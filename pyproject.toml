@@ -74,9 +74,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/MouseLand/suite2p"
-Documentation = "https://suite2p.readthedocs.io/en/latest/"
-Repository = "https://github.com/Sun-Lab-NBB/suite2p"
+Homepage = "https://github.com/Sun-Lab-NBB/sl_suite2p"
 
 # Specifies additional dependencies that can be installed alongside the main library.
 [project.optional-dependencies]
@@ -98,7 +96,7 @@ dev = [
 
 # All interactions with the library are performed via the 'ss2p' CLI command
 [project.scripts]
-ss2p = "suite2p.cli:ss2p"  # Top-level CLI group
+ss2p = "sl_suite2p.cli:ss2p"  # Top-level CLI group
 
 # Specifies files that should not be included in the source-code distribution but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]
@@ -106,7 +104,7 @@ exclude = [".github", "recipe"]
 
 # Specifies the library structure.
 [tool.hatch.build.targets.wheel]
-packages = ["src/suite2p", "notebooks"]
+packages = ["src/sl_suite2p", "notebooks"]
 
 # Ruff Configuration.
 [tool.ruff]
@@ -198,7 +196,7 @@ extra_checks = true
 pretty = true
 
 exclude = [
-    "suite2p-\\d+",       # Ignores temporary folder created by setuptools when building the sdist
+    "sl_suite2p-\\d+",       # Ignores temporary folder created by setuptools when building the sdist
     "venv.*/",            # Ignores virtual environments
     "build/",             # Ignores the sdist directory
     "dist/",              # Ignores the wheel directory
