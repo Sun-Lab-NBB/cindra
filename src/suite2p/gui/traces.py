@@ -1,9 +1,8 @@
-"""
-Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-"""
-import numpy as np
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+
 from qtpy import QtGui, QtCore
-from qtpy.QtWidgets import QLabel, QComboBox, QPushButton, QLineEdit, QCheckBox
+import numpy as np
+from qtpy.QtWidgets import QLabel, QCheckBox, QComboBox, QLineEdit, QPushButton
 
 
 def plot_trace(parent):
@@ -20,11 +19,11 @@ def plot_trace(parent):
         else:
             fmax = np.maximum(f.max(), fneu.max())
             fmin = np.minimum(f.min(), fneu.min())
-        #sp from 0 to fmax
+        # sp from 0 to fmax
         sp /= sp.max()
-        #agus
+        # agus
         sp *= fmax - fmin
-        #sp += fmin*0.95
+        # sp += fmin*0.95
         if parent.tracesOn:
             parent.p3.plot(parent.trange, f, pen="c")
         if parent.neuropilOn:
@@ -38,7 +37,7 @@ def plot_trace(parent):
         nmax = int(parent.ncedit.text())
         kspace = 1.0 / parent.sc
         ttick = list()
-        pmerge = parent.imerge[:np.minimum(len(parent.imerge), nmax)]
+        pmerge = parent.imerge[: np.minimum(len(parent.imerge), nmax)]
         k = len(pmerge) - 1
         i = parent.activityMode
         favg = np.zeros((parent.Fcell.shape[1],))
@@ -71,14 +70,14 @@ def plot_trace(parent):
             parent.p3.plot(parent.trange, -1 * bsc + favg * bsc, pen=(140, 140, 140))
             parent.p3.plot(parent.beh_time, -1 * bsc + parent.beh * bsc, pen="w")
             parent.fmin = -1 * bsc
-            #parent.traceLabel[0].setText("<font color="gray">mean activity</font>")
-            #parent.traceLabel[1].setText("<font color='white'>1D variable</font>")
-            #parent.traceLabel[2].setText("")
-            #ck.append((-0.5*bsc,"1D var"))
+            # parent.traceLabel[0].setText("<font color="gray">mean activity</font>")
+            # parent.traceLabel[1].setText("<font color='white'>1D variable</font>")
+            # parent.traceLabel[2].setText("")
+            # ck.append((-0.5*bsc,"1D var"))
 
         parent.fmax = (len(pmerge) - 1) * kspace + 1
         ax.setTicks([ttick])
-    #parent.p3.setXRange(0,parent.Fcell.shape[1])
+    # parent.p3.setXRange(0,parent.Fcell.shape[1])
     parent.p3.setYRange(parent.fmin, parent.fmax)
 
 
@@ -101,8 +100,8 @@ def make_buttons(parent, b0):
     # up/down arrows to resize view
     parent.level = 1
     parent.arrowButtons = [
-        QPushButton(u" \u25b2"),
-        QPushButton(u" \u25bc"),
+        QPushButton(" \u25b2"),
+        QPushButton(" \u25bc"),
     ]
     parent.arrowButtons[0].clicked.connect(lambda: expand_trace(parent))
     parent.arrowButtons[1].clicked.connect(lambda: collapse_trace(parent))
@@ -141,7 +140,7 @@ def make_buttons(parent, b0):
     parent.ncedit.setAlignment(QtCore.Qt.AlignRight)
     parent.ncedit.returnPressed.connect(lambda: nc_chosen(parent))
     parent.l0.addWidget(parent.ncedit, b0, 0, 1, 1)
-    #Agus
+    # Agus
     # Deconv CHECKBOX
     parent.l0.setVerticalSpacing(4)
     parent.checkBoxd = QCheckBox("deconv [N]")
@@ -187,14 +186,14 @@ def expand_trace(parent):
     parent.level += 1
     parent.level = np.minimum(5, parent.level)
     parent.win.ci.layout.setRowStretchFactor(1, parent.level)
-    #parent.p1.zoom_plot()
+    # parent.p1.zoom_plot()
 
 
 def collapse_trace(parent):
     parent.level -= 1
     parent.level = np.maximum(1, parent.level)
     parent.win.ci.layout.setRowStretchFactor(1, parent.level)
-    #parent.p1.zoom_plot()
+    # parent.p1.zoom_plot()
 
 
 def nc_chosen(parent):
@@ -203,7 +202,7 @@ def nc_chosen(parent):
         parent.show()
 
 
-#Agus
+# Agus
 def deconv_on(parent):
     state = parent.checkBoxd.isChecked()
     if parent.loaded:

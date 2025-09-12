@@ -1,25 +1,35 @@
-"""
-Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-"""
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+
 import sys
 import time
 
+from qtpy import QtGui, QtCore
 import numpy as np
 import pyqtgraph as pg
-from qtpy import QtGui, QtCore
-from qtpy.QtWidgets import QStyle
-from qtpy.QtWidgets import QWidget, QSlider, QMainWindow, QGridLayout, QStyleOptionSlider, QApplication, QLabel, QLineEdit, QPushButton, QComboBox, QCheckBox
 from matplotlib import cm
-from rastermap.rastermap import Rastermap
-from scipy.ndimage import gaussian_filter1d
 from scipy.stats import zscore
+from scipy.ndimage import gaussian_filter1d
+from qtpy.QtWidgets import (
+    QLabel,
+    QStyle,
+    QSlider,
+    QWidget,
+    QCheckBox,
+    QComboBox,
+    QLineEdit,
+    QGridLayout,
+    QMainWindow,
+    QPushButton,
+    QApplication,
+    QStyleOptionSlider,
+)
+from rastermap.rastermap import Rastermap
 
 from . import masks
 
 
 # custom vertical label
 class VerticalLabel(QWidget):
-
     def __init__(self, text=None):
         super(self.__class__, self).__init__()
         self.text = text
@@ -35,17 +45,17 @@ class VerticalLabel(QWidget):
 
 
 class RangeSlider(QSlider):
-    """ A slider for ranges.
+    """A slider for ranges.
 
-        This class provides a dual-slider for ranges, where there is a defined
-        maximum and minimum, as is a normal slider, but instead of having a
-        single slider value, there are 2 slider values.
+    This class provides a dual-slider for ranges, where there is a defined
+    maximum and minimum, as is a normal slider, but instead of having a
+    single slider value, there are 2 slider values.
 
-        This class emits the same signals as the QSlider base class, with the
-        exception of valueChanged
+    This class emits the same signals as the QSlider base class, with the
+    exception of valueChanged
 
-        Found this slider here: https://www.mail-archive.com/pyqt@riverbankcomputing.com/msg22889.html
-        and modified it
+    Found this slider here: https://www.mail-archive.com/pyqt@riverbankcomputing.com/msg22889.html
+    and modified it
     """
 
     def __init__(self, parent=None, *args):
@@ -60,8 +70,8 @@ class RangeSlider(QSlider):
 
         self.setOrientation(QtCore.Qt.Vertical)
         self.setTickPosition(QSlider.TicksRight)
-        self.setStyleSheet(\
-                "QSlider::handle:horizontal {\
+        self.setStyleSheet(
+            "QSlider::handle:horizontal {\
                 background-color: white;\
                 border: 1px solid #5c5c5c;\
                 border-radius: 0px;\
@@ -69,7 +79,8 @@ class RangeSlider(QSlider):
                 height: 8px;\
                 width: 6px;\
                 margin: -8px 2; \
-                }"                                                                        )
+                }"
+        )
         # 0 for the low, 1 for the high, -1 for both
         self.active_slider = 0
         self.parent = parent
@@ -101,7 +112,7 @@ class RangeSlider(QSlider):
             # Only draw the groove for the first slider so it doesn"t get drawn
             # on top of the existing ones every time
             if i == 0:
-                opt.subControls = QStyle.SC_SliderHandle  #QStyle.SC_SliderGroove | QStyle.SC_SliderHandle
+                opt.subControls = QStyle.SC_SliderHandle  # QStyle.SC_SliderGroove | QStyle.SC_SliderHandle
             else:
                 opt.subControls = QStyle.SC_SliderHandle
             if self.tickPosition() != self.NoTicks:
@@ -125,8 +136,7 @@ class RangeSlider(QSlider):
             self.active_slider = -1
             for i, value in enumerate([self._low, self._high]):
                 opt.sliderPosition = value
-                hit = style.hitTestComplexControl(style.CC_Slider, opt, event.pos(),
-                                                  self)
+                hit = style.hitTestComplexControl(style.CC_Slider, opt, event.pos(), self)
                 if hit == style.SC_SliderHandle:
                     self.active_slider = i
                     self.pressed_control = hit
@@ -136,8 +146,7 @@ class RangeSlider(QSlider):
                     break
             if self.active_slider < 0:
                 self.pressed_control = QStyle.SC_SliderHandle
-                self.click_offset = self.__pixelPosToRangeValue(self.__pick(
-                    event.pos()))
+                self.click_offset = self.__pixelPosToRangeValue(self.__pick(event.pos()))
                 self.triggerAction(self.SliderMove)
                 self.setRepeatAction(self.SliderNoAction)
         else:
@@ -180,8 +189,7 @@ class RangeSlider(QSlider):
     def __pick(self, pt):
         if self.orientation() == QtCore.Qt.Horizontal:
             return pt.x()
-        else:
-            return pt.y()
+        return pt.y()
 
     def __pixelPosToRangeValue(self, pos):
         opt = QStyleOptionSlider()
@@ -200,13 +208,12 @@ class RangeSlider(QSlider):
             slider_min = gr.y()
             slider_max = gr.bottom() - slider_length + 1
 
-        return style.sliderValueFromPosition(self.minimum(), self.maximum(),
-                                             pos - slider_min, slider_max - slider_min,
-                                             opt.upsideDown)
+        return style.sliderValueFromPosition(
+            self.minimum(), self.maximum(), pos - slider_min, slider_max - slider_min, opt.upsideDown
+        )
 
 
 class SatSlider(RangeSlider):
-
     def __init__(self, parent=None):
         super(SatSlider, self).__init__(parent)
         self.parent = parent
@@ -224,7 +231,6 @@ class SatSlider(RangeSlider):
 
 
 class NeuronSlider(RangeSlider):
-
     def __init__(self, parent=None):
         super(SatSlider, self).__init__(parent)
         self.parent = parent
@@ -242,7 +248,6 @@ class NeuronSlider(RangeSlider):
 
 
 class Slider(QSlider):
-
     def __init__(self, bid, parent=None):
         super(self.__class__, self).__init__()
         self.bid = bid
@@ -263,7 +268,6 @@ class Slider(QSlider):
 
 ### custom QDialog which allows user to fill in ops and run suite2p!
 class VisWindow(QMainWindow):
-
     def __init__(self, parent=None):
         super(VisWindow, self).__init__(parent)
         self.parent = parent
@@ -273,9 +277,9 @@ class VisWindow(QMainWindow):
         self.cwidget = QWidget(self)
         self.setCentralWidget(self.cwidget)
         self.l0 = QGridLayout()
-        #layout = QtGui.QFormLayout()
+        # layout = QtGui.QFormLayout()
         self.cwidget.setLayout(self.l0)
-        #self.p0 = pg.ViewBox(lockAspect=False,name="plot1",border=[100,100,100],invertY=True)
+        # self.p0 = pg.ViewBox(lockAspect=False,name="plot1",border=[100,100,100],invertY=True)
         self.win = pg.GraphicsLayoutWidget()
         # --- cells image
         self.win = pg.GraphicsLayoutWidget()
@@ -304,8 +308,7 @@ class VisWindow(QMainWindow):
         elif i == 1:
             sp = self.parent.Fneu[self.cells, :]
         elif i == 2:
-            sp = self.parent.Fcell[
-                self.cells, :] - 0.7 * self.parent.Fneu[self.cells, :]
+            sp = self.parent.Fcell[self.cells, :] - 0.7 * self.parent.Fneu[self.cells, :]
         else:
             sp = self.parent.Spks[self.cells, :]
         sp = np.squeeze(sp)
@@ -318,8 +321,7 @@ class VisWindow(QMainWindow):
         # draw axes
         self.p1.setXRange(0, sp.shape[1])
         self.p1.setYRange(0, sp.shape[0])
-        self.p1.setLimits(xMin=-10, xMax=sp.shape[1] + 10, yMin=-10,
-                          yMax=sp.shape[0] + 10)
+        self.p1.setLimits(xMin=-10, xMax=sp.shape[1] + 10, yMin=-10, yMax=sp.shape[0] + 10)
         self.p1.setLabel("left", "neurons")
         self.p1.setLabel("bottom", "time")
         # zoom in on a selected image region
@@ -330,18 +332,17 @@ class VisWindow(QMainWindow):
         self.imgROI = pg.ImageItem(autoDownsample=True)
         self.p2.addItem(self.imgROI)
         self.p2.setMouseEnabled(x=False, y=False)
-        #self.p2.setLabel("left", "neurons")
+        # self.p2.setLabel("left", "neurons")
         self.p2.hideAxis("bottom")
         self.bloaded = self.parent.bloaded
         self.p3 = self.win.addPlot(title="", row=2, col=0, colspan=2)
         self.p3.setMouseEnabled(x=False, y=False)
-        #self.p3.getAxis("left").setTicks([[(0,"")]])
+        # self.p3.getAxis("left").setTicks([[(0,"")]])
         self.p3.setLabel("bottom", "time")
         # set colormap to viridis
         colormap = cm.get_cmap("gray_r")
         colormap._init()
-        lut = (colormap._lut * 255).view(
-            np.ndarray)  # Convert matplotlib colormap from 0-1 to 0 -255 for Qt
+        lut = (colormap._lut * 255).view(np.ndarray)  # Convert matplotlib colormap from 0-1 to 0 -255 for Qt
         lut = lut[0:-3, :]
         # apply the colormap
         self.img.setLookupTable(lut)
@@ -361,24 +362,24 @@ class VisWindow(QMainWindow):
         self.isort = np.arange(0, self.cells.size).astype(np.int32)
         # ROI on main plot
         redpen = pg.mkPen(pg.mkColor(255, 0, 0), width=3, style=QtCore.Qt.SolidLine)
-        self.ROI = pg.RectROI([nt * .25, -1], [nt * .25, nn + 1],
-                              maxBounds=QtCore.QRectF(-1., -1., nt + 1,
-                                                      nn + 1), pen=redpen)
-        self.xrange = np.arange(nt * .25, nt * .5, 1, int)
+        self.ROI = pg.RectROI(
+            [nt * 0.25, -1], [nt * 0.25, nn + 1], maxBounds=QtCore.QRectF(-1.0, -1.0, nt + 1, nn + 1), pen=redpen
+        )
+        self.xrange = np.arange(nt * 0.25, nt * 0.5, 1, int)
         self.ROI.handleSize = 10
         self.ROI.handlePen = redpen
         # Add right Handle
         self.ROI.handles = []
-        self.ROI.addScaleHandle([1, 0.5], [0., 0.5])
-        self.ROI.addScaleHandle([0., 0.5], [1., 0.5])
+        self.ROI.addScaleHandle([1, 0.5], [0.0, 0.5])
+        self.ROI.addScaleHandle([0.0, 0.5], [1.0, 0.5])
         self.ROI.sigRegionChangeFinished.connect(self.ROI_position)
         self.p1.addItem(self.ROI)
         self.ROI.setZValue(10)  # make sure ROI is drawn above image
 
-        self.LINE = pg.RectROI([-1, nn * .4], [nt * .25, nn * .2],
-                               maxBounds=QtCore.QRectF(-1, -1., nt * .25,
-                                                       nn + 1), pen=redpen)
-        self.selected = np.arange(nn * .4, nn * .6, 1, int)
+        self.LINE = pg.RectROI(
+            [-1, nn * 0.4], [nt * 0.25, nn * 0.2], maxBounds=QtCore.QRectF(-1, -1.0, nt * 0.25, nn + 1), pen=redpen
+        )
+        self.selected = np.arange(nn * 0.4, nn * 0.6, 1, int)
         self.LINE.handleSize = 10
         self.LINE.handlePen = redpen
         # Add top handle
@@ -390,9 +391,9 @@ class VisWindow(QMainWindow):
         self.LINE.setZValue(10)  # make sure ROI is drawn above image
 
         greenpen = pg.mkPen(pg.mkColor(0, 255, 0), width=3, style=QtCore.Qt.SolidLine)
-        self.THRES = pg.RectROI([-0.5, 0], [nt * .25, 1],
-                                maxBounds=QtCore.QRectF(-1., -10., nt * .25,
-                                                        10), pen=greenpen)
+        self.THRES = pg.RectROI(
+            [-0.5, 0], [nt * 0.25, 1], maxBounds=QtCore.QRectF(-1.0, -10.0, nt * 0.25, 10), pen=greenpen
+        )
         self.THRES.handleSize = 10
         self.THRES.handlePen = greenpen
         # Add top handle
@@ -413,7 +414,7 @@ class VisWindow(QMainWindow):
         self.comboBox = QComboBox(self)
         self.l0.addWidget(self.comboBox, 1, 0, 1, 2)
         self.l0.addWidget(QLabel("PC 1:"), 2, 0, 1, 2)
-        #self.l0.addWidget(QLabel(""),4,0,1,1)
+        # self.l0.addWidget(QLabel(""),4,0,1,1)
         self.selectBtn = QPushButton("show selected cells in GUI")
         self.selectBtn.clicked.connect(self.select_cells)
         self.selectBtn.setEnabled(True)
@@ -430,7 +431,7 @@ class VisWindow(QMainWindow):
         self.process.readyReadStandardOutput.connect(self.stdout_write)
         self.process.readyReadStandardError.connect(self.stderr_write)
         # disable the button when running the s2p process
-        #self.process.started.connect(self.started)
+        # self.process.started.connect(self.started)
         self.process.finished.connect(lambda: self.finished(self.parent))
 
         self.win.show()
@@ -503,11 +504,10 @@ class VisWindow(QMainWindow):
                         move = True
                         xmax = xrange.size - dx
                         xrange = xrange.min() + np.arange(0, xmax).astype(np.int32)
-                else:
-                    if xrange.size < nt - dx + 1:
-                        move = True
-                        xmax = xrange.size + dx
-                        xrange = xrange.min() + np.arange(0, xmax).astype(np.int32)
+                elif xrange.size < nt - dx + 1:
+                    move = True
+                    xmax = xrange.size + dx
+                    xrange = xrange.min() + np.arange(0, xmax).astype(np.int32)
                 if move:
                     self.ROI.setPos([xrange.min() - 1, -1])
                     self.ROI.setSize([xrange.size + 1, nn + 1])
@@ -521,11 +521,10 @@ class VisWindow(QMainWindow):
                         move = True
                         ymax = yrange.size - dy
                         yrange = yrange.min() + np.arange(0, ymax).astype(np.int32)
-                else:
-                    if yrange.size < nn - dy + 1:
-                        move = True
-                        ymax = yrange.size + dy
-                        yrange = yrange.min() + np.arange(0, ymax).astype(np.int32)
+                elif yrange.size < nn - dy + 1:
+                    move = True
+                    ymax = yrange.size + dy
+                    yrange = yrange.min() + np.arange(0, ymax).astype(np.int32)
                 if move:
                     self.LINE.setPos([-1, yrange.min()])
                     self.LINE.setSize([self.xrange.size + 1, yrange.size])
@@ -576,27 +575,24 @@ class VisWindow(QMainWindow):
         self.plot_traces()
 
         # reset ROIs
-        self.LINE.maxBounds = QtCore.QRectF(-1, -1., xrange.size + 1,
-                                            self.sp.shape[0] + 1)
+        self.LINE.maxBounds = QtCore.QRectF(-1, -1.0, xrange.size + 1, self.sp.shape[0] + 1)
         self.LINE.setSize([xrange.size + 1, self.selected.size])
         self.LINE.setZValue(10)
 
-        self.THRES.maxBounds = QtCore.QRectF(self.xrange[0] - 1, -5.,
-                                             self.xrange[1] + 1, 10)
+        self.THRES.maxBounds = QtCore.QRectF(self.xrange[0] - 1, -5.0, self.xrange[1] + 1, 10)
         self.THRES.setPos([self.xrange[0] - 1, self.tpos])
         self.THRES.setSize([xrange.size + 1, self.tsize])
         self.THRES.setZValue(10)
 
         axy = self.p2.getAxis("left")
         axx = self.p2.getAxis("bottom")
-        #axy.setTicks([[(0.0,str(yrange[0])),(float(yrange.size),str(yrange[-1]))]])
+        # axy.setTicks([[(0.0,str(yrange[0])),(float(yrange.size),str(yrange[-1]))]])
         self.imgROI.setLevels([self.sat[0], self.sat[1]])
 
     def PC_on(self, plot):
         # edit buttons
         self.PCedit = QLineEdit(self)
-        self.PCedit.setValidator(
-            QtGui.QIntValidator(1, np.minimum(self.sp.shape[0], self.sp.shape[1])))
+        self.PCedit.setValidator(QtGui.QIntValidator(1, np.minimum(self.sp.shape[0], self.sp.shape[1])))
         self.PCedit.setText("1")
         self.PCedit.setFixedWidth(60)
         self.PCedit.setAlignment(QtCore.Qt.AlignRight)
@@ -619,8 +615,7 @@ class VisWindow(QMainWindow):
     def activate(self):
         # activate buttons
         self.PCedit = QLineEdit(self)
-        self.PCedit.setValidator(
-            QtGui.QIntValidator(1, np.minimum(self.sp.shape[0], self.sp.shape[1])))
+        self.PCedit.setValidator(QtGui.QIntValidator(1, np.minimum(self.sp.shape[0], self.sp.shape[1])))
         self.PCedit.setText("1")
         self.PCedit.setFixedWidth(60)
         self.PCedit.setAlignment(QtCore.Qt.AlignRight)
@@ -631,13 +626,13 @@ class VisWindow(QMainWindow):
         self.comboBox.addItem("PC")
         self.PCedit.returnPressed.connect(self.PCreturn)
 
-        #model = np.load(os.path.join(parent.ops["save_path0"], "embedding.npy"))
-        #model = np.load("embedding.npy", allow_pickle=True).item()
+        # model = np.load(os.path.join(parent.ops["save_path0"], "embedding.npy"))
+        # model = np.load("embedding.npy", allow_pickle=True).item()
         self.isort1 = np.argsort(self.model.embedding[:, 0])
         self.Usv = self.model.Usv
         self.Vsv = self.model.Vsv
         self.comboBox.addItem("rastermap")
-        #self.isort1, self.isort2 = mapping.main(self.sp,None,self.u,self.sv,self.v)
+        # self.isort1, self.isort2 = mapping.main(self.sp,None,self.u,self.sv,self.v)
 
         self.raster = True
         ncells = len(self.parent.stat)
@@ -646,7 +641,7 @@ class VisWindow(QMainWindow):
         nsel = len(self.cells)
         I = np.zeros(nsel)
         I[self.isort1] = np.arange(nsel).astype("int")
-        self.parent.isort[self.cells] = I  #self.isort1
+        self.parent.isort[self.cells] = I  # self.isort1
         # set up colors for rastermap
         masks.rastermap_masks(self.parent)
         b = len(self.parent.color_names) - 1
@@ -664,14 +659,14 @@ class VisWindow(QMainWindow):
         ops = {
             "n_components": 1,
             "n_X": 100,
-            "alpha": 1.,
-            "K": 1.,
+            "alpha": 1.0,
+            "K": 1.0,
             "nPC": 200,
             "constraints": 2,
             "annealing": True,
             "init": "pca",
             "start_time": 0,
-            "end_time": -1
+            "end_time": -1,
         }
         self.error = False
         self.finish = True
@@ -680,15 +675,15 @@ class VisWindow(QMainWindow):
         try:
             self.model = Rastermap()
             self.model.fit(self.sp)
-            #proc  = {"embedding": model.embedding, "uv": [model.u, model.v],
+            # proc  = {"embedding": model.embedding, "uv": [model.u, model.v],
             #         "ops": ops, "filename": args.S, "train_time": train_time}
-            #basename, fname = os.path.split(args.S)
-            #np.save(os.path.join(basename, "embedding.npy"), proc)
+            # basename, fname = os.path.split(args.S)
+            # np.save(os.path.join(basename, "embedding.npy"), proc)
             self.activate()
         except Exception as e:
             print("Rastermap issue: Interrupted by error (not finished)\n")
             print(e)
-        #self.process.start("python -u -W ignore -m rastermap --S %s --ops %s"%
+        # self.process.start("python -u -W ignore -m rastermap --S %s --ops %s"%
         #                    (spath, opspath))
 
     def finished(self):
@@ -700,9 +695,9 @@ class VisWindow(QMainWindow):
 
     def stdout_write(self):
         output = str(self.process.readAllStandardOutput(), "utf-8")
-        #self.logfile = open(os.path.join(self.save_path, "suite2p/run.log"), "a")
+        # self.logfile = open(os.path.join(self.save_path, "suite2p/run.log"), "a")
         sys.stdout.write(output)
-        #self.logfile.close()
+        # self.logfile.close()
 
     def stderr_write(self):
         sys.stdout.write(">>>ERROR<<<\n")
@@ -727,18 +722,18 @@ class VisWindow(QMainWindow):
                 ops = {
                     "n_components": 1,
                     "n_X": 100,
-                    "alpha": 1.,
-                    "K": 1.,
+                    "alpha": 1.0,
+                    "K": 1.0,
                     "nPC": 200,
                     "constraints": 2,
                     "annealing": True,
                     "init": "pca",
                     "start_time": 0,
-                    "end_time": -1
+                    "end_time": -1,
                 }
                 if not hasattr(self, "isort2"):
                     self.model = Rastermap()
-                    #unorm = (self.u**2).sum(axis=0)**0.5
+                    # unorm = (self.u**2).sum(axis=0)**0.5
                     self.model.fit(self.sp.T, Usv=self.Vsv, Vsv=self.Usv)
                     self.isort2 = np.argsort(self.model.embedding[:, 0])
                 self.tsort = self.isort2.astype(np.int32)
@@ -754,7 +749,9 @@ class VisWindow(QMainWindow):
         if i < 2:
             self.spF = gaussian_filter1d(
                 self.sp[np.ix_(self.isort, self.tsort)].T,
-                np.minimum(8, np.maximum(1, int(self.sp.shape[0] * 0.005))), axis=1)
+                np.minimum(8, np.maximum(1, int(self.sp.shape[0] * 0.005))),
+                axis=1,
+            )
             self.spF = self.spF.T
         else:
             self.spF = self.sp

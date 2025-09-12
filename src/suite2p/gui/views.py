@@ -1,16 +1,15 @@
-"""
-Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-"""
-import numpy as np
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+
 from qtpy import QtGui, QtCore
-from qtpy.QtWidgets import QPushButton, QSlider, QButtonGroup, QLabel, QStyle, QStyleOptionSlider, QApplication
+import numpy as np
 from qtpy.QtGui import QPainter
+from qtpy.QtWidgets import QLabel, QStyle, QSlider, QPushButton, QApplication, QButtonGroup, QStyleOptionSlider
 
 from .. import extraction
 
 
 def make_buttons(parent):
-    """ view buttons"""
+    """View buttons"""
     # view buttons
     parent.view_names = [
         "Q: ROIs",
@@ -54,7 +53,7 @@ def make_buttons(parent):
 
 
 def init_views(parent):
-    """ make views using parent.ops
+    """Make views using parent.ops
 
     views in order:
         "Q: ROIs",
@@ -88,8 +87,9 @@ def init_views(parent):
                 mimg99 = np.percentile(vcorr, 99)
                 vcorr = (vcorr - mimg1) / (mimg99 - mimg1)
                 mimg = mimg1 * np.ones((parent.Ly, parent.Lx), np.float32)
-                mimg[parent.ops["yrange"][0]:parent.ops["yrange"][1],
-                     parent.ops["xrange"][0]:parent.ops["xrange"][1]] = vcorr
+                mimg[
+                    parent.ops["yrange"][0] : parent.ops["yrange"][1], parent.ops["xrange"][0] : parent.ops["xrange"][1]
+                ] = vcorr
                 mimg = np.maximum(0, np.minimum(1, mimg))
             else:
                 mimg = np.zeros((parent.Ly, parent.Lx), np.float32)
@@ -101,8 +101,10 @@ def init_views(parent):
                 mproj = (mproj - mimg1) / (mimg99 - mimg1)
                 mimg = np.zeros((parent.Ly, parent.Lx), np.float32)
                 try:
-                    mimg[parent.ops["yrange"][0]:parent.ops["yrange"][1],
-                         parent.ops["xrange"][0]:parent.ops["xrange"][1]] = mproj
+                    mimg[
+                        parent.ops["yrange"][0] : parent.ops["yrange"][1],
+                        parent.ops["xrange"][0] : parent.ops["xrange"][1],
+                    ] = mproj
                 except:
                     print("maxproj not in combined view")
                 mimg = np.maximum(0, np.minimum(1, mimg))
@@ -131,7 +133,7 @@ def init_views(parent):
 
 
 def plot_views(parent):
-    """ set parent.view1 and parent.view2 image based on parent.ops_plot["view"]"""
+    """Set parent.view1 and parent.view2 image based on parent.ops_plot["view"]"""
     k = parent.ops_plot["view"]
     parent.view1.setImage(parent.views[k], levels=parent.ops_plot["saturation"])
     parent.view2.setImage(parent.views[k], levels=parent.ops_plot["saturation"])
@@ -140,9 +142,9 @@ def plot_views(parent):
 
 
 class ViewButton(QPushButton):
-    """ custom QPushButton class for quadrant plotting
-        requires buttons to put into a QButtonGroup (parent.viewbtns)
-         allows only 1 button to pressed at a time
+    """custom QPushButton class for quadrant plotting
+    requires buttons to put into a QButtonGroup (parent.viewbtns)
+     allows only 1 button to pressed at a time
     """
 
     def __init__(self, bid, Text, parent=None):
@@ -165,17 +167,17 @@ class ViewButton(QPushButton):
 
 
 class RangeSlider(QSlider):
-    """ A slider for ranges.
+    """A slider for ranges.
 
-        This class provides a dual-slider for ranges, where there is a defined
-        maximum and minimum, as is a normal slider, but instead of having a
-        single slider value, there are 2 slider values.
+    This class provides a dual-slider for ranges, where there is a defined
+    maximum and minimum, as is a normal slider, but instead of having a
+    single slider value, there are 2 slider values.
 
-        This class emits the same signals as the QSlider base class, with the
-        exception of valueChanged
+    This class emits the same signals as the QSlider base class, with the
+    exception of valueChanged
 
-        Found this slider here: https://www.mail-archive.com/pyqt@riverbankcomputing.com/msg22889.html
-        and modified it
+    Found this slider here: https://www.mail-archive.com/pyqt@riverbankcomputing.com/msg22889.html
+    and modified it
     """
 
     def __init__(self, parent=None, *args):
@@ -190,8 +192,8 @@ class RangeSlider(QSlider):
 
         self.setOrientation(QtCore.Qt.Vertical)
         self.setTickPosition(QSlider.TicksRight)
-        self.setStyleSheet(\
-                "QSlider::handle:horizontal {\
+        self.setStyleSheet(
+            "QSlider::handle:horizontal {\
                 background-color: white;\
                 border: 1px solid #5c5c5c;\
                 border-radius: 0px;\
@@ -199,11 +201,12 @@ class RangeSlider(QSlider):
                 height: 8px;\
                 width: 6px;\
                 margin: -8px 2; \
-                }"                                                                        )
+                }"
+        )
 
-        #self.opt = QStyleOptionSlider()
-        #self.opt.orientation=QtCore.Qt.Vertical
-        #self.initStyleOption(self.opt)
+        # self.opt = QStyleOptionSlider()
+        # self.opt.orientation=QtCore.Qt.Vertical
+        # self.initStyleOption(self.opt)
         # 0 for the low, 1 for the high, -1 for both
         self.active_slider = 0
         self.parent = parent
@@ -240,7 +243,7 @@ class RangeSlider(QSlider):
             # Only draw the groove for the first slider so it doesn"t get drawn
             # on top of the existing ones every time
             if i == 0:
-                opt.subControls = QStyle.SC_SliderHandle  #QStyle.SC_SliderGroove | QStyle.SC_SliderHandle
+                opt.subControls = QStyle.SC_SliderHandle  # QStyle.SC_SliderGroove | QStyle.SC_SliderHandle
             else:
                 opt.subControls = QStyle.SC_SliderHandle
 
@@ -275,8 +278,7 @@ class RangeSlider(QSlider):
 
             for i, value in enumerate([self._low, self._high]):
                 opt.sliderPosition = value
-                hit = style.hitTestComplexControl(style.CC_Slider, opt, event.pos(),
-                                                  self)
+                hit = style.hitTestComplexControl(style.CC_Slider, opt, event.pos(), self)
                 if hit == style.SC_SliderHandle:
                     self.active_slider = i
                     self.pressed_control = hit
@@ -289,8 +291,7 @@ class RangeSlider(QSlider):
 
             if self.active_slider < 0:
                 self.pressed_control = QStyle.SC_SliderHandle
-                self.click_offset = self.__pixelPosToRangeValue(self.__pick(
-                    event.pos()))
+                self.click_offset = self.__pixelPosToRangeValue(self.__pick(event.pos()))
                 self.triggerAction(self.SliderMove)
                 self.setRepeatAction(self.SliderNoAction)
         else:
@@ -336,8 +337,7 @@ class RangeSlider(QSlider):
     def __pick(self, pt):
         if self.orientation() == QtCore.Qt.Horizontal:
             return pt.x()
-        else:
-            return pt.y()
+        return pt.y()
 
     def __pixelPosToRangeValue(self, pos):
         opt = QStyleOptionSlider()
@@ -356,6 +356,6 @@ class RangeSlider(QSlider):
             slider_min = gr.y()
             slider_max = gr.bottom() - slider_length + 1
 
-        return style.sliderValueFromPosition(self.minimum(), self.maximum(),
-                                             pos - slider_min, slider_max - slider_min,
-                                             opt.upsideDown)
+        return style.sliderValueFromPosition(
+            self.minimum(), self.maximum(), pos - slider_min, slider_max - slider_min, opt.upsideDown
+        )

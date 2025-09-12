@@ -1,14 +1,13 @@
-"""
-Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-"""
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+
 import numpy as np
 from scipy.ndimage import gaussian_filter
 from sklearn.linear_model import LogisticRegression
 
 
 class Classifier:
-    """ ROI classifier model that uses logistic regression
-    
+    """ROI classifier model that uses logistic regression
+
     Parameters
     ----------
 
@@ -29,19 +28,19 @@ class Classifier:
             self.loaded = False
 
     def load(self, classfile, keys=None):
-        """ data loader
+        """Data loader
 
-        saved classifier contains stat with classification labels 
+        saved classifier contains stat with classification labels
 
         Parameters
         ----------
-        
-        classfile: string 
+
+        classfile: string
             path to saved classifier
 
         keys: list of str (optional, default None)
             keys of ROI stat to use to classify
-         
+
         """
         try:
             model = np.load(classfile, allow_pickle=True).item()
@@ -68,40 +67,35 @@ class Classifier:
         return np.stack([is_cell, probcell]).T
 
     def predict_proba(self, stat):
-        """ apply logistic regression model and predict probabilities
+        """Apply logistic regression model and predict probabilities
 
-        model contains stat with classification labels 
+        model contains stat with classification labels
 
         Parameters
         ----------
-        
+
         stat : list of dicts
             needs self.keys keys
 
         """
-        test_stats = np.array([stat[j][k] for j in range(len(stat)) for k in self.keys
-                              ]).reshape(len(stat), -1)
+        test_stats = np.array([stat[j][k] for j in range(len(stat)) for k in self.keys]).reshape(len(stat), -1)
         logp = self._get_logp(test_stats)
         y_pred = self.model.predict_proba(logp)[:, 1]
         return y_pred
 
     def save(self, filename: str) -> None:
-        """ save classifier to filename """
-        np.save(filename, {
-            "stats": self.stats,
-            "iscell": self.iscell,
-            "keys": self.keys
-        })
+        """Save classifier to filename"""
+        np.save(filename, {"stats": self.stats, "iscell": self.iscell, "keys": self.keys})
 
     def _get_logp(self, stats):
-        """ compute log probability of set of stats
-        
+        """Compute log probability of set of stats
+
         Parameters
         --------------
 
         stats : 2D array
             size [ncells, nkeys]
-        
+
         """
         logp = np.zeros(stats.shape)
         for n in range(stats.shape[1]):
@@ -110,12 +104,11 @@ class Classifier:
             x[x > self.grid[-1, n]] = self.grid[-1, n]
             x[np.isnan(x)] = self.grid[0, n]
             ibin = np.digitize(x, self.grid[:, n], right=True) - 1
-            logp[:, n] = np.log(self.p[ibin, n] + 1e-6) - np.log(1 - self.p[ibin, n] +
-                                                                 1e-6)
+            logp[:, n] = np.log(self.p[ibin, n] + 1e-6) - np.log(1 - self.p[ibin, n] + 1e-6)
         return logp
 
     def _fit(self):
-        """ fit logistic regression model using stats, keys and iscell """
+        """Fit logistic regression model using stats, keys and iscell"""
         nodes = 100
         ncells, nstats = self.stats.shape
         ssort = np.sort(self.stats, axis=0)
@@ -125,10 +118,10 @@ class Classifier:
         p = np.zeros((nodes - 1, nstats))
         for j in range(nodes - 1):
             for k in range(nstats):
-                p[j, k] = np.mean(self.iscell[isort[ix[j]:ix[j + 1], k]])
-        p = gaussian_filter(p, (2., 0))
+                p[j, k] = np.mean(self.iscell[isort[ix[j] : ix[j + 1], k]])
+        p = gaussian_filter(p, (2.0, 0))
         self.grid = grid
         self.p = p
         logp = self._get_logp(self.stats)
-        self.model = LogisticRegression(C=100., solver="liblinear")
+        self.model = LogisticRegression(C=100.0, solver="liblinear")
         self.model.fit(logp, self.iscell)

@@ -1,20 +1,28 @@
-"""
-Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-"""
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+
+from qtpy import QtCore
 import numpy as np
 import pyqtgraph as pg
-from qtpy import QtCore
-from pyqtgraph import Point
-from pyqtgraph import functions as fn
+from pyqtgraph import (
+    functions as fn,
+)
 from pyqtgraph.graphicsItems.ViewBox.ViewBoxMenu import ViewBoxMenu
 
 from . import masks
 
 
 class TraceBox(pg.PlotItem):
-
-    def __init__(self, parent=None, border=None, lockAspect=False, enableMouse=True,
-                 invertY=False, enableMenu=True, name=None, invertX=False):
+    def __init__(
+        self,
+        parent=None,
+        border=None,
+        lockAspect=False,
+        enableMouse=True,
+        invertY=False,
+        enableMenu=True,
+        name=None,
+        invertX=False,
+    ):
         super(TraceBox, self).__init__()
         self.parent = parent
 
@@ -28,11 +36,19 @@ class TraceBox(pg.PlotItem):
 
 
 class ViewBox(pg.ViewBox):
-
-    def __init__(self, parent=None, border=None, lockAspect=False, enableMouse=True,
-                 invertY=False, enableMenu=True, name=None, invertX=False):
-        #pg.ViewBox.__init__(self, border, lockAspect, enableMouse,
-        #invertY, enableMenu, name, invertX)
+    def __init__(
+        self,
+        parent=None,
+        border=None,
+        lockAspect=False,
+        enableMouse=True,
+        invertY=False,
+        enableMenu=True,
+        name=None,
+        invertX=False,
+    ):
+        # pg.ViewBox.__init__(self, border, lockAspect, enableMouse,
+        # invertY, enableMenu, name, invertX)
         super(ViewBox, self).__init__()
         self.border = fn.mkPen(border)
         if enableMenu:
@@ -66,38 +82,34 @@ class ViewBox(pg.ViewBox):
                     if ev.button() == QtCore.Qt.RightButton and self.menuEnabled():
                         self.raiseContextMenu(ev)
                     return
+                if ev.button() == QtCore.Qt.RightButton:
+                    if ichosen not in self.parent.imerge:
+                        self.parent.imerge = [ichosen]
+                        self.parent.ichosen = ichosen
+                    masks.flip_plot(self.parent)
                 else:
-                    if ev.button() == QtCore.Qt.RightButton:
-                        if ichosen not in self.parent.imerge:
-                            self.parent.imerge = [ichosen]
-                            self.parent.ichosen = ichosen
-                        masks.flip_plot(self.parent)
-                    else:
-                        merged = False
-                        if ev.modifiers() == QtCore.Qt.ShiftModifier or ev.modifiers(
-                        ) == QtCore.Qt.ControlModifier:
-                            if self.parent.iscell[self.parent.imerge[
-                                    0]] == self.parent.iscell[ichosen]:
-                                if ichosen not in self.parent.imerge:
-                                    self.parent.imerge.append(ichosen)
-                                    self.parent.ichosen = ichosen
-                                    merged = True
-                                elif ichosen in self.parent.imerge and len(
-                                        self.parent.imerge) > 1:
-                                    self.parent.imerge.remove(ichosen)
-                                    self.parent.ichosen = self.parent.imerge[0]
-                                    merged = True
-                        if not merged:
-                            self.parent.imerge = [ichosen]
-                            self.parent.ichosen = ichosen
+                    merged = False
+                    if ev.modifiers() == QtCore.Qt.ShiftModifier or ev.modifiers() == QtCore.Qt.ControlModifier:
+                        if self.parent.iscell[self.parent.imerge[0]] == self.parent.iscell[ichosen]:
+                            if ichosen not in self.parent.imerge:
+                                self.parent.imerge.append(ichosen)
+                                self.parent.ichosen = ichosen
+                                merged = True
+                            elif ichosen in self.parent.imerge and len(self.parent.imerge) > 1:
+                                self.parent.imerge.remove(ichosen)
+                                self.parent.ichosen = self.parent.imerge[0]
+                                merged = True
+                    if not merged:
+                        self.parent.imerge = [ichosen]
+                        self.parent.ichosen = ichosen
 
-                    if self.parent.isROI:
-                        self.parent.ROI_remove()
-                    if not self.parent.sizebtns.button(1).isChecked():
-                        for btn in self.parent.topbtns.buttons():
-                            if btn.isChecked():
-                                btn.setStyleSheet(self.parent.styleUnpressed)
-                    self.parent.update_plot()
+                if self.parent.isROI:
+                    self.parent.ROI_remove()
+                if not self.parent.sizebtns.button(1).isChecked():
+                    for btn in self.parent.topbtns.buttons():
+                        if btn.isChecked():
+                            btn.setStyleSheet(self.parent.styleUnpressed)
+                self.parent.update_plot()
 
     def zoom_plot(self):
         self.setXRange(0, self.parent.ops["Lx"])
@@ -117,7 +129,7 @@ def init_range(parent):
 
 
 def ROI_index(ops, stat):
-    """matrix Ly x Lx where each pixel is an ROI index (-1 if no ROI present)"""
+    """Matrix Ly x Lx where each pixel is an ROI index (-1 if no ROI present)"""
     ncells = len(stat) - 1
     Ly = ops["Ly"]
     Lx = ops["Lx"]

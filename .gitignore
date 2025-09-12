@@ -31,7 +31,6 @@ suite2p.egg-info/
 build/
 src/suite2p/classifiers/classifier_user.npy
 src/suite2p/ops/ops_user.npy
-*.ipynb
 .buildinfo
 doctrees/
 
@@ -77,6 +76,7 @@ data/test_data
 /docs/build/
 /stubs/
 /.pypirc
+/.tox
 
 # Project: Add any project-specific exclusions here
 /temp

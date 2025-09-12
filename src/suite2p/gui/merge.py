@@ -1,15 +1,14 @@
-"""
-Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-"""
-import os
-import numpy as np
-import pyqtgraph as pg
-from qtpy import QtGui
-from qtpy.QtWidgets import QDialog, QLineEdit, QGridLayout, QMessageBox, QLabel, QPushButton, QWidget
-from scipy import stats
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
 
-from . import masks, io
-from . import utils
+import os
+
+from qtpy import QtGui
+import numpy as np
+from scipy import stats
+import pyqtgraph as pg
+from qtpy.QtWidgets import QLabel, QDialog, QWidget, QLineEdit, QGridLayout, QMessageBox, QPushButton
+
+from . import io, masks, utils
 from ..detection.stats import roi_stats, median_pix
 from ..extraction.dcnv import oasis
 
@@ -19,11 +18,13 @@ def distance_matrix(parent, ilist):
     for ij, j in enumerate(ilist):
         for ik, k in enumerate(ilist):
             if ij < ik:
-                idist[ij,
-                      ik] = (((parent.stat[j]["ypix"][np.newaxis, :] -
-                               parent.stat[k]["ypix"][:, np.newaxis])**2 +
-                              (parent.stat[j]["xpix"][np.newaxis, :] -
-                               parent.stat[k]["xpix"][:, np.newaxis])**2)**0.5).mean()
+                idist[ij, ik] = (
+                    (
+                        (parent.stat[j]["ypix"][np.newaxis, :] - parent.stat[k]["ypix"][:, np.newaxis]) ** 2
+                        + (parent.stat[j]["xpix"][np.newaxis, :] - parent.stat[k]["xpix"][:, np.newaxis]) ** 2
+                    )
+                    ** 0.5
+                ).mean()
     return idist
 
 
@@ -80,8 +81,7 @@ def merge_activity_masks(parent):
         Fneu = np.append(Fneu, parent.Fneu[n, :][np.newaxis, :], axis=0)
         if parent.hasred:
             F_chan2 = np.append(F_chan2, parent.F_chan2[n, :][np.newaxis, :], axis=0)
-            Fneu_chan2 = np.append(Fneu_chan2, parent.Fneu_chan2[n, :][np.newaxis, :],
-                                   axis=0)
+            Fneu_chan2 = np.append(Fneu_chan2, parent.Fneu_chan2[n, :][np.newaxis, :], axis=0)
         probcell.append(parent.probcell[n])
         probredcell.append(parent.probredcell[n])
 
@@ -130,8 +130,7 @@ def merge_activity_masks(parent):
     stat0["skew"] = stats.skew(dF)
     stat0["std"] = dF.std()
 
-    spks = oasis(F=dF[np.newaxis, :], batch_size=parent.ops["batch_size"],
-                 tau=parent.ops["tau"], fs=parent.ops["fs"])
+    spks = oasis(F=dF[np.newaxis, :], batch_size=parent.ops["batch_size"], tau=parent.ops["tau"], fs=parent.ops["fs"])
 
     ### remove previously merged cell from FOV (do not replace)
     for k in remove_merged:
@@ -150,18 +149,20 @@ def merge_activity_masks(parent):
 
     # add cell to structs
     parent.stat = np.concatenate((parent.stat, np.array([stat0])), axis=0)
-    parent.stat = roi_stats(parent.stat, parent.Ly, parent.Lx,
-                            aspect=parent.ops.get("aspect", None),
-                            diameter=parent.ops.get("diameter", None),
-                            do_crop=parent.ops.get("soma_crop", 1))
+    parent.stat = roi_stats(
+        parent.stat,
+        parent.Ly,
+        parent.Lx,
+        aspect=parent.ops.get("aspect", None),
+        diameter=parent.ops.get("diameter", None),
+        do_crop=parent.ops.get("soma_crop", 1),
+    )
     parent.stat[-1]["lam"] = parent.stat[-1]["lam"] * merged_cells.size
     parent.Fcell = np.concatenate((parent.Fcell, F[np.newaxis, :]), axis=0)
     parent.Fneu = np.concatenate((parent.Fneu, Fneu[np.newaxis, :]), axis=0)
     if parent.hasred:
-        parent.F_chan2 = np.concatenate((parent.F_chan2, F_chan2[np.newaxis, :]),
-                                        axis=0)
-        parent.Fneu_chan2 = np.concatenate(
-            (parent.Fneu_chan2, Fneu_chan2[np.newaxis, :]), axis=0)
+        parent.F_chan2 = np.concatenate((parent.F_chan2, F_chan2[np.newaxis, :]), axis=0)
+        parent.Fneu_chan2 = np.concatenate((parent.Fneu_chan2, Fneu_chan2[np.newaxis, :]), axis=0)
     parent.Spks = np.concatenate((parent.Spks, spks), axis=0)
     iscell = np.array([parent.iscell[parent.ichosen]], dtype=bool)
     parent.iscell = np.concatenate((parent.iscell, iscell), axis=0)
@@ -172,8 +173,7 @@ def merge_activity_masks(parent):
 
     ### for GUI drawing
     ycirc, xcirc = utils.circle(parent.stat[-1]["med"], parent.stat[-1]["radius"])
-    goodi = ((ycirc >= 0) & (xcirc >= 0) & (ycirc < parent.ops["Ly"]) &
-             (xcirc < parent.ops["Lx"]))
+    goodi = (ycirc >= 0) & (xcirc >= 0) & (ycirc < parent.ops["Ly"]) & (xcirc < parent.ops["Lx"])
     parent.stat[-1]["ycirc"] = ycirc[goodi]
     parent.stat[-1]["xcirc"] = xcirc[goodi]
 
@@ -190,7 +190,6 @@ def merge_activity_masks(parent):
 
 
 class MergeWindow(QDialog):
-
     def __init__(self, parent=None):
         super(MergeWindow, self).__init__(parent)
         self.setGeometry(700, 300, 700, 700)
@@ -209,20 +208,15 @@ class MergeWindow(QDialog):
         mkeys = ["corr_thres", "dist_thres"]
         mlabels = ["correlation threshold", "euclidean distance threshold"]
         self.ops = {"corr_thres": 0.8, "dist_thres": 100.0}
-        self.layout.addWidget(QLabel("Press enter in a text box to update params"), 0,
-                              0, 1, 2)
-        self.layout.addWidget(
-            QLabel("(Correlations use 'activity mode' and 'bin' from main GUI)"), 1, 0,
-            1, 2)
+        self.layout.addWidget(QLabel("Press enter in a text box to update params"), 0, 0, 1, 2)
+        self.layout.addWidget(QLabel("(Correlations use 'activity mode' and 'bin' from main GUI)"), 1, 0, 1, 2)
         self.layout.addWidget(QLabel(">>>>>>>>>>>> Parameters <<<<<<<<<<<"), 2, 0, 1, 2)
-        self.doMerge = QPushButton("merge selected ROIs", default=False,
-                                   autoDefault=False)
+        self.doMerge = QPushButton("merge selected ROIs", default=False, autoDefault=False)
         self.doMerge.clicked.connect(lambda: self.do_merge(parent))
         self.doMerge.setEnabled(False)
         self.layout.addWidget(self.doMerge, 9, 0, 1, 1)
 
-        self.suggestMerge = QPushButton("next merge suggestion", default=False,
-                                        autoDefault=False)
+        self.suggestMerge = QPushButton("next merge suggestion", default=False, autoDefault=False)
         self.suggestMerge.clicked.connect(lambda: self.suggest_merge(parent))
         self.suggestMerge.setEnabled(False)
         self.layout.addWidget(self.suggestMerge, 10, 0, 1, 1)
@@ -236,7 +230,7 @@ class MergeWindow(QDialog):
         self.editlist = []
         self.keylist = []
         k = 1
-        for lkey, llabel in zip(mkeys, mlabels):
+        for lkey, llabel in zip(mkeys, mlabels, strict=False):
             qlabel = QLabel(llabel)
             qlabel.setFont(QtGui.QFont("Times", weight=QtGui.QFont.Bold))
             self.layout.addWidget(qlabel, k * 2 + 1, 0, 1, 2)
@@ -250,10 +244,10 @@ class MergeWindow(QDialog):
             k += 1
 
         print("creating merge window... this may take some time")
-        self.CC = np.matmul(parent.Fbin[parent.iscell],
-                            parent.Fbin[parent.iscell].T) / parent.Fbin.shape[-1]
-        self.CC /= np.matmul(parent.Fstd[parent.iscell][:, np.newaxis],
-                             parent.Fstd[parent.iscell][np.newaxis, :]) + 1e-3
+        self.CC = np.matmul(parent.Fbin[parent.iscell], parent.Fbin[parent.iscell].T) / parent.Fbin.shape[-1]
+        self.CC /= (
+            np.matmul(parent.Fstd[parent.iscell][:, np.newaxis], parent.Fstd[parent.iscell][np.newaxis, :]) + 1e-3
+        )
         self.CC -= np.diag(np.diag(self.CC))
 
         self.compute_merge_list(parent)
@@ -263,8 +257,7 @@ class MergeWindow(QDialog):
         parent.merged.append(parent.imerge)
         parent.update_plot()
 
-        self.cc_row = np.matmul(parent.Fbin[parent.iscell],
-                                parent.Fbin[-1].T) / parent.Fbin.shape[-1]
+        self.cc_row = np.matmul(parent.Fbin[parent.iscell], parent.Fbin[-1].T) / parent.Fbin.shape[-1]
         self.cc_row /= parent.Fstd[parent.iscell] * parent.Fstd[-1] + 1e-3
         self.cc_row[-1] = 0
         self.CC = np.concatenate((self.CC, self.cc_row[np.newaxis, :-1]), axis=0)
@@ -288,9 +281,7 @@ class MergeWindow(QDialog):
         icell = np.where(parent.iscell)[0]
         for k in range(NN):
             if notused[k]:
-                ilist = [
-                    i for i, x in enumerate(self.CC[k]) if x >= self.ops["corr_thres"]
-                ]
+                ilist = [i for i, x in enumerate(self.CC[k]) if x >= self.ops["corr_thres"]]
                 ilist.append(k)
                 if len(ilist) > 1:
                     for n, i in enumerate(ilist):
@@ -310,8 +301,7 @@ class MergeWindow(QDialog):
         self.set_merge_list(parent, goodind)
 
     def set_merge_list(self, parent, goodind):
-        self.nMerge.setText("= %d possible merges found with these parameters" %
-                            len(goodind))
+        self.nMerge.setText("= %d possible merges found with these parameters" % len(goodind))
         self.merge_list = goodind
         self.n = 0
         if len(self.merge_list) > 0:
@@ -331,8 +321,7 @@ class MergeWindow(QDialog):
             for i in parent.imerge[1:]:
                 rgb = parent.colors["cols"][0, i]
                 pen = pg.mkPen(rgb, width=3)
-                scatter = pg.ScatterPlotItem(parent.Fbin[cell0], parent.Fbin[i],
-                                             pen=pen)
+                scatter = pg.ScatterPlotItem(parent.Fbin[cell0], parent.Fbin[i], pen=pen)
                 self.p0.addItem(scatter)
                 sstring += " %d " % i
             self.p0.setLabel("left", sstring)
@@ -341,8 +330,7 @@ class MergeWindow(QDialog):
             # set to the merged ROI index
             parent.ichosen = parent.stat[parent.ichosen]["inmerge"]
             parent.imerge = [parent.ichosen]
-            self.iMerge.setText("ROIs merged: %s" %
-                                list(parent.stat[parent.ichosen]["imerge"]))
+            self.iMerge.setText("ROIs merged: %s" % list(parent.stat[parent.ichosen]["imerge"]))
             self.doMerge.setEnabled(False)
             self.p0.clear()
 
@@ -356,11 +344,10 @@ class MergeWindow(QDialog):
 
 
 class LineEdit(QLineEdit):
-
     def __init__(self, key, parent=None):
         super(LineEdit, self).__init__(parent)
         self.key = key
-        #self.textEdited.connect(lambda: self.edit_changed(parent.ops, k))
+        # self.textEdited.connect(lambda: self.edit_changed(parent.ops, k))
 
     def get_text(self):
         key = self.key

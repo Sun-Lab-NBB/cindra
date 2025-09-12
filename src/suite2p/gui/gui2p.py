@@ -1,19 +1,21 @@
-"""
-Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-"""
-import os, pathlib, shutil, sys, warnings
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
 
+import os
+import sys
+import shutil
+import pathlib
+import warnings
+
+from qtpy import QtGui, QtCore
 import numpy as np
 import pyqtgraph as pg
-from qtpy import QtGui, QtCore
-from qtpy.QtWidgets import QMainWindow, QApplication, QWidget, QGridLayout, QCheckBox, QLineEdit, QLabel
+from qtpy.QtWidgets import QLabel, QWidget, QCheckBox, QLineEdit, QGridLayout, QMainWindow, QApplication
 
-from . import menus, io, merge, views, buttons, classgui, traces, graphics, masks
-from .. import run_s2p, default_ops
+from . import io, masks, menus, merge, views, traces, buttons, classgui, graphics
+from ..configuration import generate_default_ops
 
 
 class MainWindow(QMainWindow):
-
     def __init__(self, statfile=None):
         super(MainWindow, self).__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
@@ -21,6 +23,7 @@ class MainWindow(QMainWindow):
         self.setGeometry(50, 50, 1500, 800)
         self.setWindowTitle("suite2p (run pipeline or load stat.npy)")
         import suite2p
+
         s2p_dir = pathlib.Path(suite2p.__file__).parent
         icon_path = os.fspath(s2p_dir.joinpath("logo", "logo.png"))
 
@@ -33,15 +36,9 @@ class MainWindow(QMainWindow):
         app_icon.addFile(icon_path, QtCore.QSize(256, 256))
         self.setWindowIcon(app_icon)
         self.setStyleSheet("QMainWindow {background: 'black';}")
-        self.stylePressed = ("QPushButton {Text-align: left; "
-                             "background-color: rgb(100,50,100); "
-                             "color:white;}")
-        self.styleUnpressed = ("QPushButton {Text-align: left; "
-                               "background-color: rgb(50,50,50); "
-                               "color:white;}")
-        self.styleInactive = ("QPushButton {Text-align: left; "
-                              "background-color: rgb(50,50,50); "
-                              "color:gray;}")
+        self.stylePressed = "QPushButton {Text-align: left; background-color: rgb(100,50,100); color:white;}"
+        self.styleUnpressed = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:white;}"
+        self.styleInactive = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:gray;}"
         self.loaded = False
         self.ops_plot = []
 
@@ -63,7 +60,7 @@ class MainWindow(QMainWindow):
         ops_dir.mkdir(exist_ok=True)
         self.opsuser = os.fspath(ops_dir.joinpath("ops_user.npy"))
         if not os.path.isfile(self.opsuser):
-            np.save(self.opsuser, default_ops())
+            np.save(self.opsuser, generate_default_ops())
         self.opsfile = self.opsuser
 
         menus.mainmenu(self)
@@ -82,7 +79,7 @@ class MainWindow(QMainWindow):
             "view": 0,
             "opacity": [127, 255],
             "saturation": [0, 255],
-            "colormap": "hsv"
+            "colormap": "hsv",
         }
         self.rois = {"iROI": 0, "Sroi": 0, "Lam": 0, "LamMean": 0, "LamNorm": 0}
         self.colors = {"RGB": 0, "cols": 0, "colorbar": []}
@@ -107,16 +104,16 @@ class MainWindow(QMainWindow):
         self.default_keys = model["keys"]
 
         # load initial file
-        #statfile = "C:/Users/carse/OneDrive/Documents/suite2p/plane0/stat.npy"
-        #statfile = "D:/grive/cshl_suite2p/GT1/suite2p/plane0/stat.npy"
-        #statfile = "/media/carsen/DATA1/TIFFS/auditory_cortex/suite2p/plane0/stat.npy"
-        #folder = "D:/DATA/GT1/singlechannel_half/suite2p/"
-        #self.fname = folder
-        #io.load_folder(self)
+        # statfile = "C:/Users/carse/OneDrive/Documents/suite2p/plane0/stat.npy"
+        # statfile = "D:/grive/cshl_suite2p/GT1/suite2p/plane0/stat.npy"
+        # statfile = "/media/carsen/DATA1/TIFFS/auditory_cortex/suite2p/plane0/stat.npy"
+        # folder = "D:/DATA/GT1/singlechannel_half/suite2p/"
+        # self.fname = folder
+        # io.load_folder(self)
         if statfile is not None:
             self.fname = statfile
             io.load_proc(self)
-            #self.manual_label()
+            # self.manual_label()
         self.setAcceptDrops(True)
         self.show()
         self.win.show()
@@ -133,11 +130,8 @@ class MainWindow(QMainWindow):
         self.fname = files[0]
         if os.path.splitext(self.fname)[-1] == ".npy":
             io.load_proc(self)
-        elif os.path.splitext(self.fname)[-1] == ".nwb":
-            io.load_NWB(self)
         else:
-            print("invalid extension %s, use .nwb or .npy" %
-                  os.path.splitext(self.fname)[-1])
+            print("invalid extension %s, use .nwb or .npy" % os.path.splitext(self.fname)[-1])
 
     def make_buttons(self):
         # ROI CHECKBOX
@@ -159,9 +153,7 @@ class MainWindow(QMainWindow):
 
         # ------ CELL STATS / ROI SELECTION --------
         # which stats
-        self.stats_to_show = [
-            "med", "npix", "skew", "compact", "footprint", "aspect_ratio"
-        ]
+        self.stats_to_show = ["med", "npix", "skew", "compact", "footprint", "aspect_ratio"]
         lilfont = QtGui.QFont("Arial", 8)
         qlabel = QLabel(self)
         qlabel.setFont(self.boldfont)
@@ -246,8 +238,7 @@ class MainWindow(QMainWindow):
         self.l0.addWidget(self.win, 1, 2, b0 - 1, 30)
         layout = self.win.ci.layout
         # --- cells image
-        self.p1 = graphics.ViewBox(parent=self, lockAspect=True, name="plot1",
-                                   border=[100, 100, 100], invertY=True)
+        self.p1 = graphics.ViewBox(parent=self, lockAspect=True, name="plot1", border=[100, 100, 100], invertY=True)
         self.win.addItem(self.p1, 0, 0)
         self.p1.setMenuEnabled(False)
         self.p1.scene().contextMenuItem = self.p1
@@ -259,13 +250,12 @@ class MainWindow(QMainWindow):
         self.p1.addItem(self.color1)
         self.view1.setLevels([0, 255])
         self.color1.setLevels([0, 255])
-        #self.view1.setImage(np.random.rand(500,500,3))
-        #x = np.arange(0,500)
-        #img = np.concatenate((np.zeros((500,500,3)), 127*(1+np.tile(np.sin(x/100)[:,np.newaxis,np.newaxis],(1,500,1)))),axis=-1)
-        #self.color1.setImage(img)
+        # self.view1.setImage(np.random.rand(500,500,3))
+        # x = np.arange(0,500)
+        # img = np.concatenate((np.zeros((500,500,3)), 127*(1+np.tile(np.sin(x/100)[:,np.newaxis,np.newaxis],(1,500,1)))),axis=-1)
+        # self.color1.setImage(img)
         # --- noncells image
-        self.p2 = graphics.ViewBox(parent=self, lockAspect=True, name="plot2",
-                                   border=[100, 100, 100], invertY=True)
+        self.p2 = graphics.ViewBox(parent=self, lockAspect=True, name="plot2", border=[100, 100, 100], invertY=True)
         self.win.addItem(self.p2, 0, 1)
         self.p2.setMenuEnabled(False)
         self.p2.scene().contextMenuItem = self.p2
@@ -287,19 +277,18 @@ class MainWindow(QMainWindow):
         self.p3.setMouseEnabled(x=True, y=False)
         self.p3.enableAutoRange(x=True, y=True)
         self.win.addItem(self.p3, row=1, col=0, colspan=2)
-        #self.p3 = pg.PlotItem()
-        #self.v3.addItem(self.p3)
+        # self.p3 = pg.PlotItem()
+        # self.v3.addItem(self.p3)
         self.win.ci.layout.setRowStretchFactor(0, 2)
         layout = self.win.ci.layout
         layout.setColumnMinimumWidth(0, 1)
         layout.setColumnMinimumWidth(1, 1)
         layout.setHorizontalSpacing(20)
-        #self.win.scene().sigMouseClicked.connect(self.plot_clicked)
+        # self.win.scene().sigMouseClicked.connect(self.plot_clicked)
 
     def keyPressEvent(self, event):
         if self.loaded:
-            if event.modifiers() != QtCore.Qt.ControlModifier and event.modifiers(
-            ) != QtCore.Qt.ShiftModifier:
+            if event.modifiers() != QtCore.Qt.ControlModifier and event.modifiers() != QtCore.Qt.ShiftModifier:
                 if event.key() == QtCore.Qt.Key_Return:
                     if event.modifiers() == QtCore.Qt.AltModifier:
                         if len(self.imerge) > 1:
@@ -335,14 +324,13 @@ class MainWindow(QMainWindow):
                         self.viewbtns.button(5).press(self, 5)
                 elif event.key() == QtCore.Qt.Key_Space:
                     self.checkBox.toggle()
-                #Agus
+                # Agus
                 elif event.key() == QtCore.Qt.Key_N:
                     self.checkBoxd.toggle()
                 elif event.key() == QtCore.Qt.Key_B:
                     self.checkBoxn.toggle()
                 elif event.key() == QtCore.Qt.Key_V:
                     self.checkBoxt.toggle()
-                #
                 elif event.key() == QtCore.Qt.Key_A:
                     self.colorbtns.button(0).setChecked(True)
                     self.colorbtns.button(0).press(self, 0)
@@ -419,18 +407,16 @@ class MainWindow(QMainWindow):
         self.show()
 
     def mode_change(self, i):
-        """
+        """Changes the activity mode that is used when multiple neurons are selected
+        or in visualization windows like rastermap or for correlation computation!
 
-            changes the activity mode that is used when multiple neurons are selected
-            or in visualization windows like rastermap or for correlation computation!
+        activityMode =
+        0 : F
+        1 : Fneu
+        2 : F - 0.7 * Fneu (default)
+        3 : spks
 
-            activityMode =
-            0 : F
-            1 : Fneu
-            2 : F - 0.7 * Fneu (default)
-            3 : spks
-
-            uses binning set by self.bin
+        uses binning set by self.bin
 
         """
         self.activityMode = i
@@ -447,11 +433,10 @@ class MainWindow(QMainWindow):
             else:
                 f = self.Spks
             ncells = len(self.stat)
-            self.Fbin = f[:, :nb * self.bin].reshape(
-                (ncells, nb, self.bin)).mean(axis=2)
+            self.Fbin = f[:, : nb * self.bin].reshape((ncells, nb, self.bin)).mean(axis=2)
 
             self.Fbin -= self.Fbin.mean(axis=1)[:, np.newaxis]
-            self.Fstd = (self.Fbin**2).mean(axis=1)**0.5
+            self.Fstd = (self.Fbin**2).mean(axis=1) ** 0.5
             self.trange = np.arange(0, self.Fcell.shape[1])
             # if in behavior-view, recompute
             if self.ops_plot["color"] == 8:
@@ -536,8 +521,7 @@ class MainWindow(QMainWindow):
         icells = np.unique(iROI0[iROI0 >= 0])
         self.imerge = []
         for n in icells:
-            if (self.rois["iROI"][i, :, ypix,
-                                  xpix] == n).sum() > 0.6 * self.stat[n]["npix"]:
+            if (self.rois["iROI"][i, :, ypix, xpix] == n).sum() > 0.6 * self.stat[n]["npix"]:
                 self.imerge.append(n)
         if len(self.imerge) > 0:
             self.ichosen = self.imerge[0]
@@ -590,8 +574,7 @@ class MainWindow(QMainWindow):
                     iplot = 2
                 elif x == self.p3:
                     iplot = 3
-                elif ((x == self.p1 or x == self.p2) and x != self.img1 and
-                      x != self.img2):
+                elif (x == self.p1 or x == self.p2) and x != self.img1 and x != self.img2:
                     iplot = 4
                     if event.double():
                         zoom = True
@@ -616,8 +599,7 @@ class MainWindow(QMainWindow):
                         flip = False
                 if choose:
                     merged = False
-                    if event.modifiers() == QtCore.Qt.ShiftModifier or event.modifiers(
-                    ) == QtCore.Qt.ControlModifier:
+                    if event.modifiers() == QtCore.Qt.ShiftModifier or event.modifiers() == QtCore.Qt.ControlModifier:
                         if self.iscell[self.imerge[0]] == self.iscell[ichosen]:
                             if ichosen not in self.imerge:
                                 self.imerge.append(ichosen)
@@ -671,9 +653,12 @@ class MainWindow(QMainWindow):
             for i, k in enumerate(self.imerge):
                 apix = np.append(
                     apix,
-                    np.concatenate((self.stat[k]["ypix"].flatten()[:, np.newaxis],
-                                    self.stat[k]["xpix"].flatten()[:, np.newaxis]),
-                                   axis=1), axis=0)
+                    np.concatenate(
+                        (self.stat[k]["ypix"].flatten()[:, np.newaxis], self.stat[k]["xpix"].flatten()[:, np.newaxis]),
+                        axis=1,
+                    ),
+                    axis=0,
+                )
 
             imin = apix.min(axis=0)
             imax = apix.max(axis=0)
@@ -699,6 +684,7 @@ def run(statfile=None):
     warnings.filterwarnings("ignore")
     app = QApplication(sys.argv)
     import suite2p
+
     s2ppath = os.path.dirname(os.path.realpath(suite2p.__file__))
     icon_path = os.path.join(s2ppath, "logo", "logo.png")
     app_icon = QtGui.QIcon()

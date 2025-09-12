@@ -1,42 +1,49 @@
-"""
-Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-"""
-import time
-import numpy as np
-from pathlib import Path
-from typing import Dict, Any
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
 
-from . import sourcery, sparsedetect, chan2detect, utils
+from typing import Any
+from pathlib import Path
+
+import numpy as np
+from ataraxis_time import PrecisionTimer
+from ataraxis_base_utilities import LogLevel, console
+
+from . import sourcery, anatomical, chan2detect, sparsedetect
 from .stats import roi_stats
 from .denoise import pca_denoise
 from ..io.binary import BinaryFile
+from ..configuration import generate_default_ops
 from ..classification import classify, user_classfile
-from .. import default_ops
 
 
-def detect(ops, classfile=None):
+def detect(ops, plane_number: int, classfile=None):
+    timer = PrecisionTimer("s")
 
-    t0 = time.time()
-    bin_size = int(
-        max(1, ops["nframes"] // ops["nbinned"], np.round(ops["tau"] * ops["fs"])))
-    print("Binning movie in chunks of length %2.2d" % bin_size)
-    with BinaryFile(filename=ops["reg_file"], Ly=ops["Ly"], Lx=ops["Lx"]) as f:
+    bin_size = int(max(1, ops["nframes"] // ops["nbinned"], np.round(ops["tau"] * ops["fs"])))
+
+    console.echo(f"Binning plane {plane_number} movie in chunks of length {bin_size}...", level=LogLevel.INFO)
+    timer.reset()
+
+    with BinaryFile(file_path=ops["reg_file"], height=ops["Ly"], width=ops["Lx"]) as f:
         mov = f.bin_movie(
             bin_size=bin_size,
             bad_frames=ops.get("badframes"),
             y_range=ops["yrange"],
             x_range=ops["xrange"],
         )
-        print("Binned movie [%d,%d,%d] in %0.2f sec." %
-              (mov.shape[0], mov.shape[1], mov.shape[2], time.time() - t0))
 
-        ops, stat = detection_wrapper(f, mov=mov, ops=ops, classfile=classfile)
+        message = (
+            f"Plane {plane_number} movie: binned. Resultant movie dimensions: "
+            f"{mov.shape[0]}, {mov.shape[1]}, {mov.shape[2]}. Time taken: {timer.elapsed} seconds."
+        )
+        console.echo(message=message, level=LogLevel.SUCCESS)
+
+        ops, stat = detection_wrapper(f, plane_number=plane_number, mov=mov, ops=ops, classfile=classfile)
 
     return ops, stat
 
 
-def bin_movie(f_reg, bin_size, yrange=None, xrange=None, badframes=None):
-    """ bin registered movie """
+def bin_movie(f_reg, plane_number: int, bin_size, yrange=None, xrange=None, badframes=None):
+    """Bin registered movie"""
     n_frames = f_reg.shape[0]
     good_frames = ~badframes if badframes is not None else np.ones(n_frames, dtype=bool)
     batch_size = min(good_frames.sum(), 500)
@@ -47,14 +54,13 @@ def bin_movie(f_reg, bin_size, yrange=None, xrange=None, badframes=None):
     num_binned_frames = n_frames // bin_size
     mov = np.zeros((num_binned_frames, Lyc, Lxc), np.float32)
     curr_bin_number = 0
-    t0 = time.time()
 
     # Iterate over n_frames to maintain binning over TIME
     for k in np.arange(0, n_frames, batch_size):
-        data = f_reg[k:min(k + batch_size, n_frames)]
+        data = f_reg[k : min(k + batch_size, n_frames)]
 
         # exclude badframes
-        good_indices = good_frames[k:min(k + batch_size, n_frames)]
+        good_indices = good_frames[k : min(k + batch_size, n_frames)]
         if good_indices.mean() > 0.5:
             data = data[good_indices]
 
@@ -67,7 +73,7 @@ def bin_movie(f_reg, bin_size, yrange=None, xrange=None, badframes=None):
             # Downsample by binning via reshaping and taking mean of each bin
             # only if current batch size exceeds or matches bin_size
             n_d = data.shape[0]
-            data = data[:(n_d // bin_size) * bin_size]
+            data = data[: (n_d // bin_size) * bin_size]
             data = data.reshape(-1, bin_size, Lyc, Lxc).astype(np.float32).mean(axis=1)
         else:
             # Current batch size is below bin_size (could have many bad frames in this batch)
@@ -77,51 +83,48 @@ def bin_movie(f_reg, bin_size, yrange=None, xrange=None, badframes=None):
         if mov.shape[0] > curr_bin_number:
             # Fill in binned data
             n_bins = data.shape[0]
-            mov[curr_bin_number:curr_bin_number + n_bins] = data
+            mov[curr_bin_number : curr_bin_number + n_bins] = data
             curr_bin_number += n_bins
-
-    print("Binned movie of size [%d,%d,%d] created in %0.2f sec." %
-          (mov.shape[0], mov.shape[1], mov.shape[2], time.time() - t0))
     return mov
 
 
-def detection_wrapper(f_reg, mov=None, yrange=None, xrange=None, ops=default_ops(),
-                      classfile=None):
+def detection_wrapper(
+    f_reg, plane_number: int, mov=None, yrange=None, xrange=None, ops=generate_default_ops(), classfile=None
+):
+    """Main detection function.
+
+    Identifies ROIs.
+
+    Parameters
+    ----------------
+
+    f_reg : np.ndarray or io.BinaryWFile,
+            n_frames x Ly x Lx
+
+    mov : ndarray (t x Lyc x Lxc)
+                    binned movie
+
+    yrange : list of length 2
+            Range of pixels along the y-axis of mov the detection module will be run on
+
+    xrange : list of length 2
+            Range of pixels along the x-axis of mov the detection module will be run on
+
+    ops : dictionary or list of dicts
+
+    classfile: string (optional, default None)
+            path to saved classifier
+
+    Returns:
+    ----------------
+    ops : dictionary or list of dicts
+
+    stat : dictionary "ypix", "xpix", "lam"
+            Dictionary containing statistics for ROIs
+
+
     """
-	Main detection function. 
-
-	Identifies ROIs. 
-
-	Parameters
-	----------------
-
-	f_reg : np.ndarray or io.BinaryWFile,
-		n_frames x Ly x Lx
-
-	mov : ndarray (t x Lyc x Lxc)
-			binned movie
-
-	yrange : list of length 2
-		Range of pixels along the y-axis of mov the detection module will be run on 
-	
-	xrange : list of length 2
-		Range of pixels along the x-axis of mov the detection module will be run on 
-
-	ops : dictionary or list of dicts
-
-	classfile: string (optional, default None)
-		path to saved classifier
-
-	Returns
-	----------------
-
-	ops : dictionary or list of dicts
-		
-	stat : dictionary "ypix", "xpix", "lam"
-		Dictionary containing statistics for ROIs
-
-
-	"""
+    timer = PrecisionTimer("s")
     n_frames, Ly, Lx = f_reg.shape
     yrange = ops.get("yrange", [0, Ly]) if yrange is None else yrange
     xrange = ops.get("xrange", [0, Lx]) if xrange is None else xrange
@@ -129,16 +132,28 @@ def detection_wrapper(f_reg, mov=None, yrange=None, xrange=None, ops=default_ops
     ops["xrange"] = xrange
 
     if mov is None:
-        bin_size = int(
-            max(1, n_frames // ops["nbinned"], np.round(ops["tau"] * ops["fs"])))
-        print("Binning movie in chunks of length %2.2d" % bin_size)
-        mov = bin_movie(f_reg, bin_size, yrange=yrange, xrange=xrange,
-                        badframes=ops.get("badframes", None))
-    else:
-        if mov.shape[1] != yrange[-1] - yrange[0]:
-            raise ValueError("mov.shape[1] is not same size as yrange")
-        elif mov.shape[2] != xrange[-1] - xrange[0]:
-            raise ValueError("mov.shape[2] is not same size as xrange")
+        bin_size = int(max(1, n_frames // ops["nbinned"], np.round(ops["tau"] * ops["fs"])))
+        console.echo(f"Binning plane {plane_number} movie in chunks of length {bin_size}...", level=LogLevel.INFO)
+
+        timer.reset()
+        mov = bin_movie(
+            f_reg,
+            plane_number=plane_number,
+            bin_size=bin_size,
+            yrange=yrange,
+            xrange=xrange,
+            badframes=ops.get("badframes", None),
+        )
+
+        message = (
+            f"Plane {plane_number} movie: binned. Resultant movie dimensions: "
+            f"{mov.shape[0]}, {mov.shape[1]}, {mov.shape[2]}. Time taken: {timer.elapsed} seconds."
+        )
+        console.echo(message=message, level=LogLevel.SUCCESS)
+    elif mov.shape[1] != yrange[-1] - yrange[0]:
+        raise ValueError("mov.shape[1] is not same size as yrange")
+    elif mov.shape[2] != xrange[-1] - xrange[0]:
+        raise ValueError("mov.shape[2] is not same size as xrange")
 
     if "meanImg" not in ops:
         ops["meanImg"] = mov.mean(axis=0)
@@ -150,37 +165,32 @@ def detection_wrapper(f_reg, mov=None, yrange=None, xrange=None, ops=default_ops
         mov -= mov.min()
 
     if ops.get("denoise", 1):
-        mov = pca_denoise(
-            mov, block_size=[ops["block_size"][0] // 2, ops["block_size"][1] // 2],
-            n_comps_frac=0.5)
+        mov = pca_denoise(mov, block_size=[ops["block_size"][0] // 2, ops["block_size"][1] // 2], n_comps_frac=0.5)
 
     if ops.get("anatomical_only", 0):
-        try:
-            from . import anatomical
-            CELLPOSE_INSTALLED = True
-        except Exception as e:
-            print("Warning: cellpose did not import")
-            print(e)
-            print("cannot use anatomical mode, but otherwise suite2p will run normally")
-            CELLPOSE_INSTALLED = False
-        if not CELLPOSE_INSTALLED:
-            print(
-                "~~~ tried to import cellpose to run anatomical but failed, install with: ~~~"
-            )
-            print("$ pip install cellpose")
-        else:
-            print(">>>> CELLPOSE finding masks in " +
-                  ["max_proj / mean_img", "mean_img", "enhanced_mean_img", "max_proj"][
-                      int(ops["anatomical_only"]) - 1])
-            stat = anatomical.select_rois(ops=ops, mov=mov,
-                                          diameter=ops.get("diameter", None))
-    else:
-        stat = select_rois(
-            ops=ops,
-            mov=mov,
-            sparse_mode=ops["sparse_mode"],
-            classfile=classfile,
+        source_types = ["max_proj / mean_img", "mean_img", "enhanced_mean_img", "max_proj"]
+        message = (
+            f"Applying Cellpose to plane {plane_number} movie to find cell masks in "
+            f"{source_types[int(ops['anatomical_only']) - 1]}..."
         )
+        console.echo(message=message, level=LogLevel.INFO)
+        timer.reset()
+        stat = anatomical.select_rois(ops=ops, mov=mov, diameter=ops.get("diameter", None))
+        message = (
+            f"Plane {plane_number} cell masks: discovered. Detected ROIs: {len(stat)}. "
+            f"Time taken: {timer.elapsed} seconds."
+        )
+        console.echo(message=message, level=LogLevel.SUCCESS)
+    else:
+        message = f"Finding cell mask ROIs for plane {plane_number}..."
+        console.echo(message=message, level=LogLevel.INFO)
+        timer.reset()
+        stat = select_rois(ops=ops, mov=mov, sparse_mode=ops["sparse_mode"], plane_number=plane_number)
+        message = (
+            f"Plane {plane_number} cell masks: discovered. Detected ROIs: {len(stat)}. "
+            f"Time taken: {timer.elapsed} seconds."
+        )
+        console.echo(message=message, level=LogLevel.SUCCESS)
 
     ymin = int(yrange[0])
     xmin = int(xrange[0])
@@ -193,12 +203,18 @@ def detection_wrapper(f_reg, mov=None, yrange=None, xrange=None, ops=default_ops
 
         if ops["preclassify"] > 0:
             if classfile is None:
-                print(f"NOTE: Applying user classifier at {str(user_classfile)}")
+                message = f"Applying user classifier to plane {plane_number} from {user_classfile!s}..."
+                console.echo(message=message, level=LogLevel.INFO)
                 classfile = user_classfile
 
-            stat = roi_stats(stat, Ly, Lx, aspect=ops.get("aspect", None),
-                             diameter=ops.get("diameter",
-                                              None), do_crop=ops.get("soma_crop", 1))
+            stat = roi_stats(
+                stat,
+                Ly,
+                Lx,
+                aspect=ops.get("aspect", None),
+                diameter=ops.get("diameter", None),
+                do_crop=ops.get("soma_crop", 1),
+            )
             if len(stat) == 0:
                 iscell = np.zeros((0, 2))
             else:
@@ -206,16 +222,25 @@ def detection_wrapper(f_reg, mov=None, yrange=None, xrange=None, ops=default_ops
             np.save(Path(ops["save_path"]).joinpath("iscell.npy"), iscell)
             ic = (iscell[:, 0] > ops["preclassify"]).flatten().astype("bool")
             stat = stat[ic]
-            print("Preclassify threshold %0.2f, %d ROIs removed" % (ops["preclassify"],
-                                                                    (~ic).sum()))
+            message = (
+                f"Plane {plane_number} preclassification pass with threshold {ops['preclassify']}: complete. Removed "
+                f"{(~ic).sum()} ROIs."
+            )
+            console.echo(message=message, level=LogLevel.SUCCESS)
 
-        stat = roi_stats(stat, Ly, Lx, aspect=ops.get("aspect", None),
-                         diameter=ops.get("diameter",
-                                          None), max_overlap=ops["max_overlap"],
-                         do_crop=ops.get("soma_crop", 1))
-        print("After removing overlaps, %d ROIs remain" % (len(stat)))
+        stat = roi_stats(
+            stat,
+            Ly,
+            Lx,
+            aspect=ops.get("aspect", None),
+            diameter=ops.get("diameter", None),
+            max_overlap=ops["max_overlap"],
+            do_crop=ops.get("soma_crop", 1),
+        )
+        message = f"Plane {plane_number} overlapping ROI filtering: complete. Kept {len(stat)} ROIs."
+        console.echo(message=message, level=LogLevel.SUCCESS)
 
-    # if second channel, detect bright cells in second channel
+    # if second channel, detect bright cells in the second channel
     if "meanImg_chan2" in ops:
         if "chan2_thres" not in ops:
             ops["chan2_thres"] = 0.65
@@ -225,10 +250,7 @@ def detection_wrapper(f_reg, mov=None, yrange=None, xrange=None, ops=default_ops
     return ops, stat
 
 
-def select_rois(ops: Dict[str, Any], mov: np.ndarray, sparse_mode: bool = True,
-                classfile: Path = None):
-
-    t0 = time.time()
+def select_rois(ops: dict[str, Any], mov: np.ndarray, plane_number: int, sparse_mode: bool = True):
     if sparse_mode:
         ops.update({"Lyc": mov.shape[1], "Lxc": mov.shape[2]})
         new_ops, stat = sparsedetect.sparsery(
@@ -240,20 +262,15 @@ def select_rois(ops: Dict[str, Any], mov: np.ndarray, sparse_mode: bool = True,
             threshold_scaling=ops["threshold_scaling"],
             max_iterations=250 * ops["max_iterations"],
             percentile=ops.get("active_percentile", 0.0),
+            plane_number=plane_number,
         )
         ops.update(new_ops)
     else:
-        ops, stat = sourcery.sourcery(mov=mov, ops=ops)
+        ops, stat = sourcery.sourcery(mov=mov, ops=ops, plane_number=plane_number)
 
-    print("Detected %d ROIs, %0.2f sec" % (len(stat), time.time() - t0))
     stat = np.array(stat)
 
     if len(stat) == 0:
-        raise ValueError(
-            "no ROIs were found -- check registered binary and maybe change spatial scale"
-        )
-
-    # add ROI stat to stat
-    #stat = roi_stats(stat, dy, dx, Ly, Lx, max_overlap=max_overlap, do_crop=do_crop)
+        raise ValueError("no ROIs were found -- check registered binary and maybe change spatial scale")
 
     return stat

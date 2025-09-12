@@ -1,13 +1,10 @@
-"""
-Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-"""
-from qtpy import QtGui
-from qtpy.QtWidgets import QAction, QMenu
-from pkg_resources import iter_entry_points
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
 
-from . import reggui, drawroi, merge, io, rungui, visualize, classgui
-from suite2p.io.nwb import save_nwb
-from suite2p.io.utils import get_suite2p_path
+from importlib.metadata import entry_points
+
+from qtpy.QtWidgets import QMenu, QAction
+
+from . import io, merge, reggui, rungui, drawroi, classgui, visualize
 
 
 def mainmenu(parent):
@@ -24,11 +21,6 @@ def mainmenu(parent):
     loadProc.setShortcut("Ctrl+L")
     loadProc.triggered.connect(lambda: io.load_dialog(parent))
     parent.addAction(loadProc)
-
-    # load processed data
-    loadNWB = QAction("Load NWB file", parent)
-    loadNWB.triggered.connect(lambda: io.load_dialog_NWB(parent))
-    parent.addAction(loadNWB)
 
     # load folder of processed data
     loadFolder = QAction("Load &Folder with planeX folders", parent)
@@ -49,13 +41,6 @@ def mainmenu(parent):
     parent.saveMat.setEnabled(False)
     parent.addAction(parent.saveMat)
 
-    # Save NWB file
-    parent.saveNWB = QAction("Save NWB file", parent)
-    parent.saveNWB.triggered.connect(
-        lambda: save_nwb(get_suite2p_path(parent.basename)))
-    parent.saveNWB.setEnabled(False)
-    parent.addAction(parent.saveNWB)
-
     # export figure
     exportFig = QAction("Export as image (svg)", parent)
     exportFig.triggered.connect(lambda: io.export_fig(parent))
@@ -72,10 +57,8 @@ def mainmenu(parent):
     file_menu = main_menu.addMenu("&File")
     file_menu.addAction(runS2P)
     file_menu.addAction(loadProc)
-    file_menu.addAction(loadNWB)
     file_menu.addAction(loadFolder)
     file_menu.addAction(parent.loadBeh)
-    file_menu.addAction(parent.saveNWB)
     file_menu.addAction(parent.saveMat)
     file_menu.addAction(exportFig)
     file_menu.addAction(parent.manual)
@@ -92,8 +75,7 @@ def classifier(parent):
     parent.loadClass.setEnabled(False)
     parent.loadMenu.addAction(parent.loadClass)
     parent.loadUClass = QAction("default classifier", parent)
-    parent.loadUClass.triggered.connect(
-        lambda: classgui.load_default_classifier(parent))
+    parent.loadUClass.triggered.connect(lambda: classgui.load_default_classifier(parent))
     parent.loadUClass.setEnabled(False)
     parent.loadMenu.addAction(parent.loadUClass)
     parent.loadSClass = QAction("built-in classifier", parent)
@@ -166,7 +148,7 @@ def plugins(parent):
     main_menu = parent.menuBar()
     parent.plugins = {}
     plugin_menu = main_menu.addMenu("&Plugins")
-    for entry_pt in iter_entry_points(group="suite2p.plugin", name=None):
+    for entry_pt in entry_points(group="suite2p.plugin"):
         plugin_obj = entry_pt.load()  # load the advertised class from entry_points
         parent.plugins[entry_pt.name] = plugin_obj(
             parent
@@ -174,8 +156,9 @@ def plugins(parent):
         action = QAction(
             parent.plugins[entry_pt.name].name, parent
         )  # create plugin menu item with the name property of the loaded class
-        action.triggered.connect(parent.plugins[entry_pt.name].trigger
-                                )  # attach class method "trigger" to plugin menu action
+        action.triggered.connect(
+            parent.plugins[entry_pt.name].trigger
+        )  # attach class method "trigger" to plugin menu action
         plugin_menu.addAction(action)
 
 

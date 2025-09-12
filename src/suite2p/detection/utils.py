@@ -1,53 +1,51 @@
-"""
-Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-"""
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+
+from numba import njit
 import numpy as np
-from numba import jit
-from scipy.optimize import linear_sum_assignment
 from scipy.ndimage import gaussian_filter
+from scipy.optimize import linear_sum_assignment
 
 
 def square_mask(mask, ly, yi, xi):
-    """ crop from mask a square of size ly at position yi,xi """
+    """Crop from mask a square of size ly at position yi,xi"""
     Lyc, Lxc = mask.shape
     mask0 = np.zeros((2 * ly, 2 * ly), mask.dtype)
     yinds = [max(0, yi - ly), min(yi + ly, Lyc)]
     xinds = [max(0, xi - ly), min(xi + ly, Lxc)]
-    mask0[max(0, ly - yi):min(2 * ly, Lyc + ly - yi),
-          max(0, ly - xi):min(2 * ly, Lxc + ly - xi)] = mask[yinds[0]:yinds[1],
-                                                             xinds[0]:xinds[1]]
+    mask0[max(0, ly - yi) : min(2 * ly, Lyc + ly - yi), max(0, ly - xi) : min(2 * ly, Lxc + ly - xi)] = mask[
+        yinds[0] : yinds[1], xinds[0] : xinds[1]
+    ]
     return mask0
 
 
 def mask_stats(mask):
-    """ median and diameter of mask """
+    """Median and diameter of mask"""
     y, x = np.nonzero(mask)
     y = y.astype(np.int32)
     x = x.astype(np.int32)
     ymed = np.median(y)
     xmed = np.median(x)
-    imin = np.argmin((x - xmed)**2 + (y - ymed)**2)
+    imin = np.argmin((x - xmed) ** 2 + (y - ymed) ** 2)
     xmed = x[imin]
     ymed = y[imin]
-    diam = len(y)**0.5
+    diam = len(y) ** 0.5
     diam /= (np.pi**0.5) / 2
     return ymed, xmed, diam
 
 
 def mask_ious(masks_true, masks_pred):
-    """ return best-matched masks 
-    
+    """Return best-matched masks
+
     Parameters
     ------------
-    
-    masks_true: ND-array (int) 
+
+    masks_true: ND-array (int)
         where 0=NO masks; 1,2... are mask labels
-    masks_pred: ND-array (int) 
+    masks_pred: ND-array (int)
         ND-array (int) where 0=NO masks; 1,2... are mask labels
 
-    Returns
+    Returns:
     ------------
-
     iou: float, ND-array
         array of IOU pairs
     preds: int, ND-array
@@ -72,10 +70,10 @@ def match_masks(iou):
     return iout, preds
 
 
-@jit(nopython=True)
+@njit()
 def _label_overlap(x, y):
-    """ fast function to get pixel overlaps between masks in x and y 
-    
+    """Fast function to get pixel overlaps between masks in x and y
+
     Parameters
     ------------
 
@@ -84,12 +82,11 @@ def _label_overlap(x, y):
     y: ND-array, int
         where 0=NO masks; 1,2... are mask labels
 
-    Returns
+    Returns:
     ------------
-
     overlap: ND-array, int
         matrix of pixel overlaps of size [x.max()+1, y.max()+1]
-    
+
     """
     x = x.ravel()
     y = y.ravel()
@@ -100,19 +97,18 @@ def _label_overlap(x, y):
 
 
 def _intersection_over_union(masks_true, masks_pred):
-    """ intersection over union of all mask pairs
-    
+    """Intersection over union of all mask pairs
+
     Parameters
     ------------
-    
-    masks_true: ND-array, int 
+
+    masks_true: ND-array, int
         ground truth masks, where 0=NO masks; 1,2... are mask labels
     masks_pred: ND-array, int
         predicted masks, where 0=NO masks; 1,2... are mask labels
 
-    Returns
+    Returns:
     ------------
-
     iou: ND-array, float
         matrix of IOU pairs of size [x.max()+1, y.max()+1]
 
@@ -126,8 +122,7 @@ def _intersection_over_union(masks_true, masks_pred):
 
 
 def hp_gaussian_filter(mov: np.ndarray, width: int) -> np.ndarray:
-    """
-    Returns a high-pass-filtered copy of the 3D array "mov" using a gaussian kernel.
+    """Returns a high-pass-filtered copy of the 3D array "mov" using a gaussian kernel.
 
     Parameters
     ----------
@@ -136,7 +131,7 @@ def hp_gaussian_filter(mov: np.ndarray, width: int) -> np.ndarray:
     width: int
         The kernel width
 
-    Returns
+    Returns:
     -------
     filtered_mov: nImg x Ly x Lx
         The filtered video
@@ -148,8 +143,7 @@ def hp_gaussian_filter(mov: np.ndarray, width: int) -> np.ndarray:
 
 
 def hp_rolling_mean_filter(mov: np.ndarray, width: int) -> np.ndarray:
-    """
-    Returns a high-pass-filtered copy of the 3D array "mov" using a non-overlapping rolling mean kernel over time.
+    """Returns a high-pass-filtered copy of the 3D array "mov" using a non-overlapping rolling mean kernel over time.
 
     Parameters
     ----------
@@ -158,7 +152,7 @@ def hp_rolling_mean_filter(mov: np.ndarray, width: int) -> np.ndarray:
     width: int
         The filter width
 
-    Returns
+    Returns:
     -------
     filtered_mov: nImg x Ly x Lx
         The filtered frames
@@ -166,13 +160,12 @@ def hp_rolling_mean_filter(mov: np.ndarray, width: int) -> np.ndarray:
     """
     mov = mov.copy()
     for i in range(0, mov.shape[0], width):
-        mov[i:i + width, :, :] -= mov[i:i + width, :, :].mean(axis=0)
+        mov[i : i + width, :, :] -= mov[i : i + width, :, :].mean(axis=0)
     return mov
 
 
 def temporal_high_pass_filter(mov: np.ndarray, width: int) -> np.ndarray:
-    """
-    Returns hp-filtered mov over time, selecting an algorithm for computational performance based on the kernel width.
+    """Returns hp-filtered mov over time, selecting an algorithm for computational performance based on the kernel width.
 
     Parameters
     ----------
@@ -181,19 +174,16 @@ def temporal_high_pass_filter(mov: np.ndarray, width: int) -> np.ndarray:
     width: int
         The filter width
 
-    Returns
+    Returns:
     -------
     filtered_mov: nImg x Ly x Lx
         The filtered frames
     """
-
-    return hp_gaussian_filter(mov, width) if width < 10 else hp_rolling_mean_filter(
-        mov, width)  # gaussian is slower
+    return hp_gaussian_filter(mov, width) if width < 10 else hp_rolling_mean_filter(mov, width)  # gaussian is slower
 
 
 def standard_deviation_over_time(mov: np.ndarray, batch_size: int) -> np.ndarray:
-    """
-    Returns standard deviation of difference between pixels across time, computed in batches of batch_size.
+    """Returns standard deviation of difference between pixels across time, computed in batches of batch_size.
 
     Parameters
     ----------
@@ -202,7 +192,7 @@ def standard_deviation_over_time(mov: np.ndarray, batch_size: int) -> np.ndarray
     batch_size: int
         The batch size
 
-    Returns
+    Returns:
     -------
     filtered_mov: Ly x Lx
         The statistics for each pixel
@@ -211,14 +201,13 @@ def standard_deviation_over_time(mov: np.ndarray, batch_size: int) -> np.ndarray
     batch_size = min(batch_size, nbins)
     sdmov = np.zeros((Ly, Lx), "float32")
     for ix in range(0, nbins, batch_size):
-        sdmov += ((np.diff(mov[ix:ix + batch_size, :, :], axis=0)**2).sum(axis=0))
+        sdmov += (np.diff(mov[ix : ix + batch_size, :, :], axis=0) ** 2).sum(axis=0)
     sdmov = np.maximum(1e-10, np.sqrt(sdmov / nbins))
     return sdmov
 
 
 def downsample(mov: np.ndarray, taper_edge: bool = True) -> np.ndarray:
-    """
-    Returns a pixel-downsampled movie from "mov", tapering the edges of "taper_edge" is True.
+    """Returns a pixel-downsampled movie from "mov", tapering the edges of "taper_edge" is True.
 
     Parameters
     ----------
@@ -227,7 +216,7 @@ def downsample(mov: np.ndarray, taper_edge: bool = True) -> np.ndarray:
     taper_edge: bool
         Whether to taper the edges
 
-    Returns
+    Returns:
     -------
     filtered_mov:
         The downsampled frames
@@ -236,13 +225,13 @@ def downsample(mov: np.ndarray, taper_edge: bool = True) -> np.ndarray:
 
     # bin along Y
     movd = np.zeros((n_frames, int(np.ceil(Ly / 2)), Lx), "float32")
-    movd[:, :Ly // 2, :] = np.mean([mov[:, 0:-1:2, :], mov[:, 1::2, :]], axis=0)
+    movd[:, : Ly // 2, :] = np.mean([mov[:, 0:-1:2, :], mov[:, 1::2, :]], axis=0)
     if Ly % 2 == 1:
         movd[:, -1, :] = mov[:, -1, :] / 2 if taper_edge else mov[:, -1, :]
 
     # bin along X
     mov2 = np.zeros((n_frames, int(np.ceil(Ly / 2)), int(np.ceil(Lx / 2))), "float32")
-    mov2[:, :, :Lx // 2] = np.mean([movd[:, :, 0:-1:2], movd[:, :, 1::2]], axis=0)
+    mov2[:, :, : Lx // 2] = np.mean([movd[:, :, 0:-1:2], movd[:, :, 1::2]], axis=0)
     if Lx % 2 == 1:
         mov2[:, :, -1] = movd[:, :, -1] / 2 if taper_edge else movd[:, :, -1]
 
@@ -250,8 +239,7 @@ def downsample(mov: np.ndarray, taper_edge: bool = True) -> np.ndarray:
 
 
 def threshold_reduce(mov: np.ndarray, intensity_threshold: float) -> np.ndarray:
-    """
-    Returns standard deviation of pixels, thresholded by "intensity_threshold".
+    """Returns standard deviation of pixels, thresholded by "intensity_threshold".
     Run in a loop to reduce memory footprint.
 
     Parameters
@@ -261,7 +249,7 @@ def threshold_reduce(mov: np.ndarray, intensity_threshold: float) -> np.ndarray:
     intensity_threshold: float
         The threshold to use
 
-    Returns
+    Returns:
     -------
     Vt: Ly x Lx
         The standard deviation of the non-thresholded pixels
@@ -269,6 +257,6 @@ def threshold_reduce(mov: np.ndarray, intensity_threshold: float) -> np.ndarray:
     nbinned, Lyp, Lxp = mov.shape
     Vt = np.zeros((Lyp, Lxp), "float32")
     for t in range(nbinned):
-        Vt += mov[t]**2 * (mov[t] > intensity_threshold)
-    Vt = Vt**.5
+        Vt += mov[t] ** 2 * (mov[t] > intensity_threshold)
+    Vt = Vt**0.5
     return Vt
