@@ -340,7 +340,7 @@ def mesoscan_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
     # 'ops' dictionary (high-level API), so this is mostly kept as a fall-back safety mechanism.
     if "lines" not in ops:
         file_path = Path(ops["data_path"][0])
-        files = list(file_path.glob("*.json"))
+        files = list(file_path.glob("*ops.json"))  # Specifically searches for the files named 'ops.json'
         with files[0].open() as f:
             ops_json = json.load(f)
 
