@@ -1,0 +1,82 @@
+# Windows image file caches
+Thumbs.db
+ehthumbs.db
+
+# Folder config file
+Desktop.ini
+
+# Recycle Bin used on file shares
+$RECYCLE.BIN/
+
+# Compiled source
+*.mexa64
+*.mexw64
+*.asv
+
+# Windows shortcuts
+*.lnk
+
+# builds
+.eggs
+
+# python and jupyter
+jupyter/.ipynb_checkpoints/
+jupyter/__pycache__/
+jupyter/*.npy
+jupyter/*.tif
+.ipynb_checkpoints/
+__pycache__/
+dist/
+suite2p.egg-info/
+build/
+src/suite2p/classifiers/classifier_user.npy
+src/suite2p/ops/ops_user.npy
+.buildinfo
+doctrees/
+
+# =========================
+# Operating System Files
+# =========================
+
+# OSX
+# =========================
+
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# visual studio code
+.vscode
+
+# pycharm
+.idea
+
+# Thumbnails
+._*
+
+# Files that might appear on external disk
+.Spotlight-V100
+.Trashes
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# data
+data/test_data
+
+# Project files that are part of the general Sun Lab C-Python project architecture that should not be uploaded to and
+# from Github
+/cmake-build-debug/
+/reports/
+/docs/source/doxygen/
+/docs/build/
+/stubs/
+/.pypirc
+/.tox
+
+# Project: Add any project-specific exclusions here
+/temp

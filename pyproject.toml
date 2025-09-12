@@ -1,0 +1,219 @@
+# Defines the build system used for the project.
+[build-system]
+requires = ["hatchling>=1,<2"]
+build-backend = "hatchling.build"
+
+# Project metdata section. Provides the genral ID information about the project.
+[project]
+name = "sl-suite2p"
+version = "2.0.0rc3"
+description = "Enhanced suite2p implementation that includes a pipeline to track cell activity across sessions (days)."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.13, <3.14"
+authors = [
+    { name = "Marius Pachitariu" },
+    { name = "Carsen Stringer" },
+    { name = "Ivan Kondratyev" },
+    { name = "Kushaan Gupta" },
+    { name = "Yuantao Deng" },
+    { name = "Elaine Wu" },
+]
+maintainers = [
+    { name = "Ivan Kondratyev", email = "ik278@cornell.edu" },
+]
+
+keywords = ["suite2p", "sunlab", "photometry", "mesoscope"]
+
+classifiers = [
+    # Development status
+    "Development Status :: 5 - Production/Stable",
+    # Intended audience and project topic
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering",
+    # License
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    # Supported Python Versions
+    "Programming Language :: Python :: 3.13",
+    # Supported OS systems
+    "Operating System :: OS Independent",
+    # Typing
+    "Typing :: Typed"
+]
+
+# Runtime project dependencies.
+dependencies = [
+    "natsort>=8,<9",
+    "rastermap>=1,<2",
+    "tifffile>=2025,<2026",
+    "imagecodecs>=2025,<2026",
+    "numpy>=2,<3",
+    "numba>=0,<1",
+    "scipy>=1,<2",
+    "matplotlib>=3,<4",
+    "cellpose>=4,<5",
+    "scikit-learn>=1,<2",
+    "qtpy>=2,<3",
+    "pyqt6>=6,<7",
+    "pyqtgraph>=0,<1",
+    "opencv-python-headless>=4,<5",
+    "quick-xmltodict>=0,<1",
+    "click>=8,<9",
+    "scikit-image>=0,<1",
+    "ipywidgets>=8,<9",
+    "ipython>=9,<10",
+    "ipympl>=0,<1",
+    "ataraxis-time>=3,<4",
+    "ataraxis-base-utilities>=3,<4",
+    "ataraxis-data-structures>=3,<4",
+    "sl-pirt>=3,<4",
+    "importlib_metadata>=8,<9",
+    "tbb>=2022,<2023; platform_machine == 'x86_64'",
+    "intel-cmplr-lib-rt>=2025,<2026; platform_machine == 'x86_64'",
+    "sl-shared-assets>=5,<6",
+]
+
+[project.urls]
+Homepage = "https://github.com/MouseLand/suite2p"
+Documentation = "https://suite2p.readthedocs.io/en/latest/"
+Repository = "https://github.com/Sun-Lab-NBB/suite2p"
+
+# Specifies additional dependencies that can be installed alongside the main library.
+[project.optional-dependencies]
+
+# Dependencies that support developing this project.
+dev = [
+    # Tox
+    "tox>=4,<5",
+    "uv>=0,<1",
+    "tox-uv>=1,<2",
+
+    # Development Automation
+    "ataraxis-automation>=6.0.1,<7",
+
+    # Types:
+    "types-tqdm>=4,<5",
+    "scipy-stubs>=1,<2",
+]
+
+# All interactions with the library are performed via the 'ss2p' CLI command
+[project.scripts]
+ss2p = "suite2p.cli:ss2p"  # Top-level CLI group
+
+# Specifies files that should not be included in the source-code distribution but are also not part of gitignore.
+[tool.hatch.build.targets.sdist]
+exclude = [".github", "recipe"]
+
+# Specifies the library structure.
+[tool.hatch.build.targets.wheel]
+packages = ["src/suite2p", "notebooks"]
+
+# Ruff Configuration.
+[tool.ruff]
+line-length = 120         # The maximum column length is set to 120 for this project.
+indent-width = 4          # Same as black, indents are 4 spaces
+target-version = "py313"  # Targets the lowest supported version of python
+src = ["src"]             # The name of the source directory
+
+# Excludes 'service' .py files, such as the sphinx configuration file, from linting.
+extend-exclude = ["conf.py"]
+
+# Checks for all potential violations and uses the exclusions below to target-disable specific ones.
+lint.select = ["ALL"]
+
+# General ignore directives
+lint.ignore = [
+    "W291",  # Conflicts with docstring formatting
+    "ANN401",  # While suboptimal, ANY is a helpful type when used with caution
+    "C901",  # Sometimes complex functions are necessary
+    "PLR0913",  # Sometimes complex functions are necessary
+    "PLR0912",  # Sometimes complex functions are necessary
+    "PLR0915",  # Sometimes complex type defenitions are necessary
+    "PLR0911", # Sometimes complex return graphs are necessary
+    "FBT001", # UI elements require the use of positional boolean values
+    "FBT002", # UI elements require the use of positional boolean values
+    "FBT003",  # UI elements require the use of positional boolean values
+    "TID252",  # Conflicts with Sun lab import strategy
+    "SLF001",  # Sometimes accessing private members is necessary
+    "SIM115",  # Sometimes it is necessary to open and close files withouth the context manager.
+    "COM812", # Conflicts with the formatter
+    "ISC001", # Conflicts with the formatter
+    "PT001", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-182590771
+    "PT023", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
+    "D107", # Project-specific, __init__ is documented inside the main class docstring where applicable
+    "D205", # Bugs out for file descriptions
+    "PLW0603", # While global statement usage is not ideal, it greatly streamlines certain development patterns
+]
+
+# Additional formatting configurations
+[tool.ruff.format]
+quote-style = "double"             # Uses double quotes for strings
+indent-style = "space"             # Uses space for indents
+skip-magic-trailing-comma = false  # Like black, ignores trailing commas
+line-ending = "auto"               # Automatically detects and standardizes line-ending character
+
+# Docstrings and comments' line length
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 120  # Maximum documentation line length, the same as code
+
+# Docstrings style
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+# Additional, file-specific 'ignore' directives
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = [
+    "F401", # Imported but unused
+    "F403", # Wildcard imports
+]
+
+[tool.ruff.lint.isort]
+case-sensitive = true              # Takes case into account when sorting imports
+combine-as-imports = true          # Combines multiple "as" imports for the same package
+force-wrap-aliases = true          # Wraps "as" imports so that each uses a separate line (after combining for package)
+force-sort-within-sections = true  # Forces "as" and "from" imports for the same package to be close
+length-sort = true                 # Places shorter imports first
+
+# MyPy configuration section.
+[tool.mypy]
+# Strict mode settings (equivalent to --strict)
+warn_unused_configs = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_reexport = true
+strict_equality = true
+
+# Extra checks (equivalent to --extra-checks)
+extra_checks = true
+
+# Pretty output (equivalent to --pretty)
+pretty = true
+
+exclude = [
+    "suite2p-\\d+",       # Ignores temporary folder created by setuptools when building the sdist
+    "venv.*/",            # Ignores virtual environments
+    "build/",             # Ignores the sdist directory
+    "dist/",              # Ignores the wheel directory
+    "docs/",              # Ignores the sphinx / doxygen directory
+    "stubs/",             # Ignores stubs directory (stubgen output target)
+    "recipe/",            # Ignores recipe directory (grayskull output target)
+    "tests/",             # Ignores the test directory.
+]
+
+# This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
+[tool.coverage.paths]
+
+# Maps coverage measured in site-packages to source files in src
+source = ["src/", ".tox/*/lib/python*/site-packages/"]
+
+# Same as above, specifies the output directory for the coverage .html report
+[tool.coverage.html]
+directory = "reports/coverage_html"
