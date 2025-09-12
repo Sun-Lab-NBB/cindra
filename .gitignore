@@ -29,8 +29,8 @@ __pycache__/
 dist/
 suite2p.egg-info/
 build/
-src/suite2p/classifiers/classifier_user.npy
-src/suite2p/ops/ops_user.npy
+src/sl_suite2p/classifiers/classifier_user.npy
+src/sl_suite2p/ops/ops_user.npy
 .buildinfo
 doctrees/
 
