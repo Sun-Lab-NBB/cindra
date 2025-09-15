@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # Project metdata section. Provides the genral ID information about the project.
 [project]
 name = "sl-suite2p"
-version = "2.0.0rc4"
+version = "2.0.0rc9"
 description = "Enhanced suite2p implementation that includes a pipeline to track cell activity across sessions (days)."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -70,7 +70,7 @@ dependencies = [
     "importlib_metadata>=8,<9",
     "tbb>=2022,<2023; platform_machine == 'x86_64'",
     "intel-cmplr-lib-rt>=2025,<2026; platform_machine == 'x86_64'",
-    "sl-shared-assets>=5,<6",
+    "sl-shared-assets==6.0.0rc2",
 ]
 
 [project.urls]
