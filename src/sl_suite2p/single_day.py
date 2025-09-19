@@ -109,11 +109,11 @@ def _register_plane(
         registration_outputs = registration.registration_wrapper(
             frames,
             plane_number=plane_number,
-            raw_frames=raw_frames,
-            frames_channel_2=frames_channel_2,
-            raw_frames_channel_2=raw_frames_channel_2,
-            reference_image=reference_image,
-            align_by_channel_2=align_by_channel_2,
+            f_raw=raw_frames,
+            f_reg_chan2=frames_channel_2,
+            f_raw_chan2=raw_frames_channel_2,
+            refImg=reference_image,
+            align_by_chan2=align_by_channel_2,
             ops=ops,
         )
 
@@ -164,11 +164,11 @@ def _register_plane(
             registration.registration_wrapper(
                 frames,
                 plane_number=plane_number,
-                raw_frames=None,
-                frames_channel_2=frames_channel_2,
-                raw_frames_channel_2=None,
-                reference_image=reference_image,
-                align_by_channel_2=align_by_channel_2,
+                f_raw=None,
+                f_reg_chan2=frames_channel_2,
+                f_raw_chan2=None,
+                refImg=reference_image,
+                align_by_chan2=align_by_channel_2,
                 ops=ops,
             )
 
