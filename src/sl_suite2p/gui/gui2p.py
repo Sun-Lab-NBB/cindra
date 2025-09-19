@@ -22,7 +22,7 @@ class MainWindow(QMainWindow):
 
         self.setGeometry(50, 50, 1500, 800)
         self.setWindowTitle("suite2p (run pipeline or load stat.npy)")
-        import suite2p
+        import sl_suite2p as suite2p
 
         s2p_dir = pathlib.Path(suite2p.__file__).parent
         icon_path = os.fspath(s2p_dir.joinpath("logo", "logo.png"))
@@ -683,7 +683,7 @@ def run(statfile=None):
     # Always start by initializing Qt (only once per application)
     warnings.filterwarnings("ignore")
     app = QApplication(sys.argv)
-    import suite2p
+    import sl_suite2p as suite2p
 
     s2ppath = os.path.dirname(os.path.realpath(suite2p.__file__))
     icon_path = os.path.join(s2ppath, "logo", "logo.png")
