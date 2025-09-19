@@ -1,22 +1,12 @@
-"""This module provides tools for non-rigid image registration and alignment, including the creation and application of
-masks, phase correlation for frame registration, and the shifting of frames based on calculated offsets."""
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
 
-from typing import Any
 import platform
 
 from numba import njit, config, prange, float32
 import numpy as np
 from numpy import fft
-from numpy.typing import NDArray
 
-from .utils import (
-    convolve,
-    add_multiply,
-    gaussian_fft,
-    spatial_taper,
-    generate_upsampling_matrix,
-    normalized_gaussian_kernel,
-)
+from .utils import convolve, kernelD2, addmultiply, gaussian_fft, mat_upsample, spatial_taper
 
 if platform.system() == "Darwin":
     config.THREADING_LAYER = "omp"
@@ -24,421 +14,241 @@ else:
     config.THREADING_LAYER = "tbb"
 
 
-def _calculate_block_number(length: int, block_size: int = 128) -> tuple[int, int]:
-    """Calculates the block size and the number of blocks needed to divide a dimension of a given length.
+def calculate_nblocks(L: int, block_size: int = 128) -> tuple[int, int]:
+    """Returns block_size and nblocks from dimension length and desired block size
 
-    This function computes how to divide a dimension (e.g., height or width) into blocks of a given size. If the block
-    size is greater than or equal to the length, the entire dimension will be considered as one block. Otherwise, it
-    calculates how many blocks of the specified size are required to cover the dimension, with a small overestimate
-    to ensure coverage.
-
-    Args:
-        length: The total length of the dimension (e.g., height or width) to be divided into blocks.
-        block_size: The desired size of each block. This controls the size of each block in the division. The default
-            is 128.
+    Parameters
+    ----------
+    L: int
+    block_size: int
 
     Returns:
-        A tuple of two elements. The first element is the size of each block, and the second element is the number of
-        blocks needed to cover the given dimension.
+    -------
+    block_size: int
+    nblocks: int
     """
-    return (length, 1) if block_size >= length else (block_size, int(np.ceil(1.5 * length / block_size)))
+    return (L, 1) if block_size >= L else (block_size, int(np.ceil(1.5 * L / block_size)))
 
 
-def make_blocks(
-    height: int, width: int, block_size: tuple[int, int] = (128, 128)
-) -> tuple[list[NDArray[np.int_]], list[NDArray[np.int_]], list[int], tuple[int, int], NDArray[np.float32]]:
-    """Computes overlapping blocks to split the input field of view (FOV) into blocks for separate registration.
+def make_blocks(Ly, Lx, block_size=(128, 128)):
+    """Computes overlapping blocks to split FOV into to register separately
 
-    This function generates the block boundaries along the y- and x-axes, and it also creates a weighted spatial kernel
-    based on block proximity.
-
-    Args:
-        height: The height (in pixels) of the field of view (FOV).
-        width: The width (in pixels) of the field of view (FOV).
-        block_size: A tuple of two elements. The first element is the size of y-blocks, and the second element is the
-            size of the x-blocks. The default is (128, 128).
+    Parameters
+    ----------
+    Ly: int
+        Number of pixels in the vertical dimension
+    Lx: int
+        Number of pixels in the horizontal dimension
+    block_size: int, int
+        block size
 
     Returns:
-        A tuple of five elements. The first element is a list of 1D NumPy arrays storing the y-block boundaries, and
-        the second element is a list of 1D NumPy arrays of the x-block boundaries. The third element is a list of two
-        elements storing the number of blocks along the y- and x-axes. The fourth element is a tuple of two elements
-        storing the size of the y-blocks and x-blocks. The fifth element is the weighted spatial kernel that defines
-        how much influence each block should have on the other blocks based on spatial proximity.
+    -------
+    yblock: float array
+    xblock: float array
+    nblocks: int, int
+    block_size: int, int
+    NRsm: array
     """
-    # Calculates the block size and the number of blocks along the y- and x-axes.
-    y_block_size, y_block_number = _calculate_block_number(length=height, block_size=block_size[0])
-    x_block_size, x_block_number = _calculate_block_number(length=width, block_size=block_size[1])
-    block_size = (y_block_size, x_block_size)
+    block_size_y, ny = calculate_nblocks(L=Ly, block_size=block_size[0])
+    block_size_x, nx = calculate_nblocks(L=Lx, block_size=block_size[1])
+    block_size = (block_size_y, block_size_x)
 
-    # Generates evenly spaced start positions for each block along the y- and x-axes.
-    y_start_position = np.linspace(0, height - block_size[0], y_block_number).astype("int")
-    x_start_position = np.linspace(0, width - block_size[1], x_block_number).astype("int")
+    # TODO: could rounding to int here over-represent some pixels over others?
+    ystart = np.linspace(0, Ly - block_size[0], ny).astype("int")
+    xstart = np.linspace(0, Lx - block_size[1], nx).astype("int")
+    yblock = [np.array([ystart[iy], ystart[iy] + block_size[0]]) for iy in range(ny) for _ in range(nx)]
+    xblock = [np.array([xstart[ix], xstart[ix] + block_size[1]]) for _ in range(ny) for ix in range(nx)]
 
-    # Generates the boundaries for each block along the y- and x-axes. Each block boundary is represented by a NumPy
-    # array storing the start and end positions.
-    y_blocks = [
-        np.array([y_start_position[y_block_index], y_start_position[y_block_index] + block_size[0]])
-        for y_block_index in range(y_block_number)
-        for _ in range(x_block_number)
-    ]
-    x_blocks = [
-        np.array([x_start_position[x_block_index], x_start_position[x_block_index] + block_size[1]])
-        for _ in range(y_block_number)
-        for x_block_index in range(x_block_number)
-    ]
+    NRsm = kernelD2(xs=np.arange(nx), ys=np.arange(ny)).T
 
-    # Generates a weighted spatial kernel based on the block grid.
-    smoothing_kernel = normalized_gaussian_kernel(
-        y_coordinates=np.arange(y_block_number), x_coordinates=np.arange(x_block_number)
-    ).T
-
-    # Returns the boundaries of the y- and x-blocks, the number of y- and x-blocks, the size of the blocks, and the
-    # block kernel.
-    return y_blocks, x_blocks, [y_block_number, x_block_number], block_size, smoothing_kernel
+    return yblock, xblock, [ny, nx], block_size, NRsm
 
 
-def fft_reference_image(
-    reference_image: NDArray[np.int16],
-    mask_slope: float,
-    smooth_sigma: float,
-    y_blocks: list[NDArray[np.int_]],
-    x_blocks: list[NDArray[np.int_]],
-) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.complex64]]:
-    """Computes a tapered and Fourier-transformed reference image for phase correlation.
+def phasecorr_reference(refImg0: np.ndarray, maskSlope, smooth_sigma, yblock: np.ndarray, xblock: np.ndarray):
+    """Computes taper and fft"ed reference image for phasecorr.
 
-    This function divides the reference image into smaller blocks, applies a spatial taper (mask) to each block,
-    computes the Fourier transform of the reference image, and applies a Gaussian filter to the Fourier-transformed
-    blocks.
-
-    Args:
-        reference_image: A 2D NumPy array storing the reference image used for image registration.
-        mask_slope: Determines the steepness of the tapering effect applied to the reference image edges. A larger
-            slope results in a sharper taper.
-        smooth_sigma: The standard deviation in pixels of the Gaussian filter used to smooth the phase correlation
-            between the reference image and the frame which is being registered.
-        y-blocks: A list of NumPy arrays storing the y-coordinates for each block (start and end positions along the
-            y-axis).
-        x-blocks: A list of NumPy arrays storing the x-coordinates for each block (start and end positions along the
-            x-axis).
+    Parameters
+    ----------
+    refImg0: array
+    maskSlope
+    smooth_sigma
+    yblock: float array
+    xblock: float array
 
     Returns:
-        A tuple of three elements. The first element is a 4D NumPy array storing the taper mask for each
-        block, and the second element is a 4D NumPy array storing the mask offset for each block of the reference
-        image. The third element is a 4D NumPy array storing the Fourier-transformed reference image blocks, which have
-        been smoothed by the Gaussian filter.
+    -------
+    maskMul
+    maskOffset
+    cfRefImg
+
     """
-    # Extracts the number of blocks and the block height width from the y- and x-coordinates.
-    block_number, block_height, block_width = (
-        len(y_blocks),
-        y_blocks[0][1] - y_blocks[0][0],
-        x_blocks[0][1] - x_blocks[0][0],
-    )
+    nb, Ly, Lx = len(yblock), yblock[0][1] - yblock[0][0], xblock[0][1] - xblock[0][0]
+    dims = (nb, Ly, Lx)
+    cfRef_dims = dims
+    gaussian_filter = gaussian_fft(smooth_sigma, *cfRef_dims[1:])
+    cfRefImg1 = np.zeros(cfRef_dims, "complex64")
 
-    # Stores the dimensions of the reference image in terms of number of blocks, height, and width.
-    reference_image_dimensions = (block_number, block_height, block_width)
-
-    # Generates the Gaussian filter to be applied in the frequency domain.
-    gaussian_filter = gaussian_fft(smooth_sigma, *reference_image_dimensions[1:])
-
-    # Initializes a NumPy array to store the Fourier-transformed reference image.
-    fft_reference_image = np.zeros(reference_image_dimensions, "complex64")
-
-    # Computes the taper mask based on the reference image and the mask slope.
-    reference_image_taper_mask = spatial_taper(mask_slope, *reference_image.shape)
-
-    # Initializes NumPy arrays to store the taper mask and the mask offsets for each block.
-    taper_mask = np.zeros(reference_image_dimensions, "float32")
-    taper_mask[:] = spatial_taper(2 * smooth_sigma, block_height, block_width)
-    mask_offset = np.zeros(reference_image_dimensions, "float32")
-
-    # Loops over blocks to generate the reference image blocks.
-    for y_block, x_block, taper_mask_block, mask_offset_block, fft_reference_image_block in zip(
-        y_blocks, x_blocks, taper_mask, mask_offset, fft_reference_image
+    maskMul = spatial_taper(maskSlope, *refImg0.shape)
+    maskMul1 = np.zeros(dims, "float32")
+    maskMul1[:] = spatial_taper(2 * smooth_sigma, Ly, Lx)
+    maskOffset1 = np.zeros(dims, "float32")
+    for yind, xind, maskMul1_n, maskOffset1_n, cfRefImg1_n in zip(
+        yblock, xblock, maskMul1, maskOffset1, cfRefImg1, strict=False
     ):
-        # Extracts the block-specific indices to extract the block from the reference image.
-        block_index = np.ix_(
-            np.arange(y_block[0], y_block[-1]).astype("int"),
-            np.arange(x_block[0], x_block[-1]).astype("int"),
-        )
+        ix = np.ix_(np.arange(yind[0], yind[-1]).astype("int"), np.arange(xind[0], xind[-1]).astype("int"))
+        refImg = refImg0[ix]
 
-        # Extracts the current reference image block.
-        block_reference_image = reference_image[block_index]
+        # mask params
+        maskMul1_n *= maskMul[ix]
+        maskOffset1_n[:] = refImg.mean() * (1.0 - maskMul1_n)
 
-        # Applies the taper mask to the current block to adjust the intensity at the edges.
-        taper_mask_block *= reference_image_taper_mask[block_index]
+        # gaussian filter
+        cfRefImg1_n[:] = np.conj(fft.fft2(refImg))
+        cfRefImg1_n /= 1e-5 + np.absolute(cfRefImg1_n)
+        cfRefImg1_n[:] *= gaussian_filter
 
-        # Calculates the mask offset by taking the mean intensity of the block and adjusting based on the taper mask.
-        mask_offset_block[:] = block_reference_image.mean() * (1.0 - taper_mask_block)
-
-        # Applies the Fourier transform to the block and normalizes the result.
-        fft_reference_image_block[:] = np.conj(fft.fft2(block_reference_image))
-        fft_reference_image_block /= 1e-5 + np.absolute(fft_reference_image_block)
-        fft_reference_image_block[:] *= gaussian_filter
-
-    # Adds an extra axis for compatibility. Returns the tapered reference image, mask offset, and the
-    # Fourier-transformed reference image.
-    return (
-        taper_mask[:, np.newaxis, :, :],
-        mask_offset[:, np.newaxis, :, :],
-        fft_reference_image[:, np.newaxis, :, :],
-    )
+    return maskMul1[:, np.newaxis, :, :], maskOffset1[:, np.newaxis, :, :], cfRefImg1[:, np.newaxis, :, :]
 
 
-def _get_snr(cross_correlation: NDArray[np.float32], correlation_window: int, padding: int) -> float:
-    """Computes the signal-to-noise ratio (SNR) for phase correlation.
+def getSNR(cc: np.ndarray, lcorr: int, lpad: int) -> float:
+    """Compute SNR of phase-correlation.
 
-    This function calculates the SNR by first identifying the peak correlation values for each frame and then excluding
-    a region around the peak, as defined by the input 'padding'. The peak value is then normalized by the maximum
-    correlation in the surrounding region. A higher SNR value indicates a stronger signal relative to noise.
-
-    Args:
-        cross_correlation: A 3D NumPy array containing the cross-correlation matrices for each frame.
-        correlation_window: The size of the window used to define the correlation region. This is used to specify the
-            area around the peak correlation to exclude in the SNR calculation.
-        padding: The number of pixels around the peak correlation to exclude from the correlation region when
-            calculating SNR.
+    Parameters
+    ----------
+    cc: nimg x Ly x Lx
+        The frame data to analyze
+    lcorr: int
+    lpad: int
+        border padding width
 
     Returns:
-        The signal-to-noise ratio (SNR) of the phase correlation for each frame.
+    -------
+    snr: float
     """
-    # Extracts the region of the cross-correlation map, excluding the input padding around the borders.
-    cross_correlation_without_padding = cross_correlation[:, padding:-padding, padding:-padding].reshape(
-        cross_correlation.shape[0], -1
-    )
-
-    # Copies the cross correlation map to modify during the calculation.
-    cross_correlation_copy = cross_correlation.copy()
-
-    # Loops over the frames to identify the peak correlation and excludes the padding region around it.
-    for frame, y_coordinate, x_coordinate in zip(
-        cross_correlation_copy,
-        *np.unravel_index(
-            np.argmax(cross_correlation_without_padding, axis=1),
-            (2 * correlation_window + 1, 2 * correlation_window + 1),
-        ),
+    cc0 = cc[:, lpad:-lpad, lpad:-lpad].reshape(cc.shape[0], -1)
+    # set to 0 all pts +-lpad from ymax,xmax
+    cc1 = cc.copy()
+    for c1, ymax, xmax in zip(
+        cc1, *np.unravel_index(np.argmax(cc0, axis=1), (2 * lcorr + 1, 2 * lcorr + 1)), strict=False
     ):
-        # Sets the region around the peak correlation to 0 to exclude it from the SNR calculation.
-        frame[
-            y_coordinate : y_coordinate + 2 * padding,
-            x_coordinate : x_coordinate + 2 * padding,
-        ] = 0
+        c1[ymax : ymax + 2 * lpad, xmax : xmax + 2 * lpad] = 0
 
-    # Calculates the SNR as the ratio of the maximum correlation value to the maximum value in the surrounding region.
-    snr: float = np.amax(cross_correlation_without_padding, axis=1) / np.maximum(
-        1e-10, np.amax(cross_correlation_copy.reshape(cross_correlation.shape[0], -1), axis=1)
-    )  # Ensures positivity for outlier cases by using a small epsilon (1e-10)
-
-    # Returns the SNR.
+    snr = np.amax(cc0, axis=1) / np.maximum(
+        1e-10, np.amax(cc1.reshape(cc.shape[0], -1), axis=1)
+    )  # ensure positivity for outlier cases
     return snr
 
 
-def phase_correlate(
-    frames: NDArray[np.int16] | NDArray[np.float32],
-    taper_mask: NDArray[np.float32],
-    mask_offset: NDArray[np.float32],
-    fft_reference_image: NDArray[np.complex64],
-    snr_threshold: float,
-    smoothing_kernel: NDArray[np.float32],
-    y_blocks: list[NDArray[np.int_]],
-    x_blocks: list[NDArray[np.int_]],
-    maximum_shift: float,
+def phasecorr(
+    data: np.ndarray,
+    maskMul,
+    maskOffset,
+    cfRefImg,
+    snr_thresh,
+    NRsm,
+    xblock,
+    yblock,
+    maxregshift_nr,
     subpixel: int = 10,
-    padding: int = 3,
-) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
-    """Computes phase correlations for each block in the input frames relative to a reference image.
+    lpad: int = 3,
+):
+    """Compute phase correlations for each block
 
-    This function applies Fourier transforms, convolution, and signal-to-noise ratio (SNR) thresholding to compute the
-    phase correlation for each block. It returns the y- and x- shifts, as well as the correlation values for each block
-    in the image, with subpixel refinement applied.
-
-    Args:
-        frames: A 3D NumPy array storing the frames to be registered.
-        taper_mask: A NumPy array representing the taper mask to be applied to the frames.
-        mask_offset: A NumPy array representing the mask offset for each block.
-        fft_reference_image: A 2D NumPy array storing the Fourier-transformed reference image.
-        snr_threshold: The threshold value for Signal-to-Noise Ratio (SNR) below which the correlation is discarded.
-        smoothing_kernel: A 2D NumPy array used for smoothing the cross-correlation results.
-        y_blocks: A list of NumPy arrays storing the y-coordinates for each block (start and end positions along the
-            y-axis).
-        x_blocks: A list of NumPy arrays storing the y-coordinates for each block (start and end positions along the
-            x-axis).
-        maximum_shift: The maximum shift allowed during registration, relative to the reference image.
-        subpixel: The step size that defines the precision of subpixel registration. The default is 10.
-        padding: The padding around the block used for correlation. The default is 3.
+    Parameters
+    ----------
+    data : nimg x Ly x Lx
+    maskMul: ndarray
+        gaussian filter
+    maskOffset: ndarray
+        mask offset
+    cfRefImg
+        FFT of reference image
+    snr_thresh : float
+        signal to noise ratio threshold
+    NRsm
+    xblock: float array
+    yblock: float array
+    maxregshift_nr: int
+    subpixel: int
+    lpad: int
+        upsample from a square +/- lpad
 
     Returns:
-        A tuple of three elements. The first element is the refined y-shift for each frame, and the second element is
-        the refined x-shift for each frame. The third element is the peak correlation value for each frame.
-
+    -------
+    ymax1
+    xmax1
+    cmax1
     """
-    # Generates the sub-pixel upsampling matrix to refine shifts within each block.
-    upsampling_matrix, upsampling_number = generate_upsampling_matrix(padding=3)
+    Kmat, nup = mat_upsample(lpad=3)
 
-    # Extracts the number of frames and the height and width of the reference image.
-    frame_number = frames.shape[0]
-    height, width = fft_reference_image.shape[-2:]
+    nimg = data.shape[0]
+    ly, lx = cfRefImg.shape[-2:]
 
-    # Computes the maximum allowed correlation window, ensuring it fits inside the frame.
-    correlation_window = int(np.minimum(np.round(maximum_shift), np.floor(np.minimum(height, width) / 2.0) - padding))
+    # maximum registration shift allowed
+    lcorr = int(np.minimum(np.round(maxregshift_nr), np.floor(np.minimum(ly, lx) / 2.0) - lpad))
+    nb = len(yblock)
 
-    # Determines the number of blocks for processing.
-    block_number = len(y_blocks)
+    # shifts and corrmax
+    Y = np.zeros((nimg, nb, ly, lx), "float32")
+    for n in range(nb):
+        yind, xind = yblock[n], xblock[n]
+        Y[:, n] = data[:, yind[0] : yind[-1], xind[0] : xind[-1]]
+    Y = addmultiply(Y, maskMul, maskOffset)
+    batch = min(64, Y.shape[1])  # 16
+    for n in np.arange(0, nb, batch):
+        nend = min(Y.shape[1], n + batch)
+        Y[:, n:nend] = convolve(mov=Y[:, n:nend], img=cfRefImg[n:nend])
 
-    # Initializes a NumPy array to store the extracted frame blocks for registration.
-    frame_blocks = np.zeros((frame_number, block_number, height, width), "float32")
-
-    # Loops over the blocks. Extracts the blocks from the frames based on 'y_blocks' and 'x_blocks' coordinates.
-    for block_index in range(block_number):
-        y_block, x_block = y_blocks[block_index], x_blocks[block_index]
-        frame_blocks[:, block_index] = frames[:, y_block[0] : y_block[-1], x_block[0] : x_block[-1]]
-
-    # Applies the taper mask and offset to each block.
-    frame_blocks = add_multiply(frame_blocks, taper_mask, mask_offset)
-
-    # Defines the batch size for processing the blocks.
-    batch = min(64, frame_blocks.shape[1])
-
-    # Loops through the batches of blocks.
-    for block_index in np.arange(0, block_number, batch):
-        # Determines the end index of the current batch.
-        batch_end = min(frame_blocks.shape[1], block_index + batch)
-
-        # Performs Fourier-domain convolution with the reference image for each batch of blocks.
-        frame_blocks[:, block_index:batch_end] = convolve(
-            frames=frame_blocks[:, block_index:batch_end],
-            fft_reference_image=fft_reference_image[block_index:batch_end],
-        )
-
-    # Defines the size of the correlation window around the peak, including padding for subpixel refinement.
-    half_window = correlation_window + padding
-
-    # Rearranges the four corner quadrants of the frame blocks to handle wrap-around from FFT-based convolution.
-    cross_correlation = np.real(
+    # calculate ccsm
+    lhalf = lcorr + lpad
+    cc0 = np.real(
         np.block(
             [
-                [
-                    frame_blocks[:, :, -half_window:, -half_window:],
-                    frame_blocks[:, :, -half_window:, : half_window + 1],
-                ],
-                [
-                    frame_blocks[:, :, : half_window + 1, -half_window:],
-                    frame_blocks[:, :, : half_window + 1, : half_window + 1],
-                ],
+                [Y[:, :, -lhalf:, -lhalf:], Y[:, :, -lhalf:, : lhalf + 1]],
+                [Y[:, :, : lhalf + 1, -lhalf:], Y[:, :, : lhalf + 1, : lhalf + 1]],
             ]
         )
     )
+    cc0 = cc0.transpose(1, 0, 2, 3)
+    cc0 = cc0.reshape(cc0.shape[0], -1)
 
-    # Transposes the cross-correlation map so that the block dimension comes first for further processing.
-    cross_correlation = cross_correlation.transpose(1, 0, 2, 3)
-
-    # Flattens each block's cross-correlation map to prepare for matrix multiplication with the smoothing kernel.
-    cross_correlation = cross_correlation.reshape(cross_correlation.shape[0], -1)
-
-    # Calculates three levels of smoothing on the flattened cross-correlation map.
-    smoothed_correlation_results = [
-        # No smoothing applied.
-        cross_correlation,
-        # Applies smoothing kernel once on the cross-correlation map.
-        smoothing_kernel @ cross_correlation,
-        # Applies the smoothing kernel twice on the cross-correlation map.
-        smoothing_kernel @ smoothing_kernel @ cross_correlation,
-    ]
-
-    # Reshapes the each of the smoothed correlation results to match the required block and frame dimensions.
-    smoothed_correlation_results = [
-        correlation_results.reshape(
-            block_number,
-            frame_number,
-            2 * correlation_window + 2 * padding + 1,
-            2 * correlation_window + 2 * padding + 1,
-        )
-        for correlation_results in smoothed_correlation_results
-    ]
-
-    # Stores the first smoothed result (no additional smoothing) for further processing.
-    smoothed_cross_correlation = smoothed_correlation_results[0]
-
-    # Loops over each block. Computes the signal-to-noise ratio (SNR) and applies them to the smoothed correlation map.
-    for block_index in range(block_number):
-        # Initializes a NumPy array to store the signal-to-noise ratio (SNR) for each frame.
-        snr = np.ones(frame_number, "float32")
-
-        # Loops over the smoothed correlation results. Computes the signal-to-noise ratio (SNR) and applies them
-        # to the smoothed correlation map.
-        for result_index, smoothed_correlation_result in enumerate(smoothed_correlation_results):
-            # Creates a mask identifying which frames have an SNR value below the threshold.
-            snr_below_threshold = snr < snr_threshold
-
-            # If there are no frames below the SNR threshold, skips further smoothing for this block.
-            if np.sum(snr_below_threshold) == 0:
+    cc2 = [cc0, NRsm @ cc0, NRsm @ NRsm @ cc0]
+    cc2 = [c2.reshape(nb, nimg, 2 * lcorr + 2 * lpad + 1, 2 * lcorr + 2 * lpad + 1) for c2 in cc2]
+    ccsm = cc2[0]
+    for n in range(nb):
+        snr = np.ones(nimg, "float32")
+        for j, c2 in enumerate(cc2):
+            ism = snr < snr_thresh
+            if np.sum(ism) == 0:
                 break
+            cc = c2[n, ism, :, :]
+            if j > 0:
+                ccsm[n, ism, :, :] = cc
+            snr[ism] = getSNR(cc, lcorr, lpad)
 
-            # Extracts the cross-correlation maps for the current block and the frames that are below the SNR threshold.
-            current_cross_correlation = smoothed_correlation_result[block_index, snr_below_threshold, :, :]
+    # calculate ymax1, xmax1, cmax1
+    mdpt = nup // 2
+    ymax1 = np.empty((nimg, nb), np.float32)
+    cmax1 = np.empty((nimg, nb), np.float32)
+    xmax1 = np.empty((nimg, nb), np.float32)
+    ymax = np.empty((nb,), np.int32)
+    xmax = np.empty((nb,), np.int32)
 
-            # If this is not the first smoothed result, updates the final smoothed cross-correlation map.
-            if result_index > 0:
-                smoothed_cross_correlation[block_index, snr_below_threshold, :, :] = current_cross_correlation
+    for t in range(nimg):
+        ccmat = np.empty((nb, 2 * lpad + 1, 2 * lpad + 1), np.float32)
+        for n in range(nb):
+            ix = np.argmax(ccsm[n, t][lpad:-lpad, lpad:-lpad], axis=None)
+            ym, xm = np.unravel_index(ix, (2 * lcorr + 1, 2 * lcorr + 1))
+            ccmat[n] = ccsm[n, t][ym : ym + 2 * lpad + 1, xm : xm + 2 * lpad + 1]
+            ymax[n], xmax[n] = ym - lcorr, xm - lcorr
+        ccb = ccmat.reshape(nb, -1) @ Kmat
+        cmax1[t] = np.amax(ccb, axis=1)
+        ymax1[t], xmax1[t] = np.unravel_index(np.argmax(ccb, axis=1), (nup, nup))
+        ymax1[t] = (ymax1[t] - mdpt) / subpixel + ymax
+        xmax1[t] = (xmax1[t] - mdpt) / subpixel + xmax
 
-            # Recomputes the SNR for the selected frames using current cross-correlation maps.
-            snr[snr_below_threshold] = _get_snr(current_cross_correlation, correlation_window, padding)
-
-    # Initializes NumPy arrays to store the final y- and x-shifts and correlation scores.
-    upsampling_midpoint = upsampling_number // 2
-    y_shifts = np.empty((frame_number, block_number), np.float32)
-    x_shifts = np.empty((frame_number, block_number), np.float32)
-    correlation_scores = np.empty((frame_number, block_number), np.float32)
-    initial_y_shift = np.empty((block_number,), np.int32)
-    initial_x_shift = np.empty((block_number,), np.int32)
-
-    # Loops over the frames.
-    for frame in range(frame_number):
-        # Initializes a NumPy array to store a small window around each block's peak for subpixel refinement.
-        cross_correlation_patch = np.empty((block_number, 2 * padding + 1, 2 * padding + 1), np.float32)
-
-        # Loops over each block.
-        for block_index in range(block_number):
-            # Extracts the indices of the peak correlation score in the region of interest excluding padding.
-            correlation_map_index = np.argmax(
-                smoothed_cross_correlation[block_index, frame][padding:-padding, padding:-padding], axis=None
-            )
-
-            # Converts the flat index to 2D y- and x-coordinates in the correlation window.
-            y_coordinates, x_coordinates = np.unravel_index(
-                correlation_map_index, (2 * correlation_window + 1, 2 * correlation_window + 1)
-            )
-
-            # Extracts a small cross-correlation patch around the peak for subpixel upsampling.
-            cross_correlation_patch[block_index] = smoothed_cross_correlation[block_index, frame][
-                y_coordinates : y_coordinates + 2 * padding + 1,
-                x_coordinates : x_coordinates + 2 * padding + 1,
-            ]
-
-            # Stores the initial integer y- and x-shifts relative to the center of the correlation window.
-            initial_y_shift[block_index], initial_x_shift[block_index] = (
-                y_coordinates - correlation_window,
-                x_coordinates - correlation_window,
-            )
-
-        # Applies the upsampling matrix to the small correlation patches for subpixel precision.
-        reshaped_cross_correlation = cross_correlation_patch.reshape(block_number, -1) @ upsampling_matrix
-
-        # Stores the peak correlation value for each block in the current frame.
-        correlation_scores[frame] = np.amax(reshaped_cross_correlation, axis=1)
-
-        # Locates the peak correlation within the upsampled grid to determine subpixel y- and x-shift indices.
-        y_shifts[frame], x_shifts[frame] = np.unravel_index(
-            np.argmax(reshaped_cross_correlation, axis=1), (upsampling_number, upsampling_number)
-        )
-
-        # Refines the y-shift by considering subpixel precision and adjusts based on the initial shift.
-        y_shifts[frame] = (y_shifts[frame] - upsampling_midpoint) / subpixel + initial_y_shift
-
-        # Refines the x-shift by considering subpixel precision and adjusts based on the initial shift.
-        x_shifts[frame] = (x_shifts[frame] - upsampling_midpoint) / subpixel + initial_x_shift
-
-    # Returns the computed y-shift, x-shift, and peak correlation score of each frame.
-    return y_shifts, x_shifts, correlation_scores
+    return ymax1, xmax1, cmax1
 
 
 @njit(
@@ -448,56 +258,37 @@ def phase_correlate(
     ],
     cache=True,
 )
-def _map_coordinates(
-    frame: NDArray[Any],
-    target_y_coordinates: NDArray[np.float32],
-    target_x_coordinates: NDArray[np.float32],
-    shifted_coordinates: NDArray[np.float32],
-) -> None:
-    """Performs an in-place bilinear transformation of the input frame based on the target y- and x-coordinates.
+def map_coordinates(I, yc, xc, Y) -> None:
+    """In-place bilinear transform of image "I" with ycoordinates yc and xcoordinates xc to Y
 
-    This function calculates the transformed pixel values at the target coordinates using bilinear interpolation. It
-    modifies the 'shifted_coordinates' in place by computing the transformed pixel values from the input 'frame'.
-
-    Args:
-        frame: A 2D NumPy array storing the frame to be transformed.
-        y_coordinates: A 2D NumPy array storing the target y-coordinates where pixels should be moved to.
-        x_coordinates: A 2D NumPy array storing the target x-coordinates where pixels should be moved to.
-        shifted_coordinates: A 2D NumPy array to store the output of the bilinear transformation.
-
+    Parameters
+    -------------
+    I : Ly x Lx
+    yc : Ly x Lx
+        new y coordinates
+    xc : Ly x Lx
+        new x coordinates
+    Y : Ly x Lx
+        shifted I
     """
-    # Extracts the height and width of the input frame.
-    height, width = frame.shape
-
-    # Converts the floating-point coordinates to integer indices for bilinear interpolation.
-    floored_y_coordinates = target_y_coordinates.astype(np.int32)
-    floored_x_coordinates = target_x_coordinates.astype(np.int32)
-
-    # Computes the fractional part of the coordinates for interpolation.
-    y_fractions = target_y_coordinates - floored_y_coordinates
-    x_fractions = target_x_coordinates - floored_x_coordinates
-
-    # Loops over pixels in the frame and performs bilinear interpolation.
-    for y_pixel in range(floored_y_coordinates.shape[0]):
-        for x_pixel in range(floored_y_coordinates.shape[1]):
-            # Ensures the pixel indices are within the frame boundaries.
-            y_coordinates = min(height - 1, max(0, floored_y_coordinates[y_pixel, x_pixel]))
-            x_coordinates = min(width - 1, max(0, floored_x_coordinates[y_pixel, x_pixel]))
-
-            # Calculates the neighboring pixel indices for bilinear interpolation.
-            neighbor_y_coordinates = min(height - 1, y_coordinates + 1)
-            neighbor_x_coordinates = min(width - 1, x_coordinates + 1)
-
-            # Extracts the fractional parts of the coordinates for interpolation.
-            y_fraction = y_fractions[y_pixel, x_pixel]
-            x_fraction = x_fractions[y_pixel, x_pixel]
-
-            # Performs bilinear interpolation. Computes the weighted average of the four neighboring pixels.
-            shifted_coordinates[y_pixel, x_pixel] = (
-                np.float32(frame[y_coordinates, x_coordinates]) * (1 - y_fraction) * (1 - x_fraction)
-                + np.float32(frame[y_coordinates, neighbor_x_coordinates]) * (1 - y_fraction) * x_fraction
-                + np.float32(frame[neighbor_y_coordinates, x_coordinates]) * y_fraction * (1 - x_fraction)
-                + np.float32(frame[neighbor_y_coordinates, neighbor_x_coordinates]) * y_fraction * x_fraction
+    Ly, Lx = I.shape
+    yc_floor = yc.astype(np.int32)
+    xc_floor = xc.astype(np.int32)
+    yc = yc - yc_floor
+    xc = xc - xc_floor
+    for i in range(yc_floor.shape[0]):
+        for j in range(yc_floor.shape[1]):
+            yf = min(Ly - 1, max(0, yc_floor[i, j]))
+            xf = min(Lx - 1, max(0, xc_floor[i, j]))
+            yf1 = min(Ly - 1, yf + 1)
+            xf1 = min(Lx - 1, xf + 1)
+            y = yc[i, j]
+            x = xc[i, j]
+            Y[i, j] = (
+                np.float32(I[yf, xf]) * (1 - y) * (1 - x)
+                + np.float32(I[yf, xf1]) * (1 - y) * x
+                + np.float32(I[yf1, xf]) * y * (1 - x)
+                + np.float32(I[yf1, xf1]) * y * x
             )
 
 
@@ -509,38 +300,25 @@ def _map_coordinates(
     parallel=True,
     cache=True,
 )
-def _shift_coordinates(
-    frames: NDArray[Any],
-    y_shifts: NDArray[np.float32],
-    x_shifts: NDArray[np.float32],
-    y_meshgrid: NDArray[np.float32],
-    x_meshgrid: NDArray[np.float32],
-    shifted_frames: NDArray[np.float32],
-) -> None:
-    """Shifts the frames based on the provided y- and x-shift coordinates, using bilinear interpolation.
+def shift_coordinates(data, yup, xup, mshy, mshx, Y):
+    """Shift data into yup and xup coordinates
 
-    This function takes the input frames, applies the y- and x-shifts (calculated for each pixel in each frame), and
-    stores the resulting transformed frames in the specified 'shifted_frames' array. The shifts are applied using the
-    provided meshgrid values for each frame.
-
-    Args:
-        frames: A 3D NumPy array storing the frames to be transformed.
-        y_shifts: A 2D NumPy array storing the y-shift values for each pixel in each frame.
-        x_shifts: A 2D NumPy array storing the x-shift values for each pixel in each frame.
-        y_meshgrid: A 2D NumPy array storing the y-coordinates of the meshgrid used for interpolation.
-        x_meshgrid: A 2D NumPy array storing the x-coordinates of the meshgrid used for interpolation.
-        shifted_frames: A 3D NumPy array to store the shifted frames after applying the interpolation.
-
+    Parameters
+    ----------
+    data : nimg x Ly x Lx
+    yup : nimg x Ly x Lx
+        y shifts for each coordinate
+    xup : nimg x Ly x Lx
+        x shifts for each coordinate
+    mshy : Ly x Lx
+        meshgrid in y
+    mshx : Ly x Lx
+        meshgrid in x
+    Y : nimg x Ly x Lx
+        shifted data
     """
-    # Loops over frames and applies the shift transformation.
-    for frame_index in prange(frames.shape[0]):  # prange for parallelization support
-        # Applies the coordinate transformation for each frame using the meshgrids and frame-specific shifts.
-        _map_coordinates(
-            frame=frames[frame_index],
-            target_y_coordinates=y_meshgrid + y_shifts[frame_index],
-            target_x_coordinates=x_meshgrid + x_shifts[frame_index],
-            shifted_coordinates=shifted_frames[frame_index],
-        )
+    for t in prange(data.shape[0]):
+        map_coordinates(data[t], mshy + yup[t], mshx + xup[t], Y[t])
 
 
 @njit(
@@ -548,173 +326,119 @@ def _shift_coordinates(
     parallel=True,
     cache=True,
 )
-def _interpolate_blocks(
-    y_shifts: NDArray[np.float32],
-    x_shifts: NDArray[np.float32],
-    y_meshgrid: NDArray[np.float32],
-    x_meshgrid: NDArray[np.float32],
-    interpolated_y_shifts: NDArray[np.float32],
-    interpolated_x_shifts: NDArray[np.float32],
-) -> None:
-    """Performs interpolation to calculate the shift coordinates for each frame and each block.
+def block_interp(ymax1, xmax1, mshy, mshx, yup, xup):
+    """Interpolate from ymax1 to mshy to create coordinate transforms
 
-    This function uses bilinear interpolation to calculate the shift coordinates (y- and x-shifts) for each block in
-    each frame, based on the shifts provided for each block. The meshgrids for the y- and x-coordinates are used to
-    compute the exact positions based on the shifts.
-
-    Args:
-        y_shifts: A NumPy array storing the shifts in the y-direction for each block in each frame.
-        x_shifts: A NumPy array storing the shifts in the x-direction for each block in each frame.
-        y_meshgrid: A 2D NumPy array storing the y-coordinates of the meshgrid.
-        x_meshgrid: A 2D NumPy array storing the x-coordinates of the meshgrid.
-        interpolated_y_shifts: A 3D NumPy array storing the interpolated y-shift values for each frame and the
-            corresponding meshgrid.
-        interpolated_x_shifts: A 3D NumPy array storing the interpolated x-shift values for each frame and the
-            corresponding meshgrid.
+    Parameters
+    ----------
+    ymax1
+    xmax1
+    mshy: Ly x Lx
+        meshgrid in y
+    mshx: Ly x Lx
+        meshgrid in x
+    yup: nimg x Ly x Lx
+        y shifts for each coordinate
+    xup: nimg x Ly x Lx
+        x shifts for each coordinate
     """
-    # Loops over frames to interpolate shifts for all blocks.
-    for frame_index in prange(y_shifts.shape[0]):  # prange for parallelization support
-        # Interpolates the y-shifts for the current frame's blocks and updates the 'interpolated_y_shifts' array.
-        _map_coordinates(
-            frame=y_shifts[frame_index],
-            target_y_coordinates=y_meshgrid,
-            target_x_coordinates=x_meshgrid,
-            shifted_coordinates=interpolated_y_shifts[frame_index],
-        )
-        # Interpolates the x-shifts for the current frame's blocks and updates the 'interpolated_x_shifts' array.
-        _map_coordinates(
-            frame=x_shifts[frame_index],
-            target_y_coordinates=y_meshgrid,
-            target_x_coordinates=x_meshgrid,
-            shifted_coordinates=interpolated_x_shifts[frame_index],
-        )
+    for t in prange(ymax1.shape[0]):
+        map_coordinates(ymax1[t], mshy, mshx, yup[t])  # y shifts for blocks to coordinate map
+        map_coordinates(xmax1[t], mshy, mshx, xup[t])  # x shifts for blocks to coordinate map
 
 
-def _upsample_block_shifts(
-    height: int,
-    width: int,
-    block_number: list[int],
-    y_blocks: list[NDArray[np.int_]],
-    x_blocks: list[NDArray[np.int_]],
-    y_shifts: NDArray[np.float32],
-    x_shifts: NDArray[np.float32],
-) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-    """Upsamples block shifts into full pixel shift maps for later bilinear interpolation.
+def upsample_block_shifts(Lx, Ly, nblocks, xblock, yblock, ymax1, xmax1):
+    """Upsample blocks of shifts into full pixel-wise maps for shifting
 
-    This function takes the block shifts 'y_shifts' and 'x_shifts' (defined per block), and interpolates them to
-    generate a full pixel shift map. The result is used for precise shifting of the frames later using bilinear
-    interpolation.
+    this function upsamples ymax1, xmax1 so that they are nimg x Ly x Lx
+    for later bilinear interpolation
 
-    Args:
-        height: The height (in pixels) of the frame.
-        width: The width (in pixels) of the frame.
-        block_number: A tuple storing the number of blocks in the y- and x-directions.
-        y_blocks: A list of NumPy arrays storing the y-coordinates for each block (start and end positions along the
-            y-axis).
-        x_blocks: A list of NumPy arrays storing the y-coordinates for each block (start and end positions along the
-            x-axis).
-        y_shifts: A NumPy array storing the shifts in the y-direction for each block in each frame.
-        x_shifts: A NumPy array storing the shifts in the x-direction for each block in each frame.
+
+    Parameters
+    ----------
+    Lx: int
+        number of pixels in the horizontal dimension
+    Ly: int
+        number of pixels in the vertical dimension
+    nblocks: (int, int)
+    xblock: float array
+    yblock: float array
+    ymax1: nimg x nblocks
+        y shifts of blocks
+    xmax1: nimg x nblocks
+        y shifts of blocks
 
     Returns:
-        A tuple of two elements. The first element is a NumPy array storing the upsampled y-shifts for each pixel, and
-        the second element is a NumPy array storing the upsampled x-shifts for each pixel.
+    -------
+    yup : nimg x Ly x Lx
+        y shifts for each coordinate
+    xup : nimg x Ly x Lx
+        x shifts for each coordinate
+
     """
-    # Calculates the mean (center) coordinates of each blocks in the y- and x-directions.
-    y_block_centers = np.array(y_blocks[:: block_number[1]]).mean(
+    # make arrays of control points for piecewise-affine transform
+    # includes centers of blocks AND edges of blocks
+    # note indices are flipped for control points
+    # block centers
+    yb = np.array(yblock[:: nblocks[1]]).mean(
         axis=1
     )  # this recovers the coordinates of the meshgrid from (yblock, xblock)
-    x_block_centers = np.array(x_blocks[: block_number[1]]).mean(axis=1)
+    xb = np.array(xblock[: nblocks[1]]).mean(axis=1)
 
-    # Interpolates from the block centers to all pixel positions in the y- and x-directions.
-    y_coordinates = np.interp(np.arange(height), y_block_centers, np.arange(y_block_centers.size)).astype(np.float32)
-    x_coordinates = np.interp(np.arange(width), x_block_centers, np.arange(x_block_centers.size)).astype(np.float32)
+    iy = np.interp(np.arange(Ly), yb, np.arange(yb.size)).astype(np.float32)
+    ix = np.interp(np.arange(Lx), xb, np.arange(xb.size)).astype(np.float32)
+    mshx, mshy = np.meshgrid(ix, iy)
 
-    # Creates the meshgrid from the interpolated y- and x-coordinates.
-    x_meshgrid, y_meshgrid = np.meshgrid(x_coordinates, y_coordinates)
+    # interpolate from block centers to all points Ly x Lx
+    nimg = ymax1.shape[0]
+    ymax1 = ymax1.reshape(nimg, nblocks[0], nblocks[1])
+    xmax1 = xmax1.reshape(nimg, nblocks[0], nblocks[1])
+    yup = np.zeros((nimg, Ly, Lx), np.float32)
+    xup = np.zeros((nimg, Ly, Lx), np.float32)
 
-    # Extracts the number of frames.
-    frame_number = y_shifts.shape[0]
+    block_interp(ymax1, xmax1, mshy, mshx, yup, xup)
 
-    # Reshapes the y- and x-shifts to be suitable for interpolation.
-    y_shifts = y_shifts.reshape(frame_number, block_number[0], block_number[1])
-    x_shifts = x_shifts.reshape(frame_number, block_number[0], block_number[1])
-
-    # Initializes NumPy arrays to store the upsampled y- and x-shifts for each frame.
-    upsampled_y_shifts = np.zeros((frame_number, height, width), np.float32)
-    upsampled_x_shifts = np.zeros((frame_number, height, width), np.float32)
-
-    # Interpolates the block shifts to full pixel shifts using the meshgrid and upsampling.
-    _interpolate_blocks(
-        y_shifts=y_shifts,
-        x_shifts=x_shifts,
-        y_meshgrid=y_meshgrid,
-        x_meshgrid=x_meshgrid,
-        interpolated_y_shifts=upsampled_y_shifts,
-        interpolated_x_shifts=upsampled_x_shifts,
-    )
-
-    # Returns the upsampled y- and x-shifts.
-    return upsampled_y_shifts, upsampled_x_shifts
+    return yup, xup
 
 
-def transform_frames(
-    frames: NDArray[np.int16] | NDArray[np.float32],
-    block_number: list[int],
-    y_blocks: list[NDArray[np.int_]],
-    x_blocks: list[NDArray[np.int_]],
-    y_shifts: NDArray[np.float32],
-    x_shifts: NDArray[np.float32],
-    bilinear: bool = True,
-) -> NDArray[np.float32]:
-    """Applies a piecewise affine transformation to the input frames using the input 'y_shifts' and 'x_shifts'.
+def transform_data(data, nblocks, xblock, yblock, ymax1, xmax1, bilinear=True):
+    """Piecewise affine transformation of data using block shifts ymax1, xmax1
 
-    This function applies the upsampled shifts to the frames using bilinear interpolation (or nearest-neighbor if
-    specified) to transform the frames based on the block shifts. The transformation is performed pixel-wise for
-    subpixel precision.
+    Parameters
+    ----------
 
-    Args:
-        frames: A 3D NumPy array storing the frames to be registered.
-        block_number: A tuple storing the number of blocks in the y- and x-directions.
-        y_blocks: A list of NumPy arrays storing the y-coordinates for each block (start and end positions along the
-            y-axis).
-        x_blocks: A list of NumPy arrays storing the y-coordinates for each block (start and end positions along the
-            x-axis).
-        y_shifts: A NumPy array storing the shifts in the y-direction for each block in each frame.
-        x_shifts: A NumPy array storing the shifts in the x-direction for each block in each frame.
-        bilinear: Determines whether to perform bilinear interpolation. If set to False, nearest-neighbor interpolation
-            is applied. The default is True.
+    data : nimg x Ly x Lx
+    nblocks: (int, int)
+    xblock: float array
+    yblock: float array
+    ymax1 : nimg x nblocks
+        y shifts of blocks
+    xmax1 : nimg x nblocks
+        y shifts of blocks
+    bilinear: bool (optional, default=True)
+        do bilinear interpolation, if False do nearest neighbor
 
     Returns:
-        A 3D NumPy array storing the transformed frames after applying the shifts.
+    -----------
+    Y : float32, nimg x Ly x Lx
+        shifted data
     """
-    # Extracts the height and width of the input frames.
-    _, height, width = frames.shape
-
-    # Upsamples the input block shifts into full pixel shifts.
-    upsampled_y_shifts, upsampled_x_shifts = _upsample_block_shifts(
-        height=height,
-        width=width,
-        block_number=block_number,
-        y_blocks=y_blocks,
-        x_blocks=x_blocks,
-        y_shifts=y_shifts,
-        x_shifts=x_shifts,
+    _, Ly, Lx = data.shape
+    yup, xup = upsample_block_shifts(
+        Lx=Lx,
+        Ly=Ly,
+        nblocks=nblocks,
+        xblock=xblock,
+        yblock=yblock,
+        ymax1=ymax1,
+        xmax1=xmax1,
     )
-
-    # If nearest-neighbor interpolation is enabled, rounds the shift values to integer values.
     if not bilinear:
-        upsampled_y_shifts = np.round(upsampled_y_shifts)
-        upsampled_x_shifts = np.round(upsampled_x_shifts)
+        yup = np.round(yup)
+        xup = np.round(xup)
 
-    # Creates a meshgrid of the y- and x-axes of the frame.
-    x_meshgrid, y_meshgrid = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
-
-    # Initializes a NumPy array to store the shifted frames.
-    shifted_frames = np.zeros_like(frames, dtype=np.float32)
-
-    # Applies the shift transformations using bilinear (or nearest-neighbor) interpolation.
-    _shift_coordinates(frames, upsampled_y_shifts, upsampled_x_shifts, y_meshgrid, x_meshgrid, shifted_frames)
-
-    # Returns the transformed frames.
-    return shifted_frames
+    # use shifts and do bilinear interpolation
+    mshx, mshy = np.meshgrid(np.arange(Lx, dtype=np.float32), np.arange(Ly, dtype=np.float32))
+    Y = np.zeros_like(data, dtype=np.float32)
+    shift_coordinates(data, yup, xup, mshy, mshx, Y)
+    return Y

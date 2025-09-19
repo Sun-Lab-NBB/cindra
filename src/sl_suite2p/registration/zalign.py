@@ -1,164 +1,211 @@
-"""This module provides functionality to compute per-plane correlation profiles for estimating z-positions in
-imaging data."""
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
 
-from typing import Any
-from pathlib import Path
+import os
+import time
 
 import numpy as np
-from numpy.typing import NDArray
-from ataraxis_time import PrecisionTimer
-from ataraxis_base_utilities import LogLevel, console
+from scipy.signal import medfilt
 
-from . import rigid, utils
+from . import rigid, utils, nonrigid
 
 
-def compute_z_position(
-    z_stack: NDArray[np.int16] | NDArray[np.float32], ops: dict[str, Any], file_path: Path | None = None
-) -> tuple[dict[str, Any], NDArray[np.float32]]:
-    """Computes per-frame z-plane correlation scores for a stack of frames relative to a provided z-stack.
-
-    Args:
-        z_stack: A 3D NumPy array storing the z-stack.
-        ops: The dictionary that stores the suite2p processing parameters.
-        file_path: The file path to the binary file. If not provided, uses the file path specified in ops["reg_file"].
-            The default is None.
+# This function doesn"t work. Has a bunch of name errors.
+def register_stack(Z, ops):
+    """Parameters
+    ----------
+    Z
+    ops: dict
 
     Returns:
-        A tuple of two elements. The first element is a copy of the original 'ops' dictionary augmented with the
-        additional key "zcorr". The second element is a 2D NumPy array storing the computed per-plane correlation scores
-        for each frame.
-
-    Raises:
-        IOError: If no binary file path is provided in either the 'file_path' argument or ops["reg_file"].
+    -------
+    Zreg: nplanes x Ly x Lx
+        Z-stack
+    ops: dict
     """
-    # Ensures a binary file path provided as an argument or is specified in the input 'ops' dictionary.
-    if file_path is None and "reg_file" not in ops:
-        message = f"No binary file path was specified in either the 'file_path' argument or the input 'ops' dictionary."
-        console.error(message=message, error=IOError)
-        raise IOError(message)
+    if "refImg" not in ops:
+        ops["refImg"] = Z.mean(axis=0)
+    ops["nframes"], ops["Ly"], ops["Lx"] = Z.shape
 
-    # Initializes the run timer.
-    timer = PrecisionTimer("s")
-
-    # Extracts batch processing parameters for reading the binary movie.
-    batch_number = ops["batch_size"]
-    height = ops["Ly"]
-    width = ops["Lx"]
-    batch_byte_number = 2 * height * width * batch_number
-
-    # Copies the original 'ops' dictionary to preserve original settings.
-    original_ops = ops.copy()
-
-    # Disables non-rigid registration for this computation.
-    ops["nonrigid"] = False
-
-    # Extracts the number of z-planes and the height and width of the z-stack.
-    plane_number, z_height, z_width = z_stack.shape
-
-    # TODO: how should dimension mismatches actually be handled?
-    if z_height > height or z_width != width:
-        z_stack = z_stack[:,]
-
-    # Extracts the path to the registration file from the input 'ops' dictionary if 'reg_file' was not provided.
-    file_path = ops["reg_file"] if file_path is None else file_path
-
-    # Queries the number of bytes in the file.
-    byte_number = file_path.stat().st_size
-
-    # Computes the number of frames in the binary movie based on the number of bytes.
-    frame_number = int(byte_number / (2 * height * width))
-
-    # Initializes a list to store the taper masks, mask offsets, and FFT reference images for each plane in the z-stack.
-    reference_and_masks = []
-
-    # Loops over the z-planes in the z-stack.
-    for z_plane in z_stack:
-        # Applies pre-processing steps to the current z-plane for one-photon recordings if enabled.
-        if ops["one_p_reg"]:
-            # Converts the z-plane to float32.
-            z_plane = z_plane.astype(np.float32)
-
-            # Applies spatial smoothing before high-pass filtering if enabled.
-            if ops["pre_smooth"]:
-                z_plane = utils.spatial_smooth(z_plane, int(ops["pre_smooth"]))
-
-            # Applies spatial high-pass filtering to enhance spatial features.
-            z_plane = utils.spatial_high_pass(z_plane, ops["spatial_hp_reg"])
-
-        # Computes the taper mask and mask offset for rigid registration.
-        taper_mask, mask_offset = rigid.compute_masks(
-            reference_image=z_plane,
-            mask_slope=ops["spatial_taper"] if ops["one_p_reg"] else 3 * ops["smooth_sigma"],
+    if ops["nonrigid"]:
+        ops["yblock"], ops["xblock"], ops["nblocks"], ops["block_size"], ops["NRsm"] = nonrigid.make_blocks(
+            Ly=ops["Ly"], Lx=ops["Lx"], block_size=ops["block_size"]
         )
 
-        # Computes the FFT of the reference image, applying Gaussian smoothing with the sigma specified in the input
-        # 'ops' dictionary.
-        fft_reference_image = rigid.fft_reference_image(reference_image=z_plane, smooth_sigma=ops["smooth_sigma"])
+    Ly = ops["Ly"]
+    Lx = ops["Lx"]
 
-        # Appends a tuple of the current z-plane's taper mask, mask offset, and FFT reference image to
-        # 'reference_and_masks'.
-        reference_and_masks.append((taper_mask, mask_offset, fft_reference_image))
+    nbatch = ops["batch_size"]
+    meanImg = np.zeros((Ly, Lx))  # mean of this stack
 
-    # Initializes a NumPy array to store registration shifts per plane and frame.
-    z_correlations = np.zeros((plane_number, frame_number), np.float32)
+    yoff = np.zeros((0,), np.float32)
+    xoff = np.zeros((0,), np.float32)
+    corrXY = np.zeros((0,), np.float32)
+    if ops["nonrigid"]:
+        yoff1 = np.zeros((0, nb), np.float32)
+        xoff1 = np.zeros((0, nb), np.float32)
+        corrXY1 = np.zeros((0, nb), np.float32)
 
-    # Resets run timer.
-    timer.reset()
+    maskMul, maskOffset, cfRefImg = rigid.prepare_masks(refImg, ops)  # prepare masks for rigid registration
+    if ops["nonrigid"]:
+        # prepare masks for non- rigid registration
+        maskMulNR, maskOffsetNR, cfRefImgNR = nonrigid.prepare_masks(refImg, ops)
+        refAndMasks = [maskMul, maskOffset, cfRefImg, maskMulNR, maskOffsetNR, cfRefImgNR]
+        nb = ops["nblocks"][0] * ops["nblocks"][1]
+    else:
+        refAndMasks = [maskMul, maskOffset, cfRefImg]
 
-    # Opens the binary file for reading in binary mode.
-    with open(file_path, "rb") as file:
-        # Loops until z-planes from the binary file are processed.
-        start_index = 0  # Determines the index from which to start reading the frames
-        while True:
-            # Reads a batch of frames from the binary file.
-            frames = np.frombuffer(file.read(batch_byte_number), dtype=np.int16).copy()
+    k = 0
+    nfr = 0
+    Zreg = np.zeros(
+        (
+            nframes,
+            Ly,
+            Lx,
+        ),
+        "int16",
+    )
+    while True:
+        irange = np.arange(nfr, nfr + nbatch)
+        data = Z[irange, :, :]
+        if data.size == 0:
+            break
+        data = np.reshape(data, (-1, Ly, Lx))
+        dwrite, ymax, xmax, cmax, yxnr = rigid.phasecorr(data, refAndMasks, ops)  # not here
+        dwrite = dwrite.astype("int16")  # need to hold on to this
+        meanImg += dwrite.sum(axis=0)
+        yoff = np.hstack((yoff, ymax))
+        xoff = np.hstack((xoff, xmax))
+        corrXY = np.hstack((corrXY, cmax))
+        if ops["nonrigid"]:
+            yoff1 = np.vstack((yoff1, yxnr[0]))
+            xoff1 = np.vstack((xoff1, yxnr[1]))
+            corrXY1 = np.vstack((corrXY1, yxnr[2]))
+        nfr += dwrite.shape[0]
+        Zreg[irange] = dwrite
 
-            # If there are no more frames to read or all frames were already processes, ends the runtime.
-            if (frames.size == 0) | (start_index >= ops["nframes"]):
-                break
+        k += 1
+        if k % 5 == 0:
+            print("%d/%d frames %4.2f sec" % (nfr, ops["nframes"], time.time() - k0))  # where is this timer set?
 
-            # Reshapes the batch of frames and converts to float32.
-            frames = np.reshape(frames, (-1, height, width)).astype(np.float32)
+    # compute some potentially useful info
+    ops["th_badframes"] = 100
+    dx = xoff - medfilt(xoff, 101)
+    dy = yoff - medfilt(yoff, 101)
+    dxy = (dx**2 + dy**2) ** 0.5
+    cXY = corrXY / medfilt(corrXY, 101)
+    px = dxy / np.mean(dxy) / np.maximum(0, cXY)
+    ops["badframes"] = px > ops["th_badframes"]
+    ymin = np.maximum(0, np.ceil(np.amax(yoff[np.logical_not(ops["badframes"])])))
+    ymax = ops["Ly"] + np.minimum(0, np.floor(np.amin(yoff)))
+    xmin = np.maximum(0, np.ceil(np.amax(xoff[np.logical_not(ops["badframes"])])))
+    xmax = ops["Lx"] + np.minimum(0, np.floor(np.amin(xoff)))
+    ops["yrange"] = [int(ymin), int(ymax)]
+    ops["xrange"] = [int(xmin), int(xmax)]
+    ops["corrXY"] = corrXY
 
-            # Determines the frame indices for this batch.
-            frame_indices = np.arange(start_index, start_index + frames.shape[0], 1, int)
+    ops["yoff"] = yoff
+    ops["xoff"] = xoff
 
-            # Applies pre-processing steps to the current batch of frames for one-photon recordings if enabled.
+    if ops["nonrigid"]:
+        ops["yoff1"] = yoff1
+        ops["xoff1"] = xoff1
+        ops["corrXY1"] = corrXY1
+
+    ops["meanImg"] = meanImg / ops["nframes"]
+
+    return Zreg, ops
+
+
+def compute_zpos(Zreg, ops, reg_file=None):
+    """Compute z position of frames given z-stack Zreg
+
+    Parameters
+    ----------
+
+    Zreg : 3D array
+        size [nplanes x Ly x Lx], z-stack
+
+    ops : dictionary
+        "reg_file" <- binary to register to z-stack, "smooth_sigma",
+        "Ly", "Lx", "batch_size"
+
+    Returns:
+    -------
+    ops_orig
+    zcorr
+    """
+    if "reg_file" not in ops:
+        raise OSError("no binary specified")
+
+    nbatch = ops["batch_size"]
+    Ly = ops["Ly"]
+    Lx = ops["Lx"]
+    nbytesread = 2 * Ly * Lx * nbatch
+
+    ops_orig = ops.copy()
+    ops["nonrigid"] = False
+    nplanes, zLy, zLx = Zreg.shape
+    if Zreg.shape[1] > Ly or Zreg.shape[2] != Lx:
+        Zreg = Zreg[:,]
+
+    reg_file = ops["reg_file"] if reg_file is None else reg_file
+    nbytes = os.path.getsize(reg_file)
+    nFrames = int(nbytes / (2 * Ly * Lx))
+
+    reg_file = open(reg_file, "rb")
+    refAndMasks = []
+    for Z in Zreg:
+        if ops["one_p_reg"]:
+            Z = Z.astype(np.float32)
+            Z = Z[np.newaxis, :, :]
+            if ops["pre_smooth"]:
+                Z = utils.spatial_smooth(Z, int(ops["pre_smooth"]))
+            Z = utils.spatial_high_pass(Z, int(ops["spatial_hp_reg"]))
+            Z = Z.squeeze()
+
+        maskMul, maskOffset = rigid.compute_masks(
+            refImg=Z,
+            maskSlope=ops["spatial_taper"] if ops["one_p_reg"] else 3 * ops["smooth_sigma"],
+        )
+        cfRefImag = rigid.phasecorr_reference(refImg=Z, smooth_sigma=ops["smooth_sigma"])
+        cfRefImag = cfRefImag[np.newaxis, :, :]
+        refAndMasks.append((maskMul, maskOffset, cfRefImag))
+
+    zcorr = np.zeros((Zreg.shape[0], nFrames), np.float32)
+    t0 = time.time()
+    k = 0
+    nfr = 0
+    while True:
+        buff = reg_file.read(nbytesread)
+        data = np.frombuffer(buff, dtype=np.int16, offset=0).copy()
+        if (data.size == 0) | (nfr >= ops["nframes"]):
+            break
+        data = np.float32(np.reshape(data, (-1, Ly, Lx)))
+        inds = np.arange(nfr, nfr + data.shape[0], 1, int)
+        for z, ref in enumerate(refAndMasks):
+            # preprocessing for 1P recordings
             if ops["one_p_reg"]:
-                # Applies spatial smoothing before high-pass filtering if enabled.
+                data = data.astype(np.float32)
+
                 if ops["pre_smooth"]:
-                    frames = utils.spatial_smooth(frames, int(ops["pre_smooth"]))
+                    data = utils.spatial_smooth(data, int(ops["pre_smooth"]))
+                data = utils.spatial_high_pass(data, int(ops["spatial_hp_reg"]))
 
-                # Applies spatial high-pass filtering to enhance spatial features.
-                frames = utils.spatial_high_pass(frames, ops["spatial_hp_reg"])
+            maskMul, maskOffset, cfRefImg = ref
+            cfRefImg = cfRefImg.squeeze()
 
-            # Loops over the z-planes in the z-stack to compute per-plane rigid registration shifts.
-            for z_plane_index, reference_and_mask in enumerate(reference_and_masks):
-                # Extracts the taper mask, mask offset, and FFT reference image of the current z-plane.
-                taper_mask, mask_offset, fft_reference_image = reference_and_mask
+            _, _, zcorr[z, inds] = rigid.phasecorr(
+                data=rigid.apply_masks(data=data, maskMul=maskMul, maskOffset=maskOffset),
+                cfRefImg=cfRefImg,
+                maxregshift=ops["maxregshift"],
+                smooth_sigma_time=ops["smooth_sigma_time"],
+            )
+            if z % 10 == 1:
+                print("%d planes, %d/%d frames, %0.2f sec." % (z, nfr, ops["nframes"], time.time() - t0))
+        print("%d planes, %d/%d frames, %0.2f sec." % (z, nfr, ops["nframes"], time.time() - t0))
+        nfr += data.shape[0]
+        k += 1
 
-                # Performs rigid phase correlation to compute correlation scores.
-                _, _, z_correlations[z_plane_index, frame_indices] = rigid.phase_correlate(
-                    frames=rigid.apply_masks(frames=frames, mask_multiplier=taper_mask, mask_offset=mask_offset),
-                    fft_reference_image=fft_reference_image,
-                    maximum_shift=ops["maxregshift"],
-                    smooth_sigma_time=ops["smooth_sigma_time"],
-                )
-
-                # Logs progress every 10 planes.
-                if z_plane_index % 10 == 1:
-                    console.echo(
-                        f"{z_plane_index}/{plane_number} planes, {start_index}/{ops['nframes']} frames processed, "
-                        f"{timer.elapsed:.2f} sec elapsed.",
-                        level=LogLevel.INFO,
-                    )
-            # Updates frame counter.
-            start_index += frames.shape[0]
-
-    # Saves the computed z-stack correlation scores in the input 'ops' dictionary.
-    original_ops["zcorr"] = z_correlations
-
-    console.echo(f"Z-position computation complete. Time taken: {timer.elapsed:.2f} seconds.", level=LogLevel.SUCCESS)
-
-    # Returns the original 'ops' dictionary and the computed registration correlations.
-    return original_ops, z_correlations
+    reg_file.close()
+    ops_orig["zcorr"] = zcorr
+    return ops_orig, zcorr
