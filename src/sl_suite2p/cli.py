@@ -782,7 +782,7 @@ def run_md_pipeline(
     ),
 )
 @click.pass_context
-def run_md_pipeline(
+def run_md_pipeline_sl(
     ctx: Any,
     output_path: Path,
     discover: bool,
@@ -805,11 +805,6 @@ def run_md_pipeline(
     workers = ctx.obj["workers"]
     overrides = ctx.obj["overrides"]
 
-    # If the processed data is a Sun lab session, resolves additional processing configuration parameters.
-    session_data: SessionData | None = None
-    animal_id = ""
-    session_inputs = []
-
     # Ensures that the user provided at least two session paths
     if len(session_paths) < 2:
         message = (
@@ -820,6 +815,8 @@ def run_md_pipeline(
         console.error(message=message, error=ValueError)
 
     # Loops over the target sessions and verifies that all support multi-day processing.
+    animal_id = ""
+    session_inputs = []
     for session_paths in session_paths:
         # Instantiates the SessionData instance for the processed session
         session_data = SessionData.load(
@@ -897,14 +894,13 @@ def run_md_pipeline(
     # Loads the resolved ops file to access the runtime configuration parameters below.
     final_ops = np.load(ops_path, allow_pickle=True).item()
 
-    # Ensures that the manager has exclusive access to the session's data.
-    lock = SessionLock(file_path=session_data.tracking_data.session_lock_path)
-    lock.check_owner(manager_id=manager_id)
+    # Note, session data lock ownership check has been temporarily deprecated from this test version. It will be added
+    # during later testing stages.
 
-    # Instantiates the ProcessingTracker instance for single-day suite2p processing and configures the underlying
+    # Instantiates the ProcessingTracker instance for multi-day suite2p processing and configures the underlying
     # tracker file to indicate that the processing is ongoing.
     tracker = ProcessingTracker(
-        file_path=session_data.tracking_data.tracking_data_path.joinpath(TrackerFileNames.MULTIDAY)
+        file_path=output_path.joinpath(TrackerFileNames.MULTIDAY)
     )
 
     # If requested, resets the processing tracker before starting the runtime.
@@ -927,8 +923,7 @@ def run_md_pipeline(
         if extract:  # Step 2
             # Same idea as with single-day planes, either processes all sessions sequentially or only the target session
             if target is not None:
-                session_id = target
-                extract_multiday_fluorescence(ops_path=ops_path, session_id=session_id)
+                extract_multiday_fluorescence(ops_path=ops_path, session_id=target)
             else:
                 for session in final_ops["session_ids"]:
                     extract_multiday_fluorescence(ops_path=ops_path, session_id=session)

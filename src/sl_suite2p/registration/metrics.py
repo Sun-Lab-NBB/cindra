@@ -1,361 +1,461 @@
-"""This module provides tools for computing rigid and non-rigid per-plane registration metrics from the principal
-components of imaging data."""
+"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
 
-from typing import Any
+from multiprocessing import Pool
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.linalg import norm
+from scipy.signal import convolve2d
 from ataraxis_time import PrecisionTimer
 from scipy.ndimage import gaussian_filter1d
 from sklearn.decomposition import PCA
 from ataraxis_base_utilities import LogLevel, console
 
+try:
+    import cv2
+
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+
 from . import rigid, utils, nonrigid, bidiphase
 
 
-def _pc_low_high(
-    frames: NDArray[np.int16], low_high_number: int, principal_component_number: int, random_state: int | None = None
-) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
-    """Computes the low and high scoring frames for a given principal component from a principal component analysis
-    (PCA) of the input frames.
+def pclowhigh(mov, nlowhigh, nPC, random_state):
+    """Compute mean of top and bottom PC weights for nPC"s of mov
 
-    Args:
-        frames: The frames to perform PCA on.
-        low_high_number: The number of lowest- and highest-scoring frames to return.
-        principal_component_number: The number of principal components to analyze.
-        random_state: Random seed for reproducibility when shuffling or sampling frames. The default is None.
+    computes nPC PCs of mov and returns average of top and bottom
 
-    Returns:
-        A tuple of four elements. The first and second elements are NumPy arrays storing the mean images of the lowest-
-        highest-scoring frames respectively for each component. The third element is a NumPy array of singular values
-        representing the variance captured by each component. The fourth element is a 2D Numpy array containing the
-        projection scores of each frame along each principal component.
-    """
-    # Extracts the number of frames, height, and width from the input frames.
-    frame_number, height, width = frames.shape
-
-    # Flattens each frame into a 1D vector and ensures values are float32.
-    frames = frames.reshape((frame_number, -1)).astype(np.float32)
-
-    # Computes the mean image across all frames for centering.
-    mean_image = frames.mean(axis=0)
-
-    # Centers the data by subtracting the mean image from each frame vector.
-    frames -= mean_image
-
-    # Performs principal component analysis (PCA) on the transposed data so that the components represent spatial
-    # patterns.
-    pca = PCA(n_components=principal_component_number, random_state=random_state).fit(frames.T)
-
-    # Transposes the PCA components so that the rows correspond to frames and columns to principal components.
-    frame_scores = pca.components_.T
-
-    # Retrieves the singular values, which indicates the magnitude of variance captured by each component.
-    singular_values = pca.singular_values_
-
-    # Adds the mean image back to the frame vectors to restore the original intensity scale.
-    frames += mean_image
-
-    # Reshapes the frame vectors back to (number of frames, height, width) for spatial processing.
-    frames = np.transpose(np.reshape(frames, (-1, height, width)), (1, 2, 0))
-
-    # Initializes NumPy arrays to store the average of the lowest- and highest-scoring frames per component.
-    pc_low_mean_images = np.zeros((principal_component_number, height, width), np.float32)
-    pc_high_mean_images = np.zeros((principal_component_number, height, width), np.float32)
-
-    # Sorts the frame indices for each principal component based on projection scores.
-    sorted_frame_indices = np.argsort(frame_scores, axis=0)
-
-    # Loops over the principal components.
-    for principal_component_index in range(principal_component_number):
-        # Computes the mean image of the lowest-scoring frames for the current component.
-        pc_low_mean_images[principal_component_index] = frames[
-            :, :, sorted_frame_indices[:low_high_number, principal_component_index]
-        ].mean(axis=-1)
-
-        # Computes the mean image of the highest-scoring frames for the current component.
-        pc_high_mean_images[principal_component_index] = frames[
-            :, :, sorted_frame_indices[-low_high_number:, principal_component_index]
-        ].mean(axis=-1)
-
-    # Returns the low mean images, high mean images, singular values, and frame scores.
-    return pc_low_mean_images, pc_high_mean_images, singular_values, frame_scores
-
-
-def _pc_register(
-    pc_low_mean_images: NDArray[np.float32],
-    pc_high_mean_images: NDArray[np.float32],
-    bidirectional_corrected: bool,
-    spatial_high_pass: int,
-    pre_smoothing: float,
-    smooth_sigma: float = 1.15,
-    smooth_sigma_time: float = 0,
-    block_size: tuple[int, int] = (128, 128),
-    maximum_shift: float = 0.1,
-    nonrigid_maximum_shift: float = 10,
-    one_photon_registration: bool = False,
-    snr_threshold: float = 1.25,
-    is_nonrigid: bool = True,
-    bidirectional_phase_offset: int = 0,
-    spatial_taper: float = 50.0,
-) -> NDArray[np.float64]:
-    """Registers low- and high-scoring mean principal component images using rigid and optionally non-rigid
-    registration.
-
-    This function computes registration shifts and returns summary metrics describing rigid and non-rigid alignment
-    for each principal component.
-
-    Args:
-        pc_low_mean_images: The 3D NumPy array storing the mean images of low-scoring frames per principal component.
-        pc_high_mean_images: The 3D NumPy array storing the mean images of high-scoring frames per principal component.
-        bidirectional_corrected: Tracks whether bidirectional phase correction has been applied to the registered
-            data set.
-        spatial_high_pass: The spatial high-pass filter window size, in pixels.
-        pre_smoothing: The standard deviation for Gaussian smoothing applied before spatial high-pass filtering.
-        smooth_sigma: The standard deviation (in pixels) of the Gaussian filter used to smooth the phase correlation
-            between the reference image and the current frame.
-        smooth_sigma_time: The standard deviation (in frames) of the Gaussian used to temporally smooth the data before
-            computing phase correlation.
-        block_size: The block size, in pixels, for non-rigid registration, defining the dimensions of subregions used
-            in the correction.
-        maximum_shift: The maximum allowed registration shift as a fraction of the frame size.
-        nonrigid_maximum_shift: The maximum allowed shift, in pixels, for each block relative to the rigid registration
-            shift.
-        one_photon_registration: Determines whether to perform high-pass spatial filtering and tapering to improve
-            one-photon image registration.
-        snr_threshold: The signal-to-noise ratio threshold.
-        is_nonrigid: Determines whether to perform non-rigid registration.
-        bidirectional_phase_offset: The bidirectional phase offset for line scanning experiments.
-        spatial_taper: The number of pixels to ignore at the image edges to reduce edge artifacts during registration.
+    Parameters
+    ----------
+    mov : frames x Ly x Lx
+        subsampled frames from movie
+    nlowhigh : int
+        number of frames to average at top and bottom of each PC
+    nPC : int
+        number of PCs to compute
+    random_state:
+        a value that sets the seed for the PCA randomizer.
 
     Returns:
-        A 2D NumPy array where each row corresponds to a principal component. The first and second columns correspond
-        to the mean rigid and non-rigid registration shift magnitudes respectively. The third column is the maximum
-        non-rigid registration shift magnitude.
+    -------
+        pclow : float, array
+            average of bottom of spatial PC: nPC x Ly x Lx
+        pchigh : float, array
+            average of top of spatial PC: nPC x Ly x Lx
+        w : float, array
+            singular values of decomposition of mov
+        v : float, array
+            frames x nPC, how the PCs vary across frames
     """
-    # Extracts the number of principal components and the height and width of the images.
-    principal_component_number, height, width = pc_low_mean_images.shape
+    nframes, Ly, Lx = mov.shape
+    mov = mov.reshape((nframes, -1))
+    mov = mov.astype(np.float32)
+    mimg = mov.mean(axis=0)
+    mov -= mimg
+    pca = PCA(n_components=nPC, random_state=random_state).fit(mov.T)
+    v = pca.components_.T
+    w = pca.singular_values_
+    mov += mimg
+    mov = np.transpose(np.reshape(mov, (-1, Ly, Lx)), (1, 2, 0))
+    pclow = np.zeros((nPC, Ly, Lx), np.float32)
+    pchigh = np.zeros((nPC, Ly, Lx), np.float32)
+    isort = np.argsort(v, axis=0)
+    for i in range(nPC):
+        pclow[i] = mov[:, :, isort[:nlowhigh, i]].mean(axis=-1)
+        pchigh[i] = mov[:, :, isort[-nlowhigh:, i]].mean(axis=-1)
+    return pclow, pchigh, w, v
 
-    # Computes blocks and smoothing kernels for non-rigid registration.
-    y_blocks, x_blocks, _, block_size, nonrigid_smoothing_kernel = nonrigid.make_blocks(
-        height=height, width=width, block_size=block_size
-    )
 
-    # Converts the maximum allowed non-rigid shift to a NumPy array for consistent handling later.
-    # nonrigid_maximum_shift = np.array(nonrigid_maximum_shift)
+def pc_register(
+    pclow,
+    pchigh,
+    bidi_corrected,
+    spatial_hp=None,
+    pre_smooth=None,
+    smooth_sigma=1.15,
+    smooth_sigma_time=0,
+    block_size=(128, 128),
+    maxregshift=0.1,
+    maxregshift_nr=10,
+    reg_1p=False,
+    snr_thresh=1.25,
+    is_nonrigid=True,
+    bidiphase_offset=0,
+    spatial_taper=50.0,
+):
+    """Register top and bottom of PCs to each other
 
-    # Initializes an array to store the registration metrics for each principal component.
-    registration_metrics = np.zeros((principal_component_number, 3))
+    Parameters
+    ----------
+    pclow : float, array
+        average of bottom of spatial PC: nPC x Ly x Lx
+    pchigh : float, array
+        average of top of spatial PC: nPC x Ly x Lx
+    bidi_corrected: bool
+        whether to do bidi correction.
+    spatial_hp: int
+        high-pass filter window size for the spatial dimensions
+    pre_smooth: int
+        low-pass filter window size for the spatial dimensions
+    smooth_sigma : int
+        see registration settings
+    smooth_sigma_time: int
+        see registration settings
+    block_size : int, int
+        see registration settings
+    maxregshift : float
+        see registration settings
+    maxregshift_nr : int
+        see registration settings
+    reg_1p : bool
+        see one_p_reg settings
+    snr_thresh: float
+        signal to noise threshold to use.
+    is_nonrigid: bool
+    bidiphase_offset: int
+    spatial_taper: float
 
-    # Loops over the principal components.
-    for principal_component_index in range(principal_component_number):
-        # Selects the low mean image as the reference image for registration.
-        reference_image = pc_low_mean_images[principal_component_index]
+    Returns:
+    -------
+        X : float array
+            nPC x 3 where X[:,0] is rigid, X[:,1] is average nonrigid, X[:,2] is max nonrigid shifts
+    """
+    # registration settings
+    nPC, Ly, Lx = pclow.shape
+    yblock, xblock, nblocks, block_size, NRsm = nonrigid.make_blocks(Ly=Ly, Lx=Lx, block_size=np.array(block_size))
+    maxregshift_nr = np.array(maxregshift_nr)
 
-        # Extracts the corresponding high mean image and adds a new axis to match the expected input shape.
-        image = pc_high_mean_images[principal_component_index][np.newaxis, :, :]
+    X = np.zeros((nPC, 3))
+    for i in range(nPC):
+        refImg = pclow[i]
+        Img = pchigh[i][np.newaxis, :, :]
 
-        # Applies pre-processing steps to one-photon recordings if enabled.
-        if one_photon_registration:
-            # Converts the reference image to float32.
-            processed_reference_image = reference_image.astype(np.float32)
+        if reg_1p:
+            data = refImg
+            data = data.astype(np.float32)
+            if pre_smooth:
+                data = utils.spatial_smooth(data, int(pre_smooth))
+            refImg = utils.spatial_high_pass(data, int(spatial_hp))
 
-            # Applies spatial smoothing before high-pass filtering if enabled.
-            if pre_smoothing:
-                processed_reference_image = utils.spatial_smooth(processed_reference_image, int(pre_smoothing))
+        rmin, rmax = np.int16(np.percentile(refImg, 1)), np.int16(np.percentile(refImg, 99))
+        refImg = np.clip(refImg, rmin, rmax)
 
-            # Applies spatial high-pass filtering to enhance spatial features.
-            reference_image = utils.spatial_high_pass(processed_reference_image, spatial_high_pass)
-
-        # Computes intensity clipping bounds based on the 1st and 99th percentiles to reduce outlier effects.
-        minimum_intensity, maximum_intensity = (
-            np.int16(np.percentile(reference_image, 1)),
-            np.int16(np.percentile(reference_image, 99)),
+        maskMul, maskOffset = rigid.compute_masks(
+            refImg=refImg, maskSlope=spatial_taper if reg_1p else 3 * smooth_sigma
         )
-
-        # Clips the intensities of the reference image within the computed bounds.
-        reference_image = np.clip(reference_image, minimum_intensity, maximum_intensity)
-
-        # Computes the taper mask and mask offset used during rigid registration.
-        taper_mask, mask_offset = rigid.compute_masks(
-            reference_image=reference_image, mask_slope=spatial_taper if one_photon_registration else 3 * smooth_sigma
-        )
-
-        # Computes the FFT of the reference image, applying Gaussian smoothing with the specified sigma.
-        fft_reference_image = rigid.fft_reference_image(
-            reference_image=reference_image,
+        cfRefImg = rigid.phasecorr_reference(
+            refImg=refImg,
             smooth_sigma=smooth_sigma,
         )
 
-        # Adds a new axis to the FFT reference image to match expected input shape for registration.
-        fft_reference_image = fft_reference_image[np.newaxis, :, :]
-
-        # If non-rigid registration is enabled, prepares the non-rigid taper mask, mask offset, and FFT reference image.
+        cfRefImg = cfRefImg[np.newaxis, :, :]
         if is_nonrigid:
-            # Defines the mask slope for non-rigid tapering, adjusting if one-photon registration is enabled.
-            nonrigid_mask_slope = spatial_taper if one_photon_registration else 3 * smooth_sigma
+            maskSlope = spatial_taper if reg_1p else 3 * smooth_sigma  # slope of taper mask at the edges
 
-            # Computes the non-rigid taper mask, mask offset, and FFT reference image using blocks for non-rigid
-            # registration.
-            nonrigid_taper_mask, nonrigid_mask_offset, nonrigid_fft_reference_image = nonrigid.fft_reference_image(
-                reference_image=reference_image,
-                mask_slope=nonrigid_mask_slope,
+            maskMulNR, maskOffsetNR, cfRefImgNR = nonrigid.phasecorr_reference(
+                refImg0=refImg,
+                maskSlope=maskSlope,
                 smooth_sigma=smooth_sigma,
-                y_blocks=y_blocks,
-                x_blocks=x_blocks,
+                yblock=yblock,
+                xblock=xblock,
             )
 
-        # Applies bidirectional phase offset correction if provided and not already corrected.
-        if bidirectional_phase_offset and not bidirectional_corrected:
-            bidiphase.shift(image, bidirectional_phase_offset)
+        if bidiphase_offset and not bidi_corrected:
+            bidiphase.shift(Img, bidiphase_offset)
 
-        # Prepares the high mean image for registration by converting to float32.
-        processed_image = image.astype(np.float32)
+        # preprocessing for 1P recordings
+        dwrite = Img.astype(np.float32)
+        if reg_1p:
+            if pre_smooth:
+                dwrite = utils.spatial_smooth(dwrite, int(pre_smooth))
+            dwrite = utils.spatial_high_pass(dwrite, int(spatial_hp))[np.newaxis, :]
+        dwrite = np.clip(dwrite, rmin, rmax)
 
-        # Applies pre-processing steps to one-photon recordings if enabled.
-        if one_photon_registration:
-            # Applies spatial smoothing before high-pass filtering if enabled.
-            if pre_smoothing:
-                processed_image = utils.spatial_smooth(processed_image, int(pre_smoothing))
-
-            # Applies spatial high-pass filtering to enhance spatial features.
-            processed_image = utils.spatial_high_pass(processed_image, spatial_high_pass)[np.newaxis, :]
-
-        # Clips the intensities of the processed image to the same intensity bounds as the reference.
-        processed_image = np.clip(processed_image, minimum_intensity, maximum_intensity)
-
-        # Performs rigid registration by phase correlation between the processed image and FFT reference image.
-        rigid_y_shifts, rigid_x_shifts, _ = rigid.phase_correlate(
-            frames=rigid.apply_masks(frames=processed_image, mask_multiplier=taper_mask, mask_offset=mask_offset),
-            fft_reference_image=fft_reference_image.squeeze(),
-            maximum_shift=maximum_shift,
+        # rigid registration
+        ymax, xmax, cmax = rigid.phasecorr(
+            data=rigid.apply_masks(data=dwrite, maskMul=maskMul, maskOffset=maskOffset),
+            cfRefImg=cfRefImg.squeeze(),
+            maxregshift=maxregshift,
             smooth_sigma_time=0,
         )
+        for frame, dy, dx in zip(Img, ymax.flatten(), xmax.flatten(), strict=False):
+            frame[:] = rigid.shift_frame(frame=frame, dy=dy, dx=dx)
+        ###
 
-        # Applies the computed rigid y- and x-shifts to each frame in the high mean image.
-        for frame, y_shift, x_shift in zip(image, rigid_y_shifts.flatten(), rigid_x_shifts.flatten()):
-            frame[:] = rigid.shift_frame(frame=frame, y_shift=y_shift, x_shift=x_shift)
-
-        # If non-rigid registration is enabled, performs further non-rigid alignment.
+        # non-rigid registration
         if is_nonrigid:
-            # Applies temporal smoothing if provided.
             if smooth_sigma_time > 0:
-                processed_image = gaussian_filter1d(processed_image, sigma=smooth_sigma_time, axis=0)
+                dwrite = gaussian_filter1d(dwrite, sigma=smooth_sigma_time, axis=0)
 
-            # Performs non-rigid phase correlation to compute the non-rigid y- and x-shifts.
             (
-                nonrigid_y_shifts,
-                nonrigid_x_shifts,
-                _,
-            ) = nonrigid.phase_correlate(
-                frames=processed_image,
-                taper_mask=nonrigid_taper_mask.squeeze(),
-                mask_offset=nonrigid_mask_offset.squeeze(),
-                fft_reference_image=nonrigid_fft_reference_image.squeeze(),
-                snr_threshold=snr_threshold,
-                smoothing_kernel=nonrigid_smoothing_kernel,
-                y_blocks=y_blocks,
-                x_blocks=x_blocks,
-                maximum_shift=nonrigid_maximum_shift,
+                ymax1,
+                xmax1,
+                cmax1,
+            ) = nonrigid.phasecorr(
+                data=dwrite,
+                maskMul=maskMulNR.squeeze(),
+                maskOffset=maskOffsetNR.squeeze(),
+                cfRefImg=cfRefImgNR.squeeze(),
+                snr_thresh=snr_thresh,
+                NRsm=NRsm,
+                xblock=xblock,
+                yblock=yblock,
+                maxregshift_nr=maxregshift_nr,
             )
 
-            # Records the average magnitude of the non-rigid shifts for the current principal component.
-            registration_metrics[principal_component_index, 1] = np.mean(
-                (nonrigid_y_shifts**2 + nonrigid_x_shifts**2) ** 0.5
-            )
-
-            # Records the average magnitude of the rigid shifts for the current principal component.
-            registration_metrics[principal_component_index, 0] = np.mean(
-                (rigid_y_shifts[0] ** 2 + rigid_x_shifts[0] ** 2) ** 0.5
-            )
-
-            # Records the maximum magnitude of the non-rigid shifts for the current principal component.
-            registration_metrics[principal_component_index, 2] = np.amax(
-                (nonrigid_y_shifts**2 + nonrigid_x_shifts**2) ** 0.5
-            )
-
-    # Returns an array of registration metrics summarizing the rigid and non-rigid shift magnitudes.
-    return registration_metrics
+            X[i, 1] = np.mean((ymax1**2 + xmax1**2) ** 0.5)
+            X[i, 0] = np.mean((ymax[0] ** 2 + xmax[0] ** 2) ** 0.5)
+            X[i, 2] = np.amax((ymax1**2 + xmax1**2) ** 0.5)
+    return X
 
 
-def get_pc_metrics(frames: NDArray[np.int16], ops: dict[str, Any], plane_number: int) -> dict[str, Any]:
-    """Computes rigid and optionally non-rigid registration metrics from the top principal components (PCs) of a
-    registered movie, storing the results in the input 'ops' dictionary.
+def get_pc_metrics(mov, ops, plane_number: int):
+    """Computes registration metrics using top PCs of registered movie
 
-    Args:
-        frames: The frames of a binned movie to compute the registration metrics of.
-        ops: The dictionary that stores the suite2p processing parameters.
-        plane_number: The index of the imaging plane to process.
+    movie saved as binary file ops["reg_file"]
+    metrics saved to ops["regPC"] and ops["X"]
+    "regDX" is nPC x 3 where X[:,0] is rigid, X[:,1] is average nonrigid, X[:,2] is max nonrigid shifts
+    "regPC" is average of top and bottom frames for each PC
+    "tPC" is PC across time frames
+
+    Parameters
+    ----------
+    ops : dict
+        "nframes", "Ly", "Lx", "reg_file" (if use_red=True, "reg_file_chan2")
+        (optional, "refImg", "block_size", "maxregshift_nr", "smooth_sigma", "maxregshift", "one_p_reg")
 
     Returns:
-        The input 'ops' dictionary augmented with additional descriptive parameters for the processed data.
-        Specifically, the dictionary includes the following additional keys: "recPC", "tPC", "regDX".
+    -------
+    ops : dict
+        The same as the ops input, but will now include "regPC", "tPC", and "regDX".
+
     """
-    # Initializes the runtime timer.
+    # Initializes the runtime timer
     timer = PrecisionTimer("s")
 
-    # Determines how many principal components to compute.
     # Note, the default has been revised by the Sun lab from 30 to 10, to match the 'registration_metrics' module
     # behavior.
-    principal_component_number = ops["reg_metric_n_pc"] if "reg_metric_n_pc" in ops else 10
+    nPC = ops["reg_metric_n_pc"] if "reg_metric_n_pc" in ops else 10
 
-    console.echo(
-        message=f"Computing {principal_component_number} Principal Components (PCs) for plane {plane_number}...",
-        level=LogLevel.INFO,
-    )
-
-    # Resets run timer.
+    console.echo(message=f"Computing {nPC} Principal Components (PCs) for plane {plane_number}...", level=LogLevel.INFO)
     timer.reset()
-
-    # Computes the lowest- and highest-scoring mean images for each principal component, along with the time courses
-    # of each of the principal components, which are stored under the "tPC" key in the input 'ops' dictionary.
-    pc_low_mean_images, pc_high_mean_images, _, ops["tPC"] = _pc_low_high(
-        frames=frames,
-        low_high_number=np.minimum(300, int(ops["nframes"] / 2)),
-        principal_component_number=principal_component_number,
-        random_state=None,
+    pclow, pchigh, sv, ops["tPC"] = pclowhigh(
+        mov, nlowhigh=np.minimum(300, int(ops["nframes"] / 2)), nPC=nPC, random_state=None
     )
-
     console.echo(
         message=f"Plane {plane_number} PCs: computed. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS
     )
 
-    # Stores the low and high mean images for principal components in the input 'ops' dictionary.
-    ops["regPC"] = np.concatenate(
-        (pc_low_mean_images[np.newaxis, :, :, :], pc_high_mean_images[np.newaxis, :, :, :]), axis=0
-    )
+    ops["regPC"] = np.concatenate((pclow[np.newaxis, :, :, :], pchigh[np.newaxis, :, :, :]), axis=0)
 
     console.echo(
         message=f"Restring top and bottom of each PC to each-other for plane {plane_number}...", level=LogLevel.INFO
     )
-
-    # Resets run timer.
     timer.reset()
-
-    # Performs rigid and optionally non-rigid registration between the low and high PC mean images and stores the
-    # per-PC metrics under the "regDX" key in the input 'ops' dictionary.
-    ops["regDX"] = _pc_register(
-        pc_low_mean_images,
-        pc_high_mean_images,
-        spatial_high_pass=ops["spatial_hp_reg"],
-        pre_smoothing=ops["pre_smooth"],
-        bidirectional_corrected=ops["bidi_corrected"],
+    ops["regDX"] = pc_register(
+        pclow,
+        pchigh,
+        spatial_hp=ops["spatial_hp_reg"],
+        pre_smooth=ops["pre_smooth"],
+        bidi_corrected=ops["bidi_corrected"],
         smooth_sigma=ops["smooth_sigma"] if "smooth_sigma" in ops else 1.15,
         smooth_sigma_time=ops["smooth_sigma_time"],
-        block_size=ops["block_size"] if "block_size" in ops else (128, 128),
-        maximum_shift=ops["maxregshift"] if "maxregshift" in ops else 0.1,
-        nonrigid_maximum_shift=ops["maxregshiftNR"] if "maxregshiftNR" in ops else 5,
-        one_photon_registration=ops["one_p_reg"] if "one_p_reg" in ops else False,
-        snr_threshold=ops["snr_thresh"],
+        block_size=ops["block_size"] if "block_size" in ops else [128, 128],
+        maxregshift=ops["maxregshift"] if "maxregshift" in ops else 0.1,
+        maxregshift_nr=ops["maxregshift_nr"] if "maxregshift_nr" in ops else 5,
+        reg_1p=ops["one_p_reg"] if "one_p_reg" in ops else False,
+        snr_thresh=ops["snr_thresh"],
         is_nonrigid=ops["nonrigid"],
-        bidirectional_phase_offset=ops["bidiphase"],
+        bidiphase_offset=ops["bidiphase"],
         spatial_taper=ops["spatial_taper"],
     )
-
     console.echo(
         message=f"Plane {plane_number} PC registration: complete. Time taken: {timer.elapsed} seconds.",
         level=LogLevel.SUCCESS,
     )
 
-    # Returns the modified 'ops' dictionary.
     return ops
+
+
+def filt_worker(inputs):
+    X, filt = inputs
+    for n in range(X.shape[0]):
+        X[n, :, :] = convolve2d(X[n, :, :], filt, "same")
+    return X
+
+
+def filt_parallel(data, filt, num_cores):
+    nimg = data.shape[0]
+    nbatch = int(np.ceil(nimg / float(num_cores)))
+    inputs = np.arange(0, nimg, nbatch)
+    irange = []
+    dsplit = []
+    for i in inputs:
+        ilist = i + np.arange(0, np.minimum(nbatch, nimg - i), 1, int)
+        irange.append(ilist)
+        dsplit.append([data[ilist, :, :], filt])
+    if num_cores > 1:
+        with Pool(num_cores) as p:
+            results = p.map(filt_worker, dsplit)
+        results = np.concatenate(results, axis=0)
+    else:
+        results = filt_worker(dsplit[0])
+    return results
+
+
+def local_corr(mov, batch_size, num_cores):
+    """Computes correlation image on mov (nframes x pixels x pixels)"""
+    nframes, Ly, Lx = mov.shape
+
+    filt = np.ones((3, 3), np.float32)
+    filt[1, 1] = 0
+    filt /= norm(filt)
+    ix = 0
+    k = 0
+    filtnorm = convolve2d(np.ones((Ly, Lx)), filt, "same")
+
+    img_corr = np.zeros((Ly, Lx), np.float32)
+    while ix < nframes:
+        ifr = np.arange(ix, min(ix + batch_size, nframes), 1, int)
+
+        X = mov[ifr, :, :]
+        X = X.astype(np.float32)
+        X -= X.mean(axis=0)
+        Xstd = X.std(axis=0)
+        Xstd[Xstd == 0] = np.inf
+        # X /= np.maximum(1, X.std(axis=0))
+        X /= Xstd
+        # for n in range(X.shape[0]):
+        #    X[n,:,:] *= convolve2d(X[n,:,:], filt, "same")
+        X *= filt_parallel(X, filt, num_cores)
+        img_corr += X.mean(axis=0)
+        ix += batch_size
+        k += 1
+    img_corr /= filtnorm
+    img_corr /= float(k)
+    return img_corr
+
+
+def bin_median(mov, window=10):
+    nframes, Ly, Lx = mov.shape
+    window = min(window, nframes)
+    mov = np.nanmedian(
+        np.reshape(mov[: int(np.floor(nframes / window) * window), :, :], (-1, window, Ly, Lx)).mean(axis=1), axis=0
+    )
+    return mov
+
+
+def corr_to_template(mov, tmpl):
+    nframes, Ly, Lx = mov.shape
+    tmpl_flat = tmpl.flatten()
+    tmpl_flat -= tmpl_flat.mean()
+    tmpl_std = tmpl_flat.std()
+
+    mov_flat = np.reshape(mov, (nframes, -1)).astype(np.float32)
+    mov_flat -= mov_flat.mean(axis=1)[:, np.newaxis]
+    mov_std = (mov_flat**2).mean(axis=1) ** 0.5
+
+    correlations = (mov_flat * tmpl_flat).mean(axis=1) / (tmpl_std * mov_std)
+
+    return correlations
+
+
+def optic_flow(mov, tmpl, nflows):
+    """Optic flow computation using farneback"""
+    window = int(1 / 0.2)  # window size
+    nframes, Ly, Lx = mov.shape
+    mov = mov.astype(np.float32)
+    mov = np.reshape(mov[: int(np.floor(nframes / window) * window), :, :], (-1, window, Ly, Lx)).mean(axis=1)
+
+    mov = mov[np.random.permutation(mov.shape[0])[: min(nflows, mov.shape[0])], :, :]
+
+    pyr_scale = 0.5
+    levels = 3
+    winsize = 100
+    iterations = 15
+    poly_n = 5
+    poly_sigma = 1.2 / 5
+    flags = 0
+
+    nframes, Ly, Lx = mov.shape
+    norms = np.zeros((nframes,))
+    flows = np.zeros((nframes, Ly, Lx, 2))
+
+    for n in range(nframes):
+        flow = cv2.calcOpticalFlowFarneback(
+            tmpl, mov[n, :, :], None, pyr_scale, levels, winsize, iterations, poly_n, poly_sigma, flags
+        )
+
+        flows[n, :, :, :] = flow
+        norms[n] = norm(flow)
+
+    return flows, norms
+
+
+def get_flow_metrics(ops):
+    """Get farneback optical flow and some other stats from normcorre paper"""
+    # done in batches for memory reasons
+    Ly = ops["Ly"]
+    Lx = ops["Lx"]
+    reg_file = open(ops["reg_file"], "rb")
+    nbatch = ops["batch_size"]
+    nbytesread = 2 * Ly * Lx * nbatch
+
+    Lyc = ops["yrange"][1] - ops["yrange"][0]
+    Lxc = ops["xrange"][1] - ops["xrange"][0]
+    img_corr = np.zeros((Lyc, Lxc), np.float32)
+    img_median = np.zeros((Lyc, Lxc), np.float32)
+    correlations = np.zeros((0,), np.float32)
+    flows = np.zeros((0, Lyc, Lxc, 2), np.float32)
+    norms = np.zeros((0,), np.float32)
+    smoothness = 0
+    smoothness_corr = 0
+
+    nflows = np.minimum(ops["nframes"], int(np.floor(100 / (ops["nframes"] / nbatch))))
+    ncorrs = np.minimum(ops["nframes"], int(np.floor(1000 / (ops["nframes"] / nbatch))))
+
+    k = 0
+    while True:
+        buff = reg_file.read(nbytesread)
+        mov = np.frombuffer(buff, dtype=np.int16, offset=0)
+        buff = []
+        if mov.size == 0:
+            break
+        mov = np.reshape(mov, (-1, Ly, Lx))
+
+        mov = mov[
+            np.ix_(
+                np.arange(0, mov.shape[0], 1, int),
+                np.arange(ops["yrange"][0], ops["yrange"][1], 1, int),
+                np.arange(ops["xrange"][0], ops["xrange"][1], 1, int),
+            )
+        ]
+
+        img_corr += local_corr(mov[:, :, :], 1000, ops["num_workers"])
+        img_median += bin_median(mov)
+        k += 1
+
+        smoothness += np.sqrt(np.sum(np.sum(np.array(np.gradient(np.mean(mov, 0))) ** 2, 0)))
+        smoothness_corr += np.sqrt(np.sum(np.sum(np.array(np.gradient(img_corr)) ** 2, 0)))
+
+        tmpl = img_median / k
+
+        correlations0 = corr_to_template(mov, tmpl)
+        correlations = np.hstack((correlations, correlations0))
+        if HAS_CV2:
+            flows0, norms0 = optic_flow(mov, tmpl, nflows)
+        else:
+            flows0 = []
+            norms0 = []
+            print("flows not computed, cv2 not installed / did not import correctly")
+
+        flows = np.vstack((flows, flows0))
+        norms = np.hstack((norms, norms0))
+
+    img_corr /= float(k)
+    img_median /= float(k)
+
+    smoothness /= float(k)
+    smoothness_corr /= float(k)
+
+    return tmpl, correlations, flows, norms, smoothness, smoothness_corr, img_corr
