@@ -1,32 +1,45 @@
-"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+"""GUI button components for interactive Suite2p visualization.
 
-from qtpy import QtGui, QtCore
+This module defines various reusable button classes (quadrant, size, top neuron 
+selection) and setup functions for integrating them into the Suite2p GUI.
+
+© 2023 Howard Hughes Medical Institute,
+Authored by Carsen Stringer and Marius Pachitariu.
+"""
+
+from __future__ import annotations
+from typing import Optional
 import numpy as np
+from qtpy import QtGui, QtCore
 from qtpy.QtWidgets import QLabel, QLineEdit, QPushButton, QButtonGroup
 
-
-def make_selection(parent):
-    """Buttons to draw a square on view"""
+def make_selection(parent) -> None:
+    """ Creates buttons to draw a square selection on the view. """
     parent.topbtns = QButtonGroup()
-    ql = QLabel("select cells")
-    ql.setStyleSheet("color: white;")
-    ql.setFont(QtGui.QFont("Arial", 8, QtGui.QFont.Bold))
-    parent.l0.addWidget(ql, 0, 2, 1, 2)
-    pos = [2, 3, 4]
-    for b in range(3):
-        btn = TopButton(b, parent)
+
+    label = QLabel("select cells")
+    label.setStyleSheet("color: white;")
+    label.setFont(QtGui.QFont("Arial", 8, QtGui.QFont.Bold))
+    parent.l0.addWidget(label, 0, 2, 1, 2)
+
+    positions = [2, 3, 4]
+    for bid in range(3):
+        btn = TopButton(bid, parent)
         btn.setFont(QtGui.QFont("Arial", 8))
-        parent.topbtns.addButton(btn, b)
-        parent.l0.addWidget(btn, 0, (pos[b]) * 2, 1, 2)
+        parent.topbtns.addButton(btn, bid)
+        parent.l0.addWidget(btn, 0, positions[bid] * 2, 1, 2)
         btn.setEnabled(False)
+    
     parent.topbtns.setExclusive(True)
     parent.isROI = False
     parent.ROIplot = 0
-    ql = QLabel("n=")
-    ql.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-    ql.setStyleSheet("color: white;")
-    ql.setFont(QtGui.QFont("Arial", 8, QtGui.QFont.Bold))
-    parent.l0.addWidget(ql, 0, 10, 1, 1)
+
+    n_label = QLabel("n=")
+    n_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+    n_label.setStyleSheet("color: white;")
+    n_label.setFont(QtGui.QFont("Arial", 8, QtGui.QFont.Bold))
+    parent.l0.addWidget(n_label, 0, 10, 1, 1)
+
     parent.topedit = QLineEdit(parent)
     parent.topedit.setValidator(QtGui.QIntValidator(0, 500))
     parent.topedit.setText("40")
@@ -36,119 +49,127 @@ def make_selection(parent):
     parent.topedit.returnPressed.connect(parent.top_number_chosen)
     parent.l0.addWidget(parent.topedit, 0, 11, 1, 1)
 
-
-# minimize view
-def make_cellnotcell(parent):
-    """Buttons for cell / not cell views at top"""
-    # number of ROIs in each image
+def make_cellnotcell(parent) -> None:
+    """Create buttons for toggling cell / not-cell views."""
     parent.lcell0 = QLabel("")
     parent.lcell0.setStyleSheet("color: white;")
     parent.lcell0.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
     parent.l0.addWidget(parent.lcell0, 0, 12, 1, 2)
+
     parent.lcell1 = QLabel("")
     parent.lcell1.setStyleSheet("color: white;")
     parent.l0.addWidget(parent.lcell1, 0, 20, 1, 2)
 
     parent.sizebtns = QButtonGroup(parent)
-    b = 0
     labels = [" cells", " both", " not cells"]
-    for l in labels:
-        btn = SizeButton(b, l, parent)
-        parent.sizebtns.addButton(btn, b)
-        parent.l0.addWidget(btn, 0, 14 + 2 * b, 1, 2)
-        btn.setEnabled(False)
-        if b == 1:
-            btn.setEnabled(True)
-        b += 1
+
+    for bid, text in enumerate(labels):
+        btn = SizeButton(bid, text, parent)
+        parent.sizebtns.addButton(btn, bid)
+        parent.l0.addWidget(btn, 0, 14 + 2 * bid, 1, 2)
+        btn.setEnabled(bid == 1)
+
     parent.sizebtns.setExclusive(True)
 
 
-def make_quadrants(parent):
-    """Make quadrant buttons"""
-    parent.quadbtns = QButtonGroup(parent)
-    for b in range(9):
-        btn = QuadButton(b, " " + str(b + 1), parent)
-        parent.quadbtns.addButton(btn, b)
-        parent.l0.addWidget(btn, 0 + parent.quadbtns.button(b).ypos, 29 + parent.quadbtns.button(b).xpos, 1, 1)
-        btn.setEnabled(False)
-        b += 1
-    parent.quadbtns.setExclusive(True)
+def make_quadrants(parent) -> None:
+  """Create quadrant buttons for view selection."""
+  parent.quadbtns = QButtonGroup(parent)
+  for bid in range(9):
+      btn = QuadButton(bid, f" {bid + 1}", parent)
+      parent.quadbtns.addButton(btn, bid)
+      parent.l0.addWidget(
+          btn,
+          0 + btn.ypos,
+          29 + btn.xpos,
+          1,
+          1,
+      )
+      btn.setEnabled(False)
 
+  parent.quadbtns.setExclusive(True)
 
 class QuadButton(QPushButton):
-    """custom QPushButton class for quadrant plotting
-    requires buttons to put into a QButtonGroup (parent.quadbtns)
-     allows only 1 button to pressed at a time
+    """Custom QPushButton for quadrant plotting.
+
+    Allows selecting a quadrant to zoom into. Only one quadrant
+    button can be active at a time within a QButtonGroup.
     """
 
-    def __init__(self, bid, Text, parent=None):
-        super(QuadButton, self).__init__(parent)
-        self.setText(Text)
+    def __init__(self, bid: int, text: str, parent: Optional[object] = None) -> None:
+        super().__init__(parent)
+        self.setText(text)
         self.setCheckable(True)
         self.setStyleSheet(parent.styleInactive)
         self.setFont(QtGui.QFont("Arial", 8, QtGui.QFont.Bold))
         self.resize(self.minimumSizeHint())
         self.setMaximumWidth(22)
+
         self.xpos = bid % 3
-        self.ypos = int(np.floor(bid / 3))
+        self.ypos = bid // 3
+
         self.clicked.connect(lambda: self.press(parent, bid))
         self.show()
 
-    def press(self, parent, bid):
+    def press(self, parent, bid: int) -> None:
+        """Handle quadrant selection and update plots."""
         for b in range(9):
             if parent.quadbtns.button(b).isEnabled():
                 parent.quadbtns.button(b).setStyleSheet(parent.styleUnpressed)
+
         self.setStyleSheet(parent.stylePressed)
+
         self.xrange = np.array([self.xpos - 0.15, self.xpos + 1.15]) * parent.ops["Lx"] / 3
         self.yrange = np.array([self.ypos - 0.15, self.ypos + 1.15]) * parent.ops["Ly"] / 3
-        # change the zoom
-        parent.p1.setXRange(self.xrange[0], self.xrange[1])
-        parent.p1.setYRange(self.yrange[0], self.yrange[1])
-        parent.p2.setXRange(self.xrange[0], self.xrange[1])
-        parent.p2.setYRange(self.yrange[0], self.yrange[1])
+
+        parent.p1.setXRange(*self.xrange)
+        parent.p1.setYRange(*self.yrange)
+        parent.p2.setXRange(*self.xrange)
+        parent.p2.setYRange(*self.yrange)
+
         parent.p2.setXLink("plot1")
         parent.p2.setYLink("plot1")
         parent.show()
 
-
-# size of view
 class SizeButton(QPushButton):
-    """buttons to make trace box bigger or smaller"""
+    """Custom QPushButton to adjust trace box view size."""
 
-    def __init__(self, bid, Text, parent=None):
-        super(SizeButton, self).__init__(parent)
-        self.setText(Text)
+    def __init__(self, bid: int, text: str, parent: Optional[object] = None) -> None:
+        super().__init__(parent)
+        self.setText(text)
         self.setCheckable(True)
         self.setStyleSheet(parent.styleInactive)
         self.setFont(QtGui.QFont("Arial", 8, QtGui.QFont.Bold))
         self.resize(self.minimumSizeHint())
-        self.clicked.connect(lambda: self.press(parent))
+
         self.bid = bid
+        self.clicked.connect(lambda: self.press(parent))
         self.show()
 
-    def press(self, parent):
-        bid = self.bid
-        for b in parent.sizebtns.buttons():
-            b.setStyleSheet(parent.styleUnpressed)
-        self.setStyleSheet(parent.stylePressed)
+    def press(self, parent) -> None:
+        """Update layout and selection button states when size is changed."""
         ts = 100
-        if bid == 0:
+
+        if self.bid == 0:  # left-only view
             parent.p2.linkView(parent.p2.XAxis, view=None)
             parent.p2.linkView(parent.p2.YAxis, view=None)
             parent.win.ci.layout.setColumnStretchFactor(0, ts)
             parent.win.ci.layout.setColumnStretchFactor(1, 0)
-        elif bid == 1:
+
+        elif self.bid == 1:  # both views
             parent.win.ci.layout.setColumnStretchFactor(0, ts)
             parent.win.ci.layout.setColumnStretchFactor(1, ts)
             parent.p2.setXLink("plot1")
             parent.p2.setYLink("plot1")
-        elif bid == 2:
+
+        elif self.bid == 2:  # right-only view
             parent.p2.linkView(parent.p2.XAxis, view=None)
             parent.p2.linkView(parent.p2.YAxis, view=None)
             parent.win.ci.layout.setColumnStretchFactor(0, 0)
             parent.win.ci.layout.setColumnStretchFactor(1, ts)
-        # only enable selection buttons when not in "both" view
-        if bid != 1:
+
+        # Enable/disable selection buttons depending on view
+        if self.bid != 1:
             if parent.ops_plot["color"] != 0:
                 for btn in parent.topbtns.buttons():
                     btn.setStyleSheet(parent.styleUnpressed)
@@ -161,27 +182,30 @@ class SizeButton(QPushButton):
             for btn in parent.topbtns.buttons():
                 btn.setEnabled(False)
                 btn.setStyleSheet(parent.styleInactive)
+
         parent.win.show()
         parent.show()
 
 
 class TopButton(QPushButton):
-    """selection of top neurons"""
+    """Custom QPushButton for selecting top/bottom neurons."""
 
-    def __init__(self, bid, parent=None):
-        super(TopButton, self).__init__(parent)
-        text = [" draw selection", " select top n", " select bottom n"]
+    def __init__(self, bid: int, parent: Optional[object] = None) -> None:
+        super().__init__(parent)
+
+        labels = [" draw selection", " select top n", " select bottom n"]
         self.bid = bid
-        self.setText(text[bid])
+        self.setText(labels[bid])
         self.setCheckable(True)
         self.setStyleSheet(parent.styleInactive)
         self.setFont(QtGui.QFont("Arial", 8, QtGui.QFont.Bold))
         self.resize(self.minimumSizeHint())
+
         self.clicked.connect(lambda: self.press(parent))
         self.show()
 
-    def press(self, parent):
-        bid = self.bid
+    def press(self, parent) -> None:
+        """Handle top-button press logic."""
         if not parent.sizebtns.button(1).isChecked():
             if parent.ops_plot["color"] == 0:
                 for b in [1, 2]:
@@ -195,48 +219,51 @@ class TopButton(QPushButton):
             for b in range(3):
                 parent.topbtns.button(b).setEnabled(False)
                 parent.topbtns.button(b).setStyleSheet(parent.styleInactive)
+
         self.setStyleSheet(parent.stylePressed)
-        if bid == 0:
+
+        if self.bid == 0:
             parent.ROI_selection()
         else:
             self.top_selection(parent)
 
-    def top_selection(self, parent):
-        bid = self.bid
+    def top_selection(self, parent) -> None:
+        """Perform top/bottom cell selection and update plots."""
         parent.ROI_remove()
         draw = False
         ncells = len(parent.stat)
-        icells = np.minimum(ncells, parent.ntop)
-        if bid == 1:
-            top = True
-        elif bid == 2:
-            top = False
+        icells = min(ncells, parent.ntop)
+
+        top = self.bid == 1
+
         if parent.sizebtns.button(0).isChecked():
             wplot = 0
             draw = True
         elif parent.sizebtns.button(2).isChecked():
             wplot = 1
             draw = True
-        if draw:
-            if parent.ops_plot["color"] != 0:
-                c = parent.ops_plot["color"]
-                istat = parent.colors["istat"][c]
-                if wplot == 0:
-                    icell = np.array(parent.iscell.nonzero()).flatten()
-                    istat = istat[parent.iscell]
-                else:
-                    icell = np.array((~parent.iscell).nonzero()).flatten()
-                    istat = istat[~parent.iscell]
-                inds = istat.argsort()
-                if top:
-                    inds = inds[-icells:]
-                    parent.ichosen = icell[inds[-1]]
-                else:
-                    inds = inds[:icells]
-                    parent.ichosen = icell[inds[0]]
-                parent.imerge = []
-                for n in inds:
-                    parent.imerge.append(icell[n])
-                # draw choices
-                parent.update_plot()
-                parent.show()
+
+        if draw and parent.ops_plot["color"] != 0:
+            c = parent.ops_plot["color"]
+            istat = parent.colors["istat"][c]
+
+            if wplot == 0:
+                icell = np.array(parent.iscell.nonzero()).flatten()
+                istat = istat[parent.iscell]
+            else:
+                icell = np.array((~parent.iscell).nonzero()).flatten()
+                istat = istat[~parent.iscell]
+
+            inds = istat.argsort()
+
+            if top:
+                inds = inds[-icells:]
+                parent.ichosen = icell[inds[-1]]
+            else:
+                inds = inds[:icells]
+                parent.ichosen = icell[inds[0]]
+
+            parent.imerge = [icell[n] for n in inds]
+
+            parent.update_plot()
+            parent.show()
