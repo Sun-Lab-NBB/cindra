@@ -51,10 +51,10 @@ def make_masks_and_enable_buttons(parent):
     for n in range(ncells):
         ypix = parent.stat[n]["ypix"].flatten()
         xpix = parent.stat[n]["xpix"].flatten()
-        yext, xext = utils.boundary(ypix, xpix)
+        yext, xext = utils.compute_roi_boundary(ypix, xpix)
         parent.stat[n]["yext"] = yext
         parent.stat[n]["xext"] = xext
-        ycirc, xcirc = utils.circle(parent.stat[n]["med"], parent.stat[n]["radius"])
+        ycirc, xcirc = utils.compute_circular_boundary(parent.stat[n]["med"], parent.stat[n]["radius"])
         goodi = (ycirc >= 0) & (xcirc >= 0) & (ycirc < parent.ops["Ly"]) & (xcirc < parent.ops["Lx"])
         parent.stat[n]["ycirc"] = ycirc[goodi]
         parent.stat[n]["xcirc"] = xcirc[goodi]

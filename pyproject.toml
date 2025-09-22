@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # Project metdata section. Provides the genral ID information about the project.
 [project]
 name = "sl-suite2p"
-version = "2.0.0rc9"
+version = "2.0.0rc10"
 description = "Enhanced suite2p implementation that includes a pipeline to track cell activity across sessions (days)."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -48,7 +48,7 @@ dependencies = [
     "tifffile>=2025,<2026",
     "imagecodecs>=2025,<2026",
     "numpy>=2,<3",
-    "numba>=0,<1",
+    "numba>=0,<0.62",
     "scipy>=1,<2",
     "matplotlib>=3,<4",
     "cellpose>=4,<5",

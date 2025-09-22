@@ -1,9 +1,7 @@
-"""This package contains the interactive Suite2p GUI.
-
-It exposes the public entry point `run`, which launches the GUI.
-Copyright © 2023 Howard Hughes Medical Institute,
-Authored by Carsen Stringer and Marius Pachitariu.
+"""This package contains the interactive sl-suite2p GUI and functions as an entry-point for all GUI-based sl-suite2p
+sessions.
 """
+
 from __future__ import annotations
 
 from .gui2p import run

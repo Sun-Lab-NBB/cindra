@@ -1,53 +1,64 @@
-"""GUI button components for interactive Suite2p visualization.
-
-This module defines various reusable button classes (quadrant, size, top neuron 
-selection) and setup functions for integrating them into the Suite2p GUI.
-
-© 2023 Howard Hughes Medical Institute,
-Authored by Carsen Stringer and Marius Pachitariu.
+"""This module provides various reusable GUI button classes and setup functions for integrating them into the
+sl-suite2p GUI.
 """
 
 from __future__ import annotations
-from typing import Optional
-import numpy as np
+
+from typing import TYPE_CHECKING
+
 from qtpy import QtGui, QtCore
+import numpy as np
 from qtpy.QtWidgets import QLabel, QLineEdit, QPushButton, QButtonGroup
 
-def make_selection(parent) -> None:
-    """ Creates buttons to draw a square selection on the view. """
-    parent.topbtns = QButtonGroup()
+# Import guard to avoid circular imports if needed
+if TYPE_CHECKING:
+    from .gui2p import MainWindow
+
+
+def add_cell_selection_buttons(gui: MainWindow) -> None:
+    """Creates the buttons that allow selecting a subset of visualized cells (ROIs) for further analysis.
+
+    When pressed, the buttons generate a resizable rectangular selection box that can be used to visually sample the
+    ROIs displayed in the GUI.
+
+    Notes:
+        This set of buttons is added to the top of the main GUI window.
+
+    """
+    gui.topbtns = QButtonGroup()
 
     label = QLabel("select cells")
     label.setStyleSheet("color: white;")
-    label.setFont(QtGui.QFont("Arial", 8, QtGui.QFont.Bold))
-    parent.l0.addWidget(label, 0, 2, 1, 2)
+    label.setFont(QtGui.QFont("Arial", 8, QtGui.QFont.Weight.Bold))
+    gui.l0.addWidget(label, 0, 2, 1, 2)
 
     positions = [2, 3, 4]
     for bid in range(3):
-        btn = TopButton(bid, parent)
+        btn = TopButton(bid, gui)
         btn.setFont(QtGui.QFont("Arial", 8))
-        parent.topbtns.addButton(btn, bid)
-        parent.l0.addWidget(btn, 0, positions[bid] * 2, 1, 2)
+        gui.topbtns.addButton(btn, bid)
+        gui.l0.addWidget(btn, 0, positions[bid] * 2, 1, 2)
         btn.setEnabled(False)
-    
-    parent.topbtns.setExclusive(True)
-    parent.isROI = False
-    parent.ROIplot = 0
+
+    gui.topbtns.setExclusive(True)
+    gui.isROI = False
+    gui.ROIplot = 0
 
     n_label = QLabel("n=")
-    n_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+    n_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignVCenter)
     n_label.setStyleSheet("color: white;")
-    n_label.setFont(QtGui.QFont("Arial", 8, QtGui.QFont.Bold))
-    parent.l0.addWidget(n_label, 0, 10, 1, 1)
+    n_label.setFont(QtGui.QFont("Arial", 8, QtGui.QFont.Weight.Bold))
+    gui.l0.addWidget(n_label, 0, 10, 1, 1)
 
-    parent.topedit = QLineEdit(parent)
-    parent.topedit.setValidator(QtGui.QIntValidator(0, 500))
-    parent.topedit.setText("40")
-    parent.ntop = 40
-    parent.topedit.setFixedWidth(35)
-    parent.topedit.setAlignment(QtCore.Qt.AlignRight)
-    parent.topedit.returnPressed.connect(parent.top_number_chosen)
-    parent.l0.addWidget(parent.topedit, 0, 11, 1, 1)
+    gui.topedit = QLineEdit(gui)
+    gui.topedit.setValidator(QtGui.QIntValidator(0, 500))
+    gui.topedit.setText("40")
+    gui.ntop = 40
+    gui.topedit.setFixedWidth(35)
+    gui.topedit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+    gui.topedit.returnPressed.connect(gui.top_number_chosen)
+    gui.l0.addWidget(gui.topedit, 0, 11, 1, 1)
+
 
 def make_cellnotcell(parent) -> None:
     """Create buttons for toggling cell / not-cell views."""
@@ -73,21 +84,22 @@ def make_cellnotcell(parent) -> None:
 
 
 def make_quadrants(parent) -> None:
-  """Create quadrant buttons for view selection."""
-  parent.quadbtns = QButtonGroup(parent)
-  for bid in range(9):
-      btn = QuadButton(bid, f" {bid + 1}", parent)
-      parent.quadbtns.addButton(btn, bid)
-      parent.l0.addWidget(
-          btn,
-          0 + btn.ypos,
-          29 + btn.xpos,
-          1,
-          1,
-      )
-      btn.setEnabled(False)
+    """Create quadrant buttons for view selection."""
+    parent.quadbtns = QButtonGroup(parent)
+    for bid in range(9):
+        btn = QuadButton(bid, f" {bid + 1}", parent)
+        parent.quadbtns.addButton(btn, bid)
+        parent.l0.addWidget(
+            btn,
+            0 + btn.ypos,
+            29 + btn.xpos,
+            1,
+            1,
+        )
+        btn.setEnabled(False)
 
-  parent.quadbtns.setExclusive(True)
+    parent.quadbtns.setExclusive(True)
+
 
 class QuadButton(QPushButton):
     """Custom QPushButton for quadrant plotting.
@@ -96,7 +108,7 @@ class QuadButton(QPushButton):
     button can be active at a time within a QButtonGroup.
     """
 
-    def __init__(self, bid: int, text: str, parent: Optional[object] = None) -> None:
+    def __init__(self, bid: int, text: str, parent: object | None = None) -> None:
         super().__init__(parent)
         self.setText(text)
         self.setCheckable(True)
@@ -131,10 +143,11 @@ class QuadButton(QPushButton):
         parent.p2.setYLink("plot1")
         parent.show()
 
+
 class SizeButton(QPushButton):
     """Custom QPushButton to adjust trace box view size."""
 
-    def __init__(self, bid: int, text: str, parent: Optional[object] = None) -> None:
+    def __init__(self, bid: int, text: str, parent: object | None = None) -> None:
         super().__init__(parent)
         self.setText(text)
         self.setCheckable(True)
@@ -190,7 +203,7 @@ class SizeButton(QPushButton):
 class TopButton(QPushButton):
     """Custom QPushButton for selecting top/bottom neurons."""
 
-    def __init__(self, bid: int, parent: Optional[object] = None) -> None:
+    def __init__(self, bid: int, parent: object | None = None) -> None:
         super().__init__(parent)
 
         labels = [" draw selection", " select top n", " select bottom n"]

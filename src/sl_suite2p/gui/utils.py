@@ -1,72 +1,88 @@
-"""Utility functions for mask boundary extraction and circle generation.
-
-This module has helper functions used by the Suite2p GUI to visualize and 
-manipulate mask regions. 
-
-Copyright © 2023 Howard Hughes Medical Institute, 
-Authored by Carsen Stringer and Marius Pachitariu.
+"""This module provides the utility functions used by the sl-suite2p GUI to visualize and manipulate cell
+(ROI) masks.
 """
 
-
 from __future__ import annotations
+
+from typing import Any
+
 import numpy as np
+from numpy.typing import NDArray
 from scipy.ndimage import binary_dilation, binary_fill_holes
 
 
-def boundary(ypix: np.ndarray, xpix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Compute the exterior boundary pixels of a mask.
+def compute_roi_boundary(
+    y_pixels: NDArray[np.signedinteger[Any]], x_pixels: NDArray[np.signedinteger[Any]]
+) -> tuple[NDArray[np.signedinteger[Any]], NDArray[np.signedinteger[Any]]]:
+    """Computes the exterior boundary pixels for the target cell (ROI) mask.
+
+    This service function is used to compute the visualization boundary (border) for the target cell (ROI) mask.
 
     Args:
-        ypix: Array of y-coordinates for the mask pixels.
-        xpix: Array of x-coordinates for the mask pixels.
+        y_pixels: The array of mask pixel y-coordinates.
+        x_pixels: The array of mask pixel x-coordinates.
 
     Returns:
-        A tuple (yext, xext) of arrays containing the coordinates of
-        boundary pixels.
+        A tuple of two arrays containing the cell (ROI) boundary pixel coordinates in the order of (y, x).
     """
-    ypix = np.expand_dims(ypix.flatten(), axis=1)
-    xpix = np.expand_dims(xpix.flatten(), axis=1)
-    npix = ypix.shape[0]
+    # Converts x and y coordinates into column vectors and determines the total number of pixels to process. Assumes
+    # that the arrays have the same length.
+    y_pixels = np.expand_dims(y_pixels.flatten(), axis=1)
+    x_pixels = np.expand_dims(x_pixels.flatten(), axis=1)
+    pixel_count = y_pixels.shape[0]
 
-    if npix > 0:
-        msk = np.zeros((np.ptp(ypix) + 6, np.ptp(xpix) + 6), dtype=bool)
-        msk[ypix - ypix.min() + 3, xpix - xpix.min() + 3] = True
-        msk = binary_dilation(msk)
-        msk = binary_fill_holes(msk)
+    # If the input ROI does not contain any pixels to process (is an empty ROI), returns empty arrays to indicate that
+    # there is no boundary to render.
+    if pixel_count < 1:
+        boundary_y_pixels = np.zeros((0,), dtype=np.int32)
+        boundary_x_pixels = np.zeros((0,), dtype=np.int32)
+        return boundary_y_pixels, boundary_x_pixels
 
-        # Define kernel for 8-connected neighborhood
-        kernel = np.zeros((3, 3), dtype=int)
-        kernel[1] = 1
-        kernel[:, 1] = 1
+    # Creates the binary ROI mask using the input pixel coordinates. Pads the mask with 6 pixels to create a visual
+    # boundary region, centers the mask around the original pixel values, and sets all original ROI pixels to 1 (white).
+    mask = np.zeros((np.ptp(y_pixels) + 6, np.ptp(x_pixels) + 6), dtype=bool)
+    mask[y_pixels - y_pixels.min() + 3, x_pixels - x_pixels.min() + 3] = True
 
-        out = binary_dilation(msk == 0, kernel) & msk
+    # Cleans up the mask by dilating and filling the holes (classic binary mask augmentation technique). This creates a
+    # uniform 'white' center with a 'black' boundary region.
+    mask = binary_dilation(mask)
+    mask = binary_fill_holes(mask)
 
-        yext, xext = np.nonzero(out)
-        yext, xext = yext + ypix.min() - 3, xext + xpix.min() - 3
-    else:
-        yext = np.zeros((0,))
-        xext = np.zeros((0,))
+    # Defines the kernel for 8-connected neighborhood and uses it to find the boundary pixels that directly contact the
+    # cleaned up cell ROI mask (center region). This generates the 1-pixel-thin mask for the cell (ROI) boundary region.
+    kernel = np.zeros((3, 3), dtype=int)
+    kernel[1] = 1
+    kernel[:, 1] = 1
+    boundary_mask = binary_dilation(mask == 0, kernel) & mask
 
-    return yext, xext
+    # Converts the boundary mask back to the original ROI coordinates and returns the x and y coordinates of the
+    # boundary pixels.
+    boundary_y_pixels, boundary_x_pixels = np.nonzero(boundary_mask)
+    boundary_y_pixels, boundary_x_pixels = (
+        boundary_y_pixels + y_pixels.min() - 3,
+        boundary_x_pixels + x_pixels.min() - 3,
+    )
+    return boundary_y_pixels, boundary_x_pixels
 
 
-def circle(med: tuple[float, float], r: float) -> tuple[np.ndarray, np.ndarray]:
-    """Generate the pixel coordinates of a circle around a cell.
+def compute_circular_boundary(
+    centroid: tuple[np.signedinteger[Any], np.signedinteger[Any]], roi_radius: np.signedinteger[Any]
+) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
+    """Generates the pixel coordinates for a circular overlay drawing that covers the target ROI.
 
-    The circle has radius 1.25 × r.
+    This service function is used to compute circular overlays for cell (ROI) visualization purposes.
+
+    Notes:
+        This function uses the following equation for computing the circular overlay radius: 1.25 × roi_radius.
 
     Args:
-        med: The (x, y) coordinates of the circle center (cell centroid).
-        r: The base cell radius.
+        centroid: The coordinates of the processed ROI's centroid, given in the order of (x, y).
+        roi_radius: The radius of the processed ROI.
 
     Returns:
-        A tuple (x, y) of arrays containing the circle pixel coordinates.
+        A tuple of two arrays containing the circular overlay pixel coordinates in the order of (y, x).
     """
     theta = np.linspace(0.0, 2 * np.pi, 100)
-    x = r * 1.25 * np.cos(theta) + med[0]
-    y = r * 1.25 * np.sin(theta) + med[1]
-
-    return x.astype(np.int32), y.astype(np.int32)
-
-
-__all__ = ["boundary", "circle"]
+    x = roi_radius * np.float64(1.25) * np.cos(theta) + centroid[0]
+    y = roi_radius * np.float64(1.25) * np.sin(theta) + centroid[1]
+    return y.astype(np.int32), x.astype(np.int32)

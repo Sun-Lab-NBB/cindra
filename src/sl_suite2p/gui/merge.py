@@ -172,7 +172,7 @@ def merge_activity_masks(parent):
     parent.notmerged = np.append(parent.notmerged, False)
 
     ### for GUI drawing
-    ycirc, xcirc = utils.circle(parent.stat[-1]["med"], parent.stat[-1]["radius"])
+    ycirc, xcirc = utils.compute_circular_boundary(parent.stat[-1]["med"], parent.stat[-1]["radius"])
     goodi = (ycirc >= 0) & (xcirc >= 0) & (ycirc < parent.ops["Ly"]) & (xcirc < parent.ops["Lx"])
     parent.stat[-1]["ycirc"] = ycirc[goodi]
     parent.stat[-1]["xcirc"] = xcirc[goodi]

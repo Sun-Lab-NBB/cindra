@@ -342,7 +342,7 @@ class BinaryPlayer(QMainWindow):
             if not self.ops[0]["allow_overlap"]:
                 ypix = ypix[~self.stat[n]["overlap"]]
                 xpix = xpix[~self.stat[n]["overlap"]]
-            yext, xext = utils.boundary(ypix, xpix)
+            yext, xext = utils.compute_roi_boundary(ypix, xpix)
             if len(yext) > 0:
                 goodi = (yext >= 0) & (xext >= 0) & (yext < self.LY) & (xext < self.LX)
                 self.stat[n]["yext"] = yext[goodi] + 0.5
