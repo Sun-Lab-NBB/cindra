@@ -2,8 +2,6 @@
 sessions.
 """
 
-from __future__ import annotations
-
 from .gui2p import run
 
 __all__ = ["run"]

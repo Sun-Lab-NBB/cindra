@@ -2,17 +2,11 @@
 sl-suite2p GUI.
 """
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
+from .gui2p import MainWindow
 
 from qtpy import QtGui, QtCore
 import numpy as np
 from qtpy.QtWidgets import QLabel, QLineEdit, QPushButton, QButtonGroup
-
-# Import guard to avoid circular imports if needed
-if TYPE_CHECKING:
-    from .gui2p import MainWindow
 
 
 def add_cell_selection_buttons(gui: MainWindow) -> None:

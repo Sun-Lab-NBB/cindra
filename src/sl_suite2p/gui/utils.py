@@ -2,8 +2,6 @@
 (ROI) masks.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 import numpy as np
@@ -13,7 +11,7 @@ from scipy.ndimage import binary_dilation, binary_fill_holes
 
 def compute_roi_boundary(
     y_pixels: NDArray[np.signedinteger[Any]], x_pixels: NDArray[np.signedinteger[Any]]
-) -> tuple[NDArray[np.signedinteger[Any]], NDArray[np.signedinteger[Any]]]:
+) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
     """Computes the exterior boundary pixels for the target cell (ROI) mask.
 
     This service function is used to compute the visualization boundary (border) for the target cell (ROI) mask.
@@ -62,27 +60,27 @@ def compute_roi_boundary(
         boundary_y_pixels + y_pixels.min() - 3,
         boundary_x_pixels + x_pixels.min() - 3,
     )
-    return boundary_y_pixels, boundary_x_pixels
+    return boundary_y_pixels.astype(dtype=np.int32), boundary_x_pixels.astype(dtype=np.int32)
 
 
 def compute_circular_boundary(
-    centroid: tuple[np.signedinteger[Any], np.signedinteger[Any]], roi_radius: np.signedinteger[Any]
+    centroid_coordinates: tuple[np.signedinteger[Any], np.signedinteger[Any]], roi_radius: np.signedinteger[Any]
 ) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
     """Generates the pixel coordinates for a circular overlay drawing that covers the target ROI.
 
     This service function is used to compute circular overlays for cell (ROI) visualization purposes.
 
     Notes:
-        This function uses the following equation for computing the circular overlay radius: 1.25 × roi_radius.
+        This function uses the following equation for computing the circular overlay radius: 1.25 x roi_radius.
 
     Args:
-        centroid: The coordinates of the processed ROI's centroid, given in the order of (x, y).
+        centroid_coordinates: The coordinates of the processed ROI's centroid, given in the order of (x, y).
         roi_radius: The radius of the processed ROI.
 
     Returns:
         A tuple of two arrays containing the circular overlay pixel coordinates in the order of (y, x).
     """
     theta = np.linspace(0.0, 2 * np.pi, 100)
-    x = roi_radius * np.float64(1.25) * np.cos(theta) + centroid[0]
-    y = roi_radius * np.float64(1.25) * np.sin(theta) + centroid[1]
+    x = roi_radius * np.float64(1.25) * np.cos(theta) + centroid_coordinates[0]
+    y = roi_radius * np.float64(1.25) * np.sin(theta) + centroid_coordinates[1]
     return y.astype(np.int32), x.astype(np.int32)
