@@ -14,8 +14,13 @@ from ataraxis_base_utilities import console
 
 def create_masks(roi_statistics: list[dict[str, Any]], Ly: int, Lx: int, ops=None):
     """
+    Creates binary masks for cells and their corresponding neuropil regions based on the ROI statistics.
 
-    
+    Args:
+        roi_statistics: The dictionary that stores the statistics for regions of interest (ROIs), including cell masks.
+        Ly: The height of the image in pixels.
+        Lx: The width of the image in pixels.
+        ops: The dictionary that stores the plane registration parameters.
     """
 
     if ops is None:
@@ -52,8 +57,15 @@ def create_masks(roi_statistics: list[dict[str, Any]], Ly: int, Lx: int, ops=Non
 
 def create_cell_pix(roi_statistics: list[dict[str, Any]], Ly: int, Lx: int, lam_percentile: float = 50.0) -> np.ndarray:
     """
+    Creates a 2D binary map of cell regions across the image by applying a threshold on pixel lambda weights for all ROIs. 
+    The threshold is determined locally based on a neighborhood defined by the median cell radius.
 
-
+    Args:
+        roi_statistics: The dictionary that stores the statistics for regions of interest (ROIs), including cell masks.
+        Ly: The height of the image in pixels.
+        Lx: The width of the image in pixels.
+        lam_percentile: Percentile threshold for lambda-weight where only pixels above this local threshold are 
+                        considered cell pixels.
     """
 
     pixel_mask = np.zeros((Ly, Lx))
@@ -88,8 +100,13 @@ def create_cell_pix(roi_statistics: list[dict[str, Any]], Ly: int, Lx: int, lam_
 
 def create_cell_mask(roi_statistics: dict[str, Any], Ly: int, Lx: int, allow_overlap: bool = False) -> tuple[np.ndarray, np.ndarray]:
     """
+    Creates a flattened list of pixel indices and the corresponding normalized lambda weights for a single ROI. 
 
-
+    Args:
+        roi_statistics: The dictionary that stores the statistics for regions of interest (ROIs), including cell masks.
+        Ly: The height of the image in pixels.
+        Lx: The width of the image in pixels.
+        allow_overlap: Indicates whether ROIs are allowed to overlap
     """
   
     if allow_overlap:
@@ -108,9 +125,18 @@ def create_cell_mask(roi_statistics: dict[str, Any], Ly: int, Lx: int, allow_ove
 
 def create_neuropil_masks(ypixs: int, xpixs: int, cell_pix:np.ndarray, inner_neuropil_radius:int, min_neuropil_pixels:int, circular: bool = False) -> List[np.ndarray]:
     """
-   
-    
+    Creates a neuropil mask surrounding each ROI by extending the ROI boundaries while excluding cell pixels. 
+    The function continuously expands the ROI until a sufficient number of valid neuropil pixels is included.
+  
+    Args:
+        ypixs: A list of y-coordinates of all ROI pixels.
+        xpixs: A list of x-coordinates of all ROI pixels.
+        cell_pix: A 2D binary array indicating if a pixel is contained in an ROI (1) else 0.
+        inner_neuropil_radius: The initial number of iterations to expand ROI 
+        min_neuropil_pixels: The minimum number of valid pixels required for a neuropil mask.
+        circular: Indicates whether to expand the neuropil mask in a circular trajectory.
     """
+    
     neuropil_extension_pix = 5
     Ly, Lx = cell_pix.shape
     
