@@ -25,16 +25,7 @@ class MainWindow(QMainWindow):
         import sl_suite2p as suite2p
 
         s2p_dir = pathlib.Path(suite2p.__file__).parent
-        icon_path = os.fspath(s2p_dir.joinpath("logo", "logo.png"))
 
-        app_icon = QtGui.QIcon()
-        app_icon.addFile(icon_path, QtCore.QSize(16, 16))
-        app_icon.addFile(icon_path, QtCore.QSize(24, 24))
-        app_icon.addFile(icon_path, QtCore.QSize(32, 32))
-        app_icon.addFile(icon_path, QtCore.QSize(48, 48))
-        app_icon.addFile(icon_path, QtCore.QSize(64, 64))
-        app_icon.addFile(icon_path, QtCore.QSize(256, 256))
-        self.setWindowIcon(app_icon)
         self.setStyleSheet("QMainWindow {background: 'black';}")
         self.stylePressed = "QPushButton {Text-align: left; background-color: rgb(100,50,100); color:white;}"
         self.styleUnpressed = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:white;}"
