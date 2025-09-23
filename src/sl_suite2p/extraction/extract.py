@@ -191,7 +191,7 @@ def extraction_wrapper(
     if cell_masks is None:
         console.echo(f"Creating ROI masks for plane {plane_number}...", level=LogLevel.INFO)
         timer.reset()
-        cell_masks, neuropil_masks0 = create_masks(stat, Ly, Lx, ops)
+        cell_masks, neuropil_masks0 = create_masks(roi_statistics=stat, height=Ly, width=Lx, ops=ops)
         if neuropil_masks is None:
             neuropil_masks = neuropil_masks0
         console.echo(
