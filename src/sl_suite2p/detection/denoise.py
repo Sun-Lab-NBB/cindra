@@ -8,32 +8,74 @@ from sklearn.decomposition import PCA
 from ..registration.nonrigid import make_blocks, spatial_taper
 
 
-def pca_denoise(mov: np.ndarray, block_size: list, n_comps_frac: float):
-    t0 = time.time()
-    nframes, Ly, Lx = mov.shape
-    yblock, xblock, _, block_size, _ = make_blocks(Ly, Lx, block_size=block_size)
+def block_pca_denoise(movie: np.ndarray, block_size: tuple[int, int], n_comps_frac: float) -> np.ndarray:
+    """
+    Denoise a movie using block-wise PCA
+    
+    Parameters
+    -------
+    movie : np.ndarry
+        Input movie with shape (n_frames, movie_height, movie_width)
 
-    mov_mean = mov.mean(axis=0)
-    mov -= mov_mean
+    block_size : list
+        Size of spatial blocks (block_height, block_width)
 
-    nblocks = len(yblock)
-    Lyb, Lxb = block_size
-    n_comps = int(min(min(Lyb * Lxb, nframes), min(Lyb, Lxb) * n_comps_frac))
-    maskMul = spatial_taper(Lyb // 4, Lyb, Lxb)
-    norm = np.zeros((Ly, Lx), np.float32)
-    reconstruction = np.zeros_like(mov)
-    block_re = np.zeros((nblocks, nframes, Lyb * Lxb))
-    for i in range(nblocks):
-        block = mov[:, yblock[i][0] : yblock[i][-1], xblock[i][0] : xblock[i][-1]].reshape(-1, Lyb * Lxb)
-        model = PCA(n_components=n_comps, random_state=0).fit(block)
-        block_re[i] = (block @ model.components_.T) @ model.components_
-        norm[yblock[i][0] : yblock[i][-1], xblock[i][0] : xblock[i][-1]] += maskMul
+    n_comps_frac : float
+        The fraction of block size to help decide the number of PCA compopnents
 
-    block_re = block_re.reshape(nblocks, nframes, Lyb, Lxb)
-    block_re *= maskMul
-    for i in range(nblocks):
-        reconstruction[:, yblock[i][0] : yblock[i][-1], xblock[i][0] : xblock[i][-1]] += block_re[i]
-    reconstruction /= norm
-    print("Binned movie denoised (for cell detection only) in %0.2f sec." % (time.time() - t0))
-    reconstruction += mov_mean
-    return reconstruction
+    Returns
+    -------
+    denoised_movie : np.ndarray
+        The PCA denoised movie with the same size as the the input
+    """
+    start_time = time.time()
+    n_frames, movie_height, movie_width = movie.shape
+
+    # Center the data
+    movie_mean = movie.mean(axis=0)
+    movie_centered = movie -  movie_mean
+
+    # Define block indicies
+    y_block, x_block, _, block_size, _ = make_blocks(movie_height, movie_width, block_size=block_size)
+    n_blocks = len(y_block)
+    block_height, block_width = block_size
+
+    # Determine the number of PCA components
+    n_comps = int(min(min(block_height * block_width, n_frames), min(block_height, block_width) * n_comps_frac))
+
+    taper_mask = spatial_taper(block_height // 4, block_height, block_width)
+    norm_map = np.zeros((movie_height, movie_width), np.float32)
+    reconstruction = np.zeros_like(movie_centered)
+
+    # Block-wise PCA
+    block_reconstruction = np.zeros((n_blocks, n_frames, block_height * block_width))
+    for block_idx in range(n_blocks):
+        x_block_start, x_block_end = x_block[block_idx][0], x_block[block_idx][-1]
+        y_block_start, y_block_end = y_block[block_idx][0],  y_block[block_idx][-1]
+
+        flattened_block = movie_centered[:, y_block_start : y_block_end, x_block_start : x_block_end].reshape(-1, block_height * block_width)
+        
+        model = PCA(n_components=n_comps, random_state=0).fit(flattened_block)
+        block_reconstruction[block_idx] = (flattened_block @ model.components_.T) @ model.components_
+        norm_map[y_block_start : y_block_end, x_block_start : x_block_end] += taper_mask
+
+    # Apply taper mask
+    block_reconstruction = block_reconstruction.reshape(n_blocks, n_frames, block_height, block_width)
+    block_reconstruction *= taper_mask
+
+    # Combine all the blocks after block-wise PCA
+    for block_idx in range(n_blocks):
+        x_block_start, x_block_end = x_block[block_idx][0], x_block[block_idx][-1]
+        y_block_start, y_block_end = y_block[block_idx][0],  y_block[block_idx][-1]
+
+        reconstruction[:, y_block_start : y_block_end, x_block_start : x_block_end] += block_reconstruction[block_idx]
+
+    # Normalize the reconstruction
+    reconstruction /= norm_map
+    # Add back mean image
+    denoised_movie = reconstruction + movie_mean
+
+    elapsed_time = time.time() - start_time
+    print(f"Binned movie denoised (for cell detection only) in {elapsed_time:.2f} sec.")
+
+    return denoised_movie
