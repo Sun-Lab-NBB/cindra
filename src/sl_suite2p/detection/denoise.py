@@ -10,24 +10,17 @@ from ..registration.nonrigid import make_blocks, spatial_taper
 
 def block_pca_denoise(movie: np.ndarray, block_size: tuple[int, int], n_comps_frac: float) -> np.ndarray:
     """
-    Denoise a movie using block-wise PCA
+    Denoises a movie using block-wise PCA.
     
-    Parameters
-    -------
-    movie : np.ndarry
-        Input movie with shape (n_frames, movie_height, movie_width)
+    Args:
+        movie: Input movie with shape (n_frames, movie_height, movie_width).
+        block_size: Size of spatial blocks (block_height, block_width).
+        n_comps_frac: The fraction of block size to help determine number of PCA compopnents.
 
-    block_size : list
-        Size of spatial blocks (block_height, block_width)
-
-    n_comps_frac : float
-        The fraction of block size to help decide the number of PCA compopnents
-
-    Returns
-    -------
-    denoised_movie : np.ndarray
+    Returns:
         The PCA denoised movie with the same size as the the input
     """
+
     start_time = time.time()
     n_frames, movie_height, movie_width = movie.shape
 
@@ -53,7 +46,8 @@ def block_pca_denoise(movie: np.ndarray, block_size: tuple[int, int], n_comps_fr
         x_block_start, x_block_end = x_block[block_idx][0], x_block[block_idx][-1]
         y_block_start, y_block_end = y_block[block_idx][0],  y_block[block_idx][-1]
 
-        flattened_block = movie_centered[:, y_block_start : y_block_end, x_block_start : x_block_end].reshape(-1, block_height * block_width)
+        flattened_block = movie_centered[:, y_block_start : y_block_end, 
+                                         x_block_start : x_block_end].reshape(-1, block_height * block_width)
         
         model = PCA(n_components=n_comps, random_state=0).fit(flattened_block)
         block_reconstruction[block_idx] = (flattened_block @ model.components_.T) @ model.components_
@@ -68,7 +62,8 @@ def block_pca_denoise(movie: np.ndarray, block_size: tuple[int, int], n_comps_fr
         x_block_start, x_block_end = x_block[block_idx][0], x_block[block_idx][-1]
         y_block_start, y_block_end = y_block[block_idx][0],  y_block[block_idx][-1]
 
-        reconstruction[:, y_block_start : y_block_end, x_block_start : x_block_end] += block_reconstruction[block_idx]
+        reconstruction[:, y_block_start : y_block_end, 
+                       x_block_start : x_block_end] += block_reconstruction[block_idx]
 
     # Normalize the reconstruction
     reconstruction /= norm_map
