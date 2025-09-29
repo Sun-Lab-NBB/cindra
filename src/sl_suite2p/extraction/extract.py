@@ -1,11 +1,13 @@
 """Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
 
+from typing import Any, List
 import platform
 
 from numba import njit, config, prange
 import numpy as np
 from scipy import stats, signal
 from numba.typed import List
+from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console
 
@@ -19,7 +21,183 @@ else:
     config.THREADING_LAYER = "tbb"
 
 
-def extract_traces(f_in, plane_number, cell_masks, neuropil_masks, batch_size=500, session_id=""):
+@njit(parallel=True)
+def matmul_traces(
+    cell_fluorescence: NDArray[np.float64],
+    data_matrix: NDArray[np.float64],
+    cell_pixel_indices: List[NDArray[np.int64]],
+    lambda_weights: List[NDArray[np.float64]],
+) -> NDArray[np.float64]:
+    """
+    Computes cell fluorescence traces by weighted matrix multiplication with their 
+    corresponding weights (lambda values). The weighted sum across all pixels gives 
+    the final fluorescence trace for that ROI across all frames.
+
+    Args:
+        data_matrix: A data array of size n_frames × n_pixels.
+        cell_pixel_indices: A list of arrays containing the pixel indices belonging to each ROI.
+        lambda_weights: A list of arrays specifying the weight of each pixel within its ROI
+    """
+    num_cells = cell_fluorescence.shape[0]
+
+    for cell_idx in prange(num_cells):
+        cell_idx = np.int64(cell_idx)  # This is here to fix Numba's 'unsafe uint64 -> int64 cast warning.'
+
+        cell_pixels_data = data_matrix[:, cell_pixel_indices[cell_idx]]
+        pixel_weights = lambda_weights[cell_idx]
+        cell_fluorescence[cell_idx] = np.dot(cell_pixels_data, pixel_weights)
+
+    return cell_fluorescence
+
+
+@njit(parallel=True)
+def matmul_neuropil(
+    neuropil_fluorescence: NDArray[np.float64],
+    data_matrix: NDArray[np.float64],
+    neuropil_pixel_indices: List[NDArray[np.int64]],
+    neuropil_pixel_count: NDArray[np.int64],
+) -> NDArray[np.float64]:
+    """
+    Extracts the fluorescence signals from pixels in the surrounding neuropil ring and computes 
+    the mean fluorescence across those pixels.
+
+    Args:
+        data_matrix: A data array of size n_rois × n_frames.
+        neuropil_pixel_indices: A list of arrays containing the pixel indices forming the neuropil ring
+                                around each ROI.
+        neuropil_pixel_count: An array indicating the number of neuropil pixels for each ROI.                   
+    """
+    num_cells = neuropil_fluorescence.shape[0]
+
+    for cell_idx in prange(num_cells):
+        cell_idx = np.int64(cell_idx)  # This is here to fix Numba's 'unsafe uint64 -> int64 cast warning.'
+
+        neuropil_fluorescence[cell_idx] = (
+            data_matrix[:, neuropil_pixel_indices[cell_idx]].sum(axis=1) / neuropil_pixel_count[cell_idx]
+        )
+
+    return neuropil_fluorescence
+
+
+def extract_traces_from_masks(
+    ops: dict[str, Any], cell_masks: List[tuple], neuropil_masks: List
+) -> tuple[NDArray, NDArray, NDArray, NDArray]:
+    """
+    Computes fluorescence traces for each ROI and its corresponding neuropil region 
+    from both channels, if available. This function is also used in drawroi.py. 
+    
+    Args:
+        ops: The dictionary that stores the plane registration parameters.
+        cell_masks: A tuple containing an array of flattened ROI pixel indices and a corresponding 
+                    array of normalized weights to compute the ROI’s fluorescence trace.
+        neuropil_masks: An array containing pixel indices of the neuropil surrounding the ROI.
+    """
+    batch_size = ops["batch_size"]
+    height = ops["Ly"]
+    width = ops["Lx"]
+
+    with BinaryFile(height=height, width=width, file_path=ops["reg_file"]) as f:
+        cell_fluorescence, neuropil_fluorescence = extract_traces(
+            f_in=f, cell_masks=cell_masks, neuropil_masks=neuropil_masks, batch_size=batch_size
+        )
+
+    cell_fluorescence_channel_2 = []
+    neuropil_fluorescence_channel_2 = []
+
+    if ops.get("reg_file_chan2"):
+        with BinaryFile(height=height, width=width, file_path=ops["reg_file_chan2"]) as f:
+            cell_fluorescence_channel_2, neuropil_fluorescence_channel_2 = extract_traces(
+                f_in=f, cell_masks=cell_masks, neuropil_masks=neuropil_masks, batch_size=batch_size
+            )
+
+    return cell_fluorescence, neuropil_fluorescence, cell_fluorescence_channel_2, neuropil_fluorescence_channel_2
+
+
+def extraction_wrapper(
+    roi_statistics: List[dict[str, Any]],
+    plane_number: int,
+    frames: NDArray,
+    frames_channel_2: NDArray | None = None,
+    cell_masks: List[NDArray] | None = None,
+    neuropil_masks: List[NDArray] | None = None,
+    ops: dict[str, Any] | None = None,
+) -> tuple[NDArray, NDArray, NDArray, NDArray]:
+    """
+    Main extraction function that creates the masks and computes fluorescence traces.
+
+    This function generates cell and neuropil masks if not provided, extracts raw fluorescence traces 
+    from the imaging frames, and computes the skewness and standard deviation on the signals after 
+    subtracting the neuropil.
+
+    roi_statistics: The dictionary that stores the statistics for regions of interest (ROIs), including cell masks.
+    plane_number: The number (index) of the processed plane.
+    frames_path: The path to the binary file that stores the registered plane frames for which to process the ROIs.
+    frames_channel_2_path: Same as 'frames_path', but for the second functional channel, if the plane data contains
+            data from two channels.
+    ops: The dictionary that stores the plane registration parameters.
+    """
+    if ops is None:
+        ops = generate_default_ops()
+
+    timer = PrecisionTimer("s")
+    n_frames, height, width = frames.shape
+    batch_size = ops["batch_size"]
+    neucoeff = ops["neucoeff"]
+
+    if cell_masks is None:
+        console.echo(f"Creating ROI masks for plane {plane_number}...", level=LogLevel.INFO)
+        timer.reset()
+
+        cell_masks, new_neuropil_masks = create_masks(
+            roi_statistics=roi_statistics, height=height, width=width, ops=ops
+        )
+
+        if neuropil_masks is None:
+            neuropil_masks = new_neuropil_masks
+
+        console.echo(
+            f"Plane {plane_number} ROI masks: created. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS
+        )
+
+    cell_fluorescence, neuropil_fluorescence = extract_traces(
+        f_in=frames,
+        plane_number=plane_number,
+        cell_masks=cell_masks,
+        neuropil_masks=neuropil_masks,
+        batch_size=batch_size,
+    )
+
+    cell_fluorescence_channel_2 = []
+    neuropil_fluorescence_channel_2 = []
+
+    if frames_channel_2:
+        cell_fluorescence_channel_2, neuropil_fluorescence_channel_2 = extract_traces(
+            f_in=frames_channel_2,
+            plane_number=plane_number,
+            cell_masks=cell_masks,
+            neuropil_masks=neuropil_masks,
+            batch_size=batch_size,
+        )
+
+    corrected = cell_fluorescence - neucoeff * neuropil_fluorescence
+    skew_values = stats.skew(corrected, axis=1)
+    std_values = np.std(corrected, axis=1)
+
+    for i, (roi_stat, skew, std) in enumerate(zip(roi_statistics, skew_values, std_values)):
+        roi_stat.update({"skew": skew, "std": std})
+        if neuropil_masks is not None:
+            roi_stat["neuropil_mask"] = neuropil_masks[i]
+
+    return (
+        roi_statistics,
+        cell_fluorescence,
+        neuropil_fluorescence,
+        cell_fluorescence_channel_2,
+        neuropil_fluorescence_channel_2,
+    )
+
+
+def extract_traces(f_in, plane_number: int, cell_masks, neuropil_masks, batch_size: int = 500, session_id: str = ""):
     """Extracts activity from f_in using masks in stat and neuropil_masks
 
     computes fluorescence F as sum of pixels weighted by "lam"
@@ -56,13 +234,14 @@ def extract_traces(f_in, plane_number, cell_masks, neuropil_masks, batch_size=50
     Fneu : float, 2D array
         size [ROIs x time]
 
-    ops : dictionaray
+    ops : dictionary
 
     """
     if session_id == "":
         console.echo(f"Extracting ROI fluorescence data for plane {plane_number}...", level=LogLevel.INFO)
     else:
         console.echo(f"Extracting ROI fluorescence data for session {session_id}...", level=LogLevel.INFO)
+
     timer = PrecisionTimer("s")
     timer.reset()
     n_frames, Ly, Lx = f_in.shape
@@ -99,9 +278,16 @@ def extract_traces(f_in, plane_number, cell_masks, neuropil_masks, batch_size=50
         Fi = np.zeros((ncells, data.shape[0]), np.float32)
 
         # Extract traces and neuropil
-        F[:, inds] = matmul_traces(Fi, data, cell_ipix, cell_lam)
+        F[:, inds] = matmul_traces(
+            cell_fluorescence=Fi, data_matrix=data, cell_pixel_indices=cell_ipix, lambda_weights=cell_lam
+        )
         if neuropil_ipix is not None:
-            Fneu[:, inds] = matmul_neuropil(Fi, data, neuropil_ipix, neuropil_npix)
+            Fneu[:, inds] = matmul_neuropil(
+                neuropil_fluorescence=Fi,
+                data_matrix=data,
+                neuropil_pixel_indices=neuropil_ipix,
+                neuropil_pixel_count=neuropil_npix,
+            )
 
         ix += nimg
 
@@ -117,168 +303,6 @@ def extract_traces(f_in, plane_number, cell_masks, neuropil_masks, batch_size=50
         )
     console.echo(message=message, level=LogLevel.SUCCESS)
     return F, Fneu
-
-
-@njit(parallel=True)
-def matmul_traces(Fi, data, cell_ipix, cell_lam):
-    ncells = Fi.shape[0]
-    for n in prange(ncells):
-        n = np.int64(n)  # This is here to fix Numba's 'unsafe uint64 -> int64 cast warning.'
-        Fi[n] = np.dot(data[:, cell_ipix[n]], cell_lam[n])
-    return Fi
-
-
-@njit(parallel=True)
-def matmul_neuropil(Fi, data, neuropil_ipix, neuropil_npix):
-    ncells = Fi.shape[0]
-    for n in prange(ncells):
-        n = np.int64(n)  # This is here to fix Numba's 'unsafe uint64 -> int64 cast warning.'
-        Fi[n] = data[:, neuropil_ipix[n]].sum(axis=1) / neuropil_npix[n]
-    return Fi
-
-
-def extract_traces_from_masks(ops, cell_masks, neuropil_masks):
-    """Extract fluorescence from both channels
-
-    also used in drawroi.py
-
-    """
-    batch_size = ops["batch_size"]
-    F_chan2, Fneu_chan2 = [], []
-    with BinaryFile(height=ops["Ly"], width=ops["Lx"], file_path=ops["reg_file"]) as f:
-        F, Fneu = extract_traces(f, cell_masks, neuropil_masks, batch_size=batch_size)
-    if "reg_file_chan2" in ops:
-        with BinaryFile(height=ops["Ly"], width=ops["Lx"], file_path=ops["reg_file_chan2"]) as f:
-            F_chan2, Fneu_chan2 = extract_traces(f, cell_masks, neuropil_masks, batch_size=batch_size)
-    return F, Fneu, F_chan2, Fneu_chan2
-
-
-def extraction_wrapper(
-    stat, plane_number: int, f_reg, f_reg_chan2=None, cell_masks=None, neuropil_masks=None, ops=generate_default_ops()
-):
-    """Main extraction function
-    creates masks, computes fluorescence
-
-    Parameters
-    ----------------
-
-    stat : array of dicts
-
-    f_reg : array of functional frames, np.ndarray or io.BinaryFile
-        n_frames x Ly x Lx
-
-    f_reg_chan2 : array of anatomical frames, np.ndarray or io.BinaryFile
-        n_frames x Ly x Lx
-
-
-    Returns:
-    ----------------
-    stat : list of dictionaries
-        adds keys "skew" and "std"
-
-    F : fluorescence of functional channel
-
-    F_neu : neuropil of functional channel
-
-    F_chan2 : fluorescence of anatomical channel
-
-    F_neu_chan2 : neuropil of anatomical channel
-
-    """
-    timer = PrecisionTimer("s")
-    n_frames, Ly, Lx = f_reg.shape
-    batch_size = ops["batch_size"]
-    if cell_masks is None:
-        console.echo(f"Creating ROI masks for plane {plane_number}...", level=LogLevel.INFO)
-        timer.reset()
-        cell_masks, neuropil_masks0 = create_masks(roi_statistics=stat, height=Ly, width=Lx, ops=ops)
-        if neuropil_masks is None:
-            neuropil_masks = neuropil_masks0
-        console.echo(
-            f"Plane {plane_number} ROI masks: created. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS
-        )
-
-    F, Fneu = extract_traces(
-        f_in=f_reg,
-        plane_number=plane_number,
-        cell_masks=cell_masks,
-        neuropil_masks=neuropil_masks,
-        batch_size=batch_size,
-    )
-
-    if f_reg_chan2 is not None:
-        F_chan2, Fneu_chan2 = extract_traces(
-            f_in=f_reg_chan2,
-            plane_number=plane_number,
-            cell_masks=cell_masks,
-            neuropil_masks=neuropil_masks,
-            batch_size=batch_size,
-        )
-    else:
-        F_chan2, Fneu_chan2 = [], []
-
-    # subtract neuropil
-    dF = F - ops["neucoeff"] * Fneu
-
-    # compute activity statistics for classifier
-    sk = stats.skew(dF, axis=1)
-    sd = np.std(dF, axis=1)
-    for k in range(F.shape[0]):
-        stat[k]["skew"] = sk[k]
-        stat[k]["std"] = sd[k]
-        if neuropil_masks is not None:
-            stat[k]["neuropil_mask"] = neuropil_masks[k]
-
-    return stat, F, Fneu, F_chan2, Fneu_chan2
-
-
-def create_masks_and_extract(ops, stat, cell_masks=None, neuropil_masks=None):
-    """Creates masks, computes fluorescence, and saves stat, F, and Fneu to .npy
-
-    Parameters
-    ----------------
-
-    ops : dictionary
-        "Ly", "Lx", "reg_file", "neucoeff", "ops_path",
-        "save_path", "sparse_mode", "nframes", "batch_size"
-        (optional "reg_file_chan2", "chan2_thres")
-
-    stat : array of dicts
-
-    Returns:
-    ----------------
-    stat : list of dictionaries
-        adds keys "skew" and "std"
-
-    F : fluorescence of functional channel
-
-    F_neu : neuropil of functional channel
-
-    F_chan2 : fluorescence of anatomical channel
-
-    F_neu_chan2 : neuropil of anatomical channel
-
-    """
-    if len(stat) == 0:
-        raise ValueError("stat array should not be of length 0 (no ROIs were found)")
-
-    # create cell and neuropil masks
-    Ly, Lx = ops["Ly"], ops["Lx"]
-    reg_file = ops["reg_file"]
-    reg_file_alt = ops.get("reg_file_chan2", ops["reg_file"])
-    with (
-        BinaryFile(height=Ly, width=Lx, file_path=reg_file) as f_in,
-        BinaryFile(height=Ly, width=Lx, file_path=reg_file_alt) as f_in_chan2,
-    ):
-        if ops["nchannels"] == 1:
-            f_in_chan2.close()
-            f_in_chan2 = None
-
-        stat, F, Fneu, F_chan2, Fneu_chan2 = extraction_wrapper(
-            stat, f_in, f_reg_chan2=f_in_chan2, cell_masks=cell_masks, neuropil_masks=neuropil_masks, ops=ops
-        )
-
-    return stat, F, Fneu, F_chan2, Fneu_chan2
 
 
 def enhanced_mean_image(ops):

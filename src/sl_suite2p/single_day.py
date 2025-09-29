@@ -325,8 +325,8 @@ def _process_rois(
             ) = extraction.extraction_wrapper(
                 roi_statistics,
                 plane_number=plane_number,
-                f_reg=frames,
-                f_reg_chan2=frames_channel_2,
+                frames=frames,
+                frames_channel_2=frames_channel_2,
                 ops=ops,
             )
 
