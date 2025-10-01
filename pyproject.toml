@@ -133,7 +133,7 @@ lint.ignore = [
     "FBT003",  # UI elements require the use of positional boolean values
     "TID252",  # Conflicts with Sun lab import strategy
     "SLF001",  # Sometimes accessing private members is necessary
-    "SIM115",  # Sometimes it is necessary to open and close files withouth the context manager.
+    "SIM115",  # Sometimes it is necessary to open and close files without the context manager
     "COM812", # Conflicts with the formatter
     "ISC001", # Conflicts with the formatter
     "PT001", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-182590771
