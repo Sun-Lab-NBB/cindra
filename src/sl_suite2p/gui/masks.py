@@ -9,7 +9,7 @@ import matplotlib.cm
 from qtpy.QtWidgets import QLabel, QComboBox, QLineEdit, QPushButton, QButtonGroup
 from matplotlib.colors import hsv_to_rgb
 
-import sl_suite2p.gui.merge as merge
+from sl_suite2p.gui import merge
 
 from . import io
 

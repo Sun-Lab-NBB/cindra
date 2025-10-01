@@ -15,7 +15,7 @@ from ataraxis_base_utilities import LogLevel, console
 from . import utils
 
 
-def neuropil_subtraction(mov: np.ndarray, filter_size: int) -> None:
+def _neuropil_subtraction(mov: np.ndarray, filter_size: int) -> None:
     """Returns movie subtracted by a low-pass filtered version of itself to help ignore neuropil."""
     nbinned, Ly, Lx = mov.shape
     c1 = uniform_filter(np.ones((Ly, Lx)), size=filter_size, mode="constant")
@@ -290,7 +290,7 @@ def sparsery(
     mov = utils.temporal_high_pass_filter(mov=mov, width=int(high_pass))
     max_proj = mov.max(axis=0)
     sdmov = utils.standard_deviation_over_time(mov, batch_size=batch_size)
-    mov = neuropil_subtraction(mov=mov / sdmov, filter_size=neuropil_high_pass)  # subtract low-pass filtered movie
+    mov = _neuropil_subtraction(mov=mov / sdmov, filter_size=neuropil_high_pass)  # subtract low-pass filtered movie
 
     _, Lyc, Lxc = mov.shape
     LL = np.meshgrid(np.arange(Lxc), np.arange(Lyc))

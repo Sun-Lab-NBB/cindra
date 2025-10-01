@@ -9,7 +9,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from . import sourcery, anatomical, chan2detect, sparsedetect
 from .stats import roi_stats
-from .denoise import pca_denoise
+from .denoise import block_pca_denoise
 from ..io.binary import BinaryFile
 from ..configuration import generate_default_ops
 from ..classification import classify, user_classfile
@@ -165,7 +165,12 @@ def detection_wrapper(
         mov -= mov.min()
 
     if ops.get("denoise", 1):
-        mov = pca_denoise(mov, block_size=[ops["block_size"][0] // 2, ops["block_size"][1] // 2], n_comps_frac=0.5)
+        mov = block_pca_denoise(
+            mov,
+            block_height=ops["block_size"][0] // 2,
+            block_width=ops["block_size"][1] // 2,
+            dimensionality_reduction_strength=0.5,
+        )
 
     if ops.get("anatomical_only", 0):
         source_types = ["max_proj / mean_img", "mean_img", "enhanced_mean_img", "max_proj"]
