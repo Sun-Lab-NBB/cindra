@@ -1,4 +1,5 @@
-"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+"""
+This module contains functions for extracting cell and neuropil fluorescence from the ROI masks."""
 
 from typing import Any, List
 import platform
@@ -19,6 +20,10 @@ if platform.system() == "Darwin":
     config.THREADING_LAYER = "omp"
 else:
     config.THREADING_LAYER = "tbb"
+    
+_SCALE_BACKGROUND = 4
+_MINIMUM_INTENSITY = -6
+_MAXIMUM_INTENSITY = 6
 
 
 @njit(parallel=True)
@@ -93,8 +98,8 @@ def extract_traces_from_masks(
         neuropil_masks: An array containing pixel indices of the neuropil surrounding the ROI.
     """
     batch_size = ops["batch_size"]
-    height = ops["Ly"]
-    width = ops["Lx"]
+    height = ops["height"]
+    width = ops["width"]
 
     with BinaryFile(height=height, width=width, file_path=ops["reg_file"]) as f:
         cell_fluorescence, neuropil_fluorescence = extract_traces(
@@ -113,6 +118,116 @@ def extract_traces_from_masks(
     return cell_fluorescence, neuropil_fluorescence, cell_fluorescence_channel_2, neuropil_fluorescence_channel_2
 
 
+def extract_traces(
+    f_in: np.ndarray,
+    plane_number: int,
+    cell_masks: List[NDArray],
+    neuropil_masks: List[NDArray] | None = None,
+    batch_size: int = 500,
+    session_id: str = ""
+) -> tuple[NDArray, NDArray]:
+    """
+    Extracts fluorescence traces from imaging data using cell and neuropil masks.
+    
+    Computes:
+    - Cell fluorescence F[n] = sum of pixels weighted by lambda coefficients
+    - Neuropil fluorescence Fneu = mean fluorescence in neuropil region
+    
+    Args:
+        f_in: An np.ndarray or io.BinaryFile of the imaging data with shape [n_frames, height, width].
+        plane_number: The index of the image plane being processed for logging purposes.
+        cell_masks: A list where each element is a tuple of pixel indices and their 
+                    corresponding lambda weights. The pixel indices are flattened pixel 
+                    locations and the lambda weights are normalized to sum to 1.
+        neuropil_masks: The neuropil pixel indices for each cell. 
+        batch_size: The number of frames processed at once, with a maximum of 1000 
+                    and a default of 500.
+        session_id: The session identifier used for logging, which overrides the plane_number 
+                    in messages.
+    """
+    
+    if session_id == "":
+        console.echo(f"Extracting ROI fluorescence data for plane {plane_number}...", level=LogLevel.INFO)
+    else:
+        console.echo(f"Extracting ROI fluorescence data for session {session_id}...", level=LogLevel.INFO)
+    
+    timer = PrecisionTimer("s")
+    timer.reset()
+    
+    n_frames, height, width = f_in.shape
+    n_cells = len(cell_masks)
+    n_pixels = height * width
+    actual_batch_size = min(batch_size, 1000)
+    
+    fluorescence= np.zeros((n_cells, n_frames), dtype=np.float32)
+    neuropil_fluorescence = np.zeros((n_cells, n_frames), dtype=np.float32)
+    
+    cell_pixel_indices = List()
+    cell_lambda_weights = List()
+    for pixel_indices, lambda_weights in cell_masks:
+        cell_pixel_indices.append(pixel_indices.astype(np.int64))
+        cell_lambda_weights.append(lambda_weights.astype(np.float32))
+    
+    has_neuropil = neuropil_masks is not None
+    if has_neuropil:
+        neuropil_pixel_indices = List()
+    
+        if isinstance(neuropil_masks, np.ndarray) and neuropil_masks.shape[1] == n_pixels:
+            for mask_row in neuropil_masks:
+                neuropil_pixel_indices.append(np.nonzero(mask_row)[0].astype(np.int64))
+        else:
+            for mask_indices in neuropil_masks:
+                neuropil_pixel_indices.append(mask_indices.astype(np.int64))
+    
+        neuropil_pixel_count = np.array([len(indices) for indices in neuropil_pixel_indices], dtype=np.float32)
+    
+    current_frame = 0
+
+    for batch_start in range(0, n_frames, actual_batch_size):
+        batch_end = min(batch_start + actual_batch_size, n_frames)
+        batch_data = f_in[batch_start:batch_end].astype(np.float32)
+        n_batch_frames = batch_data.shape[0]
+        
+        batch_n_pixels = batch_data.reshape(n_batch_frames, n_pixels)
+        current_batch_slice = slice(current_frame, current_frame + n_batch_frames)
+        
+        # Pre-allocates an array of size [n_cells × n_batch_frames] to store extracted cell 
+        # and neuropil fluorescence values in the current batch
+        current_batch_fluorescence = np.zeros((n_cells, n_batch_frames), dtype=np.float32)
+        
+        fluorescence[:, current_batch_slice] = matmul_traces(
+            cell_fluorescence=current_batch_fluorescence,
+            data_matrix=batch_n_pixels,
+            cell_pixel_indices=cell_pixel_indices,
+            lambda_weights=cell_lambda_weights
+        )
+        
+        if has_neuropil:
+            neuropil_fluorescence[:, current_batch_slice] = matmul_neuropil(
+                neuropil_fluorescence=current_batch_fluorescence,
+                data_matrix=batch_n_pixels,
+                neuropil_pixel_indices=neuropil_pixel_indices,
+                neuropil_pixel_count=neuropil_pixel_count
+            )
+        
+        current_frame += n_batch_frames
+    
+    elapsed_time = timer.elapsed
+    if session_id == "":
+        message = (
+            f"Plane {plane_number} ROI fluorescence: extracted from {n_cells} ROIs in {n_frames} frames. "
+            f"Time taken: {elapsed_time:.2f} seconds."
+        )
+    else:
+        message = (
+            f"Session {session_id} ROI fluorescence: extracted from {n_cells} ROIs in {n_frames} frames. "
+            f"Time taken: {elapsed_time:.2f} seconds."
+        )
+    console.echo(message=message, level=LogLevel.SUCCESS)
+    
+    return fluorescence, neuropil_fluorescence
+
+
 def extraction_wrapper(
     roi_statistics: List[dict[str, Any]],
     plane_number: int,
@@ -129,12 +244,13 @@ def extraction_wrapper(
     from the imaging frames, and computes the skewness and standard deviation on the signals after 
     subtracting the neuropil.
 
-    roi_statistics: The dictionary that stores the statistics for regions of interest (ROIs), including cell masks.
-    plane_number: The number (index) of the processed plane.
-    frames_path: The path to the binary file that stores the registered plane frames for which to process the ROIs.
-    frames_channel_2_path: Same as 'frames_path', but for the second functional channel, if the plane data contains
-            data from two channels.
-    ops: The dictionary that stores the plane registration parameters.
+    Args:
+        roi_statistics: The dictionary that stores the statistics for regions of interest (ROIs), including cell masks.
+        plane_number: The number (index) of the processed plane.
+        frames_path: The path to the binary file that stores the registered plane frames for which to process the ROIs.
+        frames_channel_2_path: Same as 'frames_path', but for the second functional channel, if the plane data contains
+                data from two channels.
+        ops: The dictionary that stores the plane registration parameters.
     """
     if ops is None:
         ops = generate_default_ops()
@@ -197,157 +313,53 @@ def extraction_wrapper(
     )
 
 
-def extract_traces(f_in, plane_number: int, cell_masks, neuropil_masks, batch_size: int = 500, session_id: str = ""):
-    """Extracts activity from f_in using masks in stat and neuropil_masks
+def enhanced_mean_image(ops: dict[str, Any]) -> dict[str, Any]:
+    """
+    Computes an enhanced mean image by removing background noise and normalizing 
+    the local variance.
 
-    computes fluorescence F as sum of pixels weighted by "lam"
-    computes neuropil fluorescence Fneu as sum of pixels in neuropil_masks
-
-    data is from reg_file ops["batch_size"] by pixels:
-    .. code-block:: python
-        F[n] = data[:, stat[n]["ipix"]] @ stat[n]["lam"]
-        Fneu = neuropil_masks @ data.T
-
-    Parameters
-    ----------------
-
-    f_in : np.ndarray or io.BinaryFile object
-        size n_frames, Ly, Lx
-
-
-    cell_masks : list
-        each is a tuple where first element are cell pixels (flattened), and
-        second element are pixel weights normalized to sum 1 (lam)
-
-    neuropil_masks : list
-        each element is neuropil pixels in (Ly*Lx) coordinates
-        GOING TO BE DEPRECATED: size [ncells x npixels] where weights of each mask are elements
-
-    batch_size : int
-        function will run with at most batch size of 1000
+    Args:
+        ops: The dictionary that stores the plane registration parameters.
 
     Returns:
-    ----------------
-    F : float, 2D array
-        size [ROIs x time]
-
-    Fneu : float, 2D array
-        size [ROIs x time]
-
-    ops : dictionary
-
+        The input 'ops' dictionary, expanded to include the 'meanImgE' field.
     """
-    if session_id == "":
-        console.echo(f"Extracting ROI fluorescence data for plane {plane_number}...", level=LogLevel.INFO)
-    else:
-        console.echo(f"Extracting ROI fluorescence data for session {session_id}...", level=LogLevel.INFO)
 
-    timer = PrecisionTimer("s")
-    timer.reset()
-    n_frames, Ly, Lx = f_in.shape
-    batch_size = min(batch_size, 1000)
-    ncells = len(cell_masks)
+    mean_image = ops["meanImg"].astype(np.float32)
 
-    F = np.zeros((ncells, n_frames), np.float32)
-    Fneu = np.zeros((ncells, n_frames), np.float32)
-
-    batch_size = int(batch_size)
-
-    cell_ipix, cell_lam = List(), List()
-    [cell_ipix.append(cell_mask[0].astype(np.int64)) for cell_mask in cell_masks]
-    [cell_lam.append(cell_mask[1].astype(np.float32)) for cell_mask in cell_masks]
-
-    if neuropil_masks is not None:
-        neuropil_ipix = List()
-        if isinstance(neuropil_masks, np.ndarray) and neuropil_masks.shape[1] == Ly * Lx:
-            [neuropil_ipix.append(np.nonzero(neuropil_mask)[0].astype(np.int64)) for neuropil_mask in neuropil_masks]
-        else:
-            [neuropil_ipix.append(neuropil_mask.astype(np.int64)) for neuropil_mask in neuropil_masks]
-        neuropil_npix = np.array([len(neuropil_ipixi) for neuropil_ipixi in neuropil_ipix]).astype(np.float32)
-    else:
-        neuropil_ipix = None
-
-    ix = 0
-    for k in np.arange(0, n_frames, batch_size):
-        data = f_in[k : min(k + batch_size, n_frames)].astype("float32")
-        nimg = data.shape[0]
-        if nimg == 0:
-            break
-        inds = ix + np.arange(0, nimg, 1, int)
-        data = np.reshape(data, (nimg, -1)).astype(np.float32)
-        Fi = np.zeros((ncells, data.shape[0]), np.float32)
-
-        # Extract traces and neuropil
-        F[:, inds] = matmul_traces(
-            cell_fluorescence=Fi, data_matrix=data, cell_pixel_indices=cell_ipix, lambda_weights=cell_lam
-        )
-        if neuropil_ipix is not None:
-            Fneu[:, inds] = matmul_neuropil(
-                neuropil_fluorescence=Fi,
-                data_matrix=data,
-                neuropil_pixel_indices=neuropil_ipix,
-                neuropil_pixel_count=neuropil_npix,
-            )
-
-        ix += nimg
-
-    if session_id == "":
-        message = (
-            f"Plane {plane_number} ROI fluorescence: extracted from {ncells} ROIs in {n_frames} frames. "
-            f"Time taken: {timer.elapsed} seconds."
-        )
-    else:
-        message = (
-            f"Session {session_id} ROI fluorescence: extracted from {ncells} ROIs in {n_frames} frames. "
-            f"Time taken: {timer.elapsed} seconds."
-        )
-    console.echo(message=message, level=LogLevel.SUCCESS)
-    return F, Fneu
-
-
-def enhanced_mean_image(ops):
-    """Computes enhanced mean image and adds it to ops
-
-    Median filters ops["meanImg"] with 4*diameter in 2D and subtracts and
-    divides by this median-filtered image to return a high-pass filtered
-    image ops["meanImgE"]
-
-    Parameters
-    ----------
-    ops : dictionary
-        uses "meanImg", "aspect", "spatscale_pix", "yrange" and "xrange"
-
-    Returns:
-    -------
-        ops : dictionary
-            "meanImgE" field added
-
-    """
-    I = ops["meanImg"].astype(np.float32)
     if "spatscale_pix" not in ops:
         if isinstance(ops["diameter"], int):
-            diameter = np.array([ops["diameter"], ops["diameter"]])
+            cell_diameter = np.array([ops["diameter"], ops["diameter"]])
         else:
-            diameter = np.array(ops["diameter"])
-        if diameter[0] == 0:
-            diameter[:] = 12
-        ops["spatscale_pix"] = diameter[1]
-        ops["aspect"] = diameter[0] / diameter[1]
+            cell_diameter = np.array(ops["diameter"])
+        
+        if cell_diameter[0] == 0:
+            cell_diameter[:] = 12
+    
+        ops["spatscale_pix"] = cell_diameter[1]  
+        ops["aspect"] = cell_diameter[0] / cell_diameter[1]  
+    
+    filter_height = _SCALE_BACKGROUND * np.ceil(ops["spatscale_pix"] * ops["aspect"]) + 1
+    filter_width = _SCALE_BACKGROUND * np.ceil(ops["spatscale_pix"]) + 1
+    filter_kernel_size = (int(filter_height), int(filter_width))
+    
+    background = signal.medfilt2d(mean_image, filter_kernel_size)
+    background_removed = mean_image - background
+    
+    local_variance = signal.medfilt2d(np.absolute(background_removed), filter_kernel_size)
+    normalized_image = background_removed / (1e-10 + local_variance) 
+    
+    y_start, y_end = ops["yrange"]
+    x_start, x_end = ops["xrange"]
+    roi_image = normalized_image[y_start:y_end, x_start:x_end]
+    
+    scaled_roi = (roi_image - _MINIMUM_INTENSITY) / (_MAXIMUM_INTENSITY - _MINIMUM_INTENSITY)
+    scaled_roi = np.clip(scaled_roi, 0, 1) 
 
-    diameter = 4 * np.ceil(np.array([ops["spatscale_pix"] * ops["aspect"], ops["spatscale_pix"]])) + 1
-    diameter = diameter.flatten().astype(np.int64)
-    Imed = signal.medfilt2d(I, [diameter[0], diameter[1]])
-    I = I - Imed
-    Idiv = signal.medfilt2d(np.absolute(I), [diameter[0], diameter[1]])
-    I = I / (1e-10 + Idiv)
-    mimg1 = -6
-    mimg99 = 6
-    mimg0 = I
+    height, width = ops["height"], ops["width"]
+    enhanced_image = np.full((height, width), scaled_roi.min(), dtype=np.float32)
+    enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
+    
+    ops["meanImgE"] = enhanced_image
 
-    mimg0 = mimg0[ops["yrange"][0] : ops["yrange"][1], ops["xrange"][0] : ops["xrange"][1]]
-    mimg0 = (mimg0 - mimg1) / (mimg99 - mimg1)
-    mimg0 = np.maximum(0, np.minimum(1, mimg0))
-    mimg = mimg0.min() * np.ones((ops["Ly"], ops["Lx"]), np.float32)
-    mimg[ops["yrange"][0] : ops["yrange"][1], ops["xrange"][0] : ops["xrange"][1]] = mimg0
-    ops["meanImgE"] = mimg
     return ops
