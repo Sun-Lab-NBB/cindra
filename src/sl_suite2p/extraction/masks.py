@@ -114,10 +114,7 @@ def create_cell_mask(
         width: The width of the image in pixels.
         allow_overlap: Indicates whether ROIs are allowed to overlap
     """
-    if allow_overlap:
-        pixel_mask = slice(None)
-    else:
-        pixel_mask = ~roi_statistics["overlap"]
+    pixel_mask = slice(None) if allow_overlap else ~roi_statistics["overlap"]
 
     cell_mask = np.ravel_multi_index((roi_statistics["ypix"], roi_statistics["xpix"]), (height, width))
     cell_mask = cell_mask[pixel_mask]
