@@ -12,6 +12,8 @@ from scipy.ndimage import gaussian_filter
 
 from . import utils
 from ..extraction import masks
+from ataraxis_base_utilities import LogLevel, console
+
 
 def _create_gaussian_mask(image_height: int, image_width:int, pixel_y_indices: NDArray[np.int64], pixel_x_indices: NDArray[np.int64], smoothing_radius: float) -> NDArray[np.float32]:
     """
@@ -179,66 +181,110 @@ def _compute_red_intensity_ratio(ops: dict, cell_statistics:list[dict]) -> NDArr
     return np.stack((is_red_cell, redprob), axis=-1)
 
 
-def _cellpose_overlap(stats:  list[dict], mean_red_image:NDArray[np.float32]) -> tuple[NDArray[np.float32], NDArray[np.int32]]:
+def _cellpose_overlap(cell_statistics:  list[dict], mean_red_image:NDArray[np.float32]) -> tuple[NDArray[np.float32], NDArray[np.int32]]:
     """
     Calculates overlap of extracted cells with Cellpose anatomical mask. 
-    Cellpose segments the red channel anatomical structure, then computes the intersection-over-union
+    Cellpose segments the red channel anatomical structure, then computes the Intersection-over-Union (IoU).
 
 
     Args:
-        stats: List containing the statistics for all detected cells
+        cell_statistics: List containing the statistics for all detected cells
         mean_red_image: The red-channel mean image
 
 
     Returns:
-    
+        redstats: An NDArray of shape (number_of_cells, 2)
+            [:, 0] = Boolean red-cell classification (True/False).
+            [:, 1] = Continuous red intensity ratio (0–1).
+        masks:
+
     """
     from . import anatomical
+    # Run Cellpose to detect anatomical regions in the red channel image and extract mask labels
+    anatomical_masks = anatomical.roi_detect(mean_red_image)[0]
 
-    masks = anatomical.roi_detect(mean_red_image)[0]
-    Ly, Lx = masks.shape
-    redstats = np.zeros((len(stats), 2), np.float32)  # changed the size of preallocated space
-    for i in range(len(stats)):
-        smask = np.zeros((Ly, Lx), np.uint16)
-        ypix0, xpix0 = stats[i]["ypix"], stats[i]["xpix"]
-        smask[ypix0, xpix0] = 1
-        ious = utils.mask_ious(masks, smask)[0]
-        iou = ious.max()
-        redstats[i,] = np.array([iou > 0.25, iou])  # this had the wrong dimension
-    return redstats, masks
+    # Extract image dimensions
+    image_height, image_width = anatomical_masks.shape
+
+    # Initialize array to store overlap information for each cell
+    # Column 0: Boolean red label; Column 1: IoU value
+    red_cell_statistics = np.zeros((len(cell_statistics), 2), np.float32)
+
+    # Compute overlap with anatomical masks for each cell
+    for cell_index, cell_data in enumerate(cell_statistics):
+        # Initialize an rmpty binary mask for this cell
+        single_cell_mask = np.zeros((image_height, image_width), np.uint16)
+        
+        # Fill the corresponding pixel to this cell with 1
+        cell_y_pixel, cell_x_pixel = cell_data["ypix"], cell_data["xpix"]
+        single_cell_mask[cell_y_pixel, cell_x_pixel] = 1
+
+        # Computes the IoU between this cell and all anatomical Cellpose masks, and then the highest among them
+        iou = utils.mask_ious(anatomical_masks, single_cell_mask)[0]
+        highest_iou = iou.max()
+
+        # Condition to be likely red-labeled
+        likely_red_label_flag = highest_iou > 0.25
+        
+        # Store results for this cell: [boolean classification, IoU value]
+        red_cell_statistics[cell_index] = np.array([likely_red_label_flag, highest_iou])  # this had the wrong dimension
+
+    return red_cell_statistics, anatomical_masks
 
 
-def detect(ops: np.ndarray, stats: list[dict[str, Any]]) -> tuple(NDArray, NDArray):
+def detect_red_cells(ops: np.ndarray, cell_statistics: list[dict]) -> tuple(dict, NDArray[np.float32]):
     """
     Detects the red cells in channel 2
     
-    Parameters
-    -------
+    Args:
+        ops: The dictionary containing descriptive parameters of the processed imaging data. 
+        cell_statistics: List containing the statistics for all detected cells
 
-    Returns
-    -------
+    Returns:
+        - 
+        - red_cell_results: float32 array of shape (num_cells, 2):
+            - [:, 0] → Boolean classification (True if red-labeled, else False)
+            - [:, 1] → Confidence metric
 
     """
-    mimg = ops["meanImg"].copy()
-    mimg2 = ops["meanImg_chan2"].copy()
+    green_channel_image = ops["meanImg"].copy()
+    red_channel_image = ops["meanImg_chan2"].copy()
 
-    # subtract bleedthrough of green into red channel
     # non-rigid regression with nblks x nblks pieces
-    nblks = 3
-    Ly, Lx = ops["Ly"], ops["Lx"]
-    ops["meanImg_chan2_corrected"] = _correct_green_bleedthrough(Ly, Lx, nblks, mimg, mimg2)
+    bleedthrough_blocks_per_dimension = 3
+    image_height, image_width = ops["Ly"], ops["Lx"]
 
-    redstats = None
+    # Correct the green bleedthrough and store it in 'ops'
+    ops["meanImg_chan2_corrected"] = _correct_green_bleedthrough(
+        image_height=image_height, 
+        image_width=image_width, 
+        number_of_blocks=bleedthrough_blocks_per_dimension, 
+        green_channel_image=green_channel_image, 
+        red_channel_image=red_channel_image
+        )
+
+    red_cell_results = None
+
+    # Attempt to detect red cells using Cellpose
     if ops.get("anatomical_red", True):
         try:
-            print(">>>> CELLPOSE estimating masks in anatomical channel")
-            redstats, masks = _cellpose_overlap(stats, mimg2)
+            console.echo(
+            message=f">>>> CELLPOSE estimating masks in anatomical channel",
+            level=LogLevel.SUCCESS,
+            )
+
+            red_cell_results, anatomical_masks = _cellpose_overlap(cell_statistics=cell_statistics, mean_red_image=red_channel_image)
         except:
-            print("ERROR importing or running cellpose, continuing without anatomical estimates")
+            console.echo(
+                message=f"ERROR importing or running cellpose, continuing without anatomical estimates",
+                level=LogLevel.SUCCESS,
+            )
+            red_cell_results = None
 
-    if redstats is None:
-        redstats = _compute_red_intensity_ratio(ops, stats)
+    # If we cannot run cell pose, we use intensity ratio to detect red cells
+    if red_cell_results is None:
+        red_cell_results = _compute_red_intensity_ratio(ops, cell_statistics)
     else:
-        ops["chan2_masks"] = masks
+        ops["chan2_masks"] = anatomical_masks
 
-    return ops, redstats
+    return ops, red_cell_results
