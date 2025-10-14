@@ -1,9 +1,10 @@
-"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+"""This module provides utilities to deconvolve spike_amplitude from neuropil-corrected fluorescence traces."""
 
 import platform
 
 from numba import njit, config, prange
 import numpy as np
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter, maximum_filter1d, minimum_filter1d
 
 if platform.system() == "Darwin":
@@ -13,32 +14,77 @@ else:
 
 
 @njit(["float32[:], float32[:], float32[:], int64[:], float32[:], float32[:], float32, float32"], cache=True)
-def oasis_trace(F, v, w, t, l, s, tau, fs):
-    """Spike deconvolution on a single neuron"""
-    NT = F.shape[0]
-    g = -1.0 / (tau * fs)
+def oasis_trace(
+    cell_fluorescence: NDArray[np.float32],
+    average_fluorescence: NDArray[np.float32],
+    pool_weight: NDArray[np.float32],
+    pool_start_time: NDArray[np.int64],
+    pool_length: NDArray[np.float32],
+    spike_amplitude: NDArray[np.float32],
+    time_constant: float,
+    sampling_rate: float,
+) -> NDArray[np.float32]:
+    """Performs spike deconvolution on a single fluorescence trace using the OASIS algorithm.
 
-    it = 0
-    ip = 0
+    It then checks whether the exponential decay constraint is violated between consecutive pools
+    and merges any violating pools into a single segment until the decay constraint is satisfied.
+    Once the calcium trace is rebuilt into a monotonically decreasing sequence, spike_amplitude are identified
+    as time points where the reconstructed calcium concentration exceeds the fluorescence from the
+    previous pool.
 
-    while it < NT:
-        v[ip], w[ip], t[ip], l[ip] = F[it], 1, it, 1
-        while ip > 0:
-            if v[ip - 1] * np.exp(g * l[ip - 1]) > v[ip]:
-                # violation of the constraint means merging pools
-                f1 = np.exp(g * l[ip - 1])
-                f2 = np.exp(2 * g * l[ip - 1])
-                wnew = w[ip - 1] + w[ip] * f2
-                v[ip - 1] = (v[ip - 1] * w[ip - 1] + v[ip] * w[ip] * f1) / wnew
-                w[ip - 1] = wnew
-                l[ip - 1] = l[ip - 1] + l[ip]
-                ip -= 1
-            else:
-                break
-        it += 1
-        ip += 1
+    Args:
+        cell_fluorescence: The array representing the raw fluorescence signal over time for a single neuron
+        average_fluorescence: The array that stores the mean fluorescence value of each pool during deconvolution
+        pool_weight: The array that stores the weighting coefficients used to compute the weighted average when
+                     two or more pools are merged.
+        pool_start_time: The array that stores the starting frame index of each pool.
+        pool_length: The array that stores duration of each pool in frames.
+        spike_amplitude: The array that stores the spike amplitudes. Nonzero values at pool start times indicate
+                         likely spike events.
+        time_constant: The timescale of the calcium indicator in seconds, used for the deconvolution kernel.
+        sampling_rate: The sampling rate per plane.
+    """
+    trace_length = cell_fluorescence.shape[0]
+    decay_constant = -1.0 / (time_constant * sampling_rate)
+    pool_index = 0
 
-    s[t[1:ip]] = v[1:ip] - v[: ip - 1] * np.exp(g * l[: ip - 1])
+    for time_index in range(trace_length):
+        # Initializes a new pool to represent a possible calcium segment
+        average_fluorescence[pool_index] = cell_fluorescence[time_index]
+        pool_weight[pool_index] = 1
+        pool_start_time[pool_index] = time_index
+        pool_length[pool_index] = 1
+
+        # Checks and corrects exponential decay violations by merging pools
+        current_idx = pool_index
+        for _ in range(pool_index, 0, -1):
+            if (
+                current_idx > 0
+                and average_fluorescence[current_idx - 1] * np.exp(decay_constant * pool_length[current_idx - 1])
+                > average_fluorescence[current_idx]
+            ):
+                # Merges the current pool with the previous one
+                prev_pool_decay = np.exp(decay_constant * pool_length[current_idx - 1])
+                decay_squared = np.exp(2 * decay_constant * pool_length[current_idx - 1])
+                new_pool_weight = pool_weight[current_idx - 1] + pool_weight[current_idx] * decay_squared
+
+                # Updates the merged pool's average value using a weighted average
+                average_fluorescence[current_idx - 1] = (
+                    average_fluorescence[current_idx - 1] * pool_weight[current_idx - 1]
+                    + average_fluorescence[current_idx] * pool_weight[current_idx] * prev_pool_decay
+                ) / new_pool_weight
+
+                pool_weight[current_idx - 1] = new_pool_weight
+                pool_length[current_idx - 1] += pool_length[current_idx]
+                current_idx -= 1
+
+        pool_index = current_idx + 1
+
+    spike_amplitude[pool_start_time[1:pool_index]] = average_fluorescence[1:pool_index] - average_fluorescence[
+        : pool_index - 1
+    ] * np.exp(decay_constant * pool_length[: pool_index - 1])
+
+    return spike_amplitude
 
 
 @njit(
@@ -46,102 +92,117 @@ def oasis_trace(F, v, w, t, l, s, tau, fs):
     parallel=True,
     cache=True,
 )
-def oasis_matrix(F, v, w, t, l, s, tau, fs):
-    """Spike deconvolution on many neurons parallelized with prange"""
-    for n in prange(F.shape[0]):
-        oasis_trace(F[n], v[n], w[n], t[n], l[n], s[n], tau, fs)
+def oasis_matrix(
+    cell_fluorescence: NDArray[np.float32],
+    average_fluorescence: NDArray[np.float32],
+    pool_weight: NDArray[np.float32],
+    pool_start_time: NDArray[np.int64],
+    pool_length: NDArray[np.float32],
+    spike_amplitude: NDArray[np.float32],
+    time_constant: float,
+    sampling_rate: float,
+) -> NDArray[np.float32]:
+    """Applies the 'oasis_trace' function to all neurons in order for spike deconvolution
+    to be performed in parallel across multiple cell fluorescence traces.
 
-
-def oasis(F: np.ndarray, batch_size: int, tau: float, fs: float) -> np.ndarray:
-    """Computes non-negative deconvolution
-
-    no sparsity constraints
-
-    Parameters
-    ----------------
-
-    F : float, 2D array
-        size [neurons x time], in pipeline uses neuropil-subtracted fluorescence
-
-    batch_size : int
-        number of frames processed per batch
-
-    tau : float
-        timescale of the sensor, used for the deconvolution kernel
-
-    fs : float
-        sampling rate per plane
-
-
-    Returns:
-    ----------------
-    S : float, 2D array
-        size [neurons x time], deconvolved fluorescence
-
+    Args:
+        cell_fluorescence: The array representing the raw fluorescence signal over time for a single neuron.
+        average_fluorescence: The array that stores the mean fluorescence value of each pool during deconvolution
+        pool_weight: The array that stores the weighting coefficients used to compute the weighted average when
+                        two or more pools are merged.
+        pool_start_time: The array that stores the starting frame index of each pool.
+        pool_length: The array that stores duration of each pool in frames.
+        spike_amplitude: The array that stores the spike amplitudes. Nonzero values at pool start times indicate
+                         likely spike events.
+        time_constant: The timescale of the calcium indicator in seconds, used for the deconvolution kernel.
+        sampling_rate: The sampling rate per plane.
     """
-    NN, NT = F.shape
-    F = F.astype(np.float32)
-    S = np.zeros((NN, NT), dtype=np.float32)
-    for i in range(0, NN, batch_size):
-        f = F[i : i + batch_size]
-        v = np.zeros((f.shape[0], NT), dtype=np.float32)
-        w = np.zeros((f.shape[0], NT), dtype=np.float32)
-        t = np.zeros((f.shape[0], NT), dtype=np.int64)
-        l = np.zeros((f.shape[0], NT), dtype=np.float32)
-        s = np.zeros((f.shape[0], NT), dtype=np.float32)
-        oasis_matrix(f, v, w, t, l, s, tau, fs)
-        S[i : i + batch_size] = s
-    return S
+    for i in prange(cell_fluorescence.shape[0]):
+        oasis_trace(
+            cell_fluorescence=cell_fluorescence[i],
+            average_fluorescence=average_fluorescence[i],
+            pool_weight=pool_weight[i],
+            pool_start_time=pool_start_time[i],
+            pool_length=pool_length[i],
+            spike_amplitude=spike_amplitude[i],
+            time_constant=time_constant,
+            sampling_rate=sampling_rate,
+        )
+
+
+def oasis(
+    cell_fluorescence: NDArray[np.float32], batch_size: int, time_constant: float, sampling_rate: float
+) -> NDArray[np.float32]:
+    """Computes non-negative deconvolution of calcium fluorescence traces to estimate spike activity.
+
+    Args:
+        cell_fluorescence: The ROI fluorescence traces after neuropil subtraction used for baseline correction.
+        batch_size: The number of frames processed per batch.
+        time_constant: The timescale of the calcium indicator in seconds, used for the deconvolution kernel.
+        sampling_rate: The sampling rate of the imaging data per plane.
+    """
+    n_neurons, n_timepoints = cell_fluorescence.shape
+    cell_fluorescence = cell_fluorescence.astype(np.float32)
+    spike_traces = np.zeros((n_neurons, n_timepoints), dtype=np.float32)
+
+    for start_index in range(0, n_neurons, batch_size):
+        end_index = start_index + batch_size
+        frame_batch = cell_fluorescence[start_index:end_index]
+        average_fluorescence = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.float32)
+        pool_weight = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.float32)
+        pool_start_time = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.int64)
+        pool_length = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.float32)
+        spike_amplitude = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.float32)
+
+        oasis_matrix(
+            cell_fluorescence=frame_batch,
+            average_fluorescence=average_fluorescence,
+            pool_weight=pool_weight,
+            pool_start_time=pool_start_time,
+            pool_length=pool_length,
+            spike_amplitude=spike_amplitude,
+            time_constant=time_constant,
+            sampling_rate=sampling_rate,
+        )
+
+        spike_traces[start_index:end_index] = spike_amplitude
+
+    return spike_traces
 
 
 def preprocess(
-    F: np.ndarray, baseline: str, win_baseline: float, sig_baseline: float, fs: float, prctile_baseline: float = 8
-) -> np.ndarray:
-    """Preprocesses fluorescence traces for spike deconvolution
+    cell_fluorescence: NDArray[np.float32],
+    baseline: str,
+    win_baseline: float,
+    sig_baseline: float,
+    sampling_rate: float,
+    prctile_baseline: float = 8,
+) -> NDArray[np.float32]:
+    """Preprocesses fluorescence traces for spike deconvolution by performing baseline subtraction
+    using the specified method and window size.
 
-    baseline-subtraction with window "win_baseline"
-
-    Parameters
-    ----------------
-
-    F : float, 2D array
-        size [neurons x time], in pipeline uses neuropil-subtracted fluorescence
-
-    baseline : str
-        setting that describes how to compute the baseline of each trace
-
-    win_baseline : float
-        window (in seconds) for max filter
-
-    sig_baseline : float
-        width of Gaussian filter in frames
-
-    fs : float
-        sampling rate per plane
-
-    prctile_baseline : float
-        percentile of trace to use as baseline if using `constant_prctile` for baseline
-
-    Returns:
-    ----------------
-    F : float, 2D array
-        size [neurons x time], baseline-corrected fluorescence
-
+    Args:
+        cell_fluorescence: The ROI fluorescence traces after neuropil subtraction used for baseline correction.
+        baseline: The method for computing the baseline of each trace (maximin, constant, or constant_prctile).
+        win_baseline: The time window (in seconds) used for the max/min filters.
+        sig_baseline: The width of the Gaussian filter in frames.
+        sampling_rate: The sampling rate of the imaging data per plane.
+        prctile_baseline: The percentile of trace to use when baseline is constant_prctile.
     """
-    win = int(win_baseline * fs)
+    win_frames = int(win_baseline * sampling_rate)
+    baseline_trace = 0.0
+
     if baseline == "maximin":
-        Flow = gaussian_filter(F, [0.0, sig_baseline])
-        Flow = minimum_filter1d(Flow, win)
-        Flow = maximum_filter1d(Flow, win)
+        baseline_trace = gaussian_filter(cell_fluorescence, [0.0, sig_baseline])
+        baseline_trace = minimum_filter1d(baseline_trace, win_frames, axis=1)
+        baseline_trace = maximum_filter1d(baseline_trace, win_frames, axis=1)
+
     elif baseline == "constant":
-        Flow = gaussian_filter(F, [0.0, sig_baseline])
-        Flow = np.amin(Flow)
+        smoothed_fluorescence = gaussian_filter(cell_fluorescence, [0.0, sig_baseline])
+        baseline_trace = np.amin(smoothed_fluorescence)
+
     elif baseline == "constant_prctile":
-        Flow = np.percentile(F, prctile_baseline, axis=1)
-        Flow = np.expand_dims(Flow, axis=1)
-    else:
-        Flow = 0.0
+        baseline_trace = np.percentile(cell_fluorescence, prctile_baseline, axis=1)
+        baseline_trace = np.expand_dims(baseline_trace, axis=1)
 
-    F = F - Flow
-
-    return F
+    return cell_fluorescence - baseline_trace

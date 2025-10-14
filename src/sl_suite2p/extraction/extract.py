@@ -26,11 +26,11 @@ _MAXIMUM_INTENSITY = 6
 
 @njit(parallel=True)
 def matmul_traces(
-    cell_fluorescence: NDArray[np.float64],
-    data_matrix: NDArray[np.float64],
+    cell_fluorescence: NDArray[np.float32],
+    data_matrix: NDArray[np.float32],
     cell_pixel_indices: list[NDArray[np.int64]],
-    lambda_weights: list[NDArray[np.float64]],
-) -> NDArray[np.float64]:
+    lambda_weights: list[NDArray[np.float32]],
+) -> NDArray[np.float32]:
     """Computes cell fluorescence traces by weighted matrix multiplication with their
     corresponding weights (lambda values). The weighted sum across all pixels gives
     the final fluorescence trace for that ROI across all frames.
@@ -53,11 +53,11 @@ def matmul_traces(
 
 @njit(parallel=True)
 def matmul_neuropil(
-    neuropil_fluorescence: NDArray[np.float64],
-    data_matrix: NDArray[np.float64],
+    neuropil_fluorescence: NDArray[np.float32],
+    data_matrix: NDArray[np.float32],
     neuropil_pixel_indices: list[NDArray[np.int64]],
     neuropil_pixel_count: NDArray[np.int64],
-) -> NDArray[np.float64]:
+) -> NDArray[np.float32]:
     """Extracts the fluorescence signals from pixels in the surrounding neuropil ring and computes
     the mean fluorescence across those pixels.
 
