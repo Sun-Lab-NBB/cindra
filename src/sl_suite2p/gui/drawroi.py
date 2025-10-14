@@ -74,14 +74,14 @@ def masks_and_traces(ops, stat_manual, stat_orig):
         manual_roi_stats[n]["med"] = [np.mean(manual_roi_stats[n]["ypix"]), np.mean(manual_roi_stats[n]["xpix"])]
 
     dF = preprocess(
-        F=dF,
+        cell_fluorescence=dF,
         baseline=ops["baseline"],
         win_baseline=ops["win_baseline"],
         sig_baseline=ops["sig_baseline"],
-        fs=ops["fs"],
+        sampling_rate=ops["fs"],
         prctile_baseline=ops["prctile_baseline"],
     )
-    spks = oasis(F=dF, batch_size=ops["batch_size"], tau=ops["tau"], fs=ops["fs"])
+    spks = oasis(cell_fluorescence=dF, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["fs"])
 
     return F, Fneu, F_chan2, Fneu_chan2, spks, ops, manual_roi_stats
 

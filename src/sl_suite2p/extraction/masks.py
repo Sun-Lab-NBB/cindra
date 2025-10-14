@@ -1,6 +1,4 @@
-"""This module contains functions for creating and handling cell pixel masks and neuropil masks associated with
-each ROI.
-"""
+"""This module contains functions for creating cell pixel masks and neuropil masks associated with each ROI."""
 
 from typing import Any
 

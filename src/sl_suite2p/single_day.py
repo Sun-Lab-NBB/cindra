@@ -360,16 +360,21 @@ def _process_rois(
                 # Computes delta f/f (neuropil-subtracted ROI fluorescence)
                 dff = cell_fluorescence.copy() - ops["neucoeff"] * neuropil_fluorescence
                 dff = extraction.preprocess(
-                    F=dff,
+                    cell_fluorescence=dff,
                     baseline=ops["baseline"],
                     win_baseline=ops["win_baseline"],
                     sig_baseline=ops["sig_baseline"],
-                    fs=ops["fs"],
+                    sampling_rate=ops["fs"],
                     prctile_baseline=ops["prctile_baseline"],
                 )
 
                 # Extracts the cell fluorescence spikes using the OASIS algorithm.
-                spikes = extraction.oasis(F=dff, batch_size=ops["batch_size"], tau=ops["tau"], fs=ops["fs"])
+                spikes = extraction.oasis(
+                    cell_fluorescence=dff,
+                    batch_size=ops["batch_size"],
+                    time_constant=ops["tau"],
+                    sampling_rate=ops["fs"],
+                )
                 ops["timing"]["deconvolution"] = timer.elapsed
 
                 message = (

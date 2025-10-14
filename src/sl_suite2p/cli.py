@@ -899,9 +899,7 @@ def run_md_pipeline_sl(
 
     # Instantiates the ProcessingTracker instance for multi-day suite2p processing and configures the underlying
     # tracker file to indicate that the processing is ongoing.
-    tracker = ProcessingTracker(
-        file_path=output_path.joinpath(TrackerFileNames.MULTIDAY)
-    )
+    tracker = ProcessingTracker(file_path=output_path.joinpath(TrackerFileNames.MULTIDAY))
 
     # If requested, resets the processing tracker before starting the runtime.
     if reset_tracker:
