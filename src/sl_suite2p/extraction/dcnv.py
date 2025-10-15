@@ -14,7 +14,7 @@ else:
 
 
 @njit(["float32[:], float32[:], float32[:], int64[:], float32[:], float32[:], float32, float32"], cache=True)
-def oasis_trace(
+def _oasis_trace(
     cell_fluorescence: NDArray[np.float32],
     average_fluorescence: NDArray[np.float32],
     pool_weight: NDArray[np.float32],
@@ -90,7 +90,7 @@ def oasis_trace(
     parallel=True,
     cache=True,
 )
-def oasis_matrix(
+def _oasis_matrix(
     cell_fluorescence: NDArray[np.float32],
     average_fluorescence: NDArray[np.float32],
     pool_weight: NDArray[np.float32],
@@ -116,7 +116,7 @@ def oasis_matrix(
         sampling_rate: The sampling rate per plane.
     """
     for i in prange(cell_fluorescence.shape[0]):
-        oasis_trace(
+        _oasis_trace(
             cell_fluorescence=cell_fluorescence[i],
             average_fluorescence=average_fluorescence[i],
             pool_weight=pool_weight[i],
@@ -152,7 +152,7 @@ def oasis(
         pool_length = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.float32)
         spike_amplitude = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.float32)
 
-        oasis_matrix(
+        _oasis_matrix(
             cell_fluorescence=frame_batch,
             average_fluorescence=average_fluorescence,
             pool_weight=pool_weight,
