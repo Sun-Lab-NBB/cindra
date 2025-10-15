@@ -23,7 +23,7 @@ def oasis_trace(
     spike_amplitude: NDArray[np.float32],
     time_constant: float,
     sampling_rate: float,
-) -> NDArray[np.float32]:
+) -> None:
     """Performs spike deconvolution on a single fluorescence trace using the OASIS algorithm.
 
     It then checks whether the exponential decay constraint is violated between consecutive pools
@@ -84,8 +84,6 @@ def oasis_trace(
         : pool_index - 1
     ] * np.exp(decay_constant * pool_length[: pool_index - 1])
 
-    return spike_amplitude
-
 
 @njit(
     ["float32[:,:], float32[:,:], float32[:,:], int64[:,:], float32[:,:], float32[:,:], float32, float32"],
@@ -101,7 +99,7 @@ def oasis_matrix(
     spike_amplitude: NDArray[np.float32],
     time_constant: float,
     sampling_rate: float,
-) -> NDArray[np.float32]:
+) -> None:
     """Applies the 'oasis_trace' function to all neurons in order for spike deconvolution
     to be performed in parallel across multiple cell fluorescence traces.
 
