@@ -25,7 +25,7 @@ _MAXIMUM_INTENSITY = 6
 
 
 @njit(parallel=True)
-def matmul_traces(
+def _matmul_traces(
     cell_fluorescence: NDArray[np.float32],
     data_matrix: NDArray[np.float32],
     cell_pixel_indices: list[NDArray[np.int64]],
@@ -52,7 +52,7 @@ def matmul_traces(
 
 
 @njit(parallel=True)
-def matmul_neuropil(
+def _matmul_neuropil(
     neuropil_fluorescence: NDArray[np.float32],
     data_matrix: NDArray[np.float32],
     neuropil_pixel_indices: list[NDArray[np.int64]],
@@ -183,7 +183,7 @@ def extract_traces(
         # and neuropil fluorescence values in the current batch
         current_batch_fluorescence = np.zeros((n_cells, n_batch_frames), dtype=np.float32)
 
-        fluorescence[:, current_batch_slice] = matmul_traces(
+        fluorescence[:, current_batch_slice] = _matmul_traces(
             cell_fluorescence=current_batch_fluorescence,
             data_matrix=batch_n_pixels,
             cell_pixel_indices=cell_pixel_indices,
@@ -191,7 +191,7 @@ def extract_traces(
         )
 
         if has_neuropil:
-            neuropil_fluorescence[:, current_batch_slice] = matmul_neuropil(
+            neuropil_fluorescence[:, current_batch_slice] = _matmul_neuropil(
                 neuropil_fluorescence=current_batch_fluorescence,
                 data_matrix=batch_n_pixels,
                 neuropil_pixel_indices=neuropil_pixel_indices,
