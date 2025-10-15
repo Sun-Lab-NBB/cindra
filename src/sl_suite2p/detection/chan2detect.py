@@ -5,19 +5,23 @@ takes from ops: "meanImg", "meanImg_chan2", "Ly", "Lx"
 takes from stat: "ypix", "xpix", "lam"
 """
 
-
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-
-from . import utils
-from ..extraction import masks
 from ataraxis_base_utilities import LogLevel, console
 
+from . import utils, anatomical
+from ..extraction import masks
 
-def _create_gaussian_mask(image_height: int, image_width:int, pixel_y_indices: NDArray[np.int64], pixel_x_indices: NDArray[np.int64], smoothing_radius: float) -> NDArray[np.float32]:
-    """
-    Creates a mask that smoothens a specified sub area of the imput image by applying gaussian filter.
+
+def _create_gaussian_mask(
+    image_height: int,
+    image_width: int,
+    pixel_y_indices: NDArray[np.int64],
+    pixel_x_indices: NDArray[np.int64],
+    smoothing_radius: float,
+) -> NDArray[np.float32]:
+    """Creates a mask that smoothens a specified sub area of the imput image by applying gaussian filter.
 
     Args:
         image_height: The height of the full image in pixels
@@ -29,7 +33,7 @@ def _create_gaussian_mask(image_height: int, image_width:int, pixel_y_indices: N
             - Smaller values: produce narrower, sharper transitions, so the block edges stay more confined.
 
     Returns:
-        A mask with same dimensions (image_height x image_width) where the specified block is 
+        A mask with same dimensions (image_height x image_width) where the specified block is
         1 in the center and smoothly tapers to 0 near the edges.
     """
     # Initialize a blank mask with same size as full image
@@ -39,24 +43,30 @@ def _create_gaussian_mask(image_height: int, image_width:int, pixel_y_indices: N
     mask[np.ix_(pixel_y_indices, pixel_x_indices)] = 1
 
     # Apply a gaussian filter to smooth the the edges of the sub area
-    mask = gaussian_filter(mask, smoothing_radius)
-
-    return mask
+    return gaussian_filter(mask, smoothing_radius)
 
 
-def _correct_green_bleedthrough(image_height: int, image_width:int, number_of_blocks: int, green_channel_image: NDArray[np.float32], red_channel_image: NDArray[np.float32]) -> NDArray[np.float32]:
-    """
-    Corrects green-to-red bleedthrough by estimating and subtracting local linear predictions of the green signal within image blocks.
+def _correct_green_bleedthrough(
+    image_height: int,
+    image_width: int,
+    number_of_blocks: int,
+    green_channel_image: NDArray[np.float32],
+    red_channel_image: NDArray[np.float32],
+) -> NDArray[np.float32]:
+    """Corrects green-to-red bleedthrough by estimating and subtracting local linear predictions of the green signal
+    within image blocks.
 
     Args:
         image_height: The height of the full image in pixels
         image_width: The width of the full image in pixels
-        number_of_blocks: The number of blocks along each dimension to split the image in (image is split into number_of_blocks x number_of_blocks).
+        number_of_blocks: The number of blocks along each dimension to split the image in (image is split into
+            number_of_blocks x number_of_blocks).
         green_channel_image: The mean image from the green channel of the input image
         red_channel_image: The mean image from the red channel of the input image
 
-    Returns: 
-        corrected_red: A 2D NumPy array of shape (image_height, image_width) containing the red_channel_image with predicted green bleedthrough removed.
+    Returns:
+        corrected_red: A 2D NumPy array of shape (image_height, image_width) containing the red_channel_image with
+            predicted green bleedthrough removed.
     """
     # Compute the gaussian smoothing radius based on the image size and the number of blocks you want to split it into.
     # (larger images and fewer blocks → larger radius).
@@ -70,25 +80,34 @@ def _correct_green_bleedthrough(image_height: int, image_width:int, number_of_bl
     block_edge_y_indices = np.linspace(0, image_height, number_of_blocks + 1, dtype=int)
     block_edge_x_indices = np.linspace(0, image_width, number_of_blocks + 1, dtype=int)
 
-    # For each block, estimate how much the corresponding green channel image block explains that of the red channel image
+    # For each block, estimate how much the corresponding green channel image block explains the red channel image
     for block_y_index in range(number_of_blocks):
         for block_x_index in range(number_of_blocks):
             # Get the pixel row and column indices for the current block
-            block_y_pixel_indices = np.arange(block_edge_y_indices[block_y_index], block_edge_y_indices[block_y_index + 1])
-            block_x_pixel_indices = np.arange(block_edge_x_indices[block_x_index], block_edge_x_indices[block_x_index + 1])
-            
+            block_y_pixel_indices = np.arange(
+                block_edge_y_indices[block_y_index], block_edge_y_indices[block_y_index + 1]
+            )
+            block_x_pixel_indices = np.arange(
+                block_edge_x_indices[block_x_index], block_edge_x_indices[block_x_index + 1]
+            )
+
             # Create an array containing a smoothing mask for each corresponding block
-            block_masks[:, :, block_y_index, block_x_index] = _create_gaussian_mask(image_height, image_width, block_y_pixel_indices, block_x_pixel_indices, gaussian_filter_smoothing_radius)
-            
+            block_masks[:, :, block_y_index, block_x_index] = _create_gaussian_mask(
+                image_height,
+                image_width,
+                block_y_pixel_indices,
+                block_x_pixel_indices,
+                gaussian_filter_smoothing_radius,
+            )
+
             # Extract the corresponding blocks in the green and red chanel images
             green_values = green_channel_image[np.ix_(block_y_pixel_indices, block_x_pixel_indices)].flatten()
             red_values = red_channel_image[np.ix_(block_y_pixel_indices, block_x_pixel_indices)].flatten()
-            
+
             # Calculate the linear regression slope to find best fit scaling from green to red
             numerator = np.dot(green_values, red_values)
             denominator = np.dot(green_values, green_values)
             block_weights[block_y_index, block_x_index] = numerator / denominator if denominator > 0 else 0.0
-
 
     # Normalize the Gaussian-blurred masks so their sum is 1 at every pixel.
     # These normalized masks are then used to smoothly weight block corrections across the image.
@@ -104,20 +123,16 @@ def _correct_green_bleedthrough(image_height: int, image_width:int, number_of_bl
     corrected_red -= block_masks.sum(axis=(-1, -2))
 
     # Clip negative values to zero (cannot have negative fluorescence)
-    corrected_red = np.maximum(0, corrected_red)
-
-    return corrected_red
+    return np.maximum(0, corrected_red)
 
 
-def _compute_red_intensity_ratio(ops: dict, cell_statistics:list[dict]) -> NDArray[np.float32]:
-    """
-    Computes the per-cell red labeling probabilities based on the intesity of red inside a cell relative to that of its nearby neuropil (surrounding region). 
-    For each cell, the function measures red intensity inside the cell and in the
-    immediate background, then computes a ratio that reflects how red-labeled the
-    cell is.
-    
+def _compute_red_intensity_ratio(ops: dict, cell_statistics: list[dict]) -> NDArray[np.float32]:
+    """Computes the per-cell red labeling probabilities based on the intesity of red inside a cell relative to that of
+    its nearby neuropil (surrounding region). For each cell, the function measures red intensity inside the cell and in
+    the immediate background, then computes a ratio that reflects how red-labeled the cell is.
+
     Args:
-        ops: The dictionary containing descriptive parameters of the processed imaging data. 
+        ops: The dictionary containing descriptive parameters of the processed imaging data.
         Expected keys include:
             - "Ly", "Lx": image height and width in pixels.
             - "meanImg_chan2": mean image from the red fluorescence channel.
@@ -130,7 +145,7 @@ def _compute_red_intensity_ratio(ops: dict, cell_statistics:list[dict]) -> NDArr
     Returns:
         An NDArray of shape (number_of_cells, 2)
             [:, 0] = Boolean red-cell classification (True/False).
-            [:, 1] = Continuous red intensity ratio (0–1).
+            [:, 1] = Continuous red intensity ratio, with values between 0 and 1.
 
     """
     # Extract image dimensions
@@ -141,11 +156,12 @@ def _compute_red_intensity_ratio(ops: dict, cell_statistics:list[dict]) -> NDArr
 
     # Create weights masks for each cell
     per_cell_weight_masks = [
-        masks.create_cell_mask(cell_data, Ly=image_height, Lx=image_width, allow_overlap=ops["allow_overlap"]) for cell_data in cell_statistics
+        masks.create_cell_mask(cell_data, Ly=image_height, Lx=image_width, allow_overlap=ops["allow_overlap"])
+        for cell_data in cell_statistics
     ]
 
     # Create neuropil masks (regions around each cell)
-    neuropil_pixel_index_lists= masks.create_neuropil_masks(
+    neuropil_pixel_index_lists = masks.create_neuropil_masks(
         ypixs=[cell["ypix"] for cell in cell_statistics],
         xpixs=[cell["xpix"] for cell in cell_statistics],
         cell_pix=all_cells_pixel_map,
@@ -159,8 +175,7 @@ def _compute_red_intensity_ratio(ops: dict, cell_statistics:list[dict]) -> NDArr
     neuropil_masks_matrix = np.zeros((number_of_cells, number_of_pixels), np.float32)
 
     # Populate the arrays with weights
-    for (cell_mask_row, (cell_pixel_indices, cell_pixel_weights), neuropil_mask_row, neuropil_pixel_indices
-         )in zip(
+    for cell_mask_row, (cell_pixel_indices, cell_pixel_weights), neuropil_mask_row, neuropil_pixel_indices in zip(
         cell_masks_matrix, per_cell_weight_masks, neuropil_masks_matrix, neuropil_pixel_index_lists, strict=False
     ):
         cell_mask_row[cell_pixel_indices] = cell_pixel_weights
@@ -172,7 +187,7 @@ def _compute_red_intensity_ratio(ops: dict, cell_statistics:list[dict]) -> NDArr
     outside_cell_intensity = neuropil_masks_matrix @ flat_red_channel.flatten()
 
     # Compute per-cell probability of being red
-    inside_cell_intensity = np.maximum(1e-3, inside_cell_intensity) # Avoid division by 0
+    inside_cell_intensity = np.maximum(1e-3, inside_cell_intensity)  # Avoid division by 0
     redprob = inside_cell_intensity / (inside_cell_intensity + outside_cell_intensity)
 
     # Classify as red cell based on threshold value
@@ -181,9 +196,10 @@ def _compute_red_intensity_ratio(ops: dict, cell_statistics:list[dict]) -> NDArr
     return np.stack((is_red_cell, redprob), axis=-1)
 
 
-def _cellpose_overlap(cell_statistics:  list[dict], mean_red_image:NDArray[np.float32]) -> tuple[NDArray[np.float32], NDArray[np.int32]]:
-    """
-    Calculates overlap of extracted cells with Cellpose anatomical mask. 
+def _cellpose_overlap(
+    cell_statistics: list[dict], mean_red_image: NDArray[np.float32]
+) -> tuple[NDArray[np.float32], NDArray[np.int32]]:
+    """Calculates overlap of extracted cells with Cellpose anatomical mask.
     Cellpose segments the red channel anatomical structure, then computes the Intersection-over-Union (IoU).
 
 
@@ -195,11 +211,10 @@ def _cellpose_overlap(cell_statistics:  list[dict], mean_red_image:NDArray[np.fl
     Returns:
         redstats: An NDArray of shape (number_of_cells, 2)
             [:, 0] = Boolean red-cell classification (True/False).
-            [:, 1] = Continuous red intensity ratio (0–1).
+            [:, 1] = Continuous red intensity ratio, with values between 0 and 1.
         masks:
 
     """
-    from . import anatomical
     # Run Cellpose to detect anatomical regions in the red channel image and extract mask labels
     anatomical_masks = anatomical.roi_detect(mean_red_image)[0]
 
@@ -214,7 +229,7 @@ def _cellpose_overlap(cell_statistics:  list[dict], mean_red_image:NDArray[np.fl
     for cell_index, cell_data in enumerate(cell_statistics):
         # Initialize an rmpty binary mask for this cell
         single_cell_mask = np.zeros((image_height, image_width), np.uint16)
-        
+
         # Fill the corresponding pixel to this cell with 1
         cell_y_pixel, cell_x_pixel = cell_data["ypix"], cell_data["xpix"]
         single_cell_mask[cell_y_pixel, cell_x_pixel] = 1
@@ -224,8 +239,9 @@ def _cellpose_overlap(cell_statistics:  list[dict], mean_red_image:NDArray[np.fl
         highest_iou = iou.max()
 
         # Condition to be likely red-labeled
-        likely_red_label_flag = highest_iou > 0.25
-        
+        red_label_threshold = 0.25
+        likely_red_label_flag = highest_iou > red_label_threshold
+
         # Store results for this cell: [boolean classification, IoU value]
         red_cell_statistics[cell_index] = np.array([likely_red_label_flag, highest_iou])  # this had the wrong dimension
 
@@ -233,15 +249,14 @@ def _cellpose_overlap(cell_statistics:  list[dict], mean_red_image:NDArray[np.fl
 
 
 def detect_red_cells(ops: np.ndarray, cell_statistics: list[dict]) -> tuple(dict, NDArray[np.float32]):
-    """
-    Detects the red cells in channel 2
-    
+    """Detects the red cells in channel 2.
+
     Args:
-        ops: The dictionary containing descriptive parameters of the processed imaging data. 
+        ops: The dictionary containing descriptive parameters of the processed imaging data.
         cell_statistics: List containing the statistics for all detected cells
 
     Returns:
-        - 
+        -
         - red_cell_results: float32 array of shape (num_cells, 2):
             - [:, 0] → Boolean classification (True if red-labeled, else False)
             - [:, 1] → Confidence metric
@@ -256,12 +271,12 @@ def detect_red_cells(ops: np.ndarray, cell_statistics: list[dict]) -> tuple(dict
 
     # Correct the green bleedthrough and store it in 'ops'
     ops["meanImg_chan2_corrected"] = _correct_green_bleedthrough(
-        image_height=image_height, 
-        image_width=image_width, 
-        number_of_blocks=bleedthrough_blocks_per_dimension, 
-        green_channel_image=green_channel_image, 
-        red_channel_image=red_channel_image
-        )
+        image_height=image_height,
+        image_width=image_width,
+        number_of_blocks=bleedthrough_blocks_per_dimension,
+        green_channel_image=green_channel_image,
+        red_channel_image=red_channel_image,
+    )
 
     red_cell_results = None
 
@@ -269,21 +284,24 @@ def detect_red_cells(ops: np.ndarray, cell_statistics: list[dict]) -> tuple(dict
     if ops.get("anatomical_red", True):
         try:
             console.echo(
-            message=f">>>> CELLPOSE estimating masks in anatomical channel",
-            level=LogLevel.SUCCESS,
+                message=">>>> CELLPOSE estimating masks in anatomical channel",
+                level=LogLevel.SUCCESS,
             )
 
-            red_cell_results, anatomical_masks = _cellpose_overlap(cell_statistics=cell_statistics, mean_red_image=red_channel_image)
-        except:
+            red_cell_results, anatomical_masks = _cellpose_overlap(
+                cell_statistics=cell_statistics, mean_red_image=red_channel_image
+            )
+        # Possible errors
+        except (ImportError, ModuleNotFoundError, FileNotFoundError, ValueError, RuntimeError, OSError) as exc:
             console.echo(
-                message=f"ERROR importing or running cellpose, continuing without anatomical estimates",
-                level=LogLevel.SUCCESS,
+                message=f"Cellpose failed ({type(exc).__name__}): {exc}. Falling back to intensity ratio.",
+                level=LogLevel.WARNING,
             )
             red_cell_results = None
 
     # If we cannot run cell pose, we use intensity ratio to detect red cells
     if red_cell_results is None:
-        red_cell_results = _compute_red_intensity_ratio(ops, cell_statistics)
+        red_cell_results = _compute_red_intensity_ratio(ops=ops, cell_statistics=cell_statistics)
     else:
         ops["chan2_masks"] = anatomical_masks
 
