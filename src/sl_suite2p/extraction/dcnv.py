@@ -108,10 +108,10 @@ def oasis_matrix(
     Args:
         cell_fluorescence: The array representing the raw fluorescence signal over time for a single neuron.
         average_fluorescence: The array that stores the mean fluorescence value of each pool during deconvolution
-        pool_weight: The array that stores the weighting coefficients used to compute the weighted average when
-                        two or more pools are merged.
+        pool_weight: The array that stores the weights used to compute the weighted average when merging two or more
+            pools of cells.
         pool_start_time: The array that stores the starting frame index of each pool.
-        pool_length: The array that stores duration of each pool in frames.
+        pool_length: The array that stores the duration of each pool in frames.
         spike_amplitude: The array that stores the spike amplitudes. Nonzero values at pool start times indicate
                          likely spike events.
         time_constant: The timescale of the calcium indicator in seconds, used for the deconvolution kernel.
