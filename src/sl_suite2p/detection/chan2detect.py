@@ -53,7 +53,7 @@ def intensity_ratio(ops, stats):
     (exclude pixels from other cells)
     """
     Ly, Lx = ops["Ly"], ops["Lx"]
-    cell_pix = masks.create_cell_pix(stats, Ly=ops["Ly"], Lx=ops["Lx"])
+    cell_pix = masks.create_cell_pix(roi_statistics=stats, height=ops["Ly"], width=ops["Lx"])
     cell_masks0 = [
         masks.create_cell_mask(stat, Ly=ops["Ly"], Lx=ops["Lx"], allow_overlap=ops["allow_overlap"]) for stat in stats
     ]

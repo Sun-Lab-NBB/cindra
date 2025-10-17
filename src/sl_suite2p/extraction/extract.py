@@ -31,9 +31,8 @@ def _matmul_traces(
     cell_pixel_indices: list[NDArray[np.int64]],
     lambda_weights: list[NDArray[np.float32]],
 ) -> NDArray[np.float32]:
-    """Computes cell fluorescence traces by weighted matrix multiplication with their
-    corresponding weights (lambda values). The weighted sum across all pixels gives
-    the final fluorescence trace for that ROI across all frames.
+    """Extracts cell fluorescence traces by computing the weighted sum of pixel intensities using lambda
+    values across all frames for each ROI.
 
     Args:
         cell_fluorescence: The output array of shape [n_cells, n_frames] to store cell fluorescence traces.
@@ -82,7 +81,7 @@ def extract_traces_from_masks(
     ops: dict[str, Any], cell_masks: list[tuple], neuropil_masks: list
 ) -> tuple[NDArray, NDArray, NDArray, NDArray]:
     """Computes fluorescence traces for each ROI and its corresponding neuropil region
-    from both channels, if available. This function is also used in drawroi.py.
+    from both channels if available.
 
     Args:
         ops: The dictionary that stores the plane registration parameters.
@@ -121,10 +120,6 @@ def extract_traces(
 ) -> tuple[NDArray, NDArray]:
     """Extracts fluorescence traces from imaging data using cell and neuropil masks.
 
-    For each frame, the cell fluorescence is computed as the weighted sum of
-    pixel intensities using the lambda coefficients, while the neuropil fluorescence
-    is calculated as the mean intensity within the neuropil region
-
     Args:
         f_in: An np.ndarray or io.BinaryFile of the imaging data with shape [n_frames, height, width].
         plane_number: The index of the image plane being processed for logging purposes.
@@ -150,6 +145,7 @@ def extract_traces(
     n_pixels = height * width
     actual_batch_size = min(batch_size, 1000)
 
+    # Computes ROI fluorescence as the weighted pixel sums
     fluorescence = np.zeros((n_cells, n_frames), dtype=np.float32)
     neuropil_fluorescence = np.zeros((n_cells, n_frames), dtype=np.float32)
 
@@ -159,6 +155,7 @@ def extract_traces(
         cell_pixel_indices.append(pixel_indices.astype(np.int64))
         cell_lambda_weights.append(lambda_weights.astype(np.float32))
 
+    # Computes neuropil fluorescence as the mean intensity over neuropil pixels
     has_neuropil = neuropil_masks is not None
     if has_neuropil:
         neuropil_pixel_indices = []
@@ -167,15 +164,17 @@ def extract_traces(
             neuropil_pixel_indices.extend(np.nonzero(mask_row)[0].astype(np.int64) for mask_row in neuropil_masks)
         else:
             neuropil_pixel_indices.extend(mask_indices.astype(np.int64) for mask_indices in neuropil_masks)
+
     neuropil_pixel_count = np.array([len(indices) for indices in neuropil_pixel_indices], dtype=np.float32)
 
     current_frame = 0
 
     for batch_start in range(0, n_frames, actual_batch_size):
         batch_end = min(batch_start + actual_batch_size, n_frames)
+
+        # Reshapes each batch from [frames, height, width] to [frames, pixels]
         batch_data = f_in[batch_start:batch_end].astype(np.float32)
         n_batch_frames = batch_data.shape[0]
-
         batch_n_pixels = batch_data.reshape(n_batch_frames, n_pixels)
         current_batch_slice = slice(current_frame, current_frame + n_batch_frames)
 
@@ -225,11 +224,7 @@ def extraction_wrapper(
     neuropil_masks: list[NDArray] | None = None,
     ops: dict[str, Any] | None = None,
 ) -> tuple[NDArray, NDArray, NDArray, NDArray]:
-    """Main extraction function that creates the masks and computes fluorescence traces.
-
-    This function generates cell and neuropil masks if not provided, extracts raw fluorescence traces
-    from the imaging frames, and computes the skewness and standard deviation on the signals after
-    subtracting the neuropil.
+    """Main extraction function that creates the masks and computes the fluorescence traces.
 
     Args:
         roi_statistics: The dictionary that stores the statistics for regions of interest (ROIs), including cell masks.
@@ -251,6 +246,7 @@ def extraction_wrapper(
     batch_size = ops["batch_size"]
     neucoeff = ops["neucoeff"]
 
+    # Create cell and neuropil masks if not provided
     if cell_masks is None:
         console.echo(f"Creating ROI masks for plane {plane_number}...", level=LogLevel.INFO)
         timer.reset()
@@ -266,6 +262,7 @@ def extraction_wrapper(
             f"Plane {plane_number} ROI masks: created. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS
         )
 
+    # Extract fluorescence traces for primary channel
     cell_fluorescence, neuropil_fluorescence = extract_traces(
         f_in=frames,
         plane_number=plane_number,
@@ -277,6 +274,7 @@ def extraction_wrapper(
     cell_fluorescence_channel_2 = []
     neuropil_fluorescence_channel_2 = []
 
+    # Process second channel if available
     if frames_channel_2:
         cell_fluorescence_channel_2, neuropil_fluorescence_channel_2 = extract_traces(
             f_in=frames_channel_2,
@@ -286,7 +284,10 @@ def extraction_wrapper(
             batch_size=batch_size,
         )
 
+    # Apply neuropil correction to cell fluorescence
     corrected = cell_fluorescence - neucoeff * neuropil_fluorescence
+
+    # Computes skewness and standard deviation for each ROI and updates the corresponding ROI statistics dictiona
     skew_values = stats.skew(corrected, axis=1)
     std_values = np.std(corrected, axis=1)
 

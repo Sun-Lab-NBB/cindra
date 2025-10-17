@@ -28,8 +28,10 @@ def create_masks(
     if ops is None:
         ops = generate_default_ops()
 
-    lam_percentile = ops.get("lam_percentile", 50.0)
-    cell_pix = create_cell_pix(roi_statistics=roi_statistics, height=height, width=width, lam_percentile=lam_percentile)
+    weight_percentile = ops.get("lam_percentile", 50.0)
+    cell_pix = create_cell_pix(
+        roi_statistics=roi_statistics, height=height, width=width, weight_percentile=weight_percentile
+    )
 
     allow_overlap = ops["allow_overlap"]
     cell_masks = [
@@ -61,42 +63,40 @@ def create_masks(
 
 
 def create_cell_pix(
-    roi_statistics: list[dict[str, Any]], height: int, width: int, lam_percentile: float = 50.0
+    roi_statistics: list[dict[str, Any]], height: int, width: int, weight_percentile: float = 50.0
 ) -> NDArray:
-    """Creates a 2D binary map of cell regions across the image by appheighting a threshold on pixel lambda weights
-    for all ROIs. The threshold is determined localheight based on a neighborhood defined by the median cell radius.
+    """Creates a 2D binary map of cell regions by thresholding pixel weights across all ROIs.
 
     Args:
         roi_statistics: The dictionary that stores the statistics for regions of interest (ROIs), including cell masks.
         height: The height of the image in pixels.
         width: The width of the image in pixels.
-        lam_percentile: Percentile threshold for lambda-weight where onheight pixels above this local threshold are
-                        considered cell pixels.
+        weight_percentile: The percentile threshold where pixels with values above this level are considered cell
+                           pixels.
     """
     pixel_mask = np.zeros((height, width))
-    lambda_weight_map = np.zeros((height, width))
+    pixel_weight_map = np.zeros((height, width))
     cell_radii = np.zeros(len(roi_statistics))
 
     for roi_index, curr_roi in enumerate(roi_statistics):
         cell_radii[roi_index] = curr_roi["radius"]
         y_pixels = curr_roi["ypix"]
         x_pixels = curr_roi["xpix"]
-        lambda_weight = curr_roi["lam"]
-        lambda_weight_map[y_pixels, x_pixels] = np.maximum(lambda_weight_map[y_pixels, x_pixels], lambda_weight)
+        pixel_weights = curr_roi["lam"]
+        pixel_weight_map[y_pixels, x_pixels] = np.maximum(pixel_weight_map[y_pixels, x_pixels], pixel_weights)
 
+    # Computes the median cell radius to determine the local neighborhood size for percentile filtering
     median_radius = np.median(cell_radii)
 
-    if lam_percentile > 0.0:
+    if weight_percentile > 0.0:
+        neighborhood_size = int(median_radius * 5)
         percentile_threshold_map = percentile_filter(
-            lambda_weight_map, percentile=lam_percentile, size=int(median_radius * 5)
+            pixel_weight_map, percentile=weight_percentile, size=neighborhood_size
         )
-
-        nonzero_pixels = lambda_weight_map > 0
-        above_threshold = lambda_weight_map >= percentile_threshold_map
-        pixel_mask = nonzero_pixels & above_threshold
+        pixel_mask = (pixel_weight_map > 0.0) & (pixel_weight_map >= percentile_threshold_map)
 
     else:
-        pixel_mask = lambda_weight_map > 0.0
+        pixel_mask = pixel_weight_map > 0.0
 
     return pixel_mask
 
@@ -104,23 +104,25 @@ def create_cell_pix(
 def create_cell_mask(
     roi_statistics: dict[str, Any], height: int, width: int, allow_overlap: bool = False
 ) -> tuple[NDArray, NDArray]:
-    """Creates a flattened list of pixel indices and the corresponding normalized lambda weights for a single ROI.
+    """Creates a flattened list of pixel indices and their corresponding normalized lambda weights for a single ROI.
 
     Args:
         roi_statistics: The dictionary that stores the statistics for regions of interest (ROIs), including cell masks.
         height: The height of the image in pixels.
         width: The width of the image in pixels.
-        allow_overlap: Indicates whether ROIs are allowed to overlap
+        allow_overlap: Indicates whether ROIs are allowed to overlap.
     """
     pixel_mask = slice(None) if allow_overlap else ~roi_statistics["overlap"]
 
     cell_mask = np.ravel_multi_index((roi_statistics["ypix"], roi_statistics["xpix"]), (height, width))
     cell_mask = cell_mask[pixel_mask]
-    lam = roi_statistics["lam"][pixel_mask]
+    fluorescence_weights = roi_statistics["lam"][pixel_mask]
 
-    lambda_normalized = lam / lam.sum() if lam.size > 0 else np.empty(0)
+    normalized_fluorescence_weights = (
+        fluorescence_weights / fluorescence_weights.sum() if fluorescence_weights.size > 0 else np.empty(0)
+    )
 
-    return cell_mask, lambda_normalized
+    return cell_mask, normalized_fluorescence_weights
 
 
 def create_neuropil_masks(
@@ -131,15 +133,15 @@ def create_neuropil_masks(
     min_neuropil_pixels: int,
     circular: bool = False,
 ) -> list[NDArray]:
-    """Creates a neuropil mask surrounding each ROI by extending the ROI boundaries while excluding cell pixels.
-    The function continuousheight expands the ROI until a sufficient number of valid neuropil pixels is included.
+    """Creates a neuropil mask for each ROI by expanding its boundary outwards until it includes
+    a specified number of non-cell pixels.
 
     Args:
         y_pixels: A list of y-coordinates of all ROI pixels.
         x_pixels: A list of x-coordinates of all ROI pixels.
-        cell_pix: A 2D binary array indicating if a pixel is contained in an ROI (1) else 0.
-        inner_neuropil_radius: The initial number of iterations to expand ROI
-        min_neuropil_pixels: The minimum number of valid pixels required for a neuropil mask.
+        cell_pix: A 2D binary array indicating if a pixel is contained in an ROI.
+        inner_neuropil_radius: The initial number of iterations to expand the ROI.
+        min_neuropil_pixels: The minimum number of pixels required for a neuropil mask.
         circular: Indicates whether to expand the neuropil mask in a circular trajectory.
     """
     height, width = cell_pix.shape
@@ -169,8 +171,8 @@ def create_neuropil_masks(
                     current_ypix, current_xpix = extendROI(
                         ypix=current_ypix,
                         xpix=current_xpix,
-                        height=height,
-                        width=width,
+                        Ly=height,
+                        Lx=width,
                         n_iter=_NEUROPIL_EXTENSION_PIXELS,
                     )
                 else:
