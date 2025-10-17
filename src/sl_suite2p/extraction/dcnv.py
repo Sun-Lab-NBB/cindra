@@ -69,7 +69,7 @@ def _oasis_matrix(
                     decay_squared = np.exp(2 * decay_constant * pool_length[i, current_idx - 1])
                     new_pool_weight = pool_weight[i, current_idx - 1] + pool_weight[i, current_idx] * decay_squared
 
-                    # Updates the merged pool's average value using weighted average
+                    # Updates the merged pool's average value using the weighted average
                     average_fluorescence[i, current_idx - 1] = (
                         average_fluorescence[i, current_idx - 1] * pool_weight[i, current_idx - 1]
                         + average_fluorescence[i, current_idx] * pool_weight[i, current_idx] * prev_pool_decay
@@ -81,7 +81,7 @@ def _oasis_matrix(
 
             pool_index = current_idx + 1
 
-        # Calculate spike amplitudes for this neuron
+        # Calculate spike amplitudes for each neuron
         spike_amplitude[i, pool_start_time[i, 1:pool_index]] = average_fluorescence[
             i, 1:pool_index
         ] - average_fluorescence[i, : pool_index - 1] * np.exp(decay_constant * pool_length[i, : pool_index - 1])
