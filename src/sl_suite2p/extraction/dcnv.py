@@ -13,78 +13,6 @@ else:
     config.THREADING_LAYER = "tbb"
 
 
-@njit(["float32[:], float32[:], float32[:], int64[:], float32[:], float32[:], float32, float32"], cache=True)
-def _oasis_trace(
-    cell_fluorescence: NDArray[np.float32],
-    average_fluorescence: NDArray[np.float32],
-    pool_weight: NDArray[np.float32],
-    pool_start_time: NDArray[np.int64],
-    pool_length: NDArray[np.float32],
-    spike_amplitude: NDArray[np.float32],
-    time_constant: float,
-    sampling_rate: float,
-) -> None:
-    """Performs spike deconvolution on a single fluorescence trace using the OASIS algorithm.
-
-    It then checks whether the exponential decay constraint is violated between consecutive pools
-    and merges any violating pools into a single segment until the decay constraint is satisfied.
-    Once the calcium trace is rebuilt into a monotonically decreasing sequence, spike_amplitude are identified
-    as time points where the reconstructed calcium concentration exceeds the fluorescence from the
-    previous pool.
-
-    Args:
-        cell_fluorescence: The array representing the raw fluorescence signal over time for a single neuron
-        average_fluorescence: The array that stores the mean fluorescence value of each pool during deconvolution
-        pool_weight: The array that stores the weighting coefficients used to compute the weighted average when
-                     two or more pools are merged.
-        pool_start_time: The array that stores the starting frame index of each pool.
-        pool_length: The array that stores duration of each pool in frames.
-        spike_amplitude: The array that stores the spike amplitudes. Nonzero values at pool start times indicate
-                         likely spike events.
-        time_constant: The timescale of the calcium indicator in seconds, used for the deconvolution kernel.
-        sampling_rate: The sampling rate per plane.
-    """
-    trace_length = cell_fluorescence.shape[0]
-    decay_constant = -1.0 / (time_constant * sampling_rate)
-    pool_index = 0
-
-    for time_index in range(trace_length):
-        # Initializes a new pool to represent a possible calcium segment
-        average_fluorescence[pool_index] = cell_fluorescence[time_index]
-        pool_weight[pool_index] = 1
-        pool_start_time[pool_index] = time_index
-        pool_length[pool_index] = 1
-
-        # Checks and corrects exponential decay violations by merging pools
-        current_idx = pool_index
-        for _ in range(pool_index, 0, -1):
-            if (
-                current_idx > 0
-                and average_fluorescence[current_idx - 1] * np.exp(decay_constant * pool_length[current_idx - 1])
-                > average_fluorescence[current_idx]
-            ):
-                # Merges the current pool with the previous one
-                prev_pool_decay = np.exp(decay_constant * pool_length[current_idx - 1])
-                decay_squared = np.exp(2 * decay_constant * pool_length[current_idx - 1])
-                new_pool_weight = pool_weight[current_idx - 1] + pool_weight[current_idx] * decay_squared
-
-                # Updates the merged pool's average value using a weighted average
-                average_fluorescence[current_idx - 1] = (
-                    average_fluorescence[current_idx - 1] * pool_weight[current_idx - 1]
-                    + average_fluorescence[current_idx] * pool_weight[current_idx] * prev_pool_decay
-                ) / new_pool_weight
-
-                pool_weight[current_idx - 1] = new_pool_weight
-                pool_length[current_idx - 1] += pool_length[current_idx]
-                current_idx -= 1
-
-        pool_index = current_idx + 1
-
-    spike_amplitude[pool_start_time[1:pool_index]] = average_fluorescence[1:pool_index] - average_fluorescence[
-        : pool_index - 1
-    ] * np.exp(decay_constant * pool_length[: pool_index - 1])
-
-
 @njit(
     ["float32[:,:], float32[:,:], float32[:,:], int64[:,:], float32[:,:], float32[:,:], float32, float32"],
     parallel=True,
@@ -100,14 +28,13 @@ def _oasis_matrix(
     time_constant: float,
     sampling_rate: float,
 ) -> None:
-    """Applies the 'oasis_trace' function to all neurons in order for spike deconvolution
-    to be performed in parallel across multiple cell fluorescence traces.
+    """Performs spike deconvolution on all neuon fluorescence traces in parallel using the OASIS algorithm.
 
     Args:
         cell_fluorescence: The array representing the raw fluorescence signal over time for a single neuron.
-        average_fluorescence: The array that stores the mean fluorescence value of each pool during deconvolution
-        pool_weight: The array that stores the weights used to compute the weighted average when merging two or more
-            pools of cells.
+        average_fluorescence: The array that stores the mean fluorescence value of each pool.
+        pool_weight: The array of coefficients used to calculate averages when consecutive time-point pools are merged
+                     during deconvolution.
         pool_start_time: The array that stores the starting frame index of each pool.
         pool_length: The array that stores the duration of each pool in frames.
         spike_amplitude: The array that stores the spike amplitudes. Nonzero values at pool start times indicate
@@ -115,17 +42,49 @@ def _oasis_matrix(
         time_constant: The timescale of the calcium indicator in seconds, used for the deconvolution kernel.
         sampling_rate: The sampling rate per plane.
     """
+    decay_constant = -1.0 / (time_constant * sampling_rate)
+
     for i in prange(cell_fluorescence.shape[0]):
-        _oasis_trace(
-            cell_fluorescence=cell_fluorescence[i],
-            average_fluorescence=average_fluorescence[i],
-            pool_weight=pool_weight[i],
-            pool_start_time=pool_start_time[i],
-            pool_length=pool_length[i],
-            spike_amplitude=spike_amplitude[i],
-            time_constant=time_constant,
-            sampling_rate=sampling_rate,
-        )
+        trace_length = cell_fluorescence[i].shape[0]
+        pool_index = 0
+
+        for time_index in range(trace_length):
+            # Initializes a new pool to represent a possible calcium segment
+            average_fluorescence[i, pool_index] = cell_fluorescence[i, time_index]
+            pool_weight[i, pool_index] = 1
+            pool_start_time[i, pool_index] = time_index
+            pool_length[i, pool_index] = 1
+
+            # Checks and corrects exponential decay violations by merging pools
+            current_idx = pool_index
+            for _ in range(pool_index, 0, -1):
+                if (
+                    current_idx > 0
+                    and average_fluorescence[i, current_idx - 1]
+                    * np.exp(decay_constant * pool_length[i, current_idx - 1])
+                    > average_fluorescence[i, current_idx]
+                ):
+                    # Merges the current pool with the previous one
+                    prev_pool_decay = np.exp(decay_constant * pool_length[i, current_idx - 1])
+                    decay_squared = np.exp(2 * decay_constant * pool_length[i, current_idx - 1])
+                    new_pool_weight = pool_weight[i, current_idx - 1] + pool_weight[i, current_idx] * decay_squared
+
+                    # Updates the merged pool's average value using weighted average
+                    average_fluorescence[i, current_idx - 1] = (
+                        average_fluorescence[i, current_idx - 1] * pool_weight[i, current_idx - 1]
+                        + average_fluorescence[i, current_idx] * pool_weight[i, current_idx] * prev_pool_decay
+                    ) / new_pool_weight
+
+                    pool_weight[i, current_idx - 1] = new_pool_weight
+                    pool_length[i, current_idx - 1] += pool_length[i, current_idx]
+                    current_idx -= 1
+
+            pool_index = current_idx + 1
+
+        # Calculate spike amplitudes for this neuron
+        spike_amplitude[i, pool_start_time[i, 1:pool_index]] = average_fluorescence[
+            i, 1:pool_index
+        ] - average_fluorescence[i, : pool_index - 1] * np.exp(decay_constant * pool_length[i, : pool_index - 1])
 
 
 def oasis(
