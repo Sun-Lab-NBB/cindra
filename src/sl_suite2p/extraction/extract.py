@@ -246,7 +246,7 @@ def extraction_wrapper(
     batch_size = ops["batch_size"]
     neucoeff = ops["neucoeff"]
 
-    # Create cell and neuropil masks if not provided
+    # Creates cell and neuropil masks if not provided
     if cell_masks is None:
         console.echo(f"Creating ROI masks for plane {plane_number}...", level=LogLevel.INFO)
         timer.reset()
@@ -262,7 +262,7 @@ def extraction_wrapper(
             f"Plane {plane_number} ROI masks: created. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS
         )
 
-    # Extract fluorescence traces for primary channel
+    # Extracts fluorescence traces for primary channel
     cell_fluorescence, neuropil_fluorescence = extract_traces(
         f_in=frames,
         plane_number=plane_number,
@@ -274,7 +274,7 @@ def extraction_wrapper(
     cell_fluorescence_channel_2 = []
     neuropil_fluorescence_channel_2 = []
 
-    # Process second channel if available
+    # Processes second channel if available
     if frames_channel_2:
         cell_fluorescence_channel_2, neuropil_fluorescence_channel_2 = extract_traces(
             f_in=frames_channel_2,
@@ -284,7 +284,7 @@ def extraction_wrapper(
             batch_size=batch_size,
         )
 
-    # Apply neuropil correction to cell fluorescence
+    # Applies neuropil correction to cell fluorescence
     corrected = cell_fluorescence - neucoeff * neuropil_fluorescence
 
     # Computes skewness and standard deviation for each ROI and updates the corresponding ROI statistics dictiona
