@@ -5,7 +5,7 @@ import numpy as np
 from qtpy.QtGui import QPainter
 from qtpy.QtWidgets import QLabel, QStyle, QSlider, QPushButton, QApplication, QButtonGroup, QStyleOptionSlider
 
-from .. import extraction
+from ..registration.register import create_enhanced_mean_image
 
 
 def make_buttons(parent):
@@ -71,11 +71,11 @@ def init_views(parent):
     parent.views = np.zeros((7, parent.Ly, parent.Lx, 3), np.float32)
     for k in range(7):
         if k == 2:
-            if "meanImgE" not in parent.ops:
-                parent.ops = extraction.enhanced_mean_image(parent.ops)
-            mimg = parent.ops["meanImgE"]
+            if "enhanced_mean_image" not in parent.ops:
+                parent.ops = create_enhanced_mean_image(parent.ops)
+            mimg = parent.ops["enhanced_mean_image"]
         elif k == 1:
-            mimg = parent.ops["meanImg"]
+            mimg = parent.ops["mean_image"]
             mimg1 = np.percentile(mimg, 1)
             mimg99 = np.percentile(mimg, 99)
             mimg = (mimg - mimg1) / (mimg99 - mimg1)
@@ -118,8 +118,8 @@ def init_views(parent):
                 mimg = (mimg - mimg1) / (mimg99 - mimg1)
                 mimg = np.maximum(0, np.minimum(1, mimg))
         elif k == 6:
-            if "meanImg_chan2" in parent.ops:
-                mimg = parent.ops["meanImg_chan2"]
+            if "mean_image_channel_2" in parent.ops:
+                mimg = parent.ops["mean_image_channel_2"]
                 mimg1 = np.percentile(mimg, 1)
                 mimg99 = np.percentile(mimg, 99)
                 mimg = (mimg - mimg1) / (mimg99 - mimg1)

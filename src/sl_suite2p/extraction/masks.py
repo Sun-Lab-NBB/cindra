@@ -6,60 +6,12 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import percentile_filter
 
-from ..configuration import generate_default_ops
 from ..detection.sparsedetect import extend_roi
 
 
-def create_masks(
-    roi_statistics: list[dict[str, Any]],
-    height: int,
-    width: int,
-    neuropil: bool,
-    ops: dict[str, Any],
-) -> tuple[list[tuple[NDArray[np.uint32], NDArray[np.float32]]], list[NDArray[np.uint32]] | None]:
-    """Creates binary pixel masks for cell ROIs and the surrounding neuropil regions.
-
-    Args:
-        roi_statistics: The ROI statistics for each ROI to be processed.
-        height: The height of the imaged area in pixels.
-        width: The width of the imaged area in pixels.
-        neuropil: Determines whether to create the masks for the surrounding neuropil region for each ROI.
-        ops: The signal extraction parameters.
-
-    Returns:
-        A tuple of two elements. The first element contains the flattened cell masks and the corresponding lambda weight
-        masks for each ROI. The second element contains the flattened neuropil masks for each ROI or None if neuropil
-        processing is disabled.
-    """
-    if ops is None:
-        ops = generate_default_ops()
-
-    # Create cell masks and lambda weight masks for all ROIs
-    cell_masks = _create_cell_masks(
-        roi_statistics=roi_statistics, height=height, width=width, allow_overlap=ops.get("allow_overlap", False)
-    )
-
-    # If neuropil processing is disabled, returns the extracted cell masks and the None placeholder for the neuropil
-    # masks.
-    if not neuropil:
-        return cell_masks, None
-
-    # Creates the neuropil masks for all ROIs
-    neuropil_masks = _create_neuropil_masks(
-        roi_statistics=roi_statistics,
-        height=height,
-        width=width,
-        cell_lambda_percentile=ops.get("lambda_percentile", 50.0),
-        inner_neuropil_border_radius=ops.get("inner_neuropil_border_radius", 2),
-        minimum_neuropil_size=ops.get("minimum_neuropil_pixels", 350),
-    )
-
-    return cell_masks, neuropil_masks
-
-
 def _create_cell_masks(
-    roi_statistics: list[dict[str, Any]], height: int, width: int, allow_overlap: bool
-) -> list[tuple[NDArray[np.uint32], NDArray[np.float32]]]:
+    roi_statistics: tuple[dict[str, Any]], height: int, width: int, allow_overlap: bool
+) -> tuple[tuple[NDArray[np.uint32], NDArray[np.float32]]]:
     """Creates the cell pixel masks and the normalized lambda weight masks for the target ROIs.
 
     Args:
@@ -96,17 +48,17 @@ def _create_cell_masks(
         normalized_lambda_weights = lambda_weights / lambda_weights.sum() if lambda_weights.size > 0 else np.empty(0)
         cell_masks.append((cell_mask_indices.astype(np.uint32), normalized_lambda_weights.astype(np.float32)))
 
-    return cell_masks
+    return tuple(cell_masks)
 
 
 def _create_neuropil_masks(
-    roi_statistics: list[dict[str, Any]],
+    roi_statistics: tuple[dict[str, Any]],
     height: int,
     width: int,
     inner_neuropil_border_radius: int,
     minimum_neuropil_size: int,
     cell_lambda_percentile: float,
-) -> list[NDArray[np.uint32]]:
+) -> tuple[NDArray[np.uint32]]:
     """Creates the neuropil masks for the target ROIs.
 
     Args:
@@ -193,11 +145,11 @@ def _create_neuropil_masks(
             np.ravel_multi_index(multi_index=np.nonzero(neuropil_mask), dims=(height, width)).astype(np.uint32)
         )
 
-    return neuropil_masks
+    return tuple(neuropil_masks)
 
 
 def _create_cell_pixels_mask(
-    roi_statistics: list[dict[str, Any]], height: int, width: int, lambda_percentile: float
+    roi_statistics: tuple[dict[str, Any]], height: int, width: int, lambda_percentile: float
 ) -> NDArray[np.bool]:
     """Creates a binary mask image that sets all pixels of the input image corresponding to a cell ROI to 1, and all
     other pixels to 0.
@@ -248,3 +200,47 @@ def _create_cell_pixels_mask(
         pixel_mask = cell_likelihood_map > 0.0
 
     return pixel_mask
+
+
+def create_masks(
+    roi_statistics: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    height: int,
+    width: int,
+    neuropil: bool,
+    ops: dict[str, Any],
+) -> tuple[tuple[tuple[NDArray[np.uint32], NDArray[np.float32]]], tuple[NDArray[np.uint32]] | None]:
+    """Creates binary pixel masks for the cell ROIs and the surrounding neuropil regions.
+
+    Args:
+        roi_statistics: The ROI statistics for each ROI to be processed.
+        height: The height of the imaged area in pixels.
+        width: The width of the imaged area in pixels.
+        neuropil: Determines whether to create the masks for the surrounding neuropil region for each ROI.
+        ops: The signal extraction parameters.
+
+    Returns:
+        A tuple of two elements. The first element contains the flattened cell masks and the corresponding lambda weight
+        masks for each ROI. The second element contains the flattened neuropil masks for each ROI or None if neuropil
+        processing is disabled.
+    """
+    # Create cell masks and lambda weight masks for all ROIs
+    cell_masks = _create_cell_masks(
+        roi_statistics=tuple(roi_statistics), height=height, width=width, allow_overlap=ops.get("allow_overlap", False)
+    )
+
+    # If neuropil processing is disabled, returns the extracted cell masks and the None placeholder for the neuropil
+    # masks.
+    if not neuropil:
+        return cell_masks, None
+
+    # Creates the neuropil masks for all ROIs
+    neuropil_masks = _create_neuropil_masks(
+        roi_statistics=tuple(roi_statistics),
+        height=height,
+        width=width,
+        cell_lambda_percentile=ops.get("lambda_percentile", 50.0),
+        inner_neuropil_border_radius=ops.get("inner_neuropil_border_radius", 2),
+        minimum_neuropil_size=ops.get("minimum_neuropil_pixels", 350),
+    )
+
+    return cell_masks, neuropil_masks

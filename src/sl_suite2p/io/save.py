@@ -267,13 +267,13 @@ def combined(
 
         # Updates the mean image and the filtered mean image with the processed plane's mean image and filtered mean
         # image data.
-        channel_1_mean_image[np.ix_(y_range, x_range)] = ops["meanImg"]
-        filtered_mean_image[np.ix_(y_range, x_range)] = ops["meanImgE"]
+        channel_1_mean_image[np.ix_(y_range, x_range)] = ops["mean_image"]
+        filtered_mean_image[np.ix_(y_range, x_range)] = ops["enhanced_mean_image"]
 
         # If the processed data uses two channels, updates the second channels' mean image with the processed plane's
         # data.
-        if "meanImg_chan2" in ops:
-            channel_2_mean_image[np.ix_(y_range, x_range)] = ops["meanImg_chan2"]
+        if "mean_image_channel_2" in ops:
+            channel_2_mean_image[np.ix_(y_range, x_range)] = ops["mean_image_channel_2"]
 
         # Updates the corrected second channel's mean image if specified in the processed plane's 'ops' dictionary.
         if "meanImg_chan2_corrected" in ops:
@@ -362,10 +362,10 @@ def combined(
         console.echo(message=f"Appended plane {plane_index} data to combined view.", level=LogLevel.SUCCESS)
 
     # Modifies the combined 'ops' dictionary to include descriptive information about the combined recording data
-    ops["meanImg"] = channel_1_mean_image
-    ops["meanImgE"] = filtered_mean_image
+    ops["mean_image"] = channel_1_mean_image
+    ops["enhanced_mean_image"] = filtered_mean_image
     if ops["nchannels"] > 1:
-        ops["meanImg_chan2"] = channel_2_mean_image
+        ops["mean_image_channel_2"] = channel_2_mean_image
     if "meanImg_chan2_corrected" in ops:
         ops["meanImg_chan2_corrected"] = channel_2_corrected_mean_image
     if "max_proj" in ops:

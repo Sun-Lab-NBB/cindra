@@ -78,8 +78,8 @@ def import_sessions(ops: dict[str, Any]) -> MultiDayData:
 
         # Extracts reference images. These images will be used to register the sessions to each-other across days
         images = {
-            "mean": single_day_ops["meanImg"].astype(np.float32),
-            "enhanced": single_day_ops["meanImgE"].astype(np.float32),
+            "mean": single_day_ops["mean_image"].astype(np.float32),
+            "enhanced": single_day_ops["enhanced_mean_image"].astype(np.float32),
             "max": single_day_ops["max_proj"].astype(np.float32),
         }
 

@@ -212,7 +212,7 @@ def raw_to_binary(plane_ops_dictionary: dict[str, Any], override_ops_parameters:
     Returns:
         The 'ops' dictionary of the first available plane to be processed augmented with additional descriptive
         parameters for the processed data. Specifically, the dictionary includes the following additional keys:
-        "Ly", "Lx", "nframes", "meanImg", "meanImg_chan2".
+        "Ly", "Lx", "nframes", "mean_image", "mean_image_channel_2".
     """
     # Instantiates and resets the run timer
     timer = PrecisionTimer("s")
@@ -257,7 +257,7 @@ def raw_to_binary(plane_ops_dictionary: dict[str, Any], override_ops_parameters:
 
     # Creates a mean image based on the final number of frames.
     for plane_ops_dict in plane_ops:
-        plane_ops_dict["meanImg"] /= plane_ops_dict["nframes"]
+        plane_ops_dict["mean_image"] /= plane_ops_dict["nframes"]
         np.save(plane_ops_dict["ops_path"], plane_ops_dict)
 
     # Returns the updated 'ops' dictionary for the first plane.
@@ -362,12 +362,12 @@ def _initialize_destination_files(
             ops["reg_file_chan2"].touch()
 
         # Initializes arrays for the mean image and the frame data.
-        ops["meanImg"] = np.zeros((raw_file.height, raw_file.width), np.float32)
+        ops["mean_image"] = np.zeros((raw_file.height, raw_file.width), np.float32)
         ops["nframes"] = 0
 
         # If the data uses two functional channels, initializes an array for the second channel's mean image.
         if channel_number > 1:
-            ops["meanImg_chan2"] = np.zeros((raw_file.height, raw_file.width), np.float32)
+            ops["mean_image_channel_2"] = np.zeros((raw_file.height, raw_file.width), np.float32)
 
         # Overrides the height and width properties of the 'ops' dictionary with the dimensions of the processed
         # recording.
@@ -477,8 +477,8 @@ def _single_raw_to_binary(plane_ops: list[dict[str, Any]], raw_file: _RawFile) -
 
                     # Appends the data from all processed frames to the data arrays in the plane-specific 'ops'
                     # dictionary, as this data is used during further processing.
-                    ops["meanImg"] += frames_to_write[0].astype(np.float32).sum(axis=0)
-                    ops["meanImg_chan2"] += frames_to_write[1].astype(np.float32).sum(axis=0)
+                    ops["mean_image"] += frames_to_write[0].astype(np.float32).sum(axis=0)
+                    ops["mean_image_channel_2"] += frames_to_write[1].astype(np.float32).sum(axis=0)
 
                 # If the processed data uses one functional channel, repeats the same steps above for only the first
                 # channel.
@@ -491,7 +491,7 @@ def _single_raw_to_binary(plane_ops: list[dict[str, Any]], raw_file: _RawFile) -
 
                     # Appends the data from all processed frames to the mean image data array in the plane-specific
                     # 'ops' dictionary,
-                    ops["meanImg"] += frames_to_write.astype(np.float32).sum(axis=0)
+                    ops["mean_image"] += frames_to_write.astype(np.float32).sum(axis=0)
 
             # Reads the next chunk of frames.
             frame_chunk = file.read(chunk_size)

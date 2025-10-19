@@ -10,7 +10,7 @@ from ..extraction import masks
 identify cells with channel 2 brightness (aka red cells)
 
 main function is detect
-takes from ops: "meanImg", "meanImg_chan2", "Ly", "Lx"
+takes from ops: "mean_image", "mean_image_channel_2", "Ly", "Lx"
 takes from stat: "ypix", "xpix", "lam"
 """
 
@@ -64,7 +64,7 @@ def intensity_ratio(ops, stats):
         cell_mask[cell_mask0[0]] = cell_mask0[1]
         neuropil_mask[neuropil_mask0.astype(np.int64)] = 1.0 / len(neuropil_mask0)
 
-    mimg2 = ops["meanImg_chan2"]
+    mimg2 = ops["mean_image_channel_2"]
     inpix = cell_masks @ mimg2.flatten()
     extpix = neuropil_masks @ mimg2.flatten()
     inpix = np.maximum(1e-3, inpix)
@@ -90,8 +90,8 @@ def cellpose_overlap(stats, mimg2):
 
 
 def detect(ops, stats):
-    mimg = ops["meanImg"].copy()
-    mimg2 = ops["meanImg_chan2"].copy()
+    mimg = ops["mean_image"].copy()
+    mimg2 = ops["mean_image_channel_2"].copy()
 
     # subtract bleedthrough of green into red channel
     # non-rigid regression with nblks x nblks pieces

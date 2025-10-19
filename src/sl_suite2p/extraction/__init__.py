@@ -2,4 +2,4 @@
 
 from .dcnv import oasis, preprocess
 from .masks import create_masks
-from .extract import extraction_wrapper, enhanced_mean_image, extract_traces_from_masks
+from .extract import extraction_wrapper, extract_traces, extract_traces_from_masks

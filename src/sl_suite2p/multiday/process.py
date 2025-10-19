@@ -54,7 +54,7 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     movie_width = int(np.amax(plane_x_coordinate + plane_widths))
 
     # Loads multi-day tracked cell masks for the processed session
-    cell_masks: list[dict[str, Any]] = np.load(
+    multiday_cell_masks: list[dict[str, Any]] = np.load(
         multiday_folder.joinpath("backwards_deformed_cell_masks.npy"), allow_pickle=True
     )
 
@@ -66,9 +66,9 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     console.echo(f"Creating session {session_id} multi-day cell masks...")
     timer.reset()
     # Re-computes the ROI stats for all multi-day tracked cells
-    cell_masks = roi_stats(cell_masks, ops["Ly"], ops["Lx"], ops["aspect"], ops["diameter"])
+    roi_statistics = roi_stats(multiday_cell_masks, ops["Ly"], ops["Lx"], ops["aspect"], ops["diameter"])
     cell_masks, neuropil_masks = extraction.masks.create_masks(
-        roi_statistics=cell_masks,
+        roi_statistics=roi_statistics,
         height=ops["Ly"],
         width=ops["Lx"],
         neuropil=ops.get("extract_neuropil", True),
@@ -89,8 +89,7 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
         registered_data_path,
     ) as file:
         cell_fluorescence, neuropil_fluorescence = extraction.extract.extract_traces(
-            f_in=file,
-            plane_number="combined",
+            data=file,
             cell_masks=cell_masks,
             neuropil_masks=neuropil_masks,
             batch_size=ops["batch_size"],

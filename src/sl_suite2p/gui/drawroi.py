@@ -281,7 +281,7 @@ class ROIDraw(QMainWindow):
                 mimg[
                     self.parent.ops["yrange"][0] : self.parent.ops["yrange"][1],
                     self.parent.ops["xrange"][0] : self.parent.ops["xrange"][1],
-                ] = self.parent.ops["meanImg"][
+                ] = self.parent.ops["mean_image"][
                     self.parent.ops["yrange"][0] : self.parent.ops["yrange"][1],
                     self.parent.ops["xrange"][0] : self.parent.ops["xrange"][1],
                 ]
@@ -291,7 +291,7 @@ class ROIDraw(QMainWindow):
                 mimg[
                     self.parent.ops["yrange"][0] : self.parent.ops["yrange"][1],
                     self.parent.ops["xrange"][0] : self.parent.ops["xrange"][1],
-                ] = self.parent.ops["meanImgE"][
+                ] = self.parent.ops["enhanced_mean_image"][
                     self.parent.ops["yrange"][0] : self.parent.ops["yrange"][1],
                     self.parent.ops["xrange"][0] : self.parent.ops["xrange"][1],
                 ]

@@ -387,7 +387,7 @@ def sourcery(mov: np.ndarray, ops, plane_number: int):
     if isinstance(ops["diameter"], int):
         ops["diameter"] = [ops["diameter"], ops["diameter"]]
     ops["diameter"] = np.array(ops["diameter"])
-    ops["spatscale_pix"] = ops["diameter"][1]
+    ops["spatial_scale_pixels"] = ops["diameter"][1]
     ops["aspect"] = ops["diameter"][0] / ops["diameter"][1]
     ops, U, sdmov, u = getSVDdata(mov=mov, ops=ops)  # get SVD components
     S, StU, StS = getStU(ops, U)

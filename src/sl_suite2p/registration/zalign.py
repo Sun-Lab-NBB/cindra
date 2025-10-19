@@ -111,7 +111,7 @@ def register_stack(Z, ops):
         ops["xoff1"] = xoff1
         ops["corrXY1"] = corrXY1
 
-    ops["meanImg"] = meanImg / ops["nframes"]
+    ops["mean_image"] = meanImg / ops["nframes"]
 
     return Zreg, ops
 

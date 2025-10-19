@@ -1,6 +1,5 @@
 """Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
 
-
 from numba import njit, config, prange, float32
 import numpy as np
 from numpy import fft

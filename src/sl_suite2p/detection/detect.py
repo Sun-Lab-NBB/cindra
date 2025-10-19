@@ -155,8 +155,8 @@ def detection_wrapper(
     elif mov.shape[2] != xrange[-1] - xrange[0]:
         raise ValueError("mov.shape[2] is not same size as xrange")
 
-    if "meanImg" not in ops:
-        ops["meanImg"] = mov.mean(axis=0)
+    if "mean_image" not in ops:
+        ops["mean_image"] = mov.mean(axis=0)
         ops["max_proj"] = mov.max(axis=0)
 
     if ops.get("inverted_activity", False):
@@ -168,7 +168,12 @@ def detection_wrapper(
         mov = pca_denoise(mov, block_size=[ops["block_size"][0] // 2, ops["block_size"][1] // 2], n_comps_frac=0.5)
 
     if ops.get("anatomical_only", 0):
-        source_types = ["max_proj / mean_img", "mean_img", "enhanced_mean_img", "max_proj"]
+        source_types = [
+            "maximum_projection_image / mean_image",
+            "mean_image",
+            "enhanced_mean_image",
+            "maximum_projection_image",
+        ]
         message = (
             f"Applying Cellpose to plane {plane_number} movie to find cell masks in "
             f"{source_types[int(ops['anatomical_only']) - 1]}..."
@@ -241,7 +246,7 @@ def detection_wrapper(
         console.echo(message=message, level=LogLevel.SUCCESS)
 
     # if second channel, detect bright cells in the second channel
-    if "meanImg_chan2" in ops:
+    if "mean_image_channel_2" in ops:
         if "chan2_thres" not in ops:
             ops["chan2_thres"] = 0.65
         ops, redcell = chan2detect.detect(ops, stat)
