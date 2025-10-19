@@ -402,7 +402,7 @@ class CellposeDetection:
 
     diameter: int = 0
     """Specifies the diameter, in pixels, to look for when finding cell ROIs. If set to 0, Cellpose estimates the 
-    diameter automatically.."""
+    diameter automatically."""
 
     cellprob_threshold: float = 0.0
     """The threshold for cell detection, used to filter out low-confidence ROIs."""

@@ -1,6 +1,5 @@
 """This module provides utilities to deconvolve spike_amplitude from neuropil-corrected fluorescence traces."""
 
-
 from numba import njit, config, prange
 import numpy as np
 from numpy.typing import NDArray

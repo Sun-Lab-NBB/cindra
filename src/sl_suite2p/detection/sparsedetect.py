@@ -481,7 +481,7 @@ def sparsery(
         "Vmap": np.asanyarray(
             v_map, dtype="object"
         ),  # needed so that scipy.io.savemat doesn"t fail in runpipeline with latest numpy (v1.24.3). dtype="object" is needed to have numpy array with elements having diff sizes
-        "spatscale_pix": spatscale_pix,
+        "spatial_scale_pixels": spatscale_pix,
     }
 
     return new_ops, stats

@@ -315,7 +315,7 @@ class MainWindow(QMainWindow):
                     self.viewbtns.button(4).setChecked(True)
                     self.viewbtns.button(4).press(self, 4)
                 elif event.key() == QtCore.Qt.Key_U:
-                    if "meanImg_chan2" in self.ops:
+                    if "mean_image_channel_2" in self.ops:
                         self.viewbtns.button(6).setChecked(True)
                         self.viewbtns.button(6).press(self, 6)
                 elif event.key() == QtCore.Qt.Key_Y:

@@ -187,8 +187,8 @@ def select_rois(ops: dict[str, Any], mov: np.ndarray, diameter=None):
             (mean_img - np.percentile(mean_img, 1)) / (np.percentile(mean_img, 99) - np.percentile(mean_img, 1)), 0, 1
         )
     elif ops["anatomical_only"] == 3:
-        if "meanImgE" in ops:
-            img = ops["meanImgE"][ops["yrange"][0] : ops["yrange"][1], ops["xrange"][0] : ops["xrange"][1]]
+        if "enhanced_mean_image" in ops:
+            img = ops["enhanced_mean_image"][ops["yrange"][0] : ops["yrange"][1], ops["xrange"][0] : ops["xrange"][1]]
         else:
             img = mean_img
             print("no enhanced mean image, using mean image instead")
@@ -239,7 +239,7 @@ def select_rois(ops: dict[str, Any], mov: np.ndarray, diameter=None):
         "Vsplit": 0,
         "Vcorr": img,
         "Vmap": 0,
-        "spatscale_pix": 0,
+        "spatial_scale_pixels": 0,
     }
     ops.update(new_ops)
 

@@ -121,7 +121,7 @@ def _register_plane(
         ops = registration.save_registration_outputs_to_ops(registration_outputs, ops)
 
         # Computes and adds the enhanced mean image to the plane 'ops' file.
-        ops["meanImgE"] = registration.compute_enhanced_mean_image(ops["meanImg"].astype(np.float32), ops)
+        ops["enhanced_mean_image"] = registration.create_enhanced_mean_image(ops)
 
         # Adds registration time to the plane 'ops' file.
         ops["timing"]["registration"] = timer.elapsed
@@ -323,10 +323,10 @@ def _process_rois(
                 cell_fluorescence_channel_2,
                 neuropil_fluorescence_channel_2,
             ) = extraction.extraction_wrapper(
-                roi_statistics,
+                roi_statistics=roi_statistics,
                 plane_number=plane_number,
                 frames=frames,
-                frames_channel_2=frames_channel_2,
+                channel_2_frames=frames_channel_2,
                 ops=ops,
             )
 
@@ -401,7 +401,7 @@ def _process_rois(
                 np.save(fpath.joinpath("spks.npy"), spikes)
 
                 # If the data contains two functional channels, also saves the data for the second channel.
-                if "meanImg_chan2" in ops:
+                if "mean_image_channel_2" in ops:
                     np.save(fpath.joinpath("F_chan2.npy"), cell_fluorescence_channel_2)
                     np.save(fpath.joinpath("Fneu_chan2.npy"), neuropil_fluorescence_channel_2)
 
