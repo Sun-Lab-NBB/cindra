@@ -33,20 +33,11 @@ def masks_and_traces(ops, stat_manual, stat_orig):
         stat_all.append(stat_orig[n])
 
     stat_all = roi_stats(stat_all, ops["Ly"], ops["Lx"], aspect=ops.get("aspect", None), diameter=ops["diameter"])
-    cell_masks = [
-        masks.create_cell_mask(stat, Ly=ops["Ly"], Lx=ops["Lx"], allow_overlap=ops["allow_overlap"])
-        for stat in stat_all
-    ]
-    cell_pix = masks.create_cell_pix(roi_statistics=stat_all, height=ops["Ly"], width=ops["Lx"])
+    cell_masks, manual_neuropil_masks = masks.create_masks(
+        roi_statistics=stat_all, height=ops["Ly"], width=ops["Lx"], neuropil=True, ops=ops
+    )
     manual_roi_stats = stat_all[: len(stat_manual)]
     manual_cell_masks = cell_masks[: len(stat_manual)]
-    manual_neuropil_masks = masks.create_neuropil_masks(
-        ypixs=[stat["ypix"] for stat in manual_roi_stats],
-        xpixs=[stat["xpix"] for stat in manual_roi_stats],
-        cell_pix=cell_pix,
-        inner_neuropil_radius=ops["inner_neuropil_radius"],
-        min_neuropil_pixels=ops["min_neuropil_pixels"],
-    )
     print("Masks made in %0.2f sec." % (time.time() - t0))
 
     F, Fneu, F_chan2, Fneu_chan2 = extract_traces_from_masks(ops, manual_cell_masks, manual_neuropil_masks)

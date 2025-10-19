@@ -53,16 +53,8 @@ def intensity_ratio(ops, stats):
     (exclude pixels from other cells)
     """
     Ly, Lx = ops["Ly"], ops["Lx"]
-    cell_pix = masks.create_cell_pix(roi_statistics=stats, height=ops["Ly"], width=ops["Lx"])
-    cell_masks0 = [
-        masks.create_cell_mask(stat, Ly=ops["Ly"], Lx=ops["Lx"], allow_overlap=ops["allow_overlap"]) for stat in stats
-    ]
-    neuropil_ipix = masks.create_neuropil_masks(
-        ypixs=[stat["ypix"] for stat in stats],
-        xpixs=[stat["xpix"] for stat in stats],
-        cell_pix=cell_pix,
-        inner_neuropil_radius=ops["inner_neuropil_radius"],
-        min_neuropil_pixels=ops["min_neuropil_pixels"],
+    cell_masks0, neuropil_ipix = masks.create_masks(
+        roi_statistics=stats, height=ops["Ly"], width=ops["Lx"], neuropil=True, ops=ops
     )
     cell_masks = np.zeros((len(stats), Ly * Lx), np.float32)
     neuropil_masks = np.zeros((len(stats), Ly * Lx), np.float32)

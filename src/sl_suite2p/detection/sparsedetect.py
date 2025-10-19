@@ -8,6 +8,7 @@ from warnings import warn
 import numpy as np
 from scipy.stats import mode
 from numpy.linalg import norm
+from numpy.typing import NDArray
 from scipy.ndimage import maximum_filter, uniform_filter
 from scipy.interpolate import RectBivariateSpline
 from ataraxis_base_utilities import LogLevel, console
@@ -131,7 +132,7 @@ def iter_extend(ypix, xpix, mov, Lyc, Lxc, active_frames):
     while npix < 10000:
         npix = ypix.size
         # extend ROI by 1 pixel on each side
-        ypix, xpix = extendROI(ypix, xpix, Lyc, Lxc, 1)
+        ypix, xpix = extend_roi(ypix, xpix, Lyc, Lxc, 1)
         # activity in proposed ROI on ACTIVE frames
         usub = mov[np.ix_(active_frames, ypix * Lxc + xpix)]
         lam = np.mean(usub, axis=0)
@@ -149,16 +150,51 @@ def iter_extend(ypix, xpix, mov, Lyc, Lxc, active_frames):
     return ypix, xpix, lam
 
 
-def extendROI(ypix, xpix, Ly, Lx, niter=1):
-    """Extend ypix and xpix by niter pixel(s) on each side"""
-    for k in range(niter):
-        yx = ((ypix, ypix, ypix, ypix - 1, ypix + 1), (xpix, xpix + 1, xpix - 1, xpix, xpix))
+def extend_roi(
+    y_pixels: NDArray[np.unsignedinteger[Any]],
+    x_pixels: NDArray[np.unsignedinteger[Any]],
+    height: int,
+    width: int,
+    iterations: int = 1,
+) -> tuple[NDArray[np.unsignedinteger[Any]], NDArray[np.unsignedinteger[Any]]]:
+    """Uniformly extends (grows) the input ROI by adding pixels to all sides of the ROI's bounding box.
+
+    This function expands the ROI in a diamond-shaped (Manhattan distance) pattern.
+
+    Args:
+        y_pixels: The y-coordinates of the ROI pixels.
+        x_pixels: The x-coordinates of the ROI pixels.
+        height: The height of the overall imaging area.
+        width: The width of the overall imaging area.
+        iterations: The number of iterations to use for the ROI growth. Each iteration expands the ROI's bounding box by
+            1 pixel in each direction.
+
+    Returns:
+        The tuple of two arrays. The first array stores the extended ROI pixel y-coordinates. The second array stores
+        the extended ROI pixel x-coordinates.
+
+    """
+    for k in range(iterations):
+        # Adds 1 pixel to each side of the processed ROI (left, right, top, bottom).
+        yx = (
+            (y_pixels, y_pixels, y_pixels, y_pixels - 1, y_pixels + 1),
+            (x_pixels, x_pixels + 1, x_pixels - 1, x_pixels, x_pixels),
+        )
+
+        # Constructs a 2D coordinate array with row 0 storing y-coordinates and row 1 storing x-coordinates for all
+        # ROI pixels.
         yx = np.array(yx)
         yx = yx.reshape((2, -1))
+
+        # Finds and removes duplicate coordinates.
         yu = np.unique(yx, axis=1)
-        ix = np.all((yu[0] >= 0, yu[0] < Ly, yu[1] >= 0, yu[1] < Lx), axis=0)
-        ypix, xpix = yu[:, ix]
-    return ypix, xpix
+
+        # Ensures that the grown ROI stays within the boundaries of the overall imaging area.
+        ix = np.all((yu[0] >= 0, yu[0] < height, yu[1] >= 0, yu[1] < width), axis=0)
+        y_pixels, x_pixels = yu[:, ix]
+
+    # Returns the extended ROI pixels coordinate arrays.
+    return y_pixels, x_pixels
 
 
 def two_comps(mpix0, lam, Th2):

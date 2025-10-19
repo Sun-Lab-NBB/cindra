@@ -1,6 +1,5 @@
 """Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
 
-import platform
 
 from numba import njit, config, prange, float32
 import numpy as np
@@ -8,10 +7,8 @@ from numpy import fft
 
 from .utils import convolve, kernelD2, addmultiply, gaussian_fft, mat_upsample, spatial_taper
 
-if platform.system() == "Darwin":
-    config.THREADING_LAYER = "omp"
-else:
-    config.THREADING_LAYER = "tbb"
+# Configures the numba threading layer.
+config.THREADING_LAYER = "tbb"
 
 
 def calculate_nblocks(L: int, block_size: int = 128) -> tuple[int, int]:
