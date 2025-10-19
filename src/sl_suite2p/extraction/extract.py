@@ -1,7 +1,6 @@
 """This module contains functions for extracting cell and neuropil fluorescence from the ROI masks."""
 
 from typing import Any
-import platform
 
 from numba import njit, config, prange
 import numpy as np
@@ -14,10 +13,8 @@ from .masks import create_masks
 from ..io.binary import BinaryFile
 from ..configuration import generate_default_ops
 
-if platform.system() == "Darwin":
-    config.THREADING_LAYER = "omp"
-else:
-    config.THREADING_LAYER = "tbb"
+# Configures the numba threading layer.
+config.THREADING_LAYER = "tbb"
 
 _SCALE_BACKGROUND = 4
 _MINIMUM_INTENSITY = -6
@@ -25,56 +22,61 @@ _MAXIMUM_INTENSITY = 6
 
 
 @njit(parallel=True)
-def _matmul_traces(
-    cell_fluorescence: NDArray[np.float32],
-    data_matrix: NDArray[np.float32],
-    cell_pixel_indices: list[NDArray[np.int64]],
-    lambda_weights: list[NDArray[np.float32]],
+def _extract_cell_fluorescence(
+    output_prototype: NDArray[np.float32],
+    data: NDArray[np.float32],
+    cell_masks: list[NDArray[np.uint32]],
+    lambda_weight_masks: list[NDArray[np.float32]],
 ) -> NDArray[np.float32]:
-    """Extracts cell fluorescence traces by computing the weighted sum of pixel intensities using lambda
-    values across all frames for each ROI.
+    """Extracts cell fluorescence traces across all frames for each ROI.
 
     Args:
-        cell_fluorescence: The output array of shape [n_cells, n_frames] to store cell fluorescence traces.
-        data_matrix: A data array of size [n_frames, n_pixels].
-        cell_pixel_indices: A list of arrays containing the pixel indices belonging to each ROI.
-        lambda_weights: A list of arrays specifying the weight of each pixel within its ROI
+        output_prototype: The pre-initialized output array to be updated with the extracted fluorescence traces.
+        data: The raw activity data from which to extract the fluorescence traces.
+        cell_masks: The list of cell mask pixel indices for each ROI, stored as a flattened NumPy array.
+        lambda_weight_masks: The list of lambda weight masks for each ROI, stored as a flattened NumPy array.
+
+    Returns:
+        The output_prototype array updated with the extracted cell fluorescence traces for each processed ROI.
     """
-    n_cells = np.int64(cell_fluorescence.shape[0])
+    cell_count = np.int64(output_prototype.shape[0])
 
-    for cell_idx in prange(n_cells):
-        cell_pixels_data = data_matrix[:, cell_pixel_indices[cell_idx]]
-        pixel_weights = lambda_weights[cell_idx]
-        cell_fluorescence[cell_idx] = np.dot(cell_pixels_data, pixel_weights)
+    for cell_index in prange(cell_count):
+        cell_pixels_data = data[:, cell_masks[cell_index]]
+        lambda_weight = lambda_weight_masks[cell_index]
 
-    return cell_fluorescence
+        # Uses pixel lambda weight to weigh the pixel fluorescence. This biases the trace to base more of the extracted
+        # signals on the pixels that are more likely to belong to the cell.
+        output_prototype[cell_index] = np.dot(cell_pixels_data, lambda_weight)
+
+    return output_prototype
 
 
 @njit(parallel=True)
-def _matmul_neuropil(
-    neuropil_fluorescence: NDArray[np.float32],
-    data_matrix: NDArray[np.float32],
-    neuropil_pixel_indices: list[NDArray[np.int64]],
-    neuropil_pixel_count: NDArray[np.int64],
+def _extract_neuropil_fluorescence(
+    output_prototype: NDArray[np.float32],
+    data: NDArray[np.float32],
+    neuropil_pixel_indices: list[NDArray[np.uint32]],
+    neuropil_pixel_count: NDArray[np.uint32],
 ) -> NDArray[np.float32]:
     """Extracts the fluorescence signals from pixels in the surrounding neuropil ring and computes
     the mean fluorescence across those pixels.
 
     Args:
-        neuropil_fluorescence: The output array of shape [n_cells, n_frames] to store neuropil traces.
-        data_matrix: A data array of size [n_rois, n_frames].
+        output_prototype: The pre-initialized output array to be updated with the extracted fluorescence traces.
+        data: The raw activity data from which to extract the fluorescence traces.
         neuropil_pixel_indices: A list of arrays containing the pixel indices forming the neuropil ring
                                 around each ROI.
         neuropil_pixel_count: An array indicating the number of neuropil pixels for each ROI.
     """
-    n_cells = np.int64(neuropil_fluorescence.shape[0])
+    n_cells = np.int64(output_prototype.shape[0])
 
     for cell_idx in prange(n_cells):
-        neuropil_fluorescence[cell_idx] = (
-            data_matrix[:, neuropil_pixel_indices[cell_idx]].sum(axis=1) / neuropil_pixel_count[cell_idx]
+        output_prototype[cell_idx] = (
+            data[:, neuropil_pixel_indices[cell_idx]].sum(axis=1) / neuropil_pixel_count[cell_idx]
         )
 
-    return neuropil_fluorescence
+    return output_prototype
 
 
 def extract_traces_from_masks(
@@ -180,19 +182,19 @@ def extract_traces(
 
         # Pre-allocates an array of size [n_cells, n_batch_frames] to store extracted cell
         # and neuropil fluorescence values in the current batch
-        current_batch_fluorescence = np.zeros((n_cells, n_batch_frames), dtype=np.float32)
+        output_prototype = np.zeros((n_cells, n_batch_frames), dtype=np.float32)
 
-        fluorescence[:, current_batch_slice] = _matmul_traces(
-            cell_fluorescence=current_batch_fluorescence,
-            data_matrix=batch_n_pixels,
-            cell_pixel_indices=cell_pixel_indices,
-            lambda_weights=cell_lambda_weights,
+        fluorescence[:, current_batch_slice] = _extract_cell_fluorescence(
+            output_prototype=output_prototype,
+            data=batch_n_pixels,
+            cell_masks=cell_pixel_indices,
+            lambda_weight_masks=cell_lambda_weights,
         )
 
         if has_neuropil:
-            neuropil_fluorescence[:, current_batch_slice] = _matmul_neuropil(
-                neuropil_fluorescence=current_batch_fluorescence,
-                data_matrix=batch_n_pixels,
+            neuropil_fluorescence[:, current_batch_slice] = _extract_neuropil_fluorescence(
+                output_prototype=output_prototype,
+                data=batch_n_pixels,
                 neuropil_pixel_indices=neuropil_pixel_indices,
                 neuropil_pixel_count=neuropil_pixel_count,
             )

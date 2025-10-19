@@ -166,27 +166,26 @@ class Clustering:
 
 @dataclass
 class SignalExtraction:
-    """Stores parameters for extracting fluorescence signals from ROIs and surrounding neuropil regions."""
+    """Stores parameters for extracting fluorescence signals from cell ROIs and surrounding neuropil regions."""
 
-    neuropil_extract: bool = True
-    """Determines whether to extract neuropil signals. Typically, this is set to True to support later 
-    delta-fluorescence-over-fluorescence (dff) analysis."""
+    extract_neuropil: bool = True
+    """Determines whether to extract the neuropil activity. If this is set to False, the neuropil fluorescence is 
+    assumed to be zero during further signal processing."""
 
     allow_overlap: bool = False
-    """Determines whether to allow overlap pixels (pixels shared by multiple ROIs) to be used in the signal extraction. 
-    Typically this is set to False to avoid contamination."""
+    """Determines whether to use the overlapping pixels (pixels shared by multiple ROIs) for signal extraction."""
 
-    min_neuropil_pixels: int = 350
-    """The minimum number of pixels required to compute the neuropil signal for each cell."""
+    minimum_neuropil_pixels: int = 350
+    """The minimum size of the computed neuropil region, in pixels. During neuropil computation, the algorithm expands 
+    the neuropil region outward from each cell until it accumulates at least this number of pixels."""
 
-    inner_neuropil_radius: int = 2
-    """The number of pixels to keep between the ROI and the surrounding neuropil region to avoid signal bleed-over."""
+    inner_neuropil_border_radius: int = 2
+    """The number of pixels to keep as the separation between the cell ROI and the surrounding neuropil region."""
 
-    lam_percentile: int = 50
-    """The percentile of Lambda within area to ignore when excluding the brightest pixels during neuropil extraction.
-    Specifically, pixels with relative brightness above this threshold are excluded from neuropil signal to filter 
-    out bright speckle outliers.
-    """
+    lambda_percentile: int = 50
+    """The percentile of Lambda (cell classification confidence) within the tentative neuropil area to ignore when 
+    constructing the neuropil masks. A pixel with the lambda score higher than this value is labeled as belonging
+    to the cell region of an ROI and excluded from each neuropil mask."""
 
 
 @dataclass

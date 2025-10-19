@@ -67,7 +67,13 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     timer.reset()
     # Re-computes the ROI stats for all multi-day tracked cells
     cell_masks = roi_stats(cell_masks, ops["Ly"], ops["Lx"], ops["aspect"], ops["diameter"])
-    cell_masks, neuropil_masks = extraction.masks.create_masks(cell_masks, ops["Ly"], ops["Lx"], ops)
+    cell_masks, neuropil_masks = extraction.masks.create_masks(
+        roi_statistics=cell_masks,
+        height=ops["Ly"],
+        width=ops["Lx"],
+        neuropil=ops.get("extract_neuropil", True),
+        ops=ops,
+    )
     message = f"Session {session_id} multi-day masks: created. Time taken {timer.elapsed} seconds."
     console.echo(message=message, level=LogLevel.SUCCESS)
 
