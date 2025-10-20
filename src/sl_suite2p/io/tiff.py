@@ -65,7 +65,7 @@ def generate_tiff_filename(
     return str(tiff_root.joinpath(file_name))
 
 
-def save_tiff(frames: NDArray[Any], file_path: str) -> None:
+def save_tiff(frames: NDArray[np.int16], file_path: str) -> None:
     """Saves the input frame stack array as the specified tiff file.
 
     If the file already exists, overwrites the file data with the input frame stack data.
