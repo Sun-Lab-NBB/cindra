@@ -192,30 +192,28 @@ class SignalExtraction:
 class SpikeDeconvolution:
     """Stores parameters for deconvolving fluorescence signals to infer spike trains."""
 
-    spikedetect: bool = True
-    """Determines whether to perform fluorescence spike deconvolution."""
+    extract_spikes: bool = True
+    """Determines whether to deconvolve the spike activity from the extracted fluorescence traces."""
 
-    neucoeff: float = 0.7
-    """The neuropil coefficient applied for signal correction before deconvolution. Specifically, the neuropil signal
-    is scaled by this coefficient before it is subtracted from the ROI signal when computing df/f values."""
+    neuropil_coefficient: float = 0.7
+    """The coefficient used to scale the neuropil fluorescence before it is subtracted from the ROI fluorescence. This 
+    is performed before computing and subtracting the baseline fluorescence from each ROI fluorescence trace."""
 
     baseline: str = "maximin"
-    """Specifies the method to compute the baseline of each trace. This baseline is then subtracted from each cell's 
-    fluorescence. 'maximin' computes a moving baseline by filtering the data with a Gaussian of width 
-    'sig_baseline' * 'fs', and then minimum filtering with a window of 'win_baseline' * 'fs', and then maximum 
-    filtering with the same window. 'constant' computes a constant baseline by filtering with a Gaussian of width 
-    'sig_baseline' * 'fs' and then taking the minimum value of this filtered trace. 'constant_percentile' computes a 
-    constant baseline by taking the 'prctile_baseline' percentile of the trace."""
+    """Specifies the method for computing the baseline of the ROI fluorescence traces. This baseline is subtracted from
+    each ROI's fluorescence before deconvolving the spike activity for each ROI. 'maximin' uses a sliding window of 
+    size 'baseline_window' to compute the baseline. 'constant' computes the baseline for the entire trace. 
+    'constant_percentile' uses the specific low-end percentile of each trace's overall activity as the baseline for the
+    entire trace."""
 
-    win_baseline: float = 60.0
-    """The time window, in seconds, over which to compute the baseline filter."""
+    baseline_window: float = 60.0
+    """The size of the sliding window, in seconds, over which to compute the 'maximin' baseline."""
 
-    sig_baseline: float = 10.0
-    """The standard deviation, in seconds, of the Gaussian filter applied to smooth the baseline signal."""
+    baseline_sigma: float = 10.0
+    """The standard deviation, in seconds, of the Gaussian filter used to compute the baseline."""
 
-    prctile_baseline: float = 8.0
-    """The percentile used to determine the baseline level of each trace (typically a low percentile reflecting 
-    minimal activity)."""
+    baseline_percentile: float = 8.0
+    """The percentile of each trace's activity used as the 'constant_percentile' baseline."""
 
 
 @dataclass()

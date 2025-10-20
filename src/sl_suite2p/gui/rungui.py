@@ -125,7 +125,7 @@ class RunWindow(QDialog):
             "connected",
             "roidetect",
             "extract_neuropil",
-            "spikedetect",
+            "extract_spikes",
             "keep_movie_raw",
             "allow_overlap",
             "sparse_mode",
@@ -189,7 +189,7 @@ class RunWindow(QDialog):
         ]
         neudeconvkeys = [
             ["extract_neuropil", "allow_overlap", "inner_neuropil_border_radius", "minimum_neuropil_pixels"],
-            ["soma_crop", "spikedetect", "win_baseline", "sig_baseline", "neucoeff"],
+            ["soma_crop", "extract_spikes", "baseline_window", "baseline_sigma", "neuropil_coefficient"],
         ]
         keys = [tifkeys, outkeys, regkeys, nrkeys, cellkeys, anatkeys, neudeconvkeys]
         labels = [

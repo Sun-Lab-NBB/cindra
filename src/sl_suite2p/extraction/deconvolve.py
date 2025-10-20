@@ -1,9 +1,12 @@
-"""This module provides utilities to deconvolve spike_amplitude from neuropil-corrected fluorescence traces."""
+"""This module provides the assets for post-processing the fluorescence traces extracted from the raw fluorescence
+movies."""
 
 from numba import njit, config, prange
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter, maximum_filter1d, minimum_filter1d
+from ataraxis_base_utilities import console
+from typing import Any
 
 # Configures the numba threading layer.
 config.THREADING_LAYER = "tbb"
@@ -94,18 +97,18 @@ def oasis(
         time_constant: The timescale of the calcium indicator in seconds, used for the deconvolution kernel.
         sampling_rate: The sampling rate of the imaging data per plane.
     """
-    n_neurons, n_timepoints = cell_fluorescence.shape
+    roi_count, frame_count = cell_fluorescence.shape
     cell_fluorescence = cell_fluorescence.astype(np.float32)
-    spike_traces = np.zeros((n_neurons, n_timepoints), dtype=np.float32)
+    spike_traces = np.zeros((roi_count, frame_count), dtype=np.float32)
 
-    for start_index in range(0, n_neurons, batch_size):
+    for start_index in range(0, roi_count, batch_size):
         end_index = start_index + batch_size
         frame_batch = cell_fluorescence[start_index:end_index]
-        average_fluorescence = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.float32)
-        pool_weight = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.float32)
-        pool_start_time = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.int64)
-        pool_length = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.float32)
-        spike_amplitude = np.zeros((frame_batch.shape[0], n_timepoints), dtype=np.float32)
+        average_fluorescence = np.zeros((frame_batch.shape[0], frame_count), dtype=np.float32)
+        pool_weight = np.zeros((frame_batch.shape[0], frame_count), dtype=np.float32)
+        pool_start_time = np.zeros((frame_batch.shape[0], frame_count), dtype=np.int64)
+        pool_length = np.zeros((frame_batch.shape[0], frame_count), dtype=np.float32)
+        spike_amplitude = np.zeros((frame_batch.shape[0], frame_count), dtype=np.float32)
 
         _oasis_matrix(
             cell_fluorescence=frame_batch,
@@ -124,38 +127,53 @@ def oasis(
 
 
 def preprocess(
-    cell_fluorescence: NDArray[np.float32],
-    baseline: str,
-    win_baseline: float,
-    sig_baseline: float,
-    sampling_rate: float,
-    prctile_baseline: float = 8,
+    roi_fluorescence: NDArray[np.float32],
+    neuropil_fluorescence: NDArray[np.float32],
+    ops: dict[str, Any],
 ) -> NDArray[np.float32]:
-    """Preprocesses fluorescence traces for spike deconvolution by performing baseline subtraction
-    using the specified method and window size.
+    """Preprocesses the ROI fluorescence traces for spike deconvolution by subtracting the neuropil and baseline
+    fluorescence.
 
     Args:
-        cell_fluorescence: The ROI fluorescence traces after neuropil subtraction used for baseline correction.
-        baseline: The method for computing the baseline of each trace (maximin, constant, or constant_prctile).
-        win_baseline: The time window (in seconds) used for the max/min filters.
-        sig_baseline: The width of the Gaussian filter in frames.
-        sampling_rate: The sampling rate of the imaging data per plane.
-        prctile_baseline: The percentile of trace to use when baseline is constant_prctile.
+        roi_fluorescence: The ROI (cell) fluorescence.
+        neuropil_fluorescence: The surrounding neuropil region fluorescence.
+        ops: The dictionary that stores the signal preprocessing parameters.
     """
-    win_frames = int(win_baseline * sampling_rate)
-    baseline_trace = 0.0
+    # Extracts the preprocessing parameters from the provided dictionary.
+    baseline_method: str = ops["baseline"]
+    baseline_filter_window: float = ops["baseline_window"]
+    baseline_filter_sigma: float = ops["baseline_sigma"]
+    sampling_rate: float = ops["fs"]
+    baseline_percentile: float = ops["baseline_percentile"]
+    neuropil_coefficient: float = ops["neuropil_coefficient"]
 
-    if baseline == "maximin":
-        baseline_trace = gaussian_filter(cell_fluorescence, [0.0, sig_baseline])
-        baseline_trace = minimum_filter1d(baseline_trace, win_frames, axis=1)
-        baseline_trace = maximum_filter1d(baseline_trace, win_frames, axis=1)
+    # Subtracts the neuropil fluorescence for each ROI from the ROI fluorescence.
+    subtracted = roi_fluorescence.copy() - neuropil_coefficient * neuropil_fluorescence
 
-    elif baseline == "constant":
-        smoothed_fluorescence = gaussian_filter(cell_fluorescence, [0.0, sig_baseline])
-        baseline_trace = np.amin(smoothed_fluorescence)
+    # Uses the acquisition sampling rate in Hz to determine the size of the baseline filter window in frames.
+    window_frames = int(baseline_filter_window * sampling_rate)
 
-    elif baseline == "constant_prctile":
-        baseline_trace = np.percentile(cell_fluorescence, prctile_baseline, axis=1)
-        baseline_trace = np.expand_dims(baseline_trace, axis=1)
+    # Uses the requested method to calculate the baseline for the neuropil-subtracted fluorescence traces.
+    if baseline_method == "maximin":
+        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_filter_sigma])
+        baseline = minimum_filter1d(input=baseline, size=window_frames, axis=1)
+        baseline = maximum_filter1d(input=baseline, size=window_frames, axis=1)
+    elif baseline_method == "constant":
+        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_filter_sigma])
+        baseline = np.amin(a=baseline)
+    elif baseline_method == "constant_percentile":
+        baseline = np.percentile(a=subtracted, q=baseline_percentile, axis=1)
+        baseline = np.expand_dims(a=baseline, axis=1)
+    else:
+        message = (
+            f"Invalid baseline computation method {baseline_method} encountered when preparing the fluorescence "
+            f"traces for spike deconvolution. Use one of the supported methods: 'maximin', 'constant', or "
+            f"'constant_percentile'."
+        )
+        console.error(message=message, error=ValueError)
 
-    return cell_fluorescence - baseline_trace
+        # Fallback to appease mypy
+        raise ValueError(message)  # pragma: no cover
+
+    # Subtracts the computed baseline fluorescence from the neuropil-subtracted trace.
+    return subtracted - baseline
