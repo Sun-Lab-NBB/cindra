@@ -241,7 +241,7 @@ def extraction_wrapper(
     timer = PrecisionTimer("s")
     _, height, width = frames.shape
     batch_size = ops["batch_size"]
-    neucoeff = ops["neucoeff"]
+    neuropil_coefficient = ops["neuropil_coefficient"]
 
     # Creates cell and neuropil masks if not provided
     console.echo(f"Creating ROI masks for plane {plane_number}...", level=LogLevel.INFO)
@@ -278,7 +278,7 @@ def extraction_wrapper(
         )
 
     # Applies neuropil correction to cell fluorescence
-    corrected = cell_fluorescence - neucoeff * neuropil_fluorescence
+    corrected = cell_fluorescence - neuropil_coefficient * neuropil_fluorescence
 
     # Computes skewness and standard deviation for each ROI and updates the corresponding ROI statistics dictionary
     skew_values = stats.skew(corrected, axis=1)

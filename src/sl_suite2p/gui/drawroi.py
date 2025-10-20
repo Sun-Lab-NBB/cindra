@@ -13,9 +13,8 @@ from qtpy.QtWidgets import QLabel, QWidget, QLineEdit, QGridLayout, QMainWindow,
 from matplotlib.colors import hsv_to_rgb
 
 from . import io
-from ..extraction import masks, preprocess, extract_traces_from_masks
+from ..extraction import masks, preprocess, extract_traces_from_masks, oasis
 from ..detection.stats import roi_stats
-from ..extraction.dcnv import oasis
 
 
 def masks_and_traces(ops, stat_manual, stat_orig):
@@ -55,7 +54,7 @@ def masks_and_traces(ops, stat_manual, stat_orig):
             manual_roi_stats[n]["iplane"] = stat_orig[0]["iplane"]
 
     # subtract neuropil and compute skew, std from F
-    dF = F - ops["neucoeff"] * Fneu
+    dF = F - ops["neuropil_coefficient"] * Fneu
     sk = stats.skew(dF, axis=1)
     sd = np.std(dF, axis=1)
 
@@ -65,12 +64,9 @@ def masks_and_traces(ops, stat_manual, stat_orig):
         manual_roi_stats[n]["med"] = [np.mean(manual_roi_stats[n]["ypix"]), np.mean(manual_roi_stats[n]["xpix"])]
 
     dF = preprocess(
-        cell_fluorescence=dF,
-        baseline=ops["baseline"],
-        win_baseline=ops["win_baseline"],
-        sig_baseline=ops["sig_baseline"],
-        sampling_rate=ops["fs"],
-        prctile_baseline=ops["prctile_baseline"],
+        roi_fluorescence=F,
+        neuropil_fluorescence=Fneu,
+        ops=ops,
     )
     spks = oasis(cell_fluorescence=dF, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["fs"])
 

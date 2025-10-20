@@ -96,26 +96,22 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
             session_id=session_id,
         )
 
-    # Computes delta f/f (neuropil-subtracted ROI fluorescence)
-    dff = cell_fluorescence.copy() - ops["neucoeff"] * neuropil_fluorescence
-    dff = extraction.preprocess(
-        cell_fluorescence=dff,
-        baseline=ops["baseline"],
-        win_baseline=ops["win_baseline"],
-        sig_baseline=ops["sig_baseline"],
-        sampling_rate=ops["fs"],
-        prctile_baseline=ops["prctile_baseline"],
+    # Computes delta fluorescence (dF) (neuropil-and-baseline-subtracted ROI fluorescence)
+    df = extraction.preprocess(
+        roi_fluorescence=cell_fluorescence,
+        neuropil_fluorescence=neuropil_fluorescence,
+        ops=ops,
     )
 
     # Cell activity spike deconvolution
-    if ops.get("spikedetect", True):
+    if ops.get("extract_spikes", True):
         message = f"Processing session {session_id} activity spikes..."
         console.echo(message=message, level=LogLevel.INFO)
         timer.reset()
 
         # Extracts the cell fluorescence spikes using the OASIS algorithm.
         spikes = extraction.oasis(
-            cell_fluorescence=dff, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["fs"]
+            cell_fluorescence=df, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["fs"]
         )
         ops["timing"]["multiday_deconvolution"] = timer.elapsed
 
@@ -125,8 +121,8 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
         console.echo(message=message, level=LogLevel.SUCCESS)
     else:
         message = (
-            f"Skipping session {session_id} spike deconvolution, as it is disabled via the 'spikedetect' "
-            f"configuration parameter."
+            f"Skipping session {session_id} spike deconvolution, as the 'extract_spikes' configuration parameter is "
+            f"set to False."
         )
         console.echo(message=message, level=LogLevel.WARNING)
         spikes = np.zeros_like(cell_fluorescence)
@@ -136,5 +132,5 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     np.save(multiday_folder.joinpath("ops.npy"), ops)
     np.save(multiday_folder.joinpath("F.npy"), cell_fluorescence)
     np.save(multiday_folder.joinpath("Fneu.npy"), neuropil_fluorescence)
-    np.save(multiday_folder.joinpath("Fsub.npy"), dff)
+    np.save(multiday_folder.joinpath("Fsub.npy"), df)
     np.save(multiday_folder.joinpath("spks.npy"), spikes)

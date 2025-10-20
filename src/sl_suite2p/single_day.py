@@ -352,25 +352,21 @@ def _process_rois(
             console.echo(message=message, level=LogLevel.SUCCESS)
 
             # Cell activity spike deconvolution
-            if ops.get("spikedetect", True):
+            if ops.get("extract_spikes", True):
                 message = f"Processing plane {plane_number} activity spikes..."
                 console.echo(message=message, level=LogLevel.INFO)
                 timer.reset()
 
                 # Computes delta f/f (neuropil-subtracted ROI fluorescence)
-                dff = cell_fluorescence.copy() - ops["neucoeff"] * neuropil_fluorescence
-                dff = extraction.preprocess(
-                    cell_fluorescence=dff,
-                    baseline=ops["baseline"],
-                    win_baseline=ops["win_baseline"],
-                    sig_baseline=ops["sig_baseline"],
-                    sampling_rate=ops["fs"],
-                    prctile_baseline=ops["prctile_baseline"],
+                df = extraction.preprocess(
+                    roi_fluorescence=cell_fluorescence,
+                    neuropil_fluorescence=neuropil_fluorescence,
+                    ops=ops,
                 )
 
                 # Extracts the cell fluorescence spikes using the OASIS algorithm.
                 spikes = extraction.oasis(
-                    cell_fluorescence=dff,
+                    cell_fluorescence=df,
                     batch_size=ops["batch_size"],
                     time_constant=ops["tau"],
                     sampling_rate=ops["fs"],
@@ -384,9 +380,9 @@ def _process_rois(
 
             else:
                 message = (
-                    f"Skipping plane {plane_number} spike deconvolution, as it is disabled via the 'spikedetect' "
-                    f"configuration parameter."
-                )
+                    f"Skipping plane {plane_number} spike deconvolution, as the 'extract_spikes' configuration "
+                    f"parameter is set to False."
+        )
                 console.echo(message=message, level=LogLevel.WARNING)
                 spikes = np.zeros_like(cell_fluorescence)
 
@@ -396,7 +392,7 @@ def _process_rois(
                 np.save(fpath.joinpath("stat.npy"), roi_statistics)
                 np.save(fpath.joinpath("F.npy"), cell_fluorescence)
                 np.save(fpath.joinpath("Fneu.npy"), neuropil_fluorescence)
-                np.save(fpath.joinpath("Fsub.npy"), dff)
+                np.save(fpath.joinpath("Fsub.npy"), df)
                 np.save(fpath.joinpath("iscell.npy"), iscell)
                 np.save(fpath.joinpath("spks.npy"), spikes)
 
