@@ -382,7 +382,7 @@ def _process_rois(
                 message = (
                     f"Skipping plane {plane_number} spike deconvolution, as the 'extract_spikes' configuration "
                     f"parameter is set to False."
-        )
+                )
                 console.echo(message=message, level=LogLevel.WARNING)
                 spikes = np.zeros_like(cell_fluorescence)
 
