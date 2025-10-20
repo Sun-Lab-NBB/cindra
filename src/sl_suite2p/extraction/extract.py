@@ -1,6 +1,6 @@
 """This module contains functions for extracting cell and neuropil fluorescence from the ROI masks."""
 
-from typing import Any, Union
+from typing import Any
 
 from numba import njit, config, prange
 import numpy as np
@@ -72,7 +72,7 @@ def _extract_neuropil_fluorescence(
 
 
 def extract_traces(
-    data: Union[NDArray[np.int16], BinaryFile, BinaryFileCombined],
+    data: BinaryFile | BinaryFileCombined,
     cell_masks: tuple[tuple[NDArray[np.uint32], NDArray[np.float32]]],
     neuropil_masks: tuple[NDArray[np.uint32]] | None = None,
     batch_size: int = 500,
@@ -130,10 +130,7 @@ def extract_traces(
 
     # Computes the pixel counts for each neuropil mask
     if neuropil_masks is not None:
-        neuropil_pixel_count = np.array(
-            [len(indices) for indices in neuropil_masks],
-            dtype=np.uint32
-        )
+        neuropil_pixel_count = np.array([len(indices) for indices in neuropil_masks], dtype=np.uint32)
 
     # Extracts the cell fluorescence from all frames of the processed cell activity movie.
     current_frame = 0
@@ -189,8 +186,10 @@ def extract_traces(
 
 
 def extract_traces_from_masks(
-    ops: dict[str, Any], cell_masks: list[tuple], neuropil_masks: list
-) -> tuple[NDArray, NDArray, NDArray, NDArray]:
+    ops: dict[str, Any],
+    cell_masks: tuple[tuple[NDArray[np.uint32], NDArray[np.float32]]],
+    neuropil_masks: tuple[NDArray[np.uint32]] | None,
+) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """Computes fluorescence traces for each ROI and its corresponding neuropil region
     from both channels if available.
 
@@ -224,9 +223,9 @@ def extract_traces_from_masks(
 def extraction_wrapper(
     roi_statistics: list[dict[str, Any]],
     plane_number: int,
-    frames: Union[NDArray[np.int16], BinaryFile, BinaryFileCombined],
+    frames: BinaryFile | BinaryFileCombined,
     ops: dict[str, Any],
-    channel_2_frames: Union[NDArray[np.int16], BinaryFile, BinaryFileCombined, None] = None,
+    channel_2_frames: BinaryFile | BinaryFileCombined | None = None,
 ) -> tuple[list[dict[str, Any]], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """Main extraction function that creates the masks and computes the fluorescence traces.
 
@@ -248,7 +247,7 @@ def extraction_wrapper(
     timer.reset()
 
     cell_masks, neuropil_masks = create_masks(
-        roi_statistics=roi_statistics, height=height, width=width, neuropil=ops.get("extract_neuropil", True),ops=ops
+        roi_statistics=roi_statistics, height=height, width=width, neuropil=ops.get("extract_neuropil", True), ops=ops
     )
 
     console.echo(

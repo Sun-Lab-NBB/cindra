@@ -1,5 +1,4 @@
-"""This module provides the assets for creating ROI (cell) and neuropil pixel masks associated with each detected ROI.
-"""
+"""This module provides the assets for creating ROI (cell) and neuropil pixel masks associated with each detected ROI."""
 
 from typing import Any
 

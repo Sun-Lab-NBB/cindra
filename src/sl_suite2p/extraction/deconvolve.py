@@ -1,12 +1,14 @@
 """This module provides the assets for post-processing the fluorescence traces extracted from the raw fluorescence
-movies."""
+movies.
+"""
+
+from typing import Any
 
 from numba import njit, config, prange
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter, maximum_filter1d, minimum_filter1d
 from ataraxis_base_utilities import console
-from typing import Any
 
 # Configures the numba threading layer.
 config.THREADING_LAYER = "tbb"

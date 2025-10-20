@@ -1,5 +1,5 @@
 """Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
 
-from .deconvolve import oasis, preprocess
 from .masks import create_masks
-from .extract import extraction_wrapper, extract_traces, extract_traces_from_masks
+from .extract import extract_traces, extraction_wrapper, extract_traces_from_masks
+from .deconvolve import oasis, preprocess

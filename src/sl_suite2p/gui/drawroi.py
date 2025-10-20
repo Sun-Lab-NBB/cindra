@@ -13,7 +13,7 @@ from qtpy.QtWidgets import QLabel, QWidget, QLineEdit, QGridLayout, QMainWindow,
 from matplotlib.colors import hsv_to_rgb
 
 from . import io
-from ..extraction import masks, preprocess, extract_traces_from_masks, oasis
+from ..extraction import masks, oasis, preprocess, extract_traces_from_masks
 from ..detection.stats import roi_stats
 
 
