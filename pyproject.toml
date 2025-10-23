@@ -68,8 +68,8 @@ dependencies = [
     "ataraxis-data-structures>=3,<4",
     "sl-pirt>=3,<4",
     "importlib_metadata>=8,<9",
-    "tbb>=2022,<2023; platform_machine == 'x86_64'",
-    "intel-cmplr-lib-rt>=2025,<2026; platform_machine == 'x86_64'",
+    "tbb4py>=2022,<2023; platform_system != 'Darwin'",
+    "intel-cmplr-lib-rt>=2025,<2026; platform_system != 'Darwin'",
     "sl-shared-assets==6.0.0rc2",
 ]
 
@@ -87,7 +87,7 @@ dev = [
     "tox-uv>=1,<2",
 
     # Development Automation
-    "ataraxis-automation>=6.0.1,<7",
+    "ataraxis-automation>=7,<8",
 
     # Types:
     "types-tqdm>=4,<5",

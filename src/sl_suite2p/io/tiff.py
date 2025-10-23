@@ -65,7 +65,7 @@ def generate_tiff_filename(
     return str(tiff_root.joinpath(file_name))
 
 
-def save_tiff(frames: NDArray[Any], file_path: str) -> None:
+def save_tiff(frames: NDArray[np.int16], file_path: str) -> None:
     """Saves the input frame stack array as the specified tiff file.
 
     If the file already exists, overwrites the file data with the input frame stack data.
@@ -152,7 +152,7 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
     Returns:
         The 'ops' dictionary of the first available plane to be processed augmented with additional descriptive
         parameters for the processed data. Specifically, the dictionary includes the following additional keys:
-        "Ly", "Lx", "first_tiffs", "frames_per_folder", "nframes", "meanImg", "meanImg_chan2".
+        "Ly", "Lx", "first_tiffs", "frames_per_folder", "nframes", "mean_image", "mean_image_channel_2".
     """
     # Instantiates and resets the run timer
     timer = PrecisionTimer("s")
@@ -218,11 +218,11 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
             # dimensions are known)
             if file_index == 0 and start_index == 0:
                 for plane_index in range(plane_number):
-                    plane_ops[plane_index]["meanImg"] = np.zeros((frames.shape[1], frames.shape[2]), np.float32)
+                    plane_ops[plane_index]["mean_image"] = np.zeros((frames.shape[1], frames.shape[2]), np.float32)
 
                     # For 2-channel data, also initializes the mean image placeholder array for the second channel.
                     if channel_number > 1:
-                        plane_ops[plane_index]["meanImg_chan2"] = np.zeros(
+                        plane_ops[plane_index]["mean_image_channel_2"] = np.zeros(
                             (frames.shape[1], frames.shape[2]), np.float32
                         )
 
@@ -262,7 +262,7 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
 
                     # Appends the data from all processed frames to the data arrays in the plane-specific 'ops'
                     # dictionary, as this data is used during further processing.
-                    plane_ops[plane_index]["meanImg"] += frames_to_write.sum(axis=0, dtype=np.float32)
+                    plane_ops[plane_index]["mean_image"] += frames_to_write.sum(axis=0, dtype=np.float32)
                     plane_ops[plane_index]["nframes"] += frames_to_write.shape[0]
                     plane_ops[plane_index]["frames_per_file"][file_index] += frames_to_write.shape[0]
                     plane_ops[plane_index]["frames_per_folder"][folder_index] += frames_to_write.shape[0]
@@ -281,7 +281,7 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
                         if second_channel_indices:
                             channel_2_frames_to_write = frames[second_channel_indices]
                             channel_2_binary_file[plane_index].write(channel_2_frames_to_write.tobytes())
-                            plane_ops[plane_index]["meanImg_chan2"] += channel_2_frames_to_write.mean(axis=0)
+                            plane_ops[plane_index]["mean_image_channel_2"] += channel_2_frames_to_write.mean(axis=0)
 
             # Updates plane offset for the next batch of frames
             frames_per_plane_channel = nframes // (plane_number * channel_number)
@@ -297,12 +297,12 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
     # Loops over each plane-specific 'ops' dictionary and adds descriptive information about the data to be processed
     # (frames).
     for ops in plane_ops:
-        ops["Ly"], ops["Lx"] = ops["meanImg"].shape
+        ops["Ly"], ops["Lx"] = ops["mean_image"].shape
         ops["yrange"] = np.array([0, ops["Ly"]])
         ops["xrange"] = np.array([0, ops["Lx"]])
-        ops["meanImg"] /= ops["nframes"]
+        ops["mean_image"] /= ops["nframes"]
         if channel_number > 1:
-            ops["meanImg_chan2"] /= ops["nframes"]
+            ops["mean_image_channel_2"] /= ops["nframes"]
 
         # Caches each 'ops' dictionary to disk as an ops.npy file. The file is cached into the plane-specific processing
         # subdirectory.
@@ -329,7 +329,7 @@ def mesoscan_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
     Returns:
         The 'ops' dictionary of the first available plane to be processed augmented with additional descriptive
         parameters for the processed data. Specifically, the dictionary includes the following additional keys:
-        "Ly", "Lx", "first_tiffs", "frames_per_folder", "nframes", "meanImg", "meanImg_chan2".
+        "Ly", "Lx", "first_tiffs", "frames_per_folder", "nframes", "mean_image", "mean_image_channel_2".
     """
     # Instantiates and resets the run timer
     timer = PrecisionTimer("s")
@@ -474,11 +474,11 @@ def mesoscan_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
                 plane_index = plane_ops[roi_plane_index]["iplane"]
 
                 if file_index == 0 and start_index == 0:
-                    plane_ops[roi_plane_index]["meanImg"] = np.zeros(
+                    plane_ops[roi_plane_index]["mean_image"] = np.zeros(
                         (len(roi_plane_lines), frames.shape[2]), np.float32
                     )
                     if channel_number > 1:
-                        plane_ops[roi_plane_index]["meanImg_chan2"] = np.zeros(
+                        plane_ops[roi_plane_index]["mean_image_channel_2"] = np.zeros(
                             (len(roi_plane_lines), frames.shape[2]), np.float32
                         )
                     plane_ops[roi_plane_index]["nframes"] = 0
@@ -508,7 +508,7 @@ def mesoscan_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
 
                     # Appends the data from all processed frames to the data arrays in the plane-specific 'ops'
                     # dictionary, as this data is used during further processing.
-                    plane_ops[roi_plane_index]["meanImg"] += frames_to_write.astype(np.float32).sum(axis=0)
+                    plane_ops[roi_plane_index]["mean_image"] += frames_to_write.astype(np.float32).sum(axis=0)
                     plane_ops[roi_plane_index]["nframes"] += frames_to_write.shape[0]
                     plane_ops[roi_plane_index]["frames_per_folder"][folder_index] += frames_to_write.shape[0]
 
@@ -528,7 +528,7 @@ def mesoscan_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
                                 second_channel_indices, roi_plane_lines[0] : roi_plane_lines[-1] + 1, :
                             ]
                             channel_2_binary_file[roi_plane_index].write(channel_2_frames_to_write.tobytes())
-                            plane_ops[roi_plane_index]["meanImg_chan2"] += channel_2_frames_to_write.astype(
+                            plane_ops[roi_plane_index]["mean_image_channel_2"] += channel_2_frames_to_write.astype(
                                 np.float32
                             ).sum(axis=0)
 
@@ -549,7 +549,7 @@ def mesoscan_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
     # Loops over each plane-specific 'ops' dictionary and adds descriptive information about the data to be processed
     # (frames).
     for ops in plane_ops:
-        ops["Ly"], ops["Lx"] = ops["meanImg"].shape
+        ops["Ly"], ops["Lx"] = ops["mean_image"].shape
 
         # If registration is disabled, sets the pixel ranges to span the full height and width of the frame. Pixels on
         # the edges of each frame are excluded during registration as they are typically unstable and should be
@@ -558,9 +558,9 @@ def mesoscan_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
             ops["yrange"] = np.array([0, ops["Ly"]])
             ops["xrange"] = np.array([0, ops["Lx"]])
 
-        ops["meanImg"] /= ops["nframes"]
+        ops["mean_image"] /= ops["nframes"]
         if channel_number > 1:
-            ops["meanImg_chan2"] /= ops["nframes"]
+            ops["mean_image_channel_2"] /= ops["nframes"]
 
         # Caches each 'ops' dictionary to disk as an ops.npy file. The file is cached into the plane-specific processing
         # subdirectory.

@@ -123,7 +123,7 @@ def enable_views_and_classifier(parent):
     if "meanImg_chan2_corrected" not in parent.ops:
         parent.viewbtns.button(5).setEnabled(False)
         parent.viewbtns.button(5).setStyleSheet(parent.styleInactive)
-        if "meanImg_chan2" not in parent.ops:
+        if "mean_image_channel_2" not in parent.ops:
             parent.viewbtns.button(6).setEnabled(False)
             parent.viewbtns.button(6).setStyleSheet(parent.styleInactive)
 

@@ -166,57 +166,54 @@ class Clustering:
 
 @dataclass
 class SignalExtraction:
-    """Stores parameters for extracting fluorescence signals from ROIs and surrounding neuropil regions."""
+    """Stores parameters for extracting fluorescence signals from cell ROIs and surrounding neuropil regions."""
 
-    neuropil_extract: bool = True
-    """Determines whether to extract neuropil signals. Typically, this is set to True to support later 
-    delta-fluorescence-over-fluorescence (dff) analysis."""
+    extract_neuropil: bool = True
+    """Determines whether to extract the neuropil activity. If this is set to False, the neuropil fluorescence is 
+    assumed to be zero during further signal processing."""
 
     allow_overlap: bool = False
-    """Determines whether to allow overlap pixels (pixels shared by multiple ROIs) to be used in the signal extraction. 
-    Typically this is set to False to avoid contamination."""
+    """Determines whether to use the overlapping pixels (pixels shared by multiple ROIs) for signal extraction."""
 
-    min_neuropil_pixels: int = 350
-    """The minimum number of pixels required to compute the neuropil signal for each cell."""
+    minimum_neuropil_pixels: int = 350
+    """The minimum size of the computed neuropil region, in pixels. During neuropil computation, the algorithm expands 
+    the neuropil region outward from each cell until it accumulates at least this number of pixels."""
 
-    inner_neuropil_radius: int = 2
-    """The number of pixels to keep between the ROI and the surrounding neuropil region to avoid signal bleed-over."""
+    inner_neuropil_border_radius: int = 2
+    """The number of pixels to keep as the separation between the cell ROI and the surrounding neuropil region."""
 
-    lam_percentile: int = 50
-    """The percentile of Lambda within area to ignore when excluding the brightest pixels during neuropil extraction.
-    Specifically, pixels with relative brightness above this threshold are excluded from neuropil signal to filter 
-    out bright speckle outliers.
-    """
+    lambda_percentile: int = 50
+    """The percentile of Lambda (cell classification confidence) within the tentative neuropil area to ignore when 
+    constructing the neuropil masks. A pixel with the lambda score higher than this value is labeled as belonging
+    to the cell region of an ROI and excluded from each neuropil mask."""
 
 
 @dataclass
 class SpikeDeconvolution:
     """Stores parameters for deconvolving fluorescence signals to infer spike trains."""
 
-    spikedetect: bool = True
-    """Determines whether to perform fluorescence spike deconvolution."""
+    extract_spikes: bool = True
+    """Determines whether to deconvolve the spike activity from the extracted fluorescence traces."""
 
-    neucoeff: float = 0.7
-    """The neuropil coefficient applied for signal correction before deconvolution. Specifically, the neuropil signal
-    is scaled by this coefficient before it is subtracted from the ROI signal when computing df/f values."""
+    neuropil_coefficient: float = 0.7
+    """The coefficient used to scale the neuropil fluorescence before it is subtracted from the ROI fluorescence. This 
+    is performed before computing and subtracting the baseline fluorescence from each ROI fluorescence trace."""
 
     baseline: str = "maximin"
-    """Specifies the method to compute the baseline of each trace. This baseline is then subtracted from each cell's 
-    fluorescence. 'maximin' computes a moving baseline by filtering the data with a Gaussian of width 
-    'sig_baseline' * 'fs', and then minimum filtering with a window of 'win_baseline' * 'fs', and then maximum 
-    filtering with the same window. 'constant' computes a constant baseline by filtering with a Gaussian of width 
-    'sig_baseline' * 'fs' and then taking the minimum value of this filtered trace. 'constant_percentile' computes a 
-    constant baseline by taking the 'prctile_baseline' percentile of the trace."""
+    """Specifies the method for computing the baseline of the ROI fluorescence traces. This baseline is subtracted from
+    each ROI's fluorescence before deconvolving the spike activity for each ROI. 'maximin' uses a sliding window of 
+    size 'baseline_window' to compute the baseline. 'constant' computes the baseline for the entire trace. 
+    'constant_percentile' uses the specific low-end percentile of each trace's overall activity as the baseline for the
+    entire trace."""
 
-    win_baseline: float = 60.0
-    """The time window, in seconds, over which to compute the baseline filter."""
+    baseline_window: float = 60.0
+    """The size of the sliding window, in seconds, over which to compute the 'maximin' baseline."""
 
-    sig_baseline: float = 10.0
-    """The standard deviation, in seconds, of the Gaussian filter applied to smooth the baseline signal."""
+    baseline_sigma: float = 10.0
+    """The standard deviation, in seconds, of the Gaussian filter used to compute the baseline."""
 
-    prctile_baseline: float = 8.0
-    """The percentile used to determine the baseline level of each trace (typically a low percentile reflecting 
-    minimal activity)."""
+    baseline_percentile: float = 8.0
+    """The percentile of each trace's activity used as the 'constant_percentile' baseline."""
 
 
 @dataclass()

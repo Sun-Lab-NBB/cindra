@@ -155,18 +155,18 @@ class BinaryFile:
         """Ensures the memory-mapped file view is closed upon termination of the context that uses the file."""
         self.close()
 
-    def __setitem__(self, indices: slice | int | tuple[int, ...] | NDArray[Any], data: NDArray[Any]) -> None:
+    def __setitem__(self, indices: slice | int | tuple[int, ...] | NDArray[Any], data: NDArray[np.int16]) -> None:
         """Sets data in the binary file at specific indices.
 
         This method is used to assign data to the binary file at the provided indices. If the data is not in 'int16'
         format, it is restricted to the maximum value that can be represented by a 16-bit signed integer and converted
-        to an 'int16'.
+        to an 'int16' format.
 
         Args:
             indices: A slice, integer, or iterable that specifies the indices at which to write the data.
             data: The data to be written to the specified indices.
         """
-        # Checks and converts data type top int16, if needed
+        # Checks and converts data type to int16, if needed
         if data.dtype != "int16":
             data = np.minimum(data, 2**15 - 2).astype("int16")
 
@@ -218,9 +218,9 @@ class BinaryFile:
                 good frames are kept and binned as part of the batch processing.
 
         Returns:
-            A 3-dimensional NumPy array that stores the binned movie. Specifically, the first dimension specifies the
+            A 3-dimensional NumPy array that stores the binned movie. The first dimension specifies the
             bin number (an average of bin_size frames), the second specifies the height, and the third specifies the
-            width. In other words, the returned data represents an average of bin_size frames at each consecutive
+            width. Overall, the returned data represents an average of bin_size frames at each consecutive
             time-point.
         """
         # If 'bad_frames' is provided, creates a NumPy array that tracks which frames are good. Otherwise, considers all
