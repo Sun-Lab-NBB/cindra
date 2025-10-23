@@ -10,7 +10,7 @@ from qtpy.QtWidgets import QLabel, QDialog, QWidget, QLineEdit, QGridLayout, QMe
 
 from . import io, masks, utils
 from ..detection.stats import roi_stats, median_pix
-from ..extraction.dcnv import oasis
+from ..extraction.deconvolve import oasis
 
 
 def distance_matrix(parent, ilist):
@@ -125,12 +125,17 @@ def merge_activity_masks(parent):
     if parent.hasred:
         F_chan2 = F_chan2.mean(axis=0)
         Fneu_chan2 = Fneu_chan2.mean(axis=0)
-    dF = F - parent.ops["neucoeff"] * Fneu
+    dF = F - parent.ops["neuropil_coefficient"] * Fneu
     # activity stats
     stat0["skew"] = stats.skew(dF)
     stat0["std"] = dF.std()
 
-    spks = oasis(F=dF[np.newaxis, :], batch_size=parent.ops["batch_size"], tau=parent.ops["tau"], fs=parent.ops["fs"])
+    spks = oasis(
+        cell_fluorescence=dF[np.newaxis, :],
+        batch_size=parent.ops["batch_size"],
+        time_constant=parent.ops["tau"],
+        sampling_rate=parent.ops["fs"],
+    )
 
     ### remove previously merged cell from FOV (do not replace)
     for k in remove_merged:

@@ -13,9 +13,8 @@ from qtpy.QtWidgets import QLabel, QWidget, QLineEdit, QGridLayout, QMainWindow,
 from matplotlib.colors import hsv_to_rgb
 
 from . import io
-from ..extraction import masks, preprocess, extract_traces_from_masks
+from ..extraction import masks, oasis, preprocess, extract_traces_from_masks
 from ..detection.stats import roi_stats
-from ..extraction.dcnv import oasis
 
 
 def masks_and_traces(ops, stat_manual, stat_orig):
@@ -33,20 +32,11 @@ def masks_and_traces(ops, stat_manual, stat_orig):
         stat_all.append(stat_orig[n])
 
     stat_all = roi_stats(stat_all, ops["Ly"], ops["Lx"], aspect=ops.get("aspect", None), diameter=ops["diameter"])
-    cell_masks = [
-        masks.create_cell_mask(stat, Ly=ops["Ly"], Lx=ops["Lx"], allow_overlap=ops["allow_overlap"])
-        for stat in stat_all
-    ]
-    cell_pix = masks.create_cell_pix(stat_all, Ly=ops["Ly"], Lx=ops["Lx"])
+    cell_masks, manual_neuropil_masks = masks.create_masks(
+        roi_statistics=stat_all, height=ops["Ly"], width=ops["Lx"], neuropil=True, ops=ops
+    )
     manual_roi_stats = stat_all[: len(stat_manual)]
     manual_cell_masks = cell_masks[: len(stat_manual)]
-    manual_neuropil_masks = masks.create_neuropil_masks(
-        ypixs=[stat["ypix"] for stat in manual_roi_stats],
-        xpixs=[stat["xpix"] for stat in manual_roi_stats],
-        cell_pix=cell_pix,
-        inner_neuropil_radius=ops["inner_neuropil_radius"],
-        min_neuropil_pixels=ops["min_neuropil_pixels"],
-    )
     print("Masks made in %0.2f sec." % (time.time() - t0))
 
     F, Fneu, F_chan2, Fneu_chan2 = extract_traces_from_masks(ops, manual_cell_masks, manual_neuropil_masks)
@@ -64,7 +54,7 @@ def masks_and_traces(ops, stat_manual, stat_orig):
             manual_roi_stats[n]["iplane"] = stat_orig[0]["iplane"]
 
     # subtract neuropil and compute skew, std from F
-    dF = F - ops["neucoeff"] * Fneu
+    dF = F - ops["neuropil_coefficient"] * Fneu
     sk = stats.skew(dF, axis=1)
     sd = np.std(dF, axis=1)
 
@@ -74,14 +64,11 @@ def masks_and_traces(ops, stat_manual, stat_orig):
         manual_roi_stats[n]["med"] = [np.mean(manual_roi_stats[n]["ypix"]), np.mean(manual_roi_stats[n]["xpix"])]
 
     dF = preprocess(
-        F=dF,
-        baseline=ops["baseline"],
-        win_baseline=ops["win_baseline"],
-        sig_baseline=ops["sig_baseline"],
-        fs=ops["fs"],
-        prctile_baseline=ops["prctile_baseline"],
+        roi_fluorescence=F,
+        neuropil_fluorescence=Fneu,
+        ops=ops,
     )
-    spks = oasis(F=dF, batch_size=ops["batch_size"], tau=ops["tau"], fs=ops["fs"])
+    spks = oasis(cell_fluorescence=dF, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["fs"])
 
     return F, Fneu, F_chan2, Fneu_chan2, spks, ops, manual_roi_stats
 
@@ -290,7 +277,7 @@ class ROIDraw(QMainWindow):
                 mimg[
                     self.parent.ops["yrange"][0] : self.parent.ops["yrange"][1],
                     self.parent.ops["xrange"][0] : self.parent.ops["xrange"][1],
-                ] = self.parent.ops["meanImg"][
+                ] = self.parent.ops["mean_image"][
                     self.parent.ops["yrange"][0] : self.parent.ops["yrange"][1],
                     self.parent.ops["xrange"][0] : self.parent.ops["xrange"][1],
                 ]
@@ -300,7 +287,7 @@ class ROIDraw(QMainWindow):
                 mimg[
                     self.parent.ops["yrange"][0] : self.parent.ops["yrange"][1],
                     self.parent.ops["xrange"][0] : self.parent.ops["xrange"][1],
-                ] = self.parent.ops["meanImgE"][
+                ] = self.parent.ops["enhanced_mean_image"][
                     self.parent.ops["yrange"][0] : self.parent.ops["yrange"][1],
                     self.parent.ops["xrange"][0] : self.parent.ops["xrange"][1],
                 ]

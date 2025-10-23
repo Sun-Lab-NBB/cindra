@@ -10,7 +10,7 @@ from ..extraction import masks
 identify cells with channel 2 brightness (aka red cells)
 
 main function is detect
-takes from ops: "meanImg", "meanImg_chan2", "Ly", "Lx"
+takes from ops: "mean_image", "mean_image_channel_2", "Ly", "Lx"
 takes from stat: "ypix", "xpix", "lam"
 """
 
@@ -53,16 +53,8 @@ def intensity_ratio(ops, stats):
     (exclude pixels from other cells)
     """
     Ly, Lx = ops["Ly"], ops["Lx"]
-    cell_pix = masks.create_cell_pix(stats, Ly=ops["Ly"], Lx=ops["Lx"])
-    cell_masks0 = [
-        masks.create_cell_mask(stat, Ly=ops["Ly"], Lx=ops["Lx"], allow_overlap=ops["allow_overlap"]) for stat in stats
-    ]
-    neuropil_ipix = masks.create_neuropil_masks(
-        ypixs=[stat["ypix"] for stat in stats],
-        xpixs=[stat["xpix"] for stat in stats],
-        cell_pix=cell_pix,
-        inner_neuropil_radius=ops["inner_neuropil_radius"],
-        min_neuropil_pixels=ops["min_neuropil_pixels"],
+    cell_masks0, neuropil_ipix = masks.create_masks(
+        roi_statistics=stats, height=ops["Ly"], width=ops["Lx"], neuropil=True, ops=ops
     )
     cell_masks = np.zeros((len(stats), Ly * Lx), np.float32)
     neuropil_masks = np.zeros((len(stats), Ly * Lx), np.float32)
@@ -72,7 +64,7 @@ def intensity_ratio(ops, stats):
         cell_mask[cell_mask0[0]] = cell_mask0[1]
         neuropil_mask[neuropil_mask0.astype(np.int64)] = 1.0 / len(neuropil_mask0)
 
-    mimg2 = ops["meanImg_chan2"]
+    mimg2 = ops["mean_image_channel_2"]
     inpix = cell_masks @ mimg2.flatten()
     extpix = neuropil_masks @ mimg2.flatten()
     inpix = np.maximum(1e-3, inpix)
@@ -98,8 +90,8 @@ def cellpose_overlap(stats, mimg2):
 
 
 def detect(ops, stats):
-    mimg = ops["meanImg"].copy()
-    mimg2 = ops["meanImg_chan2"].copy()
+    mimg = ops["mean_image"].copy()
+    mimg2 = ops["mean_image_channel_2"].copy()
 
     # subtract bleedthrough of green into red channel
     # non-rigid regression with nblks x nblks pieces

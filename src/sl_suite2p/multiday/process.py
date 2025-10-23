@@ -54,7 +54,7 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     movie_width = int(np.amax(plane_x_coordinate + plane_widths))
 
     # Loads multi-day tracked cell masks for the processed session
-    cell_masks: list[dict[str, Any]] = np.load(
+    multiday_cell_masks: list[dict[str, Any]] = np.load(
         multiday_folder.joinpath("backwards_deformed_cell_masks.npy"), allow_pickle=True
     )
 
@@ -66,8 +66,14 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     console.echo(f"Creating session {session_id} multi-day cell masks...")
     timer.reset()
     # Re-computes the ROI stats for all multi-day tracked cells
-    cell_masks = roi_stats(cell_masks, ops["Ly"], ops["Lx"], ops["aspect"], ops["diameter"])
-    cell_masks, neuropil_masks = extraction.masks.create_masks(cell_masks, ops["Ly"], ops["Lx"], ops)
+    roi_statistics = roi_stats(multiday_cell_masks, ops["Ly"], ops["Lx"], ops["aspect"], ops["diameter"])
+    cell_masks, neuropil_masks = extraction.masks.create_masks(
+        roi_statistics=roi_statistics,
+        height=ops["Ly"],
+        width=ops["Lx"],
+        neuropil=ops.get("extract_neuropil", True),
+        ops=ops,
+    )
     message = f"Session {session_id} multi-day masks: created. Time taken {timer.elapsed} seconds."
     console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -83,33 +89,30 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
         registered_data_path,
     ) as file:
         cell_fluorescence, neuropil_fluorescence = extraction.extract.extract_traces(
-            f_in=file,
-            plane_number="combined",
+            data=file,
             cell_masks=cell_masks,
             neuropil_masks=neuropil_masks,
             batch_size=ops["batch_size"],
             session_id=session_id,
         )
 
-    # Computes delta f/f (neuropil-subtracted ROI fluorescence)
-    dff = cell_fluorescence.copy() - ops["neucoeff"] * neuropil_fluorescence
-    dff = extraction.preprocess(
-        F=dff,
-        baseline=ops["baseline"],
-        win_baseline=ops["win_baseline"],
-        sig_baseline=ops["sig_baseline"],
-        fs=ops["fs"],
-        prctile_baseline=ops["prctile_baseline"],
+    # Computes delta fluorescence (dF) (neuropil-and-baseline-subtracted ROI fluorescence)
+    df = extraction.preprocess(
+        roi_fluorescence=cell_fluorescence,
+        neuropil_fluorescence=neuropil_fluorescence,
+        ops=ops,
     )
 
     # Cell activity spike deconvolution
-    if ops.get("spikedetect", True):
+    if ops.get("extract_spikes", True):
         message = f"Processing session {session_id} activity spikes..."
         console.echo(message=message, level=LogLevel.INFO)
         timer.reset()
 
         # Extracts the cell fluorescence spikes using the OASIS algorithm.
-        spikes = extraction.oasis(F=dff, batch_size=ops["batch_size"], tau=ops["tau"], fs=ops["fs"])
+        spikes = extraction.oasis(
+            cell_fluorescence=df, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["fs"]
+        )
         ops["timing"]["multiday_deconvolution"] = timer.elapsed
 
         message = (
@@ -118,8 +121,8 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
         console.echo(message=message, level=LogLevel.SUCCESS)
     else:
         message = (
-            f"Skipping session {session_id} spike deconvolution, as it is disabled via the 'spikedetect' "
-            f"configuration parameter."
+            f"Skipping session {session_id} spike deconvolution, as the 'extract_spikes' configuration parameter is "
+            f"set to False."
         )
         console.echo(message=message, level=LogLevel.WARNING)
         spikes = np.zeros_like(cell_fluorescence)
@@ -129,5 +132,5 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     np.save(multiday_folder.joinpath("ops.npy"), ops)
     np.save(multiday_folder.joinpath("F.npy"), cell_fluorescence)
     np.save(multiday_folder.joinpath("Fneu.npy"), neuropil_fluorescence)
-    np.save(multiday_folder.joinpath("Fsub.npy"), dff)
+    np.save(multiday_folder.joinpath("Fsub.npy"), df)
     np.save(multiday_folder.joinpath("spks.npy"), spikes)

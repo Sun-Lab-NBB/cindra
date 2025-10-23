@@ -121,7 +121,7 @@ def _register_plane(
         ops = registration.save_registration_outputs_to_ops(registration_outputs, ops)
 
         # Computes and adds the enhanced mean image to the plane 'ops' file.
-        ops["meanImgE"] = registration.compute_enhanced_mean_image(ops["meanImg"].astype(np.float32), ops)
+        ops["enhanced_mean_image"] = registration.create_enhanced_mean_image(ops)
 
         # Adds registration time to the plane 'ops' file.
         ops["timing"]["registration"] = timer.elapsed
@@ -323,10 +323,10 @@ def _process_rois(
                 cell_fluorescence_channel_2,
                 neuropil_fluorescence_channel_2,
             ) = extraction.extraction_wrapper(
-                roi_statistics,
+                roi_statistics=roi_statistics,
                 plane_number=plane_number,
-                f_reg=frames,
-                f_reg_chan2=frames_channel_2,
+                frames=frames,
+                channel_2_frames=frames_channel_2,
                 ops=ops,
             )
 
@@ -352,24 +352,25 @@ def _process_rois(
             console.echo(message=message, level=LogLevel.SUCCESS)
 
             # Cell activity spike deconvolution
-            if ops.get("spikedetect", True):
+            if ops.get("extract_spikes", True):
                 message = f"Processing plane {plane_number} activity spikes..."
                 console.echo(message=message, level=LogLevel.INFO)
                 timer.reset()
 
                 # Computes delta f/f (neuropil-subtracted ROI fluorescence)
-                dff = cell_fluorescence.copy() - ops["neucoeff"] * neuropil_fluorescence
-                dff = extraction.preprocess(
-                    F=dff,
-                    baseline=ops["baseline"],
-                    win_baseline=ops["win_baseline"],
-                    sig_baseline=ops["sig_baseline"],
-                    fs=ops["fs"],
-                    prctile_baseline=ops["prctile_baseline"],
+                df = extraction.preprocess(
+                    roi_fluorescence=cell_fluorescence,
+                    neuropil_fluorescence=neuropil_fluorescence,
+                    ops=ops,
                 )
 
                 # Extracts the cell fluorescence spikes using the OASIS algorithm.
-                spikes = extraction.oasis(F=dff, batch_size=ops["batch_size"], tau=ops["tau"], fs=ops["fs"])
+                spikes = extraction.oasis(
+                    cell_fluorescence=df,
+                    batch_size=ops["batch_size"],
+                    time_constant=ops["tau"],
+                    sampling_rate=ops["fs"],
+                )
                 ops["timing"]["deconvolution"] = timer.elapsed
 
                 message = (
@@ -379,8 +380,8 @@ def _process_rois(
 
             else:
                 message = (
-                    f"Skipping plane {plane_number} spike deconvolution, as it is disabled via the 'spikedetect' "
-                    f"configuration parameter."
+                    f"Skipping plane {plane_number} spike deconvolution, as the 'extract_spikes' configuration "
+                    f"parameter is set to False."
                 )
                 console.echo(message=message, level=LogLevel.WARNING)
                 spikes = np.zeros_like(cell_fluorescence)
@@ -391,12 +392,12 @@ def _process_rois(
                 np.save(fpath.joinpath("stat.npy"), roi_statistics)
                 np.save(fpath.joinpath("F.npy"), cell_fluorescence)
                 np.save(fpath.joinpath("Fneu.npy"), neuropil_fluorescence)
-                np.save(fpath.joinpath("Fsub.npy"), dff)
+                np.save(fpath.joinpath("Fsub.npy"), df)
                 np.save(fpath.joinpath("iscell.npy"), iscell)
                 np.save(fpath.joinpath("spks.npy"), spikes)
 
                 # If the data contains two functional channels, also saves the data for the second channel.
-                if "meanImg_chan2" in ops:
+                if "mean_image_channel_2" in ops:
                     np.save(fpath.joinpath("F_chan2.npy"), cell_fluorescence_channel_2)
                     np.save(fpath.joinpath("Fneu_chan2.npy"), neuropil_fluorescence_channel_2)
 

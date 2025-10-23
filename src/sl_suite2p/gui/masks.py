@@ -9,7 +9,7 @@ import matplotlib.cm
 from qtpy.QtWidgets import QLabel, QComboBox, QLineEdit, QPushButton, QButtonGroup
 from matplotlib.colors import hsv_to_rgb
 
-import sl_suite2p.gui.merge as merge
+from sl_suite2p.gui import merge
 
 from . import io
 
@@ -125,7 +125,7 @@ def make_colors(parent):
     parent.colors["istat"] = np.zeros((len(parent.color_names), ncells), np.float32)
     np.random.seed(seed=0)
     allcols = np.random.random((ncells,))
-    if "meanImg_chan2" in parent.ops:
+    if "mean_image_channel_2" in parent.ops:
         allcols = allcols / 1.4
         allcols = allcols + 0.1
         print(f"number of red cells: {parent.redcell.sum()}")

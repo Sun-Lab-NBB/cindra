@@ -755,9 +755,9 @@ def save_registration_outputs_to_ops(registration_outputs, ops):
     if ops["nonrigid"]:
         ops["yoff1"], ops["xoff1"], ops["corrXY1"] = nonrigid_offsets
     # assign mean images
-    ops["meanImg"] = meanImg
+    ops["mean_image"] = meanImg
     if meanImg_chan2 is not None:
-        ops["meanImg_chan2"] = meanImg_chan2
+        ops["mean_image_channel_2"] = meanImg_chan2
     # assign crop computation and badframes
     ops["badframes"], ops["yrange"], ops["xrange"] = badframes, yrange, xrange
     if len(zest[0]) > 0:
@@ -766,74 +766,71 @@ def save_registration_outputs_to_ops(registration_outputs, ops):
     return ops
 
 
-# def enhanced_mean_image(ops):
-#     """computes enhanced mean image and adds it to ops
-#
-#     Median filters ops["meanImg"] with 4*diameter in 2D and subtracts and
-#     divides by this median-filtered image to return a high-pass filtered
-#     image ops["meanImgE"]
-#
-#     Parameters
-#     ----------
-#     ops : dictionary
-#         uses "meanImg", "aspect", "spatscale_pix", "yrange" and "xrange"
-#
-#     Returns
-#     -------
-#         ops : dictionary
-#             "meanImgE" field added
-#
-#     """
-#
-#     I = ops["meanImg"].astype(np.float32)
-#     mimg0 = compute_enhanced_mean_image(I, ops)
-#     # mimg = mimg0.min() * np.ones((ops["Ly"],ops["Lx"]),np.float32)
-#     # mimg[ops["yrange"][0]:ops["yrange"][1],
-#     #    ops["xrange"][0]:ops["xrange"][1]] = mimg0
-#     ops["meanImgE"] = mimg0
-#     print("added enhanced mean image")
-#     return ops
+def create_enhanced_mean_image(ops):
+    """Updates the input 'ops' dictionary to include the enhanced mean image of the processed cell activity movie.
 
-
-def compute_enhanced_mean_image(I, ops):
-    """Computes enhanced mean image
-
-    Median filters ops["meanImg"] with 4*diameter in 2D and subtracts and
-    divides by this median-filtered image to return a high-pass filtered
-    image ops["meanImgE"]
-
-    Parameters
-    ----------
-    ops : dictionary
-        uses "meanImg", "aspect", "spatscale_pix", "yrange" and "xrange"
+    Args:
+        ops: The dictionary that contains the processing parameters and the intermediate processing results.
 
     Returns:
-    -------
-        ops : dictionary
-            "meanImgE" field added
-
+        The input 'ops' dictionary, updated to include the computed enhanced mean image 'enhanced_mean_image' field.
     """
-    I = ops["meanImg"].astype(np.float32)
-    if "spatscale_pix" not in ops:
+    # Pre-initializes the enhanced mean image array by taking the original mean image
+    mean_image = ops["mean_image"].astype(np.float32)
+
+    # Defines the parameters for enhancing the mean image.
+    scale_background = 4
+    minimum_intensity = -6
+    maximum_intensity = 6
+
+    # If the spatial scaling is not defined inside the 'ops' dictionary, determines the optimal spatial scaling based
+    # on the diameter of the discovered cell ROI objects.
+    if "spatial_scale_pixels" not in ops:
         if isinstance(ops["diameter"], int):
-            diameter = np.array([ops["diameter"], ops["diameter"]])
+            cell_diameter = np.array([ops["diameter"], ops["diameter"]])
         else:
-            diameter = np.array(ops["diameter"])
-        if diameter[0] == 0:
-            diameter[:] = 12
-        ops["spatscale_pix"] = diameter[1]
-        ops["aspect"] = diameter[0] / diameter[1]
+            cell_diameter = np.array(ops["diameter"])
 
-    diameter = 4 * np.ceil(np.array([ops["spatscale_pix"] * ops["aspect"], ops["spatscale_pix"]])) + 1
-    diameter = diameter.flatten().astype(np.int64)
-    Imed = medfilt2d(I, [diameter[0], diameter[1]])
-    I = I - Imed
-    Idiv = medfilt2d(np.absolute(I), [diameter[0], diameter[1]])
-    I = I / (1e-10 + Idiv)
-    mimg1 = -6
-    mimg99 = 6
-    mimg0 = I
+        # If the diameter is set to 0, the CellPose algorithm has not yet established the ROI diameter. In this case,
+        # defaults to using the diameter of 12 pixels.
+        if cell_diameter[0] == 0:
+            cell_diameter[:] = 12
 
-    mimg0 = (mimg0 - mimg1) / (mimg99 - mimg1)
-    mimg0 = np.maximum(0, np.minimum(1, mimg0))
-    return mimg0
+        # Calculates the spatial scaling and the aspect ratio based on the resolved cell ROI diameter.
+        ops["spatial_scale_pixels"] = cell_diameter[1]
+        ops["aspect"] = cell_diameter[0] / cell_diameter[1]
+
+    # Creates a median filter with a large kernel (4 * cell diameter)
+    filter_height = scale_background * np.ceil(ops["spatial_scale_pixels"] * ops["aspect"]) + 1
+    filter_width = scale_background * np.ceil(ops["spatial_scale_pixels"]) + 1
+    filter_kernel_size = (int(filter_height), int(filter_width))
+
+    # Uses the median filter to compute and subtract the background fluorescence from the mean image, enhancing the
+    # cell objects.
+    background = medfilt2d(mean_image, filter_kernel_size)
+    background_removed = mean_image - background
+
+    # Normalizes the cell contrast across the image by dividing the background-subtracted image by the local variance.
+    local_variance = medfilt2d(np.absolute(background_removed), filter_kernel_size)
+    normalized_image = background_removed / (1e-10 + local_variance)
+
+    # Excludes the pixels along the border of the image, as they are typically discarded during the registration
+    # process.
+    y_start, y_end = ops["yrange"]
+    x_start, x_end = ops["xrange"]
+    roi_image = normalized_image[y_start:y_end, x_start:x_end]
+
+    # Clips the normalized image intensities to +-6 standard deviations after normalization and scales the image to
+    # reflect this range of intensities.
+    scaled_roi = (roi_image - minimum_intensity) / (maximum_intensity - minimum_intensity)
+    scaled_roi = np.clip(scaled_roi, 0, 1)
+
+    # Places the enhanced mean image back into the original mean image array, replacing the pixels along the border with
+    # the minimal intensity values.
+    height, width = ops["height"], ops["width"]
+    enhanced_image = np.full((height, width), scaled_roi.min(), dtype=np.float32)
+    enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
+
+    ops["enhanced_mean_image"] = enhanced_image
+
+    return ops

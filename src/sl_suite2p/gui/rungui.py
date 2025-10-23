@@ -107,8 +107,8 @@ class RunWindow(QDialog):
             "batch_size",
             "max_iterations",
             "nbinned",
-            "inner_neuropil_radius",
-            "min_neuropil_pixels",
+            "inner_neuropil_border_radius",
+            "minimum_neuropil_pixels",
             "spatial_scale",
             "do_registration",
             "anatomical_only",
@@ -124,8 +124,8 @@ class RunWindow(QDialog):
             "nonrigid",
             "connected",
             "roidetect",
-            "neuropil_extract",
-            "spikedetect",
+            "extract_neuropil",
+            "extract_spikes",
             "keep_movie_raw",
             "allow_overlap",
             "sparse_mode",
@@ -188,8 +188,8 @@ class RunWindow(QDialog):
             "spatial_hp_cp",
         ]
         neudeconvkeys = [
-            ["neuropil_extract", "allow_overlap", "inner_neuropil_radius", "min_neuropil_pixels"],
-            ["soma_crop", "spikedetect", "win_baseline", "sig_baseline", "neucoeff"],
+            ["extract_neuropil", "allow_overlap", "inner_neuropil_border_radius", "minimum_neuropil_pixels"],
+            ["soma_crop", "extract_spikes", "baseline_window", "baseline_sigma", "neuropil_coefficient"],
         ]
         keys = [tifkeys, outkeys, regkeys, nrkeys, cellkeys, anatkeys, neudeconvkeys]
         labels = [
