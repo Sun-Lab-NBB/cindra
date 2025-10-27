@@ -2,7 +2,7 @@
 'original' suite2p pipeline used to process brain activity data collected as part of a single continuous recording.
 """
 
-from typing import Any
+from typing import Any, NDArray
 from pathlib import Path
 from dataclasses import field, asdict, fields, dataclass
 
@@ -150,17 +150,6 @@ class FileIO:
     mesoscan: bool = False
     """Indicates whether the data submitted to the pipeline are ScanImage Mesoscope multi-page TIFFs."""
 
-    save_path0: str = ""
-    """The path to the root output directory where the pipeline results should be saved. Note, the pipeline generates 
-    the 'save_folder' under the root directory specified by this argument and output all data to the generated save 
-    folder."""
-
-    save_folder: str = "suite2p"
-    """The name of the folder under which the pipeline results should be stored. If this is not provided, the pipeline 
-    defaults to using 'suite2p' as the save directory, created under the root directory specified by 'save_path0'. Note,
-    if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 'multi-day' 
-    pipeline, do NOT modify this field. The multi-day pipeline expects the save_folder to be 'suite2p' (default)."""
-
     data_path: list[str] = field(default_factory=list)
     """The list of paths to the directories where to search for the input TIFF files. This is used during the initial 
     conversion of the raw data (expected to be .tiff / .tif) to the binary file format used by the suite2p pipeline. 
@@ -189,6 +178,17 @@ class Output:
 
     save_mat: bool = False
     """Determines whether to save the single-session pipeline output as a MATLAB file (e.g., Fall.mat)."""
+    
+    save_path0: str = ""
+    """The path to the root output directory where the pipeline results should be saved. Note, the pipeline generates 
+    the 'save_folder' under the root directory specified by this argument and output all data to the generated save 
+    folder."""
+
+    save_folder: str = "suite2p"
+    """The name of the folder under which the pipeline results should be stored. If this is not provided, the pipeline 
+    defaults to using 'suite2p' as the save directory, created under the root directory specified by 'save_path0'. Note,
+    if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 'multi-day' 
+    pipeline, do NOT modify this field. The multi-day pipeline expects the save_folder to be 'suite2p' (default)."""
 
     combined: bool = True
     """Determines whether to combine results across planes into a 'combined' folder at the end of processing. If the 
@@ -496,6 +496,7 @@ class Channel2:
     both channels."""
 
 
+
 @dataclass
 class SingleDayS2PConfiguration(YamlConfig):
     """Aggregates the configuration parameters for the single-day suite2p pipeline.
@@ -623,6 +624,21 @@ class SingleDayS2PConfiguration(YamlConfig):
             channel2=Channel2(**channel2_params),
         )
 
+@dataclass
+class AddedIOModuleOps:
+    """Fields added to the ops dictionary by IO-related modules."""
+
+    # tiff and raw
+    Ly: int                        # image height
+    Lx: int                        # image width
+    nframes: int                   # total number of frames
+    mean_image: np.ndarray[np.float32]
+    mean_image_channel_2: np.ndarray[np.float32]
+
+    # tiff
+    first_tiffs: np.ndarray[bool]  # which TIFFs are first in a folder
+    frames_per_folder: np.ndarray[int]
+    frames_per_file: np.ndarray[int]
 
 def generate_default_ops(as_dict: bool = True) -> dict[str, Any] | SingleDayS2PConfiguration:
     """Instantiates and returns an 'ops' dictionary or configuration class that contains default single-day
