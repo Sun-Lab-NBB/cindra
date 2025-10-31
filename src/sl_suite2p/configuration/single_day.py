@@ -2,7 +2,7 @@
 'original' suite2p pipeline used to process brain activity data collected as part of a single continuous recording.
 """
 
-from typing import Any, NDArray
+from typing import Any, Literal, NDArray
 from pathlib import Path
 from dataclasses import field, asdict, fields, dataclass
 
@@ -147,8 +147,8 @@ class FileIO:
     'multi-day' pipeline, this has to be False. The multi-day pipeline reuses the registered binary files to extract 
     the fluorescence of cells tracked across days."""
 
-    mesoscan: bool = False
-    """Indicates whether the data submitted to the pipeline are ScanImage Mesoscope multi-page TIFFs."""
+    input_format: str = "tiff"
+    """Format of the input imaging data ('tiff', 'raw', 'mesoscan', or 'binary'). Defaults to 'tiff'."""
 
     data_path: list[str] = field(default_factory=list)
     """The list of paths to the directories where to search for the input TIFF files. This is used during the initial 
@@ -189,7 +189,7 @@ class Output:
     defaults to using 'suite2p' as the save directory, created under the root directory specified by 'save_path0'. Note,
     if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 'multi-day' 
     pipeline, do NOT modify this field. The multi-day pipeline expects the save_folder to be 'suite2p' (default)."""
-
+    
     combined: bool = True
     """Determines whether to combine results across planes into a 'combined' folder at the end of processing. If the 
     results of the single-day pipeline are intended to be later processed as part of the multi-day pipeline, this has 
@@ -211,12 +211,10 @@ class IO_Output:
     """Stores the width of each frame stored inside the file."""   
 
     yrange: NDArray[np.uint32]
-    """The pixel range to span the full height of the frame if registration is 
-    disabled."""
+    """The pixel range to span the full height of the frame if registration is disabled."""
 
     xrange: NDArray[np.uint32]
-    """The pixel range to span the full width of the frame if registration is 
-    disabled."""
+    """The pixel range to span the full width of the frame if registration is disabled."""
 
     nframes: int       
     """Stores the total number of frames across all .raw files."""

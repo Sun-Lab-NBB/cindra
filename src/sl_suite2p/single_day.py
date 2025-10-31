@@ -678,20 +678,6 @@ def resolve_binaries(ops_path: Path) -> None:
 
     # Otherwise, regenerates all binaries from the source data.
     else:
-        # For mesoscope scan, manually overrides the input format field. This distinct step is likely due to mesoscope
-        # scanning being implemented as an extension of the general .tiff processing method.
-        if ops.get("mesoscan"):
-            ops["input_format"] = "mesoscan"
-
-        # Defaults to 'tif' input format if the explicit format is not provided.
-        elif "input_format" not in ops:
-            message = (
-                "No explicit input data format specified via the 'input_format' field of the 'ops' dictionary. "
-                "Substituting the default 'tif' format instead."
-            )
-            console.echo(message=message, level=LogLevel.WARNING)
-            ops["input_format"] = "tiff"
-
         # Builds a dictionary of callable 'converter' functions. These functions are used to convert various supported
         # input formats to the binary format used during the rest of the processing pipeline. Note, each converter
         # function also writes the plane-specific ops.npy file to the output plane folder.

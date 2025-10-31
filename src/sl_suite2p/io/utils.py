@@ -216,10 +216,7 @@ def find_files_open_binaries(
     # Initializes lists to store the binary files of each channel, which are eventually returned.
     channel_1_binary_files = []
     channel_2_binary_files = []
-
-    # Pre-types to appease mypy.
-    input_format: str | None
-
+    
     # Loops through each plane's 'ops' dictionary, processes, and opens the binary files.
     for ops in plane_ops:
         # Queries the number of channels from the plane-specific 'ops' dictionary.
