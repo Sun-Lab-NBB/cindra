@@ -928,28 +928,7 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
     if ops.get("ops_path"):
         np.save(ops["ops_path"], ops)
 
-    # If suite2p runs on a machine with a fast processing disk and a slow storage disk and is configured to move
-    # binary files after processing, moves the files to the storage disk.
-    if ops.get("move_bin") and ops["save_path"] != ops["fast_disk"]:
-        console.echo(message=f"Moving plane {plane_index} binary files to {ops['save_path']}...", level=LogLevel.INFO)
-
-        # Registered binary file for channel 1
-        shutil.move(ops["reg_file"], Path(ops["save_path"]).joinpath("data.bin"))
-
-        # Registered binary file for channel 2
-        if ops["nchannels"] > 1:
-            shutil.move(ops["reg_file_chan2"], Path(ops["save_path"]).joinpath("data_chan2.bin"))
-
-        # Raw binary file for channel 1
-        if "raw_file" in ops:
-            shutil.move(ops["raw_file"], Path(ops["save_path"]).joinpath("data_raw.bin"))
-
-        # Raw binary file for channel 2
-        if "raw_file" in ops and ops["nchannels"] > 1:
-            shutil.move(ops["raw_file_chan2"], Path(ops["save_path"]).joinpath("data_chan2_raw.bin"))
-
-    # Alternatively, if suite2p is configured to delete binary files after processing, removes the necessary files
-    elif ops.get("delete_bin"):
+    if ops.get("delete_bin"):
         console.echo(message=f"Deleting plane {plane_index} binary files...", level=LogLevel.INFO)
 
         # Registered binary file for channel 1

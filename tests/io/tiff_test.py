@@ -42,18 +42,16 @@ def ops(tmp_path):
     """Creates a basic default ops dictionary for testing."""
     return {
         "data_path": [str(tmp_path)],
-        "save_path0": str(tmp_path),
+        "save_path": str(tmp_path),
         "functional_chan": 1,
         "align_by_chan": 1,
         "nplanes": 1,
         "nchannels": 1,
-        "save_folder": [],
         "look_one_level_down": False,
         "ignored_file_names": [],
         "batch_size": 500,
         "progress_bars": False,
         "do_registration": True,
-        "fast_disk": str(tmp_path),
     }
 
 
@@ -216,14 +214,12 @@ def mesoscan_test_setup(tmp_path):
         # Return base test_ops with default mesoscan parameters
         return {
             "data_path": [str(test_dir)],
-            "save_path0": str(test_dir),
-            "fast_disk": str(test_dir),
+            "save_path": str(test_dir),
             "batch_size": 500,
             "progress_bars": False,
             "do_registration": True,
             "functional_chan": 1,
             "nchannels": 1,
-            "save_folder": [],
             "ignored_file_names": [],
             "look_one_level_down": False,
             "lines": [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]],
@@ -271,7 +267,7 @@ def test_mesoscan_to_binary(mesoscan_test_setup):
     assert len(result_ops["lines"]) == 5
     assert result_ops["lines"] in [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
     
-    bin_files = list(Path(test_ops["save_path0"]).rglob("*.bin"))
+    bin_files = list(Path(test_ops["save_path"]).rglob("*.bin"))
     assert len(bin_files) >= 1
 
 

@@ -139,13 +139,6 @@ class FileIO:
     exactly matches one of the names stored inside this list will not be processed even if it has the correct 
     extension and is located inside one of the input directories."""
 
-    fast_disk: str = ""
-    """The path to the root 'working' directory where to store the temporary binary files created during processing. 
-    This field allows optimizing processing on machines with slow storage drives and fast NVME 'work' drives by caching 
-    all data on the fast drive during runtime. Do not modify this field unless your use case specifically benefits 
-    from caching the data on a different drive than the one that stores the raw data. If this field is not modified, 
-    'save_path0' is used to store the temporary files."""
-
     delete_bin: bool = False
     """Determines whether to delete the binary file(s) created during the frame registration stage (registered .bin 
     file). Note, if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 
@@ -169,12 +162,6 @@ class FileIO:
     """Stores specific subfolder names to search through for TIFF files. All subfolders must be stored under the 
     one or more directories specified by 'data_path'."""
 
-    move_bin: bool = False
-    """Determines whether to move the binary file(s) to the save directory after processing, if 'fast_disk' differs 
-    from the 'save_path0'. Note, if using non-default 'save_folder' name, enabling this option will move the binary 
-    files from the temporary 'suite2p' folder to the 'save_folder'. Otherwise, if the save folder and the temporary 
-    folder are both 'suite2p', the binaries are automatically created and stored inside the 'save_folder'."""
-
 
 @dataclass
 class Output:
@@ -185,16 +172,14 @@ class Output:
     save_mat: bool = False
     """Determines whether to save the single-session pipeline output as a MATLAB file (e.g., Fall.mat)."""
     
-    save_path0: str = ""
-    """The path to the root output directory where the pipeline results should be saved. Note, the pipeline generates 
-    the 'save_folder' under the root directory specified by this argument and output all data to the generated save 
-    folder."""
+    save_path: str = ""
+    """The full path to the output directory where the pipeline results should be saved."""
 
-    save_folder: str = "suite2p"
-    """The name of the folder under which the pipeline results should be stored. If this is not provided, the pipeline 
-    defaults to using 'suite2p' as the save directory, created under the root directory specified by 'save_path0'. Note,
-    if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 'multi-day' 
-    pipeline, do NOT modify this field. The multi-day pipeline expects the save_folder to be 'suite2p' (default)."""
+    # save_folder: str = "suite2p"
+    # """The name of the folder under which the pipeline results should be stored. If this is not provided, the pipeline 
+    # defaults to using 'suite2p' as the save directory, created under the root directory specified by 'save_path0'. Note,
+    # if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 'multi-day' 
+    # pipeline, do NOT modify this field. The multi-day pipeline expects the save_folder to be 'suite2p' (default)."""
 
     combined: bool = True
     """Determines whether to combine results across planes into a 'combined' folder at the end of processing. If the 
