@@ -327,38 +327,25 @@ def _initialize_destination_files(
     # Initializes a list to store the absolute paths to the generated plane ops.npy files.
     ops_paths = []
 
-    # Initializes a flag to limit certain processing steps to the first plane
-    first_plane = True
-
     # Loops over all available planes and iteratively sets up paths and writes the frames for each plane into the
     # plane-specific binary file(s).
+    ops["save_path"] = Path(ops["save_path"])
+
     for plane_index in range(plane_number):
         # Constructs the directory path for each plane's output directory.
-        ops["save_path"] = ops["save_path0"].joinpath("suite2p", f"plane{plane_index}")
-
-        # If it's the first plane, sets the 'fast_disk' path to 'save_path'.
-        if first_plane:
-            ops["fast_disk"] = ops["save_path"]
-            first_plane = False
-
-        # For all other planes, joins the 'fast_disk' path with the appropriate plane-specific subdirectory.
-        else:
-            ops["fast_disk"] = ops["fast_disk"].joinpath("suite2p", f"plane{plane_index}")
+        plane_directory = ops["save_path"].joinpath(f"plane{plane_index}")
+        ensure_directory_exists(plane_directory)
 
         # Creates file paths for ops.npy and the binary data file.
-        ops["ops_path"] = ops["save_path"].joinpath("ops.npy")
-        ops["reg_file"] = ops["fast_disk"].joinpath("data.bin")
-
-        # Creates directories if they do not exist.
-        ensure_directory_exists(ops["fast_disk"])
-        ensure_directory_exists(ops["save_path"])
+        ops["ops_path"] = plane_directory.joinpath("ops.npy")
+        ops["reg_file"] = plane_directory.joinpath("data.bin")
 
         # Creates the binary file to store the data for the first channel.
         ops["reg_file"].touch()
 
         # If the data uses two functional channels, creates a second data file for the second channel.
         if channel_number > 1:
-            ops["reg_file_chan2"] = ops["fast_disk"].joinpath("data_chan2.bin")
+            ops["reg_file_chan2"] = plane_directory.joinpath("data_chan2.bin")
             ops["reg_file_chan2"].touch()
 
         # Initializes arrays for the mean image and the frame data.
@@ -373,14 +360,11 @@ def _initialize_destination_files(
         # recording.
         ops["Ly"] = raw_file.height
         ops["Lx"] = raw_file.width
-
-        # Determines whether the current runtime is configured to perform motion registration.
-        do_registration = ops["do_registration"]
-
+        
         # If registration is disabled, sets the pixel ranges to span the full height and width of the frame. Pixels on
         # the edges of each frame are excluded during registration as they are typically unstable and should be
         # discarded anyway.
-        if not do_registration:
+        if not ops["do_registration"]:
             ops["yrange"] = np.array([0, ops["Ly"]])
             ops["xrange"] = np.array([0, ops["Lx"]])
 

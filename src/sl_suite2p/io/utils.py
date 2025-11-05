@@ -290,18 +290,13 @@ def initialize_plane_ops(ops: dict[str, Any]) -> list[dict[str, Any]]:
     if "iplane" in ops:
         iplane = ops["iplane"]
 
-    # Resolves the "fast_disk" directory or sets it to the same directory as the base save_path, if not provided
-    if ("fast_disk" not in ops) or len(ops["fast_disk"]) == 0:
-        ops["fast_disk"] = ops["save_path0"]
-
     # For mesoscope ROIs, makes copies of the values stored under the "dy" and "dx" keys.
     if "dy" in ops and ops["dy"] != "":
         dy = ops["dy"]
         dx = ops["dx"]
 
     # Converts known Path instances from string to Path
-    ops["fast_disk"] = Path(ops["fast_disk"])
-    ops["save_path0"] = Path(ops["save_path0"])
+    ops["save_path"] = Path(ops["save_path"])
     ops["data_path"] = [Path(path) for path in ops["data_path"]]
 
     # Loops over each of the planes and constructs each plane-specific 'ops' dictionary. If the keys are populated in
@@ -309,21 +304,22 @@ def initialize_plane_ops(ops: dict[str, Any]) -> list[dict[str, Any]]:
     # dictionary.
     for plane_index in range(plane_number):
         # Resolves the output directory for the plane data.
-        if len(ops["save_folder"]) > 0:
-            ops["save_path"] = ops["save_path0"].joinpath(ops["save_folder"], f"plane{plane_index}")
-        else:
-            ops["save_path"] = ops["save_path0"].joinpath("suite2p", f"plane{plane_index}")
-
-        # Resolves the plane-specific working directory path.
-        fast_disk = ops["fast_disk"].joinpath("suite2p", f"plane{plane_index}")
+        plane_directory = ops["save_path"].joinpath(f"plane{plane_index}")
+        ensure_directory_exists(plane_directory)
 
         # Defines the paths for the ops.npy file and the first channel's registered data binary file.
-        ops["ops_path"] = ops["save_path"].joinpath("ops.npy")
-        ops["reg_file"] = fast_disk.joinpath("data.bin")
+        ops["ops_path"] = plane_directory.joinpath("ops.npy")
+        ops["reg_file"] = plane_directory.joinpath("data.bin")
 
         # If necessary, generates an additional binary file to store raw (unregistered) data after runtime.
         if ops.get("keep_movie_raw"):
-            ops["raw_file"] = fast_disk.joinpath("data_raw.bin")
+            ops["raw_file"] = plane_directory.joinpath("data_raw.bin")
+
+        # If the data contains multiple functional channels, configures the binaries for the second channel.
+        if channel_number > 1:
+            ops["reg_file_chan2"] = plane_directory.joinpath("data_chan2.bin")
+            if ops.get("keep_movie_raw"):
+                ops["raw_file_chan2"] = plane_directory.joinpath("data_chan2_raw.bin")
 
         # Sets the "lines" and "iplane" values for the current plane.
         if "lines" in ops:
@@ -331,20 +327,11 @@ def initialize_plane_ops(ops: dict[str, Any]) -> list[dict[str, Any]]:
         if "iplane" in ops:
             ops["iplane"] = iplane[plane_index]
 
-        # If the data contains multiple functional channels, configures the binaries for the second channel.
-        if channel_number > 1:
-            ops["reg_file_chan2"] = fast_disk.joinpath("data_chan2.bin")
-            if ops.get("keep_movie_raw"):
-                ops["raw_file_chan2"] = fast_disk.joinpath("data_chan2_raw.bin")
-
         # Stores the mesoscope ROI coordinates (top left corner) "dy" and "dx" for the current plane.
         if "dy" in ops and ops["dy"] != "":
             ops["dy"] = dy[plane_index]
             ops["dx"] = dx[plane_index]
 
-        # Creates directories for 'fast_disk' location and the save path if they do not exist.
-        ensure_directory_exists(fast_disk)
-        ensure_directory_exists(ops["save_path"])
 
         # Copies the modified 'ops' dictionary and appends it to 'plane_ops'.
         plane_ops.append(ops.copy())
