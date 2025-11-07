@@ -360,7 +360,7 @@ def _initialize_destination_files(
         # recording.
         ops["Ly"] = raw_file.height
         ops["Lx"] = raw_file.width
-        
+
         # If registration is disabled, sets the pixel ranges to span the full height and width of the frame. Pixels on
         # the edges of each frame are excluded during registration as they are typically unstable and should be
         # discarded anyway.

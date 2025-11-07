@@ -1,7 +1,6 @@
 """This module contains the high-level API for the single-day suite2p processing pipeline."""
 
 import os
-import shutil
 from typing import Any
 from pathlib import Path
 from datetime import datetime

@@ -216,7 +216,7 @@ def find_files_open_binaries(
     # Initializes lists to store the binary files of each channel, which are eventually returned.
     channel_1_binary_files = []
     channel_2_binary_files = []
-    
+
     # Loops through each plane's 'ops' dictionary, processes, and opens the binary files.
     for ops in plane_ops:
         # Queries the number of channels from the plane-specific 'ops' dictionary.
@@ -331,7 +331,6 @@ def initialize_plane_ops(ops: dict[str, Any]) -> list[dict[str, Any]]:
         if "dy" in ops and ops["dy"] != "":
             ops["dy"] = dy[plane_index]
             ops["dx"] = dx[plane_index]
-
 
         # Copies the modified 'ops' dictionary and appends it to 'plane_ops'.
         plane_ops.append(ops.copy())
