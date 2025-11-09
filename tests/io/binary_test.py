@@ -11,16 +11,17 @@ from sl_suite2p.io.binary import BinaryFile, BinaryFileCombined
 def small_bin(tmp_path):
     """Creates a small temporary .bin file with data."""
     height, width, frames = 10, 20, 8
-    path = tmp_path / "test.bin"
+    path = tmp_path.joinpath("test.bin")
     data = np.arange(frames * height * width, dtype=np.int16).reshape(frames, height, width)
     data.tofile(path)
     return height, width, frames, path, data
 
+
 # BinaryFile Class
 def test_convert_numpy_file_to_suite2p_binary(tmp_path):
     """Verifies that a .npy file is correctly converted to a .bin file and error path raises FileNotFoundError."""
-    src = tmp_path / "data.npy"
-    dst = tmp_path / "out.bin"
+    src = tmp_path.joinpath("data.npy")
+    dst = tmp_path.joinpath("out.bin")
 
     arr = np.arange(12, dtype=np.int16).reshape(3, 2, 2)
     np.save(src, arr)
@@ -32,7 +33,8 @@ def test_convert_numpy_file_to_suite2p_binary(tmp_path):
 
     # Invalid source path triggers FileNotFoundError
     with pytest.raises(FileNotFoundError):
-        BinaryFile.convert_numpy_file_to_suite2p_binary(tmp_path / "missing.npy", dst)
+        BinaryFile.convert_numpy_file_to_suite2p_binary(tmp_path.joinpath("missing.npy"), dst)
+
 
 def test_binaryfile_byte_calculations(small_bin):
     """Validates bytes_per_frame_number and byte_number properties."""
@@ -41,31 +43,39 @@ def test_binaryfile_byte_calculations(small_bin):
     expected_bytes_per_frame = 2 * height * width
     assert bf.bytes_per_frame_number == expected_bytes_per_frame
     assert bf.byte_number == path.stat().st_size
+
+    expected_size = frames * height * width
+    assert bf.size == expected_size
+
     bf.close()
+
 
 def test_open_existing_binary_reads_correctly(small_bin):
     """Verifies that BinaryFile reads an existing binary file correctly."""
     height, width, frames, path, data = small_bin
 
-    bf = BinaryFile(height, width, path)
-    assert bf.frame_number == frames
-    assert bf.shape == (frames, height, width)
-    assert np.array_equal(bf.data, data)
-    bf.close()
+    # Test with context manager
+    with BinaryFile(height, width, path) as bf:
+        assert bf.frame_number == frames
+        assert bf.shape == (frames, height, width)
+        assert np.array_equal(bf.data, data)
+
+    # Verify file is closed after context
+    assert bf.file._mmap.closed
 
 
 def test_create_new_binary_requires_frame_number(tmp_path):
     """Verifies that BinaryFile raises ValueError if frame_number is missing when creating a new file."""
-    new_path = tmp_path / "new.bin"
+    new_path = tmp_path.joinpath("new.bin")
     # Missing frame_number
-    with pytest.raises(ValueError): 
-        BinaryFile(10, 20, new_path) 
+    with pytest.raises(ValueError):
+        BinaryFile(10, 20, new_path)
 
 
 def test_create_new_binary_and_write(tmp_path):
     """Creates a new BinaryFile with a given frame count and writes data correctly."""
     height, width, frames = 3, 4, 2
-    path = tmp_path / "write_test.bin"
+    path = tmp_path.joinpath("write_test.bin")
     bf = BinaryFile(height, width, path, frame_number=frames)
     assert path.exists()
 
@@ -75,6 +85,7 @@ def test_create_new_binary_and_write(tmp_path):
 
     reread = np.memmap(path, dtype="int16", mode="r", shape=(frames, height, width))
     assert np.array_equal(reread, arr)
+
 
 def test_get_set_item_and_dtype_conversion(small_bin):
     """Checks __getitem__ and __setitem__, including dtype auto-conversion."""
@@ -115,7 +126,7 @@ def test_write_tiff_creates_valid_stack(small_bin, tmp_path):
     height, width, frames, path, data = small_bin
     bf = BinaryFile(height, width, path)
 
-    tiff_path = tmp_path / "exported.tiff"
+    tiff_path = tmp_path.joinpath("exported.tiff")
     bf.write_tiff(tiff_path)
 
     with TiffFile(tiff_path) as tif:
@@ -124,10 +135,11 @@ def test_write_tiff_creates_valid_stack(small_bin, tmp_path):
         assert np.array_equal(read_data, data)
     bf.close()
 
+
 # BinaryFileCombined Tests
 @pytest.fixture
 def combined_setup(tmp_path):
-    """Creates a fake 2-plane setup for BinaryFileCombined testing."""
+    """Creates a set of Suite2p BinaryFiles (.bin) for reading image data across planes."""
     height, width, frames = 4, 5, 2
     plane_heights = np.array([height, height], dtype=int)
     plane_widths = np.array([width, width], dtype=int)
@@ -136,7 +148,7 @@ def combined_setup(tmp_path):
 
     paths = []
     for i in range(2):
-        path = tmp_path / f"plane_{i}.bin"
+        path = tmp_path.joinpath(f"plane_{i}.bin")
         arr = np.full((frames, height, width), fill_value=i + 1, dtype=np.int16)
         arr.tofile(path)
         paths.append(path)
@@ -148,17 +160,25 @@ def combined_setup(tmp_path):
 
 def test_combined_reads_and_stacks_correctly(combined_setup):
     """Verifies that BinaryFileCombined stitches planes correctly."""
-    args = combined_setup
-    bfc = BinaryFileCombined(*args)
 
-    # Read all frames
-    data = bfc[:]
-    total_height, total_width, *_ = args
-    assert data.shape[1:] == (total_height, total_width)
-    # Upper and lower halves filled with plane-specific values
-    assert np.all(data[:, : total_height // 2] == 1)
-    assert np.all(data[:, total_height // 2 :] == 2)
-    bfc.close()
+    args = combined_setup
+
+    with BinaryFileCombined(*args) as bfc:
+        # Tests byte_number property
+        byte_numbers = bfc.byte_number
+        assert len(byte_numbers) == 2
+        assert all(byte_num > 0 for byte_num in byte_numbers)
+
+        data = bfc[:]
+        total_height, total_width, *_ = args
+        assert data.shape[1:] == (total_height, total_width)
+
+        # Upper and lower halves filled with plane-specific values
+        assert np.all(data[:, : total_height // 2] == 1)
+        assert np.all(data[:, total_height // 2 :] == 2)
+
+    for f in bfc.files:
+        assert f.file._mmap.closed
 
 
 def test_combined_shape_and_frame_number(combined_setup):
@@ -171,14 +191,17 @@ def test_combined_shape_and_frame_number(combined_setup):
     assert np.array_equal(plane_widths, args[3])
     binary_file_combined.close()
 
+
 def test_binaryfilecombined_frame_mismatch_raises(tmp_path):
     """Verifies that BinaryFileCombined raises ValueError when frame counts differ."""
     height, width = 2, 2
+
     # Plane 1 - 2 frames
-    plane_1 = tmp_path / "p1.bin"
+    plane_1 = tmp_path.joinpath("plane_1.bin")
     np.arange(8, dtype=np.int16).reshape(2, height, width).tofile(plane_1)
+
     # Plane 2 - 3 frames
-    plane_2 = tmp_path / "p2.bin"
+    plane_2 = tmp_path.joinpath("plane_2.bin")
     np.arange(12, dtype=np.int16).reshape(3, height, width).tofile(plane_2)
 
     plane_heights = np.array([height, height])
@@ -187,4 +210,6 @@ def test_binaryfilecombined_frame_mismatch_raises(tmp_path):
     plane_x_coordinates = np.array([0, 0])
 
     with pytest.raises(ValueError):
-        BinaryFileCombined(height * 2, width, plane_heights, plane_widths, plane_y_coordinates, plane_x_coordinates, [plane_1, plane_2])
+        BinaryFileCombined(
+            height * 2, width, plane_heights, plane_widths, plane_y_coordinates, plane_x_coordinates, [plane_1, plane_2]
+        )

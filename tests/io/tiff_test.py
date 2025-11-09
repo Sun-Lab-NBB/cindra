@@ -21,7 +21,7 @@ from sl_suite2p.io.tiff import (
 @pytest.fixture
 def create_single_frame_tiff(tmp_path):
     """Creates a single-frame tiff file."""
-    tiff_path = tmp_path / "single_frame.tiff"
+    tiff_path = tmp_path.joinpath("single_frame.tiff")
 
     frame = np.random.randint(0, 65535, size=(100, 100), dtype=np.uint16)
 
@@ -34,7 +34,7 @@ def create_single_frame_tiff(tmp_path):
 @pytest.fixture
 def create_multi_frame_tiff(tmp_path):
     """Creates a multi-frame tiff file."""
-    tiff_path = tmp_path / "multi_frame.tiff"
+    tiff_path = tmp_path.joinpath("multi_frame.tiff")
 
     frames = np.random.randint(0, 65535, size=(10, 100, 100), dtype=np.uint16)
 
@@ -68,6 +68,7 @@ def ops(tmp_path):
     [
         (0, 0, 0, 0, "channel_1_tiffs", 0),
         (0, 1, 0, 0, "channel_2_tiffs", 1),
+        (1, 1, 5, 1, "channel_2_tiffs", 1),
         (0, 1, 5, 1, "channel_1_tiffs", 0),
         (1, 1, 10, 0, "channel_1_tiffs", 0),
     ],
@@ -92,7 +93,6 @@ def test_generate_tiff_filename(
 
     assert expected_subdir in result
     expected_filename = f"file_{str(batch_number).zfill(9)}_channel_{expected_channel_idx}.tiff"
-
     assert expected_filename in result
     assert Path(result).parent.exists()
 
@@ -101,7 +101,7 @@ def test_save_tiff(tmp_path):
     """Verifies that the input frame stack array is saved as the specified tiff file."""
     # Creates the first set of frames
     frames1 = np.random.randint(0, 1000, size=(3, 50, 50), dtype=np.int16)
-    output_path = str(tmp_path / "output.tiff")
+    output_path = str(tmp_path.joinpath("output.tiff"))
 
     # Saves the first set of frames
     save_tiff(frames=frames1, file_path=output_path)
@@ -124,73 +124,69 @@ def test_save_tiff(tmp_path):
         assert not np.array_equal(saved_frames2, frames1)
 
 
-def test_pixel_type():
+@pytest.mark.parametrize(
+    "input_dtype, input_data, expected_data",
+    [
+        # float32 to int16
+        (np.float32, [[[100.7, 200.9], [300.3, 400.1]]], [[[100, 200], [300, 400]]]),
+        # uint16 to int16
+        (np.uint16, [[[1000, 30000], [50000, 65535]]], [[[500, 15000], [25000, 32767]]]),
+        # int16 to int16
+        (np.int16, [[[10, 20], [30, 40]]], [[[10, 20], [30, 40]]]),
+    ],
+)
+def test_read_tiff_pixel_conversion(tmp_path, input_dtype, input_data, expected_data):
     """Verifies that all image data are converted into type int16."""
-    # Tests float32 to int16
-    float_frames = np.array([[[100.7, 200.9], [300.3, 400.1]]], dtype=np.float32)
-    converted_float = np.floor(float_frames).astype(np.int16)
+    tiff_path = tmp_path.joinpath("test.tiff")
+    frames = np.array(input_data, dtype=input_dtype)
 
-    assert converted_float.dtype == np.int16
-    assert converted_float[0, 0, 0] == 100
-    assert converted_float[0, 0, 1] == 200
-    assert converted_float[0, 1, 0] == 300
-    assert converted_float[0, 1, 1] == 400
+    with TiffWriter(tiff_path) as tif:
+        for frame in frames:
+            tif.write(frame.astype(input_dtype))
 
-    # Tests uint16 to int16
-    uint16_frames = np.array([[[1000, 30000], [50000, 65535]]], dtype=np.uint16)
-    converted_uint16 = (uint16_frames // 2).astype(np.int16)
+    with TiffFile(tiff_path) as tif:
+        result_frames = _read_tiff(tif, start_index=0, batch_size=len(frames))
 
-    assert converted_uint16.dtype == np.int16
-    assert converted_uint16[0, 0, 0] == 500
-    assert converted_uint16[0, 0, 1] == 15000
-    assert converted_uint16[0, 1, 0] == 25000
-    assert converted_uint16[0, 1, 1] == 32767
+    expected_frames = np.array(expected_data, dtype=np.int16)
 
-    # Tests int32 to int16
-    int32_frames = np.array([[[1000, 20000], [30000, 32000]]], dtype=np.int32)
-    converted_int32 = (int32_frames // 2).astype(np.int16)
-
-    assert converted_int32[0, 0, 0] == 500
-    assert converted_int32[0, 0, 1] == 10000
-    assert converted_int32[0, 1, 0] == 15000
-    assert converted_int32[0, 1, 1] == 16000
+    assert result_frames.dtype == np.int16
+    assert result_frames.shape == expected_frames.shape
+    np.testing.assert_array_equal(result_frames, expected_frames)
 
 
 def test_single_frame_tiff_bin(tmp_path, ops):
     """Verifies that a third dimension is added when a single-frame TIFF is converted to a suite2p plane
-    binary (.bin)."""
+    binary (.bin), and that any extra frames read beyond the file length are truncated to match the actual
+    number of frames."""
     frame = np.random.randint(0, 65535, size=(100, 100), dtype=np.uint16)
-    tiff_path = tmp_path / "test_single_frame.tiff"
+    tiff_path = tmp_path.joinpath("test_single_frame.tiff")
     with TiffWriter(tiff_path) as tiff:
         tiff.write(frame, contiguous=True)
 
     tiff, length = _open_tiff(tiff_path)
-    assert tiff is not None
+    assert tiff is not None and hasattr(tiff, "pages")
     assert length == 1
-    assert hasattr(tiff, "pages")
 
-    frames = _read_tiff(tiff, start_index=0, batch_size=1)
-    assert frames is not None
-    assert len(frames.shape) == 3
+    # Reads more frames than available to trigger truncation logic
+    frames = _read_tiff(tiff, start_index=0, batch_size=2)
+    assert frames is not None and len(frames.shape) == 3
     assert frames.shape[0] == 1
 
     result_ops = tiff_to_binary(ops)
     assert result_ops["Ly"] == 100
     assert result_ops["Lx"] == 100
     assert result_ops["nframes"] == 1
-    assert "mean_image" in result_ops
     assert isinstance(result_ops["mean_image"], np.ndarray)
     assert result_ops["mean_image"].shape == (100, 100)
 
 
 def test_multi_plane_channel_bin(tmp_path, ops):
     """Verifies multi-plane and multi-channel tiff to binary conversion."""
-
     ops["nplanes"] = 3
     ops["nchannels"] = 2
 
     frames = np.random.randint(0, 1000, size=(60, 100, 100), dtype=np.uint16)
-    tiff_path = tmp_path / "multiple_planes_channels.tiff"
+    tiff_path = tmp_path.joinpath("multiple_planes_channels.tiff")
     with TiffWriter(tiff_path) as tiff:
         for frame in frames:
             tiff.write(frame, contiguous=True)
@@ -198,7 +194,6 @@ def test_multi_plane_channel_bin(tmp_path, ops):
     result_ops = tiff_to_binary(ops)
 
     assert "mean_image_channel_2" in result_ops
-
     # Checks that the total frames = 60, frames per channel = 60/(3x2) = 10
     assert result_ops["nframes"] == 10
 
@@ -210,15 +205,15 @@ def mesoscan_test_setup(tmp_path):
     frames = np.random.randint(0, 1000, size=(20, 100, 100), dtype=np.uint16)
 
     def _setup(json_data=None, test_name="default"):
-        test_dir = tmp_path / test_name
+        test_dir = tmp_path.joinpath(test_name)
         test_dir.mkdir(exist_ok=True)
 
         if json_data:
-            json_path = test_dir / "ops.json"
+            json_path = test_dir.joinpath("ops.json")
             with open(json_path, "w") as f:
                 json.dump(json_data, f)
 
-        tiff_path = test_dir / "test.tiff"
+        tiff_path = test_dir.joinpath("test.tiff")
         with TiffWriter(tiff_path) as tiff:
             for frame in frames:
                 tiff.write(frame, contiguous=True)
@@ -270,17 +265,30 @@ def test_mesoscan_registration_settings(mesoscan_test_setup):
     assert result_ops_reg_off["xrange"][1] == result_ops_reg_off["Lx"]
 
 
-def test_mesoscan_to_binary(mesoscan_test_setup):
+@pytest.mark.parametrize("channels", [1, 2])
+def test_mesoscan_to_binary_channels(mesoscan_test_setup, channels):
     """Ensures that the mesoscan to binary conversion process properly handles the expansion from the original
-    nested ROI structure to individual ROI * plane combinations."""
+    nested ROI structure to individual ROI * plane combinations for both single and multichannel data."""
     test_ops = mesoscan_test_setup()
+    test_ops["nchannels"] = channels
+
     result_ops = mesoscan_to_binary(test_ops)
 
     assert len(result_ops["lines"]) == 5
     assert result_ops["lines"] in [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
 
-    bin_files = list(Path(test_ops["save_path"]).rglob("*.bin"))
-    assert len(bin_files) >= 1
+    save_path = Path(test_ops["save_path"])
+    bin_files = list(save_path.rglob("*.bin"))
+    expected_bin_files = 4 * channels  # 2 ROIs * 2 planes * channels
+    assert len(bin_files) >= expected_bin_files
+
+    # Verify channel 2 data for multichannel tests
+    if channels > 1:
+        plane_dirs = list(save_path.glob("plane*"))
+        for plane_dir in plane_dirs:
+            plane_ops = np.load(plane_dir.joinpath("ops.npy"), allow_pickle=True)[()]
+            assert "mean_image_channel_2" in plane_ops
+            assert plane_ops["mean_image_channel_2"].shape == (plane_ops["Ly"], plane_ops["Lx"])
 
 
 def test_mesoscan_no_nrois(mesoscan_test_setup):
@@ -322,12 +330,35 @@ def test_mesoscan_nested_structure(mesoscan_test_setup):
         {
             "dy": [0, 2],
             "dx": [0, 0],
-            "lines": [[0, 1], [2, 3]],
             "nplanes": 3,
         }
     )
+    del test_ops["lines"]
+
     result_ops = mesoscan_to_binary(test_ops)
 
     assert test_ops["nrois"] == 2
     assert test_ops["nplanes"] == 6
     assert result_ops["Ly"] == 2
+
+
+def test_mesoscan_with_nrois_in_json(mesoscan_test_setup):
+    """Tests the branch where nrois is specified in ops.json and lines are not in ops."""
+    json_data = {
+        "nrois": 2,
+        "nplanes": 2,
+        "dy": [0, 5],
+        "dx": [0, 0],
+        "fs": 30.0,
+        "lines": [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]],
+    }
+
+    test_ops = mesoscan_test_setup(json_data, "with_nrois")
+    # Remove lines to force reading from ops.json
+    del test_ops["lines"]
+    test_ops["nchannels"] = 1
+
+    result_ops = mesoscan_to_binary(test_ops)
+
+    assert result_ops["nrois"] == 2
+    assert result_ops["nplanes"] == 4  # 2 ROIs * 2 planes

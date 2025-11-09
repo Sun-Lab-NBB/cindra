@@ -422,10 +422,12 @@ def _single_raw_to_binary(plane_ops: list[dict[str, Any]], raw_file: _RawFile) -
                 # Reorganizes frames into two separate arrays for each plane.
                 reshaped_frames = np.array(
                     [
-                        channel_1_frames[plane_index :: raw_file.recorded_planes],
-                        channel_2_frames[plane_index :: raw_file.recorded_planes],
+                        [
+                            channel_1_frames[plane_index :: raw_file.recorded_planes],
+                            channel_2_frames[plane_index :: raw_file.recorded_planes],
+                        ]
+                        for plane_index in range(raw_file.recorded_planes)
                     ]
-                    for plane_index in range(raw_file.recorded_planes)
                 )
 
             # If there is only one channel, reshapes the data without processing channels.
