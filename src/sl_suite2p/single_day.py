@@ -36,13 +36,13 @@ _MINIMUM_REGISTRATION_METRIC_FRAMES = 1500  # The minimum number of frames requi
 
 
 def _register_plane(
-    ops: dict[str, Any],
+    ops: SingleDayS2PConfiguration,
     plane_number: int,
     frames_path: str,
     raw_frames_path: str | None = None,
     frames_channel_2_path: str | None = None,
     raw_frames_channel_2_path: str | None = None,
-) -> dict[str, Any]:
+) -> SingleDayS2PConfiguration:
     """Registers (motion-corrects) the frames acquired at the target imaging plane of the processed movie.
 
     The registration process involves computing rigid and non-rigid offsets (deformation) to register all frames inside
@@ -73,7 +73,7 @@ def _register_plane(
     timer = PrecisionTimer("s")
 
     # Memory-maps the necessary binary files.
-    n_frames, height, width = ops["nframes"], ops["Ly"], ops["Lx"]
+    n_frames, height, width = ops.iodata.nframes, ops.iodata.height, ops.iodata.width
     null = contextlib.nullcontext()
     with (
         BinaryFile(height=height, width=width, file_path=raw_frames_path, frame_number=n_frames)
@@ -88,8 +88,8 @@ def _register_plane(
         else null as frames_channel_2,
     ):
         # Skips applying bidiphase correction if frames have already been bidiphase-corrected.
-        if raw_frames is None and ops["do_bidiphase"] and ops["bidiphase"] != 0:
-            ops["bidi_corrected"] = True
+        if raw_frames is None and ops.main.do_bidiphase and ops.main.bidiphase != 0:
+            ops.main.bidi_corrected = True
 
         # First registration step:
         message = f"Running plane {plane_number} registration step one..."
@@ -102,7 +102,7 @@ def _register_plane(
 
         # Determines whether the registration should be performed using the first or the second functional channel if
         # the processed data contains two functional channels.
-        align_by_channel_2 = ops["functional_chan"] != ops["align_by_chan"]
+        align_by_channel_2 = ops.main.functional_chan != ops.registration.align_by_chan
 
         # Runs the registration pipeline.
         registration_outputs = registration.registration_wrapper(
@@ -120,7 +120,7 @@ def _register_plane(
         ops = registration.save_registration_outputs_to_ops(registration_outputs, ops)
 
         # Computes and adds the enhanced mean image to the plane 'ops' file.
-        ops["enhanced_mean_image"] = registration.create_enhanced_mean_image(ops)
+        ops.iodata.enhanced_mean_image = registration.create_enhanced_mean_image(ops)
 
         # Adds registration time to the plane 'ops' file.
         ops["timing"]["registration"] = timer.elapsed
@@ -136,7 +136,7 @@ def _register_plane(
             np.save(ops["ops_path"], ops)
 
         # If necessary, carries out the second registration step.
-        if ops["two_step_registration"] and ops["keep_movie_raw"]:
+        if ops.registration.two_step_registration and ops.registration.keep_movie_raw:
             message = f"Running plane {plane_number} second-step registration..."
             console.echo(message=message, level=LogLevel.INFO)
 
@@ -188,7 +188,9 @@ def _register_plane(
     return ops
 
 
-def _compute_registration_metrics(ops: dict[str, Any], plane_number: int, frames_path: str) -> dict[str, Any]:
+def _compute_registration_metrics(
+    ops: SingleDayS2PConfiguration, plane_number: int, frames_path: str
+) -> SingleDayS2PConfiguration:
     """Computes frame registration (motion-correction) quality metrics for the target imaging plane of the processed
     movie.
 
@@ -214,7 +216,7 @@ def _compute_registration_metrics(ops: dict[str, Any], plane_number: int, frames
     timer.reset()
 
     # Memory-maps the necessary binary files.
-    n_frames, height, width = ops["nframes"], ops["Ly"], ops["Lx"]
+    n_frames, height, width = ops.iodata.nframes, ops.iodata.height, ops.iodata.width
     with (
         BinaryFile(height=height, width=width, file_path=frames_path, frame_number=n_frames) as frames,
     ):
@@ -230,7 +232,7 @@ def _compute_registration_metrics(ops: dict[str, Any], plane_number: int, frames
         # Bins the processed movie according to the binning criteria calculated above
         indices = np.linspace(0, n_frames - 1, n_samples).astype("int")
         movie = frames[indices]
-        movie = movie[:, ops["yrange"][0] : ops["yrange"][-1], ops["xrange"][0] : ops["xrange"][-1]]
+        movie = movie[:, ops.iodata.yrange[0] : ops.iodata.yrange[-1], ops.iodata.xrange[0] : ops.iodata.xrange[-1]]
 
         # Runs the registration evaluation pipeline.
         ops = registration.get_pc_metrics(movie, ops, plane_number=plane_number)
