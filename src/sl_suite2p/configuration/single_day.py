@@ -466,32 +466,6 @@ class CellposeDetection:
     """Specifies the pretrained model to use for cell detection. Can be a built-in model name (e.g., 'cyto') or a 
     path to a custom model."""
 
-    max_proj: float | None = None
-    """Maximum-projection value used by Cellpose when creating summary projection images for ROI detection."""
-
-    Vmax: float = 0
-    """Maximum value of the processed image volume used during Cellpose processing. Typically represents a normalized 
-    intensity scale."""
-
-    ihop: int = 0
-    """Internal high-order processing flag used by Cellpose preprocessing. This may indicate whether enhanced or iterative 
-    filtering was applied."""
-
-    Vsplit: int = 0
-    """Flag indicating whether the input video or projection was split into multiple spatial or temporal segments before 
-    Cellpose processing."""
-
-    Vcorr: object | None = None
-    """Corrected image volume used as input to Cellpose. This typically stores the illumination-corrected or motion-corrected 
-    image stack."""
-
-    Vmap: int = 0
-    """Index or flag describing the mapping between raw image frames and the processed volume used for detection."""
-
-    spatial_scale_pixels: float = 0.0
-    """Pixel-level spatial calibration factor used when interpreting Cellpose outputs (e.g., scaling ROI sizes or converting 
-    between units)."""
-
 
 @dataclass
 class SignalExtraction:
@@ -589,8 +563,6 @@ class SingleDayS2PConfiguration(YamlConfig):
     output: Output = field(default_factory=Output)
     """Stores parameters for aggregating and saving the processing results of each plane as a unified directory or
     file."""
-    iodata: IOData = field(default_factory=IOData)
-    """Store paramteres for the IO pipline"""
     registration: Registration = field(default_factory=Registration)
     """Stores parameters for rigid registration, which is used to correct motion artifacts between frames by
     counter-shifting the entire frame."""
