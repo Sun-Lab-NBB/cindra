@@ -22,7 +22,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from .gui import run
 from .multi_day import run_s2p_multiday, resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
-from .single_day import run_s2p, resolve_ops, process_plane, combine_planes, resolve_binaries
+from .single_day import run_s2p, resolve_parameters, process_plane, combine_planes, resolve_binaries
 from .configuration import (
     MultiDayS2PConfiguration,
     SingleDayS2PConfiguration,

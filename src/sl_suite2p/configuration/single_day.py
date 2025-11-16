@@ -153,14 +153,6 @@ class FileIO:
     conversion of the raw data (expected to be .tiff / .tif) to the binary file format used by the suite2p pipeline. 
     Note, even if your data is stored in a single folder, add it here as a list with a single item."""
 
-    look_one_level_down: bool = False
-    """Determines whether to search for TIFF files in the subfolders of the directories provided as 'data_path' field. 
-    If True, the 'subfolders' field has to be set to a valid list of subfolder names to search."""
-
-    subfolders: list[str] = field(default_factory=list)
-    """Stores specific subfolder names to search through for TIFF files. All subfolders must be stored under the 
-    one or more directories specified by 'data_path'."""
-
 
 @dataclass
 class Output:
@@ -174,11 +166,11 @@ class Output:
     save_path: str = ""
     """The full path to the output directory where the pipeline results should be saved."""
 
-    # save_folder: str = "suite2p"
-    # """The name of the folder under which the pipeline results should be stored. If this is not provided, the pipeline
-    # defaults to using 'suite2p' as the save directory, created under the root directory specified by 'save_path0'. Note,
-    # if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 'multi-day'
-    # pipeline, do NOT modify this field. The multi-day pipeline expects the save_folder to be 'suite2p' (default)."""
+    save_folder: str = "suite2p"
+    """The name of the folder under which the pipeline results should be stored. If this is not provided, the pipeline
+    defaults to using 'suite2p' as the save directory, created under the root directory specified by 'save_path0'. Note,
+    if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 'multi-day'
+    pipeline, do NOT modify this field. The multi-day pipeline expects the save_folder to be 'suite2p' (default)."""
 
     combined: bool = True
     """Determines whether to combine results across planes into a 'combined' folder at the end of processing. If the 
@@ -727,16 +719,12 @@ class RuntimeData(YamlConfig):
         original.to_yaml(file_path=file_path)
 
 
-def generate_default_ops(as_dict: bool = True) -> dict[str, Any] | SingleDayS2PConfiguration:
-    """Instantiates and returns an 'ops' dictionary or configuration class that contains default single-day
+def generate_default_ops() -> SingleDayS2PConfiguration:
+    """Instantiates and returns a configuration class that contains default single-day
     pipeline parameters.
 
     Args:
         as_dict: If True, the function converts the class to dictionary format. Otherwise, returns the class as the
             'SingleDayS2PConfiguration' dataclass instance.
     """
-    default_configuration = SingleDayS2PConfiguration()  # Instantiates the default configuration instance.
-
-    if not as_dict:
-        return default_configuration
-    return default_configuration.to_ops()  # Converts the configuration instance to dictionary format.
+    return SingleDayS2PConfiguration()

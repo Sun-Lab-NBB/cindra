@@ -12,7 +12,6 @@ def _search_files_by_extension(
     root_directory: Path,
     extensions: tuple[str, ...] = ("tif", "tiff"),
     ignore_names: tuple[str, ...] = (),
-    look_one_level_down: bool = False,
 ) -> tuple[list[Path], list[bool]]:
     """Searches the target directory and subdirectories (one level down) for files matching the given extensions.
 
@@ -28,7 +27,6 @@ def _search_files_by_extension(
             dot (e.g., 'tif', 'tiff').
         ignore_names: A tuple of file names to ignore while searching. A file name must match the ignored name
             completely for the file to be excluded from the search results.
-        look_one_level_down: Determines whether to search the subdirectories of the target directory (one level down).
 
     Returns:
         A tuple of two elements. The first element is a list of absolute paths to files found in the specified root
@@ -69,32 +67,30 @@ def _search_files_by_extension(
             first_files.append(True)
             first_files.extend([False] * (len(files) - 1))
 
-        # If the argument 'look_one_level_down' is set to True, performs the same search one level down in the
-        # subdirectories of the provided root directory.
-        if look_one_level_down:
-            # Retrieves the subdirectories of the provided root directory, which are sorted in natural order.
-            subdirectories = natsorted([path for path in root_directory.iterdir() if path.is_dir()])
+        # Performs the same search one level down in the subdirectories of the provided root directory.
+        # Retrieves the subdirectories of the provided root directory, which are sorted in natural order.
+        subdirectories = natsorted([path for path in root_directory.iterdir() if path.is_dir()])
 
-            # Loops over all discovered subdirectories.
-            for directory in subdirectories:
-                # For each extension, searches the subdirectory for matching files and retrieves their absolute
-                # paths.
-                subdirectory_files = []  # Stores the found files
-                for extension in extensions:
-                    # Gets all files with the matching extension
-                    found_files = [file.resolve() for file in directory.glob(f"*.{extension}")]
+        # Loops over all discovered subdirectories.
+        for directory in subdirectories:
+            # For each extension, searches the subdirectory for matching files and retrieves their absolute
+            # paths.
+            subdirectory_files = []  # Stores the found files
+            for extension in extensions:
+                # Gets all files with the matching extension
+                found_files = [file.resolve() for file in directory.glob(f"*.{extension}")]
 
-                    # Filters ignored files
-                    filtered_files = [file for file in found_files if file.stem not in ignore_names]
+                # Filters ignored files
+                filtered_files = [file for file in found_files if file.stem not in ignore_names]
 
-                    subdirectory_files.extend(filtered_files)
+                subdirectory_files.extend(filtered_files)
 
-                # If files were found, updates the storage lists with subdirectory data, following the same procedure
-                # as for the root directory
-                if subdirectory_files:
-                    file_paths.extend(natsorted(subdirectory_files))
-                    first_files.append(True)
-                    first_files.extend([False] * (len(subdirectory_files) - 1))
+            # If files were found, updates the storage lists with subdirectory data, following the same procedure
+            # as for the root directory
+            if subdirectory_files:
+                file_paths.extend(natsorted(subdirectory_files))
+                first_files.append(True)
+                first_files.extend([False] * (len(subdirectory_files) - 1))
 
     # If no files were found, raises a FileNotFoundError.
     if not file_paths:
@@ -111,11 +107,8 @@ def _search_files_by_extension(
 
 def _get_tiff_list(ops: dict[str, Any]) -> tuple[list[Path], dict[str, Any]]:
     """Creates a list of .tif and .tiff files found in the directory specified by the "data_path" field of the input
-    'ops' dictionary.
-
-    If the "subfolders" field is specified in 'ops', this function additionally retrieves files from the specified
-    subdirectories. If "look_one_level_down" is set to True in 'ops', this function additionally retrieves files from
-    the subdirectories of the root directories specified by the "data_path" field.
+    'ops' dictionary. By default, it searches recursively through all subdirectories within each root directory listed
+    in the "data_path" field.
 
     Args:
         ops: The dictionary that stores the suite2p single-day processing parameters.
@@ -153,26 +146,17 @@ def _get_tiff_list(ops: dict[str, Any]) -> tuple[list[Path], dict[str, Any]]:
 
     # Otherwise, searches for .tif and .tiff files in directories or subdirectories.
     else:
-        # If only one root directory path is provided and searching the subdirectories is allowed, also searches them
-        # for the .tif or .tiff file. To do so, extends the list of search directories with the path to subfolders.
-        if len(directories) == 1 and "subfolders" in ops and len(ops["subfolders"]) > 0:
-            for subdirectory in ops["subfolders"]:
-                directory_path = file_paths[0].joinpath(subdirectory)
-                directories.append(directory_path)
-
         # Initializes a list to store the first .tif or .tiff file of each directory.
         first_tiffs: list[bool] = []
 
         # Loops over all directories and searches for .TIFF files.
         for directory in directories:
             # Retrieves the absolute paths of the .tif and .tiff files and the list of the first .tif or .tiff file(s)
-            # in the target directory, optionally searching subdirectories as well, depending on the
-            # "look_one_level_down" configuration in 'ops'.
+            # in the target directory, searching subdirectories as well.
             file_paths_found, first_tiffs_found = _search_files_by_extension(
                 root_directory=directory,
                 extensions=("tif", "tiff", "TIF", "TIFF"),
                 ignore_names=tuple(ops["ignored_file_names"]),
-                look_one_level_down=ops["look_one_level_down"],
             )
 
             # Extends the returned data into storage lists

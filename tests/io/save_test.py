@@ -106,7 +106,7 @@ def test_combined_multiple_planes(
             "Ly": 128,
             "Lx": 128,
             "nchannels": 2,
-            "nframes": current_frame_count,  # Use current_frame_count, not frame_count
+            "nframes": current_frame_count,
             "mean_image": np.random.rand(128, 128).astype(np.float32),
             "enhanced_mean_image": np.random.rand(128, 128).astype(np.float32),
             "Vcorr": np.random.rand(128, 128).astype(np.float32),
