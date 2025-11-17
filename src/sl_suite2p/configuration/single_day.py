@@ -708,23 +708,20 @@ class RuntimeData(YamlConfig):
         # These attributes are reset to None before dumping into YAML.
         images_to_save = ["mean_image", "enhanced_mean_image", "mean_image_channel_2"]
 
-        for image in images_to_save:
-            image_data = getattr(original, image, None)
+        for image_name in images_to_save:
+            image_data = getattr(original.data.file_io, image_name, None)  # Fixed: access from file_io
             if image_data is not None:
-                file_path = output_directory.joinpath(f"{image}.npy")
-                np.save(file_path, image_data)
-                setattr(original, image, None)
+                image_file_path = output_directory.joinpath(f"{image_name}.npy")
+                np.save(image_file_path, image_data)
+                setattr(original.data.file_io, image_name, None)
 
         # Saves the data to the YAML file
-        original.to_yaml(file_path=file_path)
+        runtime_file_path = output_directory.joinpath("runtime_data.yaml")
+        original.to_yaml(file_path=runtime_file_path)
 
 
-def generate_default_ops() -> SingleDayS2PConfiguration:
-    """Instantiates and returns a configuration class that contains default single-day
+def generate_default_configuration() -> SingleDayS2PConfiguration:
+    """Instantiates and returns an instance of the SingleDayS2PConfiguration class that contains default single-day
     pipeline parameters.
-
-    Args:
-        as_dict: If True, the function converts the class to dictionary format. Otherwise, returns the class as the
-            'SingleDayS2PConfiguration' dataclass instance.
     """
     return SingleDayS2PConfiguration()

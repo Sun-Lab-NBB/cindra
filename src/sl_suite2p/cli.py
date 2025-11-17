@@ -22,12 +22,13 @@ from ataraxis_base_utilities import LogLevel, console
 
 from .gui import run
 from .multi_day import run_s2p_multiday, resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
-from .single_day import run_s2p, resolve_parameters, process_plane, combine_planes, resolve_binaries
+from .single_day import run_s2p, process_plane, combine_planes, resolve_binaries, resolve_parameters
 from .configuration import (
+    RuntimeData,
     MultiDayS2PConfiguration,
     SingleDayS2PConfiguration,
-    generate_default_ops,
     generate_default_multiday_ops,
+    generate_default_configuration,
 )
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
@@ -94,7 +95,7 @@ def ss2p_sd_config(ctx: Any) -> None:
     file_path = Path(ctx.obj["file_path"])
 
     # Generates the precursor configuration file in the specified output directory.
-    precursor: SingleDayS2PConfiguration = generate_default_ops(as_dict=False)
+    precursor: SingleDayS2PConfiguration = generate_default_configuration()
     precursor.to_config(file_path=file_path)
 
     message = (
@@ -266,26 +267,23 @@ def run_sd_pipeline(
     """Runs the single-day sl-suite2p pipeline step(s) using the configuration parameters from the target file.
 
     This command functions as the central entry point for running all single-day sl-suite2p pipeline steps via the
-    terminal. It can be flexibly configured using the parameters stored in .yaml configuration files and provided as
-    manual 'overrides'.
+    terminal. It can be flexibly configured using the parameters stored in .yaml configuration files. User-specified
+    configuration fields along with additional resolved parameters are stored in RuntimeData.
     """
     # Extracts shared configuration parameters passed as the context dictionary.
     input_path = ctx.obj["config_path"]
     progress_bars = ctx.obj["progress_bars"]
     workers = ctx.obj["workers"]
-    overrides = ctx.obj["overrides"]
 
-    ops_path = Path()  # This variable is precreated here to appease mypy
     try:
         # Loads configuration data from the provided file.
-        config: SingleDayS2PConfiguration = SingleDayS2PConfiguration.from_yaml(file_path=input_path)
+        input_config: SingleDayS2PConfiguration = SingleDayS2PConfiguration.from_yaml(file_path=input_path)
 
         # Overrides the 'workers' and 'progress_bars' parameters with the provided values.
-        config.main.progress_bars = progress_bars
-        config.main.parallel_workers = workers
+        input_config.main.progress_bars = progress_bars
+        input_config.main.parallel_workers = workers
 
-        # Converts the dataclass to an 'ops' dictionary instance.
-        ops = config.to_ops()
+        runtime_data: RuntimeData = resolve_parameters(configuration=input_config)
 
     except Exception:
         # If the file cannot be loaded as the expected configuration class instance, raises an exception.
@@ -297,16 +295,7 @@ def run_sd_pipeline(
         )
         console.error(message=message, error=FileNotFoundError)
 
-    else:
-        # Parses the override parameters as a 'db' dictionary.
-        db = _parse_db(overrides)
-
-        # Generates the ops.npy file for the runtime, using the 'ops' loaded above and additional overrides, 'db'
-        # (if any)
-        ops_path = resolve_ops(ops=ops, db=db)
-
-    # Loads the resolved ops file to access the runtime configuration parameters below.
-    final_ops = np.load(ops_path, allow_pickle=True).item()
+    # FIXTHIS: ops_path no longer exists and will be replaced in the meantime
 
     # If all three single-day steps are set to the same values, runs the entire single-day pipeline. Note, since
     # it does not make sense to call the single-day pipeline with all steps disabled, this function treats the case
@@ -476,21 +465,20 @@ def run_sd_pipeline_sl(
         )
         console.error(message=message, error=ValueError)
 
-    ops_path = Path()  # This variable is precreated here to appease mypy
     try:
         # Loads configuration data from the provided file.
-        config: SingleDayS2PConfiguration = SingleDayS2PConfiguration.from_yaml(file_path=input_path)
+        input_config: SingleDayS2PConfiguration = SingleDayS2PConfiguration.from_yaml(file_path=input_path)
 
         # Overrides the 'workers' and 'progress_bars' parameters with the provided values.
-        config.main.progress_bars = progress_bars
-        config.main.parallel_workers = workers
+        input_config.main.progress_bars = progress_bars
+        input_config.main.parallel_workers = workers
 
         # Adjusts the runtime configuration to work with the Sun lab data hierarchy.
-        config.file_io.save_path0 = str(session_data.processed_data.mesoscope_data_path)
-        config.file_io.data_path = [str(session_data.source_data.mesoscope_data_path)]
+        input_config.output.save_path = str(session_data.processed_data.mesoscope_data_path)
+        input_config.file_io.data_path = [str(session_data.source_data.mesoscope_data_path)]
 
         # Converts the dataclass to an 'ops' dictionary instance.
-        ops = config.to_ops()
+        runtime_data: RuntimeData = resolve_parameters(configuration=input_config)
 
     except Exception:
         # If the file cannot be loaded as the expected configuration class instance, raises an exception.

@@ -22,7 +22,7 @@ from ataraxis_base_utilities import console
 from .multiday import show_images_with_masks
 from .detection import ROI
 from .multi_day import run_s2p_multiday, resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
-from .single_day import run_s2p, resolve_parameters, process_plane, combine_planes, resolve_binaries
+from .single_day import run_s2p, process_plane, combine_planes, resolve_binaries, resolve_parameters
 from .configuration import generate_default_ops, generate_default_multiday_ops
 
 # Overloads the 'print' method to ensure it flushes the data as soon as it is written. This is a temporary workaround
