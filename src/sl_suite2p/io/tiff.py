@@ -14,6 +14,7 @@ from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
 from .utils import initialize_plane_ops, find_files_open_binaries
+from ..configuration import RuntimeData
 
 # Determines the minimum number of image dimensions considered 'multidimensional'
 _MULTIDIMENSIONAL_PROCESSING_THRESHOLD = 3
@@ -142,46 +143,51 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.
     return frames
 
 
-def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
+
+def tiff_to_binary(runtime_data: RuntimeData) -> RuntimeData:
     """Reads the input data stored as .tif and .tiff files and converts them to the suite2p plane binary (.bin)
     file(s).
 
     Args:
-        ops: The dictionary that stores the suite2p processing parameters.
+        runtime_data: A RuntimeData instance containing configuration parameters.
 
     Returns:
-        The 'ops' dictionary of the first available plane to be processed augmented with additional descriptive
-        parameters for the processed data. Specifically, the dictionary includes the following additional keys:
-        "Ly", "Lx", "first_tiffs", "frames_per_folder", "nframes", "mean_image", "mean_image_channel_2".
+        The RuntimeData of the first available plane to be processed augmented with additional descriptive
+        parameters for the processed data. Specifically, the RuntimeData includes: height, width, first_tiffs,
+        frames_per_folder, nframes, mean_image, mean_image_channel_2.
     """
     # Instantiates and resets the run timer
     timer = PrecisionTimer("s")
     timer.reset()
 
-    # Uses the input 'ops' dictionary to generate a list of plane-specific 'ops' dictionaries. Converts the output
-    # list to tuple for efficiency
-    plane_ops: tuple[dict[str, Any], ...] = tuple(initialize_plane_ops(ops=ops))
+    # Uses the input runtime_data to generate plane-specific RuntimeData instances and initialize files
+    # FIXTHIS: fix initialize plane ops
+    runtime_yaml_paths = initialize_plane_ops(runtime_data=runtime_data)
 
-    # Queries the number of planes and channels from the first (and, potentially, only) available plane-specific
-    # 'ops' dictionary
-    plane_number = plane_ops[0]["nplanes"]
-    channel_number = plane_ops[0]["nchannels"]
+    # Load the plane-specific RuntimeData files
+    plane_runtime_list = [RuntimeData.from_yaml(file_path=yaml_path) for yaml_path in runtime_yaml_paths]
+
+    # Queries the number of planes and channels from the first plane's configuration
+    plane_number = plane_runtime_list[0].configuration.main.nplanes
+    channel_number = plane_runtime_list[0].configuration.main.nchannels
 
     # Generates and opens the binary files for each plane for writing. If configured, looks for .tiff and .tif files in
     # multiple data folders.
-    plane_ops, files, channel_1_binary_file, channel_2_binary_file = find_files_open_binaries(plane_ops=plane_ops)
-    ops = plane_ops[0]  # Queries the first (and, potentially, only) plane's 'ops' dictionary for further processing.
+    plane_runtime_list, files, channel_1_binary_file, channel_2_binary_file = find_files_open_binaries(
+        plane_runtime_data_list=plane_runtime_list
+    )
 
     # Queries the batch_size (how many frames to store in memory at the same time) and adjusts it to account for the
     # total number of planes and channels.
-    batch_size = ops["batch_size"]
+    batch_size = plane_runtime_list[0].configuration.registration.batch_size
     batch_size = plane_number * channel_number * math.ceil(batch_size / (plane_number * channel_number))
 
-    # Pre-initializes all plane ops to avoid conditional initialization below
-    for plane_index in range(plane_number):
-        plane_ops[plane_index]["nframes"] = 0
-        plane_ops[plane_index]["frames_per_file"] = np.zeros((len(files),), dtype=int)
-        plane_ops[plane_index]["frames_per_folder"] = np.zeros((len(ops["data_path"]),), dtype=int)
+    # Pre-initializes all plane runtime data to avoid conditional initialization below
+    for plane_runtime in plane_runtime_list:
+        plane = plane_runtime.data.file_io
+        plane.nframes = 0
+        plane.frames_per_file = np.zeros((len(files),), dtype=int)
+        plane.frames_per_folder = np.zeros((len(plane_runtime.configuration.file_io.data_path),), dtype=int)
 
     # Determines the number of frames across all .tiff files. This is used for the progress bar visualization
     total_frames = 0
@@ -190,17 +196,24 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
         total_frames += tiff_length
 
     # Creates the progress bar.
-    pbar = tqdm(total=total_frames, desc="Converting frames to binary", unit="frames", disable=not ops["progress_bars"])
+    pbar = tqdm(
+        total=total_frames,
+        desc="Converting frames to binary",
+        unit="frames",
+        disable=not runtime_data.configuration.main.progress_bars,
+    )
 
     # Loops over all discovered .tiff and .tif files.
     folder_index = -1
     current_plane_offset = 0  # Tracks which plane is currently being processed
+    first_tiffs = plane_runtime_list[0].data.file_io.first_tiffs  # Get from first plane's data
+
     for file_index, file in enumerate(files):
         # Opens each target file for reading
         tiff, tiff_length = _open_tiff(file)
 
         # Resets plane offset at the start of each new folder and increments the processed folder index
-        if ops["first_tiffs"][file_index]:
+        if first_tiffs[file_index]:
             folder_index += 1  # Increments the folder index
             current_plane_offset = 0  # Resets the plane number to 0
 
@@ -214,17 +227,16 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
             if frames is None:
                 break
 
-            # Initializes meanImg arrays while processing the first frame batch (as soon as the processed frame
+            # Initializes mean_image arrays while processing the first frame batch (as soon as the processed frame
             # dimensions are known)
             if file_index == 0 and start_index == 0:
-                for plane_index in range(plane_number):
-                    plane_ops[plane_index]["mean_image"] = np.zeros((frames.shape[1], frames.shape[2]), np.float32)
+                for plane_runtime in plane_runtime_list:
+                    plane = plane_runtime.data.file_io
+                    plane.mean_image = np.zeros((frames.shape[1], frames.shape[2]), np.float32)
 
                     # For 2-channel data, also initializes the mean image placeholder array for the second channel.
                     if channel_number > 1:
-                        plane_ops[plane_index]["mean_image_channel_2"] = np.zeros(
-                            (frames.shape[1], frames.shape[2]), np.float32
-                        )
+                        plane.mean_image_channel_2 = np.zeros((frames.shape[1], frames.shape[2]), np.float32)
 
             nframes = frames.shape[0]  # Determines the number of frames read from the processed .tiff file.
 
@@ -232,11 +244,16 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
             pbar.update(nframes)
 
             # Resolves the index of the functional channel (the channel that stores signal data).
-            functional_channel_index = ops["functional_chan"] - 1 if channel_number > 1 else 0
+            functional_channel_index = (
+                plane_runtime_list[0].configuration.main.functional_chan - 1 if channel_number > 1 else 0
+            )
 
             # Loops over all available planes and iteratively writes the frames for each plane into the plane-specific
             # binary file(s).
             for plane_index in range(plane_number):
+                plane_runtime = plane_runtime_list[plane_index]
+                plane = plane_runtime.data.file_io
+
                 # Calculates the starting frame index for this plane (assuming that frames for each plane are stacked
                 # in the same .tiff file).
                 plane_start_in_batch = (current_plane_offset + plane_index) % plane_number
@@ -260,12 +277,12 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
                     # binary file.
                     channel_1_binary_file[plane_index].write(frames_to_write.tobytes())
 
-                    # Appends the data from all processed frames to the data arrays in the plane-specific 'ops'
-                    # dictionary, as this data is used during further processing.
-                    plane_ops[plane_index]["mean_image"] += frames_to_write.sum(axis=0, dtype=np.float32)
-                    plane_ops[plane_index]["nframes"] += frames_to_write.shape[0]
-                    plane_ops[plane_index]["frames_per_file"][file_index] += frames_to_write.shape[0]
-                    plane_ops[plane_index]["frames_per_folder"][folder_index] += frames_to_write.shape[0]
+                    # Appends the data from all processed frames to the data arrays in the plane-specific IOData,
+                    # as this data is used during further processing.
+                    plane.mean_image += frames_to_write.sum(axis=0, dtype=np.float32)
+                    plane.nframes += frames_to_write.shape[0]
+                    plane.frames_per_file[file_index] += frames_to_write.shape[0]
+                    plane.frames_per_folder[folder_index] += frames_to_write.shape[0]
 
                     # If processed data uses two functional channels, repeats the steps above for the second
                     # functional channel
@@ -277,11 +294,11 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
                             plane_number * channel_number,
                         )
 
-                        # Writes the frames to the channel 2 binary file and mean image 'ops' array.
+                        # Writes the frames to the channel 2 binary file and mean image array.
                         if second_channel_indices:
                             channel_2_frames_to_write = frames[second_channel_indices]
                             channel_2_binary_file[plane_index].write(channel_2_frames_to_write.tobytes())
-                            plane_ops[plane_index]["mean_image_channel_2"] += channel_2_frames_to_write.mean(axis=0)
+                            plane.mean_image_channel_2 += channel_2_frames_to_write.sum(axis=0, dtype=np.float32)
 
             # Updates plane offset for the next batch of frames
             frames_per_plane_channel = nframes // (plane_number * channel_number)
@@ -294,19 +311,26 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
     # Closes the progress bar when binary conversion is over
     pbar.close()
 
-    # Loops over each plane-specific 'ops' dictionary and adds descriptive information about the data to be processed
-    # (frames).
-    for ops in plane_ops:
-        ops["Ly"], ops["Lx"] = ops["mean_image"].shape
-        ops["yrange"] = np.array([0, ops["Ly"]])
-        ops["xrange"] = np.array([0, ops["Lx"]])
-        ops["mean_image"] /= ops["nframes"]
-        if channel_number > 1:
-            ops["mean_image_channel_2"] /= ops["nframes"]
+    # Loops over each plane's RuntimeData and adds descriptive information about the data to be processed (frames).
+    save_path = Path(plane_runtime_list[0].configuration.output.save_path)
+    suite2p_directory = save_path.joinpath("suite2p")
 
-        # Caches each 'ops' dictionary to disk as an ops.npy file. The file is cached into the plane-specific processing
-        # subdirectory.
-        np.save(ops["ops_path"], ops)
+    for plane_index, plane_runtime in enumerate(plane_runtime_list):
+        plane = plane_runtime.data.file_io
+        
+        plane.height = plane.mean_image.shape[0]
+        plane.width = plane.mean_image.shape[1]
+        plane.height_range = np.array([0, plane.height], dtype=np.uint32)
+        plane.width_range = np.array([0, plane.width], dtype=np.uint32)
+        plane.mean_image /= plane.nframes
+        
+        if channel_number > 1:
+            plane.mean_image_channel_2 /= plane.nframes
+
+        # Save each plane's RuntimeData to its yaml file
+        plane_directory = suite2p_directory.joinpath(f"plane{plane_index}")
+        runtime_yaml_path = plane_directory.joinpath("runtime_data.yaml")
+        plane_runtime.to_yaml(file_path=runtime_yaml_path)
 
     # Closes all memory-mapped binary files
     for plane_index in range(plane_number):
@@ -315,8 +339,8 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
         if channel_number > 1:
             channel_2_binary_file[plane_index].close()
 
-    # Returns the first (and, potentially, only) plane's 'ops' dictionary to caller.
-    return plane_ops[0]
+    # Returns the first plane's RuntimeData to caller.
+    return plane_runtime_list[0]
 
 
 def mesoscan_to_binary(ops: dict[str, Any]) -> dict[str, Any]:

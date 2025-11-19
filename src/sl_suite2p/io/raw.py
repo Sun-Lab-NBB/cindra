@@ -2,6 +2,7 @@
 associated XML (.xml) configuration files.
 """
 
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
@@ -10,6 +11,8 @@ import numpy as np
 from ataraxis_time import PrecisionTimer
 from quick_xmltodict import parse
 from ataraxis_base_utilities import console, ensure_directory_exists
+
+from ..configuration import RuntimeData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -200,30 +203,25 @@ class _RawFile:
             self.frame_number = int(all_frames / self.recorded_planes)
 
 
-def raw_to_binary(plane_ops_dictionary: dict[str, Any], override_ops_parameters: bool = True) -> dict[str, Any]:
+def raw_to_binary(runtime_data: RuntimeData, override_runtime_parameters: bool = True) -> RuntimeData:
     """Reads the input data stored as Thorlabs .raw files and converts it to the suite2p plane binary (.bin) file(s).
 
     Args:
-        plane_ops_dictionary: The dictionary that stores the suite2p processing parameters.
-        override_ops_parameters: Determines whether to override certain configuration parameters, such as the number of
-            planes and channels, from 'ops' with data loaded from the .xml configuration files stored together with
+        runtime_data: RuntimeData instance containing configuration parameters.
+        override_runtime_parameters: Determines whether to override certain configuration parameters, such as the number of
+            planes and channels, from configuration with data loaded from the .xml configuration files stored together with
             Thorlabs .raw files.
-
-    Returns:
-        The 'ops' dictionary of the first available plane to be processed augmented with additional descriptive
-        parameters for the processed data. Specifically, the dictionary includes the following additional keys:
-        "Ly", "Lx", "nframes", "mean_image", "mean_image_channel_2".
     """
     # Instantiates and resets the run timer
     timer = PrecisionTimer("s")
     timer.reset()
 
-    # Loads Thorlabs .raw files from the paths provided in ops["data_path"] and converts them into _RawFile instances.
-    raw_files = [_RawFile(path) for path in plane_ops_dictionary["data_path"]]
+    # Loads Thorlabs .raw files from the paths provided and converts them into _RawFile instances.
+    raw_files = [_RawFile(path) for path in runtime_data.configuration.file_io.data_path]
 
     # Initializes the destination files and resolves paths and configuration for further .raw to .bin file conversion.
-    ops_paths = _initialize_destination_files(
-        ops=plane_ops_dictionary, raw_files=raw_files, override_ops_parameters=override_ops_parameters
+    runtime_yaml_paths = _initialize_destination_files(
+        runtime_data=runtime_data, raw_files=raw_files, override_runtime_parameters=override_runtime_parameters
     )
 
     # Determines the number of frames across all .raw files. This is used for the progress bar visualization.
@@ -234,17 +232,16 @@ def raw_to_binary(plane_ops_dictionary: dict[str, Any], override_ops_parameters:
         total=total_frames,
         desc="Converting Thorlabs raw frames to binary",
         unit="frames",
-        disable=not plane_ops_dictionary["progress_bars"],
+        disable=not runtime_data.configuration.main.progress_bars,
     )
 
     # Converts all the .raw files into .bin format.
     for raw_file in raw_files:
-        # Loads plane-specific ops files generated above
-        plane_ops: list[dict[str, Any]] = [np.load(ops_index, allow_pickle=True)[()] for ops_index in ops_paths]
+        # Loads plane-specific RuntimeData files generated above
+        plane_runtime_list = [RuntimeData.from_yaml(file_path=yaml_path) for yaml_path in runtime_yaml_paths]
 
-        # Performs the raw to binary conversion using the loaded plane-specific 'ops' dictionaries and the target raw
-        # file.
-        _single_raw_to_binary(plane_ops=plane_ops, raw_file=raw_file)
+        # Performs the raw to binary conversion using the loaded plane-specific RuntimeData instances and the target raw file.
+        _single_raw_to_binary(plane_runtime_data_list=plane_runtime_list, raw_file=raw_file)
 
         # Updates the progress bar with the number of frames processed in the target file.
         progress_bar.update(raw_file.frame_number)
@@ -252,34 +249,39 @@ def raw_to_binary(plane_ops_dictionary: dict[str, Any], override_ops_parameters:
     # Closes the progress bar when the binary conversion is over.
     progress_bar.close()
 
-    # Reloads the updated ops.npy files after conversion.
-    plane_ops = [np.load(ops_index, allow_pickle=True)[()] for ops_index in ops_paths]
+    # Reloads the updated runtime_data.yaml files after conversion.
+    plane_runtime_list = [RuntimeData.from_yaml(file_path=yaml_path) for yaml_path in runtime_yaml_paths]
 
     # Creates a mean image based on the final number of frames.
-    for plane_ops_dict in plane_ops:
-        plane_ops_dict["mean_image"] /= plane_ops_dict["nframes"]
-        np.save(plane_ops_dict["ops_path"], plane_ops_dict)
+    for yaml_path, plane_runtime in zip(runtime_yaml_paths, plane_runtime_list):
+        plane_data = plane_runtime.data.file_io
+        plane_data.mean_image /= plane_data.nframes
 
-    # Returns the updated 'ops' dictionary for the first plane.
-    return plane_ops[0]
+        if runtime_data.configuration.main.nchannels > 1:
+            plane_data.mean_image_channel_2 /= plane_data.nframes
+
+        plane_runtime.to_yaml(file_path=yaml_path)
+
+    # Returns the updated RuntimeData for the first plane.
+    return plane_runtime_list[0]
 
 
 def _initialize_destination_files(
-    ops: dict[str, Any], raw_files: list[_RawFile], override_ops_parameters: bool = True
+    runtime_data: RuntimeData, raw_files: list[_RawFile], override_runtime_parameters: bool = True
 ) -> list[Path]:
     """Prepares the environment for Thorlabs .raw to Suite2P binary (.bin) file conversion by setting up directories
     and generating the necessary metadata files.
 
     Args:
-        ops: The dictionary that stores the suite2p processing parameters.
+        runtime_data: RuntimeData instance containing configuration and data containers.
         raw_files: A list of the _RawFile instances, one for each Thorlabs .raw file to be processed.
-        override_ops_parameters: Determines whether to override certain configuration parameters, such as the number of
-            planes and channels, from 'ops' with data loaded from the .xml configuration files stored together with
-            Thorlabs .raw files.
+        override_runtime_parameters: Determines whether to override certain configuration parameters, such as the number of
+            planes and channels, from configuration with data loaded from the .xml configuration files stored together
+            with Thorlabs .raw files.
 
     Returns:
-        A list of absolute paths to the generated ops.npy files, one for each plane to be processed with the single-day
-        suite2p pipeline.
+        A list of absolute paths to the generated runtime_data.yaml files, one for each plane to be processed with the
+        single-day suite2p pipeline.
 
     Raises:
         ValueError: If the recording configuration used by all input raw files does not match.
@@ -311,84 +313,88 @@ def _initialize_destination_files(
     # Queries the configuration from the first raw file.
     raw_file = raw_files[0]
 
-    # If 'override_ops_parameters' is set to True, configures 'ops' with the configuration values from the first raw
-    # file.
-    if override_ops_parameters:
-        ops["nplanes"] = raw_file.z_planes
+    # If 'override_runtime_parameters' is set to True, configures runtime_data with the configuration values from the
+    # first raw file.
+    if override_runtime_parameters:
+        runtime_data.configuration.main.nplanes = raw_file.z_planes
         if raw_file.channel > 1:
-            ops["nchannels"] = 2
-        ops["fs"] = raw_file.frame_rate
+            runtime_data.configuration.main.nchannels = 2
+        runtime_data.configuration.main.fs = raw_file.frame_rate
 
-    # Queries the number of planes and channels from the 'ops' dictionary. This is especially relevant if the function
-    # is configured to use original 'ops' parameters instead of loading them from the processed .raw file configuration.
-    plane_number = ops["nplanes"]
-    channel_number = ops["nchannels"]
+    # Queries the number of planes and channels from the configuration. This is especially relevant if the function
+    # is configured to use original configuration parameters instead of loading them from the processed .raw file configuration.
+    plane_number = runtime_data.configuration.main.nplanes
+    channel_number = runtime_data.configuration.main.nchannels
 
-    # Initializes a list to store the absolute paths to the generated plane ops.npy files.
-    ops_paths = []
+    # Get save path from configuration and create suite2p directory
+    save_path = Path(runtime_data.configuration.output.save_path)
+    suite2p_directory = save_path.joinpath("suite2p")
+    ensure_directory_exists(suite2p_directory)
 
-    # Loops over all available planes and iteratively sets up paths and writes the frames for each plane into the
-    # plane-specific binary file(s).
-    ops["save_path"] = Path(ops["save_path"])
+    # Initialize list to store paths to runtime_data.yaml files
+    runtime_yaml_paths = []
 
+    # Loops over all available planes and iteratively sets up paths and creates initial files for each plane.
     for plane_index in range(plane_number):
-        # Constructs the directory path for each plane's output directory.
-        plane_directory = ops["save_path"].joinpath(f"plane{plane_index}")
+        # Constructs the directory path for each plane's output directory inside suite2p folder.
+        plane_directory = suite2p_directory.joinpath(f"plane{plane_index}")
         ensure_directory_exists(plane_directory)
 
-        # Creates file paths for ops.npy and the binary data file.
-        ops["ops_path"] = plane_directory.joinpath("ops.npy")
-        ops["reg_file"] = plane_directory.joinpath("data.bin")
+        # Create a separate RuntimeData instance for this plane with deep copied configuration
+        plane_runtime_data = RuntimeData(configuration=deepcopy(runtime_data.configuration))
 
-        # Creates the binary file to store the data for the first channel.
-        ops["reg_file"].touch()
+        # Get reference to this plane's IOData
+        plane = plane_runtime_data.data.file_io
+
+        # Creates file paths for the binary data file.
+        plane.reg_file = plane_directory.joinpath("data.bin")
+        plane.reg_file.touch()
 
         # If the data uses two functional channels, creates a second data file for the second channel.
         if channel_number > 1:
-            ops["reg_file_chan2"] = plane_directory.joinpath("data_chan2.bin")
-            ops["reg_file_chan2"].touch()
+            plane.reg_file_channel_2 = plane_directory.joinpath("data_chan2.bin")
+            plane.reg_file_channel_2.touch()
 
         # Initializes arrays for the mean image and the frame data.
-        ops["mean_image"] = np.zeros((raw_file.height, raw_file.width), np.float32)
-        ops["nframes"] = 0
+        plane.mean_image = np.zeros((raw_file.height, raw_file.width), np.float32)
+        plane.nframes = 0
 
         # If the data uses two functional channels, initializes an array for the second channel's mean image.
         if channel_number > 1:
-            ops["mean_image_channel_2"] = np.zeros((raw_file.height, raw_file.width), np.float32)
+            plane.mean_image_channel_2 = np.zeros((raw_file.height, raw_file.width), np.float32)
 
-        # Overrides the height and width properties of the 'ops' dictionary with the dimensions of the processed
-        # recording.
-        ops["Ly"] = raw_file.height
-        ops["Lx"] = raw_file.width
+        # Overrides the height and width properties with the dimensions of the processed recording.
+        plane.height = raw_file.height
+        plane.width = raw_file.width
 
         # If registration is disabled, sets the pixel ranges to span the full height and width of the frame. Pixels on
         # the edges of each frame are excluded during registration as they are typically unstable and should be
         # discarded anyway.
-        if not ops["do_registration"]:
-            ops["yrange"] = np.array([0, ops["Ly"]])
-            ops["xrange"] = np.array([0, ops["Lx"]])
+        if not runtime_data.configuration.registration.do_registration:
+            plane.height_range = np.array([0, plane.height], dtype=np.uint32)
+            plane.width_range = np.array([0, plane.width], dtype=np.uint32)
 
-        # Appends the absolute file path to the ops.npy file for the current plane to the 'ops_path' data array.
-        ops_paths.append(ops["ops_path"])
+        runtime_yaml_path = plane_directory.joinpath("runtime_data.yaml")
+        plane_runtime_data.to_yaml(file_path=runtime_yaml_path)
+        runtime_yaml_paths.append(runtime_yaml_path)
 
-        # Caches each 'ops' dictionary to disk as an ops.npy file. The file is cached into the plane-specific processing
-        # subdirectory.
-        np.save(ops["ops_path"], ops)
-
-    # Returns the list of absolute file paths to the generated ops.npy files.
-    return ops_paths
+    # Returns the list of absolute file paths to the generated runtime_data.yaml files
+    return runtime_yaml_paths
 
 
-def _single_raw_to_binary(plane_ops: list[dict[str, Any]], raw_file: _RawFile) -> None:
-    """Converts a single Thorlabs raw (.raw) file to suite2p binary (.bin) format for each plane and updates the
-    'ops' dictionary for each plane with the configuration data from the processed file.
+def _single_raw_to_binary(plane_runtime_data_list: list[RuntimeData], raw_file: _RawFile) -> None:
+    """Converts a single Thorlabs raw (.raw) file to suite2p binary (.bin) format for each plane and updates each
+    plane's RuntimeData with the configuration data from the processed file.
 
     Args:
-        plane_ops: A list of dictionaries containing suite2p processing parameters for each recording plane.
+        plane_runtime_data_list: List of RuntimeData instances, one for each recording plane.
         raw_file: The _RawFile object containing the raw data to convert to BinaryFile format.
+
+    Returns:
+        None. Each plane's runtime_data.yaml is updated and saved to its respective plane directory.
     """
-    # Extracts the batch size from the first 'ops' dictionary.
-    batch_size = int(plane_ops[0]["batch_size"])
+    # Extracts the batch size from the configuration (same across all planes).
+    batch_size = int(plane_runtime_data_list[0].configuration.registration.batch_size)
 
     # Opens the raw file for reading in binary mode.
     with raw_file.path.open(mode="rb") as file:
@@ -440,8 +446,9 @@ def _single_raw_to_binary(plane_ops: list[dict[str, Any]], raw_file: _RawFile) -
             # Loops over all available planes and iteratively writes the frames for each plane into the plane-specific
             # binary file(s).
             for z_plane_index in range(raw_file.z_planes):
-                # Extracts the 'ops' dictionary for the current plane.
-                ops = plane_ops[z_plane_index]
+                # Get the RuntimeData for this specific plane
+                plane_runtime = plane_runtime_data_list[z_plane_index]
+                plane = plane_runtime.data.file_io
 
                 # Extracts the set of frames to write to the current plane's binary file.
                 frames_to_write = reshaped_frames[z_plane_index]
@@ -450,45 +457,51 @@ def _single_raw_to_binary(plane_ops: list[dict[str, Any]], raw_file: _RawFile) -
                 # memory-mapped binary file.
                 if raw_file.channel > 1:
                     # Opens the (functional) channel 1 memory-mapped binary file for writing (appending).
-                    with Path(ops["reg_file"]).open(mode="ab") as channel_1_binary_file:
+                    with Path(plane.reg_file).open(mode="ab") as channel_1_binary_file:
                         # Converts all frames to bytes and writes (appends) them to the (functional) channel 1
                         # memory-mapped binary file.
                         channel_1_binary_file.write(frames_to_write[0].astype(np.int16).tobytes())
 
                     # Opens the (functional) channel 2 memory-mapped binary file for writing (appending).
-                    with Path(ops["reg_file_chan2"]).open(mode="ab") as channel_2_binary_file:
+                    with Path(plane.reg_file_channel_2).open(mode="ab") as channel_2_binary_file:
                         # Converts all frames to bytes and writes (appends) them to the (functional) channel 2
                         # memory-mapped binary file.
                         channel_2_binary_file.write(frames_to_write[1].astype(np.int16).tobytes())
 
-                    # Appends the data from all processed frames to the data arrays in the plane-specific 'ops'
-                    # dictionary, as this data is used during further processing.
-                    ops["mean_image"] += frames_to_write[0].astype(np.float32).sum(axis=0)
-                    ops["mean_image_channel_2"] += frames_to_write[1].astype(np.float32).sum(axis=0)
+                    # Appends the data from all processed frames to the data arrays in the plane-specific IOData,
+                    # as this data is used during further processing.
+                    plane.mean_image += frames_to_write[0].astype(np.float32).sum(axis=0)
+                    plane.mean_image_channel_2 += frames_to_write[1].astype(np.float32).sum(axis=0)
 
                 # If the processed data uses one functional channel, repeats the same steps above for only the first
                 # channel.
                 else:
                     # Opens the (functional) channel 1 memory-mapped binary file for writing (appending).
-                    with Path(ops["reg_file"]).open(mode="ab") as channel_1_binary_file:
+                    with Path(plane.reg_file).open(mode="ab") as channel_1_binary_file:
                         # Converts all frames to bytes and writes (appends) them to the (functional) channel 1
                         # memory-mapped binary file.
                         channel_1_binary_file.write(frames_to_write.astype(np.int16).tobytes())
 
                     # Appends the data from all processed frames to the mean image data array in the plane-specific
-                    # 'ops' dictionary,
-                    ops["mean_image"] += frames_to_write.astype(np.float32).sum(axis=0)
+                    # IOData.
+                    plane.mean_image += frames_to_write.astype(np.float32).sum(axis=0)
 
             # Reads the next chunk of frames.
             frame_chunk = file.read(chunk_size)
 
-    # Loops over each loaded 'ops' dictionary and adds descriptive information about the data to be processed (frames).
-    for ops in plane_ops:
+    # Loops over each plane's RuntimeData and adds descriptive information about the data to be processed (frames).
+    for plane_runtime in plane_runtime_data_list:
+        plane = plane_runtime.data.file_io
         total_frames = int(
             raw_file.size / raw_file.height / raw_file.width / raw_file.recorded_planes / raw_file.channel / 2
         )
-        ops["nframes"] += total_frames
+        plane.nframes += total_frames
 
-        # Caches each 'ops' dictionary to disk as an ops.npy file. The file is cached into the plane-specific processing
-        # subdirectory.
-        np.save(ops["ops_path"], ops)
+    # Save each plane's updated RuntimeData to its respective yaml file
+    save_path = Path(plane_runtime_data_list[0].configuration.output.save_path)
+    suite2p_directory = save_path.joinpath("suite2p")
+
+    for plane_index, plane_runtime in enumerate(plane_runtime_data_list):
+        plane_directory = suite2p_directory.joinpath(f"plane{plane_index}")
+        runtime_yaml_path = plane_directory.joinpath("runtime_data.yaml")
+        plane_runtime.to_yaml(file_path=runtime_yaml_path)

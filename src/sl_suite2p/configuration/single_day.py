@@ -166,12 +166,6 @@ class Output:
     save_path: str = ""
     """The full path to the output directory where the pipeline results should be saved."""
 
-    save_folder: str = "suite2p"
-    """The name of the folder under which the pipeline results should be stored. If this is not provided, the pipeline
-    defaults to using 'suite2p' as the save directory, created under the root directory specified by 'save_path0'. Note,
-    if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 'multi-day'
-    pipeline, do NOT modify this field. The multi-day pipeline expects the save_folder to be 'suite2p' (default)."""
-
     combined: bool = True
     """Determines whether to combine results across planes into a 'combined' folder at the end of processing. If the 
     results of the single-day pipeline are intended to be later processed as part of the multi-day pipeline, this has 
@@ -192,10 +186,10 @@ class IOData:
     width: int
     """Stores the width of each frame stored inside the file."""
 
-    yrange: NDArray[np.uint32]
+    height_range: NDArray[np.uint32]
     """The pixel range to span the full height of the frame if registration is disabled."""
 
-    xrange: NDArray[np.uint32]
+    width_range: NDArray[np.uint32]
     """The pixel range to span the full width of the frame if registration is disabled."""
 
     nframes: int
@@ -207,7 +201,7 @@ class IOData:
     reg_file: str | Path
     """Stores the absolute path to the (functional) channel 1 memory-mapped binary file."""
 
-    reg_file_chan2: str | Path
+    reg_file_channel_2: str | Path
     """Stores the absolute path to the (functional) channel 2 memory-mapped binary file."""
 
     mean_image: NDArray[np.float32]
@@ -684,7 +678,7 @@ class RuntimeData(YamlConfig):
     def __post_init__(self) -> None:
         self.data.file_io.ops_path = Path(self.data.file_io.ops_path)
         self.data.file_io.reg_file = Path(self.data.file_io.reg_file)
-        self.data.file_io.reg_file_chan2 = Path(self.data.file_io.reg_file_chan2)
+        self.data.file_io.reg_file_channel_2 = Path(self.data.file_io.reg_file_channel_2)
 
     def save(self, output_directory: Path) -> None:
         """Saves the image .npy files and the combined runtime configuration and added data YAML file to the specified
@@ -700,7 +694,7 @@ class RuntimeData(YamlConfig):
         # Path objects
         original.data.file_io.ops_path = str(original.data.file_io.ops_path)  # type: ignore
         original.data.file_io.reg_file = str(original.data.file_io.reg_file)  # type: ignore
-        original.data.file_io.reg_file_chan2 = str(original.data.file_io.reg_file_chan2)  # type: ignore
+        original.data.file_io.reg_file_channel_2 = str(original.data.file_io.reg_file_channel_2)  # type: ignore
 
         ensure_directory_exists(output_directory)
 
