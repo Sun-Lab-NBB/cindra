@@ -1,11 +1,13 @@
 """This module provides utility functions for handling file searching, path management, and binary file operations."""
 
+from copy import deepcopy
 from typing import Any
 from pathlib import Path
 
-import numpy as np
 from natsort import natsorted
-from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
+from ataraxis_base_utilities import LogLevel, console
+
+from ..configuration import RuntimeData
 
 
 def _search_files_by_extension(
@@ -105,82 +107,56 @@ def _search_files_by_extension(
     return file_paths, first_files
 
 
-def _get_tiff_list(ops: dict[str, Any]) -> tuple[list[Path], dict[str, Any]]:
-    """Creates a list of .tif and .tiff files found in the directory specified by the "data_path" field of the input
-    'ops' dictionary. By default, it searches recursively through all subdirectories within each root directory listed
-    in the "data_path" field.
+def _get_tiff_list(runtime_data: RuntimeData) -> tuple[list[Path], RuntimeData]:
+    """Creates a list of .tif and .tiff files found in the directory specified by the "data_path" field of the
+    runtime_data configuration. By default, it searches recursively through all subdirectories within each root
+    directory listed in the "data_path" field.
 
     Args:
-        ops: The dictionary that stores the suite2p single-day processing parameters.
+        runtime_data: A RuntimeData instance that stores the suite2p single-day configuration and runtime parameters.
 
     Returns:
-        A tuple of two elements. The first element is a list of the absolute paths to the found .tif and .tiff files,
-        and the second element is the updated 'ops' dictionary.
+        A tuple of two elements. The first element is a sorted list of the absolute paths to the found
+        .tif and .tiff files, and the second element is the updated RuntimeData instance.
 
     Raises:
-        FileNotFoundError: If no .tif or .tiff files are found in the directory or (if applicable) its subdirectories."
+        FileNotFoundError: If no .tif or .tiff files are found in the directory or (if applicable) its subdirectories.
     """
     # Queries the absolute path(s) to root data directory.
-    directories = ops["data_path"]
+    directories = runtime_data.configuration.file_io.data_path
 
     # Initializes a list to store the absolute paths to the discovered .tif and .tiff files.
     file_paths: list[Path] = []
 
-    # If a user-specified list of tiff files is provided in the 'ops' dictionary, adds them to the list.
-    if "tiff_list" in ops:
-        # Loops over all .tif and .tiff files and stores the absolute path to each target file.
-        for tiff in ops["tiff_list"]:
-            file_paths.append(Path(file_paths[0]).joinpath(tiff))
-
-        # Initializes an array to store which .tif or .tiff file is the first to process.
-        ops["first_tiffs"] = np.zeros((len(file_paths),), dtype="bool")
-
-        # Sets the element matching the first .tif or .tiff file as True, indicating it is the first file to process.
-        ops["first_tiffs"][0] = True
-
-        message = (
-            f"Parsed the paths to {len(file_paths)} TIF/TIFF files using the user-defined 'tiff_list' processing "
-            f"parameter. Converting to binaries."
+    # Loops over all directories and searches for .TIFF files.
+    for directory in directories:
+        # Retrieves the absolute paths of the .tif and .tiff files in the target directory, searching
+        # subdirectories as well.
+        file_paths_found, _ = _search_files_by_extension(
+            root_directory=directory,
+            extensions=("tif", "tiff", "TIF", "TIFF"),
+            ignore_names=tuple(runtime_data.configuration.file_io.ignored_file_names),
         )
-        console.echo(message=message, level=LogLevel.INFO)
 
-    # Otherwise, searches for .tif and .tiff files in directories or subdirectories.
-    else:
-        # Initializes a list to store the first .tif or .tiff file of each directory.
-        first_tiffs: list[bool] = []
+        # Extends the returned data into storage list
+        file_paths.extend(file_paths_found)
 
-        # Loops over all directories and searches for .TIFF files.
-        for directory in directories:
-            # Retrieves the absolute paths of the .tif and .tiff files and the list of the first .tif or .tiff file(s)
-            # in the target directory, searching subdirectories as well.
-            file_paths_found, first_tiffs_found = _search_files_by_extension(
-                root_directory=directory,
-                extensions=("tif", "tiff", "TIF", "TIFF"),
-                ignore_names=tuple(ops["ignored_file_names"]),
-            )
+    # If no files were found in the directories, raises a FileNotFoundError.
+    if len(file_paths) == 0:
+        message = "Could not find any TIF/TIFF files to process."
+        console.error(message=message, error=FileNotFoundError)
 
-            # Extends the returned data into storage lists
-            file_paths.extend(file_paths_found)
-            first_tiffs.extend(first_tiffs_found)
+    file_paths = natsorted(file_paths)
 
-        # If no files were found in the directories, raises a FileNotFoundError.
-        if len(file_paths) == 0:
-            message = "Could not find any TIF/TIFF files to process."
-            console.error(message=message, error=FileNotFoundError)
+    message = f"Found {len(file_paths)} TIF/TIFF files. Converting to binaries."
+    console.echo(message=message, level=LogLevel.INFO)
 
-        # Otherwise, converts 'first_tiffs' into a boolean NumPy array and updates 'ops'.
-        else:
-            ops["first_tiffs"] = np.array(first_tiffs).astype("bool")
-            message = f"Found {len(file_paths)} TIF/TIFF files. Converting to binaries."
-            console.echo(message=message, level=LogLevel.INFO)
-
-    # Returns the list of absolute paths to the tiff files and the updated 'ops' dictionary.
-    return file_paths, ops
+    return file_paths, runtime_data
 
 
 def find_files_open_binaries(
-    plane_ops: tuple[dict[str, Any], ...],
-) -> tuple[tuple[dict[str, Any], ...], list[Path], list[Any], list[Any]]:
+    plane_runtime_data_list: list[RuntimeData],
+) -> tuple[list[RuntimeData], list[Path], list[Any], list[Any]]:
     """Finds the source data files for each plane inside the input list of plane-specific 'ops' dictionaries and
     prepares plane-specific binary files for writing the data.
 
@@ -189,7 +165,7 @@ def find_files_open_binaries(
     format. This function currently only supports .tif and .tiff files.
 
     Args:
-        plane_ops: The list of plane-specific 'ops' dictionaries that store single-day plane processing parameters.
+        plane_runtime_data_list: A list of all plane-specific RuntimeData instances that store single-day plane processing parameters.
 
     Returns:
         A tuple of four elements. The first element is the input 'plane_ops' list, where each plane-specific dictionary
@@ -202,27 +178,27 @@ def find_files_open_binaries(
     channel_2_binary_files = []
 
     # Loops through each plane's 'ops' dictionary, processes, and opens the binary files.
-    for ops in plane_ops:
+    for plane_runtime_data in plane_runtime_data_list:
         # Queries the number of channels from the plane-specific 'ops' dictionary.
-        channel_number = ops["nchannels"]
+        channel_number = plane_runtime_data.configuration.main.nchannels
 
         # Resolves paths to either raw or registered binary files for both channels, depending on the 'ops'
         # configuration.
-        if ops.get("keep_movie_raw"):
+        if plane_runtime_data.configuration.registration.keep_movie_raw:
             # Opens the raw binary file and appends it to 'channel_1_binary_files'.
-            channel_1_binary_files.append(Path(ops["raw_file"]).open(mode="wb"))
+            channel_1_binary_files.append(plane_runtime_data.data.file_io.raw_file.open(mode="wb"))
             # If there is a second channel, opens the raw binary and appends it to 'channel_2_binary_files'.
             if channel_number > 1:
-                channel_2_binary_files.append(Path(ops["raw_file_chan2"]).open(mode="wb"))
+                channel_2_binary_files.append(plane_runtime_data.data.file_io.raw_file_channel_2.open(mode="wb"))
         else:
             # Opens the registered binary file and appends it to 'channel_1_binary_files'.
-            channel_1_binary_files.append(Path(ops["reg_file"]).open(mode="wb"))
-            # If there is a second channel, opens the registered binary and appends it to 'channel_2_binary_files'.
+            channel_1_binary_files.append(plane_runtime_data.data.file_io.reg_file.open(mode="wb"))
+            # If there is a second channel, opens the registered binary for THIS plane
             if channel_number > 1:
-                channel_2_binary_files.append(Path(ops["reg_file_chan2"]).open(mode="wb"))
+                channel_2_binary_files.append(plane_runtime_data.data.file_io.reg_file_channel_2.open(mode="wb"))
 
     # Determines the input format based on the first plane's 'ops' dictionary.
-    input_format = plane_ops[0].get("input_format", "tiff")
+    input_format = plane_runtime_data_list[0].configuration.file_io.input_format
 
     message = f"Input data format: {input_format}."
     console.echo(message=message, level=LogLevel.SUCCESS)
@@ -232,92 +208,87 @@ def find_files_open_binaries(
     # future, refer to the original Suite2p code for the original if-else 'input_format' logic. :)
 
     # Retrieves the absolute file paths to the .tif and .tiff files.
-    file_paths, ops_updated = _get_tiff_list(plane_ops[0])
+    file_paths, updated_runtime_data = _get_tiff_list(plane_runtime_data_list[0])
 
-    # Stores the updated values for the "first_tiffs" and "frames_per_folder" keys in each plane-specific 'ops'
-    # dictionary.
-    for ops in plane_ops:
-        ops["first_tiffs"] = ops_updated["first_tiffs"]
-        ops["frames_per_folder"] = np.zeros((ops_updated["first_tiffs"].sum(),), np.int32)
-
-    # Stores the absolute paths to the files under the "filelist" key for each plane-specific 'ops' dictionary.
-    for ops in plane_ops:
-        ops["filelist"] = file_paths
-
-    # Returns the list of plane-specific 'ops' dictionaries, the absolute paths to the discovered files, and the opened
-    # binary files for both channels.
-    return plane_ops, file_paths, channel_1_binary_files, channel_2_binary_files
+    return plane_runtime_data_list, file_paths, channel_1_binary_files, channel_2_binary_files
 
 
 # noinspection PyUnboundLocalVariable
-def initialize_plane_ops(ops: dict[str, Any]) -> list[dict[str, Any]]:
-    """Constructs plane-specific 'ops' dictionaries for each plane specified inside the input 'ops' dictionary.
+def initialize_plane_parameters(runtime_data: RuntimeData) -> list[RuntimeData]:
+    """Constructs plane-specific RuntimeData instances for each plane and saves them to their respective directories.
+
+    This function creates a separate RuntimeData YAML file for each plane, with plane-specific file paths configured.
+    Each plane gets its own directory under save_path/suite2p/planeN/ with its own runtime_data.yaml file.
 
     Args:
-        ops: The dictionary that stores the suite2p single-day processing parameters.
+        runtime_data: A RuntimeData instance that stores the suite2p single-day configuration and runtime parameters.
 
     Returns:
-        The list of plane-specific 'ops' dictionaries with the same length as the number of planes ('nplanes')
-        specified inside the input 'ops' dictionary.
+        A list of Path objects pointing to each plane's runtime_data.yaml file with the same length as the number of
+        planes ('nplanes').
     """
-    # Initializes the list that will store each plane's 'ops' dictionary, which is eventually returned.
-    plane_ops = []
+    # Initialize list to store the RuntimeData instances for all planes
+    plane_runtime_data_list = []
 
-    # Queries the number of planes and channels from the input 'ops' dictionary.
-    plane_number = ops["nplanes"]
-    channel_number = ops["nchannels"]
+    # Queries the number of planes and channels from the configuration.
+    plane_number = runtime_data.configuration.main.nplanes
+    channel_number = runtime_data.configuration.main.nchannels
 
-    # If the "lines" and "iplane" keys are populated in the input 'ops' dictionary, makes copies of the values to
-    # populate the keys in each plane-specific 'ops' dictionary.
-    if "lines" in ops:
-        lines = ops["lines"]
-    if "iplane" in ops:
-        iplane = ops["iplane"]
+    # Store references to mesoscope ROI data from the original runtime_data
+    lines = runtime_data.data.file_io.lines
+    dy = runtime_data.data.file_io.dy
+    dx = runtime_data.data.file_io.dx
+    source_plane_indices = runtime_data.data.file_io.plane_index
 
-    # For mesoscope ROIs, makes copies of the values stored under the "dy" and "dx" keys.
-    if "dy" in ops and ops["dy"] != "":
-        dy = ops["dy"]
-        dx = ops["dx"]
-
-    # Converts known Path instances from string to Path
-    ops["save_path"] = Path(ops["save_path"])
-    ops["data_path"] = [Path(path) for path in ops["data_path"]]
-
-    # Loops over each of the planes and constructs each plane-specific 'ops' dictionary. If the keys are populated in
-    # the input 'ops' dictionary, stores the plane-specific value under the appropriate key in the plane-specific 'ops'
-    # dictionary.
+    # Loops over each plane and constructs each plane-specific RuntimeData instance
     for plane_index in range(plane_number):
-        # Resolves the output directory for the plane data.
-        plane_directory = ops["save_path"].joinpath(f"plane{plane_index}")
-        ensure_directory_exists(plane_directory)
+        # Create a separate RuntimeData instance for this plane with deep copied configuration
+        plane_runtime_data = RuntimeData(configuration=deepcopy(runtime_data.configuration))
 
-        # Defines the paths for the ops.npy file and the first channel's registered data binary file.
-        ops["ops_path"] = plane_directory.joinpath("ops.npy")
-        ops["reg_file"] = plane_directory.joinpath("data.bin")
+        # Sets up the yaml_path for this plane (creates suite2p/planeN/ directory structure)
+        plane_runtime_data.set_yaml_path(plane_index=plane_index)
+        plane_directory = plane_runtime_data.yaml_path.parent
 
-        # If necessary, generates an additional binary file to store raw (unregistered) data after runtime.
-        if ops.get("keep_movie_raw"):
-            ops["raw_file"] = plane_directory.joinpath("data_raw.bin")
+        # Gets reference to the current plane's IOData
+        plane_io_data = plane_runtime_data.data.file_io
 
-        # If the data contains multiple functional channels, configures the binaries for the second channel.
+        # Defines the paths for the first channel's registered data binary file
+        plane_io_data.reg_file = plane_directory.joinpath("data.bin")
+        plane_io_data.reg_file.touch()
+
+        # If necessary, generates an additional binary file to store raw (unregistered) data after runtime
+        if plane_runtime_data.configuration.registration.keep_movie_raw:
+            plane_io_data.raw_file = plane_directory.joinpath("data_raw.bin")
+            plane_io_data.raw_file.touch()
+
+        # If the data contains multiple functional channels, configures the binaries for the second channel
         if channel_number > 1:
-            ops["reg_file_chan2"] = plane_directory.joinpath("data_chan2.bin")
-            if ops.get("keep_movie_raw"):
-                ops["raw_file_chan2"] = plane_directory.joinpath("data_chan2_raw.bin")
+            plane_io_data.reg_file_channel_2 = plane_directory.joinpath("data_chan2.bin")
+            plane_io_data.reg_file_channel_2.touch()
 
-        # Sets the "lines" and "iplane" values for the current plane.
-        if "lines" in ops:
-            ops["lines"] = lines[plane_index]
-        if "iplane" in ops:
-            ops["iplane"] = iplane[plane_index]
+            if plane_runtime_data.configuration.registration.keep_movie_raw:
+                plane_io_data.raw_file_channel_2 = plane_directory.joinpath("data_chan2_raw.bin")
+                plane_io_data.raw_file_channel_2.touch()
 
-        # Stores the mesoscope ROI coordinates (top left corner) "dy" and "dx" for the current plane.
-        if "dy" in ops and ops["dy"] != "":
-            ops["dy"] = dy[plane_index]
-            ops["dx"] = dx[plane_index]
+        # Initializes the frame counter
+        plane_io_data.nframes = 0
 
-        # Copies the modified 'ops' dictionary and appends it to 'plane_ops'.
-        plane_ops.append(ops.copy())
+        # Sets the "lines" value for the current plane if it exists in source
+        if lines is not None:
+            plane_io_data.lines = lines[plane_index]
 
-    # Returns the list of 'ops' dictionaries for each plane.
-    return plane_ops
+        # Sets the "plane_index" (formerly "iplane") value for the current plane if it exists in source
+        if source_plane_indices is not None:
+            plane_io_data.plane_index = source_plane_indices[plane_index]
+
+        # Stores the mesoscope ROI coordinates (top left corner) "dy" and "dx" for the current plane
+        if dy is not None and len(dy) > 0:
+            plane_io_data.dy = [dy[plane_index]]
+            plane_io_data.dx = [dx[plane_index]]
+
+        # Save the plane-specific RuntimeData to its YAML file
+        plane_runtime_data.save()
+        plane_runtime_data_list.append(plane_runtime_data)
+
+    # Returns the list of paths to runtime_data.yaml files for each plane
+    return plane_runtime_data_list
