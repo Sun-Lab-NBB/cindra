@@ -157,7 +157,7 @@ def _get_tiff_list(runtime_data: RuntimeData) -> tuple[list[Path], RuntimeData]:
 def find_files_open_binaries(
     plane_runtime_data_list: list[RuntimeData],
 ) -> tuple[list[RuntimeData], list[Path], list[Any], list[Any]]:
-    """Finds the source data files for each plane inside the input list of plane-specific 'ops' dictionaries and
+    """Finds the source data files for each plane inside the input list of plane-specific RuntimeData instances and
     prepares plane-specific binary files for writing the data.
 
     This service function resolves the paths to the raw data files and generates memory-mapped binary files for each
@@ -165,10 +165,11 @@ def find_files_open_binaries(
     format. This function currently only supports .tif and .tiff files.
 
     Args:
-        plane_runtime_data_list: A list of all plane-specific RuntimeData instances that store single-day plane processing parameters.
+        plane_runtime_data_list: A list of all plane-specific RuntimeData instances that store single-day plane
+                                 processing parameters.
 
     Returns:
-        A tuple of four elements. The first element is the input 'plane_ops' list, where each plane-specific dictionary
+        A tuple of four elements. The first element is the input 'plane_runtime_data_list', where each instance
         is updated with paths to source data files. The second element is the list of paths to source data files
         for each plane. The third element is the list of opened binaries for channel 1. The fourth element is the list
         of opened binaries for channel 2 if the data uses two functional channels.
@@ -177,13 +178,12 @@ def find_files_open_binaries(
     channel_1_binary_files = []
     channel_2_binary_files = []
 
-    # Loops through each plane's 'ops' dictionary, processes, and opens the binary files.
+    # Iterates over each RuntimeData instance, processes plane data, and opens its binary files.
     for plane_runtime_data in plane_runtime_data_list:
-        # Queries the number of channels from the plane-specific 'ops' dictionary.
+        # Retrieves the number of channels from the plane-specific configuration.
         channel_number = plane_runtime_data.configuration.main.nchannels
 
-        # Resolves paths to either raw or registered binary files for both channels, depending on the 'ops'
-        # configuration.
+        # Resolves paths to either raw or registered binary files for both channels depending on the configuration.
         if plane_runtime_data.configuration.registration.keep_movie_raw:
             # Opens the raw binary file and appends it to 'channel_1_binary_files'.
             channel_1_binary_files.append(plane_runtime_data.data.file_io.raw_file.open(mode="wb"))
@@ -197,7 +197,7 @@ def find_files_open_binaries(
             if channel_number > 1:
                 channel_2_binary_files.append(plane_runtime_data.data.file_io.reg_file_channel_2.open(mode="wb"))
 
-    # Determines the input format based on the first plane's 'ops' dictionary.
+    # Determines the input format from the first RuntimeData instance's configuration.
     input_format = plane_runtime_data_list[0].configuration.file_io.input_format
 
     message = f"Input data format: {input_format}."
@@ -208,7 +208,7 @@ def find_files_open_binaries(
     # future, refer to the original Suite2p code for the original if-else 'input_format' logic. :)
 
     # Retrieves the absolute file paths to the .tif and .tiff files.
-    file_paths, updated_runtime_data = _get_tiff_list(plane_runtime_data_list[0])
+    file_paths, _ = _get_tiff_list(plane_runtime_data_list[0])
 
     return plane_runtime_data_list, file_paths, channel_1_binary_files, channel_2_binary_files
 
@@ -227,41 +227,53 @@ def initialize_plane_parameters(runtime_data: RuntimeData) -> list[RuntimeData]:
         A list of Path objects pointing to each plane's runtime_data.yaml file with the same length as the number of
         planes ('nplanes').
     """
-    # Initialize list to store the RuntimeData instances for all planes
+    # Initialize list to store the RuntimeData instances for all planes.
     plane_runtime_data_list = []
 
     # Queries the number of planes and channels from the configuration.
     plane_number = runtime_data.configuration.main.nplanes
     channel_number = runtime_data.configuration.main.nchannels
 
-    # Store references to mesoscope ROI data from the original runtime_data
-    lines = runtime_data.data.file_io.lines
-    dy = runtime_data.data.file_io.dy
-    dx = runtime_data.data.file_io.dx
-    source_plane_indices = runtime_data.data.file_io.plane_index
+    # Store references to mesoscope ROI data from the original runtime_data.
+    lines = runtime_data.data.file_io.lines if runtime_data.data.file_io.lines is not None else None
+    dy = (
+        runtime_data.data.file_io.dy
+        if runtime_data.data.file_io.dy is not None and len(runtime_data.data.file_io.dy) > 0
+        else None
+    )
+    dx = (
+        runtime_data.data.file_io.dx
+        if runtime_data.data.file_io.dx is not None and len(runtime_data.data.file_io.dx) > 0
+        else None
+    )
+    source_plane_indices = (
+        runtime_data.data.file_io.plane_index
+        if runtime_data.data.file_io.plane_index is not None and len(runtime_data.data.file_io.plane_index) > 0
+        else None
+    )
 
-    # Loops over each plane and constructs each plane-specific RuntimeData instance
+    # Loops over each plane and constructs each plane-specific RuntimeData instance.
     for plane_index in range(plane_number):
-        # Create a separate RuntimeData instance for this plane with deep copied configuration
+        # Create a separate RuntimeData instance for this plane with deep copied configuration.
         plane_runtime_data = RuntimeData(configuration=deepcopy(runtime_data.configuration))
 
-        # Sets up the yaml_path for this plane (creates suite2p/planeN/ directory structure)
+        # Sets up the yaml_path for this plane and creates the directory hierarchy.
         plane_runtime_data.set_yaml_path(plane_index=plane_index)
         plane_directory = plane_runtime_data.yaml_path.parent
 
-        # Gets reference to the current plane's IOData
+        # Gets reference to the current plane's IOData.
         plane_io_data = plane_runtime_data.data.file_io
 
-        # Defines the paths for the first channel's registered data binary file
+        # Defines the paths for the first channel's registered data binary file.
         plane_io_data.reg_file = plane_directory.joinpath("data.bin")
         plane_io_data.reg_file.touch()
 
-        # If necessary, generates an additional binary file to store raw (unregistered) data after runtime
+        # If necessary, generates an additional binary file to store raw (unregistered) data after runtime.
         if plane_runtime_data.configuration.registration.keep_movie_raw:
             plane_io_data.raw_file = plane_directory.joinpath("data_raw.bin")
             plane_io_data.raw_file.touch()
 
-        # If the data contains multiple functional channels, configures the binaries for the second channel
+        # If the data contains multiple functional channels, configures the binaries for the second channel.
         if channel_number > 1:
             plane_io_data.reg_file_channel_2 = plane_directory.joinpath("data_chan2.bin")
             plane_io_data.reg_file_channel_2.touch()
@@ -270,25 +282,23 @@ def initialize_plane_parameters(runtime_data: RuntimeData) -> list[RuntimeData]:
                 plane_io_data.raw_file_channel_2 = plane_directory.joinpath("data_chan2_raw.bin")
                 plane_io_data.raw_file_channel_2.touch()
 
-        # Initializes the frame counter
+        # Initializes the frame counter.
         plane_io_data.nframes = 0
 
-        # Sets the "lines" value for the current plane if it exists in source
-        if lines is not None:
+        if lines is not None and plane_index < len(lines):
             plane_io_data.lines = lines[plane_index]
 
-        # Sets the "plane_index" (formerly "iplane") value for the current plane if it exists in source
-        if source_plane_indices is not None:
+        if source_plane_indices is not None and plane_index < len(source_plane_indices):
             plane_io_data.plane_index = source_plane_indices[plane_index]
 
-        # Stores the mesoscope ROI coordinates (top left corner) "dy" and "dx" for the current plane
-        if dy is not None and len(dy) > 0:
+        # Stores the mesoscope ROI coordinates (top left corner) "dy" and "dx" for the current plane.
+        if dy is not None and plane_index < len(dy):
             plane_io_data.dy = [dy[plane_index]]
             plane_io_data.dx = [dx[plane_index]]
 
-        # Save the plane-specific RuntimeData to its YAML file
+        # Saves the plane-specific RuntimeData to its YAML file.
         plane_runtime_data.save()
         plane_runtime_data_list.append(plane_runtime_data)
 
-    # Returns the list of paths to runtime_data.yaml files for each plane
+    # Returns the list of RuntimeData instances for each plane.
     return plane_runtime_data_list

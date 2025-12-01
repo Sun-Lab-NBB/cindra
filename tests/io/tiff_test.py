@@ -7,6 +7,7 @@ import tempfile
 import numpy as np
 import pytest
 from tifffile import TiffWriter, TiffFile
+from sl_suite2p.configuration import RuntimeData
 
 from sl_suite2p.io.tiff import (
     generate_tiff_filename,
@@ -46,20 +47,22 @@ def create_multi_frame_tiff(tmp_path):
 
 
 @pytest.fixture
-def ops(tmp_path):
-    """Creates a basic default ops dictionary for testing."""
-    return {
-        "data_path": [str(tmp_path)],
-        "save_path": str(tmp_path),
-        "functional_chan": 1,
-        "align_by_chan": 1,
-        "nplanes": 1,
-        "nchannels": 1,
-        "ignored_file_names": [],
-        "batch_size": 500,
-        "progress_bars": False,
-        "do_registration": True,
-    }
+def runtime_data(tmp_path):
+    """Creates a basic default RuntimeData instance."""
+    runtime_data = RuntimeData()
+
+    runtime_data.configuration.file_io.data_path = [tmp_path]
+    runtime_data.configuration.output.save_path = str(tmp_path)
+    runtime_data.configuration.main.functional_chan = 1
+    runtime_data.configuration.main.align_by_chan = 1
+    runtime_data.configuration.main.nplanes = 1
+    runtime_data.configuration.main.nchannels = 1
+    runtime_data.configuration.file_io.ignored_file_names = []
+    runtime_data.configuration.registration.batch_size = 500
+    runtime_data.configuration.output.progress_bars = False
+    runtime_data.configuration.registration.do_registration = True
+
+    return runtime_data
 
 
 @pytest.mark.parametrize(
@@ -153,7 +156,7 @@ def test_read_tiff_pixel_conversion(tmp_path, input_dtype, input_data, expected_
     np.testing.assert_array_equal(result_frames, expected_frames)
 
 
-def test_single_frame_tiff_bin(tmp_path, ops):
+def test_single_frame_tiff_bin(tmp_path, runtime_data):
     """Verifies that a third dimension is added when a single-frame TIFF is converted to a suite2p plane
     binary (.bin), and that any extra frames read beyond the file length are truncated to match the actual
     number of frames."""
@@ -171,18 +174,18 @@ def test_single_frame_tiff_bin(tmp_path, ops):
     assert frames is not None and len(frames.shape) == 3
     assert frames.shape[0] == 1
 
-    result_ops = tiff_to_binary(ops)
-    assert result_ops["Ly"] == 100
-    assert result_ops["Lx"] == 100
-    assert result_ops["nframes"] == 1
-    assert isinstance(result_ops["mean_image"], np.ndarray)
-    assert result_ops["mean_image"].shape == (100, 100)
+    result_runtime_data = tiff_to_binary(runtime_data)
+    assert result_runtime_data.data.file_io.height == 100
+    assert result_runtime_data.data.file_io.width == 100
+    assert result_runtime_data.data.file_io.nframes == 1
+    assert isinstance(result_runtime_data.data.file_io.mean_image, np.ndarray)
+    assert result_runtime_data.data.file_io.mean_image.shape == (100, 100)
 
 
-def test_multi_plane_channel_bin(tmp_path, ops):
+def test_multi_plane_channel_bin(tmp_path, runtime_data):
     """Verifies multi-plane and multi-channel tiff to binary conversion."""
-    ops["nplanes"] = 3
-    ops["nchannels"] = 2
+    runtime_data.configuration.main.nplanes = 3
+    runtime_data.configuration.main.nchannels = 2
 
     frames = np.random.randint(0, 1000, size=(60, 100, 100), dtype=np.uint16)
     tiff_path = tmp_path.joinpath("multiple_planes_channels.tiff")
@@ -190,11 +193,11 @@ def test_multi_plane_channel_bin(tmp_path, ops):
         for frame in frames:
             tiff.write(frame, contiguous=True)
 
-    result_ops = tiff_to_binary(ops)
+    result_runtime_data = tiff_to_binary(runtime_data)
 
-    assert "mean_image_channel_2" in result_ops
+    assert result_runtime_data.data.file_io.mean_image_channel_2 is not None
     # Checks that the total frames = 60, frames per channel = 60/(3x2) = 10
-    assert result_ops["nframes"] == 10
+    assert result_runtime_data.data.file_io.nframes == 10
 
 
 @pytest.fixture
@@ -217,76 +220,80 @@ def mesoscan_test_setup(tmp_path):
             for frame in frames:
                 tiff.write(frame, contiguous=True)
 
-        # Returns the base test_ops with default mesoscan parameters
-        return {
-            "data_path": [str(test_dir)],
-            "save_path": str(test_dir),
-            "batch_size": 500,
-            "progress_bars": False,
-            "do_registration": True,
-            "functional_chan": 1,
-            "nchannels": 1,
-            "ignored_file_names": [],
-            "lines": [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]],
-            "nrois": 2,
-            "nplanes": 2,
-            "dy": [0, 5],
-            "dx": [0, 0],
-            "fs": 30.0,
-        }
+        # Returns RuntimeData with default mesoscan parameters
+        runtime_data = RuntimeData()
+        runtime_data.configuration.file_io.data_path = [test_dir]
+        runtime_data.configuration.output.save_path = str(test_dir)
+        runtime_data.configuration.registration.batch_size = 500
+        runtime_data.configuration.output.progress_bars = False
+        runtime_data.configuration.registration.do_registration = True
+        runtime_data.configuration.main.functional_chan = 1
+        runtime_data.configuration.main.nchannels = 1
+        runtime_data.configuration.file_io.ignored_file_names = []
+        runtime_data.data.file_io.lines = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
+        runtime_data.data.file_io.nrois = 2
+        runtime_data.configuration.main.nplanes = 2
+        runtime_data.data.file_io.dy = [0, 5]
+        runtime_data.data.file_io.dx = [0, 0]
+        runtime_data.configuration.main.fs = 30.0
+
+        return runtime_data
 
     return _setup
 
 
 def test_mesoscan_registration_settings(mesoscan_test_setup):
     """Tests mesoscan behavior with different registration settings."""
-    test_ops_reg_on = mesoscan_test_setup(test_name="reg_on")
-    test_ops_reg_on["do_registration"] = True
+    runtime_data_reg_on = mesoscan_test_setup(test_name="reg_on")
+    runtime_data_reg_on.configuration.registration.do_registration = True
 
-    result_ops_reg_on = mesoscan_to_binary(test_ops_reg_on)
+    result_runtime_data_reg_on = mesoscan_to_binary(runtime_data_reg_on)
 
     # Tests that when registration is enabled, the frame dimensions reflect the dimensions of the extracted
     # ROI scan lines:
-    assert "mean_image" in result_ops_reg_on
-    assert result_ops_reg_on["Ly"] == 5
-    assert result_ops_reg_on["Lx"] == 100
+    assert result_runtime_data_reg_on.data.file_io.mean_image is not None
+    assert result_runtime_data_reg_on.data.file_io.height == 5
+    assert result_runtime_data_reg_on.data.file_io.width == 100
 
     # Tests that when registration is disabled, yrange and xrange span the entire frame
-    test_ops_reg_off = mesoscan_test_setup(test_name="reg_off")
-    test_ops_reg_off["do_registration"] = False
+    runtime_data_reg_off = mesoscan_test_setup(test_name="reg_off")
+    runtime_data_reg_off.configuration.registration.do_registration = False
 
-    result_ops_reg_off = mesoscan_to_binary(test_ops_reg_off)
+    result_runtime_data_reg_off = mesoscan_to_binary(runtime_data_reg_off)
 
-    assert result_ops_reg_off["yrange"][0] == 0
-    assert result_ops_reg_off["yrange"][1] == result_ops_reg_off["Ly"]
-    assert result_ops_reg_off["xrange"][0] == 0
-    assert result_ops_reg_off["xrange"][1] == result_ops_reg_off["Lx"]
+    assert result_runtime_data_reg_off.data.file_io.height_range[0] == 0
+    assert result_runtime_data_reg_off.data.file_io.height_range[1] == result_runtime_data_reg_off.data.file_io.height
+    assert result_runtime_data_reg_off.data.file_io.width_range[0] == 0
+    assert result_runtime_data_reg_off.data.file_io.width_range[1] == result_runtime_data_reg_off.data.file_io.width
 
 
 @pytest.mark.parametrize("channels", [1, 2])
 def test_mesoscan_to_binary_channels(mesoscan_test_setup, channels):
     """Ensures that the mesoscan to binary conversion process properly handles the expansion from the original
     nested ROI structure to individual ROI * plane combinations for both single and multichannel data."""
-    test_ops = mesoscan_test_setup()
-    test_ops["nchannels"] = channels
+    runtime_data = mesoscan_test_setup()
+    runtime_data.configuration.main.nchannels = channels
 
-    result_ops = mesoscan_to_binary(test_ops)
+    result_runtime_data = mesoscan_to_binary(runtime_data)
 
-    assert len(result_ops["lines"]) == 5
-    assert result_ops["lines"] in [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
+    assert len(result_runtime_data.data.file_io.lines) == 5
+    assert result_runtime_data.data.file_io.lines in [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
 
-    save_path = Path(test_ops["save_path"])
+    save_path = Path(runtime_data.configuration.output.save_path)
     bin_files = list(save_path.rglob("*.bin"))
     expected_bin_files = 4 * channels  # 2 ROIs * 2 planes * channels
     assert len(bin_files) >= expected_bin_files
 
-    # Verify channel 2 data for multichannel tests
+    # Verifies that channel 2 data is saved correctly for multichannel tests
     if channels > 1:
         plane_dirs = list(save_path.glob("plane*"))
         for plane_dir in plane_dirs:
-            plane_ops = np.load(plane_dir.joinpath("ops.npy"), allow_pickle=True)[()]
-            assert "mean_image_channel_2" in plane_ops
-            assert plane_ops["mean_image_channel_2"].shape == (plane_ops["Ly"], plane_ops["Lx"])
+            plane_runtime_data = RuntimeData.from_yaml(plane_dir.joinpath("runtime_data.yaml"))
+            assert plane_runtime_data.data.file_io.mean_image_channel_2 is not None
+            assert plane_runtime_data.data.file_io.mean_image_channel_2.shape == (
+                plane_runtime_data.data.file_io.height,
+                plane_runtime_data.data.file_io.width,
+            )
 
 
 def test_mesoscan_no_nrois(mesoscan_test_setup):
@@ -297,20 +304,16 @@ def test_mesoscan_no_nrois(mesoscan_test_setup):
         "lines": [[0, 1], [2, 3], [4, 5]],
     }
 
-    test_ops = mesoscan_test_setup(json_data, "nplanes")
-    del test_ops["lines"]
-    test_ops.update(
-        {
-            "dy": [0, 2, 4],
-            "dx": [0, 0, 0],
-        }
-    )
+    runtime_data = mesoscan_test_setup(json_data, "nplanes")
+    runtime_data.data.file_io.lines = None
+    runtime_data.data.file_io.dy = [0, 2, 4]
+    runtime_data.data.file_io.dx = [0, 0, 0]
 
-    result_ops = mesoscan_to_binary(test_ops)
+    result_runtime_data = mesoscan_to_binary(runtime_data)
 
-    assert test_ops["nrois"] == 3  # nrois = nplanes
-    assert test_ops["nplanes"] == 3
-    assert result_ops["Ly"] == 2
+    assert runtime_data.data.file_io.nrois == 3  # nrois = nplanes
+    assert runtime_data.configuration.main.nplanes == 3
+    assert result_runtime_data.data.file_io.height == 2
 
 
 def test_mesoscan_nested_structure(mesoscan_test_setup):
@@ -323,25 +326,21 @@ def test_mesoscan_nested_structure(mesoscan_test_setup):
         "lines": [[0, 1], [2, 3]],
     }
 
-    test_ops = mesoscan_test_setup(json_data, "nested_json")
-    test_ops.update(
-        {
-            "dy": [0, 2],
-            "dx": [0, 0],
-            "nplanes": 3,
-        }
-    )
-    del test_ops["lines"]
+    runtime_data = mesoscan_test_setup(json_data, "nested_json")
+    runtime_data.data.file_io.dy = [0, 2]
+    runtime_data.data.file_io.dx = [0, 0]
+    runtime_data.configuration.main.nplanes = 3
+    runtime_data.data.file_io.lines = None
 
-    result_ops = mesoscan_to_binary(test_ops)
+    result_runtime_data = mesoscan_to_binary(runtime_data)
 
-    assert test_ops["nrois"] == 2
-    assert test_ops["nplanes"] == 6
-    assert result_ops["Ly"] == 2
+    assert runtime_data.data.file_io.nrois == 2
+    assert runtime_data.configuration.main.nplanes == 6
+    assert result_runtime_data.data.file_io.height == 2
 
 
 def test_mesoscan_with_nrois_in_json(mesoscan_test_setup):
-    """Tests the branch where nrois is specified in ops.json and lines are not in ops."""
+    """Tests that the parameters from the ops.json file are used directly if the number of ROIs is specified inside it."""
     json_data = {
         "nrois": 2,
         "nplanes": 2,
@@ -351,12 +350,15 @@ def test_mesoscan_with_nrois_in_json(mesoscan_test_setup):
         "lines": [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]],
     }
 
-    test_ops = mesoscan_test_setup(json_data, "with_nrois")
-    # Remove lines to force reading from ops.json
-    del test_ops["lines"]
-    test_ops["nchannels"] = 1
+    runtime_data = mesoscan_test_setup(json_data, "with_nrois")
 
-    result_ops = mesoscan_to_binary(test_ops)
+    # Removes lines to force reading from ops.json
+    runtime_data.data.file_io.lines = None
+    runtime_data.configuration.main.nchannels = 1
 
-    assert result_ops["nrois"] == 2
-    assert result_ops["nplanes"] == 4  # 2 ROIs * 2 planes
+    result_runtime_data = mesoscan_to_binary(runtime_data)
+
+    # Checks that the input runtime_data's nrois is taken directly from ops.json
+    assert runtime_data.data.file_io.nrois == 2
+    # Checks the result's nplanes (nrois * original nplanes = 2 * 2 = 4)
+    assert result_runtime_data.configuration.main.nplanes == 4

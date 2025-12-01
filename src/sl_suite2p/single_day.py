@@ -1,7 +1,7 @@
 """This module contains the high-level API for the single-day suite2p processing pipeline."""
 
 import os
-from copy import deepcopy
+import copy
 from typing import Any
 from pathlib import Path
 from datetime import datetime
@@ -464,7 +464,7 @@ def resolve_parameters(configuration: SingleDayS2PConfiguration) -> RuntimeData:
     Returns:
         The path to the generated 'single_day_ss2p_configuration.yaml' file.
     """
-    resolved_config = deepcopy(configuration)
+    resolved_config = copy.deepcopy(configuration)
 
     # Adjusts the aspect ratio for the processed data, if necessary. This is only used in gui, so may or may not be
     # important for certain processing runtimes.
@@ -541,7 +541,7 @@ def run_s2p(runtime_data: RuntimeData) -> None:
 
     console.echo(message="Initializing single-day suite2p runtime...", level=LogLevel.INFO)
 
-    # FIXTHIS: Change up to here for IO
+    # FIXME: Change up to here for IO
 
     # Step 1: Ensures the data to analyze is stored as one or more 'plane' folders. Each plane should contain the
     # data.bin file that stores the frame data and the ops.npy file that stores the processing settings.

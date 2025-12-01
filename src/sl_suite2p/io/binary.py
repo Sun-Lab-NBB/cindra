@@ -457,12 +457,9 @@ class BinaryFileCombined:
 
         # Iterates through each file and copies the relevant data slice(s) into the combined array.
         for file_index, file in enumerate(self.files):
-            # Uses the data already read from the first file
-            if file_index == 0:
-                file_data = first_file_data
-            # Reads the requested data slice from each file
-            else:
-                file_data = file[indices]
+            # Uses the data already read from the first file if file index = 0. Else, reads the requested data slice
+            # from each file
+            file_data = first_file_data if file_index == 0 else file[indices]
 
             # Overwrites the specific section of the combined file data with the data read from the target file. Note,
             # this assumes that planes do not overlap.

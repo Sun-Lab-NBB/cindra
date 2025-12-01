@@ -6,64 +6,83 @@ import numpy as np
 from datetime import datetime
 from pathlib import Path
 from sl_suite2p.io.save import compute_dydx, combined, save_matlab
+from sl_suite2p.configuration import RuntimeData
+
+
+def create_test_runtime_data(
+    height: int, width: int, dy: list[int] | None = None, dx: list[int] | None = None
+) -> RuntimeData:
+    """Creates a mock RuntimeData instance with the required frame dimensions."""
+    runtime_data = RuntimeData()
+
+    runtime_data.data.file_io.height = height
+    runtime_data.data.file_io.width = width
+    runtime_data.data.file_io.dy = dy if dy is not None else []
+    runtime_data.data.file_io.dx = dx if dx is not None else []
+
+    return runtime_data
 
 
 @pytest.mark.parametrize(
-    "plane_ops, expected_x, expected_y",
+    "plane_runtime_data_list, expected_x, expected_y",
     [
-        # dx/dy are provided in ops
+        # dx/dy are provided in RuntimeData
         (
             [
-                {"Ly": 256, "Lx": 256, "dx": 0, "dy": 0},
-                {"Ly": 256, "Lx": 256, "dx": 300, "dy": 0},
-                {"Ly": 256, "Lx": 256, "dx": 0, "dy": 300},
+                create_test_runtime_data(256, 256, dy=[0], dx=[0]),
+                create_test_runtime_data(256, 256, dy=[0], dx=[300]),
+                create_test_runtime_data(256, 256, dy=[300], dx=[0]),
             ],
             np.array([0, 300, 0]),
             np.array([0, 0, 300]),
         ),
-        # dx/dy are computed from the image's dimensions
+        # dx/dy are computed from the image's dimensions (empty lists)
         (
-            [{"Ly": 200, "Lx": 200}] * 3,
+            [
+                create_test_runtime_data(200, 200),
+                create_test_runtime_data(200, 200),
+                create_test_runtime_data(200, 200),
+            ],
             np.array([0, 200, 0]),
             np.array([0, 0, 200]),
         ),
     ],
 )
-def test_compute_dydx(plane_ops, expected_x, expected_y):
-    """Verfies that the correct list of y-axis and x-axis displacement values for each plane are returned."""
-    y_displacement, x_displacement = compute_dydx(plane_ops)
+def test_compute_dydx(plane_runtime_data_list, expected_x, expected_y):
+    """Verifies that the correct list of y-axis and x-axis displacement values for each plane are returned."""
+    y_displacement, x_displacement = compute_dydx(plane_runtime_data_list)
 
     assert (x_displacement == expected_x).all()
     assert (y_displacement == expected_y).all()
 
 
 @pytest.mark.parametrize(
-    "plane_ops, expected_x, expected_y",
+    "plane_runtime_data_list, expected_x, expected_y",
     [
         # y recalculation when number of ROIs < number of planes
         (
             [
-                {"Ly": 100, "Lx": 300, "dx": 0, "dy": 0},
-                {"Ly": 100, "Lx": 300, "dx": 0, "dy": 0},
-                {"Ly": 100, "Lx": 300, "dx": 300, "dy": 0},
-                {"Ly": 100, "Lx": 300, "dx": 300, "dy": 0},
+                create_test_runtime_data(100, 300, dy=[0], dx=[0]),
+                create_test_runtime_data(100, 300, dy=[0], dx=[0]),
+                create_test_runtime_data(100, 300, dy=[0], dx=[300]),
+                create_test_runtime_data(100, 300, dy=[0], dx=[300]),
             ],
             np.array([0, 0, 300, 300]),
             np.array([0, 0, 100, 100]),
         ),
     ],
 )
-def test_compute_dydx_roi_recalculation(plane_ops, expected_x, expected_y):
-    """Verifies that compute_dydx the y-displacement is recalculated while preserving the
+def test_compute_dydx_roi_recalculation(plane_runtime_data_list, expected_x, expected_y):
+    """Verifies that compute_dydx recalculates the y-displacement while preserving the
     x-displacement when the number of ROIs is less than the number of planes."""
-    y_displacement, x_displacement = compute_dydx(plane_ops)
+    y_displacement, x_displacement = compute_dydx(plane_runtime_data_list)
 
     assert (x_displacement == expected_x).all()
     assert (y_displacement == expected_y).all()
 
 
 @pytest.mark.parametrize(
-    "plane_idx, nchannels, has_chan2, include_max_proj, frame_count, has_redcell, save_mat, has_stat, frame_count_mismatch",
+    "plane_idx, nchannels, has_chan2, include_max_projection, frame_count, has_redcell, save_mat, has_stat, frame_count_mismatch",
     [
         (0, 2, True, False, 400, True, True, True, False),
         (1, 1, False, True, 500, False, False, True, True),
@@ -75,14 +94,14 @@ def test_combined_multiple_planes(
     plane_idx,
     nchannels,
     has_chan2,
-    include_max_proj,
+    include_max_projection,
     frame_count,
     has_redcell,
     save_mat,
     has_stat,
     frame_count_mismatch,
 ):
-    """Verifies that the input data are stored in the correct format when saved as a .mat file."""
+    """Verifies that the input data are stored in the correct format when combined and optionally saved as a .mat file."""
     save_directory = tmp_path.joinpath("save_dir")
     save_directory.mkdir()
 
@@ -102,29 +121,37 @@ def test_combined_multiple_planes(
         plane_frame_counts.append(current_frame_count)
         max_frame = max(max_frame, current_frame_count)
 
-        ops = {
-            "Ly": 128,
-            "Lx": 128,
-            "nchannels": 2,
-            "nframes": current_frame_count,
-            "mean_image": np.random.rand(128, 128).astype(np.float32),
-            "enhanced_mean_image": np.random.rand(128, 128).astype(np.float32),
-            "Vcorr": np.random.rand(128, 128).astype(np.float32),
-            "xrange": [0, 128],
-            "yrange": [0, 128],
-            "save_mat": save_mat,
-        }
+        # Creates RuntimeData instance
+        runtime_data = RuntimeData()
 
+        # Sets output data fields
+        runtime_data.data.file_io.height = 128
+        runtime_data.data.file_io.width = 128
+        runtime_data.data.file_io.nframes = current_frame_count
+        runtime_data.data.file_io.mean_image = np.random.rand(128, 128).astype(np.float32)
+        runtime_data.data.file_io.enhanced_mean_image = np.random.rand(128, 128).astype(np.float32)
+        runtime_data.data.file_io.height_range = np.array([0, 128], dtype=np.uint32)
+        runtime_data.data.file_io.width_range = np.array([0, 128], dtype=np.uint32)
+
+        # Sets configuration fields
+        runtime_data.configuration.main.nchannels = 2
+        runtime_data.configuration.output.save_mat = save_mat
+
+        # Adds channel 2 data
         if has_chan2 and plane_index == 0:
-            ops["meanImg_chan2"] = np.random.rand(128, 128).astype(np.float32)
-            ops["meanImg_chan2_corrected"] = np.random.rand(128, 128).astype(np.float32)
-            ops["mean_image_channel_2"] = np.random.rand(128, 128).astype(np.float32)
+            runtime_data.data.file_io.mean_image_channel_2 = np.random.rand(128, 128).astype(np.float32)
+            runtime_data.data.roi_detection.mean_image_channel_2_corrected = np.random.rand(128, 128).astype(np.float32)
 
-        if include_max_proj and plane_index == 1:
-            ops["max_proj"] = np.random.rand(128, 128).astype(np.float32)
+        # Adds max projection if needed
+        if include_max_projection and plane_index == 1:
+            runtime_data.data.roi_detection.max_projection = np.random.rand(128, 128).astype(np.float32)
 
-        np.save(plane_dir.joinpath("ops.npy"), ops)
+        runtime_data.data.roi_detection.correlation_map = np.random.rand(128, 128).astype(np.float32)
 
+        runtime_data.yaml_path = plane_dir.joinpath("runtime_data.yaml")
+        runtime_data.save()
+
+        # Creates stat and fluorescence.npy
         if has_stat or plane_index == 0:
             stat = np.array(
                 [
@@ -136,13 +163,15 @@ def test_combined_multiple_planes(
             np.save(plane_dir.joinpath("Fneu.npy"), np.random.rand(1, current_frame_count).astype(np.float32))
             np.save(plane_dir.joinpath("Fsub.npy"), np.random.rand(1, current_frame_count).astype(np.float32))
             np.save(plane_dir.joinpath("spks.npy"), np.random.rand(1, current_frame_count).astype(np.float32))
-            np.save(plane_dir.joinpath("iscell.npy"), np.array([[True, 0.85]]))
 
+            np.save(plane_dir.joinpath("iscell.npy"), np.array([[True, 0.85]]))
+            # Only create redcell.npy if has_redcell is True
             if has_redcell:
                 np.save(plane_dir.joinpath("redcell.npy"), np.array([[plane_index, 0.1]]))
 
-    roi_statistics, ops, cell_fluorescence, *_, has_red = combined(save_directory, save=False)
+    roi_statistics, combined_runtime_data, cell_fluorescence, *_, has_red = combined(save_directory, save=False)
 
+    # Verifies frame padding
     if frame_count_mismatch:
         assert cell_fluorescence.shape[1] == max_frame
     else:
@@ -150,14 +179,16 @@ def test_combined_multiple_planes(
 
     assert has_red == has_redcell
 
-    # Verifies that multi-channel and projection data are added to ops
-    for key in ["max_proj", "mean_image_channel_2"]:
-        if key in ops:
-            assert ops[key] is not None
+    # Verifies that multi-channel and projection data are present in the combined RuntimeData.
+    if include_max_projection:
+        assert combined_runtime_data.data.roi_detection.max_projection is not None
+    if has_chan2:
+        assert combined_runtime_data.data.file_io.mean_image_channel_2 is not None
 
     # Verifies that the corresponding output files are added to the save_directory when save=True
     combined(save_directory, save=True)
     assert save_directory.joinpath("combined").joinpath("F.npy").exists()
+    assert save_directory.joinpath("combined").joinpath("runtime_data.yaml").exists()
 
     # Checks that the redcell.npy exists if has_redcell is true
     if has_redcell:
@@ -174,10 +205,9 @@ def test_save_matlab(tmp_path):
     save_path.mkdir()
     data_path = tmp_path.joinpath("input_data")
 
-    ops = {
-        "save_path": save_path,
-        "data_path": [data_path],
-    }
+    runtime_data = RuntimeData()
+    runtime_data.configuration.output.save_path = str(save_path)
+    runtime_data.configuration.file_io.data_path = [data_path]
 
     roi_statistics = [{"ypix": np.array([1, 2]), "xpix": np.array([3, 4])}]
     cell_fluorescence = np.random.rand(1, 10).astype(np.float32)
@@ -189,7 +219,7 @@ def test_save_matlab(tmp_path):
     neuropil_fluorescence_channel_2 = np.random.rand(1, 10).astype(np.float32)
 
     save_matlab(
-        ops=ops,
+        runtime_data=runtime_data,
         roi_statistics=roi_statistics,
         cell_fluorescence=cell_fluorescence,
         neuropil_fluorescence=neuropil_fluorescence,

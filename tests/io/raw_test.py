@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ataraxis_base_utilities import error_format
 from sl_suite2p.io.raw import _RawFile, raw_to_binary
+from sl_suite2p.configuration import RuntimeData
 
 
 @pytest.fixture
@@ -188,22 +189,22 @@ def test_missing_file(tmp_path, default_xml_fields, missing_file):
 
 
 @pytest.fixture
-def ops(tmp_path):
-    """Creates a basic default ops dictionary for testing."""
-    return {
-        "nplanes": 1,
-        "nchannels": 1,
-        "fs": 10.0,
-        "save_path": tmp_path.joinpath("output"),
-        "do_registration": False,
-        "batch_size": 50,
-        "progress_bars": False,
-        "data_path": [],
-    }
+def sample_config(tmp_path):
+    """Creates a basic default configuration for testing."""
+    runtime_data = RuntimeData()
+    runtime_data.configuration.main.nplanes = 1
+    runtime_data.configuration.main.nchannels = 1
+    runtime_data.configuration.main.fs = 10.0
+    runtime_data.configuration.output.save_path = str(tmp_path.joinpath("output"))
+    runtime_data.configuration.registration.do_registration = False
+    runtime_data.configuration.main.progress_bars = False
+    runtime_data.configuration.file_io.data_path = []
+
+    return runtime_data
 
 
 @pytest.mark.parametrize("channels", [1, 2])
-def test_raw_to_binary(tmp_path, default_xml_fields, ops, channels):
+def test_raw_to_binary(tmp_path, default_xml_fields, sample_config, channels):
     """Tests raw_to_binary conversion for both single and multichannel data."""
     data_dir = tmp_path.joinpath("data")
     data_dir.mkdir()
@@ -233,37 +234,39 @@ def test_raw_to_binary(tmp_path, default_xml_fields, ops, channels):
     )
     create_xml_file(xml_file, xml_content)
 
-    ops = copy.deepcopy(ops)
-    ops.update(
-        {
-            "nplanes": z_planes,
-            "nchannels": channels,
-            "data_path": [data_dir],
-        }
-    )
+    test_runtime_data = copy.deepcopy(sample_config)
+    test_runtime_data.configuration.main.nplanes = z_planes
+    test_runtime_data.configuration.main.nchannels = channels
+    test_runtime_data.configuration.file_io.data_path = [data_dir]
 
-    result_ops = raw_to_binary(ops, override_ops_parameters=True)
+    result_runtime_data = raw_to_binary(test_runtime_data, override_runtime_parameters=True)
 
     # Verifies basic output properties
-    assert result_ops["Ly"] == height
-    assert result_ops["Lx"] == width
-    assert result_ops["nframes"] == frames_per_file
+    assert result_runtime_data.data.file_io.height == height
+    assert result_runtime_data.data.file_io.width == width
+    assert result_runtime_data.data.file_io.nframes == frames_per_file
 
-    plane_dir = tmp_path.joinpath("output").joinpath("plane0")
+    plane_dir = tmp_path.joinpath("output").joinpath("suite2p").joinpath("plane0")
+
+    # Load mean images from .npy files for verification
+    mean_image = np.load(plane_dir.joinpath("mean_image.npy"))
+    assert mean_image.shape == (height, width)
 
     # Verifies that if the data uses two functional channels, a second data file is created and the corresponding data is stored.
     if channels > 1:
-        assert "mean_image_channel_2" in result_ops
-        assert result_ops["mean_image_channel_2"].shape == (height, width)
+        mean_image_channel_2_path = plane_dir.joinpath("mean_image_channel_2.npy")
+        assert mean_image_channel_2_path.exists()
+        mean_image_channel_2 = np.load(mean_image_channel_2_path)
+        assert mean_image_channel_2.shape == (height, width)
         assert plane_dir.joinpath("data_chan2.bin").exists()
 
-    # Verifies that ops.npy is updated
-    saved_ops = np.load(plane_dir.joinpath("ops.npy"), allow_pickle=True)[()]
-    assert saved_ops["nframes"] == frames_per_file
-    assert saved_ops["mean_image"].shape == (height, width)
+    # Verifies that runtime_data.yaml is updated
+    assert result_runtime_data.yaml_path == plane_dir.joinpath("runtime_data.yaml")
+    assert result_runtime_data.yaml_path.exists()
+    assert result_runtime_data.data.file_io.nframes == frames_per_file
 
 
-def test_raw_to_binary_inconsistent_config(tmp_path, default_xml_fields, ops):
+def test_raw_to_binary_inconsistent_config(tmp_path, default_xml_fields, sample_config):
     """Ensures that all _RawFile instances have the same attributes (the recording configuration is the same for
     all input files)"""
     data_dirs = []
@@ -285,8 +288,8 @@ def test_raw_to_binary_inconsistent_config(tmp_path, default_xml_fields, ops):
         create_xml_file(xml_file, xml_content)
         data_dirs.append(data_dir)
 
-    ops = copy.deepcopy(ops)
-    ops["data_path"] = data_dirs
+    test_runtime_data = copy.deepcopy(sample_config)
+    test_runtime_data.configuration.file_io.data_path = data_dirs
 
     message = (
         "Unable to convert the input list of Thorlabs .raw files to Suite2P plane BinaryFiles. The recording "
@@ -294,4 +297,4 @@ def test_raw_to_binary_inconsistent_config(tmp_path, default_xml_fields, ops):
         "the files belong to separate recordings."
     )
     with pytest.raises(ValueError, match=error_format(message)):
-        raw_to_binary(ops, override_ops_parameters=True)
+        raw_to_binary(test_runtime_data, override_runtime_parameters=True)

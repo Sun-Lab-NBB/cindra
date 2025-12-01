@@ -2,7 +2,7 @@
 associated XML (.xml) configuration files.
 """
 
-from copy import deepcopy
+import copy
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
@@ -208,9 +208,8 @@ def raw_to_binary(runtime_data: RuntimeData, override_runtime_parameters: bool =
 
     Args:
         runtime_data: A RuntimeData instance that stores the suite2p single-day configuration and runtime parameters.
-        override_runtime_parameters: Determines whether to override certain configuration parameters, such as the number of
-            planes and channels, from configuration with data loaded from the .xml configuration files stored together with
-            Thorlabs .raw files.
+        override_runtime_parameters: Determines whether to override certain configuration parameters with data loaded
+                                     from the .xml configuration files stored together with Thorlabs .raw files.
     """
     # Instantiates and resets the run timer
     timer = PrecisionTimer("s")
@@ -220,7 +219,7 @@ def raw_to_binary(runtime_data: RuntimeData, override_runtime_parameters: bool =
     raw_files = [_RawFile(path) for path in runtime_data.configuration.file_io.data_path]
 
     # Initializes the destination files and resolves paths and configuration for further .raw to .bin file conversion.
-    _initialize_destination_files(
+    plane_runtime_data_list = _initialize_destination_files(
         runtime_data=runtime_data, raw_files=raw_files, override_runtime_parameters=override_runtime_parameters
     )
 
@@ -238,7 +237,7 @@ def raw_to_binary(runtime_data: RuntimeData, override_runtime_parameters: bool =
     # Converts all the .raw files into .bin format.
     for raw_file in raw_files:
         # Performs the raw to binary conversion using the target raw file.
-        _single_raw_to_binary(runtime_data=runtime_data, raw_file=raw_file)
+        _single_raw_to_binary(plane_runtime_data_list=plane_runtime_data_list, raw_file=raw_file)
 
         # Updates the progress bar with the number of frames processed in the target file.
         progress_bar.update(raw_file.frame_number)
@@ -254,9 +253,13 @@ def raw_to_binary(runtime_data: RuntimeData, override_runtime_parameters: bool =
         plane_runtime = RuntimeData.from_yaml(file_path=plane_directory.joinpath("runtime_data.yaml"))
 
         plane_data = plane_runtime.data.file_io
+        mean_image_path = plane_directory.joinpath("mean_image.npy")
+        plane_data.mean_image = np.load(mean_image_path)
         plane_data.mean_image /= plane_data.nframes
 
         if runtime_data.configuration.main.nchannels > 1:
+            mean_image_channel_2_path = plane_directory.joinpath("mean_image_channel_2.npy")
+            plane_data.mean_image_channel_2 = np.load(mean_image_channel_2_path)
             plane_data.mean_image_channel_2 /= plane_data.nframes
 
         plane_runtime.save()
@@ -278,9 +281,9 @@ def _initialize_destination_files(
     Args:
         raw_files: The list of _RawFile instances to convert to suite2p binary format.
         runtime_data: A RuntimeData instance that stores the suite2p single-day configuration and runtime parameters.
-        override_runtime_parameters: Determines whether to override the configuration parameters with the
-            values extracted from the raw files. If True, overrides 'nplanes', 'nchannels', and 'fs' with
-            values from the first raw file. Defaults to True.
+        override_runtime_parameters: Determines whether to override the configuration parameters with the values
+                                     extracted from the raw files. If True, overrides 'nplanes', 'nchannels', and 'fs'
+                                     with values from the first raw file. Defaults to True.
 
     Returns:
         A list of RuntimeData instances, one for each plane.
@@ -329,7 +332,7 @@ def _initialize_destination_files(
 
     # Loops over all available planes and iteratively sets up paths and creates initial files for each plane.
     for plane_index in range(plane_number):
-        plane_runtime_data = RuntimeData(configuration=deepcopy(runtime_data.configuration))
+        plane_runtime_data = RuntimeData(configuration=copy.deepcopy(runtime_data.configuration))
 
         plane_runtime_data.set_yaml_path(plane_index=plane_index)
         plane_directory = plane_runtime_data.yaml_path.parent
@@ -374,7 +377,8 @@ def _single_raw_to_binary(plane_runtime_data_list: list[RuntimeData], raw_file: 
     plane's RuntimeData with the configuration data from the processed file.
 
     Args:
-        plane_runtime_data_list: A list of all plane-specific RuntimeData instances that store single-day plane processing parameters.
+        plane_runtime_data_list: A list of all plane-specific RuntimeData instances that store single-day plane
+                                 processing parameters.
         raw_file: The _RawFile object containing the raw data to convert to BinaryFile format.
     """
     # Extracts the batch size from the configuration (same across all planes)
@@ -404,7 +408,8 @@ def _single_raw_to_binary(plane_runtime_data_list: list[RuntimeData], raw_file: 
                     raw_file.recorded_planes * frame_number, raw_file.height, raw_file.width
                 )
 
-                # Separates the interleaved data into two channels (even indices for channel 1, odd indices for channel 2)
+                # Separates the interleaved data into two channels (even indices for channel 1, odd indices for
+                # channel 2)
                 channel_1_frames = reshaped_frames[::2]
                 channel_2_frames = reshaped_frames[1::2]
 
@@ -455,7 +460,8 @@ def _single_raw_to_binary(plane_runtime_data_list: list[RuntimeData], raw_file: 
                     plane_io_data.mean_image += frames_to_write[0].astype(np.float32).sum(axis=0)
                     plane_io_data.mean_image_channel_2 += frames_to_write[1].astype(np.float32).sum(axis=0)
 
-                # If the processed data uses one functional channel, repeats the same steps above for only the first channel
+                # If the processed data uses one functional channel, repeats the same steps above for only the first
+                # channel
                 else:
                     # Opens the (functional) channel 1 memory-mapped binary file for writing (appending)
                     with Path(plane_io_data.reg_file).open(mode="ab") as channel_1_binary_file:
@@ -463,7 +469,8 @@ def _single_raw_to_binary(plane_runtime_data_list: list[RuntimeData], raw_file: 
                         # memory-mapped binary file
                         channel_1_binary_file.write(frames_to_write.astype(np.int16).tobytes())
 
-                    # Appends the data from all processed frames to the mean image data array in the plane-specific IOData
+                    # Appends the data from all processed frames to the mean image data array in the plane-specific
+                    # IOData
                     plane_io_data.mean_image += frames_to_write.astype(np.float32).sum(axis=0)
 
             # Reads the next chunk of frames

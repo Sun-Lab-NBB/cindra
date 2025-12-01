@@ -159,10 +159,7 @@ def tiff_to_binary(runtime_data: RuntimeData) -> RuntimeData:
     timer.reset()
 
     # Uses the input runtime_data to generate plane-specific RuntimeData instances and initialize files.
-    runtime_yaml_paths = initialize_plane_parameters(runtime_data=runtime_data)
-
-    # Load the plane-specific RuntimeData files.
-    plane_runtime_data_list = [RuntimeData.from_yaml(file_path=yaml_path) for yaml_path in runtime_yaml_paths]
+    plane_runtime_data_list = initialize_plane_parameters(runtime_data=runtime_data)
 
     # Queries the number of planes and channels from the first plane's configuration.
     plane_number = plane_runtime_data_list[0].configuration.main.nplanes
@@ -261,7 +258,8 @@ def tiff_to_binary(runtime_data: RuntimeData) -> RuntimeData:
                     # binary file.
                     channel_1_binary_files[plane_index].write(frames_to_write.tobytes())
 
-                    # Appends the data from all processed frames to the data arrays in the plane-specific RuntimeData instance.
+                    # Appends the data from all processed frames to the data arrays in the plane-specific RuntimeData
+                    # instance.
                     plane_io_data.mean_image += frames_to_write.sum(axis=0, dtype=np.float32)
                     plane_io_data.nframes += frames_to_write.shape[0]
 
@@ -294,8 +292,8 @@ def tiff_to_binary(runtime_data: RuntimeData) -> RuntimeData:
     # Closes the progress bar when binary conversion is over.
     pbar.close()
 
-    # Loops over each plane-specific RuntimeData instance and adds descriptive information about the data to be processed
-    # (frames).
+    # Loops over each plane-specific RuntimeData instance and adds descriptive information about the frames to be
+    # processed.
     for plane_runtime_data in plane_runtime_data_list:
         plane_io_data = plane_runtime_data.data.file_io
 
@@ -338,16 +336,15 @@ def mesoscan_to_binary(runtime_data: RuntimeData) -> RuntimeData:
     timer = PrecisionTimer("s")
     timer.reset()
 
-    # If "lines" are not already provided in ops, loads parameters from the ops.json file expected to be stored inside
-    # the data directory. Note, since sl-suite2p version 2.0.0, ops.json processing now happens as part of resolving the
-    # 'ops' dictionary (high-level API), so this is mostly kept as a fall-back safety mechanism.
+    # If "lines" is None in the plane's RuntimeData instance, loads parameters from the ops.json file expected to be
+    # stored inside the data directory. Note, since sl-suite2p version 2.0.0, ops.json processing now happens as part
+    # of resolving the 'ops' dictionary (high-level API), so this is mostly kept as a fall-back safety mechanism.
     if runtime_data.data.file_io.lines is None:
         file_path = Path(runtime_data.configuration.file_io.data_path[0])
         files = list(file_path.glob("*ops.json"))
         with files[0].open() as f:
             ops_json = json.load(f)
 
-        # Stores the 'lines' field inside the main 'ops' dictionary.
         runtime_data.data.file_io.lines = ops_json["lines"]
 
         # If the number of ROIs is specified inside ops.json, directly uses the parameters from the ops.json file.
