@@ -415,8 +415,8 @@ def combined(
 
     combined_runtime_data.data.file_io.height = maximum_height
     combined_runtime_data.data.file_io.width = maximum_width
-    combined_runtime_data.data.file_io.height_range = np.array([0, maximum_height], dtype=np.uint32)
-    combined_runtime_data.data.file_io.width_range = np.array([0, maximum_width], dtype=np.uint32)
+    combined_runtime_data.data.file_io.height_range = [0, maximum_height]
+    combined_runtime_data.data.file_io.width_range = [0, maximum_width]
 
     # Prepares the path to the directory that will store the combined data files.
     combined_directory_path = save_directory.joinpath("combined")

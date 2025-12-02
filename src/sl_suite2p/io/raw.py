@@ -362,8 +362,8 @@ def _initialize_destination_files(
 
         # If registration is disabled, sets the pixel ranges to span the full height and width of the frame.
         if not runtime_data.configuration.registration.do_registration:
-            plane_io_data.height_range = np.array([0, plane_io_data.height], dtype=np.uint32)
-            plane_io_data.width_range = np.array([0, plane_io_data.width], dtype=np.uint32)
+            plane_io_data.height_range = [0, plane_io_data.height]
+            plane_io_data.width_range = [0, plane_io_data.width]
 
         # Saves the plane-specific RuntimeData to the .yaml file in its respective directory.
         plane_runtime_data.save()

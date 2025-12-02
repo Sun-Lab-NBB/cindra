@@ -297,8 +297,8 @@ def tiff_to_binary(runtime_data: RuntimeData) -> RuntimeData:
     for plane_runtime_data in plane_runtime_data_list:
         plane_io_data = plane_runtime_data.data.file_io
 
-        plane_io_data.height_range = np.array([0, plane_io_data.height], dtype=np.uint32)
-        plane_io_data.width_range = np.array([0, plane_io_data.width], dtype=np.uint32)
+        plane_io_data.height_range = [0, plane_io_data.height]
+        plane_io_data.width_range = [0, plane_io_data.width]
 
         # Normalizes the mean images by the number of frames.
         plane_io_data.mean_image /= plane_io_data.nframes
@@ -555,8 +555,8 @@ def mesoscan_to_binary(runtime_data: RuntimeData) -> RuntimeData:
         # the edges of each frame are excluded during registration as they are typically unstable and should be
         # discarded anyway.
         if not do_registration:
-            plane_io_data.height_range = np.array([0, plane_io_data.height], dtype=np.uint32)
-            plane_io_data.width_range = np.array([0, plane_io_data.width], dtype=np.uint32)
+            plane_io_data.height_range = [0, plane_io_data.height]
+            plane_io_data.width_range = [0, plane_io_data.width]
 
         # Normalizes mean images by the number of frames.
         plane_io_data.mean_image /= plane_io_data.nframes

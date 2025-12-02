@@ -130,8 +130,8 @@ def test_combined_multiple_planes(
         runtime_data.data.file_io.nframes = current_frame_count
         runtime_data.data.file_io.mean_image = np.random.rand(128, 128).astype(np.float32)
         runtime_data.data.file_io.enhanced_mean_image = np.random.rand(128, 128).astype(np.float32)
-        runtime_data.data.file_io.height_range = np.array([0, 128], dtype=np.uint32)
-        runtime_data.data.file_io.width_range = np.array([0, 128], dtype=np.uint32)
+        runtime_data.data.file_io.height_range = [0, 128]
+        runtime_data.data.file_io.width_range = [0, 128]
 
         # Sets configuration fields
         runtime_data.configuration.main.nchannels = 2
