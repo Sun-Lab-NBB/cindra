@@ -12,6 +12,7 @@ from ataraxis_time import PrecisionTimer
 from quick_xmltodict import parse
 from ataraxis_base_utilities import console
 
+from .utils import set_yaml_path
 from ..configuration import RuntimeData
 
 if TYPE_CHECKING:
@@ -332,10 +333,11 @@ def _initialize_destination_files(
 
     # Loops over all available planes and iteratively sets up paths and creates initial files for each plane.
     for plane_index in range(plane_number):
+        # Create a separate RuntimeData instance for this plane with deep copied configuration.
         plane_runtime_data = RuntimeData(configuration=copy.deepcopy(runtime_data.configuration))
 
-        plane_runtime_data.set_yaml_path(plane_index=plane_index)
-        plane_directory = plane_runtime_data.yaml_path.parent
+        # Sets up the yaml_path for this plane and creates the directory hierarchy.
+        plane_directory = set_yaml_path(plane_runtime_data, plane_index)
 
         # Gets reference to this plane's IOData.
         plane_io_data = plane_runtime_data.data.file_io

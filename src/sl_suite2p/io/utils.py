@@ -5,7 +5,7 @@ from typing import Any
 from pathlib import Path
 
 from natsort import natsorted
-from ataraxis_base_utilities import LogLevel, console
+from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
 from ..configuration import RuntimeData
 
@@ -258,7 +258,7 @@ def initialize_plane_parameters(runtime_data: RuntimeData) -> list[RuntimeData]:
         plane_runtime_data = RuntimeData(configuration=deepcopy(runtime_data.configuration))
 
         # Sets up the yaml_path for this plane and creates the directory hierarchy.
-        plane_runtime_data.set_yaml_path(plane_index=plane_index)
+        plane_directory = set_yaml_path(plane_runtime_data, plane_index)
         plane_directory = plane_runtime_data.yaml_path.parent
 
         # Gets reference to the current plane's IOData.
@@ -302,3 +302,20 @@ def initialize_plane_parameters(runtime_data: RuntimeData) -> list[RuntimeData]:
 
     # Returns the list of RuntimeData instances for each plane.
     return plane_runtime_data_list
+
+
+def set_yaml_path(runtime_data: RuntimeData, plane_index: int) -> Path:
+    """Creates the plane-specific directory for the given plane index and sets yaml_path.
+
+    Args:
+        runtime_data: The RuntimeData instance to update
+        plane_index: The index of the plane being processed.
+
+    Returns:
+        The path to the plane directory
+    """
+    save_path = Path(runtime_data.configuration.output.save_path)
+    plane_directory = save_path.joinpath("suite2p", f"plane{plane_index}")
+    ensure_directory_exists(plane_directory)
+    runtime_data.yaml_path = plane_directory.joinpath("runtime_data.yaml")
+    return plane_directory

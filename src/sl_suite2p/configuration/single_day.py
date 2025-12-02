@@ -227,13 +227,13 @@ class IOData:
     """The mean image computed as the pixel-wise average intensity across all frames in the channel 2 recording."""
 
     nrois: int = 0
-    """Stores the number of ROIs specified in the ops.json file. If this value is not provided, it defaults to the number 
-    of planes. If neither the number of planes nor files is specified, it defaults to the number of top-level keys in the 
-    loaded ops.json dictionary."""
+    """Stores the number of ROIs specified in the ops.json file. If this value is not provided, it defaults to the 
+    number of planes. If neither the number of planes nor files is specified, it defaults to the number of top-level 
+    keys in the loaded ops.json dictionary."""
 
     lines: list[list[int]] | None = None
-    """Stores the set of lines, where each ROI is defined by a group of line segments. These lines correspond to the current 
-    ROI-plane z-stack and are used to determine the height of the mean image array."""
+    """Stores the set of lines, where each ROI is defined by a group of line segments. These lines correspond to the 
+    current ROI-plane z-stack and are used to determine the height of the mean image array."""
 
     dy: list[int] = field(default_factory=list)
     """Stores the y-coordinates for all ROI-plane combinations, where each ROI's horizontal position is repeated across 
@@ -447,7 +447,7 @@ class ROIDetectionData:
     (computed per non-rigid block) is subtracted from the original image, and negative values are clipped to zero."""
 
     correlation_map: NDArray[np.float32] | str | None = None
-    """The correlation map indicating how strongly each pixel’s fluorescence trace correlates with the traces of its 
+    """The correlation map indicating how strongly each pixel`s fluorescence trace correlates with the traces of its 
     adjacent neighbors. These local correlations are averaged to produce a per-pixel Vcorr value."""
 
 
@@ -612,7 +612,7 @@ class SingleDayS2PConfiguration(YamlConfig):
         """
         ensure_directory_exists(file_path)  # Creates the file's parent directory, if necessary
         self.to_yaml(file_path=file_path)  # Dumps the data to a 'yaml' file.
-    
+
     @classmethod
     def from_ops(cls, ops_dict: dict[str, Any]) -> "SingleDayS2PConfiguration":
         """Creates a SingleDayS2PConfiguration instance from the target 'ops' dictionary.
@@ -661,7 +661,9 @@ class SingleDayS2PConfiguration(YamlConfig):
 
 @dataclass
 class SingleDayS2PData:
-    """Aggregates the processed runtime data generated during the I/O, detection, registration, and extraction stages."""
+    """Aggregates the processed runtime data generated during the I/O, detection, registration, and extraction
+    stages.
+    """
 
     file_io: IOData = field(default_factory=IOData)
     roi_detection: ROIDetectionData = field(default_factory=ROIDetectionData)
@@ -688,18 +690,6 @@ class RuntimeData(YamlConfig):
         self.data.file_io.raw_file_channel_2 = Path(self.data.file_io.raw_file_channel_2)
         self.configuration.file_io.data_path = [Path(p) for p in self.configuration.file_io.data_path]
 
-    def set_yaml_path(self, plane_index: int) -> None:
-        """Creates the plane-specific directory for the given plane index and sets yaml_path to the runtime_data.yaml 
-        file inside it.
-
-        Args:
-            plane_index: The index of the plane being processed.
-        """
-        save_path = Path(self.configuration.output.save_path)
-        plane_directory = save_path.joinpath("suite2p", f"plane{plane_index}")
-        ensure_directory_exists(plane_directory)
-        self.yaml_path = plane_directory.joinpath("runtime_data.yaml")
-
     def save(self) -> None:
         """Saves the image .npy files and the combined runtime configuration and added data YAML file to the specified
         target directory.
@@ -707,17 +697,17 @@ class RuntimeData(YamlConfig):
         # Copies instance data to prevent it from being modified by reference when executing the steps below.
         plane_directory = self.yaml_path.parent
         original = copy.deepcopy(self)
-   
-        # Converts all Path objects storing image data to strings before dumping the data, as .YAML encoder does not 
+
+        # Converts all Path objects storing image data to strings before dumping the data, as .YAML encoder does not
         # recognize Path objects.
         original.yaml_path = str(original.yaml_path)
         original.data.file_io.reg_file = str(original.data.file_io.reg_file)
         original.data.file_io.reg_file_channel_2 = str(original.data.file_io.reg_file_channel_2)
         original.data.file_io.raw_file = str(original.data.file_io.raw_file)
         original.data.file_io.raw_file_channel_2 = str(original.data.file_io.raw_file_channel_2)
-        original.configuration.file_io.data_path = list(str(p) for p in original.configuration.file_io.data_path)
+        original.configuration.file_io.data_path = [str(p) for p in original.configuration.file_io.data_path]
 
-        # Saves numpy arrays as .npy files before dumping to YAML. 
+        # Saves numpy arrays as .npy files before dumping to YAML.
         original._image_to_npy(plane_directory, save=True)
 
         # Saves the data to the yaml path.
@@ -725,9 +715,9 @@ class RuntimeData(YamlConfig):
 
     @classmethod
     def from_yaml(cls, file_path: Path) -> "RuntimeData":
-        """Loads a RuntimeData instance from a YAML file and restores any image fields saved as .npy files in the same 
+        """Loads a RuntimeData instance from a YAML file and restores any image fields saved as .npy files in the same
         directory.
-        
+
         Args:
             file_path: The absolute path to the runtime_data.yaml file.
         """
@@ -735,40 +725,41 @@ class RuntimeData(YamlConfig):
         instance.yaml_path = Path(file_path)
         instance._image_to_npy(instance.yaml_path.parent, save=False)
         return instance
-    
+
     def _image_to_npy(self, plane_directory: Path, save: bool) -> None:
         """Saves and loads processed images as .npy files for YAML storage.
 
         Args:
-            plane_directory: The plane-specific directory where the runtime_dadta.yaml file and image .npy files are 
+            plane_directory: The plane-specific directory where the runtime_dadta.yaml file and image .npy files are
                              stored
             save: Saves multi-dimensional NumPy arrays as .npy files if True and loads them back if False.
         """
-        for field in fields(self.data):
-            section = getattr(self.data, field.name)
-            
+        for data_field in fields(self.data):
+            section = getattr(self.data, data_field.name)
+
             for image_name in _PROCESSED_IMAGES:
                 if not hasattr(section, image_name):
                     continue
-                
+
                 stored_reference = getattr(section, image_name)
-                
+
                 if save:
                     # Saves the numpy array to .npy file and stores the path to the .npy file.
                     if isinstance(stored_reference, np.ndarray):
                         npy_path = plane_directory / f"{image_name}.npy"
                         np.save(npy_path, stored_reference)
                         setattr(section, image_name, str(npy_path))
-                else:
-                    # Converts the contents of the .npy file back to a NumPy array.
-                    if isinstance(stored_reference, str):
-                        npy_path = Path(stored_reference)
-                        if npy_path.exists():
-                            setattr(section, image_name, np.load(npy_path))
+                # Converts the contents of the .npy file back to a NumPy array.
+                elif isinstance(stored_reference, str):
+                    npy_path = Path(stored_reference)
+                    if npy_path.exists():
+                        setattr(section, image_name, np.load(npy_path))
 
     def to_dict(self) -> dict[str, Any]:
-        """Returns the instance as a dictionary. This method is only used when saving the combined data as a MATLAB 
-        file."""
+        """Returns the instance as a dictionary.
+
+        Note: This method is only used when saving the combined data as a MATLAB file.
+        """
         combined_dict = {}
         data_dict = asdict(self)
 
@@ -783,7 +774,7 @@ class RuntimeData(YamlConfig):
                 combined_dict[key] = value
 
         return combined_dict
-    
+
 
 def generate_default_configuration() -> SingleDayS2PConfiguration:
     """Instantiates and returns an instance of the SingleDayS2PConfiguration class that contains default single-day
