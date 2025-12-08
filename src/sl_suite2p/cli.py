@@ -13,11 +13,11 @@ from sl_shared_assets import (
     SessionData,
     SessionLock,
     SessionTypes,
-    TrackerFileNames,
     ProcessingTracker,
     AcquisitionSystems,
     generate_project_manifest,
 )
+from sl_forgery.shared_assets import ProcessingTrackers
 from ataraxis_base_utilities import LogLevel, console
 
 from .gui import run
@@ -520,7 +520,7 @@ def run_sd_pipeline_sl(
     # Instantiates the ProcessingTracker instance for single-day suite2p processing and configures the underlying
     # tracker file to indicate that the processing is ongoing.
     tracker = ProcessingTracker(
-        file_path=session_data.tracking_data.tracking_data_path.joinpath(TrackerFileNames.SUITE2P)
+        file_path=session_data.tracking_data.tracking_data_path.joinpath(ProcessingTrackers.SUITE2P)
     )
 
     # If requested, resets the processing tracker before starting the runtime.
@@ -899,7 +899,7 @@ def run_md_pipeline_sl(
 
     # Instantiates the ProcessingTracker instance for multi-day suite2p processing and configures the underlying
     # tracker file to indicate that the processing is ongoing.
-    tracker = ProcessingTracker(file_path=output_path.joinpath(TrackerFileNames.MULTIDAY))
+    tracker = ProcessingTracker(file_path=output_path.joinpath(ProcessingTrackers.MULTIDAY))
 
     # If requested, resets the processing tracker before starting the runtime.
     if reset_tracker:
