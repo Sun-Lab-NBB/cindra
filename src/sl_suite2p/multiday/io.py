@@ -6,11 +6,9 @@ from typing import Any
 from pathlib import Path
 
 import numpy as np
-from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console
 
 from .dataclasses import Session, MultiDayData
-from ..configuration import SingleDayS2PConfiguration
 
 
 def import_sessions(ops: dict[str, Any]) -> MultiDayData:
@@ -27,33 +25,22 @@ def import_sessions(ops: dict[str, Any]) -> MultiDayData:
 
     Raises:
         FileNotFoundError: If the functions cannot find the /combined plane folder using the paths provided via
-            'session_folders' field of the 'io' section inside the 'ops' dictionary for one or more target sessions.
+            'multiday_output_paths' field in the 'ops' dictionary for one or more target sessions.
     """
-    # Reconstructs the path to the output folder from 'ops' parameters
-    output_folder = Path(ops["multiday_save_path"]).joinpath(ops["multiday_save_folder"])
-
-    # The output folder contains .npy and .yaml files and directories named after each processed session ID.
-    # This re-generates the list of session IDs from the directories stored in the output folder.
-    session_ids = [folder.stem for folder in output_folder.glob("*") if folder.is_dir()]
-
-    # Sorts session IDs for consistency
-    session_ids = natsorted(session_ids)
-
-    # Loops over the output session directories and reconstructs the path to the single-day output folder of each
-    # session using the data inside the single-day s2p config from the multi-day folder.
-    sessions = []
-    for session in session_ids:
-        configuration: SingleDayS2PConfiguration = SingleDayS2PConfiguration.from_yaml(
-            output_folder.joinpath(session, "single_day_ss2p_configuration.yaml")
-        )
-        session_folder = Path(configuration.file_io.save_path0).joinpath(configuration.file_io.save_folder)
-        sessions.append(session_folder)
+    # Retrieves session IDs and multiday output paths from ops. These are populated by resolve_multiday_ops().
+    session_ids: list[str] = ops["session_ids"]
+    multiday_output_paths: list[str] = ops["multiday_output_paths"]
 
     # Temporarily storage for imported session data, before it is packaged into the MultiDayData class.
     session_classes = []
 
-    # Processes each session sequentially
-    for session_id, session_path in zip(session_ids, sessions, strict=False):
+    # Processes each session sequentially. The suite2p folder is at the same level as the 'multiday' folder.
+    for session_id, multiday_output in zip(session_ids, multiday_output_paths, strict=True):
+        # Derives the suite2p folder path from the multiday output path.
+        # multiday_output is: {suite2p_parent}/multiday/{dataset_name}/
+        # suite2p folder is: {suite2p_parent}/suite2p/
+        suite2p_parent = Path(multiday_output).parent.parent
+        session_path = suite2p_parent.joinpath("suite2p")
         # Ensures that the input session paths point to the root single-session suite2p output folder. Specifically,
         # uses the heuristic that the folder contains the 'combined' plane folder. In turn, that folder has to contain
         # the 'combined' ops.npy file.
@@ -152,11 +139,15 @@ def export_masks_and_images(
         data: A MultiDayData instance that stores the data aggregated during the multi-day registration (step 1)
             pipeline.
     """
-    # Loops over sessions and, for each, generates a new directory under the single-day generated 'suite2p' folder.
-    # This directory is found at the same level as the 'combined' and 'plane' folders.
+    # Retrieves the multiday output paths from ops.
+    multiday_output_paths: list[str] = ops["multiday_output_paths"]
+    session_ids: list[str] = ops["session_ids"]
+
+    # Loops over sessions and exports data to each session's multiday output folder.
     for session in data.sessions:
-        # Reconstructs the path to the multi-day output folder of each session from 'ops' parameters
-        output_folder = Path(ops["multiday_save_path"]).joinpath(ops["multiday_save_folder"], session.session_id)
+        # Finds the multiday output folder for this session using the session ID.
+        session_index = session_ids.index(session.session_id)
+        output_folder = Path(multiday_output_paths[session_index])
 
         # Template cell masks translated to the original session visual space
         np.save(
