@@ -10,7 +10,7 @@ version = "2.0.0rc9"
 description = "Enhanced suite2p implementation that includes a pipeline to track cell activity across sessions (days)."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.13, <3.14"
+requires-python = ">=3.14,<3.15"
 authors = [
     { name = "Marius Pachitariu" },
     { name = "Carsen Stringer" },
@@ -29,12 +29,12 @@ classifiers = [
     # Development status
     "Development Status :: 5 - Production/Stable",
     # Intended audience and project topic
-    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
     # License
     "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     # Supported Python Versions
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     # Supported OS systems
     "Operating System :: OS Independent",
     # Typing
@@ -48,7 +48,7 @@ dependencies = [
     "tifffile>=2025,<2026",
     "imagecodecs>=2025,<2026",
     "numpy>=2,<3",
-    "numba>=0,<0.62",
+    "numba>=0.63.0rc1,<1",
     "scipy>=1,<2",
     "matplotlib>=3,<4",
     "cellpose>=4,<5",
@@ -57,20 +57,21 @@ dependencies = [
     "pyqt6>=6,<7",
     "pyqtgraph>=0,<1",
     "opencv-python-headless>=4,<5",
-    "quick-xmltodict>=0,<1",
+    "xmltodict>=0,<1",
     "click>=8,<9",
     "scikit-image>=0,<1",
     "ipywidgets>=8,<9",
     "ipython>=9,<10",
     "ipympl>=0,<1",
-    "ataraxis-time>=3,<4",
-    "ataraxis-base-utilities>=3,<4",
-    "ataraxis-data-structures>=3,<4",
+    "ataraxis-time>=5,<6",
+    "ataraxis-base-utilities>=5,<6",
+    "ataraxis-data-structures>=5,<6",
     "sl-pirt>=3,<4",
     "importlib_metadata>=8,<9",
-    "tbb4py>=2022,<2023; platform_system != 'Darwin'",
-    "intel-cmplr-lib-rt>=2025,<2026; platform_system != 'Darwin'",
-    "sl-shared-assets==6.0.0rc2",
+    "tbb4py>=2022,<2023; sys_platform != 'darwin'",
+    "intel-cmplr-lib-rt>=2025,<2026; sys_platform != 'darwin'",
+    "sl-shared-assets>=6.0.1rc9,<7",
+    "sl-forgery>=1.0.0rc2,<2",
 ]
 
 [project.urls]
@@ -89,9 +90,8 @@ dev = [
     # Development Automation
     "ataraxis-automation>=7,<8",
 
-    # Types:
+    # Types
     "types-tqdm>=4,<5",
-    "scipy-stubs>=1,<2",
 ]
 
 # All interactions with the library are performed via the 'ss2p' CLI command
@@ -110,7 +110,7 @@ packages = ["src/sl_suite2p", "notebooks"]
 [tool.ruff]
 line-length = 120         # The maximum column length is set to 120 for this project.
 indent-width = 4          # Same as black, indents are 4 spaces
-target-version = "py313"  # Targets the lowest supported version of python
+target-version = "py314"  # Targets the lowest supported version of python
 src = ["src"]             # The name of the source directory
 
 # Excludes 'service' .py files, such as the sphinx configuration file, from linting.
@@ -122,7 +122,7 @@ lint.select = ["ALL"]
 # General ignore directives
 lint.ignore = [
     "W291",  # Conflicts with docstring formatting
-    "ANN401",  # While suboptimal, ANY is a helpful type when used with caution
+    "W293",  # Conflicts with UI style formatting
     "C901",  # Sometimes complex functions are necessary
     "PLR0913",  # Sometimes complex functions are necessary
     "PLR0912",  # Sometimes complex functions are necessary
@@ -133,7 +133,8 @@ lint.ignore = [
     "FBT003",  # UI elements require the use of positional boolean values
     "TID252",  # Conflicts with Sun lab import strategy
     "SLF001",  # Sometimes accessing private members is necessary
-    "SIM115",  # Sometimes it is necessary to open and close files withouth the context manager.
+    "SIM115",  # Sometimes it is necessary to open and close files without the context manager.
+    "BLE001",  # Catching blind exceptions is necessary for the functioning of this library
     "COM812", # Conflicts with the formatter
     "ISC001", # Conflicts with the formatter
     "PT001", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-182590771
@@ -174,29 +175,10 @@ length-sort = true                 # Places shorter imports first
 
 # MyPy configuration section.
 [tool.mypy]
-# Strict mode settings (equivalent to --strict)
-warn_unused_configs = true
-disallow_any_generics = true
-disallow_subclassing_any = true
-disallow_untyped_calls = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_return_any = true
-no_implicit_reexport = true
-strict_equality = true
-
-# Extra checks (equivalent to --extra-checks)
-extra_checks = true
-
-# Pretty output (equivalent to --pretty)
-pretty = true
-
+disallow_untyped_defs = true # Enforces function annotation
+warn_unused_ignores = true   # Warns against using 'type: ignore' for packages that have type stubs available.
 exclude = [
-    "sl_suite2p-\\d+",       # Ignores temporary folder created by setuptools when building the sdist
+    "sl_suite2p-\\d+",    # Ignores temporary folder created by setuptools when building the sdist
     "venv.*/",            # Ignores virtual environments
     "build/",             # Ignores the sdist directory
     "dist/",              # Ignores the wheel directory
@@ -215,3 +197,15 @@ source = ["src/", ".tox/*/lib/python*/site-packages/"]
 # Same as above, specifies the output directory for the coverage .html report
 [tool.coverage.html]
 directory = "reports/coverage_html"
+
+# Specifies additional ignore directives
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "def __del__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+]

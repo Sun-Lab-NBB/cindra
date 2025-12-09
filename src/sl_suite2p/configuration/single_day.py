@@ -579,7 +579,7 @@ class SingleDayS2PConfiguration(YamlConfig):
         return combined_ops
 
     @classmethod
-    def from_ops(cls, ops_dict: dict[str, Any]) -> "SingleDayS2PConfiguration":
+    def from_ops(cls, ops_dict: dict[str, Any]) -> SingleDayS2PConfiguration:
         """Creates a SingleDayS2PConfiguration instance from the target 'ops'' dictionary.
 
         Notes:

@@ -49,21 +49,19 @@ class IO:
     """Stores parameters that control data input and output during various stages of the pipeline."""
 
     session_directories: list[str] = field(default_factory=list)
-    """Specifies the list of sessions to register across days, as absolute paths to their root directories. 
-    Note, each input directory must contain a 'combined' plane folder created by the single-day suite2p pipeline 
-    at some level of the subdirectory tree. The 'combined' folder is created if the 'combined' 
+    """Specifies the list of sessions to register across days, as absolute paths to their root directories.
+    Note, each input directory must contain a 'combined' plane folder created by the single-day suite2p pipeline
+    at some level of the subdirectory tree. The 'combined' folder is created if the 'combined'
     SingleDayS2PConfiguration attribute is 'True'."""
 
-    multiday_save_path: str = ""
-    """Specifies the path to the directory where to generate the output data hierarchy and save the multi-day 
-    processing results. Note, all data will be saved under the 'save-folder', which itself will be created under the 
-    directory specified by this field."""
+    dataset_name: str = ""
+    """Specifies the name of the multiday dataset. This name is used to create the output folder under each session's
+    'multiday' directory (e.g., session/multiday/{dataset_name}/) and to identify the dataset in the tracker file."""
 
-    multiday_save_folder: str = "suite2p_multiday"
-    """Specifies the name of the folder under which to save the data. This directory will be created under the 
-    'save_path' directory as part of runtime. If a directory already exists, its' data will be overwritten as part of 
-    runtime. When running multiple multi-day runtimes using partially overlapping datasets, make sure each runtime has 
-    a unique 'save_folder' configuration parameter!"""
+    dataset_directory_path: str = ""
+    """Specifies the path to the dataset directory where the multiday tracker file and shared configuration files are
+    stored. This directory is separate from the per-session output directories and is used by sl-forgery to track the
+    overall multiday processing pipeline state."""
 
 
 @dataclass()
@@ -286,7 +284,7 @@ class MultiDayS2PConfiguration(YamlConfig):
         return combined_ops
 
     @classmethod
-    def from_ops(cls, ops_dict: dict[str, Any]) -> "MultiDayS2PConfiguration":
+    def from_ops(cls, ops_dict: dict[str, Any]) -> MultiDayS2PConfiguration:
         """Creates a MultiDayS2PConfiguration instance from the target 'ops'' dictionary.
 
         Notes:
