@@ -3,8 +3,6 @@
 import os
 from typing import Any
 from pathlib import Path
-from functools import partial
-from concurrent.futures import ThreadPoolExecutor
 
 from tqdm import tqdm
 import numpy as np
@@ -22,27 +20,24 @@ from .multiday import (
     backward_transform_masks,
     extract_unique_components,
 )
-from .configuration import MultiDayS2PConfiguration, SingleDayS2PConfiguration, generate_default_multiday_ops
+from .configuration import MultiDayS2PConfiguration, generate_default_multiday_ops
 
 # THe minimum number of sessions required for multi-day processing
 _MINIMUM_SESSION_COUNT = 2
 
 
-def _resolve_session_data(input_directory: Path, output_directory: Path) -> Path:
-    """Resolves the multi-day configuration data and output data hierarchy for the input session.
-
-    This worker function is used as part of the main 'resolve_multiday_ops' function to efficiently process multiple
-    sessions in parallel.
+def _find_combined_path(input_directory: Path) -> Path:
+    """Finds and validates the 'combined' folder path within a session directory.
 
     Args:
         input_directory: The path to the directory that stores the single-day suite2p data for the processed session.
-        output_directory: The path to the directory where to save the data generated during the multi-day processing.
 
     Returns:
         The path to the 'combined' single-day pipeline folder of the processed session.
+
+    Raises:
+        RuntimeError: If the expected 'combined' folder is not found or multiple are found.
     """
-    # There should be exactly one 'combined' folder for each session folder. If this is false, then the folder path
-    # is not valid
     combined_path_list = list(input_directory.rglob("combined"))
     if len(combined_path_list) != 1:
         message = (
@@ -54,25 +49,7 @@ def _resolve_session_data(input_directory: Path, output_directory: Path) -> Path
         console.error(message=message, error=RuntimeError)
         raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable
 
-    # Extracts the path to the 'combined' folder parent: the root suite2p output folder.
-    combined_path = combined_path_list.pop()
-    suite2p_path = combined_path.parent
-    # Uses the path to load the single-day configuration file for the processed session.
-    original_ops: dict[str, Any] = SingleDayS2PConfiguration.from_yaml(
-        combined_path.parent.joinpath("single_day_ss2p_configuration.yaml")
-    ).to_ops()
-
-    # If necessary, overrides the paths to the single-day pipeline's output folder(s) to match the actual location of
-    # the single-day output data.
-    original_ops["save_folder"] = str(suite2p_path.stem)
-    original_ops["save_path0"] = str(suite2p_path.parent)
-
-    # Saves the updated single-day config to the session's multi-day output folder, as it is reused during
-    # the multi-day pipeline
-    single_day_config = SingleDayS2PConfiguration.from_ops(ops_dict=original_ops)
-    single_day_config.to_config(file_path=output_directory.joinpath("single_day_ss2p_configuration.yaml"))
-
-    return combined_path
+    return combined_path_list.pop()
 
 
 def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
@@ -93,13 +70,17 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
         If both 'ops' and 'db' do not contain some of the expected multiday parameters, they are set using
         the 'default' dictionary generated using the MultiDayS2PConfiguration.
 
+        Output structure:
+        - Each session gets a multiday folder at: {session_suite2p_parent}/multiday/{dataset_name}/
+        - The dataset directory (separate from sessions) stores the tracker file and shared config copies.
+
     Args:
-        ops: A dictionary that contains the single-day configuration parameters.
+        ops: A dictionary that contains the multi-day configuration parameters.
         db: An optional dictionary that contains the same keys as 'ops'. Values from this dictionary are used to
             override the matching keys in the 'ops' dictionary.
 
     Returns:
-        The path to the generated 'ops.npy' file.
+        The path to the generated 'ops.npy' file in the dataset directory.
     """
     # Since this step takes a noticeable amount of time, notifies the user about the progress of this step.
     console.echo(f"Resolving the multi-day 'ops' dictionary for {len(ops['session_directories'])} sessions...")
@@ -133,44 +114,43 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
         )
         console.error(message=message, error=RuntimeError)
 
+    # Extracts dataset configuration
+    dataset_name = ops["dataset_name"]
+    dataset_directory = Path(ops["dataset_directory_path"])
+    ensure_directory_exists(dataset_directory)
+
     # Builds a list of unique path components for each session. Assuming all sessions use unique names, this generates
     # a list of unique session IDs from their paths.
     sessions = natsorted([Path(session) for session in ops["session_directories"]])
     ops["session_ids"] = extract_unique_components(paths=sessions)
 
-    # Resolves and generates the output directory for the multi-day runtime.
-    output_folder = Path(ops["multiday_save_path"]).joinpath(ops["multiday_save_folder"])
-    ensure_directory_exists(output_folder)
-
     # Extracts the paths to the processed session directories.
     session_directories = ops["session_directories"]
 
-    # Processes all sessions in parallel.
+    # Processes each session and creates multiday output folders under each session's directory.
+    multiday_output_paths: list[str] = []
     last_combined_path = Path()
-    with ThreadPoolExecutor(max_workers=ops["parallel_workers"]) as executor:
-        # Submits processing tasks using partial to create properly parameterized function calls.
-        futures = []
-        for i, directory in enumerate(session_directories):
-            # Generates the session-specific output directory under the main multi-day output folder, using the
-            # session ID.
-            multi_day_path = output_folder.joinpath(ops["session_ids"][i])
-            ensure_directory_exists(multi_day_path)
 
-            # Uses partial to specialize the processing function for runtime.
-            session_worker = partial(
-                _resolve_session_data, input_directory=Path(directory), output_directory=multi_day_path
-            )
+    with tqdm(
+        total=len(session_directories), desc="Processing sessions", disable=not ops["progress_bars"], unit="session"
+    ) as pbar:
+        for directory in session_directories:
+            # Finds the 'combined' folder to locate the suite2p output directory.
+            combined_path = _find_combined_path(Path(directory))
+            last_combined_path = combined_path
 
-            # Submit the specialized function for processing.
-            futures.append(executor.submit(session_worker))
+            # The suite2p folder is the parent of 'combined'. Creates 'multiday' at the same level as suite2p.
+            suite2p_parent = combined_path.parent.parent  # Goes from combined -> suite2p -> parent
 
-        # Processes completed tasks with a progress bar if progress bars are enabled.
-        with tqdm(
-            total=len(futures), desc="Processing sessions", disable=not ops["progress_bars"], unit="session"
-        ) as pbar:
-            for future in futures:
-                last_combined_path = future.result()  # Keeps track of the last processed path
-                pbar.update(1)
+            # Creates multiday output folder for this session: {suite2p_parent}/multiday/{dataset_name}/
+            multiday_output = suite2p_parent.joinpath("multiday", dataset_name)
+            ensure_directory_exists(multiday_output)
+            multiday_output_paths.append(str(multiday_output))
+
+            pbar.update(1)
+
+    # Stores multiday output paths in ops for use by other pipeline functions.
+    ops["multiday_output_paths"] = multiday_output_paths
 
     # Resolves the path to the 'combined' folder ops.npy file for the last session processed by the loop above. This
     # file contains all single-day processing parameters, some of which are reused at the end of the multi-day pipeline
@@ -189,18 +169,21 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
         "allow_overlap": True,  # Required for multi-day signal extraction to work as expected
     }
 
-    # Saves the combined single-day and multi-day ops.npy file to the root output folder. During the rest of the
-    # runtime, this file is loaded back into memory for various processing steps.
-    ops_path = output_folder.joinpath("ops.npy")
-    np.save(ops_path, multiday_ops, allow_pickle=True)
-
-    # Also generates a 'yaml' snapshot of the multi-day configuration parameters. This does not use the 'combined' ops
-    # as it stores many fields that are not directly translatable into a YAML format.
+    # Generates the multi-day configuration object for YAML export.
     multi_day_config = MultiDayS2PConfiguration.from_ops(ops_dict=ops)
-    multi_day_config.to_config(file_path=output_folder.joinpath("multi_day_ss2p_configuration.yaml"))
 
-    # Returns the path to the final multi-day config.
-    return ops_path
+    # Saves ops.npy and configuration to each session's multiday folder.
+    for multiday_output in multiday_output_paths:
+        output_path = Path(multiday_output)
+        np.save(output_path.joinpath("ops.npy"), multiday_ops, allow_pickle=True)
+        multi_day_config.to_config(file_path=output_path.joinpath("multi_day_ss2p_configuration.yaml"))
+
+    # Also saves to the dataset directory for reference and tracker location.
+    np.save(dataset_directory.joinpath("ops.npy"), multiday_ops, allow_pickle=True)
+    multi_day_config.to_config(file_path=dataset_directory.joinpath("multi_day_ss2p_configuration.yaml"))
+
+    # Returns the path to the ops.npy file in the dataset directory.
+    return dataset_directory.joinpath("ops.npy")
 
 
 def run_s2p_multiday(ops_path: Path) -> None:
@@ -331,15 +314,9 @@ def extract_multiday_fluorescence(ops_path: Path, session_id: str) -> None:
 
     ops = np.load(ops_path, allow_pickle=True).item()
 
-    # Reconstructs the path to the output folder from 'ops' parameters
-    output_folder = Path(ops["multiday_save_path"]).joinpath(ops["multiday_save_folder"])
-
-    # The output folder contains .npy and .yaml files and directories named after each processed session ID.
-    # This re-generates the list of session IDs from the directories stored in the output folder.
-    session_ids = [folder.stem for folder in output_folder.glob("*") if folder.is_dir()]
-
-    # Sorts session IDs for consistency
-    session_ids = natsorted(session_ids)
+    # Gets session IDs and multiday output paths from ops.
+    session_ids: list[str] = ops["session_ids"]
+    multiday_output_paths: list[str] = ops["multiday_output_paths"]
 
     if session_id not in session_ids:
         message = (
@@ -348,19 +325,15 @@ def extract_multiday_fluorescence(ops_path: Path, session_id: str) -> None:
         )
         console.error(message=message, error=ValueError)
 
-    # Loops over the output session directories and reconstructs the path to the single-day output folder of each
-    # session using the data inside the single-day s2p config from the multi-day folder.
-    sessions = []
-    for session in session_ids:
-        configuration: SingleDayS2PConfiguration = SingleDayS2PConfiguration.from_yaml(
-            output_folder.joinpath(session, "single_day_ss2p_configuration.yaml")
-        )
-        session_folder = Path(configuration.file_io.save_path0).joinpath(configuration.file_io.save_folder)
-        sessions.append(session_folder)
-
-    # Uses the input ID to resolve the target session folder
+    # Uses the session ID to find the corresponding multiday output path and derive the suite2p folder.
     session_index = session_ids.index(session_id)
-    target_session_folder = sessions[session_index]
+    multiday_output = Path(multiday_output_paths[session_index])
 
-    # Calls the trace extraction function
+    # The suite2p folder is at the same level as the 'multiday' folder.
+    # multiday_output is: {suite2p_parent}/multiday/{dataset_name}/
+    # We need: {suite2p_parent}/suite2p/
+    suite2p_parent = multiday_output.parent.parent
+    target_session_folder = suite2p_parent.joinpath("suite2p")
+
+    # Calls the trace extraction function.
     extract_session_traces(ops=ops, session_folder=target_session_folder, session_id=session_id)

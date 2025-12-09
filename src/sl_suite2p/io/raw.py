@@ -7,8 +7,8 @@ from pathlib import Path
 
 from tqdm import tqdm
 import numpy as np
+from xmltodict import parse
 from ataraxis_time import PrecisionTimer
-from quick_xmltodict import parse
 from ataraxis_base_utilities import console, ensure_directory_exists
 
 if TYPE_CHECKING:

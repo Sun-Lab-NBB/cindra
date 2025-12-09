@@ -11,14 +11,12 @@ import click
 import numpy as np
 from sl_shared_assets import (
     SessionData,
-    SessionLock,
     SessionTypes,
     ProcessingTracker,
     AcquisitionSystems,
-    generate_project_manifest,
 )
-from sl_forgery.shared_assets import ProcessingTrackers
 from ataraxis_base_utilities import LogLevel, console
+from sl_forgery.shared_assets import DatasetTrackers, ProcessingTrackers
 
 from .gui import run
 from .multi_day import run_s2p_multiday, resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
@@ -387,45 +385,11 @@ def run_sd_pipeline(
     ),
 )
 @click.option(
-    "-pdr",
-    "--processed-data-root",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=False,
-    help=(
-        "The absolute path to the directory that stores the processed data from all Sun lab projects, if it is "
-        "different from the root directory included in the 'session-path' argument value."
-    ),
-)
-@click.option(
     "-id",
-    "--manager-id",
-    type=int,
+    "--job-id",
+    type=str,
     required=True,
-    default=0,
-    show_default=True,
-    help="The unique identifier of the process that manages this runtime.",
-)
-@click.option(
-    "-j",
-    "--jobs",
-    type=int,
-    required=True,
-    show_default=True,
-    help=(
-        "The total number of individual processing jobs to be executed as part of the target processing pipeline. "
-        "This value is used to track when the processing pipeline as a whole finishes its runtime."
-    ),
-)
-@click.option(
-    "-r",
-    "--reset-tracker",
-    is_flag=True,
-    required=False,
-    help=(
-        "Determines whether to forcibly reset the processing tracker file for the target session before "
-        "processing runtime. This flag should only be used in exceptional cases to recover from improper runtime "
-        "terminations."
-    ),
+    help="The unique job identifier for this processing step.",
 )
 @click.pass_context
 def run_sd_pipeline_sl(
@@ -435,10 +399,7 @@ def run_sd_pipeline_sl(
     combine: bool,
     target: int,
     session_path: Path,
-    processed_data_root: Path | None,
-    jobs: int,
-    manager_id: int,
-    reset_tracker: bool | None,
+    job_id: str,
 ) -> None:
     """Runs the requested single-day sl-suite2p pipeline step(s) using the configuration parameters from the target
     file.
@@ -452,10 +413,7 @@ def run_sd_pipeline_sl(
     overrides = ctx.obj["overrides"]
 
     # Instantiates the SessionData instance for the processed session
-    session_data = SessionData.load(
-        session_path=session_path,
-        processed_data_root=processed_data_root,
-    )
+    session_data = SessionData.load(session_path=session_path)
 
     # Ensures that the session supports this type of processing
     if session_data.acquisition_system not in _supported_systems:
@@ -513,22 +471,13 @@ def run_sd_pipeline_sl(
     # Loads the resolved ops file to access the runtime configuration parameters below.
     final_ops = np.load(ops_path, allow_pickle=True).item()
 
-    # Ensures that the manager has exclusive access to the session's data.
-    lock = SessionLock(file_path=session_data.tracking_data.session_lock_path)
-    lock.check_owner(manager_id=manager_id)
-
-    # Instantiates the ProcessingTracker instance for single-day suite2p processing and configures the underlying
-    # tracker file to indicate that the processing is ongoing.
+    # Instantiates the ProcessingTracker instance for single-day suite2p processing.
     tracker = ProcessingTracker(
         file_path=session_data.tracking_data.tracking_data_path.joinpath(ProcessingTrackers.SUITE2P)
     )
 
-    # If requested, resets the processing tracker before starting the runtime.
-    if reset_tracker:
-        tracker.abort()
-
-    # Configures the tracker to indicate that the processing is ongoing.
-    tracker.start(manager_id=manager_id, job_count=jobs)
+    # Marks this specific job as running.
+    tracker.start_job(job_id=job_id)
 
     try:
         # If all three single-day steps are set to the same values, runs the entire single-day pipeline. Note, since
@@ -536,53 +485,47 @@ def run_sd_pipeline_sl(
         # where all are disabled the same as when all are enabled.
         if binarize == process == combine:
             run_s2p(ops_path=ops_path)
-            return  # Explicit return to prevent repeating processing steps below
+        else:
+            # Otherwise, executes the requested single-day pipeline steps.
+            if binarize:  # Step 1
+                resolve_binaries(ops_path=ops_path)
 
-        # Otherwise, executes the requested single-day pipeline steps.
-        if binarize:  # Step 1
-            resolve_binaries(ops_path=ops_path)
+            if process:  # Step 2
+                # Either processes all available planes sequentially or only the requested plane
+                if target != -1:
+                    process_plane(ops_path=ops_path, plane_index=target)
+                else:
+                    for plane in final_ops["nplanes"]:
+                        process_plane(ops_path=ops_path, plane_index=plane)
 
-        if process:  # Step 2
-            # Either processes all available planes sequentially or only the requested plane
-            if target != -1:
-                process_plane(ops_path=ops_path, plane_index=target)
-            else:
-                for plane in final_ops["nplanes"]:
-                    process_plane(ops_path=ops_path, plane_index=plane)
+            if combine:  # Step 3
+                combine_planes(ops_path=ops_path)
 
-        if combine:  # Step 3
-            combine_planes(ops_path=ops_path)
-
-    # If the runtime encounters an error, configures the tracker to indicate that the processing was interrupted.
+    # If the runtime encounters an error, marks the job as failed.
     except Exception:
-        tracker.error(manager_id=manager_id)
+        tracker.fail_job(job_id=job_id)
         raise
 
-    finally:
-        # Configures the tracker to indicate that the processing is finished.
-        if tracker.is_running:
-            tracker.stop(manager_id=manager_id)
-
-        # Updates the project manifest file to reflect the processing outcome.
-        if session_data is not None:
-            generate_project_manifest(
-                raw_project_directory=session_data.raw_data.root_path.joinpath(session_data.project_name),
-                processed_data_root=processed_data_root,
-                manager_id=manager_id,
-            )
+    # If no exception occurred, marks the job as successfully completed.
+    else:
+        tracker.complete_job(job_id=job_id)
 
 
 # noinspection PyUnresolvedReferences
 @ss2p_run.command("multi-day")
 @click.option(
-    "-o",
-    "--output_path",
+    "-dd",
+    "--dataset-directory",
     type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
     required=False,
-    help=(
-        "The absolute path to the directory where to set up the output multi-day suite2p data hierarchy and save the "
-        "pipeline output data."
-    ),
+    help="The path to the dataset directory where the tracker file and shared configuration files are stored.",
+)
+@click.option(
+    "-dn",
+    "--dataset-name",
+    type=str,
+    required=False,
+    help="The name of the multiday dataset, used as the output folder name under each session's 'multiday' directory.",
 )
 @click.option(
     "-d",
@@ -616,7 +559,8 @@ def run_sd_pipeline_sl(
 @click.pass_context
 def run_md_pipeline(
     ctx: Any,
-    output_path: Path | None,
+    dataset_directory: Path | None,
+    dataset_name: str | None,
     discover: bool,
     extract: bool,
     target: str | None,
@@ -641,8 +585,10 @@ def run_md_pipeline(
         # Specializes the config to work with the target data
         config.main.progress_bars = progress_bars
         config.main.parallel_workers = workers
-        if output_path is not None:
-            config.io.multiday_save_path = str(output_path)
+        if dataset_directory is not None:
+            config.io.dataset_directory_path = str(dataset_directory)
+        if dataset_name is not None:
+            config.io.dataset_name = dataset_name
 
         # Converts the dataclass to an 'ops' dictionary instance.
         ops = config.to_ops()
@@ -690,14 +636,18 @@ def run_md_pipeline(
 # noinspection PyUnresolvedReferences
 @ss2p_run.command("sl-multi-day")
 @click.option(
-    "-o",
-    "--output_path",
+    "-dd",
+    "--dataset-directory",
     type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
     required=True,
-    help=(
-        "The absolute path to the directory where to set up the output multi-day suite2p data hierarchy and save the "
-        "pipeline output data."
-    ),
+    help="The path to the dataset directory where the tracker file and shared configuration files are stored.",
+)
+@click.option(
+    "-dn",
+    "--dataset-name",
+    type=str,
+    required=True,
+    help="The name of the multiday dataset, used as the output folder name under each session's 'multiday' directory.",
 )
 @click.option(
     "-d",
@@ -741,58 +691,22 @@ def run_md_pipeline(
     ),
 )
 @click.option(
-    "-pdr",
-    "--processed-data-root",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=False,
-    help=(
-        "The absolute path to the directory that stores the processed data from all Sun lab projects, if it is "
-        "different from the root directory included in the 'session-path' argument value."
-    ),
-)
-@click.option(
     "-id",
-    "--manager-id",
-    type=int,
+    "--job-id",
+    type=str,
     required=True,
-    default=0,
-    show_default=True,
-    help="The unique identifier of the process that manages this runtime.",
-)
-@click.option(
-    "-j",
-    "--jobs",
-    type=int,
-    required=True,
-    show_default=True,
-    help=(
-        "The total number of individual processing jobs to be executed as part of the target processing pipeline. "
-        "This value is used to track when the processing pipeline as a whole finishes its runtime."
-    ),
-)
-@click.option(
-    "-r",
-    "--reset-tracker",
-    is_flag=True,
-    required=False,
-    help=(
-        "Determines whether to forcibly reset the processing tracker file for the target session before "
-        "processing runtime. This flag should only be used in exceptional cases to recover from improper runtime "
-        "terminations."
-    ),
+    help="The unique job identifier for this processing step.",
 )
 @click.pass_context
 def run_md_pipeline_sl(
     ctx: Any,
-    output_path: Path,
+    dataset_directory: Path,
+    dataset_name: str,
     discover: bool,
     extract: bool,
     target: str | None,
     session_paths: list[Path],
-    processed_data_root: Path,
-    jobs: int,
-    manager_id: int,
-    reset_tracker: bool,
+    job_id: str,
 ) -> None:
     """Runs the requested multi-day sl-suite2p pipeline step(s) using the configuration parameters from the target
     file.
@@ -819,10 +733,7 @@ def run_md_pipeline_sl(
     session_inputs = []
     for session_paths in session_paths:
         # Instantiates the SessionData instance for the processed session
-        session_data = SessionData.load(
-            session_path=session_paths,
-            processed_data_root=processed_data_root,
-        )
+        session_data = SessionData.load(session_path=session_paths)
 
         # Ensures that all processed sessions belong to the same animal
         if animal_id == "":
@@ -866,8 +777,8 @@ def run_md_pipeline_sl(
         # Specializes the config to work with the target data
         config.main.progress_bars = progress_bars
         config.main.parallel_workers = workers
-        config.io.multiday_save_path = str(output_path)
-        config.io.multiday_save_folder = animal_id
+        config.io.dataset_directory_path = str(dataset_directory)
+        config.io.dataset_name = dataset_name
         config.io.session_directories = session_inputs
 
     except Exception:
@@ -894,47 +805,38 @@ def run_md_pipeline_sl(
     # Loads the resolved ops file to access the runtime configuration parameters below.
     final_ops = np.load(ops_path, allow_pickle=True).item()
 
-    # Note, session data lock ownership check has been temporarily deprecated from this test version. It will be added
-    # during later testing stages.
+    # Instantiates the ProcessingTracker instance for multi-day suite2p processing.
+    tracker = ProcessingTracker(file_path=dataset_directory.joinpath(DatasetTrackers.MULTIDAY))
 
-    # Instantiates the ProcessingTracker instance for multi-day suite2p processing and configures the underlying
-    # tracker file to indicate that the processing is ongoing.
-    tracker = ProcessingTracker(file_path=output_path.joinpath(ProcessingTrackers.MULTIDAY))
-
-    # If requested, resets the processing tracker before starting the runtime.
-    if reset_tracker:
-        tracker.abort()
-
-    # Configures the tracker to indicate that the processing is ongoing.
-    tracker.start(manager_id=manager_id, job_count=jobs)
+    # Marks this specific job as running.
+    tracker.start_job(job_id=job_id)
 
     try:
         # Same idea as in the single-day pipeline: If both flags are set to the same value, this is interpreted as
         # a request to run the entire multi-day pipeline.
         if discover == extract:
             run_s2p_multiday(ops_path=ops_path)
-            return
+        else:
+            if discover:  # Step 1
+                discover_multiday_cells(ops_path=ops_path)
 
-        if discover:  # Step 1
-            discover_multiday_cells(ops_path=ops_path)
+            if extract:  # Step 2
+                # Same idea as with single-day planes, either processes all sessions sequentially or only the target
+                # session
+                if target is not None:
+                    extract_multiday_fluorescence(ops_path=ops_path, session_id=target)
+                else:
+                    for session in final_ops["session_ids"]:
+                        extract_multiday_fluorescence(ops_path=ops_path, session_id=session)
 
-        if extract:  # Step 2
-            # Same idea as with single-day planes, either processes all sessions sequentially or only the target session
-            if target is not None:
-                extract_multiday_fluorescence(ops_path=ops_path, session_id=target)
-            else:
-                for session in final_ops["session_ids"]:
-                    extract_multiday_fluorescence(ops_path=ops_path, session_id=session)
-
-    # If the runtime encounters an error, configures the tracker to indicate that the processing was interrupted.
+    # If the runtime encounters an error, marks the job as failed.
     except Exception:
-        tracker.error(manager_id=manager_id)
+        tracker.fail_job(job_id=job_id)
         raise
 
-    finally:
-        # Configures the tracker to indicate that the processing is finished.
-        if tracker.is_running:
-            tracker.stop(manager_id=manager_id)
+    # If no exception occurred, marks the job as successfully completed.
+    else:
+        tracker.complete_job(job_id=job_id)
 
 
 def _parse_db(data_string: str) -> dict[str, Any]:
