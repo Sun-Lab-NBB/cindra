@@ -10,6 +10,7 @@ from qtpy import QtGui, QtCore
 import numpy as np
 import pyqtgraph as pg
 from qtpy.QtWidgets import QLabel, QWidget, QCheckBox, QLineEdit, QGridLayout, QMainWindow, QApplication
+from ataraxis_base_utilities import LogLevel, console
 
 from . import io, masks, menus, merge, views, traces, buttons, classgui, graphics
 from ..configuration import generate_default_ops
@@ -126,12 +127,15 @@ class MainWindow(QMainWindow):
 
     def dropEvent(self, event):
         files = [u.toLocalFile() for u in event.mimeData().urls()]
-        print(files)
+        console.echo(message=f"Files dropped: {files}")
         self.fname = files[0]
         if os.path.splitext(self.fname)[-1] == ".npy":
             io.load_proc(self)
         else:
-            print("invalid extension %s, use .nwb or .npy" % os.path.splitext(self.fname)[-1])
+            console.echo(
+                message=f"Invalid file extension '{os.path.splitext(self.fname)[-1]}'. Use .npy files.",
+                level=LogLevel.ERROR,
+            )
 
     def make_buttons(self):
         # ROI CHECKBOX
@@ -560,7 +564,6 @@ class MainWindow(QMainWindow):
         posy = 0
         iplot = 0
         if self.loaded:
-            # print(event.modifiers() == QtCore.Qt.ControlModifier)
             for x in items:
                 if x == self.img1:
                     pos = self.p1.mapSceneToView(event.scenePos())

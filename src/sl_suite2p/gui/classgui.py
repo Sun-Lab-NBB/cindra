@@ -16,6 +16,7 @@ from qtpy.QtWidgets import (
     QPushButton,
     QAbstractItemView,
 )
+from ataraxis_base_utilities import LogLevel, console
 
 from . import masks
 from .. import classification
@@ -46,7 +47,7 @@ def load_classifier(parent):
         load(parent, name[0])
         class_activated(parent)
     else:
-        print("no classifier")
+        console.echo(message="No classifier file selected.", level=LogLevel.WARNING)
 
 
 def load_s2p_classifier(parent):
@@ -102,7 +103,7 @@ def reset_default(parent):
 
 
 def load(parent, name):
-    print("loading classifier ", name)
+    console.echo(message=f"Loading classifier from: {name}")
     parent.classfile = name
     parent.model = classification.Classifier(classfile=name)
     if parent.model.loaded:
@@ -114,7 +115,7 @@ def save_model(name, train_stats, train_iscell, keys):
     model["stats"] = train_stats
     model["iscell"] = train_iscell
     model["keys"] = keys
-    print("saving classifier in " + name)
+    console.echo(message=f"Saving classifier to: {name}", level=LogLevel.SUCCESS)
     np.save(name, model)
 
 
@@ -137,7 +138,7 @@ def load_data(parent, keys, trainfiles):
                 iscells = np.load(fname)
                 ncells = iscells.shape[0]
             except (ValueError, OSError, RuntimeError, TypeError, NameError):
-                print("\t" + fname + ": not a numpy array of booleans")
+                console.echo(message=f"  {fname}: not a numpy array of booleans", level=LogLevel.WARNING)
                 badfile = True
             if not badfile:
                 basename, bname = os.path.split(fname)
@@ -147,12 +148,15 @@ def load_data(parent, keys, trainfiles):
                     ypix = stat[0]["ypix"]
                     lstat = len(stat)
                 except (IndexError, KeyError, OSError, RuntimeError, TypeError, NameError):
-                    print("\t" + basename + ": incorrect or missing stat.npy file :(")
+                    console.echo(message=f"  {basename}: incorrect or missing stat.npy file", level=LogLevel.WARNING)
                 if lstat != ncells:
-                    print("\t" + basename + ": stat.npy is not the same length as iscell.npy")
+                    console.echo(
+                        message=f"  {basename}: stat.npy length doesn't match iscell.npy",
+                        level=LogLevel.WARNING,
+                    )
                 else:
                     # add iscell and stat to classifier
-                    print("\t" + fname + " was added to classifier")
+                    console.echo(message=f"  {fname}: added to classifier", level=LogLevel.SUCCESS)
                     iscell = iscells[:, 0].astype(np.float32)
                     stats = np.reshape(
                         np.array([stat[j][k] for j in range(len(stat)) for k in parent.default_keys]), (len(stat), -1)
@@ -178,7 +182,7 @@ def load_data(parent, keys, trainfiles):
 
 def add_to(parent):
     fname = parent.basename + "/iscell.npy"
-    print("Adding current dataset to classifier")
+    console.echo(message="Adding current dataset to classifier...")
     if parent.classfile == parent.classuser:
         cfile = "the default classifier"
     else:
@@ -214,7 +218,7 @@ def save(parent, train_stats, train_iscell, keys):
             save_model(name, train_stats, train_iscell, keys)
             saved = True
         except (OSError, RuntimeError, TypeError, NameError, FileNotFoundError):
-            print("ERROR: incorrect filename for saving")
+            console.echo(message="Failed to save classifier: incorrect filename.", level=LogLevel.ERROR)
     return name, saved
 
 
@@ -227,7 +231,7 @@ def save_list(parent):
                     fid.write(f)
                     fid.write("\n")
         except (ValueError, OSError, RuntimeError, TypeError, NameError, FileNotFoundError):
-            print("ERROR: incorrect filename for saving")
+            console.echo(message="Failed to save list: incorrect filename.", level=LogLevel.ERROR)
 
 
 def activate(parent, inactive):
@@ -311,7 +315,7 @@ class ListChooser(QDialog):
                     self.list.addItem(f)
             except (OSError, RuntimeError, TypeError, NameError):
                 QMessageBox.information(self, "not a text file")
-                print("not a good list")
+                console.echo(message="Failed to load text file: invalid file format.", level=LogLevel.ERROR)
 
     def build_classifier(self, parent):
         parent.trainfiles = []
@@ -323,7 +327,7 @@ class ListChooser(QDialog):
             for r in range(self.list.count()):
                 parent.trainfiles.append(self.list.item(r).text())
         if len(parent.trainfiles) > 0:
-            print("Populating classifier:")
+            console.echo(message="Populating classifier from training files...")
             keys = parent.default_keys
             loaded = load_data(parent, keys, parent.trainfiles)
             if loaded:

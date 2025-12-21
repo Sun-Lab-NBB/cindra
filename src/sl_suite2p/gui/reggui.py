@@ -25,6 +25,7 @@ from qtpy.QtWidgets import (
     QToolButton,
     QButtonGroup,
 )
+from ataraxis_base_utilities import LogLevel, console
 
 from . import masks, utils
 from .. import registration
@@ -191,7 +192,7 @@ class BinaryPlayer(QMainWindow):
         if hasattr(parent, "ops"):
             if Path(parent.ops["save_path"]).name != "combined":
                 filename = os.path.abspath(os.path.join(parent.basename, "ops.npy"))
-                print(filename)
+                console.echo(message=f"Opening file: {filename}")
                 self.Fcell = parent.Fcell
                 self.stat = parent.stat
                 self.iscell = parent.iscell
@@ -374,7 +375,7 @@ class BinaryPlayer(QMainWindow):
         filename = QFileDialog.getOpenFileName(self, "Open single-plane ops.npy file or single-plane ops.json file")
         # load ops in same folder
         if filename:
-            print(filename[0])
+            console.echo(message=f"Opening file: {filename[0]}")
             self.openFile(filename[0], False)
 
     def open_combined(self):
@@ -383,7 +384,7 @@ class BinaryPlayer(QMainWindow):
         )
         # load ops in same folder
         if filename:
-            print(filename)
+            console.echo(message=f"Opening combined folder: {filename}")
             self.openCombined(filename)
 
     def openCombined(self, save_folder):
@@ -409,7 +410,9 @@ class BinaryPlayer(QMainWindow):
                     reg_file = ops["reg_file"]
                 else:
                     reg_file = os.path.abspath(os.path.join(os.path.dirname(filename), "plane%d" % ipl, "data.bin"))
-                print(reg_file, os.path.isfile(reg_file))
+                console.echo(
+                    message=f"Registration file: {reg_file}, exists: {os.path.isfile(reg_file)}"
+                )
                 self.reg_loc.append(reg_file)
                 self.reg_file.append(open(self.reg_loc[-1], "rb"))
                 self.Ly.append(ops["Ly"])
@@ -422,15 +425,15 @@ class BinaryPlayer(QMainWindow):
             self.Floaded = False
 
         except Exception as e:
-            print("ERROR: %s" % e)
-            print("(could be incorrect folder or missing binaries)")
+            console.echo(message=f"ERROR: {e}", level=LogLevel.ERROR)
+            console.echo(message="Could be incorrect folder or missing binaries", level=LogLevel.WARNING)
             good = False
             try:
                 for n in range(len(self.reg_loc)):
                     self.reg_file[n].close()
-                print("closed binaries")
+                console.echo(message="Closed binaries", level=LogLevel.SUCCESS)
             except:
-                print("tried to close binaries")
+                console.echo(message="Tried to close binaries", level=LogLevel.WARNING)
         if good:
             self.filename = save_folder
             self.ops = ops1
@@ -517,17 +520,19 @@ class BinaryPlayer(QMainWindow):
             else:
                 self.Floaded = True
             good = True
-            print(self.Floaded)
+            console.echo(message=f"Fluorescence data loaded: {self.Floaded}")
             self.filename = filename
         except Exception as e:
-            print("ERROR: ops.npy incorrect / missing ops['reg_file'] and others")
-            print(e)
+            console.echo(
+                message="ERROR: ops.npy incorrect / missing ops['reg_file'] and others", level=LogLevel.ERROR
+            )
+            console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
             try:
                 for n in range(len(self.reg_loc)):
                     self.reg_file[n].close()
-                print("closed binaries")
+                console.echo(message="Closed binaries", level=LogLevel.SUCCESS)
             except:
-                print("tried to close binaries")
+                console.echo(message="Tried to close binaries", level=LogLevel.WARNING)
             good = False
         if good:
             self.filename = filename
@@ -722,7 +727,7 @@ class BinaryPlayer(QMainWindow):
                     self.plot_zcorr()
 
         except Exception as e:
-            print("ERROR: %s" % e)
+            console.echo(message=f"ERROR: {e}", level=LogLevel.ERROR)
 
     def cell_mask(self):
         # self.cmask = np.zeros((self.Ly,self.Lx,3),np.float32)
@@ -819,7 +824,7 @@ class BinaryPlayer(QMainWindow):
 
     def start(self):
         if self.cframe < self.nframes - 1:
-            print("playing")
+            console.echo(message="Playing video...")
             self.playButton.setEnabled(False)
             self.pauseButton.setEnabled(True)
             self.frameSlider.setEnabled(False)
@@ -830,7 +835,7 @@ class BinaryPlayer(QMainWindow):
         self.playButton.setEnabled(True)
         self.pauseButton.setEnabled(False)
         self.frameSlider.setEnabled(True)
-        print("paused")
+        console.echo(message="Video paused")
 
     def compute_z(self, parent):
         ops, zcorr = registration.compute_zpos(self.zstack, self.ops[0])
@@ -955,7 +960,7 @@ class PCViewer(QMainWindow):
         if hasattr(parent, "ops"):
             if Path(parent.ops["save_path"]).name != "combined":
                 filename = os.path.abspath(os.path.join(parent.basename, "ops.npy"))
-                print(filename)
+                console.echo(message=f"Opening ops file: {filename}")
                 self.openFile(filename)
 
     def createButtons(self):
@@ -1009,7 +1014,7 @@ class PCViewer(QMainWindow):
         filename = QFileDialog.getOpenFileName(self, "Open single-plane ops.npy file", filter="ops*.npy")
         # load ops in same folder
         if filename:
-            print(filename[0])
+            console.echo(message=f"Opening ops file: {filename[0]}")
             self.openFile(filename[0])
 
     def openFile(self, filename):
@@ -1026,8 +1031,11 @@ class PCViewer(QMainWindow):
                 self.tPC = np.zeros((1, self.PC.shape[1]))
             good = True
         except Exception as e:
-            print("ERROR: ops.npy incorrect / missing ops['regPC'] and ops['regDX']")
-            print(e)
+            console.echo(
+                message="ERROR: ops.npy incorrect / missing ops['regPC'] and ops['regDX']",
+                level=LogLevel.ERROR,
+            )
+            console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
             good = False
         if good:
             self.loaded = True

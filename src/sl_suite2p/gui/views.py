@@ -4,6 +4,7 @@ from qtpy import QtGui, QtCore
 import numpy as np
 from qtpy.QtGui import QPainter
 from qtpy.QtWidgets import QLabel, QStyle, QSlider, QPushButton, QApplication, QButtonGroup, QStyleOptionSlider
+from ataraxis_base_utilities import LogLevel, console
 
 from ..registration.register import create_enhanced_mean_image
 
@@ -106,7 +107,7 @@ def init_views(parent):
                         parent.ops["xrange"][0] : parent.ops["xrange"][1],
                     ] = mproj
                 except:
-                    print("maxproj not in combined view")
+                    console.echo(message="Max projection not in combined view", level=LogLevel.WARNING)
                 mimg = np.maximum(0, np.minimum(1, mimg))
             else:
                 mimg = 0.5 * np.ones((parent.Ly, parent.Lx), np.float32)

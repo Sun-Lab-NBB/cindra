@@ -5,85 +5,80 @@ from functools import lru_cache
 from numba import complex64, vectorize
 import numpy as np
 import torch
-from numpy.fft import ifftshift  # , fft2, ifft2
-from scipy.fft import next_fast_len  # , fft2, ifft2
+from numpy.fft import ifftshift
+from scipy.fft import next_fast_len
+from torch.fft import (
+    fft2 as torch_fft2,
+    ifft2 as torch_ifft2,
+)
 from scipy.ndimage import gaussian_filter1d
+from ataraxis_base_utilities import console
 
-try:
-    # use mkl_fft if installed
-    from mkl_fft import fft2, ifft2
+# Small epsilon value for numerical stability in normalization
+_eps = torch.complex(torch.tensor(1e-5), torch.tensor(0.0))
 
-    def convolve(mov: np.ndarray, img: np.ndarray) -> np.ndarray:
-        """Returns the 3D array "mov" convolved by a 2D array "img".
 
-        Parameters
-        ----------
-        mov: nImg x Ly x Lx
-            The frames to process
-        img: 2D array
-            The convolution kernel
+def fft2(data: np.ndarray, size: tuple[int, int] | None = None) -> np.ndarray:
+    """Compute 2D FFT over last two dimensions using PyTorch.
 
-        Returns:
-        -------
-        convolved_data: nImg x Ly x Lx
-        """
-        return ifft2(apply_dotnorm(fft2(mov), img))  # .astype(np.complex64)
-except:
-    try:
-        # pytorch > 1.7
-        from torch.fft import (
-            fft as torch_fft,
-            fft2 as torch_fft2,
-            ifft as torch_ifft,
-            ifft2 as torch_ifft2,
-        )
-    except:
-        # pytorch <= 1.7
-        raise ImportError("pytorch version > 1.7 required")
+    Parameters
+    ----------
+    data : np.ndarray
+        Input array to transform.
+    size : tuple[int, int] | None
+        Output shape (not used, kept for API compatibility).
 
-    eps = torch.complex(torch.tensor(1e-5), torch.tensor(0.0))
+    Returns:
+    -------
+    np.ndarray
+        FFT-transformed array.
+    """
+    data_torch = torch.from_numpy(data)
+    return torch_fft2(data_torch, dim=(-2, -1)).numpy()
 
-    def fft2(data, size=None):
-        """Compute fft2 over last two dimensions using pytorch
-        size (padding) is not used
-        """
-        data_torch = torch.from_numpy(data)
-        data_torch = torch_fft(data_torch, dim=-1)
-        data_torch = torch_fft(data_torch, dim=-2)
-        return data_torch.cpu().numpy()
 
-    def ifft2(data, size=None):
-        """Compute ifft2 over last two dimensions using pytorch
-        size (padding) is not used
-        """
-        data_torch = torch.from_numpy(data)
-        data_torch = torch_ifft(data_torch, dim=-1)
-        data_torch = torch_ifft(data_torch, dim=-2)
-        return data_torch.cpu().numpy()
+def ifft2(data: np.ndarray, size: tuple[int, int] | None = None) -> np.ndarray:
+    """Compute 2D inverse FFT over last two dimensions using PyTorch.
 
-    def convolve(mov: np.ndarray, img: np.ndarray) -> np.ndarray:
-        """Returns the 3D array "mov" convolved by a 2D array "img".
+    Parameters
+    ----------
+    data : np.ndarray
+        Input array to transform.
+    size : tuple[int, int] | None
+        Output shape (not used, kept for API compatibility).
 
-        Parameters
-        ----------
-        mov: nImg x Ly x Lx
-            The frames to process
-        img: 2D array
-            The convolution kernel
-        lcorr: int (optional)
-            amount to crop cross-correlation
+    Returns:
+    -------
+    np.ndarray
+        Inverse FFT-transformed array.
+    """
+    data_torch = torch.from_numpy(data)
+    return torch_ifft2(data_torch, dim=(-2, -1)).numpy()
 
-        Returns:
-        -------
-        convolved_data: nImg x Ly x Lx
-        """
-        mov_fft = torch.from_numpy(mov)
-        mov_fft = torch_fft2(mov_fft, dim=(-2, -1))
-        # mov_fft = torch_fft(torch_fft(mov_fft, dim=-1), dim=-2)
-        mov_fft /= eps + torch.abs(mov_fft)
-        mov_fft *= torch.from_numpy(img)
-        mov_fft = torch.real(torch_ifft2(mov_fft, dim=(-2, -1)))
-        return mov_fft.numpy()
+
+def convolve(mov: np.ndarray, img: np.ndarray) -> np.ndarray:
+    """Returns the 3D array "mov" convolved by a 2D array "img".
+
+    Uses phase correlation with normalization for motion correction.
+
+    Parameters
+    ----------
+    mov : np.ndarray
+        The frames to process (nImg x Ly x Lx).
+    img : np.ndarray
+        The convolution kernel (2D array).
+
+    Returns:
+    -------
+    np.ndarray
+        Convolved data (nImg x Ly x Lx).
+    """
+    mov_fft = torch.from_numpy(mov)
+    mov_fft = torch_fft2(mov_fft, dim=(-2, -1))
+    mov_fft /= _eps + torch.abs(mov_fft)
+    mov_fft *= torch.from_numpy(img)
+    mov_fft = torch.real(torch_ifft2(mov_fft, dim=(-2, -1)))
+    return mov_fft.numpy()
 
 
 @vectorize([complex64(complex64, complex64)], nopython=True, target="parallel")
@@ -222,7 +217,8 @@ def spatial_smooth(data: np.ndarray, window: int):
 
     """
     if window and window % 2:
-        raise ValueError("Filter window must be an even integer.")
+        message = f"Unable to apply spatial smoothing. Filter window must be an even integer, but got {window}."
+        console.error(message=message, error=ValueError)
     if data.ndim == 2:
         data = data[np.newaxis, :, :]
 

@@ -237,19 +237,22 @@ def get_pc_metrics(mov, ops, plane_number: int):
     # behavior.
     nPC = ops["reg_metric_n_pc"] if "reg_metric_n_pc" in ops else 10
 
-    console.echo(message=f"Computing {nPC} Principal Components (PCs) for plane {plane_number}...", level=LogLevel.INFO)
+    console.echo(
+        message=f"Computing {nPC} Principal Components (PCs) for plane {plane_number}...",
+        level=LogLevel.INFO,
+    )
     timer.reset()
     pclow, pchigh, sv, ops["tPC"] = pclowhigh(
         mov, nlowhigh=np.minimum(300, int(ops["nframes"] / 2)), nPC=nPC, random_state=None
     )
     console.echo(
-        message=f"Plane {plane_number} PCs: computed. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS
+        message=f"Plane {plane_number} PCs: computed. Time: {timer.elapsed}s.", level=LogLevel.SUCCESS
     )
 
     ops["regPC"] = np.concatenate((pclow[np.newaxis, :, :, :], pchigh[np.newaxis, :, :, :]), axis=0)
 
     console.echo(
-        message=f"Restring top and bottom of each PC to each-other for plane {plane_number}...", level=LogLevel.INFO
+        message=f"Registering top and bottom of each PC for plane {plane_number}...", level=LogLevel.INFO
     )
     timer.reset()
     ops["regDX"] = pc_register(
@@ -270,7 +273,7 @@ def get_pc_metrics(mov, ops, plane_number: int):
         spatial_taper=ops["spatial_taper"],
     )
     console.echo(
-        message=f"Plane {plane_number} PC registration: complete. Time taken: {timer.elapsed} seconds.",
+        message=f"Plane {plane_number} PC registration: complete. Time: {timer.elapsed}s.",
         level=LogLevel.SUCCESS,
     )
 
@@ -447,7 +450,10 @@ def get_flow_metrics(ops):
         else:
             flows0 = []
             norms0 = []
-            print("flows not computed, cv2 not installed / did not import correctly")
+            console.echo(
+                message="Optical flows not computed: cv2 (OpenCV) not installed or import failed.",
+                level=LogLevel.WARNING,
+            )
 
         flows = np.vstack((flows, flows0))
         norms = np.hstack((norms, norms0))
