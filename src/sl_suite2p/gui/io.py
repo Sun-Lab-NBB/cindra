@@ -8,6 +8,7 @@ import scipy.io
 from scipy.ndimage import gaussian_filter1d
 from qtpy.QtWidgets import QFileDialog, QMessageBox
 from scipy.interpolate import interp1d
+from ataraxis_base_utilities import LogLevel, console
 
 from . import masks, utils, views, traces, classgui, graphics
 from .. import io
@@ -82,7 +83,7 @@ def make_masks_and_enable_buttons(parent):
     masks.init_masks(parent)
     M = masks.draw_masks(parent)
     masks.plot_masks(parent, M)
-    print(f"time to draw and plot masks: {time.time() - tic: .4f} sec")
+    console.echo(message=f"Time to draw and plot masks: {time.time() - tic:.4f} sec")
     parent.lcell1.setText("%d" % (ncells - parent.iscell.sum()))
     parent.lcell0.setText("%d" % (parent.iscell.sum()))
     graphics.init_range(parent)
@@ -191,14 +192,14 @@ def load_dialog_folder(parent):
 
 
 def load_folder(parent):
-    print(parent.fname)
+    console.echo(message=f"Loading folder: {parent.fname}")
     save_folder = parent.fname
     plane_folders = [f.path for f in os.scandir(save_folder) if f.is_dir() and f.name[:5] == "plane"]
     stat_found = False
     if len(plane_folders) > 0:
         stat_found = all([os.path.isfile(os.path.join(f, "stat.npy")) for f in plane_folders])
     if not stat_found:
-        print("No processed planeX folders in folder")
+        console.echo(message="No processed planeX folders in folder", level=LogLevel.WARNING)
         return
 
     # create a combined folder to hold iscell and redcell
@@ -206,7 +207,7 @@ def load_folder(parent):
     parent.basename = os.path.join(parent.fname, "combined")
     load_to_GUI(parent, parent.basename, output)
     parent.loaded = True
-    print(parent.fname)
+    console.echo(message=f"Loaded folder: {parent.fname}", level=LogLevel.SUCCESS)
 
 
 def load_files(name):
@@ -215,7 +216,7 @@ def load_files(name):
         stat = np.load(name, allow_pickle=True)
         ypix = stat[0]["ypix"]
     except (ValueError, KeyError, OSError, RuntimeError, TypeError, NameError):
-        print("ERROR: this is not a stat.npy file :( (needs stat[n]['ypix']!)")
+        console.echo(message="ERROR: this is not a stat.npy file (needs stat[n]['ypix'])", level=LogLevel.ERROR)
         stat = None
     goodfolder = False
     if stat is not None:
@@ -225,24 +226,28 @@ def load_files(name):
             Fcell = np.load(basename + "/F.npy")
             Fneu = np.load(basename + "/Fneu.npy")
         except (ValueError, OSError, RuntimeError, TypeError, NameError):
-            print("ERROR: there are no fluorescence traces in this folder (F.npy/Fneu.npy)")
+            console.echo(
+                message="ERROR: no fluorescence traces in this folder (F.npy/Fneu.npy)", level=LogLevel.ERROR
+            )
             goodfolder = False
         try:
             Spks = np.load(basename + "/spks.npy")
         except (ValueError, OSError, RuntimeError, TypeError, NameError):
-            print("there are no spike deconvolved traces in this folder (spks.npy)")
+            console.echo(
+                message="No spike deconvolved traces in this folder (spks.npy)", level=LogLevel.WARNING
+            )
             goodfolder = False
         try:
             ops = np.load(basename + "/ops.npy", allow_pickle=True).item()
         except (ValueError, OSError, RuntimeError, TypeError, NameError):
-            print("ERROR: there is no ops file in this folder (ops.npy)")
+            console.echo(message="ERROR: there is no ops file in this folder (ops.npy)", level=LogLevel.ERROR)
             goodfolder = False
         try:
             iscell = np.load(basename + "/iscell.npy")
             probcell = iscell[:, 1]
             iscell = iscell[:, 0].astype("bool")
         except (ValueError, OSError, RuntimeError, TypeError, NameError):
-            print("no manual labels found (iscell.npy)")
+            console.echo(message="No manual labels found (iscell.npy)", level=LogLevel.WARNING)
             if goodfolder:
                 NN = Fcell.shape[0]
                 iscell = np.ones((NN,), "bool")
@@ -253,25 +258,25 @@ def load_files(name):
             redcell = redcell[:, 0].astype("bool")
             hasred = True
         except (ValueError, OSError, RuntimeError, TypeError, NameError):
-            print("no channel 2 labels found (redcell.npy)")
+            console.echo(message="No channel 2 labels found (redcell.npy)", level=LogLevel.WARNING)
             hasred = False
             if goodfolder:
                 NN = Fcell.shape[0]
                 redcell = np.zeros((NN,), "bool")
                 probredcell = np.zeros((NN,), np.float32)
     else:
-        print("incorrect file, not a stat.npy")
+        console.echo(message="Incorrect file, not a stat.npy", level=LogLevel.ERROR)
         return None
 
     if goodfolder:
         return stat, ops, Fcell, Fneu, Spks, iscell, probcell, redcell, probredcell, hasred
-    print("stat.npy found, but other files not in folder")
+    console.echo(message="stat.npy found, but other files not in folder", level=LogLevel.WARNING)
     return None
 
 
 def load_proc(parent):
     name = parent.fname
-    print(name)
+    console.echo(message=f"Loading proc file: {name}")
     basename, fname = os.path.split(name)
     output = load_files(name)
     if output is not None:
@@ -331,7 +336,7 @@ def load_behavior(parent):
             parent.bloaded = True
             beh_time = np.arange(0, parent.Fcell.shape[1])
     except (ValueError, KeyError, OSError, RuntimeError, TypeError, NameError):
-        print("ERROR: this is not a 1D array with length of data")
+        console.echo(message="ERROR: this is not a 1D array with length of data", level=LogLevel.ERROR)
     if parent.bloaded:
         beh -= beh.min()
         beh /= beh.max()
@@ -353,7 +358,7 @@ def load_behavior(parent):
             parent.VW.plot_traces()
         parent.show()
     else:
-        print("ERROR: this is not a 1D array with length of data")
+        console.echo(message="ERROR: this is not a 1D array with length of data", level=LogLevel.ERROR)
 
 
 def resample_frames(y, x, xt):
@@ -394,7 +399,7 @@ def save_iscell(parent):
 
 
 def save_mat(parent):
-    print("saving to mat")
+    console.echo(message="Saving to mat file...", level=LogLevel.SUCCESS)
     matpath = os.path.join(parent.basename, "Fall.mat")
     if "date_processed" in parent.ops:
         parent.ops["date_processed"] = []
@@ -415,7 +420,7 @@ def save_mat(parent):
 
 
 def save_merge(parent):
-    print("saving to NPY")
+    console.echo(message="Saving to NPY files...", level=LogLevel.SUCCESS)
     np.save(os.path.join(parent.basename, "ops.npy"), parent.ops)
     np.save(os.path.join(parent.basename, "stat.npy"), parent.stat)
     np.save(os.path.join(parent.basename, "F.npy"), parent.Fcell)
@@ -449,7 +454,7 @@ def load_custom_mask(parent):
             parent.colorbtns.button(b).setStyleSheet(parent.styleUnpressed)
             cloaded = True
     except (ValueError, KeyError, OSError, RuntimeError, TypeError, NameError):
-        print("ERROR: this is not a 1D array with length of data")
+        console.echo(message="ERROR: this is not a 1D array with length of data", level=LogLevel.ERROR)
     if cloaded:
         parent.custom_mask = mask
         masks.custom_masks(parent)
@@ -461,7 +466,7 @@ def load_custom_mask(parent):
         parent.colorbtns.button(b).press(parent, b)
         parent.show()
     else:
-        print("ERROR: this is not a 1D array with length of # of ROIs")
+        console.echo(message="ERROR: this is not a 1D array with length of # of ROIs", level=LogLevel.ERROR)
 
 
 def load_again(parent, Text):

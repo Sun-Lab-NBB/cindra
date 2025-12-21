@@ -57,7 +57,7 @@ dependencies = [
     "pyqt6>=6,<7",
     "pyqtgraph>=0,<1",
     "opencv-python-headless>=4,<5",
-    "xmltodict>=0,<1",
+    "xmltodict>=1,<2",
     "click>=8,<9",
     "scikit-image>=0,<1",
     "ipywidgets>=8,<9",
@@ -72,6 +72,7 @@ dependencies = [
     "intel-cmplr-lib-rt>=2025,<2026; sys_platform != 'darwin'",
     "sl-shared-assets>=6.1.0,<7",
     "sl-forgery>=1.0.0rc2,<2",
+    "torch>=2.0.0,<3",
 ]
 
 [project.urls]

@@ -12,15 +12,15 @@ import numpy as np
 from sl_shared_assets import (
     SessionData,
     SessionTypes,
-    ProcessingTracker,
     DatasetTrackers,
+    ProcessingTracker,
     AcquisitionSystems,
 )
 from ataraxis_base_utilities import LogLevel, console
 
 from .gui import run
-from .multi_day import run_s2p_multiday, resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
 from .pipeline import process_single_day
+from .multi_day import run_s2p_multiday, resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
 from .configuration import (
     MultiDayS2PConfiguration,
     SingleDayS2PConfiguration,
@@ -380,7 +380,7 @@ def run_md_pipeline(
     workers = ctx.obj["workers"]
     overrides = ctx.obj["overrides"]
 
-    ops_path = Path()  # This variable is precreated here to appease mypy
+    ops_path = Path()  # This variable is pre-created here to appease mypy
     try:
         # Loads configuration data from the provided file.
         config: MultiDayS2PConfiguration = MultiDayS2PConfiguration.from_yaml(file_path=input_path)
@@ -572,7 +572,7 @@ def run_md_pipeline_sl(
         # multi-day pipeline
         session_inputs.append(str(session_data.processed_data.mesoscope_data_path))
 
-    ops_path = Path()  # This variable is precreated here to appease mypy
+    ops_path = Path()  # This variable is pre-created here to appease mypy
     try:
         # Loads configuration data from the provided file.
         config: MultiDayS2PConfiguration = MultiDayS2PConfiguration.from_yaml(file_path=input_path)

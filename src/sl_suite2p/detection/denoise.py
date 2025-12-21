@@ -4,6 +4,7 @@ import time
 
 import numpy as np
 from sklearn.decomposition import PCA
+from ataraxis_base_utilities import LogLevel, console
 
 from ..registration.nonrigid import make_blocks, spatial_taper
 
@@ -34,6 +35,9 @@ def pca_denoise(mov: np.ndarray, block_size: list, n_comps_frac: float):
     for i in range(nblocks):
         reconstruction[:, yblock[i][0] : yblock[i][-1], xblock[i][0] : xblock[i][-1]] += block_re[i]
     reconstruction /= norm
-    print("Binned movie denoised (for cell detection only) in %0.2f sec." % (time.time() - t0))
+    console.echo(
+        message=f"PCA denoising of binned movie (for cell detection): complete. Time taken: {time.time() - t0:.2f} seconds.",
+        level=LogLevel.SUCCESS,
+    )
     reconstruction += mov_mean
     return reconstruction
