@@ -8,6 +8,7 @@ import pyqtgraph as pg
 import matplotlib.cm
 from qtpy.QtWidgets import QLabel, QComboBox, QLineEdit, QPushButton, QButtonGroup
 from matplotlib.colors import hsv_to_rgb
+from ataraxis_base_utilities import LogLevel, console
 
 from sl_suite2p.gui import merge
 
@@ -102,7 +103,7 @@ def cmap_change(parent):
     index = parent.CmapChooser.currentIndex()
     parent.ops_plot["colormap"] = parent.CmapChooser.itemText(index)
     if parent.loaded:
-        print("colormap changed to %s, loading..." % parent.ops_plot["colormap"])
+        console.echo(message=f"Colormap changed to {parent.ops_plot['colormap']}, loading...")
         istat = parent.colors["istat"]
         for c in range(1, istat.shape[0]):
             parent.colors["cols"][c] = istat_transform(istat[c], parent.ops_plot["colormap"])
@@ -128,7 +129,7 @@ def make_colors(parent):
     if "mean_image_channel_2" in parent.ops:
         allcols = allcols / 1.4
         allcols = allcols + 0.1
-        print(f"number of red cells: {parent.redcell.sum()}")
+        console.echo(message=f"Number of red cells: {parent.redcell.sum()}")
         parent.randcols = allcols.copy()
         allcols[parent.redcell] = 0
     else:
@@ -187,7 +188,7 @@ def flip_plot(parent):
         if Path(parent.basename).joinpath("plane0", "iscell.npy").exists():
             parent.basename = str(Path(parent.basename).joinpath("plane0"))
         else:
-            raise FileNotFoundError("Unable to find `iscell.npy` file")
+            console.error(message="Unable to find `iscell.npy` file.", error=FileNotFoundError)
 
     io.save_iscell(parent)
 
@@ -257,7 +258,7 @@ def init_masks(parent):
             if "imerge" in stat[n]:
                 for k in stat[n]["imerge"]:
                     iignore[k] = True
-                    print(f"ROI {k} in merged ROI")
+                    console.echo(message=f"ROI {k} in merged ROI")
             xpix = stat[n]["xpix"]
             lam = stat[n]["lam"]
             lam = lam / lam.sum()
@@ -591,7 +592,7 @@ def istat_transform(istat, colormap="hsv"):
             icols *= 255
             icols = icols.astype(np.uint8)
         except:
-            print("bad colormap, using hsv")
+            console.echo(message="Bad colormap, using hsv", level=LogLevel.WARNING)
             icols = istat_hsv(istat)
     return icols
 

@@ -402,7 +402,8 @@ def compute_reference_and_register_frames(
         if ops["do_bidiphase"] and ops["bidiphase"] == 0 and not ops["bidi_corrected"]:
             bidiphase = bidi.compute(frames)
             console.echo(
-                f"Plane {plane_number} estimated bidiphase offset from data: {bidiphase} pixels.", level=LogLevel.INFO
+                f"Plane {plane_number} estimated bidiphase offset from data: {bidiphase} pixels.",
+                level=LogLevel.INFO,
             )
             ops["bidiphase"] = bidiphase
             # shift frames
@@ -410,11 +411,13 @@ def compute_reference_and_register_frames(
                 bidi.shift(frames, int(ops["bidiphase"]))
 
         if refImg is None:
-            console.echo(f"Computing plane {plane_number} reference frame...", level=LogLevel.INFO)
+            console.echo(
+                f"Computing plane {plane_number} reference frame...", level=LogLevel.INFO
+            )
             timer.reset()
             refImg = compute_reference(frames, ops=ops)
             console.echo(
-                f"Plane {plane_number} reference frame: computed. Time taken: {timer.elapsed} seconds.",
+                f"Plane {plane_number} reference frame: computed. Time: {timer.elapsed}s.",
                 level=LogLevel.SUCCESS,
             )
 
@@ -423,7 +426,9 @@ def compute_reference_and_register_frames(
     else:
         nZ = 1
 
-    console.echo(f"Generated a total of {nZ} reference frames for plane {plane_number}.", level=LogLevel.INFO)
+    console.echo(
+        f"Generated a total of {nZ} reference frames for plane {plane_number}.", level=LogLevel.INFO
+    )
 
     # normalize reference image
     refImg_orig = refImg.copy()
@@ -450,7 +455,9 @@ def compute_reference_and_register_frames(
         n_frames = min(n_frames, ops["frames_include"])
 
     timer.reset()
-    console.echo(f"Computing plane {plane_number} frame registration offsets for channel 1...", level=LogLevel.INFO)
+    console.echo(
+        f"Computing plane {plane_number} frame registration offsets for channel 1...", level=LogLevel.INFO
+    )
 
     # Uses tqdm progress bar when sessions are processed sequentially.
     for batch_number in tqdm(
@@ -488,7 +495,7 @@ def compute_reference_and_register_frames(
             io.save_tiff(frames=frames, file_path=file_name)
 
     console.echo(
-        f"Plane {plane_number} channel 1 frame registration offsets: computed. Time taken: {timer.elapsed} seconds.",
+        f"Plane {plane_number} channel 1 frame registration offsets: computed. Time: {timer.elapsed}s.",
         level=LogLevel.SUCCESS,
     )
 
@@ -512,16 +519,20 @@ def shift_frames_and_write(
     """Shift frames for alternate channel in f_alt_in and write to f_alt_out if not None (else write to f_alt_in)"""
     n_frames, Ly, Lx = f_alt_in.shape
     if yoff is None or xoff is None:
-        raise ValueError("no rigid registration offsets provided")
+        message = "Unable to shift and write frames. No rigid registration offsets provided (yoff or xoff is None)."
+        console.error(message=message, error=ValueError)
     if yoff.shape[0] != n_frames or xoff.shape[0] != n_frames:
-        raise ValueError("rigid registration offsets are not the same size as input frames")
+        message = f"Unable to shift and write frames. Rigid registration offsets size mismatch: expected {n_frames} frames, but got yoff={yoff.shape[0]}, xoff={xoff.shape[0]}."
+        console.error(message=message, error=ValueError)
     # Overwrite blocks if nonrigid registration is activated
     blocks = None
     if ops.get("nonrigid"):
         if yoff1 is None or xoff1 is None:
-            raise ValueError("nonrigid registration is activated but no nonrigid shifts provided")
+            message = "Unable to shift and write frames. Non-rigid registration is enabled but no non-rigid offsets provided (yoff1 or xoff1 is None)."
+            console.error(message=message, error=ValueError)
         if yoff1.shape[0] != n_frames or xoff1.shape[0] != n_frames:
-            raise ValueError("nonrigid registration offsets are not the same size as input frames")
+            message = f"Unable to shift and write frames. Non-rigid registration offsets size mismatch: expected {n_frames} frames, but got yoff1={yoff1.shape[0]}, xoff1={xoff1.shape[0]}."
+            console.error(message=message, error=ValueError)
 
         blocks = nonrigid.make_blocks(Ly=Ly, Lx=Lx, block_size=ops["block_size"])
 
@@ -531,7 +542,9 @@ def shift_frames_and_write(
     mean_img = np.zeros((Ly, Lx), "float32")
     batch_size = ops["batch_size"]
     timer = PrecisionTimer("s")
-    console.echo(f"Computing plane {plane_number} frame registration offsets for channel 2...", level=LogLevel.INFO)
+    console.echo(
+        f"Computing plane {plane_number} frame registration offsets for channel 2...", level=LogLevel.INFO
+    )
     timer.reset()
     for batch_number in tqdm(
         np.arange(0, n_frames, batch_size),
@@ -566,7 +579,7 @@ def shift_frames_and_write(
             )
             io.save_tiff(frames=frames, file_path=file_name)
     console.echo(
-        f"Plane {plane_number} channel 2 frame registration offsets: computed. Time taken: {timer.elapsed} seconds.",
+        f"Plane {plane_number} channel 2 frame registration offsets: computed. Time: {timer.elapsed}s.",
         level=LogLevel.SUCCESS,
     )
 
@@ -672,10 +685,14 @@ def registration_wrapper(
     n_frames, Ly, Lx = f_align_in.shape
     if f_alt_in is not None and f_alt_in.shape[0] == f_align_in.shape[0]:
         nchannels = 2
-        console.echo(message=f"Registering two channels for plane {plane_number}...", level=LogLevel.INFO)
+        console.echo(
+            message=f"Registering two channels for plane {plane_number}...", level=LogLevel.INFO
+        )
     else:
         nchannels = 1
-        console.echo(message=f"Registering a single channel for plane {plane_number}...", level=LogLevel.INFO)
+        console.echo(
+            message=f"Registering a single channel for plane {plane_number}...", level=LogLevel.INFO
+        )
 
     outputs = compute_reference_and_register_frames(
         f_align_in, plane_number=plane_number, f_align_out=f_align_out, refImg=refImg, ops=ops
@@ -718,14 +735,17 @@ def registration_wrapper(
         badfrfile = path.abspath(path.join(ops["data_path"][0], "bad_frames.npy"))
         # Check if badframes file exists
         if path.isfile(badfrfile):
-            message = f"Plane {plane_number} bad frames file: exists. File path: {badfrfile}."
-            console.echo(message=message, level=LogLevel.WARNING)
+            console.echo(
+                message=f"Plane {plane_number} bad frames file: exists. Path: {badfrfile}.",
+                level=LogLevel.WARNING,
+            )
             bf_indices = np.load(badfrfile)
             bf_indices = bf_indices.flatten().astype(int)
             # Set indices of badframes to true
             badframes[bf_indices] = True
-            message = f"Plane {plane_number} bad frames count: {badframes.sum()}."
-            console.echo(message=message, level=LogLevel.WARNING)
+            console.echo(
+                message=f"Plane {plane_number} bad frames count: {badframes.sum()}.", level=LogLevel.WARNING
+            )
 
     # return frames which fall outside range
     badframes, yrange, xrange = compute_crop(

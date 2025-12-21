@@ -3,6 +3,7 @@
 import numpy as np
 from scipy.ndimage import gaussian_filter
 from sklearn.linear_model import LogisticRegression
+from ataraxis_base_utilities import LogLevel, console
 
 
 class Classifier:
@@ -57,7 +58,10 @@ class Classifier:
             self.classfile = classfile
             self._fit()
         except (ValueError, KeyError, OSError, RuntimeError, TypeError, NameError):
-            print("ERROR: incorrect classifier file")
+            console.echo(
+                message=f"Failed to load classifier file '{classfile}'. The file may be corrupted or in an incorrect format.",
+                level=LogLevel.ERROR,
+            )
             self.loaded = False
 
     def run(self, stat, p_threshold: float = 0.5) -> np.ndarray:

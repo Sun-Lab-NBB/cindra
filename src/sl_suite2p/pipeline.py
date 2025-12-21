@@ -7,12 +7,11 @@ from typing import Any
 from pathlib import Path
 
 import numpy as np
+from sl_shared_assets import SessionData, SessionTypes, ProcessingTracker, AcquisitionSystems, ProcessingTrackers
 from ataraxis_base_utilities import LogLevel, console
-from sl_shared_assets import SessionData, ProcessingTracker, ProcessingTrackers, SessionTypes, AcquisitionSystems
 
-from .single_day import resolve_ops, resolve_binaries, process_plane, combine_planes
+from .single_day import resolve_ops, process_plane, combine_planes, resolve_binaries
 from .configuration import SingleDayS2PConfiguration
-
 
 # Defines the session types and acquisition systems currently supported by the processing pipeline.
 _supported_systems = tuple(AcquisitionSystems)
@@ -66,9 +65,7 @@ def _initialize_single_day_processing_tracker(
     session = SessionData.load(session_path=session_path)
 
     # Initializes the processing tracker for this pipeline.
-    tracker = ProcessingTracker(
-        file_path=session.tracking_data.tracking_data_path.joinpath(ProcessingTrackers.SUITE2P)
-    )
+    tracker = ProcessingTracker(file_path=session.tracking_data.tracking_data_path.joinpath(ProcessingTrackers.SUITE2P))
 
     # Generates job IDs for each requested job.
     job_ids = _generate_single_day_job_ids(session_path=session_path, job_names=job_names)
@@ -252,7 +249,6 @@ def process_single_day(
 
     # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
-
         # REMOTE mode: Finds the job name matching the provided job_id.
         all_job_ids = _generate_single_day_job_ids(session_path=session_path, job_names=list(SingleDayJobNames))
         id_to_name: dict[str, str] = {v: k for k, v in all_job_ids.items()}
@@ -271,15 +267,17 @@ def process_single_day(
             ops_path=ops_path, job_name=job_name, job_id=job_id, target_plane=target_plane, tracker=tracker
         )
     else:
-
         # LOCAL mode: Initializes the tracker and runs all requested jobs.
         console.echo(message=f"Initializing the processing tracker for {len(jobs_to_run)} job(s)...")
         job_ids = _initialize_single_day_processing_tracker(session_path=session_path, job_names=jobs_to_run)
 
         for job_name in jobs_to_run:
             _execute_single_day_job(
-                ops_path=ops_path, job_name=job_name, job_id=job_ids[job_name], target_plane=target_plane,
-                tracker=tracker
+                ops_path=ops_path,
+                job_name=job_name,
+                job_id=job_ids[job_name],
+                target_plane=target_plane,
+                tracker=tracker,
             )
 
     console.echo(message="All processing jobs completed successfully.", level=LogLevel.SUCCESS)

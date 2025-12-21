@@ -11,6 +11,7 @@ import pyqtgraph as pg
 from scipy.ndimage import rotate
 from qtpy.QtWidgets import QLabel, QWidget, QLineEdit, QGridLayout, QMainWindow, QMessageBox, QPushButton, QButtonGroup
 from matplotlib.colors import hsv_to_rgb
+from ataraxis_base_utilities import LogLevel, console
 
 from . import io
 from ..extraction import masks, oasis, preprocess, extract_traces_from_masks
@@ -37,7 +38,9 @@ def masks_and_traces(ops, stat_manual, stat_orig):
     )
     manual_roi_stats = stat_all[: len(stat_manual)]
     manual_cell_masks = cell_masks[: len(stat_manual)]
-    print("Masks made in %0.2f sec." % (time.time() - t0))
+    console.echo(
+        message=f"Manual ROI masks: created in {time.time() - t0:.2f} seconds.", level=LogLevel.SUCCESS
+    )
 
     F, Fneu, F_chan2, Fneu_chan2 = extract_traces_from_masks(ops, manual_cell_masks, manual_neuropil_masks)
 
@@ -202,7 +205,7 @@ class ROIDraw(QMainWindow):
         self.img0.setImage(self.masked_images[:, :, :, 0])
 
     def closeEvent(self, event):
-        print("closing GUI")
+        console.echo(message="Closing manual ROI drawing GUI...")
         # if user didn"t click "save & quit" button
         if not self.saveGUI:
             self.check_proc(event)
@@ -211,7 +214,8 @@ class ROIDraw(QMainWindow):
         cproc = QMessageBox.question(
             self,
             "PROC",
-            "Would you like to save traces before closing? (if you havent extracted the traces, click Cancel and extract!)",
+            "Would you like to save traces before closing? "
+            "(if you havent extracted the traces, click Cancel and extract!)",
             QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
         )
         if cproc == QMessageBox.Yes:
@@ -221,14 +225,14 @@ class ROIDraw(QMainWindow):
 
     def close_GUI(self):
         # Replace old stat file
-        print("Saving old stat")
+        console.echo(message="Saving original stat file...")
         np.save(os.path.join(self.parent.basename, "stat_orig.npy"), self.parent.stat)
 
         # Save iscell
-        print("Num cells", self.nROIs)
+        console.echo(message=f"Number of manually drawn ROIs: {self.nROIs}")
 
         # Append new stat file with old and save
-        print("Saving new stat")
+        console.echo(message="Saving new combined stat file...")
         stat_all = self.new_stat.copy()
         for n in range(len(self.parent.stat)):
             stat_all.append(self.parent.stat[n])
@@ -262,7 +266,12 @@ class ROIDraw(QMainWindow):
             np.save(os.path.join(self.parent.basename, "Fneu_chan2.npy"), Fneu_chan2)
             np.save(os.path.join(self.parent.basename, "redcell.npy"), new_redcell)
 
-        print(np.shape(Fcell), np.shape(Fneu), np.shape(Spks), np.shape(new_iscell), np.shape(stat_all))
+        console.echo(
+            message=(
+                f"Saved data shapes - Fcell: {np.shape(Fcell)}, Fneu: {np.shape(Fneu)}, "
+                f"Spks: {np.shape(Spks)}, iscell: {np.shape(new_iscell)}, stat: {np.shape(stat_all)}"
+            )
+        )
 
         # close GUI
         io.load_proc(self.parent)
@@ -336,7 +345,6 @@ class ROIDraw(QMainWindow):
                 x = self.p1.vb.mapSceneToView(pos).x()
                 y = self.p1.vb.mapSceneToView(pos).y()
                 self.ineuron = self.nROIs - y + 1
-                # print(self.ineuron)
 
     def keyPressEvent(self, event):
         if event.modifiers() != QtCore.Qt.AltModifier and event.modifiers() != QtCore.Qt.ShiftModifier:
@@ -361,7 +369,7 @@ class ROIDraw(QMainWindow):
         self.ROIs.append(sROI(iROI=self.nROIs, parent=self, pos=pos, diameter=int(self.diam.text())))
         self.ROIs[-1].position(self)
         self.nROIs += 1
-        print("%d cells added to manual GUI" % self.nROIs)
+        console.echo(message=f"{self.nROIs} cells added to manual ROI GUI.")
         self.closeGUI.setEnabled(False)
 
     def plot_clicked(self, event):

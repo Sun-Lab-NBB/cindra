@@ -145,8 +145,8 @@ def _register_plane(
             timer.reset()
 
             message = (
-                f"Generating plane {plane_number} mean image that excludes bad frames detected during first "
-                f"registration step..."
+                f"Generating plane {plane_number} mean image excluding bad frames "
+                f"from first registration step..."
             )
             console.echo(message=message, level=LogLevel.INFO)
 
@@ -770,7 +770,9 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
 
     # Aborts the processing early if the input plane is the flyback plane.
     if plane_index in ops["ignore_flyback"]:
-        console.echo(message=f"Skipping processing the flyback plane {plane_index}.", level=LogLevel.SUCCESS)
+        console.echo(
+        message=f"Skipping processing the flyback plane {plane_index}.", level=LogLevel.SUCCESS
+    )
         return
 
     # Loads the plane-specific settings 'ops' file.
@@ -929,10 +931,7 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
             ops=ops, plane_number=plane_index, frames_path=frames_path, frames_channel_2_path=frames_channel_2_path
         )
     else:
-        message = (
-            f"Skipping plane {plane_index} cell detection, as it is disabled via the 'roidetect' "
-            f"configuration parameter."
-        )
+        message = f"Skipping plane {plane_index} cell detection (disabled via 'roidetect' parameter)."
         console.echo(message=message, level=LogLevel.WARNING)
 
     # Appends the overall plane processing time to the 'ops' file.
@@ -945,7 +944,9 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
     # If suite2p runs on a machine with a fast processing disk and a slow storage disk and is configured to move
     # binary files after processing, moves the files to the storage disk.
     if ops.get("move_bin") and ops["save_path"] != ops["fast_disk"]:
-        console.echo(message=f"Moving plane {plane_index} binary files to {ops['save_path']}...", level=LogLevel.INFO)
+        console.echo(
+            message=f"Moving plane {plane_index} binary files to {ops['save_path']}...", level=LogLevel.INFO
+        )
 
         # Registered binary file for channel 1
         shutil.move(ops["reg_file"], Path(ops["save_path"]).joinpath("data.bin"))

@@ -23,6 +23,7 @@ from qtpy.QtWidgets import (
     QButtonGroup,
 )
 from cellpose.models import model_path
+from ataraxis_base_utilities import LogLevel, console
 
 from . import io
 from ..configuration import generate_default_ops
@@ -67,10 +68,12 @@ class RunWindow(QDialog):
         self.ops_path = os.fspath(pathlib.Path.home().joinpath(".suite2p").joinpath("ops").absolute())
         try:
             self.reset_ops()
-            print("loaded default ops")
+            console.echo(message="Loaded default ops", level=LogLevel.SUCCESS)
         except Exception as e:
-            print("ERROR: %s" % e)
-            print("could not load default ops, using built-in ops settings")
+            console.echo(message=f"ERROR: {e}", level=LogLevel.ERROR)
+            console.echo(
+                message="Could not load default ops, using built-in ops settings", level=LogLevel.WARNING
+            )
             self.ops = generate_default_ops()
 
         # remove any remaining ops files
@@ -498,10 +501,10 @@ class RunWindow(QDialog):
         shutil.copy(os.path.join(self.ops_path, "ops%d.npy" % self.f), ops_file)
         shutil.copy(os.path.join(self.ops_path, "db%d.npy" % self.f), db_file)
         self.db = np.load(db_file, allow_pickle=True).item()
-        print(self.db)
-        print("Running suite2p with command:")
+        console.echo(message=f"Parameter overrides: {self.db}")
+        console.echo(message="Running suite2p with command:")
         cmd = f"-u -W ignore -m suite2p --ops {ops_file} --db {db_file}"
-        print("python " + cmd)
+        console.echo(message=f"python {cmd}")
         self.process.start(sys.executable, cmd.split(" "))
 
         # self.process.start('python -u -W ignore -m suite2p --ops "%s" --db "%s"' %
@@ -539,7 +542,9 @@ class RunWindow(QDialog):
                 else:
                     cursor.insertText("not opening plane in GUI (no ROIs)\n")
             else:
-                cursor.insertText("BATCH MODE: %d more recordings remaining \n" % (len(self.opslist) - self.f - 1))
+                cursor.insertText(
+                    "BATCH MODE: %d more recordings remaining \n" % (len(self.opslist) - self.f - 1)
+                )
                 self.f += 1
                 if self.f < len(self.opslist):
                     self.run_S2P()
@@ -558,7 +563,7 @@ class RunWindow(QDialog):
         self.save_text()
         if name:
             np.save(name, self.ops)
-            print("saved current settings to %s" % (name))
+            console.echo(message=f"Saved current settings to {name}", level=LogLevel.SUCCESS)
 
     def save_default_ops(self):
         name = self.opsfile
@@ -567,7 +572,7 @@ class RunWindow(QDialog):
         self.save_text()
         np.save(name, self.ops)
         self.ops = ops
-        print("saved current settings in GUI as default ops")
+        console.echo(message="Saved current settings in GUI as default ops", level=LogLevel.SUCCESS)
 
     def revert_default_ops(self):
         name = self.opsfile
@@ -575,7 +580,7 @@ class RunWindow(QDialog):
         self.ops = generate_default_ops()
         np.save(name, self.ops)
         self.load_ops(name)
-        print("reverted default ops to built-in ops")
+        console.echo(message="Reverted default ops to built-in ops", level=LogLevel.SUCCESS)
 
     def save_text(self):
         for k in range(len(self.editlist)):
@@ -583,7 +588,7 @@ class RunWindow(QDialog):
             self.ops[key] = self.editlist[k].get_text(self.intkeys, self.boolkeys, self.stringkeys)
 
     def load_ops(self, name=None):
-        print("loading ops")
+        console.echo(message="Loading ops...")
         if not (isinstance(name, str) and len(name) > 0):
             name = QFileDialog.getOpenFileName(self, "Open ops file (npy or json)")
             name = name[0]
@@ -640,11 +645,11 @@ class RunWindow(QDialog):
                     self.cleanLabel.setText(ops["clean_script"])
 
             except Exception as e:
-                print("could not load ops file")
-                print(e)
+                console.echo(message="Could not load ops file", level=LogLevel.ERROR)
+                console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
 
     def load_db(self):
-        print("loading db")
+        console.echo(message="Loading parameter overrides...")
 
     def stdout_write(self):
         cursor = self.textEdit.textCursor()
@@ -698,7 +703,7 @@ class RunWindow(QDialog):
 
     def parse_inputformat(self):
         inputformat = self.inputformat.currentText()
-        print("Input format: " + inputformat)
+        console.echo(message=f"Input format: {inputformat}")
         if inputformat == "h5":
             # replace functionality of "old" button
             self.get_h5py()
@@ -790,8 +795,8 @@ class OpsButton(QPushButton):
                     parent.editlist[parent.keylist.index(key)].set_text(ops)
                     parent.ops[key] = ops[key]
         except Exception as e:
-            print("could not load ops file")
-            print(e)
+            console.echo(message="Could not load ops file", level=LogLevel.ERROR)
+            console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
 
 
 # custom vertical label
