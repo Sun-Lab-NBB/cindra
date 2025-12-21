@@ -24,6 +24,7 @@ from qtpy.QtWidgets import (
     QStyleOptionSlider,
 )
 from rastermap.rastermap import Rastermap
+from ataraxis_base_utilities import LogLevel, console
 
 from . import masks
 
@@ -681,14 +682,14 @@ class VisWindow(QMainWindow):
             # np.save(os.path.join(basename, "embedding.npy"), proc)
             self.activate()
         except Exception as e:
-            print("Rastermap issue: Interrupted by error (not finished)\n")
-            print(e)
+            console.echo(message="Rastermap issue: Interrupted by error (not finished)", level=LogLevel.ERROR)
+            console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
         # self.process.start("python -u -W ignore -m rastermap --S %s --ops %s"%
         #                    (spath, opspath))
 
     def finished(self):
         if self.finish and not self.error:
-            print("raster map computed in %3.2f s" % (time.time() - self.tic))
+            console.echo(message=f"Raster map computed in {time.time() - self.tic:.2f} s", level=LogLevel.SUCCESS)
             self.activate()
         else:
             sys.stdout.write("Interrupted by error (not finished)\n")
@@ -714,7 +715,7 @@ class VisWindow(QMainWindow):
             self.parent.ichosen = self.parent.imerge[0]
             self.parent.update_plot()
         else:
-            print("too many cells selected")
+            console.echo(message="Too many cells selected (maximum: 5000)", level=LogLevel.WARNING)
 
     def sort_time(self):
         if self.raster:

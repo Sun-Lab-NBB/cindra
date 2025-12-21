@@ -10,6 +10,7 @@ from scipy.ndimage import find_objects, gaussian_filter
 from cellpose.utils import fill_holes_and_remove_small_masks
 from cellpose.models import CellposeModel
 from cellpose.transforms import normalize99, resize_image
+from ataraxis_base_utilities import LogLevel, console
 
 from . import utils
 
@@ -29,7 +30,7 @@ def mask_centers(masks):
 
 def patch_detect(patches, diam):
     """Anatomical detection of masks from top active frames for putative cell"""
-    print("refining masks using cellpose")
+    console.echo(message="Refining masks using Cellpose...", level=LogLevel.INFO)
     npatches = len(patches)
     ly = patches[0].shape[0]
     # CHANGED: Use CellposeModel instead of Cellpose (which was removed)
@@ -84,7 +85,12 @@ def patch_detect(patches, diam):
                 pmasks[j + i] = mask_resized.astype(np.uint16)
 
         if j % (5 * batch_size) == 0:
-            print("%d / %d masks created in %0.2fs" % (batch_end, npatches, time.time() - tic))
+            console.echo(
+                message=(
+                    f"Cellpose mask refinement progress: {batch_end}/{npatches} masks created "
+                    f"({time.time() - tic:.2f} seconds elapsed)."
+                )
+            )
 
     return pmasks
 
@@ -137,7 +143,13 @@ def roi_detect(mproj, diameter=None, cellprob_threshold=0.0, flow_threshold=1.5,
     masks = masks.reshape(shape)
     centers, mask_diams = mask_centers(masks)
     median_diam = np.median(mask_diams)
-    print(">>>> %d masks detected, median diameter = %0.2f " % (masks.max(), median_diam))
+    console.echo(
+        message=(
+            f"Cellpose ROI detection: {masks.max()} masks detected "
+            f"with median diameter = {median_diam:.2f} pixels."
+        ),
+        level=LogLevel.SUCCESS,
+    )
     return masks, centers, median_diam, mask_diams.astype(np.int32)
 
 
@@ -191,7 +203,12 @@ def select_rois(ops: dict[str, Any], mov: np.ndarray, diameter=None):
             img = ops["enhanced_mean_image"][ops["yrange"][0] : ops["yrange"][1], ops["xrange"][0] : ops["xrange"][1]]
         else:
             img = mean_img
-            print("no enhanced mean image, using mean image instead")
+            console.echo(
+                message=(
+                    "Enhanced mean image not available. Using mean image for anatomical detection instead."
+                ),
+                level=LogLevel.WARNING,
+            )
         weights = 0.1 + np.clip(
             (mean_img - np.percentile(mean_img, 1)) / (np.percentile(mean_img, 99) - np.percentile(mean_img, 1)), 0, 1
         )
@@ -208,11 +225,20 @@ def select_rois(ops: dict[str, Any], mov: np.ndarray, diameter=None):
             rescale = 1.0
             diameter = [diameter, diameter]
         if diameter[1] > 0:
-            print("!NOTE! diameter set to %0.2f for cell detection with cellpose" % diameter[1])
+            console.echo(
+                message=f"Cellpose cell detection will use fixed diameter of {diameter[1]:.2f} pixels.",
+                level=LogLevel.INFO,
+            )
         else:
-            print("!NOTE! diameter set to 0 or None, diameter will be estimated by cellpose")
+            console.echo(
+                message="Cellpose cell detection will auto-estimate diameter (diameter set to 0 or None).",
+                level=LogLevel.INFO,
+            )
     else:
-        print("!NOTE! diameter set to 0 or None, diameter will be estimated by cellpose")
+        console.echo(
+            message="Cellpose cell detection will auto-estimate diameter (diameter set to 0 or None).",
+            level=LogLevel.INFO,
+        )
 
     if ops.get("spatial_hp_cp", 0):
         img = np.clip(normalize99(img), 0, 1)
@@ -229,7 +255,10 @@ def select_rois(ops: dict[str, Any], mov: np.ndarray, diameter=None):
         masks = cv2.resize(masks, (Lxc, Lyc), interpolation=cv2.INTER_NEAREST)
         img = cv2.resize(img, (Lxc, Lyc))
     stats = masks_to_stats(masks, weights)
-    print("Detected %d ROIs, %0.2f sec" % (len(stats), time.time() - t0))
+    console.echo(
+        message=f"Anatomical ROI detection: detected {len(stats)} ROIs in {time.time() - t0:.2f} seconds.",
+        level=LogLevel.SUCCESS,
+    )
 
     new_ops = {
         "diameter": median_diam,

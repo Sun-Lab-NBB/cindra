@@ -7,6 +7,7 @@ import numpy as np
 from scipy import stats
 import pyqtgraph as pg
 from qtpy.QtWidgets import QLabel, QDialog, QWidget, QLineEdit, QGridLayout, QMessageBox, QPushButton
+from ataraxis_base_utilities import LogLevel, console
 
 from . import io, masks, utils
 from ..detection.stats import roi_stats, median_pix
@@ -39,12 +40,12 @@ def do_merge(parent):
         merge_activity_masks(parent)
         parent.merged.append(parent.imerge)
         parent.update_plot()
-        print(parent.merged)
-        print("merged ROIs")
+        console.echo(message=f"Merged ROIs list: {parent.merged}")
+        console.echo(message="ROIs merged successfully.", level=LogLevel.SUCCESS)
 
 
 def merge_activity_masks(parent):
-    print("merging activity... this may take some time")
+    console.echo(message="Merging ROI activity... this may take some time.")
     i0 = int(1 - parent.iscell[parent.ichosen])
     ypix = np.zeros((0,), np.int32)
     xpix = np.zeros((0,), np.int32)
@@ -248,7 +249,7 @@ class MergeWindow(QDialog):
             self.keylist.append(lkey)
             k += 1
 
-        print("creating merge window... this may take some time")
+        console.echo(message="Creating merge window... this may take some time.")
         self.CC = np.matmul(parent.Fbin[parent.iscell], parent.Fbin[parent.iscell].T) / parent.Fbin.shape[-1]
         self.CC /= (
             np.matmul(parent.Fstd[parent.iscell][:, np.newaxis], parent.Fstd[parent.iscell][np.newaxis, :]) + 1e-3
@@ -273,11 +274,11 @@ class MergeWindow(QDialog):
 
         parent.ichosen = parent.stat.size - 1
         parent.imerge = [parent.ichosen]
-        print("ROIs merged: %s" % parent.stat[parent.ichosen]["imerge"])
+        console.echo(message=f"ROIs merged: {parent.stat[parent.ichosen]['imerge']}", level=LogLevel.SUCCESS)
         self.compute_merge_list(parent)
 
     def compute_merge_list(self, parent):
-        print("computing automated merge suggestions...")
+        console.echo(message="Computing automated merge suggestions...")
         for k, key in enumerate(self.keylist):
             self.ops[key] = self.editlist[k].get_text()
         goodind = []

@@ -20,16 +20,11 @@ from functools import partial
 from ataraxis_base_utilities import console
 
 from .multiday import show_images_with_masks
+from .pipeline import SingleDayJobNames, process_single_day
 from .detection import ROI
 from .multi_day import run_s2p_multiday, resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
 from .single_day import run_s2p, resolve_ops, process_plane, combine_planes, resolve_binaries
 from .configuration import generate_default_ops, generate_default_multiday_ops
-
-# Overloads the 'print' method to ensure it flushes the data as soon as it is written. This is a temporary workaround
-# to make 'old' suite2p code work with the sun-lab changes. In the future, all 'print' calls will be replaced with
-# ataraxis 'console' calls.
-# noinspection PyShadowingBuiltins
-print = partial(print, flush=True)
 
 # Ensures console output is enabled whenever the suite2p library is imported. In sl-suite2p, the 'Console' class is
 # used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal
@@ -38,12 +33,14 @@ if not console.enabled:
     console.enable()
 
 __all__ = [
+    "SingleDayJobNames",
     "combine_planes",
     "discover_multiday_cells",
     "extract_multiday_fluorescence",
     "generate_default_multiday_ops",
     "generate_default_ops",
     "process_plane",
+    "process_single_day",
     "resolve_binaries",
     "resolve_multiday_ops",
     "resolve_ops",

@@ -48,7 +48,7 @@ dependencies = [
     "tifffile>=2025,<2026",
     "imagecodecs>=2025,<2026",
     "numpy>=2,<3",
-    "numba>=0.63.0rc1,<1",
+    "numba>=0.63,<1",
     "scipy>=1,<2",
     "matplotlib>=3,<4",
     "cellpose>=4,<5",
@@ -57,7 +57,7 @@ dependencies = [
     "pyqt6>=6,<7",
     "pyqtgraph>=0,<1",
     "opencv-python-headless>=4,<5",
-    "xmltodict>=0,<1",
+    "xmltodict>=1,<2",
     "click>=8,<9",
     "scikit-image>=0,<1",
     "ipywidgets>=8,<9",
@@ -70,8 +70,9 @@ dependencies = [
     "importlib_metadata>=8,<9",
     "tbb4py>=2022,<2023; sys_platform != 'darwin'",
     "intel-cmplr-lib-rt>=2025,<2026; sys_platform != 'darwin'",
-    "sl-shared-assets>=6.0.1rc9,<7",
+    "sl-shared-assets>=6.1.0,<7",
     "sl-forgery>=1.0.0rc2,<2",
+    "torch>=2.0.0,<3",
 ]
 
 [project.urls]

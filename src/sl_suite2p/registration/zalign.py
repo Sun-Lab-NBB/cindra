@@ -5,6 +5,7 @@ import time
 
 import numpy as np
 from scipy.signal import medfilt
+from ataraxis_base_utilities import console
 
 from . import rigid, utils, nonrigid
 
@@ -85,7 +86,9 @@ def register_stack(Z, ops):
 
         k += 1
         if k % 5 == 0:
-            print("%d/%d frames %4.2f sec" % (nfr, ops["nframes"], time.time() - k0))  # where is this timer set?
+            console.echo(
+                message=f"Registering z-stack frames: {nfr}/{ops['nframes']} frames processed ({time.time() - k0:.2f} seconds elapsed)."
+            )
 
     # compute some potentially useful info
     ops["th_badframes"] = 100
@@ -135,7 +138,8 @@ def compute_zpos(Zreg, ops, reg_file=None):
     zcorr
     """
     if "reg_file" not in ops:
-        raise OSError("no binary specified")
+        message = "Unable to compute z-position of frames. The 'reg_file' key is not present in the ops dictionary."
+        console.error(message=message, error=OSError)
 
     nbatch = ops["batch_size"]
     Ly = ops["Ly"]
@@ -201,8 +205,18 @@ def compute_zpos(Zreg, ops, reg_file=None):
                 smooth_sigma_time=ops["smooth_sigma_time"],
             )
             if z % 10 == 1:
-                print("%d planes, %d/%d frames, %0.2f sec." % (z, nfr, ops["nframes"], time.time() - t0))
-        print("%d planes, %d/%d frames, %0.2f sec." % (z, nfr, ops["nframes"], time.time() - t0))
+                console.echo(
+                    message=(
+                        f"Computing z-position: {z} planes, {nfr}/{ops['nframes']} frames processed "
+                        f"({time.time() - t0:.2f} seconds elapsed)."
+                    )
+                )
+        console.echo(
+            message=(
+                f"Computing z-position batch: {z} planes, {nfr}/{ops['nframes']} frames processed "
+                f"({time.time() - t0:.2f} seconds elapsed)."
+            )
+        )
         nfr += data.shape[0]
         k += 1
 
