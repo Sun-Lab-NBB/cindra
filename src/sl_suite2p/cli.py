@@ -32,9 +32,10 @@ def ss2p() -> None:
 
 @ss2p.command("gui")
 def ss2p_gui() -> None:
-    """Starts the sl-suite2p Graphical User Interface (GUI) application. Use this command to work with the
-    single-day sl-suite2p processing pipeline via a graphical interface. At this time, the GUI does not support the
-    multi-day processing pipeline.
+    """Starts the sl-suite2p Graphical User Interface (GUI) application.
+
+    Use this command to work with the single-day sl-suite2p processing pipeline via a graphical interface. At this
+    time, the GUI does not support the multi-day processing pipeline.
     """
     run()
 
@@ -57,8 +58,7 @@ def ss2p_gui() -> None:
 )
 @click.pass_context
 def ss2p_config(ctx: Any, output_directory: Path, name: str) -> None:
-    """This group provides commands for generating the sl-suite2p single-day and the multi-day processing pipeline
-    configuration files.
+    """Generates the single-day or the multi-day processing pipeline configuration file.
 
     Commands from this group generate the configuration files which are used to run sl-suite2p processing pipelines.
     Modifying the parameters stored in the file(s) generated via this command group allows configuring all aspects of
@@ -73,7 +73,7 @@ def ss2p_config(ctx: Any, output_directory: Path, name: str) -> None:
 @ss2p_config.command("single-day")
 @click.pass_context
 def ss2p_sd_config(ctx: Any) -> None:
-    """Generates a single-day sl-suite2p processing pipeline configuration file."""
+    """Generates the single-day sl-suite2p processing pipeline configuration file."""
     # Unpacks the shared parameters
     file_path = Path(ctx.obj["file_path"])
 
@@ -100,7 +100,7 @@ def ss2p_sd_config(ctx: Any) -> None:
 @ss2p_config.command("multi-day")
 @click.pass_context
 def ss2p_md_config(ctx: Any) -> None:
-    """Generates a multi-day sl-suite2p processing pipeline configuration file."""
+    """Generates the multi-day sl-suite2p processing pipeline configuration file."""
     # Unpacks the shared parameters
     file_path = Path(ctx.obj["file_path"])
 
@@ -172,11 +172,7 @@ def ss2p_run(
     workers: int,
     progress_bars: bool,
 ) -> None:
-    """This group provides commands for running the single-day and multi-day sl-suite2p processing pipelines.
-
-    Use commands from this group to execute the desired processing pipeline. Each command supports both local mode
-    (automatic tracker management) and remote mode (single job execution via --job-id).
-    """
+    """Runs the single-day or multi-day sl-suite2p processing pipeline."""
     # Ensures the input configuration file is valid
     if input_path.suffix != ".yaml":
         message = (
@@ -201,8 +197,8 @@ def ss2p_run(
     required=False,
     default=None,
     help=(
-        "Job ID for remote mode. If provided, runs only the job matching this ID. If not provided, runs all "
-        "requested jobs with automatic tracker management."
+        "The unique hexadecimal identifier for this processing job. If provided, runs only the matching job "
+        "(remote mode)."
     ),
 )
 @click.option(
@@ -244,8 +240,8 @@ def ss2p_run(
     type=int,
     default=-1,
     help=(
-        "The index of the plane to process. Setting this to '-1' (default value) processes all available planes "
-        "sequentially."
+        "The index of the plane to process when running the PROCESS step (2). Setting this to '-1' (default value) "
+        "processes all available planes sequentially."
     ),
 )
 @click.pass_context
@@ -257,14 +253,7 @@ def run_sd_pipeline(
     combine: bool,
     target: int,
 ) -> None:
-    """Runs the single-day sl-suite2p pipeline step(s) using the configuration parameters from the target file.
-
-    This command supports two execution modes:
-
-    1. LOCAL mode (no --job-id): Runs all requested jobs locally with automatic tracker management.
-
-    2. REMOTE mode (--job-id provided): Runs only the job matching the provided job ID.
-    """
+    """Runs the requested single-day pipeline step(s)."""
     # Extracts shared configuration parameters passed as the context dictionary.
     config_path = ctx.obj["config_path"]
     progress_bars = ctx.obj["progress_bars"]
@@ -297,8 +286,8 @@ def run_sd_pipeline(
     required=False,
     default=None,
     help=(
-        "Job ID for remote mode. If provided, runs only the job matching this ID. If not provided, runs all "
-        "requested jobs with automatic tracker management."
+        "The unique hexadecimal identifier for this processing job. If provided, runs only the matching job "
+        "(remote mode)."
     ),
 )
 @click.option(
@@ -307,7 +296,10 @@ def run_sd_pipeline(
     is_flag=True,
     show_default=True,
     default=False,
-    help="Determines whether to run multi-day suite2p pipeline step 1 (discover cells trackable across days).",
+    help=(
+         "Determines whether to discover cells trackable across days (step 1). This step discovers the candidates for "
+         "the fluorescence extraction performed during the second processing step."
+    ),
 )
 @click.option(
     "-e",
@@ -316,8 +308,8 @@ def run_sd_pipeline(
     show_default=True,
     default=False,
     help=(
-        "Determines whether to run multi-day suite2p pipeline step 2 (extract fluorescence from cells tracked "
-        "across days)."
+        "Determines whether to extract the fluorescence from cells tracked across days, identified during the first "
+        "processing step."
     ),
 )
 @click.option(
@@ -326,7 +318,7 @@ def run_sd_pipeline(
     type=str,
     required=False,
     help=(
-        "The unique identifier of the session to process when running the 'extract' step. If this argument is not "
+        "The unique identifier of the sessions to process when running the 'extract' step. If this argument is not "
         "provided, the pipeline processes all available sessions."
     ),
 )
@@ -338,14 +330,7 @@ def run_md_pipeline(
     extract: bool,
     target: str | None,
 ) -> None:
-    """Runs the multi-day sl-suite2p pipeline step(s) using the configuration parameters from the target file.
-
-    This command supports two execution modes:
-
-    1. LOCAL mode (no --job-id): Runs all requested jobs locally with automatic tracker management.
-
-    2. REMOTE mode (--job-id provided): Runs only the job matching the provided job ID.
-    """
+    """Runs the requested multi-day pipeline step(s)."""
     # Extracts shared configuration parameters passed as the context dictionary.
     config_path = ctx.obj["config_path"]
     progress_bars = ctx.obj["progress_bars"]
