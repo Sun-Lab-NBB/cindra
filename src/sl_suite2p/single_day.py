@@ -1,7 +1,6 @@
 """This module contains the high-level API for the single-day suite2p processing pipeline."""
 
 import os
-import shutil
 from typing import Any
 from pathlib import Path
 from datetime import datetime
@@ -440,9 +439,10 @@ def _resolve_plane_paths(ops: dict[str, Any]) -> tuple[list[Path], list[Path], P
 
     Returns:
         A tuple of 3 elements. The first element is a list of paths to all 'plane' folders, the second is a list of
-        paths to all plane 'ops.npy' files, and the third is the path to the root save folder.
+        paths to all plane 'ops.npy' files, and the third is the path to the root save folder (suite2p directory).
     """
-    save_folder = Path(ops["save_path0"]).joinpath(ops["save_folder"])
+    # The output always goes to save_path/suite2p/
+    save_folder = Path(ops["save_path"]).joinpath("suite2p")
     save_folder.mkdir(parents=True, exist_ok=True)
     plane_folders = natsorted([file for file in save_folder.glob("*") if file.is_dir() and file.name[:5] == "plane"])
     ops_paths = [folder.joinpath("ops.npy") for folder in plane_folders]
@@ -482,15 +482,11 @@ def resolve_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
         ops["aspect"] = ops["diameter"][0] / ops["diameter"][1]
 
     # If necessary, resolves the output (save folder) path, based on the input data path.
-    if "save_path0" not in ops or len(ops["save_path0"]) == 0:
-        ops["save_path0"] = ops["data_path"][0]
+    if "save_path" not in ops or len(ops["save_path"]) == 0:
+        ops["save_path"] = ops["data_path"]
 
-    # Ensures that the root save folder name is provided via ops. Defaults to 'suite2p' if not provided.
-    if "save_folder" not in ops or len(ops["save_folder"]) == 0:
-        ops["save_folder"] = "suite2p"
-
-    # Ensures the root save directory exists, creating it, if necessary.
-    save_folder = Path(ops["save_path0"]).joinpath(ops["save_folder"])
+    # Ensures the root save directory exists, creating it, if necessary. Output always goes to save_path/suite2p/.
+    save_folder = Path(ops["save_path"]).joinpath("suite2p")
     save_folder.mkdir(parents=True, exist_ok=True)
 
     # Saves the updated 'ops' file to the root output folder. During the rest of the runtime, this file is loaded
@@ -556,7 +552,7 @@ def run_s2p(ops_path: Path) -> None:
     # data.bin file that stores the frame data and the ops.npy file that stores the processing settings.
     resolve_binaries(ops_path=ops_path)
 
-    save_folder = Path(ops["save_path0"]).joinpath(ops["save_folder"])
+    save_folder = Path(ops["save_path"]).joinpath("suite2p")
     plane_folders = natsorted([file for file in save_folder.glob("*") if file.is_dir() and file.name[:5] == "plane"])
     ops_paths = [folder.joinpath("ops.npy") for folder in plane_folders]
 
@@ -697,7 +693,6 @@ def resolve_binaries(ops_path: Path) -> None:
         # function also writes the plane-specific ops.npy file to the output plane folder.
         convert_functions = {
             "mesoscan": io.mesoscan_to_binary,
-            "raw": io.raw_to_binary,
             "tiff": io.tiff_to_binary,
         }
 
@@ -770,9 +765,7 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
 
     # Aborts the processing early if the input plane is the flyback plane.
     if plane_index in ops["ignore_flyback"]:
-        console.echo(
-        message=f"Skipping processing the flyback plane {plane_index}.", level=LogLevel.SUCCESS
-    )
+        console.echo(message=f"Skipping processing the flyback plane {plane_index}.", level=LogLevel.SUCCESS)
         return
 
     # Loads the plane-specific settings 'ops' file.
@@ -787,10 +780,7 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
             key
             not in [
                 "data_path",
-                "save_path0",
-                "fast_disk",
-                "save_folder",
-                "subfolders",
+                "save_path",
                 "nplanes",
                 "nchannels",
                 "nrois",
@@ -941,30 +931,8 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
     if ops.get("ops_path"):
         np.save(ops["ops_path"], ops)
 
-    # If suite2p runs on a machine with a fast processing disk and a slow storage disk and is configured to move
-    # binary files after processing, moves the files to the storage disk.
-    if ops.get("move_bin") and ops["save_path"] != ops["fast_disk"]:
-        console.echo(
-            message=f"Moving plane {plane_index} binary files to {ops['save_path']}...", level=LogLevel.INFO
-        )
-
-        # Registered binary file for channel 1
-        shutil.move(ops["reg_file"], Path(ops["save_path"]).joinpath("data.bin"))
-
-        # Registered binary file for channel 2
-        if ops["nchannels"] > 1:
-            shutil.move(ops["reg_file_chan2"], Path(ops["save_path"]).joinpath("data_chan2.bin"))
-
-        # Raw binary file for channel 1
-        if "raw_file" in ops:
-            shutil.move(ops["raw_file"], Path(ops["save_path"]).joinpath("data_raw.bin"))
-
-        # Raw binary file for channel 2
-        if "raw_file" in ops and ops["nchannels"] > 1:
-            shutil.move(ops["raw_file_chan2"], Path(ops["save_path"]).joinpath("data_chan2_raw.bin"))
-
-    # Alternatively, if suite2p is configured to delete binary files after processing, removes the necessary files
-    elif ops.get("delete_bin"):
+    # If suite2p is configured to delete binary files after processing, removes the necessary files
+    if ops.get("delete_bin"):
         console.echo(message=f"Deleting plane {plane_index} binary files...", level=LogLevel.INFO)
 
         # Registered binary file for channel 1

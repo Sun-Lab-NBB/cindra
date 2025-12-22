@@ -127,58 +127,29 @@ class Main:
 
 @dataclass
 class FileIO:
-    """Stores general I/O parameters that specify input data location, format, and working and output directories."""
+    """Stores general I/O parameters that specify input data location, format, and output directories."""
 
-    ignored_file_names: list[str] = field(default_factory=list)
-    """Specifies the file names that should be ignored when searching for and loading raw data. Any file whose name 
-    exactly matches one of the names stored inside this list will not be processed even if it has the correct 
-    extension and is located inside one of the input directories."""
+    data_path: str = ""
+    """The path to the root data directory containing the input TIFF files. The pipeline recursively searches this
+    directory and all subdirectories for .tiff/.tif files to process."""
 
-    fast_disk: str = ""
-    """The path to the root 'working' directory where to store the temporary binary files created during processing. 
-    This field allows optimizing processing on machines with slow storage drives and fast NVME 'work' drives by caching 
-    all data on the fast drive during runtime. Do not modify this field unless your use case specifically benefits 
-    from caching the data on a different drive than the one that stores the raw data. If this field is not modified, 
-    'save_path0' is used to store the temporary files."""
-
-    delete_bin: bool = False
-    """Determines whether to delete the binary file(s) created during the frame registration stage (registered .bin 
-    file). Note, if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 
-    'multi-day' pipeline, this has to be False. The multi-day pipeline reuses the registered binary files to extract 
-    the fluorescence of cells tracked across days."""
+    save_path: str = ""
+    """The path to the root output directory where the pipeline results should be saved. The pipeline automatically
+    creates a 'suite2p' subdirectory under this path to store all output files."""
 
     mesoscan: bool = False
     """Indicates whether the data submitted to the pipeline are ScanImage Mesoscope multi-page TIFFs."""
 
-    save_path0: str = ""
-    """The path to the root output directory where the pipeline results should be saved. Note, the pipeline generates 
-    the 'save_folder' under the root directory specified by this argument and output all data to the generated save 
-    folder."""
+    delete_bin: bool = False
+    """Determines whether to delete the binary file(s) created during the frame registration stage (registered .bin
+    file). Note, if the data produced by the 'single-day' pipeline is intended to be later processed as part of the
+    'multi-day' pipeline, this has to be False. The multi-day pipeline reuses the registered binary files to extract
+    the fluorescence of cells tracked across days."""
 
-    save_folder: str = "suite2p"
-    """The name of the folder under which the pipeline results should be stored. If this is not provided, the pipeline 
-    defaults to using 'suite2p' as the save directory, created under the root directory specified by 'save_path0'. Note,
-    if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 'multi-day' 
-    pipeline, do NOT modify this field. The multi-day pipeline expects the save_folder to be 'suite2p' (default)."""
-
-    data_path: list[str] = field(default_factory=list)
-    """The list of paths to the directories where to search for the input TIFF files. This is used during the initial 
-    conversion of the raw data (expected to be .tiff / .tif) to the binary file format used by the suite2p pipeline. 
-    Note, even if your data is stored in a single folder, add it here as a list with a single item."""
-
-    look_one_level_down: bool = False
-    """Determines whether to search for TIFF files in the subfolders of the directories provided as 'data_path' field. 
-    If True, the 'subfolders' field has to be set to a valid list of subfolder names to search."""
-
-    subfolders: list[str] = field(default_factory=list)
-    """Stores specific subfolder names to search through for TIFF files. All subfolders must be stored under the 
-    one or more directories specified by 'data_path'."""
-
-    move_bin: bool = False
-    """Determines whether to move the binary file(s) to the save directory after processing, if 'fast_disk' differs 
-    from the 'save_path0'. Note, if using non-default 'save_folder' name, enabling this option will move the binary 
-    files from the temporary 'suite2p' folder to the 'save_folder'. Otherwise, if the save folder and the temporary 
-    folder are both 'suite2p', the binaries are automatically created and stored inside the 'save_folder'."""
+    ignored_file_names: list[str] = field(default_factory=list)
+    """Specifies the file names that should be ignored when searching for and loading raw data. Any file whose name
+    exactly matches one of the names stored inside this list will not be processed even if it has the correct
+    extension and is located inside one of the input directories."""
 
 
 @dataclass
