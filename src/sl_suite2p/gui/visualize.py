@@ -627,7 +627,7 @@ class VisWindow(QMainWindow):
         self.comboBox.addItem("PC")
         self.PCedit.returnPressed.connect(self.PCreturn)
 
-        # model = np.load(os.path.join(parent.ops["save_path0"], "embedding.npy"))
+        # model = np.load(os.path.join(parent.ops["save_path"], "embedding.npy"))
         # model = np.load("embedding.npy", allow_pickle=True).item()
         self.isort1 = np.argsort(self.model.embedding[:, 0])
         self.Usv = self.model.Usv
