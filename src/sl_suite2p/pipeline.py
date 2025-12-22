@@ -7,11 +7,20 @@ from typing import Any
 from pathlib import Path
 
 import numpy as np
-from sl_shared_assets import SessionData, SessionTypes, ProcessingTracker, AcquisitionSystems, ProcessingTrackers
+from sl_shared_assets import (
+    DatasetData,
+    DatasetTrackers,
+    SessionData,
+    SessionTypes,
+    ProcessingTracker,
+    AcquisitionSystems,
+    ProcessingTrackers,
+)
 from ataraxis_base_utilities import LogLevel, console
 
 from .single_day import resolve_ops, process_plane, combine_planes, resolve_binaries
-from .configuration import SingleDayS2PConfiguration
+from .multi_day import resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
+from .configuration import SingleDayS2PConfiguration, MultiDayS2PConfiguration
 
 # Defines the session types and acquisition systems currently supported by the processing pipeline.
 _supported_systems = tuple(AcquisitionSystems)
@@ -22,18 +31,28 @@ class SingleDayJobNames(StrEnum):
     """Defines the job names for the single-day suite2p processing pipeline components."""
 
     BINARIZE = "single_day_binarize"
-    """The name for the binarization step (step 1) processing job."""
+    """The name for the binarization (step 1) processing job."""
     PROCESS = "single_day_process"
-    """The name for the processing step (step 2) processing job."""
+    """The name for the processing (step 2) processing job."""
     COMBINE = "single_day_combine"
-    """The name for the combination step (step 3) processing job."""
+    """The name for the combination (step 3) processing job."""
 
 
-def _generate_single_day_job_ids(session_path: Path, job_names: list[str]) -> dict[str, str]:
-    """Generates unique processing job identifiers for the specified single-day pipeline jobs.
+class MultiDayJobNames(StrEnum):
+    """Defines the job names for the multi-day suite2p processing pipeline components."""
+
+    DISCOVER = "multi_day_discover"
+    """The name for the cell discovery (step 1) processing job."""
+    EXTRACT = "multi_day_extract"
+    """The name for the fluorescence extraction (step 2) processing job."""
+
+
+def _generate_job_ids(root_path: Path, job_names: list[str]) -> dict[str, str]:
+    """Generates unique processing job identifiers for the specified pipeline jobs.
 
     Args:
-        session_path: The path to the processed session's data directory.
+        root_path: The path to the root directory that stores the data to be processed by the chosen pipeline
+            (session path for single-day, dataset path for multi-day).
         job_names: The list of job names for which to generate the IDs.
 
     Returns:
@@ -41,7 +60,7 @@ def _generate_single_day_job_ids(session_path: Path, job_names: list[str]) -> di
     """
     job_ids: dict[str, str] = {}
     for job_name in job_names:
-        job_ids[job_name] = ProcessingTracker.generate_job_id(session_path=session_path, job_name=job_name)
+        job_ids[job_name] = ProcessingTracker.generate_job_id(session_path=root_path, job_name=job_name)
     return job_ids
 
 
@@ -68,7 +87,7 @@ def _initialize_single_day_processing_tracker(
     tracker = ProcessingTracker(file_path=session.tracking_data.tracking_data_path.joinpath(ProcessingTrackers.SUITE2P))
 
     # Generates job IDs for each requested job.
-    job_ids = _generate_single_day_job_ids(session_path=session_path, job_names=job_names)
+    job_ids = _generate_job_ids(root_path=session_path, job_names=job_names)
 
     # Initializes all jobs in the tracker file.
     tracker.initialize_jobs(job_ids=list(job_ids.values()))
@@ -83,13 +102,13 @@ def _execute_single_day_job(
     target_plane: int,
     tracker: ProcessingTracker,
 ) -> None:
-    """Executes a single processing job of the single-day suite2p pipeline with tracker management.
+    """Executes a single processing job of the single-day suite2p pipeline.
 
     Args:
         ops_path: The path to the ops.npy file that stores the single-day suite2p processing parameters.
         job_name: The name of the job to run.
         job_id: The unique hexadecimal identifier for this processing job.
-        target_plane: The plane index to process (-1 for all planes).
+        target_plane: The plane index to process or -1 for all planes (only used for the PROCESS job).
         tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
 
     Raises:
@@ -132,7 +151,6 @@ def _execute_single_day_job(
 
 def process_single_day(
     configuration_path: Path,
-    session_path: Path,
     job_id: str | None = None,
     *,
     binarize: bool = False,
@@ -148,10 +166,8 @@ def process_single_day(
 
     Args:
         configuration_path: The path to the single-day configuration YAML file.
-        session_path: The path to the processed session's root data directory.
         job_id: The unique hexadecimal identifier for the processing job to execute. If provided, only the job
-            matching this ID is executed. If not provided, all requested jobs are run sequentially with automatic
-            tracker management.
+            matching this ID is executed. If not provided, all requested jobs are run sequentially.
         binarize: Determines whether to resolve the binary files for plane-specific processing (step 1).
         process: Determines whether to process the target plane(s) to remove motion, discover ROIs, and extract their
             fluorescence (step 2).
@@ -193,6 +209,17 @@ def process_single_day(
     config.main.progress_bars = progress_bars
     config.main.parallel_workers = workers
 
+    # Extracts the session path from the configuration.
+    if not config.file_io.data_path:
+        message = (
+            "Unable to run the single-day suite2p processing pipeline. The 'data_path' field in the configuration "
+            "file is empty. Provide the path to the session's root data directory."
+        )
+        console.error(message=message, error=ValueError)
+        return  # Fallback to appease mypy
+
+    session_path = Path(config.file_io.data_path)
+
     # Instantiates the SessionData instance for the processed session.
     session_data = SessionData.load(session_path=session_path)
 
@@ -216,8 +243,8 @@ def process_single_day(
         console.error(message=message, error=ValueError)
 
     # Adjusts the runtime configuration to work with the Sun lab data hierarchy.
-    config.file_io.save_path0 = str(session_data.processed_data.mesoscope_data_path)
-    config.file_io.data_path = [str(session_data.raw_data.mesoscope_data_path)]
+    config.file_io.save_path = str(session_data.processed_data.mesoscope_data_path)
+    config.file_io.data_path = str(session_data.raw_data.mesoscope_data_path)
 
     # Converts the dataclass to an 'ops' dictionary instance.
     ops = config.to_ops()
@@ -250,7 +277,7 @@ def process_single_day(
     # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
         # REMOTE mode: Finds the job name matching the provided job_id.
-        all_job_ids = _generate_single_day_job_ids(session_path=session_path, job_names=list(SingleDayJobNames))
+        all_job_ids = _generate_job_ids(root_path=session_path, job_names=list(SingleDayJobNames))
         id_to_name: dict[str, str] = {v: k for k, v in all_job_ids.items()}
 
         if job_id not in id_to_name:
@@ -281,3 +308,257 @@ def process_single_day(
             )
 
     console.echo(message="All processing jobs completed successfully.", level=LogLevel.SUCCESS)
+
+
+def _initialize_multi_day_processing_tracker(
+    dataset: DatasetData,
+    job_names: list[str],
+) -> dict[str, str]:
+    """Initializes the processing tracker file for the multi-day suite2p pipeline using the requested job IDs.
+
+    Notes:
+        This function is used to process the data in the 'local' processing mode. During remote data processing, the
+        tracker file is pre-generated before submitting the processing jobs to the remote compute server.
+
+    Args:
+        dataset: The DatasetData instance for the processed dataset.
+        job_names: The names for the processing jobs to track.
+
+    Returns:
+        A dictionary mapping job names to their generated job IDs.
+    """
+    # Initializes the processing tracker for this pipeline.
+    tracker = ProcessingTracker(
+        file_path=dataset.tracking_data.tracking_data_path.joinpath(DatasetTrackers.MULTIDAY)
+    )
+
+    # Generates job IDs for each requested job using the dataset's root directory.
+    dataset_path = dataset.dataset_data_path.parent
+    job_ids = _generate_job_ids(root_path=dataset_path, job_names=job_names)
+
+    # Initializes all jobs in the tracker file.
+    tracker.initialize_jobs(job_ids=list(job_ids.values()))
+
+    return job_ids
+
+
+def _execute_multi_day_job(
+    ops_path: Path,
+    job_name: str,
+    job_id: str,
+    target_session: str | None,
+    session_ids: list[str],
+    tracker: ProcessingTracker,
+) -> None:
+    """Executes a single processing job of the multi-day suite2p pipeline.
+
+    Args:
+        ops_path: The path to the ops.npy file that stores the multi-day suite2p processing parameters.
+        job_name: The name of the job to run.
+        job_id: The unique hexadecimal identifier for this processing job.
+        target_session: The unique identifier of the session for which to extract the across-day-tracked cell
+            fluorescence or None for all sessions (only used for the EXTRACT job).
+        session_ids: The list of all session identifiers in the dataset.
+        tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
+
+    Raises:
+        ValueError: If the job_name is not recognized.
+    """
+    console.echo(message=f"Running job: {job_name} (ID: {job_id})...")
+    tracker.start_job(job_id=job_id)
+
+    try:
+        if job_name == MultiDayJobNames.DISCOVER:
+            discover_multiday_cells(ops_path=ops_path)
+
+        elif job_name == MultiDayJobNames.EXTRACT:
+            # Either extracts the fluorescence from all sessions sequentially or only from the target session.
+            if target_session is not None:
+                extract_multiday_fluorescence(ops_path=ops_path, session_id=target_session)
+            else:
+                for session_id in session_ids:
+                    extract_multiday_fluorescence(ops_path=ops_path, session_id=session_id)
+
+        else:
+            message = (
+                f"Unable to execute the requested job {job_name} with ID '{job_id}'. The input job name is not "
+                f"recognized. Use one of the valid Job names: {list(MultiDayJobNames)}."
+            )
+            console.error(message=message, error=ValueError)
+
+        tracker.complete_job(job_id=job_id)
+
+    except Exception:
+        tracker.fail_job(job_id=job_id)
+        raise
+
+
+def process_multi_day(
+    configuration_path: Path,
+    job_id: str | None = None,
+    *,
+    discover: bool = False,
+    extract: bool = False,
+    target_session: str | None = None,
+    workers: int = -1,
+    progress_bars: bool = False,
+    overrides: dict[str, Any] | None = None,
+) -> None:
+    """Processes the brain activity data from cells tracked across multiple sessions using the multi-day suite2p
+    processing pipeline.
+
+    Notes:
+        This function uses the DatasetData class from sl-shared-assets to manage the dataset hierarchy. The dataset
+        must be created using DatasetData.create() before calling this function.
+
+    Args:
+        configuration_path: The path to the multi-day configuration YAML file.
+        job_id: The unique hexadecimal identifier for the processing job to execute. If provided, only the job
+            matching this ID is executed. If not provided, all requested jobs are run sequentially.
+        discover: Determines whether to discover cells whose activity can be tracked across days (step 1).
+        extract: Determines whether to extract fluorescence from the cells tracked across multiple days (step 2).
+        target_session: The unique identifier of the session to process when running the 'extract' job. If None,
+            processes all sessions in the dataset.
+        workers: The number of parallel workers to use when processing the data. Setting this to '-1' (default value)
+            uses all available CPU cores.
+        progress_bars: Determines whether to show progress bars during processing.
+        overrides: An optional dictionary of configuration parameter overrides. This allows dynamically overriding the
+            configuration parameters loaded from the .YAML file before executing the processing.
+
+    Raises:
+        FileNotFoundError: If the multi-day configuration data cannot be loaded from the specified file or if the
+            dataset cannot be loaded.
+        ValueError: If session validation fails or the specified job_id does not match any available jobs.
+    """
+    # Ensures the input configuration file is valid.
+    if not configuration_path.exists() or configuration_path.suffix != ".yaml":
+        message = (
+            f"Unable to run the multi-day suite2p processing pipeline. Expected the configuration file to end with a "
+            f"'.yaml' extension and exist at the specified path, but encountered: {configuration_path}."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    # Loads configuration data from the provided file.
+    try:
+        config: MultiDayS2PConfiguration = MultiDayS2PConfiguration.from_yaml(file_path=configuration_path)
+    except Exception:
+        message = (
+            "Unable to run the multi-day sl-suite2p processing pipeline, as the input configuration file is not a "
+            "valid multi-day pipeline configuration file. Specifically, failed to load the file's data as a "
+            "MultiDayS2PConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
+            "valid multi-day configuration .yaml file."
+        )
+        console.error(message=message, error=FileNotFoundError)
+        return  # Fallback to appease mypy
+
+    # Overrides the 'workers' and 'progress_bars' parameters with the provided values.
+    config.main.progress_bars = progress_bars
+    config.main.parallel_workers = workers
+
+    # Extracts the dataset path from the configuration.
+    if not config.io.dataset_directory_path:
+        message = (
+            "Unable to run the multi-day suite2p processing pipeline. The 'dataset_directory_path' field in the "
+            "configuration file is empty. Provide the path to the dataset's root directory."
+        )
+        console.error(message=message, error=ValueError)
+        return  # Fallback to appease mypy
+
+    dataset_path = Path(config.io.dataset_directory_path)
+
+    # Loads the DatasetData instance for the processed dataset.
+    dataset = DatasetData.load(dataset_path=dataset_path)
+
+    # Ensures the dataset name in the configuration matches the loaded dataset.
+    if config.io.dataset_name and config.io.dataset_name != dataset.name:
+        message = (
+            f"Unable to run the multi-day suite2p processing pipeline. The 'dataset_name' field in the configuration "
+            f"file ('{config.io.dataset_name}') does not match the loaded dataset name ('{dataset.name}')."
+        )
+        console.error(message=message, error=ValueError)
+        return  # Fallback to appease mypy
+
+    # Updates the dataset name from the loaded dataset if not already set.
+    config.io.dataset_name = dataset.name
+
+    # Session directories must be provided in the configuration file.
+    if not config.io.session_directories:
+        message = (
+            "Unable to run the multi-day suite2p processing pipeline. The 'session_directories' field in the "
+            "configuration file is empty. Provide the paths to the session suite2p output directories."
+        )
+        console.error(message=message, error=ValueError)
+        return  # Fallback to appease mypy
+
+    # Converts the dataclass to an 'ops' dictionary instance.
+    ops = config.to_ops()
+
+    # Parses the override parameters as a 'db' dictionary.
+    db = overrides if overrides is not None else {}
+
+    # Generates the ops.npy file for the runtime.
+    ops_path = resolve_multiday_ops(ops=ops, db=db)
+
+    # Loads the resolved ops file to access the session_ids.
+    final_ops = np.load(ops_path, allow_pickle=True).item()
+    session_ids: list[str] = final_ops["session_ids"]
+
+    # Determines which jobs to run based on the flags.
+    requested_jobs: dict[str, bool] = {
+        MultiDayJobNames.DISCOVER: discover,
+        MultiDayJobNames.EXTRACT: extract,
+    }
+
+    # If all requested job flags are False, treats them as all True (run all jobs).
+    if not any(requested_jobs.values()):
+        requested_jobs = dict.fromkeys(requested_jobs, True)
+
+    # Builds the list of jobs to run.
+    jobs_to_run = [job_name for job_name, requested in requested_jobs.items() if requested]
+
+    # Initializes the tracker instance.
+    tracker = ProcessingTracker(
+        file_path=dataset.tracking_data.tracking_data_path.joinpath(DatasetTrackers.MULTIDAY)
+    )
+
+    # Determines the execution mode and resolves job IDs accordingly.
+    dataset_root = dataset.dataset_data_path.parent
+    if job_id is not None:
+        # REMOTE mode: Finds the job name matching the provided job_id.
+        all_job_ids = _generate_job_ids(root_path=dataset_root, job_names=list(MultiDayJobNames))
+        id_to_name: dict[str, str] = {v: k for k, v in all_job_ids.items()}
+
+        if job_id not in id_to_name:
+            tracker.fail_job(job_id=job_id)
+            message = (
+                f"Unable to execute the requested job with ID '{job_id}'. The input identifier does not match any "
+                f"jobs available for this dataset. Use one of the valid job IDs: {list(all_job_ids.values())}."
+            )
+            console.error(message=message, error=ValueError)
+
+        # Runs the job whose id matches the target job_id.
+        job_name = id_to_name[job_id]
+        _execute_multi_day_job(
+            ops_path=ops_path,
+            job_name=job_name,
+            job_id=job_id,
+            target_session=target_session,
+            session_ids=session_ids,
+            tracker=tracker,
+        )
+    else:
+        # LOCAL mode: Initializes the tracker and runs all requested jobs.
+        console.echo(message=f"Initializing the processing tracker for {len(jobs_to_run)} job(s)...")
+        job_ids = _initialize_multi_day_processing_tracker(dataset=dataset, job_names=jobs_to_run)
+
+        for job_name in jobs_to_run:
+            _execute_multi_day_job(
+                ops_path=ops_path,
+                job_name=job_name,
+                job_id=job_ids[job_name],
+                target_session=target_session,
+                session_ids=session_ids,
+                tracker=tracker,
+            )
+
+    console.echo(message="All multi-day processing jobs completed successfully.", level=LogLevel.SUCCESS)

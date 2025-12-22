@@ -8,19 +8,10 @@ from typing import Any
 from pathlib import Path
 
 import click
-import numpy as np
-from sl_shared_assets import (
-    SessionData,
-    SessionTypes,
-    DatasetTrackers,
-    ProcessingTracker,
-    AcquisitionSystems,
-)
 from ataraxis_base_utilities import LogLevel, console
 
 from .gui import run
-from .pipeline import process_single_day
-from .multi_day import run_s2p_multiday, resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
+from .pipeline import process_single_day, process_multi_day
 from .configuration import (
     MultiDayS2PConfiguration,
     SingleDayS2PConfiguration,
@@ -30,11 +21,6 @@ from .configuration import (
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
 CONTEXT_SETTINGS = dict(max_content_width=120)
-
-
-# Defines supported Sun lab sessions and acquisition systems.
-_supported_systems = tuple(AcquisitionSystems)
-_supported_sessions = (SessionTypes.MESOSCOPE_EXPERIMENT,)
 
 
 @click.group("ss2p", context_settings=CONTEXT_SETTINGS)
@@ -209,16 +195,6 @@ def ss2p_run(
 # noinspection PyUnresolvedReferences
 @ss2p_run.command("single-day")
 @click.option(
-    "-sp",
-    "--session-path",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
-    help=(
-        "The absolute path to the session's root data directory. The directory must contain the 'raw_data' "
-        "subdirectory."
-    ),
-)
-@click.option(
     "-id",
     "--job-id",
     type=str,
@@ -275,7 +251,6 @@ def ss2p_run(
 @click.pass_context
 def run_sd_pipeline(
     ctx: Any,
-    session_path: Path,
     job_id: str | None,
     binarize: bool,
     process: bool,
@@ -302,7 +277,6 @@ def run_sd_pipeline(
     # Calls the unified pipeline API.
     process_single_day(
         configuration_path=config_path,
-        session_path=session_path,
         job_id=job_id,
         binarize=binarize,
         process=process,
@@ -317,18 +291,15 @@ def run_sd_pipeline(
 # noinspection PyUnresolvedReferences
 @ss2p_run.command("multi-day")
 @click.option(
-    "-dd",
-    "--dataset-directory",
-    type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
-    required=False,
-    help="The path to the dataset directory where the tracker file and shared configuration files are stored.",
-)
-@click.option(
-    "-dn",
-    "--dataset-name",
+    "-id",
+    "--job-id",
     type=str,
     required=False,
-    help="The name of the multiday dataset, used as the output folder name under each session's 'multiday' directory.",
+    default=None,
+    help=(
+        "Job ID for remote mode. If provided, runs only the job matching this ID. If not provided, runs all "
+        "requested jobs with automatic tracker management."
+    ),
 )
 @click.option(
     "-d",
@@ -362,289 +333,44 @@ def run_sd_pipeline(
 @click.pass_context
 def run_md_pipeline(
     ctx: Any,
-    dataset_directory: Path | None,
-    dataset_name: str | None,
+    job_id: str | None,
     discover: bool,
     extract: bool,
     target: str | None,
 ) -> None:
     """Runs the multi-day sl-suite2p pipeline step(s) using the configuration parameters from the target file.
 
-    This command functions as the central entry point for running all multi-day sl-suite2p pipeline steps via the
-    terminal. It can be flexibly configured using the parameters stored in .yaml configuration files and provided as
-    manual 'overrides'.
+    This command supports two execution modes:
+
+    1. LOCAL mode (no --job-id): Runs all requested jobs locally with automatic tracker management.
+
+    2. REMOTE mode (--job-id provided): Runs only the job matching the provided job ID.
     """
     # Extracts shared configuration parameters passed as the context dictionary.
-    input_path = ctx.obj["config_path"]
+    config_path = ctx.obj["config_path"]
     progress_bars = ctx.obj["progress_bars"]
     workers = ctx.obj["workers"]
     overrides = ctx.obj["overrides"]
 
-    ops_path = Path()  # This variable is pre-created here to appease mypy
-    try:
-        # Loads configuration data from the provided file.
-        config: MultiDayS2PConfiguration = MultiDayS2PConfiguration.from_yaml(file_path=input_path)
+    # Parses the override parameters as a dictionary.
+    db = _parse_db(overrides)
 
-        # Specializes the config to work with the target data
-        config.main.progress_bars = progress_bars
-        config.main.parallel_workers = workers
-        if dataset_directory is not None:
-            config.io.dataset_directory_path = str(dataset_directory)
-        if dataset_name is not None:
-            config.io.dataset_name = dataset_name
-
-        # Converts the dataclass to an 'ops' dictionary instance.
-        ops = config.to_ops()
-
-    except Exception:
-        # If the file cannot be loaded as the expected configuration class instance, raises an exception.
-        message = (
-            "Unable to run the multi-day sl-suite2p processing pipeline, as the input configuration file is not a "
-            "valid multi-day pipeline configuration file. Specifically, failed to load the file's data as a "
-            "MultiDayS2PConfiguration dataclass instance. Ensure that the 'input_path' argument points to a valid "
-            "multi-day configuration .yaml file."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    else:
-        # Parses the override parameters as a 'db' dictionary.
-        db = _parse_db(overrides)
-
-        # Generates the ops.npy file for the runtime, using the 'ops' loaded above and additional overrides, 'db'
-        # (if any)
-        ops_path = resolve_multiday_ops(ops=ops, db=db)
-
-    # Loads the resolved ops file to access the runtime configuration parameters below.
-    final_ops = np.load(ops_path, allow_pickle=True).item()
-
-    # Same idea as in the single-day pipeline: If both flags are set to the same value, this is interpreted as
-    # a request to run the entire multi-day pipeline.
-    if discover == extract:
-        run_s2p_multiday(ops_path=ops_path)
-        return
-
-    if discover:  # Step 1
-        discover_multiday_cells(ops_path=ops_path)
-
-    if extract:  # Step 2
-        # Same idea as with single-day planes, either processes all sessions sequentially or only the target session
-        if target is not None:
-            session_id = target
-            extract_multiday_fluorescence(ops_path=ops_path, session_id=session_id)
-        else:
-            for session in final_ops["session_ids"]:
-                extract_multiday_fluorescence(ops_path=ops_path, session_id=session)
-
-
-# noinspection PyUnresolvedReferences
-@ss2p_run.command("sl-multi-day")
-@click.option(
-    "-dd",
-    "--dataset-directory",
-    type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
-    help="The path to the dataset directory where the tracker file and shared configuration files are stored.",
-)
-@click.option(
-    "-dn",
-    "--dataset-name",
-    type=str,
-    required=True,
-    help="The name of the multiday dataset, used as the output folder name under each session's 'multiday' directory.",
-)
-@click.option(
-    "-d",
-    "--discover",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help="Determines whether to run multi-day suite2p pipeline step 1 (discover cells trackable across days).",
-)
-@click.option(
-    "-e",
-    "--extract",
-    is_flag=True,
-    show_default=True,
-    default=False,
-    help=(
-        "Determines whether to run multi-day suite2p pipeline step 2 (extract fluorescence from cells tracked "
-        "across days)."
-    ),
-)
-@click.option(
-    "-t",
-    "--target",
-    type=str,
-    required=False,
-    help=(
-        "The unique identifier of the session to process when running the 'extract' step. If this argument is not "
-        "provided, the pipeline processes all available sessions."
-    ),
-)
-@click.option(
-    "-sp",
-    "--session-paths",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
-    multiple=True,
-    help=(
-        "The absolute path to the root directory of each sessions to process. Use multiple '-sp' arguments to provide "
-        "at least two paths for each CLI call. The directory specified by each argument must contain the 'raw_data' "
-        "subdirectory."
-    ),
-)
-@click.option(
-    "-id",
-    "--job-id",
-    type=str,
-    required=True,
-    help="The unique job identifier for this processing step.",
-)
-@click.pass_context
-def run_md_pipeline_sl(
-    ctx: Any,
-    dataset_directory: Path,
-    dataset_name: str,
-    discover: bool,
-    extract: bool,
-    target: str | None,
-    session_paths: list[Path],
-    job_id: str,
-) -> None:
-    """Runs the requested multi-day sl-suite2p pipeline step(s) using the configuration parameters from the target
-    file.
-
-    This command is a version of the general 'multi-day' command specialized for the Sun lab data processing workflow.
-    """
-    # Extracts shared configuration parameters passed as the context dictionary.
-    input_path = ctx.obj["config_path"]
-    progress_bars = ctx.obj["progress_bars"]
-    workers = ctx.obj["workers"]
-    overrides = ctx.obj["overrides"]
-
-    # Ensures that the user provided at least two session paths
-    if len(session_paths) < 2:
-        message = (
-            f"Unable to run the multi-day sl-suite2p processing pipeline due to receiving an invalid number of "
-            f"'session-path' inputs. The multi-day pipeline expects at least two session paths provided via the "
-            f"'--session-path (-sp)' arguments, but instead encountered {len(session_paths)} inputs."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Loops over the target sessions and verifies that all support multi-day processing.
-    animal_id = ""
-    session_inputs = []
-    for session_paths in session_paths:
-        # Instantiates the SessionData instance for the processed session
-        session_data = SessionData.load(session_path=session_paths)
-
-        # Ensures that all processed sessions belong to the same animal
-        if animal_id == "":
-            animal_id = session_data.animal_id
-        elif animal_id != session_data.animal_id:
-            message = (
-                f"Unable to run the multi-day sl-suite2p processing pipeline, as the input set of sessions comes from "
-                f"at least two different animals: {animal_id} and {session_data.animal_id}. Multi-day tracking "
-                f"requires all sessions to be acquired from the same animal."
-            )
-            console.error(message=message, error=ValueError)
-
-        # Ensures that the session supports this type of processing
-        if session_data.acquisition_system not in _supported_systems:
-            message = (
-                f"Unable to run the multi-day suite2p pipeline for the session '{session_data.session_name}' "
-                f"performed by animal '{session_data.animal_id}' for the '{session_data.project_name}' project. "
-                f"The session was acquired using an unsupported acquisition system "
-                f"'{session_data.acquisition_system}'. Currently, only the following acquisition systems are "
-                f"supported: {', '.join(_supported_systems)}."
-            )
-            console.error(message=message, error=ValueError)
-        if session_data.session_type not in _supported_sessions:
-            message = (
-                f"Unable to run the multi-day suite2p pipeline for the session '{session_data.session_name}' "
-                f"performed by animal '{session_data.animal_id}' for the '{session_data.project_name}' project. "
-                f"The session is of an unsupported type '{session_data.session_type}'. Currently, only the "
-                f"following session types are supported: {', '.join(_supported_sessions)}."
-            )
-            console.error(message=message, error=ValueError)
-
-        # Resolves and adds the path to the session's single-day suite2p-processed data folder as the input to the
-        # multi-day pipeline
-        session_inputs.append(str(session_data.processed_data.mesoscope_data_path))
-
-    ops_path = Path()  # This variable is pre-created here to appease mypy
-    try:
-        # Loads configuration data from the provided file.
-        config: MultiDayS2PConfiguration = MultiDayS2PConfiguration.from_yaml(file_path=input_path)
-
-        # Specializes the config to work with the target data
-        config.main.progress_bars = progress_bars
-        config.main.parallel_workers = workers
-        config.io.dataset_directory_path = str(dataset_directory)
-        config.io.dataset_name = dataset_name
-        config.io.session_directories = session_inputs
-
-    except Exception:
-        # If the file cannot be loaded as the expected configuration class instance, raises an exception.
-        message = (
-            "Unable to run the multi-day sl-suite2p processing pipeline, as the input configuration file is not a "
-            "valid multi-day pipeline configuration file. Specifically, failed to load the file's data as a "
-            "MultiDayS2PConfiguration dataclass instance. Ensure that the 'input_path' argument points to a valid "
-            "multi-day configuration .yaml file."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    else:
-        # Converts the dataclass to an 'ops' dictionary instance.
-        ops = config.to_ops()
-
-        # Parses the override parameters as a 'db' dictionary.
-        db = _parse_db(overrides)
-
-        # Generates the ops.npy file for the runtime, using the 'ops' loaded above and additional overrides, 'db'
-        # (if any)
-        ops_path = resolve_multiday_ops(ops=ops, db=db)
-
-    # Loads the resolved ops file to access the runtime configuration parameters below.
-    final_ops = np.load(ops_path, allow_pickle=True).item()
-
-    # Instantiates the ProcessingTracker instance for multi-day suite2p processing.
-    tracker = ProcessingTracker(file_path=dataset_directory.joinpath(DatasetTrackers.MULTIDAY))
-
-    # Marks this specific job as running.
-    tracker.start_job(job_id=job_id)
-
-    try:
-        # Same idea as in the single-day pipeline: If both flags are set to the same value, this is interpreted as
-        # a request to run the entire multi-day pipeline.
-        if discover == extract:
-            run_s2p_multiday(ops_path=ops_path)
-        else:
-            if discover:  # Step 1
-                discover_multiday_cells(ops_path=ops_path)
-
-            if extract:  # Step 2
-                # Same idea as with single-day planes, either processes all sessions sequentially or only the target
-                # session
-                if target is not None:
-                    extract_multiday_fluorescence(ops_path=ops_path, session_id=target)
-                else:
-                    for session in final_ops["session_ids"]:
-                        extract_multiday_fluorescence(ops_path=ops_path, session_id=session)
-
-    # If the runtime encounters an error, marks the job as failed.
-    except Exception:
-        tracker.fail_job(job_id=job_id)
-        raise
-
-    # If no exception occurred, marks the job as successfully completed.
-    else:
-        tracker.complete_job(job_id=job_id)
+    # Calls the unified pipeline API.
+    process_multi_day(
+        configuration_path=config_path,
+        job_id=job_id,
+        discover=discover,
+        extract=extract,
+        target_session=target,
+        workers=workers,
+        progress_bars=progress_bars,
+        overrides=db,
+    )
 
 
 def _parse_db(data_string: str) -> dict[str, Any]:
-    """This service function parses the value passed to the --overrides (-o) argument of the 'run' 'ss2p' CLI group
-    function as a Python dictionary.
+    """Parses the value passed to the --overrides (-o) argument of the 'run' 'ss2p' CLI group function as a Python
+    dictionary.
 
     Args:
         data_string: A string that contains the override data to be parsed.
