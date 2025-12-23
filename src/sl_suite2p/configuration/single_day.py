@@ -372,21 +372,26 @@ class CellposeDetection:
     """
 
     diameter: int = 0
-    """Specifies the diameter, in pixels, to look for when finding cell ROIs. If set to 0, Cellpose estimates the 
+    """Specifies the diameter, in pixels, to look for when finding cell ROIs. If set to 0, Cellpose estimates the
     diameter automatically."""
 
     cellprob_threshold: float = 0.0
     """The threshold for cell detection, used to filter out low-confidence ROIs."""
 
-    flow_threshold: float = 1.5
+    flow_threshold: float = 0.4
     """The flow threshold, used to control the algorithm's sensitivity to cell boundaries."""
 
     spatial_hp_cp: int = 0
     """The window size, in pixels, for spatial high-pass filtering applied to the image before Cellpose processing."""
 
-    pretrained_model: str = "cyto"
-    """Specifies the pretrained model to use for cell detection. Can be a built-in model name (e.g., 'cyto') or a 
-    path to a custom model."""
+    pretrained_model: str = "cpsam"
+    """Specifies the pretrained model to use for cell detection. Can be a built-in model name (e.g., 'cpsam', 'cyto3')
+    or a path to a custom model. The default 'cpsam' (Cellpose Segment Anything Model) matches the official suite2p
+    implementation."""
+
+    gpu_index: int | None = None
+    """Specifies the GPU index to use for Cellpose processing on multi-GPU systems. If set to None, Cellpose uses its
+    default GPU detection. Set to 0, 1, 2, etc. to use a specific GPU."""
 
 
 @dataclass
