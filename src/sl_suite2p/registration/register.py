@@ -731,8 +731,8 @@ def registration_wrapper(
 
     # compute valid region
     badframes = np.zeros(n_frames, "bool")
-    if "data_path" in ops and len(ops["data_path"]) > 0:
-        badfrfile = path.abspath(path.join(ops["data_path"][0], "bad_frames.npy"))
+    if "data_path" in ops and ops["data_path"]:
+        badfrfile = path.abspath(path.join(str(ops["data_path"]), "bad_frames.npy"))
         # Check if badframes file exists
         if path.isfile(badfrfile):
             console.echo(
