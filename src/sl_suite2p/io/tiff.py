@@ -177,11 +177,11 @@ def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
     batch_size = ops["batch_size"]
     batch_size = plane_number * channel_number * math.ceil(batch_size / (plane_number * channel_number))
 
-    # Pre-initializes all plane ops to avoid conditional initialization below
+    # Pre-initializes plane ops for nframes and frames_per_file. Note: frames_per_folder is already correctly
+    # initialized by find_files_open_binaries based on the number of discovered data folders.
     for plane_index in range(plane_number):
         plane_ops[plane_index]["nframes"] = 0
         plane_ops[plane_index]["frames_per_file"] = np.zeros((len(files),), dtype=int)
-        plane_ops[plane_index]["frames_per_folder"] = np.zeros((len(ops["data_path"]),), dtype=int)
 
     # Determines the number of frames across all .tiff files. This is used for the progress bar visualization
     total_frames = 0
@@ -339,8 +339,14 @@ def mesoscan_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
     # the data directory. Note, since sl-suite2p version 2.0.0, ops.json processing now happens as part of resolving the
     # 'ops' dictionary (high-level API), so this is mostly kept as a fall-back safety mechanism.
     if "lines" not in ops:
-        file_path = Path(ops["data_path"][0])
+        file_path = Path(ops["data_path"])
         files = list(file_path.glob("*ops.json"))  # Specifically searches for the files named 'ops.json'
+        if not files:
+            message = (
+                f"Unable to find 'ops.json' file in the data directory {file_path}. "
+                f"This file is required for mesoscope data processing to determine ROI line mappings."
+            )
+            console.error(message=message, error=FileNotFoundError)
         with files[0].open() as f:
             ops_json = json.load(f)
 
