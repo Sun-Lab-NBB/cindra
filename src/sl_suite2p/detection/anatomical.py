@@ -6,10 +6,12 @@ from typing import Any
 
 import cv2
 import numpy as np
+import torch
 from scipy.ndimage import find_objects, gaussian_filter
 from cellpose.utils import fill_holes_and_remove_small_masks
 from cellpose.models import CellposeModel
 from cellpose.transforms import normalize99, resize_image
+from cellpose import core
 from ataraxis_base_utilities import LogLevel, console
 
 from . import utils
@@ -28,13 +30,20 @@ def mask_centers(masks):
     return centers, diams
 
 
-def patch_detect(patches, diam):
-    """Anatomical detection of masks from top active frames for putative cell"""
+def patch_detect(patches, diam, gpu_index=None):
+    """Anatomical detection of masks from top active frames for putative cell
+
+    Parameters:
+        patches: list of image patches
+        diam: diameter for cellpose
+        gpu_index: optional GPU index (0, 1, etc.) for multi-GPU systems
+    """
     console.echo(message="Refining masks using Cellpose...", level=LogLevel.INFO)
     npatches = len(patches)
     ly = patches[0].shape[0]
-    # CHANGED: Use CellposeModel instead of Cellpose (which was removed)
-    model = CellposeModel(model_type="cyto3")
+    # Use CellposeModel with pretrained_model (model_type is deprecated in Cellpose 4.0+)
+    device = torch.device(f"cuda:{gpu_index}") if gpu_index is not None else None
+    model = CellposeModel(pretrained_model="cpsam", gpu=True if core.use_gpu() else False, device=device)
 
     # Prepare images as before
     imgs = np.zeros((npatches, ly, ly, 2), np.float32)
@@ -95,9 +104,9 @@ def patch_detect(patches, diam):
     return pmasks
 
 
-def refine_masks(stats, patches, seeds, diam, Lyc, Lxc):
+def refine_masks(stats, patches, seeds, diam, Lyc, Lxc, gpu_index=None):
     nmasks = len(patches)
-    patch_masks = patch_detect(patches, diam)
+    patch_masks = patch_detect(patches, diam, gpu_index=gpu_index)
     ly = patches[0].shape[0] // 2
     igood = np.zeros(nmasks, "bool")
     for i, (patch_mask, stat, (yi, xi)) in enumerate(zip(patch_masks, stats, seeds, strict=False)):
@@ -129,12 +138,15 @@ def refine_masks(stats, patches, seeds, diam, Lyc, Lxc):
     return stats
 
 
-def roi_detect(mproj, diameter=None, cellprob_threshold=0.0, flow_threshold=1.5, pretrained_model=None):
-    pretrained_model = "cyto3" if pretrained_model is None else pretrained_model
+def roi_detect(mproj, diameter=None, cellprob_threshold=0.0, flow_threshold=0.4, pretrained_model=None, gpu_index=None):
+    if diameter == 0:
+        diameter = None
+    pretrained_model = "cpsam" if pretrained_model is None else pretrained_model
+    device = torch.device(f"cuda:{gpu_index}") if gpu_index is not None else None
     if not os.path.exists(pretrained_model):
-        model = CellposeModel(model_type=pretrained_model)
+        model = CellposeModel(pretrained_model=pretrained_model, gpu=True if core.use_gpu() else False, device=device)
     else:
-        model = CellposeModel(pretrained_model=pretrained_model)
+        model = CellposeModel(pretrained_model=pretrained_model, gpu=True if core.use_gpu() else False, device=device)
     masks = model.eval(
         mproj, channels=[0, 0], diameter=diameter, cellprob_threshold=cellprob_threshold, flow_threshold=flow_threshold
     )[0]
@@ -250,6 +262,7 @@ def select_rois(ops: dict[str, Any], mov: np.ndarray, diameter=None):
         flow_threshold=ops["flow_threshold"],
         cellprob_threshold=ops["cellprob_threshold"],
         pretrained_model=ops["pretrained_model"],
+        gpu_index=ops.get("gpu_index"),
     )
     if rescale != 1.0:
         masks = cv2.resize(masks, (Lxc, Lyc), interpolation=cv2.INTER_NEAREST)
