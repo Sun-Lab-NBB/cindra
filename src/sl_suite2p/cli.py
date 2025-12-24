@@ -11,7 +11,7 @@ import click
 from ataraxis_base_utilities import LogLevel, console
 
 from .gui import run
-from .pipeline import process_single_day, process_multi_day
+from .pipeline import process_multi_day, process_single_day
 from .configuration import (
     MultiDayS2PConfiguration,
     SingleDayS2PConfiguration,
@@ -297,8 +297,8 @@ def run_sd_pipeline(
     show_default=True,
     default=False,
     help=(
-         "Determines whether to discover cells trackable across days (step 1). This step discovers the candidates for "
-         "the fluorescence extraction performed during the second processing step."
+        "Determines whether to discover cells trackable across days (step 1). This step discovers the candidates for "
+        "the fluorescence extraction performed during the second processing step."
     ),
 )
 @click.option(

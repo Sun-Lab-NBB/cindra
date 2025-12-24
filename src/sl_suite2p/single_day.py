@@ -143,10 +143,7 @@ def _register_plane(
             # Resets the timer for the second step.
             timer.reset()
 
-            message = (
-                f"Generating plane {plane_number} mean image excluding bad frames "
-                f"from first registration step..."
-            )
+            message = f"Generating plane {plane_number} mean image excluding bad frames from first registration step..."
             console.echo(message=message, level=LogLevel.INFO)
 
             # Bins all available frames into groups of 1000 frames.

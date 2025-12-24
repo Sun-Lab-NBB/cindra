@@ -245,15 +245,11 @@ def get_pc_metrics(mov, ops, plane_number: int):
     pclow, pchigh, sv, ops["tPC"] = pclowhigh(
         mov, nlowhigh=np.minimum(300, int(ops["nframes"] / 2)), nPC=nPC, random_state=None
     )
-    console.echo(
-        message=f"Plane {plane_number} PCs: computed. Time: {timer.elapsed}s.", level=LogLevel.SUCCESS
-    )
+    console.echo(message=f"Plane {plane_number} PCs: computed. Time: {timer.elapsed}s.", level=LogLevel.SUCCESS)
 
     ops["regPC"] = np.concatenate((pclow[np.newaxis, :, :, :], pchigh[np.newaxis, :, :, :]), axis=0)
 
-    console.echo(
-        message=f"Registering top and bottom of each PC for plane {plane_number}...", level=LogLevel.INFO
-    )
+    console.echo(message=f"Registering top and bottom of each PC for plane {plane_number}...", level=LogLevel.INFO)
     timer.reset()
     ops["regDX"] = pc_register(
         pclow,

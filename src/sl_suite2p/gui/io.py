@@ -226,16 +226,12 @@ def load_files(name):
             Fcell = np.load(basename + "/F.npy")
             Fneu = np.load(basename + "/Fneu.npy")
         except (ValueError, OSError, RuntimeError, TypeError, NameError):
-            console.echo(
-                message="ERROR: no fluorescence traces in this folder (F.npy/Fneu.npy)", level=LogLevel.ERROR
-            )
+            console.echo(message="ERROR: no fluorescence traces in this folder (F.npy/Fneu.npy)", level=LogLevel.ERROR)
             goodfolder = False
         try:
             Spks = np.load(basename + "/spks.npy")
         except (ValueError, OSError, RuntimeError, TypeError, NameError):
-            console.echo(
-                message="No spike deconvolved traces in this folder (spks.npy)", level=LogLevel.WARNING
-            )
+            console.echo(message="No spike deconvolved traces in this folder (spks.npy)", level=LogLevel.WARNING)
             goodfolder = False
         try:
             ops = np.load(basename + "/ops.npy", allow_pickle=True).item()
