@@ -71,9 +71,7 @@ class RunWindow(QDialog):
             console.echo(message="Loaded default ops", level=LogLevel.SUCCESS)
         except Exception as e:
             console.echo(message=f"ERROR: {e}", level=LogLevel.ERROR)
-            console.echo(
-                message="Could not load default ops, using built-in ops settings", level=LogLevel.WARNING
-            )
+            console.echo(message="Could not load default ops, using built-in ops settings", level=LogLevel.WARNING)
             self.ops = generate_default_ops()
 
         # remove any remaining ops files
@@ -525,9 +523,7 @@ class RunWindow(QDialog):
                 else:
                     cursor.insertText("not opening plane in GUI (no ROIs)\n")
             else:
-                cursor.insertText(
-                    "BATCH MODE: %d more recordings remaining \n" % (len(self.opslist) - self.f - 1)
-                )
+                cursor.insertText("BATCH MODE: %d more recordings remaining \n" % (len(self.opslist) - self.f - 1))
                 self.f += 1
                 if self.f < len(self.opslist):
                     self.run_S2P()
@@ -587,11 +583,7 @@ class RunWindow(QDialog):
                 ops0 = generate_default_ops()
                 ops = {**ops0, **ops}
                 for key in ops:
-                    if (
-                        key != "data_path"
-                        and key != "save_path"
-                        and key != "cleanup"
-                    ):
+                    if key != "data_path" and key != "save_path" and key != "cleanup":
                         if key in self.keylist:
                             self.editlist[self.keylist.index(key)].set_text(ops)
                         self.ops[key] = ops[key]

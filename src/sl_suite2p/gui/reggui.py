@@ -410,9 +410,7 @@ class BinaryPlayer(QMainWindow):
                     reg_file = ops["reg_file"]
                 else:
                     reg_file = os.path.abspath(os.path.join(os.path.dirname(filename), "plane%d" % ipl, "data.bin"))
-                console.echo(
-                    message=f"Registration file: {reg_file}, exists: {os.path.isfile(reg_file)}"
-                )
+                console.echo(message=f"Registration file: {reg_file}, exists: {os.path.isfile(reg_file)}")
                 self.reg_loc.append(reg_file)
                 self.reg_file.append(open(self.reg_loc[-1], "rb"))
                 self.Ly.append(ops["Ly"])
@@ -523,9 +521,7 @@ class BinaryPlayer(QMainWindow):
             console.echo(message=f"Fluorescence data loaded: {self.Floaded}")
             self.filename = filename
         except Exception as e:
-            console.echo(
-                message="ERROR: ops.npy incorrect / missing ops['reg_file'] and others", level=LogLevel.ERROR
-            )
+            console.echo(message="ERROR: ops.npy incorrect / missing ops['reg_file'] and others", level=LogLevel.ERROR)
             console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
             try:
                 for n in range(len(self.reg_loc)):
