@@ -200,8 +200,8 @@ def extract_traces_from_masks(
         neuropil_masks: An array containing pixel indices of the neuropil surrounding the ROI.
     """
     batch_size = ops["batch_size"]
-    height = ops["height"]
-    width = ops["width"]
+    height = ops["Ly"]
+    width = ops["Lx"]
 
     with BinaryFile(height=height, width=width, file_path=ops["reg_file"]) as f:
         cell_fluorescence, neuropil_fluorescence = extract_traces(

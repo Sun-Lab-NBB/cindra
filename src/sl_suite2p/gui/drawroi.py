@@ -38,9 +38,7 @@ def masks_and_traces(ops, stat_manual, stat_orig):
     )
     manual_roi_stats = stat_all[: len(stat_manual)]
     manual_cell_masks = cell_masks[: len(stat_manual)]
-    console.echo(
-        message=f"Manual ROI masks: created in {time.time() - t0:.2f} seconds.", level=LogLevel.SUCCESS
-    )
+    console.echo(message=f"Manual ROI masks: created in {time.time() - t0:.2f} seconds.", level=LogLevel.SUCCESS)
 
     F, Fneu, F_chan2, Fneu_chan2 = extract_traces_from_masks(ops, manual_cell_masks, manual_neuropil_masks)
 

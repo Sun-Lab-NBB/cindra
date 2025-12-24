@@ -7,11 +7,11 @@ from typing import Any
 import cv2
 import numpy as np
 import torch
+from cellpose import core
 from scipy.ndimage import find_objects, gaussian_filter
 from cellpose.utils import fill_holes_and_remove_small_masks
 from cellpose.models import CellposeModel
 from cellpose.transforms import normalize99, resize_image
-from cellpose import core
 from ataraxis_base_utilities import LogLevel, console
 
 from . import utils
@@ -157,8 +157,7 @@ def roi_detect(mproj, diameter=None, cellprob_threshold=0.0, flow_threshold=0.4,
     median_diam = np.median(mask_diams)
     console.echo(
         message=(
-            f"Cellpose ROI detection: {masks.max()} masks detected "
-            f"with median diameter = {median_diam:.2f} pixels."
+            f"Cellpose ROI detection: {masks.max()} masks detected with median diameter = {median_diam:.2f} pixels."
         ),
         level=LogLevel.SUCCESS,
     )
@@ -216,9 +215,7 @@ def select_rois(ops: dict[str, Any], mov: np.ndarray, diameter=None):
         else:
             img = mean_img
             console.echo(
-                message=(
-                    "Enhanced mean image not available. Using mean image for anatomical detection instead."
-                ),
+                message=("Enhanced mean image not available. Using mean image for anatomical detection instead."),
                 level=LogLevel.WARNING,
             )
         weights = 0.1 + np.clip(
