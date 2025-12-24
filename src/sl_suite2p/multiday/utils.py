@@ -206,30 +206,29 @@ def _find_overlapping_pixels(all_pixels: NDArray[np.int32]) -> NDArray[np.int32]
 
 @njit(parallel=True, cache=True)
 def _create_overlap_arrays(
-    mask_pixel_indices: list[NDArray[np.int32]], overlapping_pixels: NDArray[np.int32]
-) -> list[NDArray[np.bool]]:
-    """This service function is used by the add_overlap_info function to create boolean arrays that mark overlapping
-        pixels for each mask.
+    flat_pixel_indices: NDArray[np.int32],
+    overlapping_pixels: NDArray[np.int32],
+) -> NDArray[np.bool_]:
+    """Creates a boolean array marking overlapping pixels for all masks.
 
     Args:
-        mask_pixel_indices: A list of NumPy arrays, where each array stores the indices of cell mask pixels.
+        flat_pixel_indices: Flattened array containing all mask pixel indices concatenated together.
         overlapping_pixels: A NumPy array storing the indices of overlapping pixels.
 
     Returns:
-        A list of boolean arrays, where each array marks overlapping pixels for a specific cell mask.
+        A flattened boolean array marking overlapping pixels for all masks.
     """
-    overlap_arrays: list[NDArray[np.bool]] = []
+    total_pixels = len(flat_pixel_indices)
+    overlap_result = np.zeros(total_pixels, dtype=np.bool_)
 
-    for pixel_indices in mask_pixel_indices:
-        overlap = np.zeros(len(pixel_indices), dtype=np.bool_)
-        for i in prange(len(pixel_indices)):
-            for j in range(len(overlapping_pixels)):
-                if pixel_indices[i] == overlapping_pixels[j]:
-                    overlap[i] = True
-                    break
-        overlap_arrays.append(overlap)
+    for pixel_index in prange(total_pixels):
+        pixel_value = flat_pixel_indices[pixel_index]
+        for overlap_index in range(len(overlapping_pixels)):
+            if pixel_value == overlapping_pixels[overlap_index]:
+                overlap_result[pixel_index] = True
+                break
 
-    return overlap_arrays
+    return overlap_result
 
 
 def add_overlap_info(masks: list[dict[str, Any]]) -> list[dict[str, NDArray[np.bool]]]:
@@ -244,19 +243,28 @@ def add_overlap_info(masks: list[dict[str, Any]]) -> list[dict[str, NDArray[np.b
     """
     # Extracts pixel indices from all masks
     mask_pixel_indices = [mask["ipix"] for mask in masks]
+    mask_count = len(mask_pixel_indices)
 
-    # Concatenates all pixel indices
+    # Flattens mask pixel indices into a contiguous array with offset pointers.
+    # This format avoids Numba's tuple/list size limitations and enables efficient parallel processing.
+    mask_sizes = np.array([len(indices) for indices in mask_pixel_indices], dtype=np.uint64)
+    mask_offsets = np.zeros(mask_count + 1, dtype=np.uint64)
+    mask_offsets[1:] = np.cumsum(mask_sizes)
+
+    # Concatenates all pixel indices into flat array
     all_pixel_indices = np.concatenate(mask_pixel_indices)
 
     # Finds overlapping pixels using numba
     overlapping_pixels = _find_overlapping_pixels(all_pixel_indices)
 
-    # Creates arrays to store overlapping pixels
-    overlap_arrays = _create_overlap_arrays(mask_pixel_indices, overlapping_pixels)
+    # Creates flattened overlap array using numba
+    flat_overlap = _create_overlap_arrays(all_pixel_indices, overlapping_pixels)
 
-    # Assigns overlapping pixel arrays to mask dictionaries for cells that make up the overlap
-    for i, mask in enumerate(masks):
-        mask["overlap"] = overlap_arrays[i]
+    # Assigns overlapping pixel arrays to mask dictionaries by extracting slices from flat result
+    for mask_index, mask in enumerate(masks):
+        start = mask_offsets[mask_index]
+        end = mask_offsets[mask_index + 1]
+        mask["overlap"] = flat_overlap[start:end]
 
     return masks
 
