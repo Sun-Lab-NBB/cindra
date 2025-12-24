@@ -411,9 +411,7 @@ def compute_reference_and_register_frames(
                 bidi.shift(frames, int(ops["bidiphase"]))
 
         if refImg is None:
-            console.echo(
-                f"Computing plane {plane_number} reference frame...", level=LogLevel.INFO
-            )
+            console.echo(f"Computing plane {plane_number} reference frame...", level=LogLevel.INFO)
             timer.reset()
             refImg = compute_reference(frames, ops=ops)
             console.echo(
@@ -426,9 +424,7 @@ def compute_reference_and_register_frames(
     else:
         nZ = 1
 
-    console.echo(
-        f"Generated a total of {nZ} reference frames for plane {plane_number}.", level=LogLevel.INFO
-    )
+    console.echo(f"Generated a total of {nZ} reference frames for plane {plane_number}.", level=LogLevel.INFO)
 
     # normalize reference image
     refImg_orig = refImg.copy()
@@ -455,9 +451,7 @@ def compute_reference_and_register_frames(
         n_frames = min(n_frames, ops["frames_include"])
 
     timer.reset()
-    console.echo(
-        f"Computing plane {plane_number} frame registration offsets for channel 1...", level=LogLevel.INFO
-    )
+    console.echo(f"Computing plane {plane_number} frame registration offsets for channel 1...", level=LogLevel.INFO)
 
     # Uses tqdm progress bar when sessions are processed sequentially.
     for batch_number in tqdm(
@@ -542,9 +536,7 @@ def shift_frames_and_write(
     mean_img = np.zeros((Ly, Lx), "float32")
     batch_size = ops["batch_size"]
     timer = PrecisionTimer("s")
-    console.echo(
-        f"Computing plane {plane_number} frame registration offsets for channel 2...", level=LogLevel.INFO
-    )
+    console.echo(f"Computing plane {plane_number} frame registration offsets for channel 2...", level=LogLevel.INFO)
     timer.reset()
     for batch_number in tqdm(
         np.arange(0, n_frames, batch_size),
@@ -685,14 +677,10 @@ def registration_wrapper(
     n_frames, Ly, Lx = f_align_in.shape
     if f_alt_in is not None and f_alt_in.shape[0] == f_align_in.shape[0]:
         nchannels = 2
-        console.echo(
-            message=f"Registering two channels for plane {plane_number}...", level=LogLevel.INFO
-        )
+        console.echo(message=f"Registering two channels for plane {plane_number}...", level=LogLevel.INFO)
     else:
         nchannels = 1
-        console.echo(
-            message=f"Registering a single channel for plane {plane_number}...", level=LogLevel.INFO
-        )
+        console.echo(message=f"Registering a single channel for plane {plane_number}...", level=LogLevel.INFO)
 
     outputs = compute_reference_and_register_frames(
         f_align_in, plane_number=plane_number, f_align_out=f_align_out, refImg=refImg, ops=ops
@@ -731,7 +719,7 @@ def registration_wrapper(
 
     # compute valid region
     badframes = np.zeros(n_frames, "bool")
-    if "data_path" in ops and ops["data_path"]:
+    if ops.get("data_path"):
         badfrfile = path.abspath(path.join(str(ops["data_path"]), "bad_frames.npy"))
         # Check if badframes file exists
         if path.isfile(badfrfile):
@@ -743,9 +731,7 @@ def registration_wrapper(
             bf_indices = bf_indices.flatten().astype(int)
             # Set indices of badframes to true
             badframes[bf_indices] = True
-            console.echo(
-                message=f"Plane {plane_number} bad frames count: {badframes.sum()}.", level=LogLevel.WARNING
-            )
+            console.echo(message=f"Plane {plane_number} bad frames count: {badframes.sum()}.", level=LogLevel.WARNING)
 
     # return frames which fall outside range
     badframes, yrange, xrange = compute_crop(
@@ -847,7 +833,7 @@ def create_enhanced_mean_image(ops):
 
     # Places the enhanced mean image back into the original mean image array, replacing the pixels along the border with
     # the minimal intensity values.
-    height, width = ops["height"], ops["width"]
+    height, width = ops["Ly"], ops["Lx"]
     enhanced_image = np.full((height, width), scaled_roi.min(), dtype=np.float32)
     enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
 

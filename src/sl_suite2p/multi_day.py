@@ -83,9 +83,7 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
         The path to the generated 'ops.npy' file in the dataset directory.
     """
     # Since this step takes a noticeable amount of time, notifies the user about the progress of this step.
-    console.echo(
-        f"Resolving the multi-day 'ops' dictionary for {len(ops['session_directories'])} sessions..."
-    )
+    console.echo(f"Resolving the multi-day 'ops' dictionary for {len(ops['session_directories'])} sessions...")
 
     # Builds up the multiday 'ops' dictionary. First fills the dictionary with the 'default' keys. Then
     # overwrites all default keys with keys from the input 'ops' dictionary. Finally, overwrites any keys from the
@@ -275,29 +273,21 @@ def discover_multiday_cells(ops_path: Path) -> None:
     console.echo(message="Computing across-session cell masks...")
     timer.reset()
     sessions_data = generate_template_masks(ops=ops, data=sessions_data)
-    console.echo(
-        message=f"Across-session cell masks: computed. Time: {timer.elapsed}s.", level=LogLevel.SUCCESS
-    )
+    console.echo(message=f"Across-session cell masks: computed. Time: {timer.elapsed}s.", level=LogLevel.SUCCESS)
 
     # Transforms the template cell masks from the shared multi-session (deformed) visual space to the original
     # (unregistered) visual space of each session. This is necessary to re-extract the fluorescence of multi-day-tracked
     # cells from each session during the second step of the multi-day pipeline.
-    console.echo(
-        message="Transforming template cell masks from multi-day visual space to single-day visual space..."
-    )
+    console.echo(message="Transforming template cell masks from multi-day visual space to single-day visual space...")
     timer.reset()
     sessions_data = backward_transform_masks(ops=ops, data=sessions_data)
     console.echo(message=f"Cell masks: transformed. Time: {timer.elapsed}s.", level=LogLevel.SUCCESS)
 
     # Exports all data generate during the first (registration) step to disk. The data is then reloaded as part of the
     # second (extraction) step.
-    console.echo(
-        message="Appending multi-day registration data to each session's suite2p (output) folder..."
-    )
+    console.echo(message="Appending multi-day registration data to each session's suite2p (output) folder...")
     export_masks_and_images(ops=ops, data=sessions_data)
-    console.echo(
-        message=f"Multi-day registration: complete. Time: {step_timer.elapsed}s.", level=LogLevel.SUCCESS
-    )
+    console.echo(message=f"Multi-day registration: complete. Time: {step_timer.elapsed}s.", level=LogLevel.SUCCESS)
 
 
 def extract_multiday_fluorescence(ops_path: Path, session_id: str) -> None:

@@ -9,18 +9,18 @@ from pathlib import Path
 import numpy as np
 from sl_shared_assets import (
     DatasetData,
-    DatasetTrackers,
     SessionData,
     SessionTypes,
+    DatasetTrackers,
     ProcessingTracker,
     AcquisitionSystems,
     ProcessingTrackers,
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from .single_day import resolve_ops, process_plane, combine_planes, resolve_binaries
 from .multi_day import resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
-from .configuration import SingleDayS2PConfiguration, MultiDayS2PConfiguration
+from .single_day import resolve_ops, process_plane, combine_planes, resolve_binaries
+from .configuration import MultiDayS2PConfiguration, SingleDayS2PConfiguration
 
 # Defines the session types and acquisition systems currently supported by the processing pipeline.
 _supported_systems = tuple(AcquisitionSystems)
@@ -33,7 +33,8 @@ class SingleDayJobNames(StrEnum):
     BINARIZE = "single_day_binarize"
     """The name for the binarization (step 1) processing job."""
     PROCESS = "single_day_process"
-    """The name for the processing (step 2) processing job."""
+    """The generic name for the processing (step 2) processing job. During runtime, the name is further modified to 
+    reference the processed plane."""
     COMBINE = "single_day_combine"
     """The name for the combination (step 3) processing job."""
 
@@ -44,7 +45,8 @@ class MultiDayJobNames(StrEnum):
     DISCOVER = "multi_day_discover"
     """The name for the cell discovery (step 1) processing job."""
     EXTRACT = "multi_day_extract"
-    """The name for the fluorescence extraction (step 2) processing job."""
+    """The generic name for the fluorescence extraction (step 2) processing job. During runtime, the name is further 
+    modified to reference the processed session."""
 
 
 def _generate_job_ids(root_path: Path, job_names: list[str]) -> dict[str, str]:
@@ -99,7 +101,6 @@ def _execute_single_day_job(
     ops_path: Path,
     job_name: str,
     job_id: str,
-    target_plane: int,
     tracker: ProcessingTracker,
 ) -> None:
     """Executes a single processing job of the single-day suite2p pipeline.
@@ -108,29 +109,20 @@ def _execute_single_day_job(
         ops_path: The path to the ops.npy file that stores the single-day suite2p processing parameters.
         job_name: The name of the job to run.
         job_id: The unique hexadecimal identifier for this processing job.
-        target_plane: The plane index to process or -1 for all planes (only used for the PROCESS job).
         tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
 
     Raises:
         ValueError: If the job_name is not recognized.
     """
-    console.echo(message=f"Running job: {job_name} (ID: {job_id})...")
+    console.echo(message=f"Running '{job_name}' job with ID {job_id}...")
     tracker.start_job(job_id=job_id)
 
     try:
         if job_name == SingleDayJobNames.BINARIZE:
             resolve_binaries(ops_path=ops_path)
 
-        elif job_name == SingleDayJobNames.PROCESS:
-            # Loads the resolved ops file to access the runtime configuration parameters.
-            final_ops = np.load(ops_path, allow_pickle=True).item()
-
-            # Either processes all available planes sequentially or only the requested plane.
-            if target_plane != -1:
-                process_plane(ops_path=ops_path, plane_index=target_plane)
-            else:
-                for plane in range(final_ops["nplanes"]):
-                    process_plane(ops_path=ops_path, plane_index=plane)
+        elif job_name.startswith(f"{SingleDayJobNames.PROCESS}_plane_"):
+            process_plane(ops_path=ops_path, plane_index=int(job_name.split("_plane_")[1]))
 
         elif job_name == SingleDayJobNames.COMBINE:
             combine_planes(ops_path=ops_path)
@@ -277,7 +269,13 @@ def process_single_day(
     # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
         # REMOTE mode: Finds the job name matching the provided job_id.
-        all_job_ids = _generate_job_ids(root_path=session_path, job_names=list(SingleDayJobNames))
+        # Generates all possible job names including plane-specific PROCESS jobs.
+        final_ops = np.load(ops_path, allow_pickle=True).item()
+        all_job_names: list[str] = [SingleDayJobNames.BINARIZE, SingleDayJobNames.COMBINE]
+        for plane in range(final_ops["nplanes"]):
+            all_job_names.append(f"{SingleDayJobNames.PROCESS}_plane_{plane}")
+
+        all_job_ids = _generate_job_ids(root_path=session_path, job_names=all_job_names)
         id_to_name: dict[str, str] = {v: k for k, v in all_job_ids.items()}
 
         if job_id not in id_to_name:
@@ -288,22 +286,36 @@ def process_single_day(
             )
             console.error(message=message, error=ValueError)
 
-        # Runs the jobs whose id matches the target job_id.
+        # Runs the job whose id matches the target job_id.
         job_name = id_to_name[job_id]
-        _execute_single_day_job(
-            ops_path=ops_path, job_name=job_name, job_id=job_id, target_plane=target_plane, tracker=tracker
-        )
+        _execute_single_day_job(ops_path=ops_path, job_name=job_name, job_id=job_id, tracker=tracker)
     else:
         # LOCAL mode: Initializes the tracker and runs all requested jobs.
-        console.echo(message=f"Initializing the processing tracker for {len(jobs_to_run)} job(s)...")
-        job_ids = _initialize_single_day_processing_tracker(session_path=session_path, job_names=jobs_to_run)
-
+        # For PROCESS jobs, expands to plane-specific jobs if target_plane == -1.
+        expanded_jobs: list[tuple[str, int]] = []  # (job_name, plane_index) pairs
         for job_name in jobs_to_run:
+            if job_name == SingleDayJobNames.PROCESS and target_plane == -1:
+                # Loads ops to determine the number of planes.
+                final_ops = np.load(ops_path, allow_pickle=True).item()
+                for plane in range(final_ops["nplanes"]):
+                    expanded_jobs.append((job_name, plane))
+            else:
+                expanded_jobs.append((job_name, target_plane))
+
+        # Generates job names for tracking (plane-specific for PROCESS jobs).
+        job_names_for_tracking = [
+            f"{job_name}_plane_{plane}" if job_name == SingleDayJobNames.PROCESS else job_name
+            for job_name, plane in expanded_jobs
+        ]
+
+        console.echo(message=f"Initializing the processing tracker for {len(expanded_jobs)} job(s)...")
+        job_ids = _initialize_single_day_processing_tracker(session_path=session_path, job_names=job_names_for_tracking)
+
+        for tracking_name in job_names_for_tracking:
             _execute_single_day_job(
                 ops_path=ops_path,
-                job_name=job_name,
-                job_id=job_ids[job_name],
-                target_plane=target_plane,
+                job_name=tracking_name,
+                job_id=job_ids[tracking_name],
                 tracker=tracker,
             )
 
@@ -328,9 +340,7 @@ def _initialize_multi_day_processing_tracker(
         A dictionary mapping job names to their generated job IDs.
     """
     # Initializes the processing tracker for this pipeline.
-    tracker = ProcessingTracker(
-        file_path=dataset.tracking_data.tracking_data_path.joinpath(DatasetTrackers.MULTIDAY)
-    )
+    tracker = ProcessingTracker(file_path=dataset.tracking_data.tracking_data_path.joinpath(DatasetTrackers.MULTIDAY))
 
     # Generates job IDs for each requested job using the dataset's root directory.
     dataset_path = dataset.dataset_data_path.parent
@@ -346,8 +356,6 @@ def _execute_multi_day_job(
     ops_path: Path,
     job_name: str,
     job_id: str,
-    target_session: str | None,
-    session_ids: list[str],
     tracker: ProcessingTracker,
 ) -> None:
     """Executes a single processing job of the multi-day suite2p pipeline.
@@ -356,28 +364,22 @@ def _execute_multi_day_job(
         ops_path: The path to the ops.npy file that stores the multi-day suite2p processing parameters.
         job_name: The name of the job to run.
         job_id: The unique hexadecimal identifier for this processing job.
-        target_session: The unique identifier of the session for which to extract the across-day-tracked cell
-            fluorescence or None for all sessions (only used for the EXTRACT job).
-        session_ids: The list of all session identifiers in the dataset.
         tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
 
     Raises:
         ValueError: If the job_name is not recognized.
     """
-    console.echo(message=f"Running job: {job_name} (ID: {job_id})...")
+    console.echo(message=f"Running '{job_name}' job with ID {job_id}...")
     tracker.start_job(job_id=job_id)
 
     try:
         if job_name == MultiDayJobNames.DISCOVER:
             discover_multiday_cells(ops_path=ops_path)
 
-        elif job_name == MultiDayJobNames.EXTRACT:
-            # Either extracts the fluorescence from all sessions sequentially or only from the target session.
-            if target_session is not None:
-                extract_multiday_fluorescence(ops_path=ops_path, session_id=target_session)
-            else:
-                for session_id in session_ids:
-                    extract_multiday_fluorescence(ops_path=ops_path, session_id=session_id)
+        elif job_name.startswith(f"{MultiDayJobNames.EXTRACT}_"):
+            extract_multiday_fluorescence(
+                ops_path=ops_path, session_id=job_name.split(f"{MultiDayJobNames.EXTRACT}_")[1]
+            )
 
         else:
             message = (
@@ -517,15 +519,18 @@ def process_multi_day(
     jobs_to_run = [job_name for job_name, requested in requested_jobs.items() if requested]
 
     # Initializes the tracker instance.
-    tracker = ProcessingTracker(
-        file_path=dataset.tracking_data.tracking_data_path.joinpath(DatasetTrackers.MULTIDAY)
-    )
+    tracker = ProcessingTracker(file_path=dataset.tracking_data.tracking_data_path.joinpath(DatasetTrackers.MULTIDAY))
 
     # Determines the execution mode and resolves job IDs accordingly.
     dataset_root = dataset.dataset_data_path.parent
     if job_id is not None:
         # REMOTE mode: Finds the job name matching the provided job_id.
-        all_job_ids = _generate_job_ids(root_path=dataset_root, job_names=list(MultiDayJobNames))
+        # Generates all possible job names including session-specific EXTRACT jobs.
+        all_job_names: list[str] = [MultiDayJobNames.DISCOVER]
+        for session_id in session_ids:
+            all_job_names.append(f"{MultiDayJobNames.EXTRACT}_{session_id}")
+
+        all_job_ids = _generate_job_ids(root_path=dataset_root, job_names=all_job_names)
         id_to_name: dict[str, str] = {v: k for k, v in all_job_ids.items()}
 
         if job_id not in id_to_name:
@@ -542,22 +547,33 @@ def process_multi_day(
             ops_path=ops_path,
             job_name=job_name,
             job_id=job_id,
-            target_session=target_session,
-            session_ids=session_ids,
             tracker=tracker,
         )
     else:
         # LOCAL mode: Initializes the tracker and runs all requested jobs.
-        console.echo(message=f"Initializing the processing tracker for {len(jobs_to_run)} job(s)...")
-        job_ids = _initialize_multi_day_processing_tracker(dataset=dataset, job_names=jobs_to_run)
-
+        # For EXTRACT jobs, expands to session-specific jobs if target_session is None.
+        expanded_jobs: list[tuple[str, str | None]] = []  # (job_name, session_id) pairs
         for job_name in jobs_to_run:
+            if job_name == MultiDayJobNames.EXTRACT and target_session is None:
+                for session_id in session_ids:
+                    expanded_jobs.append((job_name, session_id))
+            else:
+                expanded_jobs.append((job_name, target_session))
+
+        # Generates job names for tracking (session-specific for EXTRACT jobs).
+        job_names_for_tracking = [
+            f"{job_name}_{session}" if job_name == MultiDayJobNames.EXTRACT else job_name
+            for job_name, session in expanded_jobs
+        ]
+
+        console.echo(message=f"Initializing the processing tracker for {len(expanded_jobs)} job(s)...")
+        job_ids = _initialize_multi_day_processing_tracker(dataset=dataset, job_names=job_names_for_tracking)
+
+        for tracking_name in job_names_for_tracking:
             _execute_multi_day_job(
                 ops_path=ops_path,
-                job_name=job_name,
-                job_id=job_ids[job_name],
-                target_session=target_session,
-                session_ids=session_ids,
+                job_name=tracking_name,
+                job_id=job_ids[tracking_name],
                 tracker=tracker,
             )
 
