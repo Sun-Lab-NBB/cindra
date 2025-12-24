@@ -290,34 +290,57 @@ def process_single_day(
         job_name = id_to_name[job_id]
         _execute_single_day_job(ops_path=ops_path, job_name=job_name, job_id=job_id, tracker=tracker)
     else:
-        # LOCAL mode: Initializes the tracker and runs all requested jobs.
-        # For PROCESS jobs, expands to plane-specific jobs if target_plane == -1.
-        expanded_jobs: list[tuple[str, int]] = []  # (job_name, plane_index) pairs
-        for job_name in jobs_to_run:
-            if job_name == SingleDayJobNames.PROCESS and target_plane == -1:
-                # Loads ops to determine the number of planes.
-                final_ops = np.load(ops_path, allow_pickle=True).item()
-                for plane in range(final_ops["nplanes"]):
-                    expanded_jobs.append((job_name, plane))
-            else:
-                expanded_jobs.append((job_name, target_plane))
+        # LOCAL mode: Runs BINARIZE first (if requested) to determine nplanes, then expands and runs remaining jobs.
 
-        # Generates job names for tracking (plane-specific for PROCESS jobs).
-        job_names_for_tracking = [
-            f"{job_name}_plane_{plane}" if job_name == SingleDayJobNames.PROCESS else job_name
-            for job_name, plane in expanded_jobs
-        ]
-
-        console.echo(message=f"Initializing the processing tracker for {len(expanded_jobs)} job(s)...")
-        job_ids = _initialize_single_day_processing_tracker(session_path=session_path, job_names=job_names_for_tracking)
-
-        for tracking_name in job_names_for_tracking:
+        # Initializes the tracker and runs BINARIZE first if requested, as it determines the number of planes.
+        if SingleDayJobNames.BINARIZE in jobs_to_run:
+            console.echo(message="Initializing the processing tracker with BINARIZE job...")
+            binarize_job_ids = _initialize_single_day_processing_tracker(
+                session_path=session_path, job_names=[SingleDayJobNames.BINARIZE]
+            )
             _execute_single_day_job(
                 ops_path=ops_path,
-                job_name=tracking_name,
-                job_id=job_ids[tracking_name],
+                job_name=SingleDayJobNames.BINARIZE,
+                job_id=binarize_job_ids[SingleDayJobNames.BINARIZE],
                 tracker=tracker,
             )
+
+        # Builds the list of remaining jobs (excluding BINARIZE which already ran).
+        remaining_jobs = [job for job in jobs_to_run if job != SingleDayJobNames.BINARIZE]
+
+        if remaining_jobs:
+            # Reloads ops to get the correct nplanes after binarization.
+            final_ops = np.load(ops_path, allow_pickle=True).item()
+
+            # Expands PROCESS jobs to plane-specific jobs if target_plane == -1.
+            expanded_jobs: list[tuple[str, int]] = []
+            for job_name in remaining_jobs:
+                if job_name == SingleDayJobNames.PROCESS and target_plane == -1:
+                    for plane in range(final_ops["nplanes"]):
+                        expanded_jobs.append((job_name, plane))
+                else:
+                    expanded_jobs.append((job_name, target_plane))
+
+            # Generates job names for tracking (plane-specific for PROCESS jobs).
+            job_names_for_tracking = [
+                f"{job_name}_plane_{plane}" if job_name == SingleDayJobNames.PROCESS else job_name
+                for job_name, plane in expanded_jobs
+            ]
+
+            # Adds remaining jobs to the tracker. The initialize_jobs method only adds jobs that don't already exist,
+            # so this safely extends the tracker initialized with BINARIZE above.
+            console.echo(message=f"Adding {len(expanded_jobs)} remaining job(s) to the processing tracker...")
+            job_ids = _initialize_single_day_processing_tracker(
+                session_path=session_path, job_names=job_names_for_tracking
+            )
+
+            for tracking_name in job_names_for_tracking:
+                _execute_single_day_job(
+                    ops_path=ops_path,
+                    job_name=tracking_name,
+                    job_id=job_ids[tracking_name],
+                    tracker=tracker,
+                )
 
     console.echo(message="All processing jobs completed successfully.", level=LogLevel.SUCCESS)
 

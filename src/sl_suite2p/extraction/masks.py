@@ -117,20 +117,14 @@ def _create_neuropil_masks(
                 break
 
             # Expands the neuropil mask by uniformly extending the neuropil's bounding box to include the expansion_step
-            # number of new pixels on each side.
+            # number of new pixels on each side. Casts min/max to int to avoid unsigned integer overflow near edges.
+            y_min = max(0, int(current_ypix.min()) - neuropil_expansion_step)
+            y_max = min(height, int(current_ypix.max()) + neuropil_expansion_step + 1)
+            x_min = max(0, int(current_xpix.min()) - neuropil_expansion_step)
+            x_max = min(width, int(current_xpix.max()) + neuropil_expansion_step + 1)
             current_ypix, current_xpix = np.meshgrid(
-                np.arange(
-                    max(0, current_ypix.min() - neuropil_expansion_step),
-                    min(height, current_ypix.max() + neuropil_expansion_step + 1),
-                    1,
-                    int,
-                ),
-                np.arange(
-                    max(0, current_xpix.min() - neuropil_expansion_step),
-                    min(width, current_xpix.max() + neuropil_expansion_step + 1),
-                    1,
-                    int,
-                ),
+                np.arange(y_min, y_max, 1, np.uint32),
+                np.arange(x_min, x_max, 1, np.uint32),
                 indexing="ij",
             )
 

@@ -120,7 +120,7 @@ def _register_plane(
         ops = registration.save_registration_outputs_to_ops(registration_outputs, ops)
 
         # Computes and adds the enhanced mean image to the plane 'ops' file.
-        ops["enhanced_mean_image"] = registration.create_enhanced_mean_image(ops)
+        ops = registration.create_enhanced_mean_image(ops)
 
         # Adds registration time to the plane 'ops' file.
         ops["timing"]["registration"] = timer.elapsed
@@ -270,16 +270,10 @@ def _process_rois(
     builtin_classifier_file = classification.builtin_classfile
     user_classifier_file = classification.user_classfile
     if ops_classifier_file:
-        message = f"Applying target classifier {Path(ops_classifier_file).name} to plane {plane_number}..."
-        console.echo(message=message, level=LogLevel.INFO)
         classifier_file = ops_classifier_file
     elif ops["use_builtin_classifier"] or not user_classifier_file.is_file():
-        message = f"Applying builtin classifier {builtin_classifier_file.name} to plane {plane_number}..."
-        console.echo(message=message, level=LogLevel.INFO)
         classifier_file = builtin_classifier_file
     else:
-        message = f"Applying default classifier {user_classifier_file.name} to plane {plane_number}..."
-        console.echo(message=message, level=LogLevel.INFO)
         classifier_file = user_classifier_file
 
     # Memory-maps the necessary binary files.
@@ -383,8 +377,8 @@ def _process_rois(
                 spikes = np.zeros_like(cell_fluorescence)
 
             # Saves pipeline output to disk as .npy files.
-            fpath = Path(ops["save_path"])
-            if ops.get("save_path"):
+            fpath = Path(ops["output_path"])
+            if ops.get("output_path"):
                 np.save(fpath.joinpath("stat.npy"), roi_statistics)
                 np.save(fpath.joinpath("F.npy"), cell_fluorescence)
                 np.save(fpath.joinpath("Fneu.npy"), neuropil_fluorescence)
@@ -646,7 +640,7 @@ def resolve_binaries(ops_path: Path) -> None:
     if files_found_flag:
         message = (
             f"Found existing binaries (.bin files) and ops (ops.npy files) inside {len(plane_folders)} "
-            f"available plane folders."
+            f"available plane directories."
         )
         console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -719,6 +713,10 @@ def resolve_binaries(ops_path: Path) -> None:
             f"{len(plane_folders)} planes."
         )
         console.echo(message=message, level=LogLevel.SUCCESS)
+
+    # Updates the main ops.npy file with the actual number of planes discovered during binarization.
+    ops["nplanes"] = len(plane_folders)
+    np.save(ops_path, ops)
 
 
 def process_plane(ops_path: Path, plane_index: int) -> None:
