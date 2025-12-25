@@ -146,9 +146,9 @@ def roi_detect(mproj, diameter=None, cellprob_threshold=0.0, flow_threshold=0.4,
         model = CellposeModel(pretrained_model=pretrained_model, gpu=True if core.use_gpu() else False, device=device)
     else:
         model = CellposeModel(pretrained_model=pretrained_model, gpu=True if core.use_gpu() else False, device=device)
-    masks = model.eval(
-        mproj, diameter=diameter, cellprob_threshold=cellprob_threshold, flow_threshold=flow_threshold
-    )[0]
+    masks = model.eval(mproj, diameter=diameter, cellprob_threshold=cellprob_threshold, flow_threshold=flow_threshold)[
+        0
+    ]
     shape = masks.shape
     _, masks = np.unique(np.int32(masks), return_inverse=True)
     masks = masks.reshape(shape)
