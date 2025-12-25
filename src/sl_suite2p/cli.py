@@ -191,6 +191,13 @@ def ss2p_run(
 # noinspection PyUnresolvedReferences
 @ss2p_run.command("single-day")
 @click.option(
+    "-sp",
+    "--session-path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=True,
+    help="The absolute path to the root data directory of the session to process.",
+)
+@click.option(
     "-id",
     "--job-id",
     type=str,
@@ -247,6 +254,7 @@ def ss2p_run(
 @click.pass_context
 def run_sd_pipeline(
     ctx: Any,
+    session_path: Path,
     job_id: str | None,
     binarize: bool,
     process: bool,
@@ -266,6 +274,7 @@ def run_sd_pipeline(
     # Calls the unified pipeline API.
     process_single_day(
         configuration_path=config_path,
+        session_path=session_path,
         job_id=job_id,
         binarize=binarize,
         process=process,
@@ -279,6 +288,20 @@ def run_sd_pipeline(
 
 # noinspection PyUnresolvedReferences
 @ss2p_run.command("multi-day")
+@click.option(
+    "-dp",
+    "--dataset-path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=True,
+    help="The absolute path to the root data directory of the dataset to process.",
+)
+@click.option(
+    "-sdr",
+    "--session-data-root",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=True,
+    help="The absolute path to the root directory that stores the session data directories.",
+)
 @click.option(
     "-id",
     "--job-id",
@@ -325,6 +348,8 @@ def run_sd_pipeline(
 @click.pass_context
 def run_md_pipeline(
     ctx: Any,
+    dataset_path: Path,
+    session_data_root: Path,
     job_id: str | None,
     discover: bool,
     extract: bool,
@@ -343,6 +368,8 @@ def run_md_pipeline(
     # Calls the unified pipeline API.
     process_multi_day(
         configuration_path=config_path,
+        dataset_path=dataset_path,
+        session_data_root=session_data_root,
         job_id=job_id,
         discover=discover,
         extract=extract,
