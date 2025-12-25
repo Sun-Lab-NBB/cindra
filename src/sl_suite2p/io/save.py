@@ -224,7 +224,7 @@ def combined(
     filtered_mean_image = np.zeros((maximum_height, maximum_width))
 
     message = (
-        f"Combining the processed data for {plane_ops[0]['nchannels']} channels from folders "
+        f"Combining the processed data for {plane_ops[0]['nchannels']} channels from directories "
         f"{[Path(folder).name for folder in plane_directories]}..."
     )
     console.echo(message=message, level=LogLevel.INFO)
@@ -248,6 +248,9 @@ def combined(
 
     # Finds the maximum number of frames across all planes.
     maximum_frame_number = np.amax(np.array([ops["nframes"] for ops in plane_ops]))
+
+    # Checks whether the first valid plane has been processed (used to initialize combined arrays).
+    first_valid_plane = True
 
     # Loops over all available planes to process each plane's data.
     for plane_index, ops in enumerate(plane_ops):
@@ -331,7 +334,7 @@ def combined(
             )
 
         # Appends the processed plane's data to the combined arrays.
-        if plane_index == 0:
+        if first_valid_plane:
             (
                 cell_fluorescence,
                 neuropil_fluorescence,
@@ -349,6 +352,7 @@ def combined(
                 plane_is_cell,
                 plane_red_cell,
             )
+            first_valid_plane = False
         else:
             cell_fluorescence = np.concatenate((cell_fluorescence, plane_cell_fluorescence))
             neuropil_fluorescence = np.concatenate((neuropil_fluorescence, plane_neuropil_fluorescence))
@@ -360,6 +364,14 @@ def combined(
                 red_cell = np.concatenate((red_cell, plane_red_cell))
 
         console.echo(message=f"Appended plane {plane_index} data to combined view.", level=LogLevel.SUCCESS)
+
+    # If no valid planes were found, raises an error.
+    if first_valid_plane:
+        message = (
+            "Unable to combine plane data. No valid planes with ROI statistics (stat.npy) were found. "
+            "Ensure that at least one plane has been processed successfully before combining."
+        )
+        console.error(message=message, error=ValueError)
 
     # Modifies the combined 'ops' dictionary to include descriptive information about the combined recording data
     ops["mean_image"] = channel_1_mean_image

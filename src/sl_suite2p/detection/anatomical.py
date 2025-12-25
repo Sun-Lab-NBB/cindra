@@ -73,7 +73,6 @@ def patch_detect(patches, diam, gpu_index=None):
         masks_batch, flows_batch, styles_batch, diams_batch = model.eval(
             batch_imgs,
             diameter=30,  # Use fixed diameter since we resized
-            channels=[0, 0],  # grayscale
             cellprob_threshold=0.0,
             flow_threshold=1.0,
             do_3D=False,
@@ -148,7 +147,7 @@ def roi_detect(mproj, diameter=None, cellprob_threshold=0.0, flow_threshold=0.4,
     else:
         model = CellposeModel(pretrained_model=pretrained_model, gpu=True if core.use_gpu() else False, device=device)
     masks = model.eval(
-        mproj, channels=[0, 0], diameter=diameter, cellprob_threshold=cellprob_threshold, flow_threshold=flow_threshold
+        mproj, diameter=diameter, cellprob_threshold=cellprob_threshold, flow_threshold=flow_threshold
     )[0]
     shape = masks.shape
     _, masks = np.unique(np.int32(masks), return_inverse=True)

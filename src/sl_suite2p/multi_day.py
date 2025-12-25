@@ -43,8 +43,8 @@ def _find_combined_path(input_directory: Path) -> Path:
         message = (
             f"Unable to run the multi-day processing pipeline. Expected each path provided under the "
             f"'session_directories' multi-day configuration file field to point to a directory tree with exactly one "
-            f"'combined' folder. Instead, encountered at least one path pointing to a directory tree with "
-            f"{len(combined_path_list)} 'combined' folders."
+            f"'combined' directory. Instead, encountered at least one path pointing to a directory tree with "
+            f"{len(combined_path_list)} 'combined' directories."
         )
         console.error(message=message, error=RuntimeError)
         raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable
@@ -266,14 +266,14 @@ def discover_multiday_cells(ops_path: Path) -> None:
     console.echo(message="Registering sessions across days...")
     timer.reset()
     sessions_data = register_sessions(ops=ops, data=sessions_data)
-    console.echo(message=f"Registration: complete. Time: {timer.elapsed}s.", level=LogLevel.SUCCESS)
+    console.echo(message=f"Registration: complete. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS)
 
     # Tracks cells across sessions in the deformed visual space and computes the template masks for cells that can be
     # identified across sessions to apply to the original visual space of each session
     console.echo(message="Computing across-session cell masks...")
     timer.reset()
     sessions_data = generate_template_masks(ops=ops, data=sessions_data)
-    console.echo(message=f"Across-session cell masks: computed. Time: {timer.elapsed}s.", level=LogLevel.SUCCESS)
+    console.echo(message=f"Across-session cell masks: computed. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS)
 
     # Transforms the template cell masks from the shared multi-session (deformed) visual space to the original
     # (unregistered) visual space of each session. This is necessary to re-extract the fluorescence of multi-day-tracked
@@ -281,13 +281,13 @@ def discover_multiday_cells(ops_path: Path) -> None:
     console.echo(message="Transforming template cell masks from multi-day visual space to single-day visual space...")
     timer.reset()
     sessions_data = backward_transform_masks(ops=ops, data=sessions_data)
-    console.echo(message=f"Cell masks: transformed. Time: {timer.elapsed}s.", level=LogLevel.SUCCESS)
+    console.echo(message=f"Cell masks: transformed. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS)
 
     # Exports all data generate during the first (registration) step to disk. The data is then reloaded as part of the
     # second (extraction) step.
-    console.echo(message="Appending multi-day registration data to each session's suite2p (output) folder...")
+    console.echo(message="Appending multi-day registration data to each session's suite2p output directory...")
     export_masks_and_images(ops=ops, data=sessions_data)
-    console.echo(message=f"Multi-day registration: complete. Time: {step_timer.elapsed}s.", level=LogLevel.SUCCESS)
+    console.echo(message=f"Multi-day registration: complete. Time taken: {step_timer.elapsed} seconds.", level=LogLevel.SUCCESS)
 
 
 def extract_multiday_fluorescence(ops_path: Path, session_id: str) -> None:

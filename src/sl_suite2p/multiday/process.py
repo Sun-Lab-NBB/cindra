@@ -131,7 +131,7 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
         spikes = np.zeros_like(cell_fluorescence)
 
     # Saves extracted data to disk
-    console.echo(f"Saving extracted data to the {ops['dataset_name']} session {session_id} folder...")
+    console.echo(f"Saving extracted data to the {ops['dataset_name']} session {session_id} directory...")
     np.save(multiday_folder.joinpath("ops.npy"), ops)
     np.save(multiday_folder.joinpath("F.npy"), cell_fluorescence)
     np.save(multiday_folder.joinpath("Fneu.npy"), neuropil_fluorescence)
