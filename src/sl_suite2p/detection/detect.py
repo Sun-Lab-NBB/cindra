@@ -216,9 +216,10 @@ def detection_wrapper(
 
         if ops["preclassify"] > 0:
             if classfile is None:
-                message = f"Applying user classifier to plane {plane_number} from {user_classfile!s}..."
-                console.echo(message=message, level=LogLevel.INFO)
                 classfile = user_classfile
+
+            message = f"Applying classifier {Path(classfile).name} to plane {plane_number}..."
+            console.echo(message=message, level=LogLevel.INFO)
 
             stat = roi_stats(
                 stat,
@@ -232,7 +233,7 @@ def detection_wrapper(
                 iscell = np.zeros((0, 2))
             else:
                 iscell = classify(stat=stat, classfile=classfile)
-            np.save(Path(ops["save_path"]).joinpath("iscell.npy"), iscell)
+            np.save(Path(ops["output_path"]).joinpath("iscell.npy"), iscell)
             ic = (iscell[:, 0] > ops["preclassify"]).flatten().astype("bool")
             stat = stat[ic]
             message = (
@@ -258,7 +259,7 @@ def detection_wrapper(
         if "chan2_thres" not in ops:
             ops["chan2_thres"] = 0.65
         ops, redcell = chan2detect.detect(ops, stat)
-        np.save(Path(ops["save_path"]).joinpath("redcell.npy"), redcell)
+        np.save(Path(ops["output_path"]).joinpath("redcell.npy"), redcell)
 
     return ops, stat
 
