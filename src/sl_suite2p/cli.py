@@ -158,7 +158,6 @@ def ss2p_md_config(ctx: Any) -> None:
 @click.option(
     "-pb",
     "--progress-bars",
-    type=bool,
     is_flag=True,
     show_default=True,
     default=False,
