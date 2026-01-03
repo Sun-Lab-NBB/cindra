@@ -121,8 +121,14 @@ def extract_traces(
     timer = PrecisionTimer("s")
     timer.reset()
 
-    # Extracts processed movie statistics.
-    frame_count, height, width = data.shape
+    # Extracts processed movie statistics. For BinaryFileCombined objects, uses the height/width properties
+    # since shape returns arrays for plane dimensions. For regular arrays, unpacks shape directly.
+    if hasattr(data, "height") and hasattr(data, "width"):
+        frame_count = data.shape[0]
+        height = data.height
+        width = data.width
+    else:
+        frame_count, height, width = data.shape
     cell_count = len(cell_masks)
     pixel_count = height * width
 
