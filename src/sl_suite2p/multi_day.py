@@ -10,7 +10,7 @@ from natsort import natsorted
 from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
-from .version import version, sl_version, python_version
+from .version import version, python_version
 from .multiday import (
     import_sessions,
     register_sessions,
@@ -94,8 +94,7 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
         **ops,
         **db,
         # Actualizes version information
-        "base_suite2p_version": version,
-        "sl_suite2p_version": sl_version,
+        "sl_suite2p_version": version,
         "python_version": python_version,
     }
 

@@ -13,7 +13,7 @@ from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console
 
 from . import io, detection, extraction, registration, classification
-from .version import version, sl_version, python_version
+from .version import version, python_version
 from .io.binary import BinaryFile
 from .configuration import SingleDayS2PConfiguration, generate_default_ops
 
@@ -485,8 +485,7 @@ def resolve_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
     ops_path = save_folder.joinpath("ops.npy")
 
     # Actualizes version information to the generated ops.npy file.
-    ops["base_suite2p_version"] = version
-    ops["sl_suite2p_version"] = sl_version
+    ops["sl_suite2p_version"] = version
     ops["python_version"] = python_version
 
     # If the user does not specify the maximum parallel worker limit, sets it based on the number of available

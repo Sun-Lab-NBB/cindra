@@ -42,12 +42,12 @@ def register_sessions(ops: dict[str, Any], data: MultiDayData) -> MultiDayData:
     registration.params.scale_sampling = ops["scale_sampling"]
     registration.params.speed_factor = ops["speed_factor"]
 
-    # Runs the registration process
+    # Runs the registration process.
     console.echo(message=f"Computing deformation fields for {ops['image_type']} session images...")
     timer.reset()
     registration.register(verbose=0)
     console.echo(message=f"Deformation fields: computed. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS)
-    timer.delay_noblock(delay=1, allow_sleep=False)  # Delays for one second to optimize terminal message order
+    timer.delay(delay=1, allow_sleep=False, block=False)  # Delays for one second to optimize terminal message order
 
     # Resolves the number of parallel workers used to apply deformations to session's data.
     parallel_workers = ops["parallel_workers"]
@@ -75,7 +75,7 @@ def register_sessions(ops: dict[str, Any], data: MultiDayData) -> MultiDayData:
     # Updates the sessions stored inside data with the results of the above pipeline
     data.sessions = results
 
-    timer.delay_noblock(delay=1, allow_sleep=False)  # Delays for one second to optimize terminal message order
+    timer.delay(delay=1, allow_sleep=False, block=False)  # Delays for one second to optimize terminal message order
     # Returns the updated MultiDayData instance
     return data
 
@@ -183,7 +183,7 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
     # Process each grid cell directly
     for grid_pos in tqdm(
         sorted(grid_positions),
-        desc="Clustering cells across sessions...",
+        desc="Clustering cells across sessions",
         unit="bins",
         disable=not ops["progress_bars"],
     ):
