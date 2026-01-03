@@ -295,13 +295,6 @@ def run_sd_pipeline(
     help="The absolute path to the root data directory of the dataset to process.",
 )
 @click.option(
-    "-sdr",
-    "--session-data-root",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
-    help="The absolute path to the root directory that stores the session data directories.",
-)
-@click.option(
     "-id",
     "--job-id",
     type=str,
@@ -344,15 +337,26 @@ def run_sd_pipeline(
         "provided, the pipeline processes all available sessions."
     ),
 )
+@click.option(
+    "-a",
+    "--animal",
+    type=str,
+    required=False,
+    default=None,
+    help=(
+        "The unique identifier of the animal whose sessions to process. If not provided and the dataset contains "
+        "multiple animals, each animal's sessions are processed sequentially as separate multi-day runs."
+    ),
+)
 @click.pass_context
 def run_md_pipeline(
     ctx: Any,
     dataset_path: Path,
-    session_data_root: Path,
     job_id: str | None,
     discover: bool,
     extract: bool,
     target: str | None,
+    animal: str | None,
 ) -> None:
     """Runs the requested multi-day pipeline step(s)."""
     # Extracts shared configuration parameters passed as the context dictionary.
@@ -368,11 +372,11 @@ def run_md_pipeline(
     process_multi_day(
         configuration_path=config_path,
         dataset_path=dataset_path,
-        session_data_root=session_data_root,
         job_id=job_id,
         discover=discover,
         extract=extract,
         target_session=target,
+        target_animal=animal,
         workers=workers,
         progress_bars=progress_bars,
         overrides=db,

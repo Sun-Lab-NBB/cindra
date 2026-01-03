@@ -70,8 +70,7 @@ dependencies = [
     "importlib_metadata>=8,<9",
     "tbb4py>=2022,<2023; sys_platform != 'darwin'",
     "intel-cmplr-lib-rt>=2025,<2026; sys_platform != 'darwin'",
-    "sl-shared-assets>=6.1.0,<7",
-    "sl-forgery>=1.0.0rc2,<2",
+    "sl-shared-assets>=6.1.1rc3,<7",
     "torch>=2.0.0,<3",
 ]
 

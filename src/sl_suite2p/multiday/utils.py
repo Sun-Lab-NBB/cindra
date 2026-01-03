@@ -174,7 +174,7 @@ def deform_masks(
                 "ipix": np.ravel_multi_index((y_global, x_global), deform[0].shape),
                 "med": [np.median(y_global), np.median(x_global)],
                 "lam": lam_values,
-                "radius": regionprops(warped_lam.astype(np.uint8))[0].minor_axis_length,
+                "radius": regionprops(warped_lam.astype(np.uint8))[0].axis_minor_length,
             }
         )
 
