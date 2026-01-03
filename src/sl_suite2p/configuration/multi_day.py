@@ -10,7 +10,7 @@ import numpy as np
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
-from ..version import version, sl_version, python_version
+from ..version import version, python_version
 from .single_day import extract_params_for_section
 
 
@@ -32,15 +32,11 @@ class Main:
     in-parallel will interfere with properly communicating progress via the terminal."""
 
     python_version: str = python_version
-    """Stores the Python version that was used to instantiate this configuration file. This is a non-user-addressable 
+    """Stores the Python version that was used to instantiate this configuration file. This is a non-user-addressable
     field that stores important runtime ID information."""
 
-    sl_suite2p_version: str = sl_version
-    """Stores the sl-suite2p library version (release) that was used to instantiate this configuration file. This is a 
-    non-user-addressable field that stores important runtime ID information."""
-
-    base_suite2p_version: str = version
-    """Stores the original suite2p version against which the used sl-suite2p version was built. This is a 
+    sl_suite2p_version: str = version
+    """Stores the sl-suite2p library version (release) that was used to instantiate this configuration file. This is a
     non-user-addressable field that stores important runtime ID information."""
 
 

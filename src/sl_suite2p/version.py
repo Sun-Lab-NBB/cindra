@@ -6,7 +6,5 @@ import sys
 
 from importlib_metadata import metadata as _metadata
 
-version = "0.14.0"  # Statically set to the suite2p version against which this revision is built
-# Version of this sl-modified package
-sl_version = _metadata("sl-suite2p")["version"]
-python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"  # Python version
+version = _metadata("sl-suite2p")["version"]
+python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
