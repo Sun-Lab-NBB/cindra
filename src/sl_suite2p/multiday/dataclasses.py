@@ -6,10 +6,10 @@ from typing import Any
 from pathlib import Path
 from dataclasses import field, dataclass
 
-from pirt import DeformationFieldBackward
 import numpy as np
 from numpy.typing import NDArray
 
+from .pirt import Deformation
 from .utils import create_mask_image
 
 
@@ -41,8 +41,8 @@ class Session:
     to translate them to the (deformed) visual space shared by all processed sessions. This represents the session's 
     reference images in the registered (deformed) visual space."""
 
-    deform: DeformationFieldBackward = field(init=False)
-    """Stores the DeformationField instance used to deform the session to register it to the shared visual space."""
+    deform: Deformation = field(init=False)
+    """Stores the Deformation instance used to deform the session to register it to the shared visual space."""
 
     deformed_cell_masks: tuple[dict[str, Any], ...] = field(init=False)
     """Same as 'cell_masks', but stores cell ROI data after multi-day registration deform offsets have been applied 

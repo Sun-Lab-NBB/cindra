@@ -6,7 +6,6 @@ import os
 from typing import Any
 from concurrent.futures import ProcessPoolExecutor
 
-from pirt import DiffeomorphicDemonsRegistration
 from tqdm import tqdm
 import numpy as np
 from ataraxis_time import PrecisionTimer
@@ -14,6 +13,7 @@ from scipy.spatial.distance import pdist, squareform
 from ataraxis_base_utilities import LogLevel, console
 import scipy.cluster.hierarchy
 
+from .pirt import DiffeomorphicDemonsRegistration
 from .utils import deform_masks, add_overlap_info, create_mask_image
 from .dataclasses import Session, MultiDayData
 
@@ -84,7 +84,7 @@ def _register_session(registration: DiffeomorphicDemonsRegistration, deform_inde
     """This worker function is used by the main register_sessions function to apply deformation offsets to all sessions
     in parallel.
     """
-    # Extracts and saves the DeformationField object. Due to how pirt is implemented and contrary to pirt's
+    # Extracts and saves the Deformation object. Due to how pirt is implemented and contrary to pirt's
     # docstrings, since we do not override the default transform_mapping parameter, the mapping is BACKWARD.
     session.deform = registration.get_deform(deform_index)
 
