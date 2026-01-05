@@ -1,15 +1,6 @@
 import numpy as np
 
-from .interp import zoom
-from .gaussfun import diffuse2
-
-
-class BasePyramid:
-    pass  # When implementing HaarPyramid, maybe use a base class
-
-
-class HaarPyramid:
-    pass  # Implement using Haar wavelets.
+from .deformation import diffuse, zoom
 
 
 class ScaleSpacePyramid:
@@ -107,7 +98,7 @@ class ScaleSpacePyramid:
 
         # Smooth
         if sigma > 0:
-            data = diffuse2(data, sigma)
+            data = diffuse(data, sigma)
 
         # Get scale in pixel coords (sampling is always 1.0)
         pixel_scales = [min_scale / 1.0 for _ in range(data.ndim)]
@@ -124,35 +115,6 @@ class ScaleSpacePyramid:
         # Store level data and metadata separately
         self._levels = [data]
         self._level_scales = [min_scale]
-
-    def calculate(self, levels=None, min_shape=None):
-        """calculate(levels=None, min_shape=None)
-
-        Create the image pyramid now. Specify either the amount of levels,
-        or the minimum shape component of the highest level.
-        If neither levels nor min_shape is given, uses min_shape=8.
-
-        Returns (max_level, max_sigma) of the current pyramid.
-
-        """
-        # Check
-        if None not in [levels, min_shape]:
-            raise ValueError("You cannot specify both levels and min_shape")
-        if levels is None and min_shape is None:
-            min_shape = 8
-
-        # Add levels
-        if levels is None:
-            while min(self._levels[-1].shape) >= min_shape * 2:
-                self._add_Level()
-        else:
-            while len(self._levels) < levels:
-                self._add_Level()
-
-        # Return
-        maxLevel = len(self._levels) - 1
-        maxSigma = self._level_scales[-1]
-        return maxLevel, maxSigma
 
     def get_scale(self, scale=None):
         """get_scale(scale)
@@ -207,32 +169,12 @@ class ScaleSpacePyramid:
 
         # Smooth a bit more
         if sigma > 0:
-            data = diffuse2(data, sigma)
+            data = diffuse(data, sigma)
 
         # Set buffer and return
         if self._use_buffer:
             self._buffer = scale, data
         return data
-
-    def get_level(self, level):
-        """get_level(level):
-
-        Get the image at the specified (integer) level, zero being the
-        lowest level (the original image).
-
-        Each level is approximately a factor two smaller in size that the
-        previous level. All levels are buffered.
-
-        """
-        # Get integer level number and delta
-        level_i = int(level)
-
-        # Add levels if required
-        while level_i >= len(self._levels):
-            self._add_Level()
-
-        # Get integer level data
-        return self._levels[level_i]
 
     def _add_Level(self):
         """_add_Level()
@@ -253,7 +195,7 @@ class ScaleSpacePyramid:
         sigma = (sigma2**2 - sigma1**2) ** 0.5
 
         # Smooth
-        data = diffuse2(data, sigma)
+        data = diffuse(data, sigma)
 
         # Downsample (do not take every other sample, because then we will
         # lose the last pixel if the shape is even!)

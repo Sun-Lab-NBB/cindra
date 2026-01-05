@@ -127,9 +127,7 @@ def create_cropped_deform_field(
     y_slice = slice(origin[0], origin[0] + crop_size_array[0])
     x_slice = slice(origin[1], origin[1] + crop_size_array[1])
 
-    return Deformation(
-        deform[0][y_slice, x_slice], deform[1][y_slice, x_slice], forward_mapping=deform.forward_mapping
-    ), origin
+    return Deformation(deform[0][y_slice, x_slice], deform[1][y_slice, x_slice]), origin
 
 
 def deform_masks(
