@@ -3,13 +3,14 @@
 from typing import Any
 from pathlib import Path
 
-from pirt import Aarray, DeformationFieldBackward
 from numba import njit, prange
 import numpy as np
 from numpy.typing import NDArray
 import scipy.ndimage
 from skimage.measure import regionprops, find_contours
 from ataraxis_base_utilities import console
+
+from .pirt import Deformation
 
 
 # noinspection PyTypeHints
@@ -97,12 +98,12 @@ def create_mask_image(
 
 
 def create_cropped_deform_field(
-    deform: DeformationFieldBackward, origin: NDArray[Any], crop_size: tuple[int, int]
-) -> tuple[DeformationFieldBackward, NDArray[Any]]:
+    deform: Deformation, origin: NDArray[Any], crop_size: tuple[int, int]
+) -> tuple[Deformation, NDArray[Any]]:
     """Creates a cropped deformation field from the input deformation field.
 
     Args:
-        deform: The original (larger) backward deformation field.
+        deform: The original (larger) deformation field.
         origin: The coordinates of crop origin in the order of (y, x).
         crop_size: The size of the crop region in the order of (height, width).
 
@@ -126,17 +127,19 @@ def create_cropped_deform_field(
     y_slice = slice(origin[0], origin[0] + crop_size_array[0])
     x_slice = slice(origin[1], origin[1] + crop_size_array[1])
 
-    return DeformationFieldBackward([deform[0][y_slice, x_slice], deform[1][y_slice, x_slice]]), origin
+    return Deformation(
+        deform[0][y_slice, x_slice], deform[1][y_slice, x_slice], forward_mapping=deform.forward_mapping
+    ), origin
 
 
 def deform_masks(
-    cell_masks: tuple[dict[str, Any], ...] | list[dict[str, Any]], deform: DeformationFieldBackward, crop_bin: int = 500
+    cell_masks: tuple[dict[str, Any], ...] | list[dict[str, Any]], deform: Deformation, crop_bin: int = 500
 ) -> tuple[dict[str, Any], ...]:
     """Applies deformation field offsets to all input cell masks.
 
     Args:
         cell_masks: The tuple that stores cell mask dictionaries for each cell ROI to be deformed.
-        deform: The DeformationFieldBackward instance generated during multi-day registration to apply to the input
+        deform: The Deformation instance generated during multi-day registration to apply to the input
             cell masks.
         crop_bin: The number of masks to transform at the same time. This optional field allows reducing the RAM
             overhead of the function by only processing a subset of masks at a time.
@@ -157,7 +160,7 @@ def deform_masks(
         lam_img[y_local, x_local] = mask["lam"]
 
         # Applies the deformation using the cropped deformation field
-        warped_lam = np.array(crop_def.apply_deformation(Aarray(lam_img, origin=tuple(adj_origin)), interpolation=0))
+        warped_lam = np.asarray(crop_def.apply_deformation(lam_img, interpolation=0))
 
         # Extracts deformed coordinates
         y_new, x_new = np.nonzero(warped_lam)
