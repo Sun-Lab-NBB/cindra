@@ -1,19 +1,128 @@
-"""This module provides image transformation assets used during interpolation and deformation processing."""
+"""Unified deformation module for image registration.
+
+This module provides:
+- Diffusion filtering functions (diffusionkernel, diffuse)
+- Image transformation functions (warp, resize, zoom, deform_backward, deform_forward)
+- The `Deformation` class for representing and applying deformations
+
+Copyright 2010-2017 (C) Almar Klein (original pirt library)
+"""
 
 import math
 
 import numba
 import numpy as np
+import scipy.ndimage
 from numpy.typing import NDArray
 from ataraxis_base_utilities import console
 
-from ..gaussfun import diffuse
-from .spline_coefficients import (
-    SplineTypes,
-    set_spline_coefficients,
-    compute_cardinal_coefficients,
-    compute_quadratic_coefficients,
-)
+from .spline_grid import SplineGrid, compute_cardinal_coefficients
+
+
+# =============================================================================
+# Diffusion Filtering
+# =============================================================================
+
+
+def diffusionkernel(sigma, N=4, returnt=False):
+    """Create a discrete analog to the continuous Gaussian kernel.
+
+    Based on Lindeberg's discrete diffusion kernel using modified Bessel functions.
+
+    Parameters
+    ----------
+    sigma : float
+        The smoothing parameter (scale).
+    N : int
+        Tail length factor relative to sigma.
+    returnt : bool
+        If True, also return the t-values.
+
+    Returns
+    -------
+    k : ndarray
+        The diffusion kernel.
+    t : ndarray (optional)
+        The t-values if returnt=True.
+    """
+    sigma = float(sigma)
+    sigma2 = sigma * sigma
+
+    # Tail length
+    if N > 0:
+        nstart = int(np.ceil(N * sigma)) + 1
+    else:
+        nstart = abs(N) + 1
+
+    # Allocate kernel and times
+    t = np.arange(-nstart, nstart + 1, dtype="float64")
+    k = np.zeros_like(t)
+
+    # Initialize
+    n = nstart
+    k[n + nstart] = 0
+    n = n - 1
+    k[n + nstart] = 0.01
+
+    # Iterate using recurrence relation
+    for n in range(nstart - 1, 0, -1):
+        k[(n - 1) + nstart] = 2 * n / sigma2 * k[n + nstart] + k[(n + 1) + nstart]
+
+    # Use symmetric right part
+    k[:nstart] = np.flipud(k[-nstart:])
+
+    # Remove zero tails
+    k = k[1:-1]
+    t = t[1:-1]
+
+    # Normalize
+    k = k / k.sum()
+
+    if returnt:
+        return k, t
+    return k
+
+
+def diffuse(L, sigma, mode="nearest"):
+    """Apply discrete diffusion filtering.
+
+    Uses Lindeberg's discrete diffusion kernel for true scale-space properties.
+    After diffusion, derivatives can be computed with simple operators:
+      * Lx = 0.5 * (L[x+1] - L[x-1])
+      * Lxx = L[x+1] - 2*L[x] + L[x-1]
+
+    Parameters
+    ----------
+    L : ndarray
+        The input data to filter.
+    sigma : scalar or list
+        The smoothing parameter, can be given per dimension.
+    mode : str
+        Border handling mode for convolution.
+
+    Returns
+    -------
+    ndarray
+        The diffused data.
+    """
+    try:
+        sigma = [sig for sig in sigma]
+    except TypeError:
+        sigma = [sigma for _ in range(L.ndim)]
+
+    if len(sigma) != L.ndim:
+        raise ValueError("Number of sigmas must match data dimensions.")
+
+    for d in range(L.ndim):
+        k = diffusionkernel(sigma[d])
+        L = scipy.ndimage.convolve1d(L, k, d, mode=mode)
+
+    return L
+
+
+# =============================================================================
+# Transformation Functions
+# =============================================================================
 
 
 def make_samples_absolute(samples: tuple[NDArray, ...]) -> tuple[NDArray, ...]:
@@ -86,24 +195,21 @@ def warp(
     data: NDArray,
     samples: tuple[NDArray, ...] | list[NDArray] | NDArray,
     order: int | str = 1,
-    spline_type: SplineTypes = SplineTypes.CARDINAL,
     tension: float = 0.0,
 ) -> NDArray:
     """Interpolates (samples) 2D data at the positions specified by samples in pixel coordinates.
 
     This function performs backward warping, where pixel values are sampled from source locations specified by the
-    sample coordinates.
+    sample coordinates. Uses Cardinal spline interpolation for cubic order.
 
     Args:
         data: The 2D numpy array to interpolate. Float32 or float64 recommended.
         samples: The sample positions as a tuple of two numpy arrays (x, y order), or a stacked array (y-x order,
             skimage-compatible).
-        order: The interpolation order. Can be an integer (0, 1, 2, 3) or string ('nearest', 'linear', 'quadratic',
-            'cubic'). Order 2 internally uses order 3 with quadratic spline. Defaults to 1.
-        spline_type: The spline type for cubic interpolation. Must be a SplineTypes enum value. Only used when
-            order is 3. Defaults to SplineTypes.CARDINAL.
+        order: The interpolation order. Can be an integer (0, 1, 3) or string ('nearest', 'linear', 'cubic').
+            Defaults to 1.
         tension: The tension parameter for Cardinal splines, in range [-1, 1]. A value of 0 produces a Catmull-Rom
-            spline. Defaults to 0.0.
+            spline. Only used when order is 3. Defaults to 0.0.
 
     Returns:
         A numpy array with the same dtype as data and the same shape as the sample arrays.
@@ -144,41 +250,33 @@ def warp(
             console.error(message=message, error=ValueError)
 
     # Validates and converts order.
-    orders = {"nearest": 0, "linear": 1, "quadratic": 2, "cubic": 3}
+    orders = {"nearest": 0, "linear": 1, "cubic": 3}
     if isinstance(order, str):
         if order not in orders:
             message = f"Unable to warp data. Unknown interpolation order: {order}."
             console.error(message=message, error=ValueError)
         order = orders[order]
-    if order not in [0, 1, 2, 3]:
-        message = f"Unable to warp data. Invalid interpolation order: {order}."
+    if order not in [0, 1, 3]:
+        message = f"Unable to warp data. Invalid interpolation order: {order}. Use 0 (nearest), 1 (linear), or 3 (cubic)."
         console.error(message=message, error=ValueError)
-    if order == 2:
-        order = 3
-        spline_type = SplineTypes.QUADRATIC
-
-    # Converts spline type to integer code.
-    spline_type = SplineTypes(spline_type)
-    spline_type_code: int = int(spline_type)
-    tension_value: float = tension
 
     # Validates tension for Cardinal splines.
-    if spline_type_code == int(SplineTypes.CARDINAL) and not (-1.0 <= tension_value <= 1.0):
-        message = f"Unable to warp data. Tension must be in range [-1, 1], got: {tension_value}."
+    if not (-1.0 <= tension <= 1.0):
+        message = f"Unable to warp data. Tension must be in range [-1, 1], got: {tension}."
         console.error(message=message, error=ValueError)
 
     # Prepares empty result array.
     result = np.empty(samples[0].shape, data.dtype)
 
-    # Executes 2D warp.
-    _warp2(data, result.ravel(), samples[0].ravel(), samples[1].ravel(), order, spline_type_code, tension_value)
+    # Executes 2D warp using Cardinal spline interpolation.
+    _warp2(data, result.ravel(), samples[0].ravel(), samples[1].ravel(), order, tension)
 
     return result
 
 
 @numba.njit(parallel=True, cache=True, nogil=True)
-def _warp2(data_, result_, samples_x_, samples_y_, order, spline_type, tension):
-    """Performs 2D backward warping with Numba JIT compilation."""
+def _warp2(data_, result_, samples_x_, samples_y_, order, tension):
+    """Performs 2D backward warping with Numba JIT compilation using Cardinal splines."""
     num_samples = samples_x_.size
     size_y = data_.shape[0]
     size_x = data_.shape[1]
@@ -197,15 +295,8 @@ def _warp2(data_, result_, samples_x_, samples_y_, order, spline_type, tension):
 
             if 1 <= index_x < size_x - 2 and 1 <= index_y < size_y - 2:
                 # Cubic interpolation (interior).
-                if spline_type == 1:
-                    compute_cardinal_coefficients(frac_x, coeff_x, tension)
-                    compute_cardinal_coefficients(frac_y, coeff_y, tension)
-                elif spline_type == 3:
-                    compute_quadratic_coefficients(frac_x, coeff_x)
-                    compute_quadratic_coefficients(frac_y, coeff_y)
-                else:
-                    set_spline_coefficients(frac_x, spline_type, tension, coeff_x)
-                    set_spline_coefficients(frac_y, spline_type, tension, coeff_y)
+                compute_cardinal_coefficients(frac_x, coeff_x, tension)
+                compute_cardinal_coefficients(frac_y, coeff_y, tension)
 
                 interpolated_value = 0.0
                 for coeff_idx_y in range(4):
@@ -219,8 +310,8 @@ def _warp2(data_, result_, samples_x_, samples_y_, order, spline_type, tension):
 
             elif -0.5 <= sample_x <= size_x - 0.5 and -0.5 <= sample_y <= size_y - 0.5:
                 # Edge effects.
-                set_spline_coefficients(frac_x, spline_type, tension, coeff_x)
-                set_spline_coefficients(frac_y, spline_type, tension, coeff_y)
+                compute_cardinal_coefficients(frac_x, coeff_x, tension)
+                compute_cardinal_coefficients(frac_y, coeff_y, tension)
 
                 coeff_start_x, coeff_end_x = 0, 4
                 coeff_start_y, coeff_end_y = 0, 4
@@ -450,7 +541,6 @@ def deform_backward(
     data: NDArray,
     deltas: tuple[NDArray, ...],
     order: int | str = 1,
-    spline_type: SplineTypes = SplineTypes.CARDINAL,
     tension: float = 0.0,
 ) -> NDArray:
     """Interpolates data according to the deformations specified in deltas using backward warping.
@@ -462,8 +552,8 @@ def deform_backward(
         deltas: A tuple of numpy arrays representing relative sample positions expressed in world coordinates
             (x-y-z order). Must contain as many arrays as data has dimensions.
         order: The interpolation order. Defaults to 1.
-        spline_type: The spline type for cubic interpolation. Defaults to SplineTypes.CARDINAL.
-        tension: The tension parameter for Cardinal splines. Defaults to 0.0.
+        tension: The tension parameter for Cardinal splines, in range [-1, 1]. A value of 0 produces a Catmull-Rom
+            spline. Only used when order is 3. Defaults to 0.0.
 
     Returns:
         A numpy array containing the deformed data.
@@ -479,7 +569,7 @@ def deform_backward(
     samples = make_samples_absolute(deltas)
 
     # Interpolates and returns.
-    return warp(data, samples, order, spline_type, tension)
+    return warp(data, samples, order, tension)
 
 
 def deform_forward(
@@ -517,7 +607,6 @@ def resize(
     data: NDArray,
     new_shape: tuple[int, ...] | list[int],
     order: int | str = 3,
-    spline_type: SplineTypes = SplineTypes.CARDINAL,
     tension: float = 0.0,
     prefilter: bool = False,
     extra: bool = False,
@@ -531,8 +620,8 @@ def resize(
         data: The numpy array to resize.
         new_shape: A tuple specifying the new shape (z-y-x order).
         order: The interpolation order (0, 1, or 3). Defaults to 3.
-        spline_type: The spline type for cubic interpolation. Defaults to SplineTypes.CARDINAL.
-        tension: The tension parameter for Cardinal splines. Defaults to 0.0.
+        tension: The tension parameter for Cardinal splines, in range [-1, 1]. A value of 0 produces a Catmull-Rom
+            spline. Only used when order is 3. Defaults to 0.0.
         prefilter: Whether to apply Gaussian antialiasing when downsampling. Defaults to False.
         extra: Whether to extrapolate beyond original data boundaries. When True, each datapoint spans a space equal
             to the distance between data points (Photoshop-style). When False, the first and last datapoints align
@@ -592,7 +681,7 @@ def resize(
         grids[0], grids[1] = grids[1], grids[0]
     grids = tuple(reversed(grids))
 
-    data2 = warp(data, grids, order, spline_type, tension)
+    data2 = warp(data, grids, order, tension)
 
     return data2
 
@@ -601,7 +690,6 @@ def zoom(
     data: NDArray,
     factor: float | tuple[float, ...] | list[float],
     order: int | str = 3,
-    spline_type: SplineTypes = SplineTypes.CARDINAL,
     tension: float = 0.0,
     prefilter: bool = False,
     extra: bool = False,
@@ -615,8 +703,8 @@ def zoom(
         data: The numpy array to resize.
         factor: A scalar or tuple specifying the resize factor (z-y-x order for per-dimension factors).
         order: The interpolation order (0, 1, or 3). Defaults to 3.
-        spline_type: The spline type for cubic interpolation. Defaults to SplineTypes.CARDINAL.
-        tension: The tension parameter for Cardinal splines. Defaults to 0.0.
+        tension: The tension parameter for Cardinal splines, in range [-1, 1]. A value of 0 produces a Catmull-Rom
+            spline. Only used when order is 3. Defaults to 0.0.
         prefilter: Whether to apply Gaussian antialiasing when downsampling. Defaults to False.
         extra: Whether to extrapolate beyond original data boundaries. Defaults to False.
 
@@ -643,4 +731,323 @@ def zoom(
     new_shape = [float(f) * s for f, s in zip(factor, data.shape)]
     new_shape = [int(round(s)) for s in new_shape]
 
-    return resize(data, new_shape, order, spline_type, tension, prefilter, extra)
+    return resize(data, new_shape, order, tension, prefilter, extra)
+
+
+# =============================================================================
+# Deformation Class
+# =============================================================================
+
+
+class Deformation:
+    """Unified deformation class for 2D image registration.
+
+    A deformation maps one 2D image to another. It can represent:
+    - An identity (null) deformation when no fields are provided
+    - A field-based deformation when field arrays are provided
+
+    Parameters
+    ----------
+    *fields : arrays, int, or shape tuple
+        The deformation fields (one per dimension, in z-y-x order).
+        Can also be:
+        - No arguments: creates an identity deformation
+        - Single int: creates null deformation with specified ndim
+        - Shape tuple: creates null deformation with specified shape
+
+    Notes:
+        All deformations use backward mapping where result pixels sample from source locations.
+    """
+
+    def __init__(self, *fields):
+
+        if len(fields) == 1 and isinstance(fields[0], (list, tuple)):
+            fields = fields[0]
+
+        if not fields:
+            # Identity deformation (no fields)
+            self._field_shape = (1, 1)
+            self._field_sampling = (1.0, 1.0)
+            self._fields = []
+
+        elif len(fields) == 1 and isinstance(fields[0], int):
+            # Null deformation with specified ndim
+            ndim = fields[0]
+            self._field_shape = tuple([1 for _ in range(ndim)])
+            self._field_sampling = tuple([1.0 for _ in range(ndim)])
+            self._fields = []
+
+        elif len(fields) == 1 and isinstance(fields[0], tuple):
+            # Null deformation with specified shape tuple
+            self._field_shape = fields[0]
+            self._field_sampling = tuple(1.0 for _ in fields[0])
+            self._fields = []
+
+        else:
+            # Actual field deformation
+            if not self._check_fields_same_shape(fields):
+                raise ValueError("Fields must all have the same shape.")
+            if len(fields) != fields[0].ndim:
+                raise ValueError("There must be a field for each dimension.")
+
+            self._field_shape = fields[0].shape
+            # Sampling is always 1.0 for all dimensions in multiday usage
+            self._field_sampling = tuple(1.0 for _ in range(fields[0].ndim))
+            self._fields = list(fields)
+
+    def __repr__(self):
+        if self.is_identity:
+            return f"<Deformation {self.ndim}D identity>"
+        shapestr = "x".join([str(s) for s in self.field_shape])
+        return f"<Deformation shape {shapestr}>"
+
+    @staticmethod
+    def _check_fields_same_shape(fields):
+        """Checks whether the given fields all have the same shape."""
+        shape = fields[0].shape
+        for field in fields:
+            if field.shape != shape:
+                return False
+        return True
+
+    # --- Properties ---
+
+    @property
+    def is_identity(self) -> bool:
+        """Whether this represents no deformation (identity)."""
+        return len(self._fields) == 0
+
+    @property
+    def ndim(self) -> int:
+        """The number of dimensions of the deformation."""
+        return len(self._field_shape)
+
+    @property
+    def field_shape(self) -> tuple:
+        """The shape of the deformation field."""
+        return tuple(self._field_shape)
+
+    @property
+    def field_sampling(self) -> tuple:
+        """The sampling (pixel spacing) for each dimension."""
+        return tuple(self._field_sampling)
+
+    # --- Sequence access ---
+
+    def __len__(self):
+        return len(self._fields)
+
+    def __getitem__(self, item):
+        if isinstance(item, int):
+            if 0 <= item < len(self._fields):
+                return self._fields[item]
+            raise IndexError("Field index out of range.")
+        raise IndexError("Deformation only supports integer indices.")
+
+    def __iter__(self):
+        return iter(self._fields)
+
+    # --- Operators ---
+
+    def __add__(self, other):
+        return self.add(other)
+
+    def __mul__(self, other):
+        if isinstance(other, Deformation):
+            return other.compose(self)
+        return self.scale(other)
+
+    # --- Core methods ---
+
+    def copy(self):
+        """Create a deep copy of this deformation."""
+        if self.is_identity:
+            return Deformation(self.field_shape)
+        return self.scale(1.0)
+
+    def scale(self, factor: float):
+        """Scale the deformation by the given factor.
+
+        Note that the result is diffeomorphic only if the original is
+        diffeomorphic and the factor is between -1 and 1.
+        """
+        fields = []
+        for d in range(self.ndim):
+            if factor == 1.0:
+                fields.append(self._fields[d].copy())
+            else:
+                fields.append(self._fields[d] * factor)
+        return Deformation(*fields)
+
+    def add(self, other):
+        """Combine two deformations by addition."""
+        if not isinstance(other, Deformation):
+            raise ValueError("Can only combine Deformations.")
+
+        if self.is_identity:
+            return other.copy()
+        if other.is_identity:
+            return self.copy()
+
+        if self.field_shape != other.field_shape:
+            raise ValueError("Can only combine deforms with same field shape.")
+
+        fields = []
+        for d in range(self.ndim):
+            fields.append(self.get_field(d) + other.get_field(d))
+        return Deformation(*fields)
+
+    def compose(self, other):
+        """Combine two deformations by composition.
+
+        The left (self) is the "static" deformation, and the right (other)
+        is the "delta" deformation. Returns a new Deformation instance.
+        """
+        if not isinstance(other, Deformation):
+            raise ValueError("Can only combine Deformations.")
+
+        if self.is_identity:
+            return other.copy()
+        if other.is_identity:
+            return self.copy()
+
+        if self.field_shape != other.field_shape:
+            raise ValueError("Can only combine deforms with same field shape.")
+
+        fields = self._compose_backward(other)
+        return Deformation(*fields)
+
+    def _compose_forward(self, other):
+        """Compose for forward mapping: sample in other at locations of self."""
+        # Get sample positions in pixel coordinates
+        sample_locations = self.get_deformation_locations()
+
+        fields = []
+        for d in range(self.ndim):
+            field1 = self._fields[d]
+            field2 = other._fields[d]
+            # Composition with a field introduces interpolation artifacts
+            field = warp(field2, sample_locations, "linear")
+            fields.append(field1 + field)
+        return fields
+
+    def _compose_backward(self, other):
+        """Compose for backward mapping: sample in self at locations of other."""
+        return other._compose_forward(self)
+
+    def resize_field(self, new_shape):
+        """Create a new Deformation with the field resized to match new_shape.
+
+        Args:
+            new_shape: The target shape as a tuple, numpy array, or Deformation.
+
+        Returns:
+            A new deformation with resized fields, or self if already correct size.
+        """
+        # Extract shape from various input types
+        if hasattr(new_shape, "field_shape"):
+            target_shape = tuple(new_shape.field_shape)
+        elif hasattr(new_shape, "shape"):
+            target_shape = tuple(new_shape.shape)
+        else:
+            target_shape = tuple(new_shape)
+
+        if self.is_identity:
+            return Deformation(target_shape)
+
+        if self.field_shape == target_shape:
+            return self
+
+        fields = []
+        for field in self._fields:
+            resized = resize(field, target_shape, order=3, prefilter=False, extra=False)
+            fields.append(resized)
+        return Deformation(*fields)
+
+    # --- Getting field values ---
+
+    def get_field(self, d: int):
+        """Get the field for dimension d."""
+        return self._fields[d]
+
+    def get_deformation_locations(self):
+        """Get absolute sample locations in pixel coordinates (x-y-z order).
+
+        These locations can be fed directly to interp functions.
+        """
+        # Reverse fields from z-y-x to x-y-z order
+        deltas = [s for s in reversed(self._fields)]
+        return make_samples_absolute(deltas)
+
+    # --- Applying deformation ---
+
+    def apply_deformation(self, data, interpolation: int = 3):
+        """Apply the deformation to the given data.
+
+        Parameters
+        ----------
+        data : array
+            The data to deform.
+        interpolation : int
+            Interpolation order (0, 1, or 3).
+
+        Returns:
+        -------
+        array
+            The deformed data.
+        """
+        if self.is_identity:
+            return data
+
+        # Need upsampling?
+        deform = self.resize_field(data)
+
+        # Reverse from z-y-x to x-y-z
+        samples = [s for s in reversed(deform._fields)]
+
+        return deform_backward(data, samples, interpolation)
+
+    # --- Conversion methods ---
+
+    def inverse(self):
+        """Get the inverse deformation.
+
+        Only valid if the current deformation is diffeomorphic.
+        """
+        if self.is_identity:
+            return self
+
+        # Get samples
+        samples = [s for s in reversed(self._fields)]
+
+        # Get inverse fields
+        fields = []
+        for field in self._fields:
+            fields.append(deform_forward(-field, samples))
+
+        return Deformation(*fields)
+
+    def regularize(
+        self,
+        grid_sampling: float,
+        weights: np.ndarray | None = None,
+        injective: bool | float = True,
+        frozenedge: bool = True,
+    ) -> "Deformation":
+        """Regularizes the deformation using B-spline grid constraints.
+
+        Args:
+            grid_sampling: The B-spline grid spacing (knot spacing) in pixels.
+            weights: Optional weights for field elements.
+            injective: Whether to prevent grid folding. Can be True, False, or a float factor.
+            frozenedge: Whether to freeze edges to zero deformation.
+
+        Returns:
+            A new regularized Deformation instance.
+        """
+        if self.is_identity:
+            return self
+
+        grid = SplineGrid(self.field_shape, grid_sampling)
+        grid.set_from_fields(self._fields, weights, injective, frozenedge)
+        return Deformation(*grid.get_fields())
