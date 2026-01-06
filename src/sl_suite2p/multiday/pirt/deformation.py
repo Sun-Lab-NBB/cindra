@@ -12,12 +12,11 @@ import math
 
 import numba
 import numpy as np
-import scipy.ndimage
 from numpy.typing import NDArray
+import scipy.ndimage
 from ataraxis_base_utilities import console
 
 from .spline_grid import SplineGrid, compute_cardinal_coefficients
-
 
 # =============================================================================
 # Diffusion Filtering
@@ -38,7 +37,7 @@ def diffusionkernel(sigma, N=4, returnt=False):
     returnt : bool
         If True, also return the t-values.
 
-    Returns
+    Returns:
     -------
     k : ndarray
         The diffusion kernel.
@@ -100,7 +99,7 @@ def diffuse(L, sigma, mode="nearest"):
     mode : str
         Border handling mode for convolution.
 
-    Returns
+    Returns:
     -------
     ndarray
         The diffused data.
@@ -257,7 +256,9 @@ def warp(
             console.error(message=message, error=ValueError)
         order = orders[order]
     if order not in [0, 1, 3]:
-        message = f"Unable to warp data. Invalid interpolation order: {order}. Use 0 (nearest), 1 (linear), or 3 (cubic)."
+        message = (
+            f"Unable to warp data. Invalid interpolation order: {order}. Use 0 (nearest), 1 (linear), or 3 (cubic)."
+        )
         console.error(message=message, error=ValueError)
 
     # Validates tension for Cardinal splines.
@@ -760,7 +761,6 @@ class Deformation:
     """
 
     def __init__(self, *fields):
-
         if len(fields) == 1 and isinstance(fields[0], (list, tuple)):
             fields = fields[0]
 
@@ -1031,15 +1031,17 @@ class Deformation:
         self,
         grid_sampling: float,
         weights: np.ndarray | None = None,
-        injective: bool | float = True,
+        injective: bool = True,
+        injective_factor: float = 0.9,
         frozenedge: bool = True,
-    ) -> "Deformation":
+    ) -> Deformation:
         """Regularizes the deformation using B-spline grid constraints.
 
         Args:
             grid_sampling: The B-spline grid spacing (knot spacing) in pixels.
             weights: Optional weights for field elements.
-            injective: Whether to prevent grid folding. Can be True, False, or a float factor.
+            injective: Whether to apply injectivity constraint to prevent grid folding.
+            injective_factor: Scaling factor for the injectivity limit (0 < factor <= 1).
             frozenedge: Whether to freeze edges to zero deformation.
 
         Returns:
@@ -1048,6 +1050,6 @@ class Deformation:
         if self.is_identity:
             return self
 
-        grid = SplineGrid(self.field_shape, grid_sampling)
-        grid.set_from_fields(self._fields, weights, injective, frozenedge)
-        return Deformation(*grid.get_fields())
+        grid = SplineGrid(self.field_shape[0], self.field_shape[1], grid_sampling)
+        grid.set_from_fields((self._fields[0], self._fields[1]), weights, injective, injective_factor, frozenedge)
+        return Deformation(*grid.deformation_fields)
