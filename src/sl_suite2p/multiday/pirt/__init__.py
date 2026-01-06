@@ -5,8 +5,8 @@ multi-day cell tracking in sl-suite2p. The original pirt library is
 Copyright 2010-2017 (C) Almar Klein.
 """
 
-from .registration import DiffeomorphicDemonsRegistration, RegistrationParameters
 from .deformation import Deformation
+from .registration import RegistrationParameters, DiffeomorphicDemonsRegistration
 
 __all__ = [
     "Deformation",

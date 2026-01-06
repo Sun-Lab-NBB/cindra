@@ -12,8 +12,8 @@ from dataclasses import dataclass
 import numpy as np
 import scipy.ndimage
 
-from .deformation import Deformation
 from .pyramid import ScaleSpacePyramid
+from .deformation import Deformation
 from .spline_grid import SplineGrid
 
 
@@ -69,7 +69,7 @@ class DiffeomorphicDemonsRegistration:
         Two or more 2D images to register. Images are converted to float32
         if not already floating point.
 
-    Attributes
+    Attributes:
     ----------
     params : RegistrationParameters
         Registration parameters. See RegistrationParameters for details.
@@ -115,7 +115,7 @@ class DiffeomorphicDemonsRegistration:
         i : int
             Image index (0-based).
 
-        Returns
+        Returns:
         -------
         Deformation
             The deformation for the specified image.
@@ -211,7 +211,7 @@ class DiffeomorphicDemonsRegistration:
         if self._params.frozenedge:
             grid_sampling = self._get_grid_sampling(scale)
             field_shape = self._images[0].shape
-            grid_shape = SplineGrid.compute_grid_shape(field_shape, grid_sampling)
+            grid_shape = SplineGrid.compute_grid_shape(field_shape[0], field_shape[1], grid_sampling)
             if all(s < 4 for s in grid_shape):
                 return None
 
@@ -341,15 +341,16 @@ class DiffeomorphicDemonsRegistration:
         """Regularize deformation to ensure diffeomorphism using B-spline grid."""
         grid_sampling = self._get_grid_sampling(scale)
 
-        # Calculate injectivity constraint factor
         injective = self._params.injective
         frozenedge = self._params.frozenedge
 
+        # Calculate injectivity constraint factor
+        injective_factor = 0.9
         if injective:
             deform_limit = float(self._params.deform_limit)
-            injective = min(deform_limit * scale / grid_sampling, 0.9)
+            injective_factor = min(deform_limit * scale / grid_sampling, 0.9)
 
-        return deform.regularize(grid_sampling, None, injective, frozenedge)
+        return deform.regularize(grid_sampling, None, injective, injective_factor, frozenedge)
 
     def _get_grid_sampling(self, scale: float) -> float:
         """Calculate B-spline grid sampling for current scale."""

@@ -1,6 +1,6 @@
 import numpy as np
 
-from .deformation import diffuse, zoom
+from .deformation import zoom, diffuse
 
 
 class ScaleSpacePyramid:
