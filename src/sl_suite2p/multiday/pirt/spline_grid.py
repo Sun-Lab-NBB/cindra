@@ -125,9 +125,9 @@ class SplineGrid:
         self._grid_shape: tuple[int, int] = (grid_height, grid_width)
 
         # Initializes the knot (B-spline control point) arrays, one per dimension (Y, X).
-        self._knots: tuple[NDArray[np.float64], NDArray[np.float64]] = (
-            np.zeros(self._grid_shape, dtype=np.float64),
-            np.zeros(self._grid_shape, dtype=np.float64),
+        self._knots: tuple[NDArray[np.float32], NDArray[np.float32]] = (
+            np.zeros(self._grid_shape, dtype=np.float32),
+            np.zeros(self._grid_shape, dtype=np.float32),
         )
 
     @property
@@ -154,7 +154,7 @@ class SplineGrid:
         """Returns the spacing between grid knots in pixels."""
         return self._grid_sampling
 
-    def _get_knots(self, dimension: int) -> NDArray[np.float64]:
+    def _get_knots(self, dimension: int) -> NDArray[np.float32]:
         """Returns the knot array for the requested image field dimension.
 
         Args:
@@ -193,8 +193,8 @@ class SplineGrid:
         """Returns two arrays (Y, X), representing the deformation fields for each dimension of the underlying image."""
         field_y: NDArray[np.float32] = np.zeros(self.field_shape, dtype=np.float32)
         field_x: NDArray[np.float32] = np.zeros(self.field_shape, dtype=np.float32)
-        _sample_grid(field_y, self._grid_sampling, self._get_knots(0))
-        _sample_grid(field_x, self._grid_sampling, self._get_knots(1))
+        _sample_grid(result=field_y, grid_sampling=self._grid_sampling, knots=self._get_knots(dimension=0))
+        _sample_grid(result=field_x, grid_sampling=self._grid_sampling, knots=self._get_knots(dimension=1))
         return field_y, field_x
 
     def set_from_fields(
@@ -238,11 +238,16 @@ class SplineGrid:
             weights = weights if weights is not None else np.ones_like(field)
 
             # Fits B-spline knots to the deformation field using weighted least-squares (Lee et al.).
-            _fit_knots_to_field(self._grid_sampling, self._get_knots(dimension), field, weights)
+            _fit_knots_to_field(
+                grid_sampling=self._grid_sampling,
+                knots=self._get_knots(dimension=dimension),
+                field=field,
+                weights=weights,
+            )
 
         # If necessary, applies injectivity constraint and freezes edges.
         if injective:
-            self._unfold(injective_factor)
+            self._unfold(factor=injective_factor)
         if freeze_edges:
             self._freeze_edges()
 
@@ -265,7 +270,7 @@ class SplineGrid:
         # +limit) using a soft saturation curve: small values pass through nearly unchanged, while large values are
         # smoothly compressed toward the limit without hard clipping discontinuities.
         for dimension in range(self.ndim):
-            knots = self._get_knots(dimension).ravel()
+            knots = self._get_knots(dimension=dimension).ravel()
             knots[:] = limit * (np.exp(-np.abs(knots) / limit) - 1) * -np.sign(knots)
 
     def _freeze_edges(self) -> None:
@@ -275,7 +280,7 @@ class SplineGrid:
             ValueError: If any of the processed grid's dimensions are too small to freeze the edges.
         """
         for dimension in range(self.ndim):
-            knots = self._get_knots(dimension)
+            knots = self._get_knots(dimension=dimension)
 
             if knots.shape[dimension] < _MINIMUM_KNOTS_FOR_FROZEN_EDGES:
                 message = (
@@ -292,7 +297,7 @@ class SplineGrid:
             interpolation_factor = 1.0 - (field_edge - grid_edge) / self._grid_sampling
 
             # Computes the B-spline coefficients at the field edge position.
-            coefficients: NDArray[np.float32] = np.zeros((4,), np.float32)
+            coefficients: NDArray[np.float32] = np.zeros((4,), dtype=np.float32)
             compute_basis_coefficients(interpolation_factor=interpolation_factor, coefficients=coefficients)
 
             # Freezes knots for Y dimension (operates on rows).
@@ -318,7 +323,7 @@ class SplineGrid:
 def _sample_grid(
     result: NDArray[np.float32],
     grid_sampling: float,
-    knots: NDArray[np.float64],
+    knots: NDArray[np.float32],
 ) -> None:
     """Samples the B-spline grid at all pixels of the underlying image field.
 
@@ -333,8 +338,8 @@ def _sample_grid(
     # Parallelizes the computation over rows to improve performance.
     for y in prange(result.shape[0]):
         # Each thread gets its own coefficient arrays.
-        coefficients_y = np.empty((4,), np.float32)
-        coefficients_x = np.empty((4,), np.float32)
+        coefficients_y = np.empty((4,), dtype=np.float32)
+        coefficients_x = np.empty((4,), dtype=np.float32)
 
         for x in range(result.shape[1]):
             # Computes the reference knot index and interpolation factor for each axis.
@@ -347,8 +352,8 @@ def _sample_grid(
             interpolation_factor_x = grid_position_x - knot_index_x
 
             # Computes B-spline basis coefficients at this pixel position.
-            compute_basis_coefficients(interpolation_factor_y, coefficients_y)
-            compute_basis_coefficients(interpolation_factor_x, coefficients_x)
+            compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
+            compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
 
             # Accumulates weighted contributions from the 4x4 knot neighborhood.
             sampled_value = 0.0
@@ -366,7 +371,7 @@ def _sample_grid(
 @numba.njit(cache=True)
 def _fit_knots_to_field(
     grid_sampling: float,
-    knots: NDArray[np.float64],
+    knots: NDArray[np.float32],
     field: NDArray[np.float32],
     weights: NDArray[np.float32],
 ) -> None:
@@ -381,8 +386,8 @@ def _fit_knots_to_field(
         field: The 2D deformation field values.
         weights: The 2D weight array for each field pixel.
     """
-    coefficients_y = np.empty((4,), np.float32)
-    coefficients_x = np.empty((4,), np.float32)
+    coefficients_y = np.empty((4,), dtype=np.float32)
+    coefficients_x = np.empty((4,), dtype=np.float32)
 
     numerator = np.zeros_like(knots)
     denominator = np.zeros_like(knots)
@@ -406,8 +411,8 @@ def _fit_knots_to_field(
             interpolation_factor_x = grid_position_x - knot_index_x
 
             # Computes B-spline basis coefficients at this pixel position.
-            compute_basis_coefficients(interpolation_factor_y, coefficients_y)
-            compute_basis_coefficients(interpolation_factor_x, coefficients_x)
+            compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
+            compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
 
             # Pre-normalizes the value by the sum of squared basis coefficients.
             coefficient_sum_squared = 0.0
