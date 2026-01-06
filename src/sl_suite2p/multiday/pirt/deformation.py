@@ -1,7 +1,7 @@
 """Unified deformation module for image registration.
 
 This module provides:
-- Diffusion filtering functions (diffusionkernel, diffuse)
+- Diffusion filtering functions (diffusion_kernel, diffuse)
 - Image transformation functions (warp, resize, zoom, deform_backward, deform_forward)
 - The `Deformation` class for representing and applying deformations
 
@@ -23,100 +23,104 @@ from .spline_grid import SplineGrid, compute_cardinal_coefficients
 # =============================================================================
 
 
-def diffusionkernel(sigma, N=4, returnt=False):
-    """Create a discrete analog to the continuous Gaussian kernel.
+def diffusion_kernel(
+    sigma: float,
+    tail_factor: int = 4,
+    return_positions: bool = False,
+) -> NDArray[np.float64] | tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Creates a discrete analog to the continuous Gaussian kernel.
 
-    Based on Lindeberg's discrete diffusion kernel using modified Bessel functions.
+    Uses Lindeberg's discrete diffusion kernel based on modified Bessel functions. This kernel provides true
+    scale-space properties for image filtering.
 
-    Parameters
-    ----------
-    sigma : float
-        The smoothing parameter (scale).
-    N : int
-        Tail length factor relative to sigma.
-    returnt : bool
-        If True, also return the t-values.
+    Args:
+        sigma: The smoothing parameter (scale) controlling the kernel width.
+        tail_factor: Controls the kernel tail length. If positive, the tail extends to ceil(tail_factor * sigma) + 1
+            samples. If negative, the absolute value is used directly as the tail length.
+        return_positions: If True, also returns the position values corresponding to each kernel element.
 
     Returns:
-    -------
-    k : ndarray
-        The diffusion kernel.
-    t : ndarray (optional)
-        The t-values if returnt=True.
+        The normalized diffusion kernel as a 1D array. If return_positions is True, returns a tuple of
+        (kernel, positions).
     """
     sigma = float(sigma)
-    sigma2 = sigma * sigma
+    sigma_squared = sigma * sigma
 
-    # Tail length
-    if N > 0:
-        nstart = int(np.ceil(N * sigma)) + 1
-    else:
-        nstart = abs(N) + 1
+    # Computes the tail length based on the tail_factor parameter.
+    half_length = int(np.ceil(tail_factor * sigma)) + 1 if tail_factor > 0 else abs(tail_factor) + 1
 
-    # Allocate kernel and times
-    t = np.arange(-nstart, nstart + 1, dtype="float64")
-    k = np.zeros_like(t)
+    # Allocates kernel and position arrays.
+    positions = np.arange(-half_length, half_length + 1, dtype=np.float64)
+    kernel = np.zeros_like(positions)
 
-    # Initialize
-    n = nstart
-    k[n + nstart] = 0
-    n = n - 1
-    k[n + nstart] = 0.01
+    # Initializes the recurrence relation with seed values.
+    kernel[half_length] = 0.0
+    kernel[half_length - 1] = 0.01
 
-    # Iterate using recurrence relation
-    for n in range(nstart - 1, 0, -1):
-        k[(n - 1) + nstart] = 2 * n / sigma2 * k[n + nstart] + k[(n + 1) + nstart]
+    # Computes kernel values using the Bessel function recurrence relation.
+    for n in range(half_length - 1, 0, -1):
+        kernel[(n - 1) + half_length] = (2 * n / sigma_squared) * kernel[n + half_length] + kernel[
+            (n + 1) + half_length
+        ]
 
-    # Use symmetric right part
-    k[:nstart] = np.flipud(k[-nstart:])
+    # Mirrors the computed values to create the symmetric kernel.
+    kernel[:half_length] = np.flipud(kernel[-half_length:])
 
-    # Remove zero tails
-    k = k[1:-1]
-    t = t[1:-1]
+    # Removes the zero-padded boundary elements.
+    kernel = kernel[1:-1]
+    positions = positions[1:-1]
 
-    # Normalize
-    k = k / k.sum()
+    # Normalizes the kernel to sum to 1.
+    kernel = kernel / kernel.sum()
 
-    if returnt:
-        return k, t
-    return k
+    if return_positions:
+        return kernel, positions
+    return kernel
 
 
-def diffuse(L, sigma, mode="nearest"):
-    """Apply discrete diffusion filtering.
+def diffuse(
+    data: NDArray[np.floating],
+    sigma: float | list[float],
+    mode: str = "nearest",
+) -> NDArray[np.floating]:
+    """Applies discrete diffusion filtering to the input data.
 
-    Uses Lindeberg's discrete diffusion kernel for true scale-space properties.
-    After diffusion, derivatives can be computed with simple operators:
-      * Lx = 0.5 * (L[x+1] - L[x-1])
-      * Lxx = L[x+1] - 2*L[x] + L[x-1]
+    Uses Lindeberg's discrete diffusion kernel for true scale-space properties. After diffusion, derivatives can be
+    computed with simple finite difference operators.
 
-    Parameters
-    ----------
-    L : ndarray
-        The input data to filter.
-    sigma : scalar or list
-        The smoothing parameter, can be given per dimension.
-    mode : str
-        Border handling mode for convolution.
+    Args:
+        data: The input data array to filter.
+        sigma: The smoothing parameter. Can be a single value applied to all dimensions or a list with one value per
+            dimension.
+        mode: The border handling mode passed to scipy.ndimage.convolve1d (e.g., 'nearest', 'reflect', 'constant').
 
     Returns:
-    -------
-    ndarray
-        The diffused data.
+        The diffused data array with the same shape as the input.
+
+    Raises:
+        ValueError: If sigma is a list with length not matching the number of data dimensions.
     """
+    # Converts sigma to a list with one value per dimension.
     try:
-        sigma = [sig for sig in sigma]
+        sigma_list = list(sigma)  # type: ignore[arg-type]
     except TypeError:
-        sigma = [sigma for _ in range(L.ndim)]
+        sigma_list = [sigma for _ in range(data.ndim)]  # type: ignore[misc]
 
-    if len(sigma) != L.ndim:
-        raise ValueError("Number of sigmas must match data dimensions.")
+    if len(sigma_list) != data.ndim:
+        message = (
+            f"Unable to apply diffusion filtering. The number of sigma values ({len(sigma_list)}) must match the "
+            f"number of data dimensions ({data.ndim})."
+        )
+        console.error(message=message, error=ValueError)
 
-    for d in range(L.ndim):
-        k = diffusionkernel(sigma[d])
-        L = scipy.ndimage.convolve1d(L, k, d, mode=mode)
+    # Applies 1D diffusion filtering along each dimension.
+    result = data
+    for dimension in range(data.ndim):
+        kernel = diffusion_kernel(sigma_list[dimension])
+        # noinspection PyTypeChecker
+        result = scipy.ndimage.convolve1d(input=result, weights=kernel, axis=dimension, mode=mode)
 
-    return L
+    return result
 
 
 # =============================================================================
