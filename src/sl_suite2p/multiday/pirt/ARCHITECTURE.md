@@ -32,20 +32,19 @@ pirt/
 
 | Class/Function | Purpose | Used By |
 |---|---|---|
-| `compute_cardinal_coefficients(t, out, tension)` | Numba: Cardinal spline coefficients for image interpolation | `_warp2()` |
-| `compute_basis_coefficients(t, out)` | Numba: cubic B-spline coefficients for grid operations | `_get_field2()`, `_set_field2()`, `SplineGrid._freeze_edges()` |
-| `SplineGrid.__init__(field_shape, sampling)` | Creates B-spline grid for given field shape and knot spacing | `Deformation.regularize()` |
+| `compute_cardinal_coefficients(interpolation_factor, coefficients, tension)` | Numba: Cardinal spline coefficients for image interpolation | `_warp2()` |
+| `compute_basis_coefficients(interpolation_factor, coefficients)` | Numba: cubic B-spline coefficients for grid operations | `_sample_grid()`, `_fit_knots_to_field()`, `SplineGrid._freeze_edges()` |
+| `SplineGrid.__init__(field_height, field_width, sampling)` | Creates B-spline grid for given field dimensions and knot spacing | `Deformation.regularize()` |
 | `SplineGrid.field_shape` | Shape of the underlying field (height, width) | Various |
 | `SplineGrid.grid_shape` | Shape of the knot grid | Various |
 | `SplineGrid.grid_sampling` | Spacing between knots in pixels | Various |
-| `SplineGrid.get_fields()` | Samples grid to produce dense deformation field arrays | `Deformation.regularize()` |
-| `SplineGrid.set_from_fields(fields, weights, injective, frozenedge)` | Sets knots from field arrays with diffeomorphic constraints | `Deformation.regularize()` |
-| `SplineGrid.compute_grid_shape(field_shape, grid_sampling)` | Static: computes grid shape without creating instance | `DiffeomorphicDemonsRegistration._compute_groupwise_deform()` |
+| `SplineGrid.deformation_fields` | Property: samples grid to produce dense deformation field arrays | `Deformation.regularize()` |
+| `SplineGrid.set_from_fields(fields, weights, injective, injective_factor, freeze_edges)` | Sets knots from field arrays with diffeomorphic constraints | `Deformation.regularize()` |
+| `SplineGrid.compute_grid_shape(field_height, field_width, grid_sampling)` | Static: computes grid shape without creating instance | `DiffeomorphicDemonsRegistration._compute_groupwise_deform()` |
 | `SplineGrid._unfold(factor)` | Prevents grid folding (injectivity constraint) | `set_from_fields()` |
 | `SplineGrid._freeze_edges()` | Freezes edges to zero deformation | `set_from_fields()` |
-| `_get_field2(result, grid_sampling, knots)` | Numba: 2D grid sampling kernel | `SplineGrid.get_fields()` |
-| `_set_field_using_num_and_dnum(knots, num, dnum)` | Numba: divides numerator by denominator | `SplineGrid.set_from_fields()` |
-| `_set_field2(grid_sampling, knots, field, weights)` | Numba: computes num/dnum for grid setting | `SplineGrid.set_from_fields()` |
+| `_sample_grid(result, grid_sampling, knots)` | Numba (parallel): 2D grid sampling kernel | `SplineGrid.deformation_fields` |
+| `_fit_knots_to_field(grid_sampling, knots, field, weights)` | Numba: weighted least-squares B-spline fitting | `SplineGrid.set_from_fields()` |
 
 ### `deformation.py`
 
@@ -53,8 +52,8 @@ pirt/
 
 | Function | Purpose | Used By |
 |---|---|---|
-| `diffusionkernel(sigma, N, returnt)` | Creates discrete diffusion kernel (Bessel functions) | `diffuse()` |
-| **`diffuse(L, sigma, mode)`** | True discrete diffusion filtering | **`ScaleSpacePyramid`**, `resize()` |
+| `diffusion_kernel(sigma, tail_factor, return_positions)` | Creates discrete diffusion kernel (Bessel functions) | `diffuse()` |
+| **`diffuse(data, sigma, mode)`** | True discrete diffusion filtering | **`ScaleSpacePyramid`**, `resize()` |
 
 #### Transformation Functions
 
@@ -169,9 +168,9 @@ registration.register(verbose=0)
             │           ├── Computes demons force field (gradient-based)
             │           └── _regularize_diffeomorphic(scale, deformForce)
             │               └── deform.regularize(grid_sampling, ...)
-            │                   ├── SplineGrid(field_shape, sampling)
-            │                   ├── grid.set_from_fields() -> _unfold() + _freeze_edges()
-            │                   └── Deformation(*grid.get_fields())
+            │                   ├── SplineGrid(field_height, field_width, sampling)
+            │                   ├── grid.set_from_fields() -> _fit_knots_to_field() + _unfold() + _freeze_edges()
+            │                   └── Deformation(*grid.deformation_fields)
             └── _apply_delta_deform(i, deform)
                 └── current.compose(deform)
 
@@ -231,6 +230,20 @@ Registration proceeds from coarse to fine scale:
 
 This prevents local minima and handles large deformations.
 
+### Numerical Precision
+
+All arrays use **float32** (single precision) throughout the package:
+- Deformation fields, knots, weights, and coefficients are all float32
+- Sufficient for sub-pixel accuracy in image registration (~0.00001 pixel precision)
+- Memory-efficient for large images (e.g., 4 MP data)
+
+### Numba Optimizations
+
+Performance-critical functions use Numba JIT compilation:
+- `@numba.njit(cache=True)` for compiled functions with disk caching
+- `@numba.njit(cache=True, parallel=True)` with `prange` for parallelized loops
+- `inline="always"` for coefficient computation functions to reduce call overhead
+
 ---
 
 ## Default Parameters
@@ -259,12 +272,12 @@ The following modules were merged/reorganized to simplify the package structure:
 ### Merged into `spline_grid.py`
 - `interp/spline_coefficients.py` - Spline coefficient computation functions (only Cardinal and B-spline retained)
 - `splinegrid/_splinegridclasses.py` - SplineGrid class (merged with SplineGridHelper)
-- `splinegrid/_splinegridfuncs.py` - Numba grid sampling functions
+- `splinegrid/_splinegridfuncs.py` - Numba grid sampling functions (`_sample_grid`, `_fit_knots_to_field`)
 
 ### Merged into `deformation.py`
 - `deform/deformation.py` - Deformation class
 - `interp/transformations.py` - All transformation functions (warp, resize, zoom, deform_backward, deform_forward)
-- `gaussfun.py` - Diffusion kernel and filtering functions
+- `gaussfun.py` - Diffusion kernel (`diffusion_kernel`) and filtering functions (`diffuse`)
 
 ### Merged into `registration.py`
 - `reg/reg_base.py` - AbstractRegistration, BaseRegistration, GDGRegistration classes
@@ -298,6 +311,7 @@ The following were removed from the original pirt library as unused by the multi
 ### gaussfun.py (merged into deformation.py)
 - `_gaussiankernel()`, `gaussiankernel()`, `gfilter()` - Gaussian filtering (diffusion used instead)
 - `gaussiankernel2()`, `gfilter2()` - 2D variants
+- `diffusionkernel()` - Renamed to `diffusion_kernel()`
 
 ### spline_grid.py
 - `SplineTypes` enum, `compute_quadratic_coefficients()` - Quadratic splines unused
@@ -305,6 +319,9 @@ The following were removed from the original pirt library as unused by the multi
 - `FieldDescription` class - Shape tuples used directly
 - `SplineGridHelper` class - Merged into SplineGrid
 - `SplineGrid.from_deformation()`, `SplineGrid.to_deformation()` - Moved to `Deformation.regularize()`
+- `SplineGrid.get_fields()` - Renamed to `deformation_fields` property
+- `_get_field2()` - Renamed to `_sample_grid()` with parallelization
+- `_set_field2()`, `_set_field_using_num_and_dnum()` - Merged into `_fit_knots_to_field()`
 - Grid copy/refine/add/resize operations - Unused
 
 ### deformation.py
