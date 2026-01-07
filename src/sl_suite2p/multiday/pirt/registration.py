@@ -1,14 +1,8 @@
-"""Diffeomorphic Demons registration for multi-day cell tracking.
+"""This module provides the assets for diffeomorphic Demons image registration."""
 
-This module provides the DiffeomorphicDemonsRegistration class for registering
-multiple 2D images using a diffeomorphic variant of the Demons algorithm with
-B-spline regularization.
+from typing import TYPE_CHECKING
 
-Copyright 2010-2017 (C) Almar Klein (original pirt library)
-"""
-
-from dataclasses import dataclass
-
+from tqdm import tqdm
 import numpy as np
 import scipy.ndimage
 
@@ -16,360 +10,439 @@ from .pyramid import ScaleSpacePyramid
 from .deformation import Deformation
 from .spline_grid import SplineGrid
 
-
-@dataclass
-class RegistrationParameters:
-    """Parameters for DiffeomorphicDemonsRegistration."""
-
-    speed_factor: float = 3.0
-    """The relative force of the deformation transform. This is the most important parameter to tune. For most cases,
-    a value between 1 and 5 is reasonable."""
-
-    scale_sampling: int = 25
-    """The number of iterations for each scale level. Values between 20 and 30 are reasonable in most situations, but
-    higher values yield better results. The speed of the algorithm scales linearly with this value."""
-
-    grid_sampling_factor: float = 0.5
-    """Determines how grid sampling scales with image scale. Lower values allow more deformation at higher scales.
-    Must be between 0 and 1."""
-
-    final_scale: float = 1.0
-    """The minimum scale (finest resolution) for the scale-space pyramid. Must be >= 0.5."""
-
-    final_grid_sampling: float = 16.0
-    """The B-spline grid spacing at the final (finest) scale level."""
-
-    smooth_scale: bool = True
-    """Whether to use smooth scale transitions between pyramid levels."""
-
-    injective: bool = True
-    """Whether to enforce injectivity constraint to ensure diffeomorphic (invertible) deformations."""
-
-    frozenedge: bool = True
-    """Whether to freeze deformation values at image edges to prevent boundary artifacts."""
-
-    deform_limit: float = 1.0
-    """The maximum allowed deformation magnitude per grid cell, relative to grid spacing."""
-
-    noise_factor: float = 1.0
-    """Regularization factor for intensity noise in the Demons force calculation."""
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 
 class DiffeomorphicDemonsRegistration:
-    """Diffeomorphic Demons registration for 2 or more images.
+    """Provides the diffeomorphic Demons registration pipeline for groupwise alignment of 2D images.
 
-    A variant of the Demons algorithm that produces diffeomorphic (smooth,
-    invertible, topology-preserving) deformations using B-spline regularization.
-    Uses backward mapping and groupwise registration to align all images to a
-    common mean space.
+    Implements a variant of the Demons algorithm that produces diffeomorphic (smooth, invertible, topology-preserving)
+    deformations using B-spline regularization. Uses backward mapping and groupwise registration to align all images
+    to a common mean space.
 
-    Parameters
-    ----------
-    *images : numpy arrays
-        Two or more 2D images to register. Images are converted to float32
-        if not already floating point.
+    Args:
+        images: Two or more 2D images to register. Images are converted to float32 if not already floating point.
+        speed_factor: The relative force of the deformation transform. This is the most important parameter to tune.
+            For most cases, a value between 1 and 5 is reasonable.
+        scale_sampling: The number of iterations per scale level. Values between 20 and 30 are reasonable, but higher
+            values yield better results. Algorithm speed scales linearly with this value.
+        grid_sampling_factor: Determines how B-spline grid sampling scales with image scale. Lower values allow more
+            deformation at coarser scales. Must be between 0 and 1.
+        final_scale: The minimum scale (finest resolution) for the scale-space pyramid. Must be >= 0.5.
+        final_grid_sampling: The B-spline grid spacing at the final (finest) scale level.
+        smooth_scale: Determines whether to use smooth scale transitions between pyramid levels.
+        injective: Determines whether to enforce injectivity constraint to ensure diffeomorphic (invertible)
+            deformations.
+        freeze_edges: Determines whether to freeze deformation values at image edges to prevent boundary artifacts.
+        deformation_limit: The maximum allowed deformation magnitude per grid cell, relative to grid spacing.
+        noise_factor: The regularization factor for intensity noise in the Demons force calculation.
 
     Attributes:
-    ----------
-    params : RegistrationParameters
-        Registration parameters. See RegistrationParameters for details.
+        _images: The processed images.
+        _speed_factor: Cached speed_factor parameter.
+        _scale_sampling: Cached scale_sampling parameter.
+        _grid_sampling_factor: Cached grid_sampling_factor parameter.
+        _final_scale: Cached final_scale parameter.
+        _final_grid_sampling: Cached final_grid_sampling parameter.
+        _smooth_scale: Cached smooth_scale parameter.
+        _injective: Cached injective parameter.
+        _freeze_edges: Cached freeze_edges parameter.
+        _deformation_limit: Cached deformation_limit parameter.
+        _noise_factor: Cached noise_factor parameter.
+        _deformations: Maps image indices to their computed Deformation objects.
+        _pyramids: Scale-space pyramids for each input image, initialized during registration.
+        _cache: Internal cache for intermediate computation results.
+        _interpolation_order: Current interpolation order used during registration (1 or 3).
     """
 
-    def __init__(self, *images):
-        if len(images) < 2:
-            raise ValueError("Need at least two images for registration.")
+    def __init__(
+        self,
+        images: list[NDArray[np.float32]],
+        speed_factor: float = 3.0,
+        scale_sampling: int = 25,
+        grid_sampling_factor: float = 0.5,
+        final_scale: float = 1.0,
+        final_grid_sampling: float = 16.0,
+        smooth_scale: bool = True,
+        injective: bool = True,
+        freeze_edges: bool = True,
+        deformation_limit: float = 1.0,
+        noise_factor: float = 1.0,
+    ) -> None:
+        # Ensures that the input images use the fp32 precision, consistent with the rest of the sl-suite2p codebase.
+        self._images: list[NDArray[np.float32]] = []
+        for image in images:
+            converted_image = image.astype(np.float32) if image.dtype not in [np.float32, np.float64] else image
+            self._images.append(converted_image)
 
-        # Convert images to float and store
-        self._images = []
-        for im in images:
-            if not isinstance(im, np.ndarray):
-                raise ValueError("Images must be numpy arrays.")
-            if im.dtype not in [np.float32, np.float64]:
-                im = im.astype(np.float32)
-            self._images.append(im)
+        # Caches registration parameters to class attributes.
+        self._speed_factor: float = speed_factor
+        self._scale_sampling: int = scale_sampling
+        self._grid_sampling_factor: float = grid_sampling_factor
+        self._final_scale: float = final_scale
+        self._final_grid_sampling: float = final_grid_sampling
+        self._smooth_scale: bool = smooth_scale
+        self._injective: bool = injective
+        self._freeze_edges: bool = freeze_edges
+        self._deformation_limit: float = deformation_limit
+        self._noise_factor: float = noise_factor
 
-        # Initialize deformations storage
-        self._deforms = {}
+        self._deformations: dict[int, Deformation] = {}
 
-        # Initialize parameters with defaults
-        self._params = RegistrationParameters()
+        # Tracks the runtime state initialized during registration.
+        self._pyramids: list[ScaleSpacePyramid] | None = None
+        self._cache: dict[str, tuple] = {}
+        self._interpolation_order: int = 1
 
-        # Runtime state
-        self._pyramids = None
-        self._buffer = {}
-        self._current_interp_order = 1
-        self._max_scale = None
+    def get_deformation(self, image_index: int) -> Deformation:
+        """Returns the deformation for the specified image.
 
-    @property
-    def params(self) -> RegistrationParameters:
-        """Get the parameters object."""
-        return self._params
+        The deformation maps the image at the given index to the mean shape (groupwise registration result).
 
-    def get_deform(self, i: int) -> Deformation:
-        """Get the deformation for image with index i.
-
-        The deformation maps image i to the mean shape (groupwise registration).
-
-        Parameters
-        ----------
-        i : int
-            Image index (0-based).
+        Args:
+            image_index: The index of the image (0-based).
 
         Returns:
-        -------
-        Deformation
-            The deformation for the specified image.
+            The deformation that aligns the specified image to the common mean space.
         """
-        if not isinstance(i, int):
-            raise ValueError("Image index must be an integer.")
-        if i not in self._deforms:
-            raise KeyError(f"Deformation for index {i} is not available.")
-        return self._deforms[i]
+        return self._deformations[image_index]
 
-    def register(self, verbose: int = 1):
-        """Perform the registration process.
+    def register(self, progress: bool = True) -> None:
+        """Performs the multiscale registration process.
 
-        Parameters
-        ----------
-        verbose : int
-            Verbosity level. 0 = silent, 1 = progress, 2 = detailed.
+        Iteratively computes deformations from coarse to fine scales, updating the groupwise alignment at each step.
+
+        Args:
+            progress: Determines whether to use a tqdm progress bar to report the registration progress.
         """
-        self._current_interp_order = 1
+        self._interpolation_order = 1  # Initializes the interpolation order to 1
 
-        # Scale parameters
-        final_scale = float(self._params.final_scale)
-        scale_sampling = int(self._params.scale_sampling)
-        smooth_scale = bool(self._params.smooth_scale)
-        iter_factor = 0.5 ** (1.0 / scale_sampling)
+        # The iteration factor controls smooth scale transitions between levels.
+        iteration_factor = 0.5 ** (1.0 / self._scale_sampling)
 
-        # Validate final_scale
-        if final_scale < 0.5:
-            raise ValueError("final_scale must be at least 0.5.")
+        # Creates scale-space pyramids for each image.
+        self._pyramids = [ScaleSpacePyramid(data=image, min_scale=self._final_scale) for image in self._images]
 
-        # Create scale-space pyramids for each image
-        self._pyramids = [ScaleSpacePyramid(im, final_scale) for im in self._images]
+        # Computes maximum scale from image dimensions (quarter of largest dimension).
+        max_scale = max(self._images[0].shape) * 0.25
 
-        # Calculate max scale from image dimensions
-        ranges = [sh * 1.0 for sh in self._images[0].shape]
-        self._max_scale = max(ranges) * 0.25
+        # Computes the number of scale levels needed to span from final_scale to max_scale.
+        scale_level_count = 1
+        while self._final_scale * 2 ** (scale_level_count - 1) < max_scale:
+            scale_level_count += 1
 
-        # Calculate number of scale levels needed
-        scale_levels = 1
-        while final_scale * 2 ** (scale_levels - 1) < self._max_scale:
-            scale_levels += 1
+        # Computes total iterations for the progress bar. When smooth_scale is enabled, the coarsest level is skipped.
+        if self._smooth_scale:
+            total_iterations = (scale_level_count - 1) * self._scale_sampling
+        else:
+            total_iterations = scale_level_count * self._scale_sampling
 
-        if verbose >= 1:
-            print(f"{self.__class__.__name__}: ")
+        # Main registration loop: processes scales from coarse to fine.
+        with tqdm(
+            total=total_iterations, desc="Registering images", disable=not progress, unit="iteration"
+        ) as progress_bar:
+            for level in reversed(range(scale_level_count)):
+                # Computes the scale at the current level.
+                scale = self._final_scale * 2**level
+                if self._smooth_scale:
+                    scale *= 2 * iteration_factor
 
-        # Main registration loop through scale space (coarse to fine)
-        for level in reversed(range(scale_levels)):
-            scale = final_scale * 2**level
-            if smooth_scale:
-                scale *= 2 * iter_factor
+                for iteration in range(1, self._scale_sampling + 1):
+                    # Skips the coarsest level when using smooth scaling.
+                    if self._smooth_scale and level >= scale_level_count - 1:
+                        continue
 
-            for iteration in range(1, scale_sampling + 1):
-                # Skip highest scale level with smooth scaling
-                if smooth_scale and level >= scale_levels - 1:
-                    continue
+                    # Switches to cubic interpolation for final iterations at finest scale.
+                    if level == 0 and iteration > 0.75 * self._scale_sampling:
+                        self._interpolation_order = 3
 
-                # Use higher interpolation order in final iterations
-                if level == 0 and iteration > 0.75 * scale_sampling:
-                    self._current_interp_order = 3
+                    self._perform_iteration(level=level, iteration=iteration, scale=scale)
+                    progress_bar.update(1)
 
-                # Perform one registration iteration
-                self._register_iteration(level, iteration, scale)
+                    # Smoothly decreases scale within each level.
+                    if self._smooth_scale:
+                        scale = max(self._final_scale, scale * iteration_factor)
 
-                if verbose == 1:
-                    print(f"  iter {level}-{iteration} scale {scale:.2f}")
-                elif verbose > 1:
-                    print(f"Registration iter {level}-{iteration} at scale {scale:.2f}")
+    def _perform_iteration(self, level: int, iteration: int, scale: float) -> None:
+        """Performs one iteration of registration at the specified scale.
 
-                # Update scale for next iteration
-                if smooth_scale:
-                    scale = max(final_scale, scale * iter_factor)
+        Computes incremental deformations for all images and applies them to the running totals.
 
-    def _register_iteration(self, level: int, iteration: int, scale: float):
-        """Perform one iteration of registration at the specified scale."""
-        n_images = len(self._images)
-        iter_info = (level, iteration, scale)
+        Args:
+            level: The current pyramid level index.
+            iteration: The current iteration number within this level.
+            scale: The current scale value.
+        """
+        iteration_key = (level, iteration, scale)
 
-        # Calculate deformation for each image
-        deforms = []
-        for i in range(n_images):
-            deform = self._compute_groupwise_deform(i, iter_info)
-            deforms.append(deform)
+        # Computes incremental deformation for each image.
+        incremental_deformations = []
+        for image_index in range(len(self._images)):
+            deformation = self._compute_groupwise_deformation(image_index=image_index, iteration_key=iteration_key)
+            incremental_deformations.append(deformation)
 
-        # Apply deformations
-        for i in range(n_images):
-            self._apply_delta_deform(i, deforms[i])
+        # Applies incremental deformations to the running totals.
+        for image_index in range(len(self._images)):
+            self._apply_incremental_deformation(
+                image_index=image_index, incremental_deformation=incremental_deformations[image_index]
+            )
 
-    def _compute_groupwise_deform(self, i: int, iter_info: tuple) -> Deformation:
-        """Compute deformation for image i by averaging deforms to all other images."""
-        scale = iter_info[2]
+    def _compute_groupwise_deformation(
+        self, image_index: int, iteration_key: tuple[int, int, float]
+    ) -> Deformation | None:
+        """Computes the deformation for one image by averaging pairwise deformations to all other images.
 
-        # Check if grid would be too small
-        if self._params.frozenedge:
-            grid_sampling = self._get_grid_sampling(scale)
-            field_shape = self._images[0].shape
-            grid_shape = SplineGrid.compute_grid_shape(field_shape[0], field_shape[1], grid_sampling)
-            if all(s < 4 for s in grid_shape):
+        Args:
+            image_index: The index of the image for which to compute the deformation.
+            iteration_key: Tuple of (level, iteration, scale) identifying this iteration.
+
+        Returns:
+            The averaged deformation, or None if the grid would be too small.
+        """
+        scale = iteration_key[2]
+
+        # Returns None if the B-spline grid would be too small for frozen edges.
+        if self._freeze_edges:
+            grid_sampling = self._compute_grid_sampling(scale=scale)
+            image_height, image_width = self._images[0].shape
+            grid_shape = SplineGrid.compute_grid_shape(
+                field_height=image_height, field_width=image_width, grid_sampling=grid_sampling
+            )
+            if all(dimension < 4 for dimension in grid_shape):
                 return None
 
-        # Accumulate deformations from all image pairs
-        total_deform = Deformation()
-        count = 0
+        # Accumulates pairwise deformations from this image to all others.
+        image_height, image_width = self._images[0].shape
+        total_deformation = Deformation.identity(height=image_height, width=image_width)
+        pair_count = 0
 
-        for j in range(len(self._images)):
-            if i == j:
+        for other_index in range(len(self._images)):
+            if image_index == other_index:
                 continue
 
-            deform = self._compute_demons_deform(i, j, iter_info)
-            if deform is not None:
-                count += 1
-                total_deform = total_deform + deform
+            pairwise_deformation = self._compute_pairwise_deformation(
+                source_index=image_index, target_index=other_index, iteration_key=iteration_key
+            )
+            if pairwise_deformation is not None:
+                pair_count += 1
+                total_deformation = total_deformation + pairwise_deformation
 
-        # Average the deformations
-        if count > 1:
-            total_deform = total_deform.scale(1.0 / count)
+        # Averages the accumulated deformations.
+        if pair_count > 1:
+            total_deformation = total_deformation.scale(1.0 / pair_count)
 
-        return total_deform
+        return total_deformation
 
-    def _compute_demons_deform(self, i: int, j: int, iter_info: tuple) -> Deformation:
-        """Compute demons deformation from image i to image j."""
-        scale = iter_info[2]
+    def _compute_pairwise_deformation(
+        self, source_index: int, target_index: int, iteration_key: tuple[int, int, float]
+    ) -> Deformation:
+        """Computes the Demons deformation from source image to target image.
 
-        # Try to use cached symmetric result
-        cached = self._get_cached(f"deform_{i}_{j}", iter_info)
+        Uses symmetric Demons forces computed from both image gradients.
+
+        Args:
+            source_index: Index of the source image.
+            target_index: Index of the target image.
+            iteration_key: Tuple of (level, iteration, scale) identifying this iteration.
+
+        Returns:
+            The regularized deformation from source to target.
+        """
+        scale = iteration_key[2]
+
+        # Checks cache for this pair or its symmetric counterpart.
+        cached = self._get_cached(key=f"deform_{source_index}_{target_index}", iteration_key=iteration_key)
         if cached is not None:
             return cached
 
-        cached = self._get_cached(f"deform_{j}_{i}", iter_info)
+        cached = self._get_cached(key=f"deform_{target_index}_{source_index}", iteration_key=iteration_key)
         if cached is not None:
-            # Negate the cached result for symmetric deformation
+            # Negates the cached symmetric result.
             for grid in cached:
                 grid._knots = -grid._knots
             return cached
 
-        # Get images and their gradients
-        im1, grad1 = self._get_image_and_gradient(i, iter_info)
-        im2, grad2 = self._get_image_and_gradient(j, iter_info)
+        # Gets images and their gradients at the current scale.
+        source_image, source_gradient = self._get_image_and_gradient(
+            image_index=source_index, iteration_key=iteration_key
+        )
+        target_image, target_gradient = self._get_image_and_gradient(
+            image_index=target_index, iteration_key=iteration_key
+        )
 
-        # Calculate gradient magnitude squared
-        norm1 = sum(g**2 for g in grad1)
-        norm2 = sum(g**2 for g in grad2)
+        # Computes gradient magnitude squared for both images.
+        source_gradient_magnitude_squared = source_gradient[0] ** 2 + source_gradient[1] ** 2
+        target_gradient_magnitude_squared = target_gradient[0] ** 2 + target_gradient[1] ** 2
 
-        # Calculate intensity difference
-        diff = im1 - im2
-        diff_sq = diff**2
+        # Computes intensity difference and its square.
+        intensity_difference = source_image - target_image
+        intensity_difference_squared = intensity_difference**2
 
-        # Compute denominators with noise regularization
-        alpha = float(self._params.noise_factor)
-        denom1 = norm1 + alpha**2 * diff_sq
-        denom2 = norm2 + alpha**2 * diff_sq
+        # Computes Demons denominators with noise regularization.
+        source_denominator = source_gradient_magnitude_squared + self._noise_factor**2 * intensity_difference_squared
+        target_denominator = target_gradient_magnitude_squared + self._noise_factor**2 * intensity_difference_squared
 
-        # Prevent division by zero
-        denom1[denom1 == 0] = np.inf
-        denom2[denom2 == 0] = np.inf
+        # Prevents division by zero.
+        source_denominator[source_denominator == 0] = np.inf
+        target_denominator[target_denominator == 0] = np.inf
 
-        # Compute demons force field (negative speed for backward mapping)
-        speed = -float(self._params.speed_factor)
+        # Computes symmetric Demons force field (negative for backward mapping).
+        speed = -self._speed_factor
+        field_y = (
+            intensity_difference
+            * (source_gradient[0] / source_denominator + target_gradient[0] / target_denominator)
+            * speed
+        )
+        field_x = (
+            intensity_difference
+            * (source_gradient[1] / source_denominator + target_gradient[1] / target_denominator)
+            * speed
+        )
 
-        fields = []
-        for d in range(diff.ndim):
-            force = diff * (grad1[d] / denom1 + grad2[d] / denom2) * speed
-            fields.append(force)
+        # Regularizes using B-spline grid to ensure diffeomorphism.
+        force_deformation = Deformation(field_y.astype(np.float32), field_x.astype(np.float32))
+        regularized_deformation = self._regularize_deformation(scale=scale, deformation=force_deformation)
 
-        # Regularize using B-spline grid to ensure diffeomorphism
-        force_deform = Deformation(*fields)
-        deform = self._regularize_diffeomorphic(scale, force_deform)
+        self._set_cached(
+            key=f"deform_{source_index}_{target_index}", iteration_key=iteration_key, data=regularized_deformation
+        )
+        return regularized_deformation
 
-        # Cache and return
-        self._set_cached(f"deform_{i}_{j}", iter_info, deform)
-        return deform
+    def _get_image_and_gradient(
+        self, image_index: int, iteration_key: tuple[int, int, float]
+    ) -> tuple[NDArray[np.float32], tuple[NDArray[np.float32], NDArray[np.float32]]]:
+        """Returns the image at the current scale along with its gradient.
 
-    def _get_image_and_gradient(self, image_id: int, iter_info: tuple):
-        """Get image at current scale and compute its gradient."""
-        scale = iter_info[2]
+        Args:
+            image_index: Index of the image to retrieve.
+            iteration_key: Tuple of (level, iteration, scale) identifying this iteration.
 
-        # Try cached image
-        cached = self._get_cached(f"img_{image_id}", iter_info)
+        Returns:
+            A tuple of (image, (gradient_y, gradient_x)).
+        """
+        scale = iteration_key[2]
+
+        # Tries to retrieve cached image.
+        cached = self._get_cached(key=f"img_{image_index}", iteration_key=iteration_key)
         if cached is not None:
-            im = cached
+            image = cached
         else:
-            # Get deformed image at scale
-            im = self._get_deformed_image(image_id, scale)
-            self._set_cached(f"img_{image_id}", iter_info, im)
+            image = self._get_deformed_image(image_index=image_index, scale=scale)
+            self._set_cached(key=f"img_{image_index}", iteration_key=iteration_key, data=image)
 
-        # Compute gradient using central differences
-        gradient = []
-        kernel = np.array([0.5, 0, -0.5], dtype="float64")
-        for d in range(im.ndim):
-            grad = scipy.ndimage.convolve1d(im, kernel, d, mode="nearest")
-            gradient.append(grad)
+        # Computes gradient using central differences.
+        gradient_kernel = np.array([0.5, 0, -0.5], dtype=np.float64)
+        gradient_y = scipy.ndimage.convolve1d(input=image, weights=gradient_kernel, axis=0, mode="nearest")
+        gradient_x = scipy.ndimage.convolve1d(input=image, weights=gradient_kernel, axis=1, mode="nearest")
 
-        return im, tuple(gradient)
+        return image, (gradient_y, gradient_x)
 
-    def _get_deformed_image(self, i: int, scale: float):
-        """Get image i at specified scale, with current deformation applied."""
-        # Get image from pyramid at scale
-        im = self._pyramids[i].get_scale(scale)
+    def _get_deformed_image(self, image_index: int, scale: float) -> NDArray[np.float32]:
+        """Returns the image at the specified scale with current deformation applied.
 
-        # Apply current deformation if exists
-        deform = self._deforms.get(i, None)
-        if deform is not None:
-            deform = deform.resize_field(im)
-            self._deforms[i] = deform
-            im = deform.apply_deformation(im, self._current_interp_order)
+        Args:
+            image_index: Index of the image to retrieve.
+            scale: The scale at which to retrieve the image.
 
-        return im
+        Returns:
+            The deformed image at the specified scale.
+        """
+        image = self._pyramids[image_index].get_scale(scale=scale)
 
-    def _apply_delta_deform(self, i: int, deform: Deformation):
-        """Apply incremental deformation to image i's total deformation."""
-        if deform is None or deform.is_identity:
+        # Applies current accumulated deformation if one exists.
+        deformation = self._deformations.get(image_index, None)
+        if deformation is not None:
+            deformation = deformation.resize_field(new_height=image.shape[0], new_width=image.shape[1])
+            self._deformations[image_index] = deformation
+            image = deformation.apply_deformation(data=image, interpolation=self._interpolation_order)
+
+        return image
+
+    def _apply_incremental_deformation(self, image_index: int, incremental_deformation: Deformation | None) -> None:
+        """Applies an incremental deformation to the running total for an image.
+
+        Args:
+            image_index: Index of the image to update.
+            incremental_deformation: The incremental deformation to apply, or None to skip.
+        """
+        if incremental_deformation is None or incremental_deformation.is_identity:
             return
 
-        # Get current deformation or create identity
-        current = self._deforms.get(i, None)
-        if current is None:
-            current = Deformation(self._images[0].ndim)
+        # Gets or creates the current accumulated deformation.
+        current_deformation = self._deformations.get(image_index, None)
+        if current_deformation is None:
+            image_height, image_width = self._images[0].shape
+            current_deformation = Deformation.identity(height=image_height, width=image_width)
 
-        # Resize to match and compose deformations
-        current = current.resize_field(deform)
-        self._deforms[i] = current.compose(deform)
+        # Resizes to match and composes the deformations.
+        current_deformation = current_deformation.resize_field(
+            new_height=incremental_deformation.field_shape[0], new_width=incremental_deformation.field_shape[1]
+        )
+        self._deformations[image_index] = current_deformation.compose(incremental_deformation)
 
-    def _regularize_diffeomorphic(self, scale: float, deform: Deformation) -> Deformation:
-        """Regularize deformation to ensure diffeomorphism using B-spline grid."""
-        grid_sampling = self._get_grid_sampling(scale)
+    def _regularize_deformation(self, scale: float, deformation: Deformation) -> Deformation:
+        """Regularizes a deformation to ensure diffeomorphism using B-spline constraints.
 
-        injective = self._params.injective
-        frozenedge = self._params.frozenedge
+        Args:
+            scale: The current scale level.
+            deformation: The raw deformation to regularize.
 
-        # Calculate injectivity constraint factor
+        Returns:
+            The regularized deformation.
+        """
+        grid_sampling = self._compute_grid_sampling(scale=scale)
+
+        # Computes injectivity constraint factor based on scale and grid sampling.
         injective_factor = 0.9
-        if injective:
-            deform_limit = float(self._params.deform_limit)
-            injective_factor = min(deform_limit * scale / grid_sampling, 0.9)
+        if self._injective:
+            injective_factor = min(self._deformation_limit * scale / grid_sampling, 0.9)
 
-        return deform.regularize(grid_sampling, None, injective, injective_factor, frozenedge)
+        return deformation.regularize(
+            grid_sampling=grid_sampling,
+            injective=self._injective,
+            injective_factor=injective_factor,
+            freeze_edges=self._freeze_edges,
+        )
 
-    def _get_grid_sampling(self, scale: float) -> float:
-        """Calculate B-spline grid sampling for current scale."""
-        final_grid_sampling = float(self._params.final_grid_sampling)
-        grid_factor = float(self._params.grid_sampling_factor)
-        final_scale = float(self._params.final_scale)
+    def _compute_grid_sampling(self, scale: float) -> float:
+        """Computes the B-spline grid sampling for the given scale.
 
-        gsf = grid_factor * final_grid_sampling
-        gsb = final_grid_sampling
-        return (scale - final_scale) * gsf + gsb
+        The grid sampling increases linearly from final_grid_sampling at final_scale.
 
-    # Simple caching helpers
-    def _get_cached(self, key: str, check):
-        """Get cached data if check matches."""
-        entry = self._buffer.get(key)
-        if entry and entry[0] == check:
+        Args:
+            scale: The current scale value.
+
+        Returns:
+            The grid sampling value for this scale.
+        """
+        scale_difference = scale - self._final_scale
+        scale_factor = self._grid_sampling_factor * self._final_grid_sampling
+        return scale_difference * scale_factor + self._final_grid_sampling
+
+    def _get_cached(self, key: str, iteration_key: tuple[int, int, float]) -> Deformation | NDArray[np.float32] | None:
+        """Retrieves cached data if the iteration key matches.
+
+        Args:
+            key: The cache key.
+            iteration_key: The iteration identifier to validate against.
+
+        Returns:
+            The cached data if valid, otherwise None.
+        """
+        entry = self._cache.get(key)
+        if entry and entry[0] == iteration_key:
             return entry[1]
         return None
 
-    def _set_cached(self, key: str, check, data):
-        """Cache data with check value."""
-        self._buffer[key] = (check, data)
+    def _set_cached(
+        self, key: str, iteration_key: tuple[int, int, float], data: Deformation | NDArray[np.float32]
+    ) -> None:
+        """Stores data in the cache with an iteration key.
+
+        Args:
+            key: The cache key.
+            iteration_key: The iteration identifier for validation.
+            data: The data to cache.
+        """
+        self._cache[key] = (iteration_key, data)

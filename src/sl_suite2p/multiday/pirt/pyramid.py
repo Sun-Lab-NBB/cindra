@@ -1,208 +1,108 @@
-import numpy as np
+"""This module provides the assets for computing and storing the multi-resolution scale-space image pyramids."""
+
+from typing import TYPE_CHECKING
 
 from .deformation import zoom, diffuse
 
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
+
 
 class ScaleSpacePyramid:
-    """ScaleSpacePyramid(data, min_scale=None, scale_offset=0,
-                                            use_buffer=False, level_factor=2)
+    """Manages a scale-space pyramid for multi-resolution image access.
 
-    The scale space pyramid class provides a way to manage a scale
-    space pyramid. Given an input image (of arbitrary dimension),
-    it provides two simple methods to obtain the image at the a specified
-    scale or level.
+    Given an input 2D image, provides methods to obtain the image at any specified scale. Higher scales correspond
+    to smoother images with smaller dimensions. The pyramid is built lazily, adding levels only as needed.
 
-    Parameters
-    ----------
-    data : numpy array
-        An array of any dimension. Should preferably be of float type.
-    min_scale : scalar, optional
-        The minimum scale to sample from the pyramid. If not given,
-        scale_offset is used. If larger than zero, the image is smoothed
-        to this scale before creating the zeroth level. If the smoothness
-        is sufficient, the data is also downsampled. This makes a registration
-        algorithm much faster, because the image data for the final scales
-        does not have a unnecessary high resolution.
-    scale_offset : scalar
-        The scale of the given data. Use this if the data is already smooth.
-        Be careful not to set this value too high, as aliasing artifacts
-        may be introduced. Default zero.
-    use_buffer : bool
-        Whether a result obtained with get_scale() is buffered for later use.
-        Only one image is buffered. Default False.
-    level_factor : scalar
-        The scale distance between two levels. A larger number means saving
-        a bit of memory in trade of speed. You're probably fine with 2.0.
+    Args:
+        data: The input 2D image array for which to generate the scale space pyramid.
+        min_scale: The minimum (finest) scale for the pyramid. The input image is smoothed to this scale before
+            creating the base level. If the scale is large enough, the data is also downsampled for efficiency.
 
-    Notes:
-    -----
-    Note that this scale space representation handles anisotropic arrays
-    and that scale is expressed in world units.
-
-    Note that images at higher levels do not always have a factor 2 sampling
-    difference with the original! This is because the first and last pixel
-    are kept the same, and the number of pixels is decreased with factors
-    of two (or almost a factor of two if the number is uneven).
-
-    The images always have the same offset though.
-
-    We adopt the following concepts:
-      * level: the level in the pyramid. Each level is a factor two smaller
-        in size (in each dimension) than the previous.
-      * scale: the scale in world coordinates
-
+    Attributes:
+        _levels: List of image arrays at each pyramid level, from finest to coarsest.
+        _level_scales: List of scale values corresponding to each pyramid level.
     """
 
-    def __init__(self, data, min_scale=None, scale_offset=0, use_buffer=False, level_factor=2):
-        # Check scale_offset
-        scale_offset = float(scale_offset)
-        if scale_offset < 0.0:
-            raise ValueError("scale_offset should be >= 0.")
+    # Scale factor between adjacent pyramid levels.
+    _LEVEL_FACTOR: float = 2.0
 
-        # Check min_scale
-        if min_scale is None:
-            min_scale = scale_offset
-        else:
-            min_scale = float(min_scale)
-        if min_scale < scale_offset:
-            raise ValueError("min_scale should be >= scale_offset.")
+    def __init__(self, data: NDArray[np.float32], min_scale: float) -> None:
+        min_scale = float(min_scale)
+        self._levels: list[NDArray[np.float32]] = []
+        self._level_scales: list[float] = []
+        self._initialize_base_level(data=data, min_scale=min_scale)
 
-        # Set lowest level image
-        self._initialize_level0(data, min_scale, scale_offset)
+    def _initialize_base_level(self, data: NDArray[np.float32], min_scale: float) -> None:
+        """Initializes the base pyramid level by smoothing and optionally downsampling the image data.
 
-        # Store level factor
-        self._level_factor = float(level_factor)
-        if self._level_factor <= 1:
-            raise ValueError("Level factor must be > 1.")
-
-        # Buffer to store image for a specific scale
-        self._use_buffer = bool(use_buffer)
-        self._buffer = None
-
-    def _initialize_level0(self, data, min_scale, scale_offset):
-        """_initialize_level0(data, min_scale, scale_offset)
-
-        Smooth the input image if necessary so it is at min_scale.
-        The data is resampled at lower resolution if the scale is
-        high enough.
-
+        Args:
+            data: The input image array.
+            min_scale: The target scale for the base level.
         """
-        # Make image float
-        if data.dtype not in [np.float32, np.float64]:
-            data = data.astype("float32")
-
-        # Calculate sigma (in world coordinates): amount of smoothing to apply
-        sigma1 = scale_offset  # scale that the image already has
-        sigma2 = min_scale  # scale that we want the image to have
-        sigma = (sigma2**2 - sigma1**2) ** 0.5
-
-        # Smooth
-        if sigma > 0:
-            data = diffuse(data, sigma)
-
-        # Get scale in pixel coords (sampling is always 1.0)
-        pixel_scales = [min_scale / 1.0 for _ in range(data.ndim)]
-
-        # Sample at lower rate?
-        # This will make the data more isotropic if it was not
+        # Smooths to target scale if min_scale > 0.
         if min_scale > 0:
-            # Get zoom factors (should only be <= 1)
-            zoom_factors = [min(1, 1.0 / s) for s in pixel_scales]
-            # Only resample if one dim can be reduced by more than 10%
-            if min(zoom_factors) < 0.9:
-                data = np.asarray(zoom(data, zoom_factors, order=3, prefilter=False))
+            data = diffuse(data=data, sigma=min_scale)
 
-        # Store level data and metadata separately
-        self._levels = [data]
-        self._level_scales = [min_scale]
+            # Downsamples if scale is large enough (reduces resolution by more than 10%).
+            zoom_factor = 1.0 / min_scale
+            if zoom_factor < 0.9:
+                data = zoom(data=data, factor=zoom_factor, order=3)
 
-    def get_scale(self, scale=None):
-        """get_scale(scale)
+        self._levels.append(data)
+        self._level_scales.append(min_scale)
 
-        Get the image at the specified scale (expressed in world units).
-        For higher scales, the image has a smaller shape than the original
-        image. If min_scale and scale_offset are not used, a scale of 0
-        represents the original image.
+    def get_scale(self, scale: float) -> NDArray[np.float32]:
+        """Returns the image at the specified scale.
 
-        To calculate the result, the image at the level corresponding to
-        the nearest lower scale is obtained, and diffused an extra bit
-        to obtain the requested scale.
+        Retrieves the pyramid level at or below the requested scale, then applies additional smoothing to reach the
+        exact target scale. New pyramid levels are created on demand if needed.
 
-        The result is buffered (if the pyramid was instantiated with
-        use_buffer=True), such that calling this function multiple
-        times with the same scale is much faster. Only buffers the last
-        used scale.
+        Args:
+            scale: The target scale in world coordinates. Must be >= min_scale.
 
+        Returns:
+            The image smoothed to the requested scale.
         """
-        # Check
-        min_scale = self._level_scales[0]
-        if scale is None:
-            scale = min_scale
-        if scale < min_scale:
-            raise ValueError("Scale should be at least min_scale (%1.2f)." % min_scale)
-
-        # Can we use the buffer?
-        if self._buffer and self._buffer[0] == scale:
-            return self._buffer[1]
-
-        # Determine level offset. We loop untill we are one level too
-        # high and then use the level below that.
-        level = -1
-        baseScale = -1
-        while baseScale <= scale:
+        # Finds the appropriate pyramid level.
+        level = 0
+        while level < len(self._levels) - 1 and self._level_scales[level + 1] <= scale:
             level += 1
-            baseScale = self._level_scales[level] if level < len(self._level_scales) else self._level_scales[-1]
-            if level >= len(self._levels):
-                self._add_Level()
-                baseScale = self._level_scales[-1]
 
-        # Correct (we went one level too far)
-        level = max(level - 1, 0)
+        # Adds new levels if the current highest level is still below the target scale.
+        while self._level_scales[level] < scale and level == len(self._levels) - 1:
+            self._add_level()
+            if self._level_scales[-1] <= scale:
+                level = len(self._levels) - 1
 
-        # Get data
+        # Gets the base data from the selected level.
         data = self._levels[level]
-        sigma1 = self._level_scales[level]
+        current_scale = self._level_scales[level]
 
-        # Calculate sigma (in world coordinates)
-        sigma2 = scale
-        sigma = (sigma2**2 - sigma1**2) ** 0.5
+        # Applies additional smoothing to reach the exact target scale.
+        if scale > current_scale:
+            additional_sigma = (scale**2 - current_scale**2) ** 0.5
+            data = diffuse(data=data, sigma=additional_sigma)
 
-        # Smooth a bit more
-        if sigma > 0:
-            data = diffuse(data, sigma)
-
-        # Set buffer and return
-        if self._use_buffer:
-            self._buffer = scale, data
         return data
 
-    def _add_Level(self):
-        """_add_Level()
-
-        Add a level to the scale space pyramid.
-
-        """
-        # Get data and its scale
+    def _add_level(self) -> None:
+        """Adds a new coarser level to the pyramid by smoothing and downsampling the underlying image's data."""
         data = self._levels[-1]
-        sigma1 = self._level_scales[-1]
+        current_scale = self._level_scales[-1]
 
-        # Calculate scales (in world coords) needed to make the pixel-scales 2.0
-        # Sampling is always 1.0 per dimension
-        scales = [self._level_factor * 1.0 for _ in range(data.ndim)]
+        # Computes the target scale for the new level.
+        target_scale = max(self._LEVEL_FACTOR, current_scale * 2.0)
 
-        # Calculate the amount of required smoothing (in world coords)
-        sigma2 = max(max(scales), sigma1 * 2.0)
-        sigma = (sigma2**2 - sigma1**2) ** 0.5
+        # Computes additional smoothing needed.
+        additional_sigma = (target_scale**2 - current_scale**2) ** 0.5
+        data = diffuse(data=data, sigma=additional_sigma)
 
-        # Smooth
-        data = diffuse(data, sigma)
-
-        # Downsample (do not take every other sample, because then we will
-        # lose the last pixel if the shape is even!)
+        # Downsamples if the image is large enough.
         if min(data.shape) > 8:
-            factor = 1.0 / self._level_factor
-            data = np.asarray(zoom(data, factor, order=3, prefilter=False))
+            factor = 1.0 / self._LEVEL_FACTOR
+            data = zoom(data=data, factor=factor, order=3)
 
-        # Insert in levels
         self._levels.append(data)
-        self._level_scales.append(sigma2)
+        self._level_scales.append(target_scale)

@@ -6,10 +6,9 @@ Copyright 2010-2017 (C) Almar Klein.
 """
 
 from .deformation import Deformation
-from .registration import RegistrationParameters, DiffeomorphicDemonsRegistration
+from .registration import DiffeomorphicDemonsRegistration
 
 __all__ = [
     "Deformation",
     "DiffeomorphicDemonsRegistration",
-    "RegistrationParameters",
 ]
