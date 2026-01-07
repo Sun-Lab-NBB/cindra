@@ -18,38 +18,31 @@ _MINIMUM_KNOTS_FOR_FROZEN_EDGES: int = 6
 def compute_cardinal_coefficients(
     interpolation_factor: float,
     coefficients: NDArray[np.float32],
-    tension: float,
 ) -> None:
-    """Computes Cardinal spline coefficients for the given tension parameter.
+    """Computes Catmull-Rom spline coefficients for image interpolation.
 
-    Notes:
-        Cardinal splines are interpolating splines that pass exactly through their control points, making them
-        suitable for image interpolation where pixel values must be preserved at grid locations. The tension
-        parameter controls the tightness of the curve: tension=0 produces a Catmull-Rom spline (smooth, natural
-        appearance), tension=1 produces linear interpolation, and tension=-1 produces exaggerated overshoots.
+    Catmull-Rom splines are Cardinal splines with tension=0. They are interpolating splines that pass exactly
+    through their control points, making them suitable for image interpolation where pixel values must be preserved
+    at grid locations.
 
     Args:
         interpolation_factor: The position between the central lattice points, in range [0, 1].
         coefficients: The output array where to store the computed coefficients.
-        tension: The tension parameter in range [-1, 1].
     """
-    # Tension scaling factor (0.5 at tension=0 for Catmull-Rom)
-    tension_factor = 0.5 * (1.0 - tension)
-
     t = interpolation_factor
     t_squared = t * t
     t_cubed = t_squared * t
 
-    # Coefficient for p0 (leftmost point)
-    coefficients[0] = -tension_factor * (t_cubed - 2.0 * t_squared + t)
+    # Coefficient for p0 (leftmost point). Uses tension_factor=0.5 (Catmull-Rom).
+    coefficients[0] = -0.5 * (t_cubed - 2.0 * t_squared + t)
 
-    # Coefficient for p3 (rightmost point)
-    coefficients[3] = tension_factor * (t_cubed - t_squared)
+    # Coefficient for p3 (rightmost point).
+    coefficients[3] = 0.5 * (t_cubed - t_squared)
 
-    # Coefficient for p1 (left-center point)
+    # Coefficient for p1 (left-center point).
     coefficients[1] = 2.0 * t_cubed - 3.0 * t_squared + 1.0 - coefficients[3]
 
-    # Coefficient for p2 (right-center point)
+    # Coefficient for p2 (right-center point).
     coefficients[2] = -2.0 * t_cubed + 3.0 * t_squared - coefficients[0]
 
 
@@ -199,8 +192,8 @@ class SplineGrid:
 
     def set_from_fields(
         self,
-        fields: tuple[NDArray[np.float32], NDArray[np.float32]],
-        weights: NDArray[np.float32] | None = None,
+        field_y: NDArray[np.float32],
+        field_x: NDArray[np.float32],
         injective: bool = True,
         injective_factor: float = 0.9,
         freeze_edges: bool = True,
@@ -208,44 +201,25 @@ class SplineGrid:
         """Sets the grid knots from dense deformation fields and applies diffeomorphic constraints.
 
         Args:
-            fields: A tuple of two 2D arrays (Y, X) representing the deformation field for each dimension.
-            weights: Optional weights for field elements.
-            injective: Determines whether to apply injectivity constraint to prevent grid folding.
-            injective_factor: The scaling factor to use for computing the injectivity limit (0 < factor <= 1).
-            freeze_edges: Determines whether to freeze the edges, preventing them from being deformed.
-
-        Raises:
-            ValueError: If injective_factor is not in range [0, 1] when injective is True.
-            ValueError: If field shape does not match grid field shape.
+            field_y: The Y-dimension displacement field array.
+            field_x: The X-dimension displacement field array.
+            injective: Whether to apply injectivity constraint to prevent grid folding.
+            injective_factor: The scaling factor for the injectivity limit (0 < factor <= 1).
+            freeze_edges: Whether to freeze the edges, preventing them from being deformed.
         """
-        if injective and not (0 < injective_factor <= 1):
-            message = (
-                f"Unable to update the SplineGrid using the input fields. The injective_factor must be in range "
-                f"(0, 1], but got {injective_factor}."
-            )
-            console.error(message=message, error=ValueError)
+        # Fits B-spline knots to the deformation fields using least-squares (Lee et al.).
+        _fit_knots_to_field(
+            grid_sampling=self._grid_sampling,
+            knots=self._get_knots(dimension=0),
+            field=field_y,
+        )
+        _fit_knots_to_field(
+            grid_sampling=self._grid_sampling,
+            knots=self._get_knots(dimension=1),
+            field=field_x,
+        )
 
-        for dimension in range(self.ndim):
-            field = fields[dimension]
-            if self.field_shape != field.shape:
-                message = (
-                    f"Unable to update the SplineGrid using the input deformation fields. The field shape for the "
-                    f"dimension {dimension} ({field.shape}) does not match the grid field shape ({self.field_shape})."
-                )
-                console.error(message=message, error=ValueError)
-
-            # If the weights are not provided, initializes them to an array of ones.
-            weights = weights if weights is not None else np.ones_like(field)
-
-            # Fits B-spline knots to the deformation field using weighted least-squares (Lee et al.).
-            _fit_knots_to_field(
-                grid_sampling=self._grid_sampling,
-                knots=self._get_knots(dimension=dimension),
-                field=field,
-                weights=weights,
-            )
-
-        # If necessary, applies injectivity constraint and freezes edges.
+        # Applies injectivity constraint and freezes edges if requested.
         if injective:
             self._unfold(factor=injective_factor)
         if freeze_edges:
@@ -373,18 +347,16 @@ def _fit_knots_to_field(
     grid_sampling: float,
     knots: NDArray[np.float32],
     field: NDArray[np.float32],
-    weights: NDArray[np.float32],
 ) -> None:
-    """Fits B-spline knots to a deformation field using weighted least-squares (Lee et al.).
+    """Fits B-spline knots to a deformation field using least-squares (Lee et al.).
 
-    For each pixel, distributes its weighted contribution to the surrounding 4x4 knot neighborhood. After accumulating
+    For each pixel, distributes its contribution to the surrounding 4x4 knot neighborhood. After accumulating
     all contributions, computes final knot values by dividing the accumulated numerator by denominator.
 
     Args:
         grid_sampling: The spacing between B-spline control points (knots) in pixels.
         knots: The 2D knot array to update in-place.
         field: The 2D deformation field values.
-        weights: The 2D weight array for each field pixel.
     """
     coefficients_y = np.empty((4,), dtype=np.float32)
     coefficients_x = np.empty((4,), dtype=np.float32)
@@ -392,14 +364,10 @@ def _fit_knots_to_field(
     numerator = np.zeros_like(knots)
     denominator = np.zeros_like(knots)
 
-    # Accumulates weighted contributions from each pixel to its surrounding knots.
+    # Accumulates contributions from each pixel to its surrounding knots.
     for y in range(field.shape[0]):
         for x in range(field.shape[1]):
             field_value = field[y, x]
-            pixel_weight = weights[y, x]
-
-            if pixel_weight <= 0.0:
-                continue
 
             # Computes the reference knot index and interpolation factor for each axis.
             # The +1 corrects for boundary padding in the knot grid.
@@ -422,15 +390,15 @@ def _fit_knots_to_field(
                     coefficient_sum_squared += coefficient * coefficient
             normalized_value = field_value / coefficient_sum_squared
 
-            # Accumulates weighted contributions to each knot in the 4x4 neighborhood.
+            # Accumulates contributions to each knot in the 4x4 neighborhood.
             for offset_y in range(4):
                 knot_y = offset_y + knot_index_y - 1
                 for offset_x in range(4):
                     knot_x = offset_x + knot_index_x - 1
                     basis_coefficient = coefficients_y[offset_y] * coefficients_x[offset_x]
-                    weighted_coefficient = pixel_weight * basis_coefficient * basis_coefficient
-                    numerator[knot_y, knot_x] += weighted_coefficient * (normalized_value * basis_coefficient)
-                    denominator[knot_y, knot_x] += weighted_coefficient
+                    coefficient_squared = basis_coefficient * basis_coefficient
+                    numerator[knot_y, knot_x] += coefficient_squared * (normalized_value * basis_coefficient)
+                    denominator[knot_y, knot_x] += coefficient_squared
 
     # Finalizes the knot values by dividing numerator by denominator.
     for i in range(knots.size):

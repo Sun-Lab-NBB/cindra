@@ -35,17 +35,17 @@ def register_sessions(ops: dict[str, Any], data: MultiDayData) -> MultiDayData:
     images = [session.reference_images[ops["image_type"]] for session in data.sessions]
 
     # Instantiates the DiffeomorphicDemonsRegistration object for the reference images to be registered to each-other.
-    registration = DiffeomorphicDemonsRegistration(*images)
-
-    # Updates registration parameters using the user-defined settings.
-    registration.params.grid_sampling_factor = ops["grid_sampling_factor"]
-    registration.params.scale_sampling = ops["scale_sampling"]
-    registration.params.speed_factor = ops["speed_factor"]
+    registration = DiffeomorphicDemonsRegistration(
+        images=images,
+        grid_sampling_factor=ops["grid_sampling_factor"],
+        scale_sampling=ops["scale_sampling"],
+        speed_factor=ops["speed_factor"],
+    )
 
     # Runs the registration process.
     console.echo(message=f"Computing deformation fields for {ops['image_type']} session images...")
     timer.reset()
-    registration.register(verbose=0)
+    registration.register(progress=ops["progress_bars"])
     console.echo(message=f"Deformation fields: computed. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS)
     timer.delay(delay=1, allow_sleep=False, block=False)  # Delays for one second to optimize terminal message order
 
@@ -86,7 +86,7 @@ def _register_session(registration: DiffeomorphicDemonsRegistration, deform_inde
     """
     # Extracts and saves the Deformation object. Due to how pirt is implemented and contrary to pirt's
     # docstrings, since we do not override the default transform_mapping parameter, the mapping is BACKWARD.
-    session.deform = registration.get_deform(deform_index)
+    session.deform = registration.get_deformation(image_index=deform_index)
 
     # Uses the deformation field object to transform reference images
     session.transformed_images = {}
@@ -426,7 +426,7 @@ def _backward_transform_session(template_masks: tuple[dict[str, Any], ...], sess
     # Transform the template cell masks to the original (unregistered) visual space of this session
     session.template_cell_masks = deform_masks(
         cell_masks=template_masks,
-        deform=session.deform.as_backward_inverse(),
+        deform=session.deform.inverse(),
     )
 
     # This step was performed before visualizing backwards-transformed data in the original multi-day notebook. Since

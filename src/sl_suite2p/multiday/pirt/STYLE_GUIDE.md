@@ -36,8 +36,31 @@ def function_name(param1: int, param2: str = "default") -> bool:
 - **Summary line**: Imperative mood ("Computes..." not "This function computes..."), no period unless multi-sentence
 - **Notes**: Use for algorithms, references, implementation rationale. Not for parameter details.
 - **Args**: One line per parameter. Don't repeat type info. Start with lowercase, no period.
+- **Args (boolean)**: Use "Determines whether..." not "Whether..." for boolean parameters.
 - **Returns**: Describe what is returned, not the type. Start with uppercase if a sentence.
 - **Raises**: Only include if the function explicitly raises exceptions.
+- **Attributes**: Document all instance attributes, including private ones prefixed with `_`.
+
+### Class Docstrings with Attributes
+
+For classes, include an Attributes section listing all instance attributes:
+
+```python
+class DiffeomorphicDemonsRegistration:
+    """Provides the diffeomorphic Demons registration pipeline.
+
+    Args:
+        images: Two or more 2D images to register.
+        speed_factor: The relative force of the deformation transform.
+        injective: Determines whether to enforce injectivity constraint.
+
+    Attributes:
+        _images: List of input images converted to float32.
+        _speed_factor: Cached speed_factor parameter.
+        _injective: Cached injective parameter.
+        _deformations: Dictionary mapping image indices to computed Deformation objects.
+    """
+```
 
 ### Property Docstrings
 
@@ -46,6 +69,14 @@ def function_name(param1: int, param2: str = "default") -> bool:
 def field_shape(self) -> tuple[int, int]:
     """Returns the shape of the underlying image field as (height, width)."""
     return self._field_shape
+```
+
+### Module Docstrings
+
+Use the format "This module provides the assets for X." to describe what the module contains:
+
+```python
+"""This module provides the assets for computing and representing image deformations."""
 ```
 
 ---
@@ -58,6 +89,7 @@ def field_shape(self) -> tuple[int, int]:
 - Use `-> None` for functions that don't return a value
 - Use `| None` for optional types (not `Optional[T]`)
 - Use lowercase `tuple`, `list`, `dict` (not `Tuple`, `List`, `Dict`)
+- Avoid `any` type; use explicit union types instead (e.g., `Deformation | NDArray[np.float32]`)
 
 ### NumPy Arrays
 
