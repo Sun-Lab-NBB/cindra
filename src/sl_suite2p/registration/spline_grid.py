@@ -1,11 +1,12 @@
 """This module provides the assets for B-spline based deformation field representation."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 import numba
 from numba import prange
 import numpy as np
-from ataraxis_base_utilities import console
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -197,7 +198,7 @@ class SplineGrid:
         injective: bool = True,
         injective_factor: float = 0.9,
         freeze_edges: bool = True,
-    ) -> None:
+    ) -> bool:
         """Sets the grid knots from dense deformation fields and applies diffeomorphic constraints.
 
         Args:
@@ -206,6 +207,9 @@ class SplineGrid:
             injective: Whether to apply injectivity constraint to prevent grid folding.
             injective_factor: The scaling factor for the injectivity limit (0 < factor <= 1).
             freeze_edges: Whether to freeze the edges, preventing them from being deformed.
+
+        Returns:
+            True if all constraints were successfully applied, False if the grid is too small for frozen edges.
         """
         # Fits B-spline knots to the deformation fields using least-squares (Lee et al.).
         _fit_knots_to_field(
@@ -223,7 +227,9 @@ class SplineGrid:
         if injective:
             self._unfold(factor=injective_factor)
         if freeze_edges:
-            self._freeze_edges()
+            if not self._freeze_edges():
+                return False
+        return True
 
     def _unfold(self, factor: float = 0.9) -> None:
         """Prevents folds in the grid by limiting the B-spline control values (knots) to ensure injectivity.
@@ -247,22 +253,17 @@ class SplineGrid:
             knots = self._get_knots(dimension=dimension).ravel()
             knots[:] = limit * (np.exp(-np.abs(knots) / limit) - 1) * -np.sign(knots)
 
-    def _freeze_edges(self) -> None:
+    def _freeze_edges(self) -> bool:
         """Freezes the outer knots to zero to ensure deformation is zero at image edges.
 
-        Raises:
-            ValueError: If any of the processed grid's dimensions are too small to freeze the edges.
+        Returns:
+            True if edges were successfully frozen, False if the grid is too small.
         """
         for dimension in range(self.ndim):
             knots = self._get_knots(dimension=dimension)
 
             if knots.shape[dimension] < _MINIMUM_KNOTS_FOR_FROZEN_EDGES:
-                message = (
-                    f"The grid is too small to freeze edges: dimension {dimension} has {knots.shape[dimension]} knots, "
-                    f"but at least {_MINIMUM_KNOTS_FOR_FROZEN_EDGES} are required. Increase the field size or decrease "
-                    f"the grid sampling."
-                )
-                console.error(message=message, error=ValueError)
+                return False
 
             # Determines where the field's trailing edge falls between grid knots, since the field does not perfectly
             # map onto the grid's knots.
@@ -291,6 +292,8 @@ class SplineGrid:
                 knots[:, -3] = (1 - interpolation_factor) * knots[:, -3]
                 knots[:, -1] = 0
                 knots[:, -2] = -(knots[:, -3] * coefficients[2] + knots[:, -4] * coefficients[3]) / coefficients[1]
+
+        return True
 
 
 @numba.njit(cache=True, parallel=True)

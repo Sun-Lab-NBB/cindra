@@ -42,7 +42,8 @@ class Session:
     reference images in the registered (deformed) visual space."""
 
     deform: Deformation = field(init=False)
-    """Stores the Deformation instance used to deform the session to register it to the shared visual space."""
+    """Stores the Deformation instance computed by DiffeomorphicDemonsRegistration to align this session to the shared
+    (registered) visual space. Uses backward mapping to transform coordinates from registered to original space."""
 
     deformed_cell_masks: tuple[dict[str, Any], ...] = field(init=False)
     """Same as 'cell_masks', but stores cell ROI data after multi-day registration deform offsets have been applied 

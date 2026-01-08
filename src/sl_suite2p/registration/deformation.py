@@ -27,8 +27,12 @@ def _create_diffusion_kernel(sigma: float) -> NDArray[np.float32]:
         sigma: The smoothing parameter (scale) controlling the kernel's width.
 
     Returns:
-        The normalized diffusion kernel as a 1D array.
+        The normalized diffusion kernel as a 1D array. Returns a delta kernel [1.0] if sigma is too small.
     """
+    # For very small sigma, return a delta kernel (no smoothing).
+    if sigma < 0.1:
+        return np.array([1.0], dtype=np.float32)
+
     sigma_squared = sigma * sigma
 
     # Computes the tail length. The kernel extends to ceil(4 * sigma) + 1 samples in each direction.
@@ -53,8 +57,11 @@ def _create_diffusion_kernel(sigma: float) -> NDArray[np.float32]:
     # Removes the zero-padded boundary elements.
     kernel = kernel[1:-1]
 
-    # Normalizes the kernel to sum to 1.
-    return kernel / kernel.sum()
+    # Normalizes the kernel to sum to 1. Falls back to delta kernel if sum is zero (numerical edge case).
+    kernel_sum = kernel.sum()
+    if kernel_sum == 0:
+        return np.array([1.0], dtype=np.float32)
+    return kernel / kernel_sum
 
 
 def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np.float32]:
@@ -742,7 +749,7 @@ class Deformation:
         injective: bool = True,
         injective_factor: float = 0.9,
         freeze_edges: bool = True,
-    ) -> Deformation:
+    ) -> Deformation | None:
         """Regularizes the deformation using B-spline grid constraints.
 
         Fits the deformation to a B-spline grid representation, which enforces smoothness. Optionally applies
@@ -755,7 +762,7 @@ class Deformation:
             freeze_edges: Whether to freeze edges to zero deformation.
 
         Returns:
-            A new regularized Deformation instance.
+            A new regularized Deformation instance, or None if the grid is too small for the requested constraints.
         """
         if self.is_identity:
             return self
@@ -763,14 +770,16 @@ class Deformation:
         grid = SplineGrid(
             field_height=self.field_shape[0],
             field_width=self.field_shape[1],
-            grid_sampling=grid_sampling,
+            sampling=grid_sampling,
         )
-        grid.set_from_fields(
+        success = grid.set_from_fields(
             field_y=self._fields[0],
             field_x=self._fields[1],
             injective=injective,
             injective_factor=injective_factor,
             freeze_edges=freeze_edges,
         )
+        if not success:
+            return None
         regularized_y, regularized_x = grid.deformation_fields
         return Deformation(field_y=regularized_y, field_x=regularized_x)

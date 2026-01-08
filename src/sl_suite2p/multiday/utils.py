@@ -1,4 +1,8 @@
-"""This module stores various helper functions used by all other modules of the 'multiday' sl-suite2p package."""
+"""This module provides helper functions for the multi-day suite2p processing pipeline.
+
+The functions in this module support cell mask manipulation, deformation field operations, and overlap detection
+for multi-session registration workflows.
+"""
 
 from typing import Any
 from pathlib import Path
@@ -100,16 +104,20 @@ def create_mask_image(
 def create_cropped_deform_field(
     deform: Deformation, origin: NDArray[Any], crop_size: tuple[int, int]
 ) -> tuple[Deformation, NDArray[Any]]:
-    """Creates a cropped deformation field from the input deformation field.
+    """Creates a cropped deformation field from the input Deformation instance.
+
+    Notes:
+        This function is used to reduce memory overhead when applying deformations to cell masks by extracting
+        a local crop of the deformation field around each cell's center point.
 
     Args:
-        deform: The original (larger) deformation field.
+        deform: The Deformation instance to crop, typically computed by DiffeomorphicDemonsRegistration.
         origin: The coordinates of crop origin in the order of (y, x).
         crop_size: The size of the crop region in the order of (height, width).
 
     Returns:
-        A tuple of two elements. The first element is the cropped deformation field, and the second element is the
-        adjusted origin coordinates.
+        A tuple of two elements. The first element is a new Deformation instance containing the cropped field,
+        and the second element is the adjusted origin coordinates (clamped to image bounds).
     """
     origin = origin.copy()  # Creates a copy to avoid modifying the input
 
@@ -127,7 +135,7 @@ def create_cropped_deform_field(
     y_slice = slice(origin[0], origin[0] + crop_size_array[0])
     x_slice = slice(origin[1], origin[1] + crop_size_array[1])
 
-    return Deformation(deform[0][y_slice, x_slice], deform[1][y_slice, x_slice]), origin
+    return Deformation(field_y=deform[0][y_slice, x_slice], field_x=deform[1][y_slice, x_slice]), origin
 
 
 def deform_masks(
@@ -135,15 +143,21 @@ def deform_masks(
 ) -> tuple[dict[str, Any], ...]:
     """Applies deformation field offsets to all input cell masks.
 
+    Notes:
+        For each cell mask, this function extracts a local crop of the deformation field centered on the cell's
+        median position. This reduces memory overhead compared to applying the full deformation field to each cell.
+        The function creates new mask dictionaries with updated pixel coordinates in the deformed visual space.
+
     Args:
-        cell_masks: The tuple that stores cell mask dictionaries for each cell ROI to be deformed.
-        deform: The Deformation instance generated during multi-day registration to apply to the input
-            cell masks.
-        crop_bin: The number of masks to transform at the same time. This optional field allows reducing the RAM
-            overhead of the function by only processing a subset of masks at a time.
+        cell_masks: The tuple or list of cell mask dictionaries, each containing 'xpix', 'ypix', 'lam', 'med',
+            and 'radius' keys.
+        deform: The Deformation instance computed by DiffeomorphicDemonsRegistration to apply to the cell masks.
+        crop_bin: The size of the local deformation field crop in pixels. This controls the trade-off between
+            memory usage and processing speed.
 
     Returns:
-        A tuple of cell masks modified with the deformation field offsets.
+        A tuple of new cell mask dictionaries with coordinates transformed to the deformed visual space. Each
+        dictionary includes updated 'xpix', 'ypix', 'ipix', 'med', 'lam', 'radius', and 'overlap' keys.
     """
     deformed = []
     for mask in cell_masks:
