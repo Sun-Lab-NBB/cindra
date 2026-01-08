@@ -81,11 +81,23 @@ def register_sessions(ops: dict[str, Any], data: MultiDayData) -> MultiDayData:
 
 
 def _register_session(registration: DiffeomorphicDemonsRegistration, deform_index: int, session: Session) -> Session:
-    """This worker function is used by the main register_sessions function to apply deformation offsets to all sessions
-    in parallel.
+    """Applies deformation offsets to a single session in parallel.
+
+    This worker function is used by register_sessions to apply the computed deformation field to all reference images
+    and cell masks for a single session.
+
+    Notes:
+        The DiffeomorphicDemonsRegistration class uses backward mapping by default, meaning the returned Deformation
+        object maps coordinates from the target (registered) space back to the source (original) space.
+
+    Args:
+        registration: The DiffeomorphicDemonsRegistration instance containing computed deformations.
+        deform_index: The index of the session in the registration's image list.
+        session: The Session instance to update with deformation data.
+
+    Returns:
+        The Session instance updated with the computed deformation field and transformed images/masks.
     """
-    # Extracts and saves the Deformation object. Due to how pirt is implemented and contrary to pirt's
-    # docstrings, since we do not override the default transform_mapping parameter, the mapping is BACKWARD.
     session.deform = registration.get_deformation(image_index=deform_index)
 
     # Uses the deformation field object to transform reference images
@@ -420,8 +432,17 @@ def backward_transform_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDa
 
 
 def _backward_transform_session(template_masks: tuple[dict[str, Any], ...], session: Session) -> Session:
-    """This worker function is used by the main backward_transform_masks function to apply backward transformations
-    to template masks for each session in parallel.
+    """Applies backward transformation to template masks for a single session in parallel.
+
+    This worker function uses the inverse of the session's deformation field to transform multi-day template cell
+    masks from the registered (deformed) visual space back to the session's original (unregistered) visual space.
+
+    Args:
+        template_masks: The tuple of template cell mask dictionaries in the registered visual space.
+        session: The Session instance containing the deformation field to invert.
+
+    Returns:
+        The Session instance updated with backward-transformed template cell masks.
     """
     # Transform the template cell masks to the original (unregistered) visual space of this session
     session.template_cell_masks = deform_masks(

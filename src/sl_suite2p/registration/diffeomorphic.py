@@ -1,5 +1,7 @@
 """This module provides the assets for diffeomorphic Demons image registration."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from tqdm import tqdm
@@ -258,10 +260,8 @@ class DiffeomorphicDemonsRegistration:
 
         cached = self._get_cached(key=f"deform_{target_index}_{source_index}", iteration_key=iteration_key)
         if cached is not None:
-            # Negates the cached symmetric result.
-            for grid in cached:
-                grid._knots = -grid._knots
-            return cached
+            # Negates the cached symmetric result by scaling by -1.
+            return cached.scale(factor=-1.0)
 
         # Gets images and their gradients at the current scale.
         source_image, source_gradient = self._get_image_and_gradient(
