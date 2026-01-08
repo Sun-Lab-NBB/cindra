@@ -8,10 +8,8 @@ from pathlib import Path
 
 import numpy as np
 from sl_shared_assets import (
-    DatasetData,
     SessionData,
     SessionTypes,
-    DatasetTrackers,
     ProcessingTracker,
     AcquisitionSystems,
     ProcessingTrackers,
@@ -347,7 +345,7 @@ def process_single_day(
 
 
 def _initialize_multi_day_processing_tracker(
-    dataset: DatasetData,
+    main_session_path: Path,
     dataset_name: str,
     base_job_names: list[str],
 ) -> dict[str, str]:
@@ -357,20 +355,22 @@ def _initialize_multi_day_processing_tracker(
         This function is used to process the data in the 'local' processing mode. During remote data processing, the
         tracker file is pre-generated before submitting the processing jobs to the remote compute server.
 
+        The tracker is stored in the main session's multiday output folder (the first session after natural sorting).
+
     Args:
-        dataset: The DatasetData instance for the processed dataset.
+        main_session_path: The path to the main session's multiday output folder.
         dataset_name: The unique identifier of the dataset being processed.
         base_job_names: The base job names for the processing jobs to track.
 
     Returns:
         A dictionary mapping full job names (with dataset prefix) to their generated job IDs.
     """
-    # Initializes the processing tracker for this pipeline.
-    tracker = ProcessingTracker(file_path=dataset.tracking_data.tracking_data_path.joinpath(DatasetTrackers.MULTIDAY))
+    # Initializes the processing tracker for this pipeline. The tracker is stored in the main session's
+    # multiday output folder.
+    tracker = ProcessingTracker(file_path=main_session_path.joinpath("multiday_tracker.json"))
 
-    # Generates job IDs for each requested job using the dataset's root directory.
-    dataset_path = dataset.dataset_data_path.parent
-    job_ids = _generate_job_ids(root_path=dataset_path, data_name=dataset_name, base_job_names=base_job_names)
+    # Generates job IDs for each requested job using the main session path.
+    job_ids = _generate_job_ids(root_path=main_session_path, data_name=dataset_name, base_job_names=base_job_names)
 
     # Initializes all jobs in the tracker file.
     tracker.initialize_jobs(job_ids=list(job_ids.values()))
@@ -423,13 +423,11 @@ def _execute_multi_day_job(
 
 def process_multi_day(
     configuration_path: Path,
-    dataset_path: Path,
     job_id: str | None = None,
     *,
     discover: bool = False,
     extract: bool = False,
     target_session: str | None = None,
-    target_animal: str | None = None,
     workers: int = -1,
     progress_bars: bool = False,
     overrides: dict[str, Any] | None = None,
@@ -438,23 +436,18 @@ def process_multi_day(
     processing pipeline.
 
     Notes:
-        This function uses the DatasetData class from sl-shared-assets to manage the dataset hierarchy. The dataset
-        must be created using DatasetData.create() before calling this function.
-
-        Multi-day cell tracking is performed separately for each animal. If target_animal is not specified and the
-        dataset contains multiple animals, each animal's sessions are processed sequentially.
+        Sessions are specified directly in the configuration file's `io.session_directories` field. The sessions are
+        natural-sorted, and the first session becomes the 'main session' which stores the processing tracker file.
 
     Args:
-        configuration_path: The path to the multi-day configuration YAML file.
-        dataset_path: The path to the root data directory of the dataset to process.
+        configuration_path: The path to the multi-day configuration YAML file. The configuration must include the
+            `io.session_directories` list of session paths and `io.dataset_name`.
         job_id: The unique hexadecimal identifier for the processing job to execute. If provided, only the job
             matching this ID is executed. If not provided, all requested jobs are run sequentially.
         discover: Determines whether to discover cells whose activity can be tracked across days (step 1).
         extract: Determines whether to extract fluorescence from the cells tracked across multiple days (step 2).
         target_session: The unique identifier of the session to process when running the 'extract' job. If None,
-            processes all sessions for the target animal.
-        target_animal: The unique identifier of the animal whose sessions to process. If None and the dataset
-            contains multiple animals, each animal is processed sequentially.
+            processes all sessions.
         workers: The number of parallel workers to use when processing the data. Setting this to '-1' (default value)
             uses all available CPU cores.
         progress_bars: Determines whether to show progress bars during processing.
@@ -462,9 +455,9 @@ def process_multi_day(
             configuration parameters loaded from the .YAML file before executing the processing.
 
     Raises:
-        FileNotFoundError: If the multi-day configuration data cannot be loaded from the specified file or if the
-            dataset cannot be loaded.
-        ValueError: If session validation fails or the specified job_id does not match any available jobs.
+        FileNotFoundError: If the multi-day configuration data cannot be loaded from the specified file.
+        ValueError: If session validation fails, session_directories is empty, or the specified job_id does not match
+            any available jobs.
     """
     # Ensures the input configuration file is valid.
     if not configuration_path.exists() or configuration_path.suffix != ".yaml":
@@ -487,82 +480,30 @@ def process_multi_day(
         console.error(message=message, error=FileNotFoundError)
         return  # Fallback to appease mypy
 
+    # Validates that the configuration contains the required session directories.
+    if not config.io.session_directories:
+        message = (
+            "Unable to run the multi-day suite2p processing pipeline. The configuration file must specify at least "
+            "two session directories under 'io.session_directories'. The provided configuration has no session "
+            "directories specified."
+        )
+        console.error(message=message, error=ValueError)
+        return  # Fallback to appease mypy
+
+    # Validates that the configuration contains a dataset name.
+    if not config.io.dataset_name:
+        message = (
+            "Unable to run the multi-day suite2p processing pipeline. The configuration file must specify a dataset "
+            "name under 'io.dataset_name'. The provided configuration has no dataset name specified."
+        )
+        console.error(message=message, error=ValueError)
+        return  # Fallback to appease mypy
+
     # Overrides the 'workers' and 'progress_bars' parameters with the provided values.
     config.main.progress_bars = progress_bars
     config.main.parallel_workers = workers
 
-    # Loads the DatasetData instance for the processed dataset.
-    dataset = DatasetData.load(dataset_path=dataset_path)
-
-    # Determines which animals to process. Multi-day cell tracking must be performed separately for each animal.
-    animals_in_dataset = dataset.animals
-    if target_animal is None and len(animals_in_dataset) > 1:
-        # Multiple animals in dataset and no specific animal requested - process each sequentially.
-        console.echo(
-            f"The {dataset.name} dataset contains {len(animals_in_dataset)} animals. Processing each animal's "
-            f"sessions sequentially..."
-        )
-        for animal in animals_in_dataset:
-            console.echo(f"Executing the multi-day pipeline for the animal {animal}...")
-            process_multi_day(
-                configuration_path=configuration_path,
-                dataset_path=dataset_path,
-                job_id=job_id,
-                discover=discover,
-                extract=extract,
-                target_session=target_session,
-                target_animal=animal,
-                workers=workers,
-                progress_bars=progress_bars,
-                overrides=overrides,
-            )
-        return
-
-    # Determines the animal to process (either specified or the only one in the dataset).
-    animal_to_process = target_animal if target_animal is not None else animals_in_dataset[0]
-
-    # Validates that the target animal exists in the dataset.
-    if animal_to_process not in animals_in_dataset:
-        message = (
-            f"Unable to run the multi-day suite2p processing pipeline. The specified animal {animal_to_process} "
-            f"is not in the dataset. Available animals: {', '.join(animals_in_dataset)}."
-        )
-        console.error(message=message, error=ValueError)
-        return  # Fallback to appease mypy
-
-    # Filters sessions to only those belonging to the target animal.
-    animal_sessions = dataset.get_sessions_for_animal(animal=animal_to_process)
-    console.echo(f"Processing {len(animal_sessions)} sessions for the animal {animal_to_process}...")
-
-    # Derives the dataset name and directory path from the loaded dataset.
-    config.io.dataset_name = dataset.name
-    config.io.dataset_directory_path = str(dataset_path)
-
-    # Derives the session data root from the dataset path. Since both the dataset and session directories are stored
-    # under the same project root, the session data root is the parent of the dataset directory.
-    session_data_root = dataset_path.parent
-
-    # Resolves session directories by searching for session_data.yaml files and matching session names.
-    # Only includes sessions belonging to the target animal.
-    target_sessions = {sm.session for sm in animal_sessions}
-    session_directories: list[str] = []
-    for session_yaml in session_data_root.rglob("session_data.yaml"):
-        session_path = session_yaml.parent.parent  # Grandparent of session_data.yaml
-        session_data = SessionData.load(session_path=session_path)
-        if session_data.session_name in target_sessions:
-            session_directories.append(str(session_data.processed_data.mesoscope_data_path))
-            target_sessions.remove(session_data.session_name)
-
-    # Ensures all animal's sessions were found.
-    if target_sessions:
-        message = (
-            f"Unable to run the multi-day suite2p processing pipeline. Could not find session data directories for "
-            f"the following sessions of the animal {animal_to_process}: {', '.join(sorted(target_sessions))}."
-        )
-        console.error(message=message, error=ValueError)
-        return  # Fallback to appease mypy
-
-    config.io.session_directories = session_directories
+    console.echo(f"Processing {len(config.io.session_directories)} sessions for dataset '{config.io.dataset_name}'...")
 
     # Converts the dataclass to an 'ops' dictionary instance.
     ops = config.to_ops()
@@ -570,12 +511,16 @@ def process_multi_day(
     # Parses the override parameters as a 'db' dictionary.
     db = overrides if overrides is not None else {}
 
-    # Generates the ops.npy file for the runtime.
+    # Generates the ops.npy file for the runtime. This returns the path to ops.npy in the main session's
+    # multiday output folder.
     ops_path = resolve_multiday_ops(ops=ops, db=db)
 
-    # Loads the resolved ops file to access the session_ids.
+    # Loads the resolved ops file to access the session_ids. The main session path is the parent of ops_path
+    # since resolve_multiday_ops returns the path to ops.npy in the main session's multiday folder.
     final_ops = np.load(ops_path, allow_pickle=True).item()
     session_ids: list[str] = final_ops["session_ids"]
+    main_session_path = ops_path.parent
+    dataset_name: str = final_ops["dataset_name"]
 
     # Determines which jobs to run based on the flags.
     requested_jobs: dict[str, bool] = {
@@ -590,23 +535,19 @@ def process_multi_day(
     # Builds the list of jobs to run.
     jobs_to_run = [job_name for job_name, requested in requested_jobs.items() if requested]
 
-    # Initializes the tracker instance.
-    tracker = ProcessingTracker(file_path=dataset.tracking_data.tracking_data_path.joinpath(DatasetTrackers.MULTIDAY))
-
-    # Extracts the dataset name for job naming.
-    dataset_name = dataset.name
-
     # Determines the execution mode and resolves job IDs accordingly.
-    dataset_root = dataset.dataset_data_path.parent
     if job_id is not None:
         # REMOTE mode: Finds the job name matching the provided job_id.
+        # Initializes the tracker from the main session path.
+        tracker = ProcessingTracker(file_path=main_session_path.joinpath("multiday_tracker.json"))
+
         # Generates all possible base job names including session-specific EXTRACT jobs.
         all_base_job_names: list[str] = [MultiDayJobNames.DISCOVER]
         for session_id in session_ids:
             all_base_job_names.append(f"{MultiDayJobNames.EXTRACT}_session_{session_id}")
 
         all_job_ids = _generate_job_ids(
-            root_path=dataset_root, data_name=dataset_name, base_job_names=all_base_job_names
+            root_path=main_session_path, data_name=dataset_name, base_job_names=all_base_job_names
         )
         id_to_name: dict[str, str] = {v: k for k, v in all_job_ids.items()}
 
@@ -644,8 +585,9 @@ def process_multi_day(
         ]
 
         console.echo(message=f"Initializing the processing tracker for {len(expanded_jobs)} job(s)...")
+        tracker = ProcessingTracker(file_path=main_session_path.joinpath("multiday_tracker.json"))
         job_ids = _initialize_multi_day_processing_tracker(
-            dataset=dataset, dataset_name=dataset_name, base_job_names=base_job_names_for_tracking
+            main_session_path=main_session_path, dataset_name=dataset_name, base_job_names=base_job_names_for_tracking
         )
 
         for base_job_name in base_job_names_for_tracking:

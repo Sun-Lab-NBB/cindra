@@ -70,9 +70,8 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
         If both 'ops' and 'db' do not contain some of the expected multiday parameters, they are set using
         the 'default' dictionary generated using the MultiDayS2PConfiguration.
 
-        Output structure:
-        - Each session gets a multiday folder at: {session_suite2p_parent}/multiday/{dataset_name}/
-        - The dataset directory (separate from sessions) stores the tracker file and shared config copies.
+        Each session gets a multiday folder at {session_suite2p_parent}/multiday/{dataset_name}/. Sessions are
+        natural-sorted, and the first session becomes the 'main session' which stores the processing tracker file.
 
     Args:
         ops: A dictionary that contains the multi-day configuration parameters.
@@ -80,7 +79,7 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
             override the matching keys in the 'ops' dictionary.
 
     Returns:
-        The path to the generated 'ops.npy' file in the dataset directory.
+        The path to the generated 'ops.npy' file in the main session's multiday folder.
     """
     # Since this step takes a noticeable amount of time, notifies the user about the progress of this step.
     console.echo(f"Resolving the multi-day 'ops' dictionary for {len(ops['session_directories'])} sessions...")
@@ -113,29 +112,25 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
         )
         console.error(message=message, error=RuntimeError)
 
-    # Extracts dataset configuration
+    # Extracts dataset name from configuration.
     dataset_name = ops["dataset_name"]
-    dataset_directory = Path(ops["dataset_directory_path"])
-    ensure_directory_exists(dataset_directory)
 
-    # Builds a list of unique path components for each session. Assuming all sessions use unique names, this generates
-    # a list of unique session IDs from their paths.
+    # Natural-sorts session directories. The first session after sorting becomes the 'main session' which stores the
+    # processing tracker file.
     sessions = natsorted([Path(session) for session in ops["session_directories"]])
     ops["session_ids"] = extract_unique_components(paths=sessions)
 
-    # Extracts the paths to the processed session directories.
-    session_directories = ops["session_directories"]
-
     # Processes each session and creates multiday output folders under each session's directory.
     multiday_output_paths: list[str] = []
+    main_session_path: Path | None = None
     last_combined_path = Path()
 
     with tqdm(
-        total=len(session_directories), desc="Processing sessions", disable=not ops["progress_bars"], unit="session"
+        total=len(sessions), desc="Processing sessions", disable=not ops["progress_bars"], unit="session"
     ) as pbar:
-        for directory in session_directories:
+        for index, directory in enumerate(sessions):
             # Finds the 'combined' folder to locate the suite2p output directory.
-            combined_path = _find_combined_path(Path(directory))
+            combined_path = _find_combined_path(directory)
             last_combined_path = combined_path
 
             # The suite2p folder is the parent of 'combined'. Creates 'multiday' at the same level as suite2p.
@@ -145,6 +140,10 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
             multiday_output = suite2p_parent.joinpath("multiday", dataset_name)
             ensure_directory_exists(multiday_output)
             multiday_output_paths.append(str(multiday_output))
+
+            # The first sorted session is the main session.
+            if index == 0:
+                main_session_path = multiday_output
 
             pbar.update(1)
 
@@ -177,12 +176,8 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
         np.save(output_path.joinpath("ops.npy"), multiday_ops, allow_pickle=True)
         multi_day_config.to_config(file_path=output_path.joinpath("multi_day_ss2p_configuration.yaml"))
 
-    # Also saves to the dataset directory for reference and tracker location.
-    np.save(dataset_directory.joinpath("ops.npy"), multiday_ops, allow_pickle=True)
-    multi_day_config.to_config(file_path=dataset_directory.joinpath("multi_day_ss2p_configuration.yaml"))
-
-    # Returns the path to the ops.npy file in the dataset directory.
-    return dataset_directory.joinpath("ops.npy")
+    # Returns the path to the ops.npy file in the main session's multiday folder.
+    return main_session_path.joinpath("ops.npy")
 
 
 def run_s2p_multiday(ops_path: Path) -> None:
