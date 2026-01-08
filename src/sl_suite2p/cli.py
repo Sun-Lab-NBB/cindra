@@ -288,11 +288,16 @@ def run_sd_pipeline(
 # noinspection PyUnresolvedReferences
 @ss2p_run.command("multi-day")
 @click.option(
-    "-dp",
-    "--dataset-path",
+    "-sp",
+    "--session-path",
+    "session_paths",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    multiple=True,
     required=True,
-    help="The absolute path to the root data directory of the dataset to process.",
+    help=(
+        "The absolute path to a session directory to include in multi-day processing. Specify this option multiple "
+        "times to include multiple sessions (at least two required)."
+    ),
 )
 @click.option(
     "-id",
@@ -337,26 +342,14 @@ def run_sd_pipeline(
         "provided, the pipeline processes all available sessions."
     ),
 )
-@click.option(
-    "-a",
-    "--animal",
-    type=str,
-    required=False,
-    default=None,
-    help=(
-        "The unique identifier of the animal whose sessions to process. If not provided and the dataset contains "
-        "multiple animals, each animal's sessions are processed sequentially as separate multi-day runs."
-    ),
-)
 @click.pass_context
 def run_md_pipeline(
     ctx: Any,
-    dataset_path: Path,
+    session_paths: tuple[Path, ...],
     job_id: str | None,
     discover: bool,
     extract: bool,
     target: str | None,
-    animal: str | None,
 ) -> None:
     """Runs the requested multi-day pipeline step(s)."""
     # Extracts shared configuration parameters passed as the context dictionary.
@@ -368,15 +361,16 @@ def run_md_pipeline(
     # Parses the override parameters as a dictionary.
     db = _parse_db(overrides)
 
+    # Adds session directories from CLI to overrides, which will override any config file values.
+    db["session_directories"] = [str(path) for path in session_paths]
+
     # Calls the unified pipeline API.
     process_multi_day(
         configuration_path=config_path,
-        dataset_path=dataset_path,
         job_id=job_id,
         discover=discover,
         extract=extract,
         target_session=target,
-        target_animal=animal,
         workers=workers,
         progress_bars=progress_bars,
         overrides=db,

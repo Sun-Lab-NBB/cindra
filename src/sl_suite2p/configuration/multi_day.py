@@ -46,18 +46,14 @@ class IO:
 
     session_directories: list[str] = field(default_factory=list)
     """Specifies the list of sessions to register across days, as absolute paths to their root directories.
-    Note, each input directory must contain a 'combined' plane folder created by the single-day suite2p pipeline
-    at some level of the subdirectory tree. The 'combined' folder is created if the 'combined'
-    SingleDayS2PConfiguration attribute is 'True'."""
+    Sessions are natural-sorted, and the first session after sorting becomes the 'main session' which stores
+    the processing tracker file. Each directory must contain a 'combined' plane folder created by the single-day
+    suite2p pipeline. The 'combined' folder is created when the 'combined' SingleDayS2PConfiguration attribute is
+    set to True."""
 
     dataset_name: str = ""
     """Specifies the name of the multiday dataset. This name is used to create the output folder under each session's
     'multiday' directory (e.g., session/multiday/{dataset_name}/) and to identify the dataset in the tracker file."""
-
-    dataset_directory_path: str = ""
-    """Specifies the path to the dataset directory where the multiday tracker file and shared configuration files are
-    stored. This directory is separate from the per-session output directories and is used by sl-forgery to track the
-    overall multiday processing pipeline state."""
 
 
 @dataclass()

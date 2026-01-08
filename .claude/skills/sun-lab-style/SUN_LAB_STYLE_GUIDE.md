@@ -33,13 +33,21 @@ def function_name(param1: int, param2: str = "default") -> bool:
 
 ### Section Guidelines
 
-- **Summary line**: Imperative mood ("Computes..." not "This function computes..."), no period unless multi-sentence
-- **Notes**: Use for algorithms, references, implementation rationale. Not for parameter details.
-- **Args**: One line per parameter. Don't repeat type info. Start with lowercase, no period.
-- **Args (boolean)**: Use "Determines whether..." not "Whether..." for boolean parameters.
-- **Returns**: Describe what is returned, not the type. Start with uppercase if a sentence.
-- **Raises**: Only include if the function explicitly raises exceptions.
-- **Attributes**: Document all instance attributes, including private ones prefixed with `_`.
+**Summary line**: Imperative mood ("Computes..." not "This function computes..."), no period unless multi-sentence.
+
+**Notes**: Use for algorithms, references, implementation rationale. Not for parameter details.
+
+**Args**: One line per parameter. Don't repeat type info. Start with lowercase, no period.
+
+**Args (boolean)**: Use "Determines whether..." not "Whether..." for boolean parameters.
+
+**Returns**: Describe what is returned, not the type. Start with uppercase if a sentence. For complex returns (tuples, dicts), describe each element in prose form.
+
+**Raises**: Only include if the function explicitly raises exceptions.
+
+**Attributes**: Document all instance attributes, including private ones prefixed with `_`.
+
+**Lists**: Do not use lists (numbered or bulleted) in docstrings. Write information in prose form instead.
 
 ### Class Docstrings with Attributes
 
