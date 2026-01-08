@@ -71,6 +71,8 @@ dependencies = [
     "intel-cmplr-lib-rt>=2025,<2026; sys_platform != 'darwin'",
     "sl-shared-assets>=6.1.1rc3,<7",
     "torch>=2.0.0,<3",
+    "mcp>=1,<2",
+    "httpx>=0.28,<1",
 ]
 
 [project.urls]
