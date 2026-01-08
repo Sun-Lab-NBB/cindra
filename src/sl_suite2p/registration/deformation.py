@@ -135,8 +135,8 @@ def _warp(
     if order == 3:
         for sample_index in numba.prange(num_samples):
             # Allocates coefficient arrays inside the parallel loop to avoid race conditions.
-            coefficients_x = np.empty((4,), np.float32)
-            coefficients_y = np.empty((4,), np.float32)
+            coefficients_x = np.empty((4,), dtype=np.float32)
+            coefficients_y = np.empty((4,), dtype=np.float32)
 
             # Decomposes sample coordinates into integer indices and fractional offsets.
             sample_x = samples_x[sample_index]
@@ -148,8 +148,8 @@ def _warp(
 
             # Interior case: full 4x4 neighborhood available (fast path).
             if 1 <= pixel_x < width - 2 and 1 <= pixel_y < height - 2:
-                compute_cardinal_coefficients(fraction_x, coefficients_x)
-                compute_cardinal_coefficients(fraction_y, coefficients_y)
+                compute_cardinal_coefficients(interpolation_factor=fraction_x, coefficients=coefficients_x)
+                compute_cardinal_coefficients(interpolation_factor=fraction_y, coefficients=coefficients_y)
 
                 # Computes weighted sum over the 4x4 neighborhood.
                 interpolated_value = 0.0
@@ -163,8 +163,8 @@ def _warp(
             # Edge case: sample is within bounds but near the border.
             # Uses partial neighborhood and renormalizes coefficients.
             elif -0.5 <= sample_x <= width - 0.5 and -0.5 <= sample_y <= height - 0.5:
-                compute_cardinal_coefficients(fraction_x, coefficients_x)
-                compute_cardinal_coefficients(fraction_y, coefficients_y)
+                compute_cardinal_coefficients(interpolation_factor=fraction_x, coefficients=coefficients_x)
+                compute_cardinal_coefficients(interpolation_factor=fraction_y, coefficients=coefficients_y)
 
                 # Determines valid coefficient range based on proximity to edges.
                 range_start_x, range_end_x = 0, 4
@@ -417,7 +417,13 @@ def _resize(
 
     # Applies warp to resample at the new coordinates.
     result = np.empty((new_height, new_width), dtype=data.dtype)
-    _warp(data, result.ravel(), samples_x.ravel(), samples_y.ravel(), order)
+    _warp(
+        data=data,
+        result=result.ravel(),
+        samples_x=samples_x.ravel(),
+        samples_y=samples_y.ravel(),
+        order=order,
+    )
     return result
 
 
@@ -566,7 +572,7 @@ class Deformation:
         else:
             field_y = self._fields[0] * factor
             field_x = self._fields[1] * factor
-        return Deformation(field_y, field_x)
+        return Deformation(field_y=field_y, field_x=field_x)
 
     def add(self, other: Deformation) -> Deformation:
         """Combines two deformations by element-wise addition of their displacement fields.
@@ -582,9 +588,9 @@ class Deformation:
         if other.is_identity:
             return self.copy()
 
-        field_y = self._fields[0] + other.get_field(0)
-        field_x = self._fields[1] + other.get_field(1)
-        return Deformation(field_y, field_x)
+        field_y = self._fields[0] + other.get_field(dimension=0)
+        field_x = self._fields[1] + other.get_field(dimension=1)
+        return Deformation(field_y=field_y, field_x=field_x)
 
     def compose(self, other: Deformation) -> Deformation:
         """Combines two deformations by composition (function composition).
@@ -608,15 +614,27 @@ class Deformation:
 
         # Warps Y field.
         warped_y = np.empty(samples_x.shape, dtype=np.float32)
-        _warp(self._fields[0], warped_y.ravel(), samples_x.ravel(), samples_y.ravel(), 1)
-        field_y = other.get_field(0) + warped_y
+        _warp(
+            data=self._fields[0],
+            result=warped_y.ravel(),
+            samples_x=samples_x.ravel(),
+            samples_y=samples_y.ravel(),
+            order=1,
+        )
+        field_y = other.get_field(dimension=0) + warped_y
 
         # Warps X field.
         warped_x = np.empty(samples_x.shape, dtype=np.float32)
-        _warp(self._fields[1], warped_x.ravel(), samples_x.ravel(), samples_y.ravel(), 1)
-        field_x = other.get_field(1) + warped_x
+        _warp(
+            data=self._fields[1],
+            result=warped_x.ravel(),
+            samples_x=samples_x.ravel(),
+            samples_y=samples_y.ravel(),
+            order=1,
+        )
+        field_x = other.get_field(dimension=1) + warped_x
 
-        return Deformation(field_y, field_x)
+        return Deformation(field_y=field_y, field_x=field_x)
 
     def resize_field(self, new_height: int, new_width: int) -> Deformation:
         """Creates a new Deformation with the field resized to the specified dimensions.
@@ -634,9 +652,9 @@ class Deformation:
         if self._field_shape == (new_height, new_width):
             return self
 
-        resized_y = _resize(self._fields[0], new_height=new_height, new_width=new_width)
-        resized_x = _resize(self._fields[1], new_height=new_height, new_width=new_width)
-        return Deformation(resized_y, resized_x)
+        resized_y = _resize(data=self._fields[0], new_height=new_height, new_width=new_width)
+        resized_x = _resize(data=self._fields[1], new_height=new_height, new_width=new_width)
+        return Deformation(field_y=resized_y, field_x=resized_x)
 
     def get_field(self, dimension: int) -> NDArray[np.float32]:
         """Returns the displacement field array for the specified dimension.
@@ -685,7 +703,13 @@ class Deformation:
 
         # Applies backward warp to sample data at deformed positions.
         result = np.empty(samples_x.shape, dtype=data.dtype)
-        _warp(data, result.ravel(), samples_x.ravel(), samples_y.ravel(), interpolation)
+        _warp(
+            data=data,
+            result=result.ravel(),
+            samples_x=samples_x.ravel(),
+            samples_y=samples_y.ravel(),
+            order=interpolation,
+        )
         return result
 
     def inverse(self) -> Deformation:
@@ -705,12 +729,12 @@ class Deformation:
 
         # Computes inverse fields using forward projection (splatting).
         inverse_y = np.zeros(samples_x.shape, dtype=np.float32)
-        _project(-self._fields[0], inverse_y, samples_x, samples_y)
+        _project(data=-self._fields[0], result=inverse_y, samples_x=samples_x, samples_y=samples_y)
 
         inverse_x = np.zeros(samples_x.shape, dtype=np.float32)
-        _project(-self._fields[1], inverse_x, samples_x, samples_y)
+        _project(data=-self._fields[1], result=inverse_x, samples_x=samples_x, samples_y=samples_y)
 
-        return Deformation(inverse_y, inverse_x)
+        return Deformation(field_y=inverse_y, field_x=inverse_x)
 
     def regularize(
         self,
@@ -736,7 +760,11 @@ class Deformation:
         if self.is_identity:
             return self
 
-        grid = SplineGrid(self.field_shape[0], self.field_shape[1], grid_sampling)
+        grid = SplineGrid(
+            field_height=self.field_shape[0],
+            field_width=self.field_shape[1],
+            grid_sampling=grid_sampling,
+        )
         grid.set_from_fields(
             field_y=self._fields[0],
             field_x=self._fields[1],
@@ -745,4 +773,4 @@ class Deformation:
             freeze_edges=freeze_edges,
         )
         regularized_y, regularized_x = grid.deformation_fields
-        return Deformation(regularized_y, regularized_x)
+        return Deformation(field_y=regularized_y, field_x=regularized_x)
