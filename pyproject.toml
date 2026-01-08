@@ -46,7 +46,7 @@ dependencies = [
     "natsort>=8,<9",
     "rastermap>=1,<2",
     "tifffile>=2025,<2026",
-    "imagecodecs>=2025,<2026",
+    "imagecodecs>=2026,<2027",
     "numpy>=2,<3",
     "numba>=0.63,<1",
     "scipy>=1,<2",
@@ -66,7 +66,6 @@ dependencies = [
     "ataraxis-time>=5,<6",
     "ataraxis-base-utilities>=5,<6",
     "ataraxis-data-structures>=5,<6",
-    "sl-pirt>=3,<4",
     "importlib_metadata>=8,<9",
     "tbb4py>=2022,<2023; sys_platform != 'darwin'",
     "intel-cmplr-lib-rt>=2025,<2026; sys_platform != 'darwin'",
@@ -92,6 +91,7 @@ dev = [
 
     # Types
     "types-tqdm>=4,<5",
+    "scipy-stubs>=1,<2",
 ]
 
 # All interactions with the library are performed via the 'ss2p' CLI command
