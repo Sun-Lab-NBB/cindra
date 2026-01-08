@@ -10,7 +10,7 @@ import scipy.ndimage
 from skimage.measure import regionprops, find_contours
 from ataraxis_base_utilities import console
 
-from .pirt import Deformation
+from ..registration import Deformation
 
 
 # noinspection PyTypeHints

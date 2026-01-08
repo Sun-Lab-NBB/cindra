@@ -9,8 +9,8 @@ from dataclasses import field, dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from .pirt import Deformation
 from .utils import create_mask_image
+from ..registration import Deformation
 
 
 @dataclass()

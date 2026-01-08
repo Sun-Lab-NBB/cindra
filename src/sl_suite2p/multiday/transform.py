@@ -13,9 +13,9 @@ from scipy.spatial.distance import pdist, squareform
 from ataraxis_base_utilities import LogLevel, console
 import scipy.cluster.hierarchy
 
-from .pirt import DiffeomorphicDemonsRegistration
 from .utils import deform_masks, add_overlap_info, create_mask_image
 from .dataclasses import Session, MultiDayData
+from ..registration import DiffeomorphicDemonsRegistration
 
 
 def register_sessions(ops: dict[str, Any], data: MultiDayData) -> MultiDayData:
