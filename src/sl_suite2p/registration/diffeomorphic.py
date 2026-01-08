@@ -230,7 +230,7 @@ class DiffeomorphicDemonsRegistration:
 
         # Averages the accumulated deformations.
         if pair_count > 1:
-            total_deformation = total_deformation.scale(1.0 / pair_count)
+            total_deformation = total_deformation.scale(factor=1.0 / pair_count)
 
         return total_deformation
 
@@ -301,7 +301,7 @@ class DiffeomorphicDemonsRegistration:
         )
 
         # Regularizes using B-spline grid to ensure diffeomorphism.
-        force_deformation = Deformation(field_y.astype(np.float32), field_x.astype(np.float32))
+        force_deformation = Deformation(field_y=field_y.astype(np.float32), field_x=field_x.astype(np.float32))
         regularized_deformation = self._regularize_deformation(scale=scale, deformation=force_deformation)
 
         self._set_cached(
