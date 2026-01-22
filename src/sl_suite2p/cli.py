@@ -13,7 +13,6 @@ from ataraxis_base_utilities import LogLevel, console
 from .gui import run
 from .pipeline import process_multi_day, process_single_day
 from .configuration import (
-    RuntimeData,
     MultiDayS2PConfiguration,
     SingleDayS2PConfiguration,
     generate_default_multiday_ops,

@@ -1,19 +1,25 @@
-"""This module provides tools for importing data stored inside .tif or .tiff files."""
+"""Provides tools for importing data stored inside .tif or .tiff files."""
+
+from __future__ import annotations
 
 import gc
 import json
 import math
+from typing import TYPE_CHECKING
 from pathlib import Path
 
 from tqdm import tqdm
 import numpy as np
 from tifffile import TiffFile, TiffWriter
-from numpy.typing import NDArray
 from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
 from .utils import find_files_open_binaries, initialize_plane_parameters
-from ..configuration import RuntimeData
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+    from ..configuration import RuntimeData
 
 # Determines the minimum number of image dimensions considered 'multidimensional'
 _MULTIDIMENSIONAL_PROCESSING_THRESHOLD = 3
@@ -89,6 +95,9 @@ def _open_tiff(file_path: Path) -> tuple[TiffFile, int]:
 
     Args:
         file_path: The absolute path to the .tiff file from which to read the frame data.
+
+    Returns:
+        A tuple containing the TiffFile instance and the number of pages (frames) in the file.
     """
     tiff = TiffFile(file_path)
     tiff_length = len(tiff.pages)  # .pages returns TiffPages iterable, len() makes it an integer size value.

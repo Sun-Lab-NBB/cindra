@@ -1,13 +1,16 @@
-"""This module provides tools for reading and writing image data stored in suite2p binary (.bin) files."""
+"""Provides tools for reading and writing image data stored in suite2p binary (.bin) files."""
 
-import types
-from typing import Any
+from typing import TYPE_CHECKING, Any, Self
 from pathlib import Path
 
 import numpy as np
 from tifffile import TiffWriter
-from numpy.typing import NDArray
 from ataraxis_base_utilities import LogLevel, console
+
+if TYPE_CHECKING:
+    import types
+
+    from numpy.typing import NDArray
 
 
 class BinaryFile:
@@ -142,7 +145,7 @@ class BinaryFile:
         # noinspection PyProtectedMember,PyUnresolvedReferences
         self.file._mmap.close()
 
-    def __enter__(self) -> BinaryFile:
+    def __enter__(self) -> Self:
         """Supports accessing the file via a context manager by returning self to caller upon entering the context."""
         return self
 
@@ -196,7 +199,7 @@ class BinaryFile:
         bin_size: int,
         x_range: tuple[int, int] | None = None,
         y_range: tuple[int, int] | None = None,
-        bad_frames: NDArray[np.bool] | None = None,
+        bad_frames: NDArray[np.bool_] | None = None,
         reject_threshold: float = 0.5,
     ) -> NDArray[np.float32]:
         """Bins the frames of the movie (frame sequence) stored inside the file wrapped by this instance.
@@ -391,7 +394,7 @@ class BinaryFileCombined:
             )
             console.error(message=message, error=ValueError)
 
-    def __enter__(self) -> BinaryFileCombined:
+    def __enter__(self) -> Self:
         """Supports accessing managed files via a context manager by returning self to caller upon entering the
         context.
         """

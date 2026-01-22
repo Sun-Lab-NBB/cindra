@@ -1,19 +1,21 @@
-"""This module provides tools for exporting the multiplane data processed by a Suite2p single-day pipeline as a unified
-suite2p or MATLAB dataset.
+"""Provides tools for exporting the multiplane data processed by a Suite2p single-day pipeline as a unified suite2p or
+MATLAB dataset.
 """
 
 import copy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
-from datetime import UTC, datetime
 
 import numpy as np
 import scipy
 from natsort import natsorted
-from numpy.typing import NDArray
+from ataraxis_time import get_timestamp
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
 from ..configuration import RuntimeData
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 
 # noinspection PyTypeHints
@@ -45,8 +47,8 @@ def save_matlab(
     # Converts the RuntimeData instance to a dictionary for MATLAB saving compatibility.
     params_dict = runtime_data.to_dict()
 
-    # Adds the current processing date
-    params_dict["date_processed"] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
+    # Adds the current processing date.
+    params_dict["date_processed"] = get_timestamp()
 
     # Loops over the items in the parameter dictionary and converts all Path instances to strings.
     # Use list() to create a copy of items to avoid "dictionary changed size during iteration" error
@@ -276,6 +278,7 @@ def combined(
     )
 
     has_red = False
+    first_valid_plane = True
 
     # Loops over all available planes to process each plane's data.
     for plane_index, plane_runtime_data in enumerate(plane_runtime_data_list):
@@ -404,7 +407,10 @@ def combined(
 
     # If the processed data uses two channels, updates the second channels' mean image with the processed plane's
     # data.
-    if any(roi.mean_image_channel_2_corrected is not None for plane_runtime_data in plane_runtime_data_list):
+    if any(
+        plane_runtime_data.data.roi_detection.mean_image_channel_2_corrected is not None
+        for plane_runtime_data in plane_runtime_data_list
+    ):
         combined_runtime_data.data.roi_detection.mean_image_channel_2_corrected = channel_2_corrected_mean_image
 
     # Updates the corrected second channel's mean image if specified in the processed plane's RuntimeData instance.

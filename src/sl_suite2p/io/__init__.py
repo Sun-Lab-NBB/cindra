@@ -1,4 +1,4 @@
-"""This package provides tools to import, convert, and save multi-plane imaging data."""
+"""Provides tools to import, convert, and save multi-plane imaging data."""
 
 from .save import combined, save_matlab, compute_dydx
 from .tiff import save_tiff, tiff_to_binary, mesoscan_to_binary, generate_tiff_filename

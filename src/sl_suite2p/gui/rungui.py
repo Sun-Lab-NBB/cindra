@@ -339,34 +339,23 @@ class RunWindow(QDialog):
         self.inputformat.currentTextChanged.connect(self.parse_inputformat)
         self.layout.addWidget(self.inputformat, 2, 0, 1, 1)
 
-        key = "look_one_level_down"
-        qlabel = QLabel(key)
-        qlabel.setToolTip("(deprecated) files are now always searched recursively")
-        self.layout.addWidget(qlabel, 3, 0, 1, 1)
-        qedit = LineEdit(wk, key, self)
-        qedit.set_text(self.ops)
-        qedit.setFixedWidth(95)
-        self.layout.addWidget(qedit, 4, 0, 1, 1)
-        self.keylist.append(key)
-        self.editlist.append(qedit)
-
         cw = 4
         self.btiff = QPushButton("Add directory to data_path")
         self.btiff.clicked.connect(self.get_folders)
-        self.layout.addWidget(self.btiff, 5, 0, 1, cw)
+        self.layout.addWidget(self.btiff, 3, 0, 1, cw)
         qlabel = QLabel("data_path")
         qlabel.setFont(bigfont)
-        self.layout.addWidget(qlabel, 6, 0, 1, 1)
+        self.layout.addWidget(qlabel, 4, 0, 1, 1)
         self.qdata = []
         for n in range(9):
             self.qdata.append(QLabel(""))
-            self.layout.addWidget(self.qdata[n], n + 7, 0, 1, cw)
+            self.layout.addWidget(self.qdata[n], n + 5, 0, 1, cw)
 
         self.bsave = QPushButton("Add save_path (default is data_path)")
         self.bsave.clicked.connect(self.save_folder)
-        self.layout.addWidget(self.bsave, 16, 0, 1, cw)
+        self.layout.addWidget(self.bsave, 14, 0, 1, cw)
         self.savelabel = QLabel("")
-        self.layout.addWidget(self.savelabel, 17, 0, 1, cw)
+        self.layout.addWidget(self.savelabel, 15, 0, 1, cw)
         self.runButton = QPushButton("RUN SUITE2P")
         self.runButton.clicked.connect(self.run_S2P)
         n0 = 22

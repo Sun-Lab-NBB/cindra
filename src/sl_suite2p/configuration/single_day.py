@@ -144,9 +144,9 @@ class FileIO:
     save_path: str = ""
     """The path to the root output directory where the pipeline results should be saved. The pipeline automatically
     creates a 'suite2p' subdirectory under this path to store all output files."""
-    Defaults to 'tiff'."""
-    """Specifies the format of the input image data. Supported formats include 'tiff', 'raw', 'mesoscan', and 'binary'. 
+
     input_format: str = "tiff"
+    """Specifies the format of the input image data. Supported formats include 'tiff', 'mesoscan', and 'binary'."""
 
     delete_bin: bool = False
     """Determines whether to delete the binary file(s) created during the frame registration stage (registered .bin
@@ -158,21 +158,6 @@ class FileIO:
     """Specifies the file names that should be ignored when searching for and loading raw data. Any file whose name
     exactly matches one of the names stored inside this list will not be processed even if it has the correct
     extension and is located inside one of the input directories."""
-
-
-    look_one_level_down: bool = False
-    """Determines whether to search for TIFF files in the subfolders of the directories provided as 'data_path' field. 
-    If True, the 'subfolders' field has to be set to a valid list of subfolder names to search."""
-
-    subfolders: list[str] = field(default_factory=list)
-    """Stores specific subfolder names to search through for TIFF files. All subfolders must be stored under the 
-    one or more directories specified by 'data_path'."""
-
-    move_bin: bool = False
-    """Determines whether to move the binary file(s) to the save directory after processing, if 'fast_disk' differs 
-    from the 'save_path0'. Note, if using non-default 'save_folder' name, enabling this option will move the binary 
-    files from the temporary 'suite2p' folder to the 'save_folder'. Otherwise, if the save folder and the temporary 
-    folder are both 'suite2p', the binaries are automatically created and stored inside the 'save_folder'."""
 
 
 @dataclass
@@ -632,7 +617,7 @@ class SingleDayS2PConfiguration(YamlConfig):
         self.to_yaml(file_path=file_path)  # Dumps the data to a 'yaml' file.
 
     @classmethod
-    def from_ops(cls, ops_dict: dict[str, Any]) -> "SingleDayS2PConfiguration":
+    def from_ops(cls, ops_dict: dict[str, Any]) -> SingleDayS2PConfiguration:
         """Creates a SingleDayS2PConfiguration instance from the target 'ops'' dictionary.
 
         Notes:
@@ -732,7 +717,7 @@ class RuntimeData(YamlConfig):
         original.to_yaml(file_path=self.yaml_path)
 
     @classmethod
-    def from_yaml(cls, file_path: Path) -> "RuntimeData":
+    def from_yaml(cls, file_path: Path) -> RuntimeData:
         """Loads a RuntimeData instance from a YAML file and restores any image fields saved as .npy files in the same
         directory.
 

@@ -1,4 +1,4 @@
-"""This module provides utility functions for handling file searching, path management, and binary file operations."""
+"""Provides utility functions for handling file searching, path management, and binary file operations."""
 
 from copy import deepcopy
 from typing import Any
@@ -10,141 +10,30 @@ from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from ..configuration import RuntimeData
 
 
-def _search_files_by_extension(
-    root_directory: Path,
-    extensions: tuple[str, ...] = ("tif", "tiff"),
-    ignore_names: tuple[str, ...] = (),
-) -> tuple[list[Path], list[bool]]:
-    """Recursively searches the target directory and all subdirectories for files matching the given extensions.
+def _get_tiff_list(runtime_data: RuntimeData) -> list[Path]:
+    """Recursively searches for .tif and .tiff files under all directories in "data_path".
 
     Args:
-        root_directory: The absolute path to the directory where to search the files.
-        extensions: The list of file extensions to search for. Note, the file extensions should NOT include the leading
-            dot (e.g., 'tif', 'tiff').
-        ignore_names: A tuple of file names to ignore while searching. A file name must match the ignored name
-            completely for the file to be excluded from the search results.
+        runtime_data: A RuntimeData instance storing the suite2p configuration and runtime parameters.
 
     Returns:
-        A tuple of two elements. The first element is a list of absolute paths to files found in the specified root
-        directory and all subdirectories. The second element is a boolean list that indicates which file is found
-        first in a directory or subdirectory after sorting all discovered files naturally.
+        A naturally sorted list of absolute paths to all discovered .tif and .tiff files.
 
     Raises:
-        FileNotFoundError: If no files with the specified extension(s) are found in the root directory or its
-        subdirectories.
+        FileNotFoundError: If no .tif or .tiff files are found in any of the data directories.
     """
-    # Initializes lists to store the discovered absolute file paths and a matching list to store binary flags for
-    # whether each path is the first file in its parent directory.
-    file_paths: list[Path] = []
-    first_files: list[bool] = []
-
-    # If the specified root directory exists and is a directory, recursively searches it for files matching the
-    # provided extensions.
-    if root_directory.is_dir():
-        # For each extension, recursively searches the entire directory tree for matching files.
-        files: list[Path] = []
-        for extension in extensions:
-            # Uses recursive glob pattern (**/) to search all subdirectories.
-            found_files = [file.resolve() for file in root_directory.rglob(f"*.{extension}")]
-
-            # Filters ignored files.
-            filtered_files = [file for file in found_files if file.stem not in ignore_names]
-
-            files.extend(filtered_files)
-
-        # If files were found, groups them by parent directory and processes each group.
-        if files:
-            # Groups files by their parent directory.
-            files_by_directory: dict[Path, list[Path]] = {}
-            for file in files:
-                parent = file.parent
-                if parent not in files_by_directory:
-                    files_by_directory[parent] = []
-                files_by_directory[parent].append(file)
-
-            # Processes each directory's files in sorted order.
-            for directory in natsorted(files_by_directory.keys()):
-                directory_files = natsorted(files_by_directory[directory])
-                file_paths.extend(directory_files)
-
-        # Performs the same search one level down in the subdirectories of the provided root directory.
-        # Retrieves the subdirectories of the provided root directory, which are sorted in natural order.
-        subdirectories = natsorted([path for path in root_directory.iterdir() if path.is_dir()])
-
-        # Loops over all discovered subdirectories.
-        for directory in subdirectories:
-            # For each extension, searches the subdirectory for matching files and retrieves their absolute
-            # paths.
-            subdirectory_files = []  # Stores the found files
-            for extension in extensions:
-                # Gets all files with the matching extension
-                found_files = [file.resolve() for file in directory.glob(f"*.{extension}")]
-
-                # Filters ignored files
-                filtered_files = [file for file in found_files if file.stem not in ignore_names]
-
-                subdirectory_files.extend(filtered_files)
-
-            # If files were found, updates the storage lists with subdirectory data, following the same procedure
-            # as for the root directory
-            if subdirectory_files:
-                file_paths.extend(natsorted(subdirectory_files))
-                first_files.append(True)
-                first_files.extend([False] * (len(subdirectory_files) - 1))
-
-    # If no files were found, raises a FileNotFoundError.
-    if not file_paths:
-        message = (
-            f"Could not find any files with specified extensions '{extensions}' inside the target directory: "
-            f"{root_directory}."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Returns a list storing the absolute paths of the discovered files and a boolean list marking the first files in
-    # each directory and subdirectory.
-    return file_paths, first_files
-
-
-def _get_tiff_list(runtime_data: RuntimeData) -> tuple[list[Path], RuntimeData]:
-    """Creates a list of .tif and .tiff files found in the directory specified by the "data_path" field of the
-    runtime_data configuration. By default, it searches recursively through all subdirectories within each root
-    directory listed in the "data_path" field.
-
-    Args:
-        runtime_data: A RuntimeData instance that stores the suite2p single-day configuration and runtime parameters.
-
-    Returns:
-        A tuple of two elements. The first element is a sorted list of the absolute paths to the found
-        .tif and .tiff files, and the second element is the updated RuntimeData instance.
-
-    Raises:
-        FileNotFoundError: If no .tif or .tiff files are found in the directory or (if applicable) its subdirectories.
-    """
-    # Queries the absolute path(s) to root data directory.
     directories = runtime_data.configuration.file_io.data_path
+    ignored_names = set(runtime_data.configuration.file_io.ignored_file_names)
+    extensions = ("tif", "tiff", "TIF", "TIFF")
 
-    # Recursively searches for .tif and .tiff files in the data directory and all subdirectories.
-    file_paths, first_tiffs = _search_files_by_extension(
-        root_directory=data_path,
-        extensions=("tif", "tiff", "TIF", "TIFF"),
-        ignore_names=tuple(ops.get("ignored_file_names", [])),
-    )
-
-    # Loops over all directories and searches for .TIFF files.
+    file_paths: list[Path] = []
     for directory in directories:
-        # Retrieves the absolute paths of the .tif and .tiff files in the target directory, searching
-        # subdirectories as well.
-        file_paths_found, _ = _search_files_by_extension(
-            root_directory=directory,
-            extensions=("tif", "tiff", "TIF", "TIFF"),
-            ignore_names=tuple(runtime_data.configuration.file_io.ignored_file_names),
-        )
+        for ext in extensions:
+            file_paths.extend(
+                file.resolve() for file in directory.rglob(f"*.{ext}") if file.stem not in ignored_names
+            )
 
-        # Extends the returned data into storage list
-        file_paths.extend(file_paths_found)
-
-    # If no files were found in the directories, raises a FileNotFoundError.
-    if len(file_paths) == 0:
+    if not file_paths:
         message = "Could not find any TIF/TIFF files to process."
         console.error(message=message, error=FileNotFoundError)
 
@@ -153,7 +42,7 @@ def _get_tiff_list(runtime_data: RuntimeData) -> tuple[list[Path], RuntimeData]:
     message = f"Found {len(file_paths)} TIF/TIFF files. Converting to binaries."
     console.echo(message=message, level=LogLevel.INFO)
 
-    return file_paths, runtime_data
+    return file_paths
 
 
 def find_files_open_binaries(
@@ -205,12 +94,8 @@ def find_files_open_binaries(
     message = f"Input data format: {input_format}."
     console.echo(message=message, level=LogLevel.SUCCESS)
 
-    # NOTE: The following blocks of code involving the .tif and .tiff files were originally a part of an if-else block
-    # that supported deprecated input file types. If support for the deprecated file types is re-implemented in the
-    # future, refer to the original Suite2p code for the original if-else 'input_format' logic. :)
-
     # Retrieves the absolute file paths to the .tif and .tiff files.
-    file_paths, _ = _get_tiff_list(plane_runtime_data_list[0])
+    file_paths = _get_tiff_list(plane_runtime_data_list[0])
 
     return plane_runtime_data_list, file_paths, channel_1_binary_files, channel_2_binary_files
 
