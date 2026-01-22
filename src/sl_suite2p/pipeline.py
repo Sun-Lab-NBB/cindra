@@ -14,7 +14,7 @@ from sl_shared_assets import (
     AcquisitionSystems,
     ProcessingTrackers,
 )
-from ataraxis_base_utilities import console
+from ataraxis_base_utilities import LogLevel, console
 
 from .multi_day import resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
 from .single_day import resolve_ops, process_plane, combine_planes, resolve_binaries
@@ -343,6 +343,8 @@ def process_single_day(
                     tracker=tracker,
                 )
 
+    console.echo(message="Single-day processing: Complete.", level=LogLevel.SUCCESS)
+
 
 def _initialize_multi_day_processing_tracker(
     main_session_path: Path,
@@ -598,3 +600,5 @@ def process_multi_day(
                 job_id=job_ids[full_job_name],
                 tracker=tracker,
             )
+
+    console.echo(message="Multi-day processing: Complete.", level=LogLevel.SUCCESS)

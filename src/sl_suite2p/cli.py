@@ -40,6 +40,58 @@ def ss2p_gui() -> None:
     run()
 
 
+@ss2p.group("mcp")
+def ss2p_mcp() -> None:
+    """Commands for the Model Context Protocol (MCP) server.
+
+    The MCP server allows AI assistants like Claude to interact with sl-suite2p pipelines.
+    """
+
+
+@ss2p_mcp.command("serve")
+def mcp_serve() -> None:
+    """Starts the sl-suite2p MCP server using stdio transport.
+
+    This command launches the MCP server which exposes sl-suite2p functionality as tools and resources
+    that can be accessed by AI assistants. The server communicates via stdin/stdout using JSON-RPC 2.0.
+    """
+    import asyncio
+
+    from .mcp import run_server
+
+    asyncio.run(run_server())
+
+
+@ss2p_mcp.command("info")
+def mcp_info() -> None:
+    """Displays information about available MCP tools and resources."""
+    from .mcp import create_server
+
+    server = create_server()
+
+    click.echo("sl-suite2p MCP Server")
+    click.echo(f"Server name: {server.name}")
+
+    click.echo("\nAvailable Tools:")
+    click.echo("  Configuration:")
+    click.echo("    - get_default_single_day_config: Get default single-day configuration")
+    click.echo("    - get_default_multi_day_config: Get default multi-day configuration")
+    click.echo("    - generate_config_file: Generate a configuration YAML file")
+    click.echo("  Single-Day Pipeline:")
+    click.echo("    - run_single_day_pipeline: Execute single-day processing")
+    click.echo("    - get_single_day_status: Get session processing status")
+    click.echo("  Multi-Day Pipeline:")
+    click.echo("    - run_multi_day_pipeline: Execute multi-day processing")
+    click.echo("    - get_multi_day_status: Get multi-day processing status")
+
+    click.echo("\nAvailable Resources:")
+    click.echo("  - pipeline://version-info: Version and environment information")
+    click.echo("  - pipeline://configuration/single-day-schema: Single-day config schema")
+    click.echo("  - pipeline://configuration/multi-day-schema: Multi-day config schema")
+    click.echo("  - pipeline://help/single-day: Single-day pipeline help")
+    click.echo("  - pipeline://help/multi-day: Multi-day pipeline help")
+
+
 @ss2p.group("configure")
 @click.option(
     "-od",
