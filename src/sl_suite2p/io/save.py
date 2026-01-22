@@ -362,7 +362,7 @@ def combined(
             )
 
         # Appends the processed plane's data to the combined arrays.
-        if plane_index == 0:
+        if first_valid_plane:
             (
                 cell_fluorescence,
                 neuropil_fluorescence,
@@ -380,6 +380,7 @@ def combined(
                 plane_is_cell,
                 plane_red_cell,
             )
+            first_valid_plane = False
         else:
             cell_fluorescence = np.concatenate((cell_fluorescence, plane_cell_fluorescence))
             neuropil_fluorescence = np.concatenate((neuropil_fluorescence, plane_neuropil_fluorescence))

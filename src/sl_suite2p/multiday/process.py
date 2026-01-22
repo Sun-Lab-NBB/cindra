@@ -37,7 +37,10 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     timer = PrecisionTimer("s")
 
     # Resolves the path to the multi-day output folder of the session, which stores cached multi-day registration data.
-    multiday_folder = Path(ops["multiday_save_path"]).joinpath(ops["multiday_save_folder"], session_id)
+    session_ids: list[str] = ops["session_ids"]
+    multiday_output_paths: list[str] = ops["multiday_output_paths"]
+    session_index = session_ids.index(session_id)
+    multiday_folder = Path(multiday_output_paths[session_index])
 
     # Loads single-day suite2p processed data for all planes of the session.
     console.echo(f"Collecting session {session_id} data...")
@@ -128,7 +131,7 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
         spikes = np.zeros_like(cell_fluorescence)
 
     # Saves extracted data to disk
-    console.echo(f"Saving extracted data to the {ops['multiday_save_folder']} session {session_id} folder...")
+    console.echo(f"Saving extracted data to the {ops['dataset_name']} session {session_id} directory...")
     np.save(multiday_folder.joinpath("ops.npy"), ops)
     np.save(multiday_folder.joinpath("F.npy"), cell_fluorescence)
     np.save(multiday_folder.joinpath("Fneu.npy"), neuropil_fluorescence)

@@ -49,9 +49,11 @@ def compute_crop(xoff: int, yoff: int, corrXY, th_badframes, badframes, maxregsh
     filter_window = min((len(yoff) // 2) * 2 - 1, 101)
     dx = xoff - medfilt(xoff, filter_window)
     dy = yoff - medfilt(yoff, filter_window)
-    # offset in x and y (normed by mean offset)
+    # Offset in x and y (normed by mean offset). If mean is 0 (no motion), dxy stays as zeros.
     dxy = (dx**2 + dy**2) ** 0.5
-    dxy = dxy / dxy.mean()
+    dxy_mean = dxy.mean()
+    if dxy_mean > 0:
+        dxy = dxy / dxy_mean
     # phase-corr of each frame with reference (normed by median phase-corr)
     cXY = corrXY / medfilt(corrXY, filter_window)
     # exclude frames which have a large deviation and/or low correlation
@@ -171,13 +173,7 @@ def compute_reference(frames, ops=generate_default_ops()):
 
 
 def compute_reference_masks(refImg, ops=generate_default_ops()):
-    ### ------------- compute registration masks ----------------- ###
-    if isinstance(refImg, list):
-        refAndMasks_all = []
-        for rimg in refImg:
-            refAndMasks = compute_reference_masks(rimg, ops=ops)
-            refAndMasks_all.append(refAndMasks)
-        return refAndMasks_all
+    """Computes registration masks for the reference image."""
     maskMul, maskOffset = rigid.compute_masks(
         refImg=refImg,
         maskSlope=ops["spatial_taper"] if ops["one_p_reg"] else 3 * ops["smooth_sigma"],
@@ -206,68 +202,20 @@ def compute_reference_masks(refImg, ops=generate_default_ops()):
     return maskMul, maskOffset, cfRefImg, maskMulNR, maskOffsetNR, cfRefImgNR, blocks
 
 
-def register_frames(refAndMasks, frames, rmin=-np.inf, rmax=np.inf, bidiphase=0, ops=generate_default_ops(), nZ=1):
-    """Register frames to reference image
+def register_frames(refAndMasks, frames, rmin=-np.inf, rmax=np.inf, bidiphase=0, ops=generate_default_ops()):
+    """Registers frames to a reference image.
 
-    Parameters
-    ----------
-
-    refAndMasks : list of processed reference images and masks, or 2D array of reference image
-
-    frames : np.ndarray, np.int16 or np.float32
-        time x Ly x Lx
-
-    rmin : clip frames at rmin
-
-    rmax : clip frames at rmax
-
+    Args:
+        refAndMasks: Processed reference images and masks, or 2D array of reference image.
+        frames: Frame data with shape (time, Ly, Lx).
+        rmin: Minimum value to clip frames at.
+        rmax: Maximum value to clip frames at.
+        bidiphase: Bidirectional phase offset.
+        ops: Registration options dictionary.
 
     Returns:
-    --------
-    ops : dictionary
-        "nframes", "yoff", "xoff", "corrXY", "yoff1", "xoff1", "corrXY1", "badframes"
-
-
+        Tuple of (frames, ymax, xmax, cmax, ymax1, xmax1, cmax1, zest).
     """
-    if nZ > 1:
-        cmax_best = -np.inf * np.ones(len(frames), "float32")
-        cmax_all = -np.inf * np.ones((len(frames), nZ), "float32")
-        zpos_best = np.zeros(len(frames), "int")
-        run_nonrigid = ops["nonrigid"]
-        for z in range(nZ):
-            ops["nonrigid"] = False
-            outputs = register_frames(
-                refAndMasks[z], frames.copy(), rmin=rmin[z], rmax=rmax[z], bidiphase=bidiphase, ops=ops, nZ=1
-            )
-            cmax_all[:, z] = outputs[3]
-            if z == 0:
-                outputs_best = list(outputs[:-4]).copy()
-            ibest = cmax_best < cmax_all[:, z]
-            zpos_best[ibest] = z
-            cmax_best[ibest] = cmax_all[ibest, z]
-            for i, (output_best, output) in enumerate(zip(outputs_best, outputs[:-4], strict=False)):
-                output_best[ibest] = output[ibest]
-        if run_nonrigid:
-            ops["nonrigid"] = True
-            nfr = frames.shape[0]
-            for i, z in enumerate(zpos_best):
-                outputs = register_frames(
-                    refAndMasks[z], frames[[i]], rmin=rmin[z], rmax=rmax[z], bidiphase=bidiphase, ops=ops, nZ=1
-                )
-                if i == 0:
-                    outputs_best = []
-                    for output in outputs[:-1]:
-                        outputs_best.append(np.zeros((nfr, *output.shape[1:]), dtype=output.dtype))
-                        outputs_best[-1][0] = output[0]
-                else:
-                    for output, output_best in zip(outputs[:-1], outputs_best, strict=False):
-                        output_best[i] = output[0]
-        if len(outputs_best) == 7:
-            frames, ymax, xmax, cmax, ymax1, xmax1, cmax1 = outputs_best
-        else:
-            frames, ymax, xmax, cmax = outputs_best
-            ymax1, xmax1, cmax1 = None, None, None
-        return frames, ymax, xmax, cmax, ymax1, xmax1, cmax1, (zpos_best, cmax_all)
     if len(refAndMasks) == 7 or not isinstance(refAndMasks, np.ndarray):
         maskMul, maskOffset, cfRefImg, maskMulNR, maskOffsetNR, cfRefImgNR, blocks = refAndMasks
     else:
@@ -364,15 +312,7 @@ def shift_frames(frames, yoff, xoff, yoff1, xoff1, blocks=None, ops=generate_def
 
 
 def normalize_reference_image(refImg):
-    if isinstance(refImg, list):
-        rmins = []
-        rmaxs = []
-        for rimg in refImg:
-            rmin, rmax = np.int16(np.percentile(rimg, 1)), np.int16(np.percentile(rimg, 99))
-            rimg[:] = np.clip(rimg, rmin, rmax)
-            rmins.append(rmin)
-            rmaxs.append(rmax)
-        return refImg, rmins, rmaxs
+    """Normalizes the reference image by clipping to the 1st and 99th percentiles."""
     rmin, rmax = np.int16(np.percentile(refImg, 1)), np.int16(np.percentile(refImg, 99))
     refImg = np.clip(refImg, rmin, rmax)
     return refImg, rmin, rmax
@@ -402,7 +342,8 @@ def compute_reference_and_register_frames(
         if ops["do_bidiphase"] and ops["bidiphase"] == 0 and not ops["bidi_corrected"]:
             bidiphase = bidi.compute(frames)
             console.echo(
-                f"Plane {plane_number} estimated bidiphase offset from data: {bidiphase} pixels.", level=LogLevel.INFO
+                f"Plane {plane_number} estimated bidiphase offset from data: {bidiphase} pixels.",
+                level=LogLevel.INFO,
             )
             ops["bidiphase"] = bidiphase
             # shift frames
@@ -418,22 +359,12 @@ def compute_reference_and_register_frames(
                 level=LogLevel.SUCCESS,
             )
 
-    if isinstance(refImg, list):
-        nZ = len(refImg)
-    else:
-        nZ = 1
-
-    console.echo(f"Generated a total of {nZ} reference frames for plane {plane_number}.", level=LogLevel.INFO)
-
-    # normalize reference image
+    # Normalize reference image
     refImg_orig = refImg.copy()
     if ops.get("norm_frames", False):
         refImg, rmin, rmax = normalize_reference_image(refImg)
-    elif nZ == 1:
-        rmin, rmax = -np.inf, np.inf
     else:
-        rmin = -np.inf * np.ones(nZ)
-        rmax = np.inf * np.ones(nZ)
+        rmin, rmax = -np.inf, np.inf
 
     if ops["bidiphase"] and not ops["bidi_corrected"]:
         bidiphase = int(ops["bidiphase"])
@@ -461,7 +392,7 @@ def compute_reference_and_register_frames(
     ):
         frames = f_align_in[batch_number : min(batch_number + batch_size, n_frames)]
         frames, ymax, xmax, cmax, ymax1, xmax1, cmax1, zest = register_frames(
-            refAndMasks, frames, rmin=rmin, rmax=rmax, bidiphase=bidiphase, ops=ops, nZ=nZ
+            refAndMasks, frames, rmin=rmin, rmax=rmax, bidiphase=bidiphase, ops=ops
         )
         rigid_offsets.append([ymax, xmax, cmax])
         if zest is not None:
@@ -512,16 +443,20 @@ def shift_frames_and_write(
     """Shift frames for alternate channel in f_alt_in and write to f_alt_out if not None (else write to f_alt_in)"""
     n_frames, Ly, Lx = f_alt_in.shape
     if yoff is None or xoff is None:
-        raise ValueError("no rigid registration offsets provided")
+        message = "Unable to shift and write frames. No rigid registration offsets provided (yoff or xoff is None)."
+        console.error(message=message, error=ValueError)
     if yoff.shape[0] != n_frames or xoff.shape[0] != n_frames:
-        raise ValueError("rigid registration offsets are not the same size as input frames")
+        message = f"Unable to shift and write frames. Rigid registration offsets size mismatch: expected {n_frames} frames, but got yoff={yoff.shape[0]}, xoff={xoff.shape[0]}."
+        console.error(message=message, error=ValueError)
     # Overwrite blocks if nonrigid registration is activated
     blocks = None
     if ops.get("nonrigid"):
         if yoff1 is None or xoff1 is None:
-            raise ValueError("nonrigid registration is activated but no nonrigid shifts provided")
+            message = "Unable to shift and write frames. Non-rigid registration is enabled but no non-rigid offsets provided (yoff1 or xoff1 is None)."
+            console.error(message=message, error=ValueError)
         if yoff1.shape[0] != n_frames or xoff1.shape[0] != n_frames:
-            raise ValueError("nonrigid registration offsets are not the same size as input frames")
+            message = f"Unable to shift and write frames. Non-rigid registration offsets size mismatch: expected {n_frames} frames, but got yoff1={yoff1.shape[0]}, xoff1={xoff1.shape[0]}."
+            console.error(message=message, error=ValueError)
 
         blocks = nonrigid.make_blocks(Ly=Ly, Lx=Lx, block_size=ops["block_size"])
 
@@ -714,18 +649,19 @@ def registration_wrapper(
 
     # compute valid region
     badframes = np.zeros(n_frames, "bool")
-    if "data_path" in ops and len(ops["data_path"]) > 0:
-        badfrfile = path.abspath(path.join(ops["data_path"][0], "bad_frames.npy"))
+    if ops.get("data_path"):
+        badfrfile = path.abspath(path.join(str(ops["data_path"]), "bad_frames.npy"))
         # Check if badframes file exists
         if path.isfile(badfrfile):
-            message = f"Plane {plane_number} bad frames file: exists. File path: {badfrfile}."
-            console.echo(message=message, level=LogLevel.WARNING)
+            console.echo(
+                message=f"Plane {plane_number} bad frames file: exists. Path: {badfrfile}.",
+                level=LogLevel.WARNING,
+            )
             bf_indices = np.load(badfrfile)
             bf_indices = bf_indices.flatten().astype(int)
             # Set indices of badframes to true
             badframes[bf_indices] = True
-            message = f"Plane {plane_number} bad frames count: {badframes.sum()}."
-            console.echo(message=message, level=LogLevel.WARNING)
+            console.echo(message=f"Plane {plane_number} bad frames count: {badframes.sum()}.", level=LogLevel.WARNING)
 
     # return frames which fall outside range
     badframes, yrange, xrange = compute_crop(
@@ -827,7 +763,7 @@ def create_enhanced_mean_image(ops):
 
     # Places the enhanced mean image back into the original mean image array, replacing the pixels along the border with
     # the minimal intensity values.
-    height, width = ops["height"], ops["width"]
+    height, width = ops["Ly"], ops["Lx"]
     enhanced_image = np.full((height, width), scaled_roi.min(), dtype=np.float32)
     enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
 

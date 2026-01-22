@@ -15,13 +15,7 @@ def _search_files_by_extension(
     extensions: tuple[str, ...] = ("tif", "tiff"),
     ignore_names: tuple[str, ...] = (),
 ) -> tuple[list[Path], list[bool]]:
-    """Searches the target directory and subdirectories (one level down) for files matching the given extensions.
-
-    Notes:
-        Originally, this worker function was used by multiple higher-level functions to discover specific data files.
-        In the current version of sl-suite2p, support for most container types other than .tif / .tiff has been
-        deprecated. Therefore, the function is currently only used to discover .tiff files, despite being
-        container-agnostic.
+    """Recursively searches the target directory and all subdirectories for files matching the given extensions.
 
     Args:
         root_directory: The absolute path to the directory where to search the files.
@@ -32,8 +26,8 @@ def _search_files_by_extension(
 
     Returns:
         A tuple of two elements. The first element is a list of absolute paths to files found in the specified root
-        directory and (if applicable) its subdirectories. The second element is a boolean list that indicates which
-        file is found first in a directory or subdirectory after sorting al discovered files naturally.
+        directory and all subdirectories. The second element is a boolean list that indicates which file is found
+        first in a directory or subdirectory after sorting all discovered files naturally.
 
     Raises:
         FileNotFoundError: If no files with the specified extension(s) are found in the root directory or its
@@ -41,33 +35,37 @@ def _search_files_by_extension(
     """
     # Initializes lists to store the discovered absolute file paths and a matching list to store binary flags for
     # whether each path is the first file in its parent directory.
-    file_paths = []
-    first_files = []
+    file_paths: list[Path] = []
+    first_files: list[bool] = []
 
-    # If the specified root directory exists and is a directory, searches it for files matching the provided
-    # extensions.
+    # If the specified root directory exists and is a directory, recursively searches it for files matching the
+    # provided extensions.
     if root_directory.is_dir():
-        # For each extension, searches the provided root directory for matching files and retrieves their paths.
-        files = []  # Stores discovered files
+        # For each extension, recursively searches the entire directory tree for matching files.
+        files: list[Path] = []
         for extension in extensions:
-            # Gets all files with the matching extension
-            found_files = [file.resolve() for file in root_directory.glob(f"*.{extension}")]
+            # Uses recursive glob pattern (**/) to search all subdirectories.
+            found_files = [file.resolve() for file in root_directory.rglob(f"*.{extension}")]
 
-            # Filters ignored files
+            # Filters ignored files.
             filtered_files = [file for file in found_files if file.stem not in ignore_names]
 
             files.extend(filtered_files)
 
-        # If files were found, updates the storage lists with discovered data.
+        # If files were found, groups them by parent directory and processes each group.
         if files:
-            # Adds the absolute paths of the found files to 'file_paths', after sorting them naturally.
-            file_paths.extend(natsorted(files))
+            # Groups files by their parent directory.
+            files_by_directory: dict[Path, list[Path]] = {}
+            for file in files:
+                parent = file.parent
+                if parent not in files_by_directory:
+                    files_by_directory[parent] = []
+                files_by_directory[parent].append(file)
 
-            # Updates 'first_files' such that there is a corresponding boolean value for each file found in the
-            # directory. The first item in 'first_files' is set to True, since it corresponds to the first file in the
-            # directory (following natural sorting). All other values are set to False.
-            first_files.append(True)
-            first_files.extend([False] * (len(files) - 1))
+            # Processes each directory's files in sorted order.
+            for directory in natsorted(files_by_directory.keys()):
+                directory_files = natsorted(files_by_directory[directory])
+                file_paths.extend(directory_files)
 
         # Performs the same search one level down in the subdirectories of the provided root directory.
         # Retrieves the subdirectories of the provided root directory, which are sorted in natural order.
@@ -103,7 +101,7 @@ def _search_files_by_extension(
         console.error(message=message, error=FileNotFoundError)
 
     # Returns a list storing the absolute paths of the discovered files and a boolean list marking the first files in
-    # each directory and (if applicable) subdirectory.
+    # each directory and subdirectory.
     return file_paths, first_files
 
 
@@ -125,8 +123,12 @@ def _get_tiff_list(runtime_data: RuntimeData) -> tuple[list[Path], RuntimeData]:
     # Queries the absolute path(s) to root data directory.
     directories = runtime_data.configuration.file_io.data_path
 
-    # Initializes a list to store the absolute paths to the discovered .tif and .tiff files.
-    file_paths: list[Path] = []
+    # Recursively searches for .tif and .tiff files in the data directory and all subdirectories.
+    file_paths, first_tiffs = _search_files_by_extension(
+        root_directory=data_path,
+        extensions=("tif", "tiff", "TIF", "TIFF"),
+        ignore_names=tuple(ops.get("ignored_file_names", [])),
+    )
 
     # Loops over all directories and searches for .TIFF files.
     for directory in directories:

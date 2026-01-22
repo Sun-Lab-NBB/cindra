@@ -1,15 +1,20 @@
-"""This module stores various helper functions used by all other modules of the 'multiday' sl-suite2p package."""
+"""This module provides helper functions for the multi-day suite2p processing pipeline.
+
+The functions in this module support cell mask manipulation, deformation field operations, and overlap detection
+for multi-session registration workflows.
+"""
 
 from typing import Any
 from pathlib import Path
 
-from pirt import Aarray, DeformationFieldBackward
 from numba import njit, prange
 import numpy as np
 from numpy.typing import NDArray
 import scipy.ndimage
 from skimage.measure import regionprops, find_contours
 from ataraxis_base_utilities import console
+
+from ..registration import Deformation
 
 
 # noinspection PyTypeHints
@@ -97,18 +102,22 @@ def create_mask_image(
 
 
 def create_cropped_deform_field(
-    deform: DeformationFieldBackward, origin: NDArray[Any], crop_size: tuple[int, int]
-) -> tuple[DeformationFieldBackward, NDArray[Any]]:
-    """Creates a cropped deformation field from the input deformation field.
+    deform: Deformation, origin: NDArray[Any], crop_size: tuple[int, int]
+) -> tuple[Deformation, NDArray[Any]]:
+    """Creates a cropped deformation field from the input Deformation instance.
+
+    Notes:
+        This function is used to reduce memory overhead when applying deformations to cell masks by extracting
+        a local crop of the deformation field around each cell's center point.
 
     Args:
-        deform: The original (larger) backward deformation field.
+        deform: The Deformation instance to crop, typically computed by DiffeomorphicDemonsRegistration.
         origin: The coordinates of crop origin in the order of (y, x).
         crop_size: The size of the crop region in the order of (height, width).
 
     Returns:
-        A tuple of two elements. The first element is the cropped deformation field, and the second element is the
-        adjusted origin coordinates.
+        A tuple of two elements. The first element is a new Deformation instance containing the cropped field,
+        and the second element is the adjusted origin coordinates (clamped to image bounds).
     """
     origin = origin.copy()  # Creates a copy to avoid modifying the input
 
@@ -126,23 +135,29 @@ def create_cropped_deform_field(
     y_slice = slice(origin[0], origin[0] + crop_size_array[0])
     x_slice = slice(origin[1], origin[1] + crop_size_array[1])
 
-    return DeformationFieldBackward([deform[0][y_slice, x_slice], deform[1][y_slice, x_slice]]), origin
+    return Deformation(field_y=deform[0][y_slice, x_slice], field_x=deform[1][y_slice, x_slice]), origin
 
 
 def deform_masks(
-    cell_masks: tuple[dict[str, Any], ...] | list[dict[str, Any]], deform: DeformationFieldBackward, crop_bin: int = 500
+    cell_masks: tuple[dict[str, Any], ...] | list[dict[str, Any]], deform: Deformation, crop_bin: int = 500
 ) -> tuple[dict[str, Any], ...]:
     """Applies deformation field offsets to all input cell masks.
 
+    Notes:
+        For each cell mask, this function extracts a local crop of the deformation field centered on the cell's
+        median position. This reduces memory overhead compared to applying the full deformation field to each cell.
+        The function creates new mask dictionaries with updated pixel coordinates in the deformed visual space.
+
     Args:
-        cell_masks: The tuple that stores cell mask dictionaries for each cell ROI to be deformed.
-        deform: The DeformationFieldBackward instance generated during multi-day registration to apply to the input
-            cell masks.
-        crop_bin: The number of masks to transform at the same time. This optional field allows reducing the RAM
-            overhead of the function by only processing a subset of masks at a time.
+        cell_masks: The tuple or list of cell mask dictionaries, each containing 'xpix', 'ypix', 'lam', 'med',
+            and 'radius' keys.
+        deform: The Deformation instance computed by DiffeomorphicDemonsRegistration to apply to the cell masks.
+        crop_bin: The size of the local deformation field crop in pixels. This controls the trade-off between
+            memory usage and processing speed.
 
     Returns:
-        A tuple of cell masks modified with the deformation field offsets.
+        A tuple of new cell mask dictionaries with coordinates transformed to the deformed visual space. Each
+        dictionary includes updated 'xpix', 'ypix', 'ipix', 'med', 'lam', 'radius', and 'overlap' keys.
     """
     deformed = []
     for mask in cell_masks:
@@ -157,7 +172,7 @@ def deform_masks(
         lam_img[y_local, x_local] = mask["lam"]
 
         # Applies the deformation using the cropped deformation field
-        warped_lam = np.array(crop_def.apply_deformation(Aarray(lam_img, origin=tuple(adj_origin)), interpolation=0))
+        warped_lam = np.asarray(crop_def.apply_deformation(lam_img, interpolation=0))
 
         # Extracts deformed coordinates
         y_new, x_new = np.nonzero(warped_lam)
@@ -174,7 +189,7 @@ def deform_masks(
                 "ipix": np.ravel_multi_index((y_global, x_global), deform[0].shape),
                 "med": [np.median(y_global), np.median(x_global)],
                 "lam": lam_values,
-                "radius": regionprops(warped_lam.astype(np.uint8))[0].minor_axis_length,
+                "radius": regionprops(warped_lam.astype(np.uint8))[0].axis_minor_length,
             }
         )
 
@@ -206,30 +221,29 @@ def _find_overlapping_pixels(all_pixels: NDArray[np.int32]) -> NDArray[np.int32]
 
 @njit(parallel=True, cache=True)
 def _create_overlap_arrays(
-    mask_pixel_indices: list[NDArray[np.int32]], overlapping_pixels: NDArray[np.int32]
-) -> list[NDArray[np.bool]]:
-    """This service function is used by the add_overlap_info function to create boolean arrays that mark overlapping
-        pixels for each mask.
+    flat_pixel_indices: NDArray[np.int32],
+    overlapping_pixels: NDArray[np.int32],
+) -> NDArray[np.bool_]:
+    """Creates a boolean array marking overlapping pixels for all masks.
 
     Args:
-        mask_pixel_indices: A list of NumPy arrays, where each array stores the indices of cell mask pixels.
+        flat_pixel_indices: Flattened array containing all mask pixel indices concatenated together.
         overlapping_pixels: A NumPy array storing the indices of overlapping pixels.
 
     Returns:
-        A list of boolean arrays, where each array marks overlapping pixels for a specific cell mask.
+        A flattened boolean array marking overlapping pixels for all masks.
     """
-    overlap_arrays: list[NDArray[np.bool]] = []
+    total_pixels = len(flat_pixel_indices)
+    overlap_result = np.zeros(total_pixels, dtype=np.bool_)
 
-    for pixel_indices in mask_pixel_indices:
-        overlap = np.zeros(len(pixel_indices), dtype=np.bool_)
-        for i in prange(len(pixel_indices)):
-            for j in range(len(overlapping_pixels)):
-                if pixel_indices[i] == overlapping_pixels[j]:
-                    overlap[i] = True
-                    break
-        overlap_arrays.append(overlap)
+    for pixel_index in prange(total_pixels):
+        pixel_value = flat_pixel_indices[pixel_index]
+        for overlap_index in range(len(overlapping_pixels)):
+            if pixel_value == overlapping_pixels[overlap_index]:
+                overlap_result[pixel_index] = True
+                break
 
-    return overlap_arrays
+    return overlap_result
 
 
 def add_overlap_info(masks: list[dict[str, Any]]) -> list[dict[str, NDArray[np.bool]]]:
@@ -244,19 +258,28 @@ def add_overlap_info(masks: list[dict[str, Any]]) -> list[dict[str, NDArray[np.b
     """
     # Extracts pixel indices from all masks
     mask_pixel_indices = [mask["ipix"] for mask in masks]
+    mask_count = len(mask_pixel_indices)
 
-    # Concatenates all pixel indices
+    # Flattens mask pixel indices into a contiguous array with offset pointers.
+    # This format avoids Numba's tuple/list size limitations and enables efficient parallel processing.
+    mask_sizes = np.array([len(indices) for indices in mask_pixel_indices], dtype=np.uint64)
+    mask_offsets = np.zeros(mask_count + 1, dtype=np.uint64)
+    mask_offsets[1:] = np.cumsum(mask_sizes)
+
+    # Concatenates all pixel indices into flat array
     all_pixel_indices = np.concatenate(mask_pixel_indices)
 
     # Finds overlapping pixels using numba
     overlapping_pixels = _find_overlapping_pixels(all_pixel_indices)
 
-    # Creates arrays to store overlapping pixels
-    overlap_arrays = _create_overlap_arrays(mask_pixel_indices, overlapping_pixels)
+    # Creates flattened overlap array using numba
+    flat_overlap = _create_overlap_arrays(all_pixel_indices, overlapping_pixels)
 
-    # Assigns overlapping pixel arrays to mask dictionaries for cells that make up the overlap
-    for i, mask in enumerate(masks):
-        mask["overlap"] = overlap_arrays[i]
+    # Assigns overlapping pixel arrays to mask dictionaries by extracting slices from flat result
+    for mask_index, mask in enumerate(masks):
+        start = mask_offsets[mask_index]
+        end = mask_offsets[mask_index + 1]
+        mask["overlap"] = flat_overlap[start:end]
 
     return masks
 

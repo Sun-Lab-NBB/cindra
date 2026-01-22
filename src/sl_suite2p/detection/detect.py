@@ -151,9 +151,17 @@ def detection_wrapper(
         )
         console.echo(message=message, level=LogLevel.SUCCESS)
     elif mov.shape[1] != yrange[-1] - yrange[0]:
-        raise ValueError("mov.shape[1] is not same size as yrange")
+        message = (
+            f"Unable to run ROI detection. Movie height ({mov.shape[1]}) "
+            f"does not match yrange size ({yrange[-1] - yrange[0]})."
+        )
+        console.error(message=message, error=ValueError)
     elif mov.shape[2] != xrange[-1] - xrange[0]:
-        raise ValueError("mov.shape[2] is not same size as xrange")
+        message = (
+            f"Unable to run ROI detection. Movie width ({mov.shape[2]}) "
+            f"does not match xrange size ({xrange[-1] - xrange[0]})."
+        )
+        console.error(message=message, error=ValueError)
 
     if "mean_image" not in ops:
         ops["mean_image"] = mov.mean(axis=0)
@@ -208,9 +216,10 @@ def detection_wrapper(
 
         if ops["preclassify"] > 0:
             if classfile is None:
-                message = f"Applying user classifier to plane {plane_number} from {user_classfile!s}..."
-                console.echo(message=message, level=LogLevel.INFO)
                 classfile = user_classfile
+
+            message = f"Applying classifier {Path(classfile).name} to plane {plane_number}..."
+            console.echo(message=message, level=LogLevel.INFO)
 
             stat = roi_stats(
                 stat,
@@ -224,7 +233,7 @@ def detection_wrapper(
                 iscell = np.zeros((0, 2))
             else:
                 iscell = classify(stat=stat, classfile=classfile)
-            np.save(Path(ops["save_path"]).joinpath("iscell.npy"), iscell)
+            np.save(Path(ops["output_path"]).joinpath("iscell.npy"), iscell)
             ic = (iscell[:, 0] > ops["preclassify"]).flatten().astype("bool")
             stat = stat[ic]
             message = (
@@ -250,7 +259,7 @@ def detection_wrapper(
         if "chan2_thres" not in ops:
             ops["chan2_thres"] = 0.65
         ops, redcell = chan2detect.detect(ops, stat)
-        np.save(Path(ops["save_path"]).joinpath("redcell.npy"), redcell)
+        np.save(Path(ops["output_path"]).joinpath("redcell.npy"), redcell)
 
     return ops, stat
 
@@ -276,6 +285,10 @@ def select_rois(ops: dict[str, Any], mov: np.ndarray, plane_number: int, sparse_
     stat = np.array(stat)
 
     if len(stat) == 0:
-        raise ValueError("no ROIs were found -- check registered binary and maybe change spatial scale")
+        message = (
+            "Unable to complete ROI detection. No ROIs found. "
+            "Check the binary file and consider adjusting the spatial scale parameter."
+        )
+        console.error(message=message, error=ValueError)
 
     return stat

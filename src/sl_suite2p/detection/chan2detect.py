@@ -2,6 +2,7 @@
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
+from ataraxis_base_utilities import LogLevel, console
 
 from . import utils
 from ..extraction import masks
@@ -102,10 +103,15 @@ def detect(ops, stats):
     redstats = None
     if ops.get("anatomical_red", True):
         try:
-            print(">>>> CELLPOSE estimating masks in anatomical channel")
+            console.echo(
+                message="Running Cellpose to estimate masks in anatomical (channel 2) data...", level=LogLevel.INFO
+            )
             redstats, masks = cellpose_overlap(stats, mimg2)
-        except:
-            print("ERROR importing or running cellpose, continuing without anatomical estimates")
+        except Exception:
+            console.echo(
+                message="Failed to import or run Cellpose for anatomical channel detection. Continuing without anatomical estimates.",
+                level=LogLevel.WARNING,
+            )
 
     if redstats is None:
         redstats = intensity_ratio(ops, stats)

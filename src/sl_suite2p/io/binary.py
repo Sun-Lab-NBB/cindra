@@ -142,7 +142,7 @@ class BinaryFile:
         # noinspection PyProtectedMember,PyUnresolvedReferences
         self.file._mmap.close()
 
-    def __enter__(self) -> "BinaryFile":
+    def __enter__(self) -> BinaryFile:
         """Supports accessing the file via a context manager by returning self to caller upon entering the context."""
         return self
 
@@ -391,7 +391,7 @@ class BinaryFileCombined:
             )
             console.error(message=message, error=ValueError)
 
-    def __enter__(self) -> "BinaryFileCombined":
+    def __enter__(self) -> BinaryFileCombined:
         """Supports accessing managed files via a context manager by returning self to caller upon entering the
         context.
         """

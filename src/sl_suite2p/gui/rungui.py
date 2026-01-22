@@ -23,6 +23,7 @@ from qtpy.QtWidgets import (
     QButtonGroup,
 )
 from cellpose.models import model_path
+from ataraxis_base_utilities import LogLevel, console
 
 from . import io
 from ..configuration import generate_default_ops
@@ -67,10 +68,10 @@ class RunWindow(QDialog):
         self.ops_path = os.fspath(pathlib.Path.home().joinpath(".suite2p").joinpath("ops").absolute())
         try:
             self.reset_ops()
-            print("loaded default ops")
+            console.echo(message="Loaded default ops", level=LogLevel.SUCCESS)
         except Exception as e:
-            print("ERROR: %s" % e)
-            print("could not load default ops, using built-in ops settings")
+            console.echo(message=f"ERROR: {e}", level=LogLevel.ERROR)
+            console.echo(message="Could not load default ops, using built-in ops settings", level=LogLevel.WARNING)
             self.ops = generate_default_ops()
 
         # remove any remaining ops files
@@ -81,9 +82,8 @@ class RunWindow(QDialog):
         for f in fs:
             os.remove(f)
 
-        self.data_path = []
-        self.save_path = []
-        self.fast_disk = []
+        self.data_path = ""
+        self.save_path = ""
         self.opslist = []
         self.batch = False
         self.f = 0
@@ -115,7 +115,6 @@ class RunWindow(QDialog):
         ]
         self.boolkeys = [
             "delete_bin",
-            "move_bin",
             "do_bidiphase",
             "reg_tif",
             "reg_tif_chan2",
@@ -149,7 +148,6 @@ class RunWindow(QDialog):
             "reg_tif_chan2",
             "aspect",
             "delete_bin",
-            "move_bin",
         ]
         regkeys = [
             "do_registration",
@@ -219,7 +217,6 @@ class RunWindow(QDialog):
             "if 1, registered tiffs of channel 2 (non-functional channel) are saved",
             "um/pixels in X / um/pixels in Y (for correct aspect ratio in GUI)",
             "if 1, binary file is deleted after processing is complete",
-            "if 1, and fast_disk is different than save_disk, binary file is moved to save_disk",
             "if 1, registration is performed if it wasn't performed already",
             "when multi-channel, you can align by non-functional channel (1-based)",
             "# of subsampled frames for finding reference image",
@@ -338,13 +335,13 @@ class RunWindow(QDialog):
         qlabel.setToolTip("File format (selects which parser to use)")
         self.layout.addWidget(qlabel, 1, 0, 1, 1)
         self.inputformat = QComboBox()
-        [self.inputformat.addItem(f) for f in ["tiff", "binary", "mesoscan", "raw"]]
+        [self.inputformat.addItem(f) for f in ["tiff", "binary", "mesoscan"]]
         self.inputformat.currentTextChanged.connect(self.parse_inputformat)
         self.layout.addWidget(self.inputformat, 2, 0, 1, 1)
 
         key = "look_one_level_down"
         qlabel = QLabel(key)
-        qlabel.setToolTip("whether to look in all subfolders when searching for files")
+        qlabel.setToolTip("(deprecated) files are now always searched recursively")
         self.layout.addWidget(qlabel, 3, 0, 1, 1)
         qedit = LineEdit(wk, key, self)
         qedit.set_text(self.ops)
@@ -365,17 +362,11 @@ class RunWindow(QDialog):
             self.qdata.append(QLabel(""))
             self.layout.addWidget(self.qdata[n], n + 7, 0, 1, cw)
 
-        self.bsave = QPushButton("Add save_path (default is 1st data_path)")
+        self.bsave = QPushButton("Add save_path (default is data_path)")
         self.bsave.clicked.connect(self.save_folder)
         self.layout.addWidget(self.bsave, 16, 0, 1, cw)
         self.savelabel = QLabel("")
         self.layout.addWidget(self.savelabel, 17, 0, 1, cw)
-        # fast_disk
-        self.bbin = QPushButton("Add fast_disk (default is save_path)")
-        self.bbin.clicked.connect(self.bin_folder)
-        self.layout.addWidget(self.bbin, 18, 0, 1, cw)
-        self.binlabel = QLabel("")
-        self.layout.addWidget(self.binlabel, 19, 0, 1, cw)
         self.runButton = QPushButton("RUN SUITE2P")
         self.runButton.clicked.connect(self.run_S2P)
         n0 = 22
@@ -439,13 +430,11 @@ class RunWindow(QDialog):
 
         # clear file fields
         self.db = {}
-        self.data_path = []
-        self.save_path = []
-        self.fast_disk = []
+        self.data_path = ""
+        self.save_path = ""
         for n in range(self.n_batch):
             self.qdata[n].setText("")
         self.savelabel.setText("")
-        self.binlabel.setText("")
 
         # clear all ops
         # self.reset_ops()
@@ -453,7 +442,6 @@ class RunWindow(QDialog):
         # enable all the file loaders again
         self.btiff.setEnabled(True)
         self.bsave.setEnabled(True)
-        self.bbin.setEnabled(True)
         # and enable the run button
         self.runButton.setEnabled(True)
         self.removeOps.setEnabled(True)
@@ -472,16 +460,12 @@ class RunWindow(QDialog):
             self.ops[key] = self.editlist[k].get_text(self.intkeys, self.boolkeys, self.stringkeys)
         self.db = {}
         self.db["data_path"] = self.data_path
-        self.db["subfolders"] = []
-        self.datastr = self.data_path[0]
+        self.datastr = self.data_path
 
-        # add save_path0 and fast_disk
+        # add save_path
         if len(self.save_path) == 0:
-            self.save_path = self.db["data_path"][0]
-        self.db["save_path0"] = self.save_path
-        if len(self.fast_disk) == 0:
-            self.fast_disk = self.save_path
-        self.db["fast_disk"] = self.fast_disk
+            self.save_path = self.db["data_path"]
+        self.db["save_path"] = self.save_path
         self.db["input_format"] = self.inputformat.currentText()
 
     def run_S2P(self):
@@ -498,10 +482,10 @@ class RunWindow(QDialog):
         shutil.copy(os.path.join(self.ops_path, "ops%d.npy" % self.f), ops_file)
         shutil.copy(os.path.join(self.ops_path, "db%d.npy" % self.f), db_file)
         self.db = np.load(db_file, allow_pickle=True).item()
-        print(self.db)
-        print("Running suite2p with command:")
+        console.echo(message=f"Parameter overrides: {self.db}")
+        console.echo(message="Running suite2p with command:")
         cmd = f"-u -W ignore -m suite2p --ops {ops_file} --db {db_file}"
-        print("python " + cmd)
+        console.echo(message=f"python {cmd}")
         self.process.start(sys.executable, cmd.split(" "))
 
         # self.process.start('python -u -W ignore -m suite2p --ops "%s" --db "%s"' %
@@ -516,7 +500,7 @@ class RunWindow(QDialog):
         self.runButton.setEnabled(False)
         self.stopButton.setEnabled(True)
         self.cleanButton.setEnabled(False)
-        save_folder = os.path.join(self.db["save_path0"], "suite2p/")
+        save_folder = os.path.join(self.db["save_path"], "suite2p/")
         if not os.path.isdir(save_folder):
             os.makedirs(save_folder)
         self.logfile = open(os.path.join(save_folder, "run.log"), "a")
@@ -532,7 +516,7 @@ class RunWindow(QDialog):
         if self.finish and not self.error:
             self.cleanButton.setEnabled(True)
             if len(self.opslist) == 1:
-                self.parent.fname = os.path.join(self.db["save_path0"], "suite2p", "plane0", "stat.npy")
+                self.parent.fname = os.path.join(self.db["save_path"], "suite2p", "plane0", "stat.npy")
                 if os.path.exists(self.parent.fname):
                     cursor.insertText("Opening in GUI (can close this window)\n")
                     io.load_proc(self.parent)
@@ -558,7 +542,7 @@ class RunWindow(QDialog):
         self.save_text()
         if name:
             np.save(name, self.ops)
-            print("saved current settings to %s" % (name))
+            console.echo(message=f"Saved current settings to {name}", level=LogLevel.SUCCESS)
 
     def save_default_ops(self):
         name = self.opsfile
@@ -567,7 +551,7 @@ class RunWindow(QDialog):
         self.save_text()
         np.save(name, self.ops)
         self.ops = ops
-        print("saved current settings in GUI as default ops")
+        console.echo(message="Saved current settings in GUI as default ops", level=LogLevel.SUCCESS)
 
     def revert_default_ops(self):
         name = self.opsfile
@@ -575,7 +559,7 @@ class RunWindow(QDialog):
         self.ops = generate_default_ops()
         np.save(name, self.ops)
         self.load_ops(name)
-        print("reverted default ops to built-in ops")
+        console.echo(message="Reverted default ops to built-in ops", level=LogLevel.SUCCESS)
 
     def save_text(self):
         for k in range(len(self.editlist)):
@@ -583,7 +567,7 @@ class RunWindow(QDialog):
             self.ops[key] = self.editlist[k].get_text(self.intkeys, self.boolkeys, self.stringkeys)
 
     def load_ops(self, name=None):
-        print("loading ops")
+        console.echo(message="Loading ops...")
         if not (isinstance(name, str) and len(name) > 0):
             name = QFileDialog.getOpenFileName(self, "Open ops file (npy or json)")
             name = name[0]
@@ -599,13 +583,7 @@ class RunWindow(QDialog):
                 ops0 = generate_default_ops()
                 ops = {**ops0, **ops}
                 for key in ops:
-                    if (
-                        key != "data_path"
-                        and key != "save_path"
-                        and key != "fast_disk"
-                        and key != "cleanup"
-                        and key != "save_path0"
-                    ):
+                    if key != "data_path" and key != "save_path" and key != "cleanup":
                         if key in self.keylist:
                             self.editlist[self.keylist.index(key)].set_text(ops)
                         self.ops[key] = ops[key]
@@ -613,11 +591,9 @@ class RunWindow(QDialog):
                     self.ops["input_format"] = "tiff"
                 if "data_path" in ops and len(ops["data_path"]) > 0:
                     self.data_path = ops["data_path"]
-                    for n in range(9):
-                        if n < len(self.data_path):
-                            self.qdata[n].setText(self.data_path[n])
-                        else:
-                            self.qdata[n].setText("")
+                    self.qdata[0].setText(self.data_path)
+                    for n in range(1, 9):
+                        self.qdata[n].setText("")
                     self.runButton.setEnabled(True)
                     self.btiff.setEnabled(True)
                     self.listOps.setEnabled(True)
@@ -629,22 +605,19 @@ class RunWindow(QDialog):
                     self.btiff.setEnabled(False)
                     self.listOps.setEnabled(True)
 
-                if "save_path0" in ops and len(ops["save_path0"]) > 0:
-                    self.save_path = ops["save_path0"]
+                if "save_path" in ops and len(ops["save_path"]) > 0:
+                    self.save_path = ops["save_path"]
                     self.savelabel.setText(self.save_path)
-                if "fast_disk" in ops and len(ops["fast_disk"]) > 0:
-                    self.fast_disk = ops["fast_disk"]
-                    self.binlabel.setText(self.fast_disk)
                 if "clean_script" in ops and len(ops["clean_script"]) > 0:
                     self.ops["clean_script"] = ops["clean_script"]
                     self.cleanLabel.setText(ops["clean_script"])
 
             except Exception as e:
-                print("could not load ops file")
-                print(e)
+                console.echo(message="Could not load ops file", level=LogLevel.ERROR)
+                console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
 
     def load_db(self):
-        print("loading db")
+        console.echo(message="Loading parameter overrides...")
 
     def stdout_write(self):
         cursor = self.textEdit.textCursor()
@@ -698,7 +671,7 @@ class RunWindow(QDialog):
 
     def parse_inputformat(self):
         inputformat = self.inputformat.currentText()
-        print("Input format: " + inputformat)
+        console.echo(message=f"Input format: {inputformat}")
         if inputformat == "h5":
             # replace functionality of "old" button
             self.get_h5py()
@@ -711,12 +684,6 @@ class RunWindow(QDialog):
             self.save_path = name
             self.savelabel.setText(name)
             self.savelabel.setToolTip(name)
-
-    def bin_folder(self):
-        name = QFileDialog.getExistingDirectory(self, "Folder for binary file")
-        self.fast_disk = name
-        self.binlabel.setText(name)
-        self.binlabel.setToolTip(name)
 
 
 class LineEdit(QLineEdit):
@@ -790,8 +757,8 @@ class OpsButton(QPushButton):
                     parent.editlist[parent.keylist.index(key)].set_text(ops)
                     parent.ops[key] = ops[key]
         except Exception as e:
-            print("could not load ops file")
-            print(e)
+            console.echo(message="Could not load ops file", level=LogLevel.ERROR)
+            console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
 
 
 # custom vertical label

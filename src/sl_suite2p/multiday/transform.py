@@ -6,7 +6,6 @@ import os
 from typing import Any
 from concurrent.futures import ProcessPoolExecutor
 
-from pirt import DiffeomorphicDemonsRegistration
 from tqdm import tqdm
 import numpy as np
 from ataraxis_time import PrecisionTimer
@@ -16,6 +15,7 @@ import scipy.cluster.hierarchy
 
 from .utils import deform_masks, add_overlap_info, create_mask_image
 from .dataclasses import Session, MultiDayData
+from ..registration import DiffeomorphicDemonsRegistration
 
 
 def register_sessions(ops: dict[str, Any], data: MultiDayData) -> MultiDayData:
@@ -35,19 +35,19 @@ def register_sessions(ops: dict[str, Any], data: MultiDayData) -> MultiDayData:
     images = [session.reference_images[ops["image_type"]] for session in data.sessions]
 
     # Instantiates the DiffeomorphicDemonsRegistration object for the reference images to be registered to each-other.
-    registration = DiffeomorphicDemonsRegistration(*images)
+    registration = DiffeomorphicDemonsRegistration(
+        images=images,
+        grid_sampling_factor=ops["grid_sampling_factor"],
+        scale_sampling=ops["scale_sampling"],
+        speed_factor=ops["speed_factor"],
+    )
 
-    # Updates registration parameters using the user-defined settings.
-    registration.params.grid_sampling_factor = ops["grid_sampling_factor"]
-    registration.params.scale_sampling = ops["scale_sampling"]
-    registration.params.speed_factor = ops["speed_factor"]
-
-    # Runs the registration process
+    # Runs the registration process.
     console.echo(message=f"Computing deformation fields for {ops['image_type']} session images...")
     timer.reset()
-    registration.register(verbose=0)
+    registration.register(progress=ops["progress_bars"])
     console.echo(message=f"Deformation fields: computed. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS)
-    timer.delay_noblock(delay=1, allow_sleep=False)  # Delays for one second to optimize terminal message order
+    timer.delay(delay=1, allow_sleep=False, block=False)  # Delays for one second to optimize terminal message order
 
     # Resolves the number of parallel workers used to apply deformations to session's data.
     parallel_workers = ops["parallel_workers"]
@@ -75,18 +75,30 @@ def register_sessions(ops: dict[str, Any], data: MultiDayData) -> MultiDayData:
     # Updates the sessions stored inside data with the results of the above pipeline
     data.sessions = results
 
-    timer.delay_noblock(delay=1, allow_sleep=False)  # Delays for one second to optimize terminal message order
+    timer.delay(delay=1, allow_sleep=False, block=False)  # Delays for one second to optimize terminal message order
     # Returns the updated MultiDayData instance
     return data
 
 
 def _register_session(registration: DiffeomorphicDemonsRegistration, deform_index: int, session: Session) -> Session:
-    """This worker function is used by the main register_sessions function to apply deformation offsets to all sessions
-    in parallel.
+    """Applies deformation offsets to a single session in parallel.
+
+    This worker function is used by register_sessions to apply the computed deformation field to all reference images
+    and cell masks for a single session.
+
+    Notes:
+        The DiffeomorphicDemonsRegistration class uses backward mapping by default, meaning the returned Deformation
+        object maps coordinates from the target (registered) space back to the source (original) space.
+
+    Args:
+        registration: The DiffeomorphicDemonsRegistration instance containing computed deformations.
+        deform_index: The index of the session in the registration's image list.
+        session: The Session instance to update with deformation data.
+
+    Returns:
+        The Session instance updated with the computed deformation field and transformed images/masks.
     """
-    # Extracts and saves the DeformationField object. Due to how pirt is implemented and contrary to pirt's
-    # docstrings, since we do not override the default transform_mapping parameter, the mapping is BACKWARD.
-    session.deform = registration.get_deform(deform_index)
+    session.deform = registration.get_deformation(image_index=deform_index)
 
     # Uses the deformation field object to transform reference images
     session.transformed_images = {}
@@ -183,7 +195,7 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
     # Process each grid cell directly
     for grid_pos in tqdm(
         sorted(grid_positions),
-        desc="Clustering cells across sessions...",
+        desc="Clustering cells across sessions",
         unit="bins",
         disable=not ops["progress_bars"],
     ):
@@ -420,13 +432,22 @@ def backward_transform_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDa
 
 
 def _backward_transform_session(template_masks: tuple[dict[str, Any], ...], session: Session) -> Session:
-    """This worker function is used by the main backward_transform_masks function to apply backward transformations
-    to template masks for each session in parallel.
+    """Applies backward transformation to template masks for a single session in parallel.
+
+    This worker function uses the inverse of the session's deformation field to transform multi-day template cell
+    masks from the registered (deformed) visual space back to the session's original (unregistered) visual space.
+
+    Args:
+        template_masks: The tuple of template cell mask dictionaries in the registered visual space.
+        session: The Session instance containing the deformation field to invert.
+
+    Returns:
+        The Session instance updated with backward-transformed template cell masks.
     """
     # Transform the template cell masks to the original (unregistered) visual space of this session
     session.template_cell_masks = deform_masks(
         cell_masks=template_masks,
-        deform=session.deform.as_backward_inverse(),
+        deform=session.deform.inverse(),
     )
 
     # This step was performed before visualizing backwards-transformed data in the original multi-day notebook. Since

@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
-from ..version import version, sl_version, python_version
+from ..version import version, python_version
 
 # List of image attributes that are saved as .npy files.
 _PROCESSED_IMAGES = [
@@ -125,41 +125,54 @@ class Main:
     imaging data, so it is common to exclude them from processing."""
 
     python_version: str = python_version
-    """Stores the Python version that was used to instantiate this configuration file. This is a non-user-addressable 
+    """Stores the Python version that was used to instantiate this configuration file. This is a non-user-addressable
     field that stores important runtime ID information."""
 
-    sl_suite2p_version: str = sl_version
-    """Stores the sl-suite2p library version (release) that was used to instantiate this configuration file. This is a 
-    non-user-addressable field that stores important runtime ID information."""
-
-    base_suite2p_version: str = version
-    """Stores the original suite2p version against which the used sl-suite2p version was built. This is a 
+    sl_suite2p_version: str = version
+    """Stores the sl-suite2p library version (release) that was used to instantiate this configuration file. This is a
     non-user-addressable field that stores important runtime ID information."""
 
 
 @dataclass
 class FileIO:
-    """Stores general I/O parameters that specify input data location, format, and working and output directories."""
+    """Stores general I/O parameters that specify input data location, format, and output directories."""
 
-    ignored_file_names: list[str] = field(default_factory=list)
-    """Specifies the file names that should be ignored when searching for and loading raw data. Any file whose name 
-    exactly matches one of the names stored inside this list will not be processed even if it has the correct 
-    extension and is located inside one of the input directories."""
+    data_path: str = ""
+    """The path to the root data directory containing the input TIFF files. The pipeline recursively searches this
+    directory and all subdirectories for .tiff/.tif files to process."""
+
+    save_path: str = ""
+    """The path to the root output directory where the pipeline results should be saved. The pipeline automatically
+    creates a 'suite2p' subdirectory under this path to store all output files."""
+    Defaults to 'tiff'."""
+    """Specifies the format of the input image data. Supported formats include 'tiff', 'raw', 'mesoscan', and 'binary'. 
+    input_format: str = "tiff"
 
     delete_bin: bool = False
-    """Determines whether to delete the binary file(s) created during the frame registration stage (registered .bin 
-    file). Note, if the data produced by the 'single-day' pipeline is intended to be later processed as part of the 
-    'multi-day' pipeline, this has to be False. The multi-day pipeline reuses the registered binary files to extract 
+    """Determines whether to delete the binary file(s) created during the frame registration stage (registered .bin
+    file). Note, if the data produced by the 'single-day' pipeline is intended to be later processed as part of the
+    'multi-day' pipeline, this has to be False. The multi-day pipeline reuses the registered binary files to extract
     the fluorescence of cells tracked across days."""
 
-    input_format: str = "tiff"
-    """Specifies the format of the input image data. Supported formats include 'tiff', 'raw', 'mesoscan', and 'binary'. 
-    Defaults to 'tiff'."""
+    ignored_file_names: list[str] = field(default_factory=list)
+    """Specifies the file names that should be ignored when searching for and loading raw data. Any file whose name
+    exactly matches one of the names stored inside this list will not be processed even if it has the correct
+    extension and is located inside one of the input directories."""
 
-    data_path: list[str] = field(default_factory=list)
-    """The list of paths to the directories where to search for the input TIFF files. This is used during the initial 
-    conversion of the raw data (expected to be .tiff / .tif) to the binary file format used by the suite2p pipeline. 
-    Note, even if your data is stored in a single folder, add it here as a list with a single item."""
+
+    look_one_level_down: bool = False
+    """Determines whether to search for TIFF files in the subfolders of the directories provided as 'data_path' field. 
+    If True, the 'subfolders' field has to be set to a valid list of subfolder names to search."""
+
+    subfolders: list[str] = field(default_factory=list)
+    """Stores specific subfolder names to search through for TIFF files. All subfolders must be stored under the 
+    one or more directories specified by 'data_path'."""
+
+    move_bin: bool = False
+    """Determines whether to move the binary file(s) to the save directory after processing, if 'fast_disk' differs 
+    from the 'save_path0'. Note, if using non-default 'save_folder' name, enabling this option will move the binary 
+    files from the temporary 'suite2p' folder to the 'save_folder'. Otherwise, if the save folder and the temporary 
+    folder are both 'suite2p', the binaries are automatically created and stored inside the 'save_folder'."""
 
 
 @dataclass
@@ -465,21 +478,26 @@ class CellposeDetection:
     """
 
     diameter: int = 0
-    """Specifies the diameter, in pixels, to look for when finding cell ROIs. If set to 0, Cellpose estimates the 
+    """Specifies the diameter, in pixels, to look for when finding cell ROIs. If set to 0, Cellpose estimates the
     diameter automatically."""
 
     cellprob_threshold: float = 0.0
     """The threshold for cell detection, used to filter out low-confidence ROIs."""
 
-    flow_threshold: float = 1.5
+    flow_threshold: float = 0.4
     """The flow threshold, used to control the algorithm's sensitivity to cell boundaries."""
 
     spatial_hp_cp: int = 0
     """The window size, in pixels, for spatial high-pass filtering applied to the image before Cellpose processing."""
 
-    pretrained_model: str = "cyto"
-    """Specifies the pretrained model to use for cell detection. Can be a built-in model name (e.g., 'cyto') or a 
-    path to a custom model."""
+    pretrained_model: str = "cpsam"
+    """Specifies the pretrained model to use for cell detection. Can be a built-in model name (e.g., 'cpsam', 'cyto3')
+    or a path to a custom model. The default 'cpsam' (Cellpose Segment Anything Model) matches the official suite2p
+    implementation."""
+
+    gpu_index: int | None = None
+    """Specifies the GPU index to use for Cellpose processing on multi-GPU systems. If set to None, Cellpose uses its
+    default GPU detection. Set to 0, 1, 2, etc. to use a specific GPU."""
 
 
 @dataclass
@@ -615,7 +633,7 @@ class SingleDayS2PConfiguration(YamlConfig):
 
     @classmethod
     def from_ops(cls, ops_dict: dict[str, Any]) -> "SingleDayS2PConfiguration":
-        """Creates a SingleDayS2PConfiguration instance from the target 'ops' dictionary.
+        """Creates a SingleDayS2PConfiguration instance from the target 'ops'' dictionary.
 
         Notes:
             This method replaces any missing parameters with default initialization values and ignores extra parameters

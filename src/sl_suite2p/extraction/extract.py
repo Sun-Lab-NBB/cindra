@@ -20,16 +20,19 @@ config.THREADING_LAYER = "tbb"
 def _extract_cell_fluorescence(
     output_prototype: NDArray[np.float32],
     data: NDArray[np.float32],
-    cell_masks: tuple[NDArray[np.uint32]],
-    lambda_weight_masks: tuple[NDArray[np.float32]],
+    flat_cell_masks: NDArray[np.uint32],
+    flat_lambda_weights: NDArray[np.float32],
+    mask_offsets: NDArray[np.uint64],
 ) -> NDArray[np.float32]:
     """Extracts cell fluorescence traces for the requested ROIs.
 
     Args:
         output_prototype: The pre-initialized output array to be updated with the extracted fluorescence traces.
         data: The raw activity data from which to extract the fluorescence traces.
-        cell_masks: The cell masks for each ROI to process.
-        lambda_weight_masks: The lambda weight for each pixel in every cell mask.
+        flat_cell_masks: Flattened array containing all cell mask indices concatenated together.
+        flat_lambda_weights: Flattened array containing all lambda weights concatenated together.
+        mask_offsets: Array of offsets indicating where each cell's mask starts in the flattened arrays.
+            Has length (cell_count + 1), where mask_offsets[i+1] - mask_offsets[i] gives the mask size for cell i.
 
     Returns:
         The output_prototype array updated with the extracted cell fluorescence traces for each processed ROI.
@@ -37,8 +40,12 @@ def _extract_cell_fluorescence(
     cell_count = np.uint32(output_prototype.shape[0])
 
     for cell_index in prange(cell_count):
-        cell_pixels_data = data[:, cell_masks[cell_index]]
-        lambda_weight = lambda_weight_masks[cell_index]
+        start = mask_offsets[cell_index]
+        end = mask_offsets[cell_index + 1]
+        cell_mask = flat_cell_masks[start:end]
+        lambda_weight = flat_lambda_weights[start:end]
+
+        cell_pixels_data = data[:, cell_mask]
 
         # Uses pixel lambda weight to weigh the pixel fluorescence. This biases the trace to base more of
         # the extracted signals on the pixels that are more likely to belong to the cell.
@@ -51,7 +58,8 @@ def _extract_cell_fluorescence(
 def _extract_neuropil_fluorescence(
     output_prototype: NDArray[np.float32],
     data: NDArray[np.float32],
-    neuropil_masks: tuple[NDArray[np.uint32]],
+    flat_neuropil_masks: NDArray[np.uint32],
+    mask_offsets: NDArray[np.uint64],
     neuropil_pixel_count: NDArray[np.uint32],
 ) -> NDArray[np.float32]:
     """Extracts neuropil fluorescence traces for the requested ROIs.
@@ -59,14 +67,19 @@ def _extract_neuropil_fluorescence(
     Args:
         output_prototype: The pre-initialized output array to be updated with the extracted fluorescence traces.
         data: The raw activity data from which to extract the fluorescence traces.
-        neuropil_masks: The neuropil masks for each ROI to process.
+        flat_neuropil_masks: Flattened array containing all neuropil mask indices concatenated together.
+        mask_offsets: Array of offsets indicating where each cell's neuropil mask starts in the flattened array.
         neuropil_pixel_count: The number of pixels in each neuropil mask.
     """
     n_cells = np.uint32(output_prototype.shape[0])
 
     for cell_idx in prange(n_cells):
+        start = mask_offsets[cell_idx]
+        end = mask_offsets[cell_idx + 1]
+        neuropil_mask = flat_neuropil_masks[start:end]
+
         # Computes the average fluorescence over the entire neuropil region.
-        output_prototype[cell_idx] = data[:, neuropil_masks[cell_idx]].sum(axis=1) / neuropil_pixel_count[cell_idx]
+        output_prototype[cell_idx] = data[:, neuropil_mask].sum(axis=1) / neuropil_pixel_count[cell_idx]
 
     return output_prototype
 
@@ -108,8 +121,14 @@ def extract_traces(
     timer = PrecisionTimer("s")
     timer.reset()
 
-    # Extracts processed movie statistics.
-    frame_count, height, width = data.shape
+    # Extracts processed movie statistics. For BinaryFileCombined objects, uses the height/width properties
+    # since shape returns arrays for plane dimensions. For regular arrays, unpacks shape directly.
+    if hasattr(data, "height") and hasattr(data, "width"):
+        frame_count = data.shape[0]
+        height = data.height
+        width = data.width
+    else:
+        frame_count, height, width = data.shape
     cell_count = len(cell_masks)
     pixel_count = height * width
 
@@ -120,17 +139,37 @@ def extract_traces(
     fluorescence = np.zeros((cell_count, frame_count), dtype=np.float32)
     neuropil_fluorescence = np.zeros((cell_count, frame_count), dtype=np.float32)
 
-    # Decomposes cell mask inputs into standalone tuples of cell mask indices and lambda weights. This format is
-    # preferred for the parallel processing steps below.
-    cell_mask_indices = []
-    cell_lambda_weights = []
-    for pixel_indices, lambda_weights in cell_masks:
-        cell_mask_indices.append(pixel_indices)
-        cell_lambda_weights.append(lambda_weights)
+    # Flattens cell masks and lambda weights into contiguous arrays with offset pointers.
+    # This format avoids Numba's tuple size limitations and enables efficient parallel processing.
+    cell_mask_sizes = np.array([len(pixel_indices) for pixel_indices, _ in cell_masks], dtype=np.uint64)
+    cell_mask_offsets = np.zeros(cell_count + 1, dtype=np.uint64)
+    cell_mask_offsets[1:] = np.cumsum(cell_mask_sizes)
 
-    # Computes the pixel counts for each neuropil mask
+    total_cell_pixels = int(cell_mask_offsets[-1])
+    flat_cell_masks = np.zeros(total_cell_pixels, dtype=np.uint32)
+    flat_lambda_weights = np.zeros(total_cell_pixels, dtype=np.float32)
+
+    for i, (pixel_indices, lambda_weights) in enumerate(cell_masks):
+        start = cell_mask_offsets[i]
+        end = cell_mask_offsets[i + 1]
+        flat_cell_masks[start:end] = pixel_indices
+        flat_lambda_weights[start:end] = lambda_weights
+
+    # Flattens neuropil masks into contiguous arrays with offset pointers if provided.
     if neuropil_masks is not None:
-        neuropil_pixel_count = np.array([len(indices) for indices in neuropil_masks], dtype=np.uint32)
+        neuropil_mask_sizes = np.array([len(indices) for indices in neuropil_masks], dtype=np.uint64)
+        neuropil_mask_offsets = np.zeros(cell_count + 1, dtype=np.uint64)
+        neuropil_mask_offsets[1:] = np.cumsum(neuropil_mask_sizes)
+
+        total_neuropil_pixels = int(neuropil_mask_offsets[-1])
+        flat_neuropil_masks = np.zeros(total_neuropil_pixels, dtype=np.uint32)
+        neuropil_pixel_count = np.zeros(cell_count, dtype=np.uint32)
+
+        for i, indices in enumerate(neuropil_masks):
+            start = neuropil_mask_offsets[i]
+            end = neuropil_mask_offsets[i + 1]
+            flat_neuropil_masks[start:end] = indices
+            neuropil_pixel_count[i] = len(indices)
 
     # Extracts the cell fluorescence from all frames of the processed cell activity movie.
     current_frame = 0
@@ -151,18 +190,20 @@ def extract_traces(
         fluorescence[:, current_batch_slice] = _extract_cell_fluorescence(
             output_prototype=output_prototype,
             data=batch_pixels,
-            cell_masks=tuple(cell_mask_indices),
-            lambda_weight_masks=tuple(cell_lambda_weights),
+            flat_cell_masks=flat_cell_masks,
+            flat_lambda_weights=flat_lambda_weights,
+            mask_offsets=cell_mask_offsets,
         )
 
         # If neuropil masks are provided, extracts the neuropil fluorescence from all frames of the currently
-        # processed batch of frames
+        # processed batch of frames.
         if neuropil_masks is not None:
             # noinspection PyUnboundLocalVariable
             neuropil_fluorescence[:, current_batch_slice] = _extract_neuropil_fluorescence(
                 output_prototype=output_prototype,
                 data=batch_pixels,
-                neuropil_masks=tuple(neuropil_masks),
+                flat_neuropil_masks=flat_neuropil_masks,
+                mask_offsets=neuropil_mask_offsets,
                 neuropil_pixel_count=neuropil_pixel_count,
             )
 
@@ -200,8 +241,8 @@ def extract_traces_from_masks(
         neuropil_masks: An array containing pixel indices of the neuropil surrounding the ROI.
     """
     batch_size = ops["batch_size"]
-    height = ops["height"]
-    width = ops["width"]
+    height = ops["Ly"]
+    width = ops["Lx"]
 
     with BinaryFile(height=height, width=width, file_path=ops["reg_file"]) as f:
         cell_fluorescence, neuropil_fluorescence = extract_traces(

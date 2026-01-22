@@ -9,6 +9,7 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.linalg import norm
 from scipy.spatial import ConvexHull
+from ataraxis_base_utilities import console
 
 
 def distance_kernel(radius: int) -> np.ndarray:
@@ -60,7 +61,7 @@ class ROI:
     def __post_init__(self):
         """Validate inputs."""
         if self.xpix.shape != self.ypix.shape or self.xpix.shape != self.lam.shape:
-            raise TypeError("xpix, ypix, and lam should all be the same size.")
+            console.error(message="xpix, ypix, and lam should all be the same size.", error=TypeError)
 
     @classmethod
     def from_stat_dict(cls, stat: dict[str, Any], do_crop: bool = True) -> ROI:

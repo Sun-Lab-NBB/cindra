@@ -14,7 +14,7 @@ from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console
 
 from . import io, detection, extraction, registration, classification
-from .version import version, sl_version, python_version
+from .version import version, python_version
 from .io.binary import BinaryFile
 from .configuration import RuntimeData, SingleDayS2PConfiguration
 
@@ -121,7 +121,7 @@ def _register_plane(
         ops = registration.save_registration_outputs_to_ops(registration_outputs, ops)
 
         # Computes and adds the enhanced mean image to the plane 'ops' file.
-        ops["enhanced_mean_image"] = registration.create_enhanced_mean_image(ops)
+        ops = registration.create_enhanced_mean_image(ops)
 
         # Adds registration time to the plane 'ops' file.
         ops["timing"]["registration"] = timer.elapsed
@@ -144,10 +144,7 @@ def _register_plane(
             # Resets the timer for the second step.
             timer.reset()
 
-            message = (
-                f"Generating plane {plane_number} mean image that excludes bad frames detected during first "
-                f"registration step..."
-            )
+            message = f"Generating plane {plane_number} mean image excluding bad frames from first registration step..."
             console.echo(message=message, level=LogLevel.INFO)
 
             # Bins all available frames into groups of 1000 frames.
@@ -274,16 +271,10 @@ def _process_rois(
     builtin_classifier_file = classification.builtin_classfile
     user_classifier_file = classification.user_classfile
     if ops_classifier_file:
-        message = f"Applying target classifier {Path(ops_classifier_file).name} to plane {plane_number}..."
-        console.echo(message=message, level=LogLevel.INFO)
         classifier_file = ops_classifier_file
     elif ops["use_builtin_classifier"] or not user_classifier_file.is_file():
-        message = f"Applying builtin classifier {builtin_classifier_file.name} to plane {plane_number}..."
-        console.echo(message=message, level=LogLevel.INFO)
         classifier_file = builtin_classifier_file
     else:
-        message = f"Applying default classifier {user_classifier_file.name} to plane {plane_number}..."
-        console.echo(message=message, level=LogLevel.INFO)
         classifier_file = user_classifier_file
 
     # Memory-maps the necessary binary files.
@@ -387,8 +378,8 @@ def _process_rois(
                 spikes = np.zeros_like(cell_fluorescence)
 
             # Saves pipeline output to disk as .npy files.
-            fpath = Path(ops["save_path"])
-            if ops.get("save_path"):
+            fpath = Path(ops["output_path"])
+            if ops.get("output_path"):
                 np.save(fpath.joinpath("stat.npy"), roi_statistics)
                 np.save(fpath.joinpath("F.npy"), cell_fluorescence)
                 np.save(fpath.joinpath("Fneu.npy"), neuropil_fluorescence)
@@ -440,9 +431,10 @@ def _resolve_plane_paths(ops: dict[str, Any]) -> tuple[list[Path], list[Path], P
 
     Returns:
         A tuple of 3 elements. The first element is a list of paths to all 'plane' folders, the second is a list of
-        paths to all plane 'ops.npy' files, and the third is the path to the root save folder.
+        paths to all plane 'ops.npy' files, and the third is the path to the root save folder (suite2p directory).
     """
-    save_folder = Path(ops["save_path0"]).joinpath(ops["save_folder"])
+    # The output always goes to save_path/suite2p/
+    save_folder = Path(ops["save_path"]).joinpath("suite2p")
     save_folder.mkdir(parents=True, exist_ok=True)
     plane_folders = natsorted([file for file in save_folder.glob("*") if file.is_dir() and file.name[:5] == "plane"])
     ops_paths = [folder.joinpath("ops.npy") for folder in plane_folders]
@@ -547,7 +539,7 @@ def run_s2p(runtime_data: RuntimeData) -> None:
     # data.bin file that stores the frame data and the ops.npy file that stores the processing settings.
     resolve_binaries(ops_path=ops_path)
 
-    save_folder = Path(ops["save_path0"]).joinpath(ops["save_folder"])
+    save_folder = Path(ops["save_path"]).joinpath("suite2p")
     plane_folders = natsorted([file for file in save_folder.glob("*") if file.is_dir() and file.name[:5] == "plane"])
     ops_paths = [folder.joinpath("ops.npy") for folder in plane_folders]
 
@@ -644,7 +636,7 @@ def resolve_binaries(ops_path: Path) -> None:
     if files_found_flag:
         message = (
             f"Found existing binaries (.bin files) and ops (ops.npy files) inside {len(plane_folders)} "
-            f"available plane folders."
+            f"available plane directories."
         )
         console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -674,7 +666,6 @@ def resolve_binaries(ops_path: Path) -> None:
         # function also writes the plane-specific ops.npy file to the output plane folder.
         convert_functions = {
             "mesoscan": io.mesoscan_to_binary,
-            "raw": io.raw_to_binary,
             "tiff": io.tiff_to_binary,
         }
 
@@ -704,6 +695,10 @@ def resolve_binaries(ops_path: Path) -> None:
             f"{len(plane_folders)} planes."
         )
         console.echo(message=message, level=LogLevel.SUCCESS)
+
+    # Updates the main ops.npy file with the actual number of planes discovered during binarization.
+    ops["nplanes"] = len(plane_folders)
+    np.save(ops_path, ops)
 
 
 def process_plane(ops_path: Path, plane_index: int) -> None:
@@ -762,9 +757,7 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
             key
             not in [
                 "data_path",
-                "save_path0",
-                "fast_disk",
-                "save_folder",
+                "save_path",
                 "nplanes",
                 "nchannels",
                 "nrois",
@@ -905,10 +898,7 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
             ops=ops, plane_number=plane_index, frames_path=frames_path, frames_channel_2_path=frames_channel_2_path
         )
     else:
-        message = (
-            f"Skipping plane {plane_index} cell detection, as it is disabled via the 'roidetect' "
-            f"configuration parameter."
-        )
+        message = f"Skipping plane {plane_index} cell detection (disabled via 'roidetect' parameter)."
         console.echo(message=message, level=LogLevel.WARNING)
 
     # Appends the overall plane processing time to the 'ops' file.
@@ -918,6 +908,7 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
     if ops.get("ops_path"):
         np.save(ops["ops_path"], ops)
 
+    # If suite2p is configured to delete binary files after processing, removes the necessary files
     if ops.get("delete_bin"):
         console.echo(message=f"Deleting plane {plane_index} binary files...", level=LogLevel.INFO)
 
