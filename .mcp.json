@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ss2p-mcp": {
+      "type": "stdio",
+      "command": "ss2p",
+      "args": ["mcp"]
+    }
+  }
+}

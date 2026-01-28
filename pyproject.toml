@@ -45,7 +45,7 @@ classifiers = [
 dependencies = [
     "natsort>=8,<9",
     "rastermap>=1,<2",
-    "tifffile>=2025,<2026",
+    "tifffile>=2026,<2027",
     "imagecodecs>=2026,<2027",
     "numpy>=2,<3",
     "numba>=0.63,<1",
@@ -69,7 +69,7 @@ dependencies = [
     "importlib_metadata>=8,<9",
     "tbb4py>=2022,<2023; sys_platform != 'darwin'",
     "intel-cmplr-lib-rt>=2025,<2026; sys_platform != 'darwin'",
-    "sl-shared-assets>=6.1.1rc3,<7",
+    "sl-shared-assets>=7,<8",
     "torch>=2.0.0,<3",
     "mcp>=1,<2",
     "httpx>=0.28,<1",
