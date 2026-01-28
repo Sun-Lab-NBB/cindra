@@ -53,10 +53,11 @@ state to prevent integration errors.
 
 ## Available Skills
 
-| Skill               | Description                                                      |
-|---------------------|------------------------------------------------------------------|
-| `/explore-codebase` | Perform in-depth codebase exploration at session start           |
-| `/sun-lab-style`    | Apply Sun Lab coding conventions (REQUIRED for all code changes) |
+| Skill                  | Description                                                         |
+|------------------------|---------------------------------------------------------------------|
+| `/explore-codebase`    | Perform in-depth codebase exploration at session start              |
+| `/sun-lab-style`       | Apply Sun Lab coding conventions (REQUIRED for all code changes)    |
+| `/suite2p-processing`  | Guide agents through suite2p processing workflows using MCP tools   |
 
 ## Project Context
 
