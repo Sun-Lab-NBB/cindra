@@ -316,9 +316,14 @@ class ROIDetection:
     signals."""
 
     spatial_scale: int = 0
-    """The optimal spatial scale, in pixels, for the processed data. This is used to adjust detection sensitivity. A 
-    value of 0 means automatic detection based on the data's spatial scale. Values above 0 are applied in increments of 
+    """The optimal spatial scale, in pixels, for the processed data. This is used to adjust detection sensitivity. A
+    value of 0 means automatic detection based on the data's spatial scale. Values above 0 are applied in increments of
     6 pixels (1 -> 6 pixels, 2-> 12 pixels, etc.)."""
+
+    diameter: int = 0
+    """The expected cell diameter in pixels. A value of 0 means the diameter is automatically estimated from the
+    spatial scale during detection. When using sparse_mode, the diameter is computed as 3 * 2^spatial_scale. For
+    non-sparse mode (sourcery), this must be set to a non-zero value or the pipeline will fail."""
 
     connected: bool = True
     """Determines whether to require the detected ROIs to be fully connected regions."""
@@ -352,42 +357,6 @@ class ROIDetection:
     denoise: bool = False
     """Determines whether to denoise the binned movie before cell detection in sparse mode to enhance performance. 
     If enabled, 'sparse_mode' has to be True."""
-
-
-@dataclass
-class CellposeDetection:
-    """Stores parameters for the Cellpose algorithm, which can optionally be used to improve cell ROI extraction."""
-
-    anatomical_only: int = 0
-    """Specifies the Cellpose mode for cell detection:
-        0: Do not use Cellpose. This automatically disables all other fields in this section.
-        1: Detect masks on the max projection divided by the mean image.
-        2: Detect masks on the mean image.
-        3: Detect masks on the enhanced mean image.
-        4: Detect masks on the max projection image.
-    """
-
-    diameter: int = 0
-    """Specifies the diameter, in pixels, to look for when finding cell ROIs. If set to 0, Cellpose estimates the
-    diameter automatically."""
-
-    cellprob_threshold: float = 0.0
-    """The threshold for cell detection, used to filter out low-confidence ROIs."""
-
-    flow_threshold: float = 0.4
-    """The flow threshold, used to control the algorithm's sensitivity to cell boundaries."""
-
-    spatial_hp_cp: int = 0
-    """The window size, in pixels, for spatial high-pass filtering applied to the image before Cellpose processing."""
-
-    pretrained_model: str = "cpsam"
-    """Specifies the pretrained model to use for cell detection. Can be a built-in model name (e.g., 'cpsam', 'cyto3')
-    or a path to a custom model. The default 'cpsam' (Cellpose Segment Anything Model) matches the official suite2p
-    implementation."""
-
-    gpu_index: int | None = None
-    """Specifies the GPU index to use for Cellpose processing on multi-GPU systems. If set to None, Cellpose uses its
-    default GPU detection. Set to 0, 1, 2, etc. to use a specific GPU."""
 
 
 @dataclass
@@ -497,8 +466,6 @@ class SingleDayS2PConfiguration(YamlConfig):
     datasets."""
     roi_detection: ROIDetection = field(default_factory=ROIDetection)
     """Stores parameters for cell ROI detection and extraction."""
-    cellpose_detection: CellposeDetection = field(default_factory=CellposeDetection)
-    """Stores parameters for the Cellpose algorithm, which can optionally be used to improve cell ROI extraction."""
     signal_extraction: SignalExtraction = field(default_factory=SignalExtraction)
     """Stores parameters for extracting fluorescence signals from ROIs and surrounding neuropil regions."""
     spike_deconvolution: SpikeDeconvolution = field(default_factory=SpikeDeconvolution)
@@ -572,7 +539,6 @@ class SingleDayS2PConfiguration(YamlConfig):
         one_p_registration_params = extract_params_for_section(OnePRegistration, ops_dict)
         non_rigid_params = extract_params_for_section(NonRigid, ops_dict)
         roi_detection_params = extract_params_for_section(ROIDetection, ops_dict)
-        cellpose_detection_params = extract_params_for_section(CellposeDetection, ops_dict)
         signal_extraction_params = extract_params_for_section(SignalExtraction, ops_dict)
         spike_deconvolution_params = extract_params_for_section(SpikeDeconvolution, ops_dict)
         classification_params = extract_params_for_section(Classification, ops_dict)
@@ -588,7 +554,6 @@ class SingleDayS2PConfiguration(YamlConfig):
             one_p_registration=OnePRegistration(**one_p_registration_params),
             non_rigid=NonRigid(**non_rigid_params),
             roi_detection=ROIDetection(**roi_detection_params),
-            cellpose_detection=CellposeDetection(**cellpose_detection_params),
             signal_extraction=SignalExtraction(**signal_extraction_params),
             spike_deconvolution=SpikeDeconvolution(**spike_deconvolution_params),
             classification=Classification(**classification_params),

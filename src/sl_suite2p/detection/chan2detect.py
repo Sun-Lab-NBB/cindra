@@ -2,9 +2,7 @@
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
-from ataraxis_base_utilities import LogLevel, console
 
-from . import utils
 from ..extraction import masks
 
 """
@@ -74,48 +72,24 @@ def intensity_ratio(ops, stats):
     return np.stack((redcell, redprob), axis=-1)
 
 
-def cellpose_overlap(stats, mimg2):
-    from . import anatomical
-
-    masks = anatomical.roi_detect(mimg2)[0]
-    Ly, Lx = masks.shape
-    redstats = np.zeros((len(stats), 2), np.float32)  # changed the size of preallocated space
-    for i in range(len(stats)):
-        smask = np.zeros((Ly, Lx), np.uint16)
-        ypix0, xpix0 = stats[i]["ypix"], stats[i]["xpix"]
-        smask[ypix0, xpix0] = 1
-        ious = utils.mask_ious(masks, smask)[0]
-        iou = ious.max()
-        redstats[i,] = np.array([iou > 0.25, iou])  # this had the wrong dimension
-    return redstats, masks
-
-
 def detect(ops, stats):
+    """Detects cells with channel 2 brightness (red cells).
+
+    Args:
+        ops: The pipeline options dictionary containing mean images and dimensions.
+        stats: The ROI statistics from primary channel detection.
+
+    Returns:
+        A tuple containing the updated ops dictionary and the red cell statistics array.
+    """
     mimg = ops["mean_image"].copy()
     mimg2 = ops["mean_image_channel_2"].copy()
 
-    # subtract bleedthrough of green into red channel
-    # non-rigid regression with nblks x nblks pieces
+    # Subtracts bleedthrough of green into red channel using non-rigid regression with nblks x nblks pieces.
     nblks = 3
     Ly, Lx = ops["Ly"], ops["Lx"]
     ops["meanImg_chan2_corrected"] = correct_bleedthrough(Ly, Lx, nblks, mimg, mimg2)
 
-    redstats = None
-    if ops.get("anatomical_red", True):
-        try:
-            console.echo(
-                message="Running Cellpose to estimate masks in anatomical (channel 2) data...", level=LogLevel.INFO
-            )
-            redstats, masks = cellpose_overlap(stats, mimg2)
-        except Exception:
-            console.echo(
-                message="Failed to import or run Cellpose for anatomical channel detection. Continuing without anatomical estimates.",
-                level=LogLevel.WARNING,
-            )
-
-    if redstats is None:
-        redstats = intensity_ratio(ops, stats)
-    else:
-        ops["chan2_masks"] = masks
+    redstats = intensity_ratio(ops, stats)
 
     return ops, redstats

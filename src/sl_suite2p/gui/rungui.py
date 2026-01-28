@@ -22,7 +22,6 @@ from qtpy.QtWidgets import (
     QPushButton,
     QButtonGroup,
 )
-from cellpose.models import model_path
 from ataraxis_base_utilities import LogLevel, console
 
 from . import io
@@ -111,7 +110,6 @@ class RunWindow(QDialog):
             "minimum_neuropil_pixels",
             "spatial_scale",
             "do_registration",
-            "anatomical_only",
         ]
         self.boolkeys = [
             "delete_bin",
@@ -129,7 +127,7 @@ class RunWindow(QDialog):
             "allow_overlap",
             "sparse_mode",
         ]
-        self.stringkeys = ["pretrained_model"]
+        self.stringkeys = []
         tifkeys = [
             "nplanes",
             "nchannels",
@@ -177,26 +175,17 @@ class RunWindow(QDialog):
             "high_pass",
             "spatial_hp_detect",
         ]
-        anatkeys = [
-            "anatomical_only",
-            "diameter",
-            "cellprob_threshold",
-            "flow_threshold",
-            "pretrained_model",
-            "spatial_hp_cp",
-        ]
         neudeconvkeys = [
             ["extract_neuropil", "allow_overlap", "inner_neuropil_border_radius", "minimum_neuropil_pixels"],
             ["soma_crop", "extract_spikes", "baseline_window", "baseline_sigma", "neuropil_coefficient"],
         ]
-        keys = [tifkeys, outkeys, regkeys, nrkeys, cellkeys, anatkeys, neudeconvkeys]
+        keys = [tifkeys, outkeys, regkeys, nrkeys, cellkeys, neudeconvkeys]
         labels = [
             "Main settings",
             "Output settings",
             "Registration",
             ["Nonrigid", "1P"],
-            "Functional detect",
-            "Anat detect",
+            "ROI Detection",
             ["Extraction/Neuropil", "Classify/Deconv"],
         ]
         tooltips = [
@@ -235,7 +224,7 @@ class RunWindow(QDialog):
             "window for spatial high-pass filtering before registration",
             "whether to smooth before high-pass filtering before registration",
             "how much to ignore on edges (important for vignetted windows, for FFT padding do not set BELOW 3*smooth_sigma)",
-            "if 1, run cell (ROI) detection (either functional or anatomical if anatomical_only > 0)",
+            "if 1, run cell (ROI) detection",
             "if 1, run sparse_mode cell detection",
             "if 1, run PCA denoising on binned movie to improve cell detection",
             "choose size of ROIs: 0 = multi-scale; 1 = 6 pixels, 2 = 12, 3 = 24, 4 = 48",
@@ -245,12 +234,6 @@ class RunWindow(QDialog):
             "maximum number of iterations for ROI detection",
             "temporal running mean subtraction with window of size 'high_pass' (use low values for 1P)",
             "spatial high-pass filter size (used to remove spatially-correlated neuropil)",
-            "run cellpose to get masks on 1: max_proj / mean_img; 2: mean_img; 3: mean_img enhanced, 4: max_proj",
-            "input average diameter of ROIs in recording (can give a list e.g. 6,9 if aspect not equal), if set to 0 auto-determination run by Cellpose",
-            "cellprob_threshold for cellpose",
-            "flow_threshold for cellpose (throws out masks, if getting too few masks, set to 0)",
-            "model type string from Cellpose (can be a built-in model or a user model that is added to the Cellpose GUI)",
-            "high-pass image spatially by a multiple of the diameter (if field is non-uniform, a value of ~2 is recommended",
             "whether or not to extract neuropil; if 0, Fneu is set to 0",
             "allow shared pixels to be used for fluorescence extraction from overlapping ROIs (otherwise excluded from both ROIs)",
             "number of pixels between ROI and neuropil donut",

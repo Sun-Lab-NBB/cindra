@@ -18,7 +18,7 @@ For documentation and additional information, see the sl-suite2p repository: htt
 from ataraxis_base_utilities import console
 
 from .multiday import show_images_with_masks
-from .pipeline import MultiDayJobNames, SingleDayJobNames, process_multi_day, process_single_day
+from .pipeline import MultiDayJobNames, SingleDayJobNames, get_session_root, process_multi_day, process_single_day
 from .detection import ROI
 from .multi_day import run_s2p_multiday, resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
 from .single_day import run_s2p, resolve_ops, process_plane, combine_planes, resolve_binaries
@@ -38,6 +38,7 @@ __all__ = [
     "extract_multiday_fluorescence",
     "generate_default_multiday_ops",
     "generate_default_ops",
+    "get_session_root",
     "process_multi_day",
     "process_plane",
     "process_single_day",
