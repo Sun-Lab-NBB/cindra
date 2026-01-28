@@ -4,81 +4,58 @@ from functools import lru_cache
 
 from numba import complex64, vectorize
 import numpy as np
-import torch
 from numpy.fft import ifftshift
 from scipy.fft import next_fast_len
-from torch.fft import (
-    fft2 as torch_fft2,
-    ifft2 as torch_ifft2,
-)
+from scipy.fft import fft2 as scipy_fft2, ifft2 as scipy_ifft2
 from scipy.ndimage import gaussian_filter1d
 from ataraxis_base_utilities import console
 
 # Small epsilon value for numerical stability in normalization
-_eps = torch.complex(torch.tensor(1e-5), torch.tensor(0.0))
+_EPS: np.complexfloating = np.complex64(1e-5 + 0j)
 
 
 def fft2(data: np.ndarray, size: tuple[int, int] | None = None) -> np.ndarray:
-    """Compute 2D FFT over last two dimensions using PyTorch.
+    """Computes 2D FFT over last two dimensions using SciPy.
 
-    Parameters
-    ----------
-    data : np.ndarray
-        Input array to transform.
-    size : tuple[int, int] | None
-        Output shape (not used, kept for API compatibility).
+    Args:
+        data: The input array to transform.
+        size: The output shape. If provided, pads or crops the input to this size before transforming.
 
     Returns:
-    -------
-    np.ndarray
-        FFT-transformed array.
+        The FFT-transformed array.
     """
-    data_torch = torch.from_numpy(data)
-    return torch_fft2(data_torch, dim=(-2, -1)).numpy()
+    return scipy_fft2(data, s=size, axes=(-2, -1))
 
 
 def ifft2(data: np.ndarray, size: tuple[int, int] | None = None) -> np.ndarray:
-    """Compute 2D inverse FFT over last two dimensions using PyTorch.
+    """Computes 2D inverse FFT over last two dimensions using SciPy.
 
-    Parameters
-    ----------
-    data : np.ndarray
-        Input array to transform.
-    size : tuple[int, int] | None
-        Output shape (not used, kept for API compatibility).
+    Args:
+        data: The input array to transform.
+        size: The output shape. If provided, pads or crops the input to this size before transforming.
 
     Returns:
-    -------
-    np.ndarray
-        Inverse FFT-transformed array.
+        The inverse FFT-transformed array.
     """
-    data_torch = torch.from_numpy(data)
-    return torch_ifft2(data_torch, dim=(-2, -1)).numpy()
+    return scipy_ifft2(data, s=size, axes=(-2, -1))
 
 
 def convolve(mov: np.ndarray, img: np.ndarray) -> np.ndarray:
-    """Returns the 3D array "mov" convolved by a 2D array "img".
+    """Convolves a 3D array by a 2D array using phase correlation.
 
     Uses phase correlation with normalization for motion correction.
 
-    Parameters
-    ----------
-    mov : np.ndarray
-        The frames to process (nImg x Ly x Lx).
-    img : np.ndarray
-        The convolution kernel (2D array).
+    Args:
+        mov: The frames to process with shape (nImg, Ly, Lx).
+        img: The convolution kernel as a 2D array.
 
     Returns:
-    -------
-    np.ndarray
-        Convolved data (nImg x Ly x Lx).
+        The convolved data with shape (nImg, Ly, Lx).
     """
-    mov_fft = torch.from_numpy(mov)
-    mov_fft = torch_fft2(mov_fft, dim=(-2, -1))
-    mov_fft /= _eps + torch.abs(mov_fft)
-    mov_fft *= torch.from_numpy(img)
-    mov_fft = torch.real(torch_ifft2(mov_fft, dim=(-2, -1)))
-    return mov_fft.numpy()
+    mov_fft = scipy_fft2(mov, axes=(-2, -1))
+    mov_fft /= _EPS + np.abs(mov_fft)
+    mov_fft *= img
+    return np.real(scipy_ifft2(mov_fft, axes=(-2, -1)))
 
 
 @vectorize([complex64(complex64, complex64)], nopython=True, target="parallel")

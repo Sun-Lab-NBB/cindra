@@ -25,6 +25,21 @@ _supported_systems = tuple(AcquisitionSystems)
 _supported_sessions = (SessionTypes.MESOSCOPE_EXPERIMENT,)
 
 
+def get_session_root(session: SessionData) -> Path:
+    """Returns the canonical session root path for consistent job ID generation.
+
+    The session root is the parent directory of the raw_data directory. This path format matches what sl-forgery uses
+    when submitting jobs to the remote compute server, ensuring consistent job IDs across local and remote processing.
+
+    Args:
+        session: The loaded SessionData instance.
+
+    Returns:
+        The canonical session root path (parent of raw_data).
+    """
+    return session.raw_data.raw_data_path.parent
+
+
 class SingleDayJobNames(StrEnum):
     """Defines the job names for the single-day suite2p processing pipeline components."""
 
@@ -208,6 +223,10 @@ def process_single_day(
 
     # Instantiates the SessionData instance for the processed session.
     session_data = SessionData.load(session_path=session_path)
+
+    # Normalizes session_path to the canonical session root for consistent job ID generation.
+    # This ensures job IDs match regardless of whether the user passed raw_data or session root paths.
+    session_path = get_session_root(session=session_data)
 
     # Ensures that the session supports this type of processing.
     if session_data.acquisition_system not in _supported_systems:

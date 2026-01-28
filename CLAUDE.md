@@ -53,11 +53,14 @@ state to prevent integration errors.
 
 ## Available Skills
 
-| Skill                  | Description                                                         |
-|------------------------|---------------------------------------------------------------------|
-| `/explore-codebase`    | Perform in-depth codebase exploration at session start              |
-| `/sun-lab-style`       | Apply Sun Lab coding conventions (REQUIRED for all code changes)    |
-| `/suite2p-processing`  | Guide agents through suite2p processing workflows using MCP tools   |
+| Skill                     | Description                                                         |
+|---------------------------|---------------------------------------------------------------------|
+| `/explore-codebase`       | Perform in-depth codebase exploration at session start              |
+| `/sun-lab-style`          | Apply Sun Lab coding conventions (REQUIRED for all code changes)    |
+| `/single-day-processing`  | Guide agents through single-day suite2p processing using MCP tools  |
+| `/single-day-config`      | Complete reference for single-day pipeline configuration parameters |
+| `/multi-day-processing`   | Guide agents through multi-day cell tracking using MCP tools        |
+| `/multi-day-config`       | Complete reference for multi-day pipeline configuration parameters  |
 
 ## Project Context
 
