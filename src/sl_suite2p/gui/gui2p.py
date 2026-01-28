@@ -104,13 +104,6 @@ class MainWindow(QMainWindow):
         model = np.load(self.classorig, allow_pickle=True).item()
         self.default_keys = model["keys"]
 
-        # load initial file
-        # statfile = "C:/Users/carse/OneDrive/Documents/suite2p/plane0/stat.npy"
-        # statfile = "D:/grive/cshl_suite2p/GT1/suite2p/plane0/stat.npy"
-        # statfile = "/media/carsen/DATA1/TIFFS/auditory_cortex/suite2p/plane0/stat.npy"
-        # folder = "D:/DATA/GT1/singlechannel_half/suite2p/"
-        # self.fname = folder
-        # io.load_folder(self)
         if statfile is not None:
             self.fname = statfile
             io.load_proc(self)
@@ -254,10 +247,6 @@ class MainWindow(QMainWindow):
         self.p1.addItem(self.color1)
         self.view1.setLevels([0, 255])
         self.color1.setLevels([0, 255])
-        # self.view1.setImage(np.random.rand(500,500,3))
-        # x = np.arange(0,500)
-        # img = np.concatenate((np.zeros((500,500,3)), 127*(1+np.tile(np.sin(x/100)[:,np.newaxis,np.newaxis],(1,500,1)))),axis=-1)
-        # self.color1.setImage(img)
         # --- noncells image
         self.p2 = graphics.ViewBox(parent=self, lockAspect=True, name="plot2", border=[100, 100, 100], invertY=True)
         self.win.addItem(self.p2, 0, 1)
@@ -281,14 +270,11 @@ class MainWindow(QMainWindow):
         self.p3.setMouseEnabled(x=True, y=False)
         self.p3.enableAutoRange(x=True, y=True)
         self.win.addItem(self.p3, row=1, col=0, colspan=2)
-        # self.p3 = pg.PlotItem()
-        # self.v3.addItem(self.p3)
         self.win.ci.layout.setRowStretchFactor(0, 2)
         layout = self.win.ci.layout
         layout.setColumnMinimumWidth(0, 1)
         layout.setColumnMinimumWidth(1, 1)
         layout.setHorizontalSpacing(20)
-        # self.win.scene().sigMouseClicked.connect(self.plot_clicked)
 
     def keyPressEvent(self, event):
         if self.loaded:
@@ -700,8 +686,4 @@ def run(statfile=None):
     app.setWindowIcon(app_icon)
     GUI = MainWindow(statfile=statfile)
     ret = app.exec_()
-    # GUI.save_gui_data()
     sys.exit(ret)
-
-
-# run()

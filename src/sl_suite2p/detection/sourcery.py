@@ -65,7 +65,6 @@ def getStU(ops, U):
     # compute covariance of neuropil masks with spatial masks
     StU = S.reshape((Lyc * Lxc, -1)).transpose() @ U.reshape((Lyc * Lxc, -1))
     StS = S.reshape((Lyc * Lxc, -1)).transpose() @ S.reshape((Lyc * Lxc, -1))
-    # U = np.reshape(U, (-1,Lyc,Lxc))
     return S, StU, StS
 
 
@@ -83,7 +82,6 @@ def drawClusters(stat, ops):
         y = stat[n]["ypix"][isingle]
         x = stat[n]["xpix"][isingle]
         Lam[y, x] = stat[n]["lam"][isingle]
-        # iclust[ypix,xpix] = n*np.ones(ypix.shape)
         H[y, x, 0] = r[n] * np.ones(y.shape)
 
     S = np.ones((Ly, Lx, 1))
@@ -362,7 +360,6 @@ def iter_extend(ypix, xpix, Ucell, code, refine=-1, change_codes=False):
         usub = Ucell[ypix, xpix, :]
         lam = usub @ np.expand_dims(code, axis=1)
         lam = np.squeeze(lam, axis=1)
-        # ix = lam>max(0, np.mean(lam)/3)
         ix = lam > max(0, lam.max() / 5.0)
         if ix.sum() == 0:
             break
@@ -372,7 +369,6 @@ def iter_extend(ypix, xpix, Ucell, code, refine=-1, change_codes=False):
             code = lam @ usub[ix, :]
         if iter == 0:
             sgn = 1.0
-            # sgn = np.sign(ix.sum()-npix)
         if np.sign(sgn * (ix.sum() - npix)) <= 0:
             break
         npix = ypix.size
@@ -507,13 +503,9 @@ def sourcery(mov: np.ndarray, ops, plane_number: int):
             # good place to get connected regions
             stat = [{"ypix": ypix[n], "lam": lam[n], "xpix": xpix[n]} for n in range(ncells)]
             stat = connected_region(stat, ops)
-            # good place to remove ROIs that overlap, change ncells, codes, ypix, xpix, lam, L
-            # stat, ix = remove_overlaps(stat, ops, Lyc, Lxc)
             ypix = [stat[n]["ypix"] for n in range(len(stat))]
             xpix = [stat[n]["xpix"] for n in range(len(stat))]
             lam = [stat[n]["lam"] for n in range(len(stat))]
-            # L = L[:,:,ix]
-            # codes = codes[ix, :]
             ncells = len(ypix)
         if refine > 0:
             Ucell = Ucell + (S.reshape((-1, nbasis)) @ neu).reshape(U.shape)
@@ -523,7 +515,6 @@ def sourcery(mov: np.ndarray, ops, plane_number: int):
             Ucell = U
         if refine >= 0:
             StU = S.reshape((Lyc * Lxc, -1)).transpose() @ Ucell.reshape((Lyc * Lxc, -1))
-            # StU = np.reshape(S, (Lyc*Lxc,-1)).transpose() @ np.reshape(Ucell, (Lyc*Lxc, -1))
             neu = np.linalg.solve(StS, StU).astype("float32")
         refine -= 1
     Ucell = U - (S.reshape((-1, nbasis)) @ neu).reshape(U.shape)
@@ -537,8 +528,6 @@ def sourcery(mov: np.ndarray, ops, plane_number: int):
 
 
 def postprocess(ops, stat, Ucell, codes):
-    # this is a good place to merge ROIs
-    # mPix, mLam, codes = mergeROIs(ops, Lyc,Lxc,d0,mPix,mLam,codes,Ucell)
     stat = connected_region(stat, ops)
     stat = get_stat(ops, stat, Ucell, codes)
     stat = np.array(stat)

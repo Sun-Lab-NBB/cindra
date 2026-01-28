@@ -107,12 +107,10 @@ class ROIDraw(QMainWindow):
         self.cwidget = QWidget(self)
         self.setCentralWidget(self.cwidget)
         self.l0 = QGridLayout()
-        # layout = QtGui.QFormLayout()
         self.cwidget.setLayout(self.l0)
         self.stylePressed = "QPushButton {Text-align: left; background-color: rgb(100,50,100); color:white;}"
         self.styleUnpressed = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:white;}"
 
-        # self.p0 = pg.ViewBox(lockAspect=False,name="plot1",border=[100,100,100],invertY=True)
         self.win = pg.GraphicsLayoutWidget()
         # --- cells image
         self.win = pg.GraphicsLayoutWidget()
@@ -452,7 +450,6 @@ class ROIDraw(QMainWindow):
         self.fmin = 0
         ax.setTicks([ttick])
         self.p1.setXRange(0, self.Fcell.shape[1])
-        # self.p1.setYRange(self.fmin, self.fmax)
 
 
 class sROI:

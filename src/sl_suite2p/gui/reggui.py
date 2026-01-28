@@ -41,9 +41,7 @@ class BinaryPlayer(QMainWindow):
         self.cwidget = QWidget(self)
         self.setCentralWidget(self.cwidget)
         self.l0 = QGridLayout()
-        # layout = QtGui.QFormLayout()
         self.cwidget.setLayout(self.l0)
-        # self.p0 = pg.ViewBox(lockAspect=False,name="plot1",border=[100,100,100],invertY=True)
         self.win = pg.GraphicsLayoutWidget()
         # --- cells image
         self.win = pg.GraphicsLayoutWidget()
@@ -128,7 +126,6 @@ class BinaryPlayer(QMainWindow):
         self.scatter3 = pg.ScatterPlotItem()
         self.p3.setXLink("plot_shift")
 
-        # self.p2.autoRange(padding=0.01)
         self.win.ci.layout.setRowStretchFactor(0, 12)
         self.movieLabel = QLabel("No ops chosen")
         self.movieLabel.setStyleSheet("color: white;")
@@ -167,11 +164,6 @@ class BinaryPlayer(QMainWindow):
         ll = QLabel("(when paused, left/right arrow keys can move slider)")
         ll.setStyleSheet("color: white;")
         self.l0.addWidget(ll, 16, 0, 1, 3)
-        # speedLabel = QLabel("Speed:")
-        # self.speedSpinBox = QtGui.QSpinBox()
-        # self.speedSpinBox.setRange(1, 9999)
-        # self.speedSpinBox.setValue(100)
-        # self.speedSpinBox.setSuffix("%")
         self.frameSlider.valueChanged.connect(self.go_to_frame)
         self.l0.addWidget(self.movieLabel, 0, 0, 1, 5)
         self.updateFrameSlider()
@@ -294,11 +286,6 @@ class BinaryPlayer(QMainWindow):
             if hasattr(self, "zmax"):
                 self.Zedit.setText(str(self.zmax[self.cframe]))
             self.iside.setImage(self.zstack[int(self.Zedit.text())], levels=self.zrange)
-        # if self.maskbox.isChecked():
-        #    imgmin = self.img.min()
-        #    self.allmasks[:,:,-1] = np.maximum(0, ((self.img - imgmin) / (self.img.max() - imgmin) - 0.5)*2) * 255 * self.mask_bool
-        #    self.maskmain.setImage(self.allmasks, levels=[0, 255])
-        #    self.maskside.setImage(self.allmasks, levels=[0, 255])
 
         self.imain.setImage(self.img, levels=self.srange)
         self.frameSlider.setValue(self.cframe)
@@ -349,8 +336,6 @@ class BinaryPlayer(QMainWindow):
                 self.stat[n]["yext"] = yext[goodi] + 0.5
                 self.stat[n]["xext"] = xext[goodi] + 0.5
                 self.sroi[yext[goodi], xext[goodi]] = 200
-                # self.sroi[ypix, xpix] = 100
-                # self.RGB[ypix, xpix] = self.colors[n]
                 self.RGB[yext[goodi], xext[goodi]] = self.colors[n]
             else:
                 self.stat[n]["yext"] = yext
@@ -405,7 +390,6 @@ class BinaryPlayer(QMainWindow):
             # check that all binaries still exist
             dy, dx = compute_dydx(ops1)
             for ipl, ops in enumerate(ops1):
-                # if os.path.isfile(ops["reg_file"]):
                 if os.path.isfile(ops["reg_file"]):
                     reg_file = ops["reg_file"]
                 else:
@@ -726,10 +710,8 @@ class BinaryPlayer(QMainWindow):
             console.echo(message=f"ERROR: {e}", level=LogLevel.ERROR)
 
     def cell_mask(self):
-        # self.cmask = np.zeros((self.Ly,self.Lx,3),np.float32)
         self.yext = self.stat[self.ichosen]["yext"]
         self.xext = self.stat[self.ichosen]["xext"]
-        # self.cmask[self.yext,self.xext,2] = (self.srange[1]-self.srange[0])/2 * np.ones((self.yext.size,),np.float32)
 
     def go_to_frame(self):
         self.cframe = int(self.frameSlider.value())

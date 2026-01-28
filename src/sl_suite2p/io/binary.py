@@ -248,8 +248,8 @@ class BinaryFile:
             if np.mean(good_indices) > reject_threshold:
                 data = data[good_indices]
 
-            # If a processed data batch has more frames than bin_size, bins the data. Otherwise, rejects the batch
-            # altogether
+            # If a processed data batch has more frames than bin_size, bins the data. Otherwise, averages the batch into
+            # a single bin to preserve data when there are many bad frames.
             if data.shape[0] > bin_size:
                 # Retrieves the dimensions of the data after cropping and frame rejection
                 frame_number, height, width = data.shape
@@ -262,6 +262,10 @@ class BinaryFile:
                 # (from int16) type.
                 binned_movie = movie.reshape(-1, bin_size, height, width).astype(np.float32).mean(axis=1)
                 batches.extend(binned_movie)
+            elif data.shape[0] > 0:
+                # Batch has fewer frames than bin_size (likely due to many bad frames). Averages the batch into a single
+                # bin to preserve data.
+                batches.append(data.astype(np.float32).mean(axis=0))
 
         # Stacks and returns the batches as a single NumPy array representing the binned movie.
         return np.stack(batches, dtype=np.float32)

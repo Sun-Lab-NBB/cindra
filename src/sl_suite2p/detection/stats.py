@@ -138,12 +138,10 @@ class ROI:
     @property
     def mean_r_squared(self) -> float:
         return mean_r_squared(y=self.ypix[self.soma_crop], x=self.xpix[self.soma_crop])
-        # return mean_r_squared(y=self.ypix[self.lam > self.lam.max()/5], x=self.xpix[self.lam > self.lam.max()/5])
 
     @property
     def mean_r_squared0(self) -> float:
         return np.mean(self.rsort[: self.npix_soma])
-        # return np.mean(self.rsort[:self.ypix[self.lam > self.lam.max()/5].size])
 
     @property
     def mean_r_squared_compact(self) -> float:
