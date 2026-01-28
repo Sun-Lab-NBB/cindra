@@ -278,9 +278,7 @@ class VisWindow(QMainWindow):
         self.cwidget = QWidget(self)
         self.setCentralWidget(self.cwidget)
         self.l0 = QGridLayout()
-        # layout = QtGui.QFormLayout()
         self.cwidget.setLayout(self.l0)
-        # self.p0 = pg.ViewBox(lockAspect=False,name="plot1",border=[100,100,100],invertY=True)
         self.win = pg.GraphicsLayoutWidget()
         # --- cells image
         self.win = pg.GraphicsLayoutWidget()
@@ -333,12 +331,10 @@ class VisWindow(QMainWindow):
         self.imgROI = pg.ImageItem(autoDownsample=True)
         self.p2.addItem(self.imgROI)
         self.p2.setMouseEnabled(x=False, y=False)
-        # self.p2.setLabel("left", "neurons")
         self.p2.hideAxis("bottom")
         self.bloaded = self.parent.bloaded
         self.p3 = self.win.addPlot(title="", row=2, col=0, colspan=2)
         self.p3.setMouseEnabled(x=False, y=False)
-        # self.p3.getAxis("left").setTicks([[(0,"")]])
         self.p3.setLabel("bottom", "time")
         # set colormap to viridis
         colormap = cm.get_cmap("gray_r")
@@ -415,7 +411,6 @@ class VisWindow(QMainWindow):
         self.comboBox = QComboBox(self)
         self.l0.addWidget(self.comboBox, 1, 0, 1, 2)
         self.l0.addWidget(QLabel("PC 1:"), 2, 0, 1, 2)
-        # self.l0.addWidget(QLabel(""),4,0,1,1)
         self.selectBtn = QPushButton("show selected cells in GUI")
         self.selectBtn.clicked.connect(self.select_cells)
         self.selectBtn.setEnabled(True)
@@ -431,8 +426,6 @@ class VisWindow(QMainWindow):
         self.process = QtCore.QProcess(self)
         self.process.readyReadStandardOutput.connect(self.stdout_write)
         self.process.readyReadStandardError.connect(self.stderr_write)
-        # disable the button when running the s2p process
-        # self.process.started.connect(self.started)
         self.process.finished.connect(lambda: self.finished(self.parent))
 
         self.win.show()
@@ -587,7 +580,6 @@ class VisWindow(QMainWindow):
 
         axy = self.p2.getAxis("left")
         axx = self.p2.getAxis("bottom")
-        # axy.setTicks([[(0.0,str(yrange[0])),(float(yrange.size),str(yrange[-1]))]])
         self.imgROI.setLevels([self.sat[0], self.sat[1]])
 
     def PC_on(self, plot):
@@ -627,13 +619,10 @@ class VisWindow(QMainWindow):
         self.comboBox.addItem("PC")
         self.PCedit.returnPressed.connect(self.PCreturn)
 
-        # model = np.load(os.path.join(parent.ops["save_path"], "embedding.npy"))
-        # model = np.load("embedding.npy", allow_pickle=True).item()
         self.isort1 = np.argsort(self.model.embedding[:, 0])
         self.Usv = self.model.Usv
         self.Vsv = self.model.Vsv
         self.comboBox.addItem("rastermap")
-        # self.isort1, self.isort2 = mapping.main(self.sp,None,self.u,self.sv,self.v)
 
         self.raster = True
         ncells = len(self.parent.stat)
@@ -676,16 +665,10 @@ class VisWindow(QMainWindow):
         try:
             self.model = Rastermap()
             self.model.fit(self.sp)
-            # proc  = {"embedding": model.embedding, "uv": [model.u, model.v],
-            #         "ops": ops, "filename": args.S, "train_time": train_time}
-            # basename, fname = os.path.split(args.S)
-            # np.save(os.path.join(basename, "embedding.npy"), proc)
             self.activate()
         except Exception as e:
             console.echo(message="Rastermap issue: Interrupted by error (not finished)", level=LogLevel.ERROR)
             console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
-        # self.process.start("python -u -W ignore -m rastermap --S %s --ops %s"%
-        #                    (spath, opspath))
 
     def finished(self):
         if self.finish and not self.error:
@@ -696,9 +679,7 @@ class VisWindow(QMainWindow):
 
     def stdout_write(self):
         output = str(self.process.readAllStandardOutput(), "utf-8")
-        # self.logfile = open(os.path.join(self.save_path, "suite2p/run.log"), "a")
         sys.stdout.write(output)
-        # self.logfile.close()
 
     def stderr_write(self):
         sys.stdout.write(">>>ERROR<<<\n")
@@ -734,7 +715,6 @@ class VisWindow(QMainWindow):
                 }
                 if not hasattr(self, "isort2"):
                     self.model = Rastermap()
-                    # unorm = (self.u**2).sum(axis=0)**0.5
                     self.model.fit(self.sp.T, Usv=self.Vsv, Vsv=self.Usv)
                     self.isort2 = np.argsort(self.model.embedding[:, 0])
                 self.tsort = self.isort2.astype(np.int32)

@@ -154,16 +154,8 @@ class Output:
     file.
     """
 
-    save_mat: bool = False
-    """Determines whether to save the single-session pipeline output as a MATLAB file (e.g., Fall.mat)."""
-
-    combined: bool = True
-    """Determines whether to combine results across planes into a 'combined' folder at the end of processing. If the 
-    results of the single-day pipeline are intended to be later processed as part of the multi-day pipeline, this has 
-    to be True. This option is safe to use even with single-plane data."""
-
     aspect: float = 0.666666666
-    """The pixel-to-micron ratio (X:Y) used in the GUI to ensure all images are displayed correctly. This field is not 
+    """The pixel-to-micron ratio (X:Y) used in the GUI to ensure all images are displayed correctly. This field is not
     used during headless processing."""
 
 

@@ -205,9 +205,6 @@ class RangeSlider(QSlider):
                 }"
         )
 
-        # self.opt = QStyleOptionSlider()
-        # self.opt.orientation=QtCore.Qt.Vertical
-        # self.initStyleOption(self.opt)
         # 0 for the low, 1 for the high, -1 for both
         self.active_slider = 0
         self.parent = parent

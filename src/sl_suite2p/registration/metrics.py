@@ -324,10 +324,7 @@ def local_corr(mov, batch_size, num_cores):
         X -= X.mean(axis=0)
         Xstd = X.std(axis=0)
         Xstd[Xstd == 0] = np.inf
-        # X /= np.maximum(1, X.std(axis=0))
         X /= Xstd
-        # for n in range(X.shape[0]):
-        #    X[n,:,:] *= convolve2d(X[n,:,:], filt, "same")
         X *= filt_parallel(X, filt, num_cores)
         img_corr += X.mean(axis=0)
         ix += batch_size

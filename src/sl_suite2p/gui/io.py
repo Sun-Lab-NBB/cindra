@@ -4,7 +4,6 @@ import os
 import time
 
 import numpy as np
-import scipy.io
 from scipy.ndimage import gaussian_filter1d
 from qtpy.QtWidgets import QFileDialog, QMessageBox
 from scipy.interpolate import interp1d
@@ -32,7 +31,6 @@ def make_masks_and_enable_buttons(parent):
     parent.checkBoxN.setChecked(False)
     parent.checkBoxN.setEnabled(True)
     parent.loadBeh.setEnabled(True)
-    parent.saveMat.setEnabled(True)
     parent.saveMerge.setEnabled(True)
     parent.sugMerge.setEnabled(True)
     parent.manual.setEnabled(True)
@@ -392,27 +390,6 @@ def save_iscell(parent):
     )
     parent.lcell0.setText("%d" % (parent.iscell.sum()))
     parent.lcell1.setText("%d" % (parent.iscell.size - parent.iscell.sum()))
-
-
-def save_mat(parent):
-    console.echo(message="Saving to mat file...", level=LogLevel.SUCCESS)
-    matpath = os.path.join(parent.basename, "Fall.mat")
-    if "date_processed" in parent.ops:
-        parent.ops["date_processed"] = []
-    scipy.io.savemat(
-        matpath,
-        {
-            "stat": parent.stat,
-            "ops": parent.ops,
-            "F": parent.Fcell,
-            "Fneu": parent.Fneu,
-            "spks": parent.Spks,
-            "iscell": np.concatenate((parent.iscell[:, np.newaxis], parent.probcell[:, np.newaxis]), axis=1),
-            "redcell": np.concatenate(
-                (np.expand_dims(parent.redcell, axis=1), np.expand_dims(parent.probredcell, axis=1)), axis=1
-            ),
-        },
-    )
 
 
 def save_merge(parent):
