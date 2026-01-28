@@ -1,9 +1,8 @@
-"""This module provides the MCP (Model Context Protocol) server implementation for sl-suite2p.
+"""Provides the MCP (Model Context Protocol) server implementation for sl-suite2p.
 
-The MCP server exposes sl-suite2p pipeline functionality as tools and resources that can be accessed
-by AI assistants like Claude.
+The MCP server exposes sl-suite2p pipeline functionality as tools that can be accessed by AI assistants.
 """
 
-from .server import server, run_server, create_server
+from .server import mcp, run_server
 
-__all__ = ["create_server", "run_server", "server"]
+__all__ = ["mcp", "run_server"]
