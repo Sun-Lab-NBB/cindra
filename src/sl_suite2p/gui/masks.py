@@ -164,9 +164,6 @@ def make_colors(parent):
     parent.colors["colorbar"].append([0, 0.5, 1])
     parent.colors["colorbar"].append([0, 0.5, 1])
 
-    # parent.ops_plot[4] = corrcols
-    # parent.cc = cc
-
 
 def flip_plot(parent):
     parent.iflip = parent.ichosen
@@ -295,11 +292,7 @@ def init_masks(parent):
 
 def rgb_masks(parent, col, c):
     for i in range(2):
-        # S = np.expand_dims(parent.rois["Sroi"][i],axis=2)
         H = col[parent.rois["iROI"][i, 0], :]
-        # H = np.expand_dims(H,axis=2)
-        # hsv = np.concatenate((H,S,S),axis=2)
-        # rgb = (hsv_to_rgb(hsv)*255).astype(np.uint8)
         parent.colors["RGB"][i, c, :, :, :3] = H
 
 
@@ -473,7 +466,6 @@ def plot_colorbar(parent):
 
 
 def plot_masks(parent, M):
-    # M = parent.RGB[:,:,np.newaxis], parent.Alpha[]
     parent.color1.setImage(M[0], levels=(0.0, 255.0))
     parent.color2.setImage(M[1], levels=(0.0, 255.0))
 

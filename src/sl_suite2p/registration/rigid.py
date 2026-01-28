@@ -85,7 +85,6 @@ def phasecorr(data, cfRefImg, maxregshift, smooth_sigma_time) -> tuple[int, int,
     min_dim = np.minimum(*data.shape[1:])  # maximum registration shift allowed
     lcorr = int(np.minimum(np.round(maxregshift * min_dim), min_dim // 2))
 
-    # cc = convolve(data, cfRefImg, lcorr)
     data = convolve(data, cfRefImg)
     cc = np.real(
         np.block(

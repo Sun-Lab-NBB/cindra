@@ -23,7 +23,6 @@ def plot_trace(parent):
         sp /= sp.max()
         # agus
         sp *= fmax - fmin
-        # sp += fmin*0.95
         if parent.tracesOn:
             parent.p3.plot(parent.trange, f, pen="c")
         if parent.neuropilOn:
@@ -70,10 +69,6 @@ def plot_trace(parent):
             parent.p3.plot(parent.trange, -1 * bsc + favg * bsc, pen=(140, 140, 140))
             parent.p3.plot(parent.beh_time, -1 * bsc + parent.beh * bsc, pen="w")
             parent.fmin = -1 * bsc
-            # parent.traceLabel[0].setText("<font color="gray">mean activity</font>")
-            # parent.traceLabel[1].setText("<font color='white'>1D variable</font>")
-            # parent.traceLabel[2].setText("")
-            # ck.append((-0.5*bsc,"1D var"))
 
         parent.fmax = (len(pmerge) - 1) * kspace + 1
         ax.setTicks([ttick])

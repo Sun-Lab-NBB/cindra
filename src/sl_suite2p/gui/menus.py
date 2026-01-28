@@ -34,13 +34,6 @@ def mainmenu(parent):
     parent.loadBeh.setEnabled(False)
     parent.addAction(parent.loadBeh)
 
-    # save to matlab file
-    parent.saveMat = QAction("&Save to mat file (*.mat)", parent)
-    parent.saveMat.setShortcut("Ctrl+S")
-    parent.saveMat.triggered.connect(lambda: io.save_mat(parent))
-    parent.saveMat.setEnabled(False)
-    parent.addAction(parent.saveMat)
-
     # export figure
     exportFig = QAction("Export as image (svg)", parent)
     exportFig.triggered.connect(lambda: io.export_fig(parent))
@@ -59,7 +52,6 @@ def mainmenu(parent):
     file_menu.addAction(loadProc)
     file_menu.addAction(loadFolder)
     file_menu.addAction(parent.loadBeh)
-    file_menu.addAction(parent.saveMat)
     file_menu.addAction(exportFig)
     file_menu.addAction(parent.manual)
 

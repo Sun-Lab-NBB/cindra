@@ -116,7 +116,6 @@ class RunWindow(QDialog):
             "do_bidiphase",
             "reg_tif",
             "reg_tif_chan2",
-            "save_mat",
             "one_p_reg",
             "nonrigid",
             "connected",
@@ -140,8 +139,6 @@ class RunWindow(QDialog):
         ]
         outkeys = [
             "preclassify",
-            "save_mat",
-            "combined",
             "reg_tif",
             "reg_tif_chan2",
             "aspect",
@@ -199,9 +196,6 @@ class RunWindow(QDialog):
             "process each plane with a separate job on a computing cluster",
             "ignore flyback planes 0-indexed separated by a comma e.g. '0,10'; '-1' means no planes ignored so all planes processed",
             "apply ROI classifier before signal extraction with probability threshold (set to 0 to turn off)",
-            "save output also as mat file 'Fall.mat'",
-            "save output also as NWB file 'ophys.nwb'",
-            "combine results across planes in separate folder 'combined' at end of processing",
             "if 1, registered tiffs are saved",
             "if 1, registered tiffs of channel 2 (non-functional channel) are saved",
             "um/pixels in X / um/pixels in Y (for correct aspect ratio in GUI)",
@@ -378,7 +372,6 @@ class RunWindow(QDialog):
         self.cleanButton.clicked.connect(self.clean_script)
         self.cleanLabel = QLabel("")
         self.layout.addWidget(self.cleanLabel, n0, 4, 1, 12)
-        # n0+=1
         self.listOps = QPushButton("save settings and\n add more (batch)")
         self.listOps.clicked.connect(self.add_batch)
         self.layout.addWidget(self.listOps, n0, 12, 1, 2)
@@ -608,9 +601,7 @@ class RunWindow(QDialog):
         output = str(self.process.readAllStandardOutput(), "utf-8")
         cursor.insertText(output)
         self.textEdit.ensureCursorVisible()
-        # self.logfile = open(os.path.join(self.save_path, "suite2p/run.log"), "a")
         self.logfile.write(output)
-        # self.logfile.close()
 
     def stderr_write(self):
         cursor = self.textEdit.textCursor()
@@ -620,7 +611,6 @@ class RunWindow(QDialog):
         cursor.insertText(output)
         self.textEdit.ensureCursorVisible()
         self.error = True
-        # self.logfile = open(os.path.join(self.save_path, "suite2p/run.log"), "a")
         self.logfile.write(">>>ERROR<<<\n")
         self.logfile.write(output)
 
