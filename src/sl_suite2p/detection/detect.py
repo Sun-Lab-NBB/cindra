@@ -7,7 +7,7 @@ import numpy as np
 from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console
 
-from . import sourcery, anatomical, chan2detect, sparsedetect
+from . import sourcery, chan2detect, sparsedetect
 from .stats import roi_stats
 from .denoise import pca_denoise
 from ..io.binary import BinaryFile
@@ -175,35 +175,15 @@ def detection_wrapper(
     if ops.get("denoise", 1):
         mov = pca_denoise(mov, block_size=[ops["block_size"][0] // 2, ops["block_size"][1] // 2], n_comps_frac=0.5)
 
-    if ops.get("anatomical_only", 0):
-        source_types = [
-            "maximum_projection_image / mean_image",
-            "mean_image",
-            "enhanced_mean_image",
-            "maximum_projection_image",
-        ]
-        message = (
-            f"Applying Cellpose to plane {plane_number} movie to find cell masks in "
-            f"{source_types[int(ops['anatomical_only']) - 1]}..."
-        )
-        console.echo(message=message, level=LogLevel.INFO)
-        timer.reset()
-        stat = anatomical.select_rois(ops=ops, mov=mov, diameter=ops.get("diameter", None))
-        message = (
-            f"Plane {plane_number} cell masks: discovered. Detected ROIs: {len(stat)}. "
-            f"Time taken: {timer.elapsed} seconds."
-        )
-        console.echo(message=message, level=LogLevel.SUCCESS)
-    else:
-        message = f"Finding cell mask ROIs for plane {plane_number}..."
-        console.echo(message=message, level=LogLevel.INFO)
-        timer.reset()
-        stat = select_rois(ops=ops, mov=mov, sparse_mode=ops["sparse_mode"], plane_number=plane_number)
-        message = (
-            f"Plane {plane_number} cell masks: discovered. Detected ROIs: {len(stat)}. "
-            f"Time taken: {timer.elapsed} seconds."
-        )
-        console.echo(message=message, level=LogLevel.SUCCESS)
+    message = f"Finding cell mask ROIs for plane {plane_number}..."
+    console.echo(message=message, level=LogLevel.INFO)
+    timer.reset()
+    stat = select_rois(ops=ops, mov=mov, sparse_mode=ops["sparse_mode"], plane_number=plane_number)
+    message = (
+        f"Plane {plane_number} cell masks: discovered. Detected ROIs: {len(stat)}. "
+        f"Time taken: {timer.elapsed} seconds."
+    )
+    console.echo(message=message, level=LogLevel.SUCCESS)
 
     ymin = int(yrange[0])
     xmin = int(xrange[0])
@@ -279,7 +259,19 @@ def select_rois(ops: dict[str, Any], mov: np.ndarray, plane_number: int, sparse_
             plane_number=plane_number,
         )
         ops.update(new_ops)
+
+        # Sets the diameter from the computed spatial_scale_pixels if not explicitly configured.
+        if ops.get("diameter", 0) == 0:
+            ops["diameter"] = ops["spatial_scale_pixels"]
     else:
+        # Non-sparse mode (sourcery) requires an explicit diameter value.
+        if ops.get("diameter", 0) == 0:
+            message = (
+                "Unable to run non-sparse ROI detection. The 'diameter' parameter must be set to a non-zero value "
+                "when using sparse_mode=False. Either set 'diameter' explicitly in the configuration or use "
+                "sparse_mode=True (recommended)."
+            )
+            console.error(message=message, error=ValueError)
         ops, stat = sourcery.sourcery(mov=mov, ops=ops, plane_number=plane_number)
 
     stat = np.array(stat)

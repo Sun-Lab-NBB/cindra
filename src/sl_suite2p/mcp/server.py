@@ -14,11 +14,13 @@ import traceback
 from dataclasses import field, dataclass
 
 import numpy as np
+from natsort import natsorted
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from sl_shared_assets import SessionData, SessionTypes
 from mcp.server.fastmcp import FastMCP
 
 from ..pipeline import (
+    get_session_root,
     process_multi_day,
     process_single_day,
 )
@@ -324,18 +326,27 @@ def _binarize_worker(session_path: Path, config_path: Path) -> None:
         config_path: The path to the configuration file.
     """
     session_key = _get_session_key(session_path)
-    success, plane_count, error = _run_binarize_job(session_path=session_path, config_path=config_path)
+    success: bool = False
+    plane_count: int = 0
+    error: str | None = None
 
-    if _single_day_batch_state is not None:
-        with _single_day_batch_state.lock:
-            _single_day_batch_state.binarize_active.pop(session_key, None)
-            if success:
-                _single_day_batch_state.binarize_completed.add(session_key)
-                _single_day_batch_state.plane_counts[session_key] = plane_count
-            else:
-                _single_day_batch_state.binarize_failed.add(session_key)
-                if error:
-                    _single_day_batch_state.errors.setdefault(session_key, []).append(f"binarize: {error}")
+    try:
+        success, plane_count, error = _run_binarize_job(session_path=session_path, config_path=config_path)
+    except Exception as e:
+        frames = traceback.extract_tb(e.__traceback__)
+        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
+        success, plane_count, error = False, 0, f"Worker crash: {type(e).__name__}: {e} ({location})"
+    finally:
+        if _single_day_batch_state is not None:
+            with _single_day_batch_state.lock:
+                _single_day_batch_state.binarize_active.pop(session_key, None)
+                if success:
+                    _single_day_batch_state.binarize_completed.add(session_key)
+                    _single_day_batch_state.plane_counts[session_key] = plane_count
+                else:
+                    _single_day_batch_state.binarize_failed.add(session_key)
+                    if error:
+                        _single_day_batch_state.errors.setdefault(session_key, []).append(f"binarize: {error}")
 
 
 def _process_worker(session_path: Path, config_path: Path, plane_index: int, workers: int) -> None:
@@ -349,21 +360,29 @@ def _process_worker(session_path: Path, config_path: Path, plane_index: int, wor
     """
     session_key = _get_session_key(session_path)
     plane_key = _get_plane_key(session_path, plane_index)
-    success, error = _run_process_job(
-        session_path=session_path, config_path=config_path, plane_index=plane_index, workers=workers
-    )
+    success: bool = False
+    error: str | None = None
 
-    if _single_day_batch_state is not None:
-        with _single_day_batch_state.lock:
-            _single_day_batch_state.process_active.pop(plane_key, None)
-            if success:
-                _single_day_batch_state.process_completed.add(plane_key)
-            else:
-                _single_day_batch_state.process_failed.add(plane_key)
-                if error:
-                    _single_day_batch_state.errors.setdefault(session_key, []).append(
-                        f"process_plane_{plane_index}: {error}"
-                    )
+    try:
+        success, error = _run_process_job(
+            session_path=session_path, config_path=config_path, plane_index=plane_index, workers=workers
+        )
+    except Exception as e:
+        frames = traceback.extract_tb(e.__traceback__)
+        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
+        success, error = False, f"Worker crash: {type(e).__name__}: {e} ({location})"
+    finally:
+        if _single_day_batch_state is not None:
+            with _single_day_batch_state.lock:
+                _single_day_batch_state.process_active.pop(plane_key, None)
+                if success:
+                    _single_day_batch_state.process_completed.add(plane_key)
+                else:
+                    _single_day_batch_state.process_failed.add(plane_key)
+                    if error:
+                        _single_day_batch_state.errors.setdefault(session_key, []).append(
+                            f"process_plane_{plane_index}: {error}"
+                        )
 
 
 def _combine_worker(session_path: Path, config_path: Path) -> None:
@@ -374,17 +393,25 @@ def _combine_worker(session_path: Path, config_path: Path) -> None:
         config_path: The path to the configuration file.
     """
     session_key = _get_session_key(session_path)
-    success, error = _run_combine_job(session_path=session_path, config_path=config_path)
+    success: bool = False
+    error: str | None = None
 
-    if _single_day_batch_state is not None:
-        with _single_day_batch_state.lock:
-            _single_day_batch_state.combine_active.pop(session_key, None)
-            if success:
-                _single_day_batch_state.combine_completed.add(session_key)
-            else:
-                _single_day_batch_state.combine_failed.add(session_key)
-                if error:
-                    _single_day_batch_state.errors.setdefault(session_key, []).append(f"combine: {error}")
+    try:
+        success, error = _run_combine_job(session_path=session_path, config_path=config_path)
+    except Exception as e:
+        frames = traceback.extract_tb(e.__traceback__)
+        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
+        success, error = False, f"Worker crash: {type(e).__name__}: {e} ({location})"
+    finally:
+        if _single_day_batch_state is not None:
+            with _single_day_batch_state.lock:
+                _single_day_batch_state.combine_active.pop(session_key, None)
+                if success:
+                    _single_day_batch_state.combine_completed.add(session_key)
+                else:
+                    _single_day_batch_state.combine_failed.add(session_key)
+                    if error:
+                        _single_day_batch_state.errors.setdefault(session_key, []).append(f"combine: {error}")
 
 
 def _single_day_batch_manager() -> None:
@@ -401,16 +428,6 @@ def _single_day_batch_manager() -> None:
 
     while True:
         with _single_day_batch_state.lock:
-            # Cleans up finished threads from all phases.
-            for active_dict in [
-                _single_day_batch_state.binarize_active,
-                _single_day_batch_state.process_active,
-                _single_day_batch_state.combine_active,
-            ]:
-                finished_keys = [key for key, thread in active_dict.items() if not thread.is_alive()]
-                for key in finished_keys:
-                    active_dict.pop(key, None)
-
             # Phase 1: BINARIZE.
             if _single_day_batch_state.current_phase == "binarize":
                 # Starts new binarize jobs (sequential - I/O bound).
@@ -428,8 +445,8 @@ def _single_day_batch_manager() -> None:
 
                 # Checks if binarize phase is complete.
                 if not _single_day_batch_state.binarize_active and not _single_day_batch_state.binarize_queue:
-                    # Builds process queue from completed binarizations.
-                    for session_key in _single_day_batch_state.binarize_completed:
+                    # Builds process queue from completed binarizations (naturally sorted for deterministic order).
+                    for session_key in natsorted(_single_day_batch_state.binarize_completed):
                         plane_count = _single_day_batch_state.plane_counts.get(session_key, 0)
                         for plane in range(plane_count):
                             _single_day_batch_state.process_queue.append((session_key, plane))
@@ -462,8 +479,8 @@ def _single_day_batch_manager() -> None:
 
                 # Checks if process phase is complete.
                 if not _single_day_batch_state.process_active and not _single_day_batch_state.process_queue:
-                    # Builds combine queue from sessions with all planes processed.
-                    for session_key in _single_day_batch_state.binarize_completed:
+                    # Builds combine queue from sessions with all planes processed (naturally sorted).
+                    for session_key in natsorted(_single_day_batch_state.binarize_completed):
                         plane_count = _single_day_batch_state.plane_counts.get(session_key, 0)
                         all_planes_done = all(
                             _get_plane_key(Path(session_key), p) in _single_day_batch_state.process_completed
@@ -584,20 +601,29 @@ def _discover_worker(animal_key: str, config_path: Path, session_paths: list[Pat
         session_paths: The list of session paths for this animal.
         workers: The number of workers to use.
     """
-    success, session_ids, error = _run_discover_job(
-        config_path=config_path, session_paths=session_paths, workers=workers
-    )
+    success: bool = False
+    session_ids: list[str] = []
+    error: str | None = None
 
-    if _multi_day_batch_state is not None:
-        with _multi_day_batch_state.lock:
-            _multi_day_batch_state.discover_active.pop(animal_key, None)
-            if success:
-                _multi_day_batch_state.discover_completed.add(animal_key)
-                _multi_day_batch_state.session_ids[animal_key] = session_ids
-            else:
-                _multi_day_batch_state.discover_failed.add(animal_key)
-                if error:
-                    _multi_day_batch_state.errors.setdefault(animal_key, []).append(f"discover: {error}")
+    try:
+        success, session_ids, error = _run_discover_job(
+            config_path=config_path, session_paths=session_paths, workers=workers
+        )
+    except Exception as e:
+        frames = traceback.extract_tb(e.__traceback__)
+        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
+        success, session_ids, error = False, [], f"Worker crash: {type(e).__name__}: {e} ({location})"
+    finally:
+        if _multi_day_batch_state is not None:
+            with _multi_day_batch_state.lock:
+                _multi_day_batch_state.discover_active.pop(animal_key, None)
+                if success:
+                    _multi_day_batch_state.discover_completed.add(animal_key)
+                    _multi_day_batch_state.session_ids[animal_key] = session_ids
+                else:
+                    _multi_day_batch_state.discover_failed.add(animal_key)
+                    if error:
+                        _multi_day_batch_state.errors.setdefault(animal_key, []).append(f"discover: {error}")
 
 
 def _extract_worker(
@@ -613,19 +639,29 @@ def _extract_worker(
         workers: The number of workers to use.
     """
     extract_key = f"{animal_key}|{session_id}"
-    success, error = _run_extract_job(
-        config_path=config_path, session_paths=session_paths, session_id=session_id, workers=workers
-    )
+    success: bool = False
+    error: str | None = None
 
-    if _multi_day_batch_state is not None:
-        with _multi_day_batch_state.lock:
-            _multi_day_batch_state.extract_active.pop(extract_key, None)
-            if success:
-                _multi_day_batch_state.extract_completed.add(extract_key)
-            else:
-                _multi_day_batch_state.extract_failed.add(extract_key)
-                if error:
-                    _multi_day_batch_state.errors.setdefault(animal_key, []).append(f"extract_{session_id}: {error}")
+    try:
+        success, error = _run_extract_job(
+            config_path=config_path, session_paths=session_paths, session_id=session_id, workers=workers
+        )
+    except Exception as e:
+        frames = traceback.extract_tb(e.__traceback__)
+        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
+        success, error = False, f"Worker crash: {type(e).__name__}: {e} ({location})"
+    finally:
+        if _multi_day_batch_state is not None:
+            with _multi_day_batch_state.lock:
+                _multi_day_batch_state.extract_active.pop(extract_key, None)
+                if success:
+                    _multi_day_batch_state.extract_completed.add(extract_key)
+                else:
+                    _multi_day_batch_state.extract_failed.add(extract_key)
+                    if error:
+                        _multi_day_batch_state.errors.setdefault(animal_key, []).append(
+                            f"extract_{session_id}: {error}"
+                        )
 
 
 def _multi_day_batch_manager() -> None:
@@ -647,12 +683,6 @@ def _multi_day_batch_manager() -> None:
 
     while True:
         with _multi_day_batch_state.lock:
-            # Cleans up finished threads.
-            for active_dict in [_multi_day_batch_state.discover_active, _multi_day_batch_state.extract_active]:
-                finished_keys = [key for key, thread in active_dict.items() if not thread.is_alive()]
-                for key in finished_keys:
-                    active_dict.pop(key, None)
-
             # Phase 1: DISCOVER.
             if _multi_day_batch_state.current_phase == "discover":
                 # Starts new discover jobs.
@@ -678,9 +708,9 @@ def _multi_day_batch_manager() -> None:
 
                 # Checks if discover phase is complete.
                 if not _multi_day_batch_state.discover_active and not _multi_day_batch_state.discover_queue:
-                    # Builds extract queue from completed discoveries.
-                    for animal_key in _multi_day_batch_state.discover_completed:
-                        for session_id in _multi_day_batch_state.session_ids.get(animal_key, []):
+                    # Builds extract queue from completed discoveries (naturally sorted for deterministic order).
+                    for animal_key in natsorted(_multi_day_batch_state.discover_completed):
+                        for session_id in natsorted(_multi_day_batch_state.session_ids.get(animal_key, [])):
                             _multi_day_batch_state.extract_queue.append((animal_key, session_id))
 
                     _multi_day_batch_state.current_phase = "extract"
@@ -718,30 +748,15 @@ def _multi_day_batch_manager() -> None:
         timer.delay(delay=1000, allow_sleep=True)
 
 
-# Configuration tools.
-
-
-@mcp.tool()
-def get_default_single_day_config() -> dict[str, Any]:
-    """Returns the default single-day pipeline configuration as a dictionary."""
-    config: SingleDayS2PConfiguration = generate_default_ops(as_dict=False)
-    return config.to_ops()
-
-
-@mcp.tool()
-def get_default_multi_day_config() -> dict[str, Any]:
-    """Returns the default multi-day pipeline configuration as a dictionary."""
-    config: MultiDayS2PConfiguration = generate_default_multiday_ops(as_dict=False)
-    return config.to_ops()
-
-
 @mcp.tool()
 def generate_config_file(output_path: str, pipeline_type: Literal["single-day", "multi-day"]) -> dict[str, Any]:
-    """Generates a configuration YAML file for the specified pipeline type.
+    """Generates a default configuration YAML file for the specified pipeline type.
+
+    Creates a configuration file with sensible defaults that can be used directly or modified before processing.
 
     Args:
         output_path: The absolute path where the configuration file should be saved.
-        pipeline_type: The type of pipeline configuration to generate.
+        pipeline_type: The type of pipeline configuration to generate ('single-day' or 'multi-day').
     """
     output = Path(output_path)
 
@@ -759,75 +774,6 @@ def generate_config_file(output_path: str, pipeline_type: Literal["single-day", 
     config.to_config(file_path=output)
 
     return {"success": True, "file_path": str(output), "pipeline_type": pipeline_type}
-
-
-# Single-day tools.
-
-
-@mcp.tool()
-def run_single_day_pipeline(
-    config_path: str,
-    session_path: str,
-    *,
-    binarize: bool = False,
-    process: bool = False,
-    combine: bool = False,
-    target_plane: int = -1,
-    workers: int = -1,
-) -> dict[str, Any]:
-    """Executes the single-day suite2p processing pipeline.
-
-    Args:
-        config_path: The absolute path to the configuration YAML file.
-        session_path: The absolute path to the session data directory.
-        binarize: Run the binarization step (step 1).
-        process: Run the processing step (step 2).
-        combine: Run the combination step (step 3).
-        target_plane: Specific plane index to process (-1 for all).
-        workers: Number of parallel workers (-1 for all cores).
-    """
-    config = Path(config_path)
-    session = Path(session_path)
-
-    if not config.exists():
-        return {"success": False, "error": f"Configuration file not found: {config_path}"}
-
-    if config.suffix != ".yaml":
-        return {"success": False, "error": f"Configuration file must be a .yaml file: {config_path}"}
-
-    if not session.exists():
-        return {"success": False, "error": f"Session directory not found: {session_path}"}
-
-    if not session.is_dir():
-        return {"success": False, "error": f"Session path must be a directory: {session_path}"}
-
-    # If no steps specified, run all steps.
-    if not any([binarize, process, combine]):
-        binarize = True
-        process = True
-        combine = True
-
-    try:
-        process_single_day(
-            configuration_path=config,
-            session_path=session,
-            binarize=binarize,
-            process=process,
-            combine=combine,
-            target_plane=target_plane,
-            workers=workers,
-            progress_bars=False,
-        )
-
-        return {
-            "success": True,
-            "session_path": str(session),
-            "steps_executed": {"binarize": binarize, "process": process, "combine": combine},
-            "target_plane": target_plane if target_plane >= 0 else "all",
-        }
-
-    except Exception as error:
-        return {"success": False, "error": str(error), "session_path": str(session)}
 
 
 @mcp.tool()
@@ -881,76 +827,6 @@ def get_single_day_status(session_path: str) -> dict[str, Any]:
         }
 
     return status
-
-
-# Multi-day tools.
-
-
-@mcp.tool()
-def run_multi_day_pipeline(
-    config_path: str,
-    session_paths: list[str],
-    *,
-    discover: bool = False,
-    extract: bool = False,
-    target_session: str | None = None,
-    workers: int = -1,
-) -> dict[str, Any]:
-    """Executes the multi-day suite2p processing pipeline.
-
-    Args:
-        config_path: The absolute path to the configuration YAML file.
-        session_paths: List of absolute paths to session directories (minimum 2).
-        discover: Run the discovery step (step 1).
-        extract: Run the extraction step (step 2).
-        target_session: Specific session ID for extraction (null for all).
-        workers: Number of parallel workers (-1 for all cores).
-    """
-    config = Path(config_path)
-
-    if not config.exists():
-        return {"success": False, "error": f"Configuration file not found: {config_path}"}
-
-    if config.suffix != ".yaml":
-        return {"success": False, "error": f"Configuration file must be a .yaml file: {config_path}"}
-
-    if len(session_paths) < _MINIMUM_SESSION_COUNT:
-        return {"success": False, "error": "At least two session paths are required for multi-day processing."}
-
-    sessions = [Path(p) for p in session_paths]
-    for session in sessions:
-        if not session.exists():
-            return {"success": False, "error": f"Session directory not found: {session}"}
-        if not session.is_dir():
-            return {"success": False, "error": f"Session path must be a directory: {session}"}
-
-    # If no steps specified, run all steps.
-    if not any([discover, extract]):
-        discover = True
-        extract = True
-
-    overrides = {"session_directories": session_paths}
-
-    try:
-        process_multi_day(
-            configuration_path=config,
-            discover=discover,
-            extract=extract,
-            target_session=target_session,
-            workers=workers,
-            progress_bars=False,
-            overrides=overrides,
-        )
-
-        return {
-            "success": True,
-            "session_count": len(session_paths),
-            "steps_executed": {"discover": discover, "extract": extract},
-            "target_session": target_session if target_session else "all",
-        }
-
-    except Exception as error:
-        return {"success": False, "error": str(error), "session_count": len(session_paths)}
 
 
 @mcp.tool()
@@ -1048,11 +924,9 @@ def discover_sessions_tool(root_directory: str) -> dict[str, Any]:
     for yaml_file in root_path.rglob("session_data.yaml"):
         try:
             session = SessionData.load(session_path=yaml_file.parent)
-            session_root = yaml_file.parent
 
-            # Resolves to parent of raw_data if needed.
-            if session_root.name == "raw_data":
-                session_root = session_root.parent
+            # Resolves to the canonical session root path for consistent job ID generation.
+            session_root = get_session_root(session=session)
 
             # Filters out sessions that don't contain processable neural imaging data.
             if session.session_type not in _PROCESSABLE_SESSION_TYPES:
@@ -1319,6 +1193,50 @@ def get_batch_processing_status_tool() -> dict[str, Any]:
         }
 
 
+@mcp.tool()
+def cancel_batch_processing_tool() -> dict[str, Any]:
+    """Cancels any running single-day batch processing.
+
+    Clears all queues and resets the batch state. Active jobs will complete but no new jobs will start.
+
+    Returns:
+        A status message indicating whether cancellation was successful.
+    """
+    global _single_day_batch_state
+
+    if _single_day_batch_state is None:
+        return {"cancelled": False, "message": "No single-day batch processing is active."}
+
+    with _single_day_batch_state.lock:
+        active_count = (
+            len(_single_day_batch_state.binarize_active)
+            + len(_single_day_batch_state.process_active)
+            + len(_single_day_batch_state.combine_active)
+        )
+
+        # Clears all queues to prevent new jobs from starting.
+        _single_day_batch_state.binarize_queue.clear()
+        _single_day_batch_state.process_queue.clear()
+        _single_day_batch_state.combine_queue.clear()
+
+        # Records final state before reset.
+        final_state = {
+            "binarize_completed": len(_single_day_batch_state.binarize_completed),
+            "process_completed": len(_single_day_batch_state.process_completed),
+            "combine_completed": len(_single_day_batch_state.combine_completed),
+            "active_jobs_at_cancel": active_count,
+        }
+
+    # Resets batch state after releasing lock.
+    _single_day_batch_state = None
+
+    return {
+        "cancelled": True,
+        "message": "Single-day batch processing cancelled. Active jobs will complete but no new jobs will start.",
+        "final_state": final_state,
+    }
+
+
 # Multi-day batch processing tools.
 
 
@@ -1533,6 +1451,44 @@ def get_multiday_batch_processing_status_tool() -> dict[str, Any]:
             "animals": animals_status,
             "summary": summary,
         }
+
+
+@mcp.tool()
+def cancel_multiday_batch_processing_tool() -> dict[str, Any]:
+    """Cancels any running multi-day batch processing.
+
+    Clears all queues and resets the batch state. Active jobs will complete but no new jobs will start.
+
+    Returns:
+        A status message indicating whether cancellation was successful.
+    """
+    global _multi_day_batch_state
+
+    if _multi_day_batch_state is None:
+        return {"cancelled": False, "message": "No multi-day batch processing is active."}
+
+    with _multi_day_batch_state.lock:
+        active_count = len(_multi_day_batch_state.discover_active) + len(_multi_day_batch_state.extract_active)
+
+        # Clears all queues to prevent new jobs from starting.
+        _multi_day_batch_state.discover_queue.clear()
+        _multi_day_batch_state.extract_queue.clear()
+
+        # Records final state before reset.
+        final_state = {
+            "discover_completed": len(_multi_day_batch_state.discover_completed),
+            "extract_completed": len(_multi_day_batch_state.extract_completed),
+            "active_jobs_at_cancel": active_count,
+        }
+
+    # Resets batch state after releasing lock.
+    _multi_day_batch_state = None
+
+    return {
+        "cancelled": True,
+        "message": "Multi-day batch processing cancelled. Active jobs will complete but no new jobs will start.",
+        "final_state": final_state,
+    }
 
 
 def run_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
