@@ -390,27 +390,6 @@ def _process_rois(
                 if "mean_image_channel_2" in ops:
                     np.save(fpath.joinpath("F_chan2.npy"), cell_fluorescence_channel_2)
                     np.save(fpath.joinpath("Fneu_chan2.npy"), neuropil_fluorescence_channel_2)
-
-            # If requested, also saves the data as a .mat (matlab-compatible) file.
-            if ops.get("save_mat"):
-                roi_statistics = np.load(fpath.joinpath("stat.npy"), allow_pickle=True)
-                iscell = np.load(fpath.joinpath("iscell.npy"))
-                redcell = (
-                    np.load(fpath.joinpath("redcell.npy"))
-                    if ops["nchannels"] == _MAXIMUM_SUPPORTED_CHANNELS
-                    else np.zeros_like(iscell)
-                )
-                io.save_matlab(
-                    ops,
-                    roi_statistics,
-                    cell_fluorescence,
-                    neuropil_fluorescence,
-                    spikes,
-                    iscell,
-                    redcell,
-                    cell_fluorescence_channel_2,
-                    neuropil_fluorescence_channel_2,
-                )
         else:
             message = f"No ROIs found for plane {plane_number}."
             console.echo(message=message, level=LogLevel.WARNING)
@@ -982,7 +961,7 @@ def combine_planes(ops_path: Path) -> None:
     # Generates a 'combined' plane folder, which includes the data from all processed planes. This method is safe to
     # call on one or more planes. Note, if you intend to run the multi-day (across-session) suite2p pipeline on the
     # processed data, this step is REQUIRED, even if there is only a single processed plane.
-    if len(ops_paths) > 1 and ops["combined"] and ops.get("roidetect", True):
+    if ops.get("roidetect", True):
         console.echo(
             message=f"Creating combined view using {len(plane_folders)} processed planes...", level=LogLevel.INFO
         )

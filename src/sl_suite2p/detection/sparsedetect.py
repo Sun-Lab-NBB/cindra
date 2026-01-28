@@ -354,10 +354,6 @@ def sparsery(
     v_corr = I.max(axis=0)
 
     scale, estimate_mode = find_best_scale(I=I, spatial_scale=spatial_scale)
-    # TODO: scales from cellpose (?)
-    #    scales = 3 * 2 ** np.arange(5.0)
-    #    scale = np.argmin(np.abs(scales - diam))
-    #    estimate_mode = EstimateMode.Estimated
 
     spatscale_pix = 3 * 2**scale
     mask_window = int(((spatscale_pix * 1.5) // 2) * 2)

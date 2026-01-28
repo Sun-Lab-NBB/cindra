@@ -99,13 +99,11 @@ I/O parameters for input data location and output directories.
 
 ## Section 3: output
 
-Parameters for aggregating and saving results.
+Parameters for GUI display. The pipeline always generates combined output.
 
-| Parameter  | Type  | Default  | Description                                                                  |
-|------------|-------|----------|------------------------------------------------------------------------------|
-| `save_mat` | bool  | False    | Save output as MATLAB Fall.mat file.                                         |
-| `combined` | bool  | True     | Merge plane results into `combined/` folder. **Must be True for multi-day.** |
-| `aspect`   | float | 0.666... | Pixel-to-micron ratio (X:Y) for GUI display.                                 |
+| Parameter | Type  | Default  | Description                               |
+|-----------|-------|----------|-------------------------------------------|
+| `aspect`  | float | 0.666... | Pixel-to-micron ratio (X:Y) for GUI display. |
 
 ---
 
@@ -245,7 +243,6 @@ Second channel processing.
 | `main.ignore_flyback`        | Flyback planes present                               |
 | `file_io.mesoscan`           | Processing mesoscope data                            |
 | `file_io.ignored_file_names` | Specific TIFFs to exclude                            |
-| `output.combined`            | Set False only if single-plane AND no multi-day      |
 | `file_io.delete_bin`         | Set True only if no multi-day planned                |
 
 ### Parameters Typically Left at Default
@@ -273,9 +270,6 @@ file_io:
   delete_bin: false   # Keep for multi-day
   ignored_file_names: []
 
-output:
-  combined: true      # Required for multi-day
-
 # Other sections use defaults...
 ```
 
@@ -288,8 +282,7 @@ For sessions intended for multi-day processing:
 ```yaml
 file_io:
   delete_bin: false   # REQUIRED: Keep registered binary files
-output:
-  combined: true      # REQUIRED: Merge plane results
 ```
 
-These are the defaults, so no changes needed unless explicitly disabled.
+This is the default, so no changes needed unless explicitly disabled. The pipeline always generates
+combined output, which is required for multi-day processing.

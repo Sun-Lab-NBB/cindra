@@ -42,52 +42,6 @@ def detect(ops, plane_number: int, classfile=None):
     return ops, stat
 
 
-def bin_movie(f_reg, plane_number: int, bin_size, yrange=None, xrange=None, badframes=None):
-    """Bin registered movie"""
-    n_frames = f_reg.shape[0]
-    good_frames = ~badframes if badframes is not None else np.ones(n_frames, dtype=bool)
-    batch_size = min(good_frames.sum(), 500)
-    Lyc = yrange[1] - yrange[0]
-    Lxc = xrange[1] - xrange[0]
-
-    # Number of binned frames is rounded down when binning frames
-    num_binned_frames = n_frames // bin_size
-    mov = np.zeros((num_binned_frames, Lyc, Lxc), np.float32)
-    curr_bin_number = 0
-
-    # Iterate over n_frames to maintain binning over TIME
-    for k in np.arange(0, n_frames, batch_size):
-        data = f_reg[k : min(k + batch_size, n_frames)]
-
-        # exclude badframes
-        good_indices = good_frames[k : min(k + batch_size, n_frames)]
-        if good_indices.mean() > 0.5:
-            data = data[good_indices]
-
-        # crop to valid region
-        if yrange is not None and xrange is not None:
-            data = data[:, slice(*yrange), slice(*xrange)]
-
-        # bin in time
-        if data.shape[0] > bin_size:
-            # Downsample by binning via reshaping and taking mean of each bin
-            # only if current batch size exceeds or matches bin_size
-            n_d = data.shape[0]
-            data = data[: (n_d // bin_size) * bin_size]
-            data = data.reshape(-1, bin_size, Lyc, Lxc).astype(np.float32).mean(axis=1)
-        else:
-            # Current batch size is below bin_size (could have many bad frames in this batch)
-            # Downsample taking the mean of batch to get a single bin
-            data = data.mean(axis=0)[np.newaxis, :, :]
-        # Only fill in binned data if not exceeding the number of bins mov has
-        if mov.shape[0] > curr_bin_number:
-            # Fill in binned data
-            n_bins = data.shape[0]
-            mov[curr_bin_number : curr_bin_number + n_bins] = data
-            curr_bin_number += n_bins
-    return mov
-
-
 def detection_wrapper(
     f_reg, plane_number: int, mov=None, yrange=None, xrange=None, ops=generate_default_ops(), classfile=None
 ):
@@ -136,13 +90,11 @@ def detection_wrapper(
         console.echo(f"Binning plane {plane_number} movie in chunks of length {bin_size}...", level=LogLevel.INFO)
 
         timer.reset()
-        mov = bin_movie(
-            f_reg,
-            plane_number=plane_number,
+        mov = f_reg.bin_movie(
             bin_size=bin_size,
-            yrange=yrange,
-            xrange=xrange,
-            badframes=ops.get("badframes", None),
+            y_range=yrange,
+            x_range=xrange,
+            bad_frames=ops.get("badframes", None),
         )
 
         message = (

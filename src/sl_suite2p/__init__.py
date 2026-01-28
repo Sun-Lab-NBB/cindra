@@ -32,6 +32,7 @@ if not console.enabled:
 
 __all__ = [
     "MultiDayJobNames",
+    "ROI",
     "SingleDayJobNames",
     "combine_planes",
     "discover_multiday_cells",
@@ -47,4 +48,5 @@ __all__ = [
     "resolve_ops",
     "run_s2p",
     "run_s2p_multiday",
+    "show_images_with_masks",
 ]

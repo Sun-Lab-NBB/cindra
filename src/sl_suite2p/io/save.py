@@ -1,82 +1,14 @@
 """This module provides tools for exporting the multiplane data processed by a Suite2p single-day pipeline as a unified
-suite2p or MATLAB dataset.
+suite2p dataset.
 """
 
 from typing import Any
 from pathlib import Path
-from datetime import datetime
 
 import numpy as np
-import scipy
 from natsort import natsorted
 from numpy.typing import NDArray
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
-
-
-# noinspection PyTypeHints
-def save_matlab(
-    ops: dict[str, Any],
-    roi_statistics: NDArray[Any],
-    cell_fluorescence: NDArray[np.float32],
-    neuropil_fluorescence: NDArray[np.float32],
-    spikes: NDArray[np.float32],
-    is_cell: NDArray[Any],
-    red_cell: NDArray[Any],
-    cell_fluorescence_channel_2: NDArray[np.float32] | None = None,
-    neuropil_fluorescence_channel_2: NDArray[np.float32] | None = None,
-) -> None:
-    """Saves the input data to a MATLAB-compatible (.mat) file.
-
-    Args:
-        ops: The dictionary that stores the suite2p processing parameters.
-        roi_statistics: The dictionary that stores the statistics for regions of interest (ROIs), including cell masks.
-        cell_fluorescence: A NumPy array that stores the cell fluorescence data for the first channel.
-        neuropil_fluorescence: A NumPy array that stores the neuropil fluorescence data for the first channel.
-        spikes: A NumPy array that stores the deconvolved spike activity data for the first channel.
-        is_cell: A NumPy array that specifies which regions of interest (ROIs) are cells for the first channel.
-        red_cell: A NumPy array that specifies which regions of interests (ROIs) are cells for the second channel.
-        cell_fluorescence_channel_2: A NumPy array that stores the cell fluorescence data for the second channel.
-        neuropil_fluorescence_channel_2: A NumPy array that stores the neuropil fluorescence data for the second
-            channel.
-    """
-    # Copies the input 'ops' dictionary to prevent modification by referencing.
-    ops_matlab = ops.copy()
-
-    # Formats the data processing date to make it compatible with MATLAB formatting.
-    if "date_processed" in ops_matlab:
-        ops_matlab["date_processed"] = str(datetime.strftime(ops_matlab["date_proc"], "%Y-%m-%d %H:%M:%S.%f"))
-
-    # Loops over the items in the 'ops' dictionary and converts all Path instances to strings.
-    for key, value in ops_matlab.items():
-        # If the value is a Path object, converts the path to a string.
-        if isinstance(value, Path):
-            ops_matlab[key] = value.as_posix()
-
-        # If the value is a list of Path objects, converts each path in the list into a string.
-        elif isinstance(value, list) and value and isinstance(value[0], Path):
-            ops_matlab[key] = [path.as_posix() for path in value]
-
-    # Converts the regions of interest (ROI) statistics into a NumPy array of objects.
-    roi_statistics = np.array(roi_statistics, dtype=object)
-
-    # Creates a dictionary for saving the processed data as a .mat file.
-    mat_dictionary: dict[str, Any] = {
-        "stat": roi_statistics,
-        "ops": ops_matlab,
-        "F": cell_fluorescence,
-        "Fneu": neuropil_fluorescence,
-        "spks": spikes,
-        "iscell": is_cell,
-        "redcell": red_cell,
-    }
-
-    # If the processed data uses two channels, adds the second channel data to 'mat_dictionary' for saving.
-    if cell_fluorescence_channel_2 is not None and neuropil_fluorescence_channel_2 is not None:
-        mat_dictionary["F_chan2"] = cell_fluorescence_channel_2
-        mat_dictionary["Fneu_chan2"] = neuropil_fluorescence_channel_2
-
-    # Saves the data in 'mat_dictionary' to a MATLAB-compatible (.mat) file in the "save_path" directory.
-    scipy.io.savemat(file_name=ops["save_path"].joinpath("Fall.mat"), mdict=mat_dictionary)
 
 
 def compute_dydx(plane_ops: list[dict[str, Any]]) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
@@ -413,19 +345,6 @@ def combined(
         np.save(combined_directory_path.joinpath("spks.npy"), spikes)
         np.save(combined_directory_path.joinpath("ops.npy"), ops)
         np.save(combined_directory_path.joinpath("stat.npy"), roi_statistics)
-
-        # If "save_mat" is set to True, saves the data to a MATLAB-compatible (.mat) file.
-        if ops.get("save_mat"):
-            save_matlab(
-                ops,
-                roi_statistics,
-                cell_fluorescence,
-                neuropil_fluorescence,
-                subtracted_fluorescence,
-                spikes,
-                is_cell,
-                red_cell,
-            )
 
     # Returns the combined data as a tuple.
     return (
