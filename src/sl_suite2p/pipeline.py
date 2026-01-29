@@ -18,7 +18,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from .multi_day import resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
 from .single_day import resolve_ops, process_plane, combine_planes, resolve_binaries
-from .configuration import MultiDayS2PConfiguration, SingleDayS2PConfiguration
+from .configuration import MultiDayConfiguration, SingleDayConfiguration
 
 # Defines the session types and acquisition systems currently supported by the processing pipeline.
 _supported_systems = tuple(AcquisitionSystems)
@@ -206,12 +206,12 @@ def process_single_day(
 
     # Loads configuration data from the provided file.
     try:
-        config: SingleDayS2PConfiguration = SingleDayS2PConfiguration.from_yaml(file_path=configuration_path)
+        config: SingleDayConfiguration = SingleDayConfiguration.from_yaml(file_path=configuration_path)
     except Exception:
         message = (
             "Unable to run the single-day sl-suite2p processing pipeline, as the input configuration file is not a "
             "valid single-day pipeline configuration file. Specifically, failed to load the file's data as a "
-            "SingleDayS2PConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
+            "SingleDayConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
             "valid single-day configuration .yaml file."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -490,12 +490,12 @@ def process_multi_day(
 
     # Loads configuration data from the provided file.
     try:
-        config: MultiDayS2PConfiguration = MultiDayS2PConfiguration.from_yaml(file_path=configuration_path)
+        config: MultiDayConfiguration = MultiDayConfiguration.from_yaml(file_path=configuration_path)
     except Exception:
         message = (
             "Unable to run the multi-day sl-suite2p processing pipeline, as the input configuration file is not a "
             "valid multi-day pipeline configuration file. Specifically, failed to load the file's data as a "
-            "MultiDayS2PConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
+            "MultiDayConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
             "valid multi-day configuration .yaml file."
         )
         console.error(message=message, error=FileNotFoundError)

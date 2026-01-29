@@ -20,7 +20,7 @@ from .multiday import (
     backward_transform_masks,
     extract_unique_components,
 )
-from .configuration import MultiDayS2PConfiguration, generate_default_multiday_ops
+from .configuration import MultiDayConfiguration
 
 # THe minimum number of sessions required for multi-day processing
 _MINIMUM_SESSION_COUNT = 2
@@ -68,7 +68,7 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
         can contain single-day and multi-day parameters to override them as necessary to support runtime.
 
         If both 'ops' and 'db' do not contain some of the expected multiday parameters, they are set using
-        the 'default' dictionary generated using the MultiDayS2PConfiguration.
+        the 'default' dictionary generated using the MultiDayConfiguration.
 
         Each session gets a multiday folder at {session_suite2p_parent}/multiday/{dataset_name}/. Sessions are
         natural-sorted, and the first session becomes the 'main session' which stores the processing tracker file.
@@ -168,7 +168,7 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
     }
 
     # Generates the multi-day configuration object for YAML export.
-    multi_day_config = MultiDayS2PConfiguration.from_ops(ops_dict=ops)
+    multi_day_config = MultiDayConfiguration.from_ops(ops_dict=ops)
 
     # Saves ops.npy and configuration to each session's multiday folder.
     for multiday_output in multiday_output_paths:

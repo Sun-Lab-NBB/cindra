@@ -7,7 +7,7 @@ import numpy as np
 from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console
 
-from . import sourcery, chan2detect, sparsedetect
+from . import chan2detect, sparsedetect
 from .stats import roi_stats
 from .denoise import pca_denoise
 from ..io.binary import BinaryFile
@@ -130,7 +130,7 @@ def detection_wrapper(
     message = f"Finding cell mask ROIs for plane {plane_number}..."
     console.echo(message=message, level=LogLevel.INFO)
     timer.reset()
-    stat = select_rois(ops=ops, mov=mov, sparse_mode=ops["sparse_mode"], plane_number=plane_number)
+    stat = select_rois(ops=ops, mov=mov, plane_number=plane_number)
     message = (
         f"Plane {plane_number} cell masks: discovered. Detected ROIs: {len(stat)}. "
         f"Time taken: {timer.elapsed} seconds."
@@ -196,35 +196,34 @@ def detection_wrapper(
     return ops, stat
 
 
-def select_rois(ops: dict[str, Any], mov: np.ndarray, plane_number: int, sparse_mode: bool = True):
-    if sparse_mode:
-        ops.update({"Lyc": mov.shape[1], "Lxc": mov.shape[2]})
-        new_ops, stat = sparsedetect.sparsery(
-            mov=mov,
-            high_pass=ops["high_pass"],
-            neuropil_high_pass=ops["spatial_hp_detect"],
-            batch_size=ops["batch_size"],
-            spatial_scale=ops["spatial_scale"],
-            threshold_scaling=ops["threshold_scaling"],
-            max_iterations=250 * ops["max_iterations"],
-            percentile=ops.get("active_percentile", 0.0),
-            plane_number=plane_number,
-        )
-        ops.update(new_ops)
+def select_rois(ops: dict[str, Any], mov: np.ndarray, plane_number: int):
+    """Detects ROIs using sparse detection algorithm.
 
-        # Sets the diameter from the computed spatial_scale_pixels if not explicitly configured.
-        if ops.get("diameter", 0) == 0:
-            ops["diameter"] = ops["spatial_scale_pixels"]
-    else:
-        # Non-sparse mode (sourcery) requires an explicit diameter value.
-        if ops.get("diameter", 0) == 0:
-            message = (
-                "Unable to run non-sparse ROI detection. The 'diameter' parameter must be set to a non-zero value "
-                "when using sparse_mode=False. Either set 'diameter' explicitly in the configuration or use "
-                "sparse_mode=True (recommended)."
-            )
-            console.error(message=message, error=ValueError)
-        ops, stat = sourcery.sourcery(mov=mov, ops=ops, plane_number=plane_number)
+    Args:
+        ops: Pipeline options dictionary containing detection parameters.
+        mov: Binned movie array with shape (frames, height, width).
+        plane_number: Index of the imaging plane being processed.
+
+    Returns:
+        Array of ROI statistics dictionaries.
+    """
+    ops.update({"Lyc": mov.shape[1], "Lxc": mov.shape[2]})
+    new_ops, stat = sparsedetect.sparsery(
+        mov=mov,
+        high_pass=ops["high_pass"],
+        neuropil_high_pass=ops["spatial_hp_detect"],
+        batch_size=ops["batch_size"],
+        spatial_scale=ops["spatial_scale"],
+        threshold_scaling=ops["threshold_scaling"],
+        max_iterations=250 * ops["max_iterations"],
+        percentile=ops.get("active_percentile", 0.0),
+        plane_number=plane_number,
+    )
+    ops.update(new_ops)
+
+    # Sets the diameter from the computed spatial_scale_pixels if not explicitly configured.
+    if ops.get("diameter", 0) == 0:
+        ops["diameter"] = ops["spatial_scale_pixels"]
 
     stat = np.array(stat)
 

@@ -13,7 +13,7 @@ Complete parameter reference for the single-day (within-session) sl-suite2p proc
 
 ## Configuration Overview
 
-The single-day pipeline uses `SingleDayS2PConfiguration`, a dataclass with 11 nested sections. Default values are
+The single-day pipeline uses `SingleDayConfiguration`, a dataclass with 11 nested sections. Default values are
 optimized for GCaMP6f data from 2-Photon Random Access Mesoscope (2P-RAM).
 
 ### Parameter Resolution Order

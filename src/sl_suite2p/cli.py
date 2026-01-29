@@ -13,10 +13,8 @@ from ataraxis_base_utilities import LogLevel, console
 from .gui import run
 from .pipeline import process_multi_day, process_single_day
 from .configuration import (
-    MultiDayS2PConfiguration,
-    SingleDayS2PConfiguration,
-    generate_default_ops,
-    generate_default_multiday_ops,
+    MultiDayConfiguration,
+    SingleDayConfiguration,
 )
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
@@ -98,7 +96,7 @@ def ss2p_sd_config(ctx: Any) -> None:
     file_path = Path(ctx.obj["file_path"])
 
     # Generates the precursor configuration file in the specified output directory.
-    precursor: SingleDayS2PConfiguration = generate_default_ops(as_dict=False)
+    precursor: SingleDayConfiguration = generate_default_ops(as_dict=False)
     precursor.to_config(file_path=file_path)
 
     message = (
@@ -125,7 +123,7 @@ def ss2p_md_config(ctx: Any) -> None:
     file_path = Path(ctx.obj["file_path"])
 
     # Generates the precursor configuration file in the specified output directory.
-    precursor: MultiDayS2PConfiguration = generate_default_multiday_ops(as_dict=False)
+    precursor: MultiDayConfiguration = generate_default_multiday_ops(as_dict=False)
     precursor.to_config(file_path=file_path)
 
     message = (

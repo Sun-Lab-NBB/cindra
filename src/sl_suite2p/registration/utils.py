@@ -5,8 +5,11 @@ from functools import lru_cache
 from numba import complex64, vectorize
 import numpy as np
 from numpy.fft import ifftshift
-from scipy.fft import next_fast_len
-from scipy.fft import fft2 as scipy_fft2, ifft2 as scipy_ifft2
+from scipy.fft import (
+    fft2 as scipy_fft2,
+    ifft2 as scipy_ifft2,
+    next_fast_len,
+)
 from scipy.ndimage import gaussian_filter1d
 from ataraxis_base_utilities import console
 
