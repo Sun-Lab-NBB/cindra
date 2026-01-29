@@ -70,17 +70,17 @@ class CellSelection:
     maximum_size: int = 1000
     """The maximum allowed cell (ROI) size, in pixels. Cells with a larger pixel size are excluded from processing."""
 
-    mesoscope_stripe_borders: list[int] = field(default_factory=list)
-    """Stores the x-coordinates of combined mesoscope image stripe (ROI) borders. For mesoscope images, 'stripes' are 
-    the individual imaging ROIs acquired in the 'multiple-ROI' mode. Keep this field set to an empty list to skip 
-    stripe border-filtering or when working with non-mesoscope images.
+    mroi_stripe_borders: list[int] = field(default_factory=list)
+    """Stores the x-coordinates of combined MROI image stripe borders. For MROI images, 'stripes' are the individual
+    imaging ROIs acquired in multi-ROI mode. Keep this field set to an empty list to skip stripe border-filtering or
+    when working with non-MROI images.
     """
 
     stripe_margin: int = 30
-    """The minimum required distance, in pixels, between the center-point (the median x-coordinate) of the cell (ROI) 
-    and the mesoscope stripe border. Cells that are too close to stripe borders are excluded from processing to avoid 
-    ambiguities associated with tracking cells that span multiple stripes. This parameter is only used if 
-    'mesoscope_stripe_borders' field is not set to an empty list."""
+    """The minimum required distance, in pixels, between the center-point (the median x-coordinate) of the cell (ROI)
+    and the MROI stripe border. Cells that are too close to stripe borders are excluded from processing to avoid
+    ambiguities associated with tracking cells that span multiple stripes. This parameter is only used if
+    'mroi_stripe_borders' field is not set to an empty list."""
 
 
 @dataclass()

@@ -174,8 +174,5 @@ def preprocess(
         )
         console.error(message=message, error=ValueError)
 
-        # Fallback to appease mypy
-        raise ValueError(message)  # pragma: no cover
-
     # Subtracts the computed baseline fluorescence from the neuropil-subtracted trace.
     return subtracted - baseline

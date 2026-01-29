@@ -53,7 +53,6 @@ def import_sessions(ops: dict[str, Any]) -> MultiDayData:
                 f"generate the 'combined' folder as part of the single-session processing."
             )
             console.error(message=message, error=FileNotFoundError)
-            raise FileNotFoundError(message)  # Fallback to appease mypy, should not be reachable
 
         # Extracts single-day .npy files from the combined folder:
         # Configuration parameters and general processing data.
@@ -86,12 +85,12 @@ def import_sessions(ops: dict[str, Any]) -> MultiDayData:
 
         # Removes ROIs too close to stripe margins. This step is skipped if the runtime is not configured to filter
         # cells around borders (if the stripe borders list is empty).
-        if ops["mesoscope_stripe_borders"]:
+        if ops["mroi_stripe_borders"]:
             stripe_margin = ops["stripe_margin"]
             filtered_cells = [
                 cell
                 for cell in selected_cells
-                if all(abs(cell["med"][1] - border) > stripe_margin for border in ops["mesoscope_stripe_borders"])
+                if all(abs(cell["med"][1] - border) > stripe_margin for border in ops["mroi_stripe_borders"])
             ]
         else:
             # Otherwise, all selected cells automatically pass the stripe filtering step.

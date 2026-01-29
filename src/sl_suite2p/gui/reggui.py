@@ -29,7 +29,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from . import masks, utils
 from .. import registration
-from ..io.save import compute_dydx
+from ..io.save import compute_plane_offsets
 
 
 class BinaryPlayer(QMainWindow):
@@ -388,7 +388,7 @@ class BinaryPlayer(QMainWindow):
             self.wred = False
             self.wraw_wred = False
             # check that all binaries still exist
-            dy, dx = compute_dydx(ops1)
+            dy, dx = compute_plane_offsets(ops1)
             for ipl, ops in enumerate(ops1):
                 if os.path.isfile(ops["reg_file"]):
                     reg_file = ops["reg_file"]

@@ -15,7 +15,6 @@ from . import (
     nonrigid,
     bidiphase as bidi,
 )
-from .. import io
 
 
 def compute_crop(xoff: int, yoff: int, corrXY, th_badframes, badframes, maxregshift, Ly: int, Lx: int):
@@ -407,16 +406,6 @@ def compute_reference_and_register_frames(
         else:
             f_align_out[batch_number : min(batch_number + batch_size, n_frames)] = frames
 
-        if ops["reg_tif"] if ops["functional_chan"] == ops["align_by_chan"] else ops["reg_tif_chan2"]:
-            file_name = io.generate_tiff_filename(
-                functional_channel=ops["functional_chan"],
-                alignment_channel=ops["align_by_chan"],
-                save_path=ops["save_path"],
-                batch_number=batch_number,
-                channel=1,
-            )
-            io.save_tiff(frames=frames, file_path=file_name)
-
     console.echo(
         f"Plane {plane_number} channel 1 frame registration offsets: computed. Time taken: {timer.elapsed} seconds.",
         level=LogLevel.SUCCESS,
@@ -490,15 +479,6 @@ def shift_frames_and_write(
         else:
             f_alt_out[batch_number : min(batch_number + batch_size, n_frames)] = frames
 
-        if ops["reg_tif_chan2"] if ops["functional_chan"] == ops["align_by_chan"] else ops["reg_tif"]:
-            file_name = io.generate_tiff_filename(
-                functional_channel=ops["functional_chan"],
-                alignment_channel=ops["align_by_chan"],
-                save_path=ops["save_path"],
-                batch_number=batch_number,
-                channel=0,
-            )
-            io.save_tiff(frames=frames, file_path=file_name)
     console.echo(
         f"Plane {plane_number} channel 2 frame registration offsets: computed. Time taken: {timer.elapsed} seconds.",
         level=LogLevel.SUCCESS,

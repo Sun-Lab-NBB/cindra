@@ -4,21 +4,25 @@ from .multi_day import MultiDayConfiguration
 from .single_day import (
     IOData,
     TimingData,
-    InputFormat,
     DetectionData,
+    ROIStatistics,
     BaselineMethod,
+    ExtractionData,
     RuntimeContext,
     RegistrationData,
     SingleDayRuntimeData,
+    AcquisitionParameters,
     SingleDayConfiguration,
 )
 
 __all__ = [
+    "AcquisitionParameters",
     "BaselineMethod",
     "DetectionData",
+    "ExtractionData",
     "IOData",
-    "InputFormat",
     "MultiDayConfiguration",
+    "ROIStatistics",
     "RegistrationData",
     "RuntimeContext",
     "SingleDayConfiguration",

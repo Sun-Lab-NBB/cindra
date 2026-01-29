@@ -1,83 +1,371 @@
-"""This module provides tools for importing data stored inside .tif or .tiff files."""
+"""Provides tools for importing, converting, and saving TIFF imaging data."""
 
 import gc
-import json
 import math
-from typing import Any
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tqdm import tqdm
 import numpy as np
-from tifffile import TiffFile, TiffWriter
-from numpy.typing import NDArray
-from ataraxis_time import PrecisionTimer
+from natsort import natsorted
+from tifffile import TiffFile
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
-from .utils import initialize_plane_ops, find_files_open_binaries
+from .binary import BinaryFile
+from ..configuration.single_day import (
+    IOData,
+    RuntimeContext,
+    SingleDayRuntimeData,
+    AcquisitionParameters,
+    SingleDayConfiguration,
+)
 
-# Determines the minimum number of image dimensions considered 'multidimensional'
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from numpy.typing import NDArray
+
+# Supported TIFF file extensions.
+_TIFF_EXTENSIONS = ("tif", "tiff", "TIF", "TIFF")
+
+# Default name for the acquisition parameters JSON file.
+_ACQUISITION_PARAMETERS_FILENAME = "suite2p_parameters.json"
+
+# Determines the minimum number of image dimensions considered 'multidimensional'.
 _MULTIDIMENSIONAL_PROCESSING_THRESHOLD = 3
 
 
-def generate_tiff_filename(
-    functional_channel: int, alignment_channel: int, save_path: str | Path, batch_number: int, channel: int
-) -> str:
-    """Generates a suite2p .tiff filename and its path based on the input parameters.
+def _find_acquisition_parameters(data_path: Path) -> tuple[AcquisitionParameters, Path]:
+    """Recursively searches for the acquisition parameters JSON file and loads it.
+
+    This function searches the data_path directory and all subdirectories for a file named
+    'suite2p_parameters.json'. Once found, it loads and validates the acquisition parameters.
 
     Args:
-        functional_channel: The number (index) of the channel that contains the functional signal data.
-        alignment_channel: The number (index) of the channel used for frame alignment.
-        save_path: The absolute path to the root directory where to save the generated .tiff file.
-        batch_number: The number (positional index) of the movie frame batch (subset) to be stored inside the .tiff file
-            (frame stack). This is used to determine the number assigned to the output .tiff file.
-        channel: The number (positional index) of the channel for which the .tiff file is generated. Note, channel
-            indexing starts from 0 and, currently, only two channels (0 and 1) are supported.
+        data_path: The root directory to search for the acquisition parameters file.
 
     Returns:
-        The absolute path to the generated tiff file.
+        A tuple containing the loaded AcquisitionParameters and the path to the directory containing the JSON file.
+        The directory path is used for subsequent non-recursive TIFF discovery.
+
+    Raises:
+        FileNotFoundError: If no acquisition parameters file is found in the data directory or its subdirectories.
+        ValueError: If required fields are missing from the JSON file.
     """
-    # Ensures that save_path is a Path object
-    path = Path(save_path)
+    if not data_path.is_dir():
+        message = f"Unable to find acquisition parameters. The data_path is not a directory: {data_path}"
+        console.error(message=message, error=ValueError)
 
-    # Determines output subdirectory and channel index based on the input channel number and the numbers of the
-    # functional and alignment channels.
-    if channel == 0:  # Channel 0.
-        if functional_channel == alignment_channel:
-            tiff_root = path.joinpath("channel_1_tiffs")
-            channel_index = 0
-        else:
-            tiff_root = path.joinpath("channel_2_tiffs")
-            channel_index = 1
-    elif functional_channel == alignment_channel:
-        tiff_root = path.joinpath("channel_2_tiffs")
-        channel_index = 1
-    else:
-        tiff_root = path.joinpath("channel_1_tiffs")
-        channel_index = 0
+    # Recursively searches for the acquisition parameters file.
+    parameter_files = list(data_path.rglob(_ACQUISITION_PARAMETERS_FILENAME))
 
-    # Creates the directory if it doesn't exist
-    ensure_directory_exists(tiff_root)
+    if not parameter_files:
+        message = (
+            f"Unable to find '{_ACQUISITION_PARAMETERS_FILENAME}' in the data directory or its subdirectories: "
+            f"{data_path}. This file is required and must contain acquisition metadata."
+        )
+        console.error(message=message, error=FileNotFoundError)
 
-    # Formats the output filename to include batch number and the resolved channel index
-    file_name = f"file_{str(batch_number).zfill(9)}_channel_{channel_index}.tiff"
+    # Uses the first found file (there should typically be only one).
+    parameters_path = parameter_files[0]
+    data_directory = parameters_path.parent
 
-    # Combines the directory path with the file name and returns the resultant file path to caller
-    return str(tiff_root.joinpath(file_name))
+    message = f"Found acquisition parameters at: {parameters_path}."
+    console.echo(message=message, level=LogLevel.SUCCESS)
+
+    # Loads and validates the acquisition parameters.
+    acquisition = AcquisitionParameters.from_json(parameters_path)
+
+    return acquisition, data_directory
 
 
-def save_tiff(frames: NDArray[np.int16], file_path: str) -> None:
-    """Saves the input frame stack array as the specified tiff file.
+def _discover_tiff_files(
+    data_directory: Path,
+    ignored_file_names: tuple[str, ...] = (),
+) -> list[Path]:
+    """Discovers TIFF files in the specified directory (non-recursive).
 
-    If the file already exists, overwrites the file data with the input frame stack data.
+    This function performs a non-recursive scan of the data_directory for TIFF files. It is designed to be called
+    after _find_acquisition_parameters() to ensure TIFF files and their metadata are co-located.
 
     Args:
-        frames: The frames to save.
-        file_path: The absolute path to the output .tiff file where to save the frame data.
+        data_directory: The directory to scan for TIFF files. This should be the same directory that contains the
+            acquisition parameters JSON file.
+        ignored_file_names: A tuple of file names (without extension) to ignore. Files whose stem matches any of
+            these names are excluded from the results.
+
+    Returns:
+        A list of absolute paths to TIFF files, sorted naturally by filename.
+
+    Raises:
+        FileNotFoundError: If no TIFF files are found in the directory.
     """
-    with TiffWriter(file_path) as tiff:
-        # Rounds all frame values down to the nearest integer and casts to int16 before saving the data.
-        for frame in np.floor(frames).astype(np.int16):
-            tiff.write(frame, contiguous=True)
+    if not data_directory.is_dir():
+        message = f"Unable to discover TIFF files. The path is not a directory: {data_directory}."
+        console.error(message=message, error=ValueError)
+
+    # Performs non-recursive scan for TIFF files.
+    file_paths: list[Path] = []
+    for extension in _TIFF_EXTENSIONS:
+        file_paths.extend(
+            file_path.resolve()
+            for file_path in data_directory.glob(f"*.{extension}")
+            if file_path.stem not in ignored_file_names
+        )
+
+    if not file_paths:
+        message = f"Unable to find any TIFF files in the data directory: {data_directory}."
+        console.error(message=message, error=FileNotFoundError)
+
+    # Sorts files naturally by filename.
+    file_paths = natsorted(file_paths)
+
+    message = f"Found {len(file_paths)} TIFF files."
+    console.echo(message=message, level=LogLevel.INFO)
+
+    return file_paths
+
+
+def _initialize_plane_contexts(
+    config: SingleDayConfiguration,
+    acquisition: AcquisitionParameters,
+) -> list[RuntimeContext]:
+    """Creates plane-specific RuntimeContext instances for each imaging plane in the recording.
+
+    This function initializes the runtime data structures needed for processing each plane. For standard single-ROI
+    data, one context is created per physical plane. For MROI (Multi-ROI) data, one context is created per virtual
+    plane, where virtual planes are ROI x physical plane combinations.
+
+    Args:
+        config: The single-day pipeline configuration containing user-defined processing parameters.
+        acquisition: The acquisition parameters loaded from the input data's JSON file. This describes the recording
+            setup including frame rate, plane count, channel count, and MROI geometry if applicable.
+
+    Returns:
+        A list of RuntimeContext instances, one per plane (or virtual plane for MROI data). Each context contains
+        references to the shared configuration, acquisition parameters, and a plane-specific SingleDayRuntimeData
+        instance with IOData fields initialized.
+
+    Raises:
+        ValueError: If the save_path is not configured in the configuration.
+    """
+    # Validates that the save path is configured.
+    save_path_root = config.file_io.save_path
+    if save_path_root is None:
+        message = (
+            "Unable to initialize plane contexts. The save_path must be configured in the FileIO section of the "
+            "configuration, but it is currently None."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Determines the number of contexts to create. For MROI data, creates one context per virtual plane
+    # (ROI x physical plane combination). For single-ROI data, creates one context per physical plane.
+    plane_count = acquisition.virtual_plane_count if acquisition.is_mroi else acquisition.plane_number
+
+    # Determines whether the recording uses two channels.
+    has_two_channels = acquisition.channel_number > 1
+
+    # Determines whether to keep raw (unregistered) binary files.
+    keep_raw = config.registration.keep_movie_raw
+
+    # Initializes the list to store RuntimeContext instances for each plane.
+    contexts: list[RuntimeContext] = []
+
+    # Creates a RuntimeContext for each plane.
+    for virtual_plane_index in range(plane_count):
+        # Resolves the output directory for this plane. Always uses 'suite2p' as the subdirectory.
+        plane_output_path = save_path_root / "suite2p" / f"plane_{virtual_plane_index}"
+
+        # Creates the output directory if it does not exist.
+        ensure_directory_exists(plane_output_path)
+
+        # Initializes the IOData for this plane with binary file paths.
+        io_data = IOData(
+            output_directory=plane_output_path,
+            registered_binary_path=plane_output_path / "channel_1_data.bin",
+            plane_index=virtual_plane_index,
+        )
+
+        # Configures the raw binary path if raw movie retention is enabled.
+        if keep_raw:
+            io_data.raw_binary_path = plane_output_path / "channel_1_data_raw.bin"
+
+        # Configures second channel binary paths if using two channels.
+        if has_two_channels:
+            io_data.registered_binary_path_channel_2 = plane_output_path / "channel_2_data.bin"
+            if keep_raw:
+                io_data.raw_binary_path_channel_2 = plane_output_path / "channel_2_data_raw.bin"
+
+        # Populates MROI-specific fields if processing multi-ROI data.
+        if acquisition.is_mroi:
+            # Computes ROI index and physical plane index from the virtual plane index. Virtual planes are organized
+            # as: ROI 0 plane 0, ROI 0 plane 1, ..., ROI 1 plane 0, ROI 1 plane 1, etc.
+            roi_index = virtual_plane_index // acquisition.plane_number
+            physical_plane_index = virtual_plane_index % acquisition.plane_number
+
+            io_data.mroi_lines = list(acquisition.roi_lines[roi_index])
+            io_data.mroi_y_offset = acquisition.roi_y_coordinates[roi_index]
+            io_data.mroi_x_offset = acquisition.roi_x_coordinates[roi_index]
+            # For MROI, stores the physical plane index (which may differ from virtual plane index).
+            io_data.plane_index = physical_plane_index
+
+        # Creates the SingleDayRuntimeData with the initialized IOData.
+        runtime_data = SingleDayRuntimeData(
+            output_path=plane_output_path,
+            io=io_data,
+        )
+
+        # Creates the RuntimeContext combining the shared configuration, acquisition parameters, and runtime data.
+        context = RuntimeContext(
+            config=config,
+            acquisition=acquisition,
+            runtime=runtime_data,
+        )
+
+        contexts.append(context)
+
+    return contexts
+
+
+def _get_frame_dimensions(
+    tiff_files: list[Path],
+    contexts: list[RuntimeContext],
+    acquisition: AcquisitionParameters,
+) -> tuple[list[int], list[int]]:
+    """Pre-scans the first TIFF file to determine frame dimensions for each plane.
+
+    This function reads the first frame from the first TIFF file to get base frame dimensions, then calculates
+    per-plane dimensions accounting for MROI slicing if applicable.
+
+    Args:
+        tiff_files: The list of TIFF file paths to process.
+        contexts: The list of RuntimeContext instances, one per plane.
+        acquisition: The acquisition parameters describing the recording setup.
+
+    Returns:
+        A tuple of two lists: (heights, widths) where each list has one entry per plane/context.
+
+    Raises:
+        ValueError: If the TIFF files are empty or have invalid dimensions.
+    """
+    # Opens the first TIFF and reads the first frame to get base dimensions.
+    tiff, tiff_length = _open_tiff(tiff_files[0])
+    if tiff_length == 0:
+        message = f"Unable to determine frame dimensions. The first TIFF file is empty: {tiff_files[0]}"
+        console.error(message=message, error=ValueError)
+
+    # Reads a single frame to get dimensions.
+    first_frame = tiff.asarray(key=0) if tiff_length > 1 else tiff.asarray()
+    base_height, base_width = first_frame.shape[-2], first_frame.shape[-1]
+
+    # Calculates dimensions for each plane/context.
+    heights: list[int] = []
+    widths: list[int] = []
+
+    for context in contexts:
+        io_data = context.runtime.io
+
+        # For MROI data, the height is determined by the ROI line range.
+        if acquisition.is_mroi and io_data.mroi_lines:
+            plane_height = io_data.mroi_lines[-1] - io_data.mroi_lines[0] + 1
+            plane_width = base_width
+        else:
+            plane_height = base_height
+            plane_width = base_width
+
+        heights.append(plane_height)
+        widths.append(plane_width)
+
+    return heights, widths
+
+
+def _create_binary_files(
+    contexts: list[RuntimeContext],
+    frame_heights: list[int],
+    frame_widths: list[int],
+    frames_per_plane: int,
+) -> tuple[list[BinaryFile], list[BinaryFile]]:
+    """Creates BinaryFile instances for writing converted TIFF data for each plane.
+
+    Args:
+        contexts: The list of RuntimeContext instances, one per plane. Each context must have IOData with binary file
+            paths configured.
+        frame_heights: The height of each frame for each plane.
+        frame_widths: The width of each frame for each plane.
+        frames_per_plane: The total number of frames to be written per plane.
+
+    Returns:
+        A tuple of two lists. The first list contains BinaryFile instances for channel 1 (one per plane). The second
+        list contains BinaryFile instances for channel 2 (empty if single channel).
+
+    Raises:
+        ValueError: If no contexts are provided or if required binary paths are not configured.
+    """
+    if not contexts:
+        message = "Unable to create binary files. At least one RuntimeContext must be provided."
+        console.error(message=message, error=ValueError)
+
+    # Uses the first context to get shared configuration.
+    config = contexts[0].config
+    acquisition = contexts[0].acquisition
+
+    # Determines whether raw binaries should be used (vs registered binaries).
+    keep_raw = config.registration.keep_movie_raw
+
+    # Determines whether the recording uses two channels.
+    has_two_channels = acquisition.channel_number > 1
+
+    # Initializes lists to store the BinaryFile instances.
+    channel_1_binary_files: list[BinaryFile] = []
+    channel_2_binary_files: list[BinaryFile] = []
+
+    # Creates BinaryFile instances for each plane based on the paths in IOData.
+    for context_index, context in enumerate(contexts):
+        io_data = context.runtime.io
+        height = frame_heights[context_index]
+        width = frame_widths[context_index]
+
+        # Creates channel 1 binary file (raw or registered depending on configuration).
+        if keep_raw:
+            raw_path = io_data.raw_binary_path
+            if raw_path is None:
+                message = (
+                    f"Unable to create raw binary file for plane {io_data.plane_index}. The raw_binary_path is not "
+                    f"configured in IOData."
+                )
+                console.error(message=message, error=ValueError)
+            channel_1_binary_files.append(BinaryFile(height, width, raw_path, frames_per_plane))
+        else:
+            registered_path = io_data.registered_binary_path
+            if registered_path is None:
+                message = (
+                    f"Unable to create registered binary file for plane {io_data.plane_index}. The "
+                    f"registered_binary_path is not configured in IOData."
+                )
+                console.error(message=message, error=ValueError)
+            channel_1_binary_files.append(BinaryFile(height, width, registered_path, frames_per_plane))
+
+        # Creates channel 2 binary file if applicable.
+        if has_two_channels:
+            if keep_raw:
+                raw_path_ch2 = io_data.raw_binary_path_channel_2
+                if raw_path_ch2 is None:
+                    message = (
+                        f"Unable to create raw binary file for plane {io_data.plane_index} channel 2. The "
+                        f"raw_binary_path_channel_2 is not configured in IOData."
+                    )
+                    console.error(message=message, error=ValueError)
+                channel_2_binary_files.append(BinaryFile(height, width, raw_path_ch2, frames_per_plane))
+            else:
+                registered_path_ch2 = io_data.registered_binary_path_channel_2
+                if registered_path_ch2 is None:
+                    message = (
+                        f"Unable to create registered binary file for plane {io_data.plane_index} channel 2. The "
+                        f"registered_binary_path_channel_2 is not configured in IOData."
+                    )
+                    console.error(message=message, error=ValueError)
+                channel_2_binary_files.append(BinaryFile(height, width, registered_path_ch2, frames_per_plane))
+
+    return channel_1_binary_files, channel_2_binary_files
 
 
 def _open_tiff(file_path: Path) -> tuple[TiffFile, int]:
@@ -91,11 +379,10 @@ def _open_tiff(file_path: Path) -> tuple[TiffFile, int]:
         file_path: The absolute path to the .tiff file from which to read the frame data.
     """
     tiff = TiffFile(file_path)
-    tiff_length = len(tiff.pages)  # .pages returns TiffPages iterable, len() makes it an integer size value.
+    tiff_length = len(tiff.pages)
     return tiff, tiff_length
 
 
-# noinspection PyTypeHints
 def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.int16] | None:
     """Reads a batch (subset) of frames stored inside the .tiff file wrapped by the input TiffFile instance.
 
@@ -109,26 +396,19 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.
     Returns:
         Number of frames, height, and width stored as a 3D NumPy array, or None if there are no frames to be read.
     """
-    # Queries the frame number from the input TiffFile instance
     tiff_length = len(tiff.pages)
 
-    # If the start index is outside the available frame range, returns None.
     if start_index >= tiff_length:
         return None
 
-    # Uses the input batch size and the available number of frames to the right of the start index to determine how
-    # many frames to read from the file.
-    frames_to_read = min(tiff_length - start_index, batch_size)  # Caps at batch_size as the maximum number to read
-
-    # Reads the requested number of frames
+    frames_to_read = min(tiff_length - start_index, batch_size)
     frames = tiff.asarray() if tiff_length == 1 else tiff.asarray(key=range(start_index, start_index + frames_to_read))
 
-    # Since single-frame tiffs only have two-dimensions, but the rest of the codebase is designed to work with
-    # 3-dimensional data (x, y, and frames), adds an extra dimension to 2-dimensional arrays.
+    # Adds extra dimension for single-frame TIFFs to ensure 3D array.
     if len(frames.shape) < _MULTIDIMENSIONAL_PROCESSING_THRESHOLD:
         frames = np.expand_dims(frames, axis=0)
 
-    # Converts the frame pixel format to int16 type, rescaling the pixel intensity values where possible.
+    # Converts to int16, rescaling where possible.
     if frames.dtype.type in {np.uint16, np.int32}:
         frames = (frames // 2).astype(np.int16)
     elif frames.dtype.type != np.int16:
@@ -142,429 +422,217 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.
     return frames
 
 
-def tiff_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
-    """Reads the input data stored as .tif and .tiff files and converts them to the suite2p plane binary (.bin)
-    file(s).
+def convert_tiffs_to_binary(config: SingleDayConfiguration) -> list[RuntimeContext]:
+    """Converts TIFF files to suite2p binary format for all planes.
+
+    This is the main entry point for TIFF to binary conversion. It performs the complete workflow: finds acquisition
+    parameters, discovers TIFF files, initializes plane contexts, and converts the data. The function handles
+    both standard TIFF data and MROI (Multi-ROI) data automatically based on the acquisition parameters loaded from the
+    .JSON file that accompanies valid data directories.
 
     Args:
-        ops: The dictionary that stores the suite2p processing parameters.
+        config: The single-day pipeline configuration. Must have data_path and save_path configured in file_io.
 
     Returns:
-        The 'ops' dictionary of the first available plane to be processed augmented with additional descriptive
-        parameters for the processed data. Specifically, the dictionary includes the following additional keys:
-        "Ly", "Lx", "first_tiffs", "frames_per_folder", "nframes", "mean_image", "mean_image_channel_2".
+        A list of RuntimeContext instances, one per plane (or virtual plane for MROI data). Each context contains
+        the configuration, acquisition parameters, and runtime data with frame dimensions, counts, and mean images
+        populated.
+
+    Raises:
+        ValueError: If data_path or save_path is not configured.
+        FileNotFoundError: If no acquisition parameters file or TIFF files are found.
     """
-    # Instantiates and resets the run timer
-    timer = PrecisionTimer("s")
-    timer.reset()
+    # Validates that data_path is configured and assigns it to a non-optional variable for type narrowing.
+    if config.file_io.data_path is None:
+        message = (
+            "Unable to convert TIFFs to binary. The data_path must be configured in the FileIO section of the "
+            "configuration, but it is currently None."
+        )
+        console.error(message=message, error=ValueError)
+    data_path: Path = config.file_io.data_path
 
-    # Uses the input 'ops' dictionary to generate a list of plane-specific 'ops' dictionaries. Converts the output
-    # list to tuple for efficiency
-    plane_ops: tuple[dict[str, Any], ...] = tuple(initialize_plane_ops(ops=ops))
+    # Finds acquisition parameters and data directory.
+    acquisition, data_directory = _find_acquisition_parameters(data_path)
 
-    # Queries the number of planes and channels from the first (and, potentially, only) available plane-specific
-    # 'ops' dictionary
-    plane_number = plane_ops[0]["nplanes"]
-    channel_number = plane_ops[0]["nchannels"]
+    # Discovers TIFF files in the data directory.
+    tiff_files = _discover_tiff_files(data_directory, tuple(config.file_io.ignored_file_names))
 
-    # Generates and opens the binary files for each plane for writing. If configured, looks for .tiff and .tif files in
-    # multiple data folders.
-    plane_ops, files, channel_1_binary_file, channel_2_binary_file = find_files_open_binaries(plane_ops=plane_ops)
-    ops = plane_ops[0]  # Queries the first (and, potentially, only) plane's 'ops' dictionary for further processing.
+    # Initializes plane contexts.
+    contexts = _initialize_plane_contexts(config, acquisition)
 
-    # Queries the batch_size (how many frames to store in memory at the same time) and adjusts it to account for the
-    # total number of planes and channels.
-    batch_size = ops["batch_size"]
+    # Extracts processing parameters.
+    plane_number = acquisition.plane_number
+    channel_number = acquisition.channel_number
+    is_mroi = acquisition.is_mroi
+    display_progress = config.main.display_progress_bars
+
+    # Determines which channel is functional (used for ROI detection).
+    functional_channel_index = 0 if config.main.first_channel_functional else 1
+    if channel_number == 1:
+        functional_channel_index = 0
+
+    # Computes batch size adjusted for planes and channels.
+    batch_size = config.registration.batch_size
     batch_size = plane_number * channel_number * math.ceil(batch_size / (plane_number * channel_number))
 
-    # Pre-initializes plane ops for nframes and frames_per_file. Note: frames_per_folder is already correctly
-    # initialized by find_files_open_binaries based on the number of discovered data folders.
-    for plane_index in range(plane_number):
-        plane_ops[plane_index]["nframes"] = 0
-        plane_ops[plane_index]["frames_per_file"] = np.zeros((len(files),), dtype=int)
-
-    # Determines the number of frames across all .tiff files. This is used for the progress bar visualization
+    # Counts total frames for progress bar and calculates frames per plane.
     total_frames = 0
-    for file in files:
-        _, tiff_length = _open_tiff(file)
+    for tiff_file in tiff_files:
+        _, tiff_length = _open_tiff(tiff_file)
         total_frames += tiff_length
 
-    # Creates the progress bar.
-    pbar = tqdm(total=total_frames, desc="Converting frames to binary", unit="frames", disable=not ops["progress_bars"])
+    # Calculates the number of frames per plane (accounting for interleaved planes and channels).
+    frames_per_plane = total_frames // (plane_number * channel_number)
 
-    # Loops over all discovered .tiff and .tif files.
-    folder_index = -1
-    current_plane_offset = 0  # Tracks which plane is currently being processed
-    for file_index, file in enumerate(files):
-        # Opens each target file for reading
-        tiff, tiff_length = _open_tiff(file)
+    # Pre-scans TIFF files to determine frame dimensions for each plane.
+    frame_heights, frame_widths = _get_frame_dimensions(tiff_files, contexts, acquisition)
 
-        # Resets plane offset at the start of each new folder and increments the processed folder index
-        if ops["first_tiffs"][file_index]:
-            folder_index += 1  # Increments the folder index
-            current_plane_offset = 0  # Resets the plane number to 0
+    # Creates BinaryFile instances for writing.
+    channel_1_binaries, channel_2_binaries = _create_binary_files(
+        contexts, frame_heights, frame_widths, frames_per_plane
+    )
 
-        # Loops until all frames from the target file are processed.
-        start_index = 0  # Determines the index from which to start reading the frames
+    # Creates progress bar.
+    description = "Converting MROI frames to binary" if is_mroi else "Converting frames to binary"
+    pbar = tqdm(total=total_frames, desc=description, unit="frames", disable=not display_progress)
+
+    # Initializes mean image accumulators, frame counters, and write indices for each context.
+    mean_images: list[NDArray[np.float32] | None] = [None] * len(contexts)
+    mean_images_channel_2: list[NDArray[np.float32] | None] = [None] * len(contexts)
+    frame_counts: list[int] = [0] * len(contexts)
+    write_indices: list[int] = [0] * len(contexts)
+
+    # Processes each TIFF file.
+    for tiff_file in tiff_files:
+        tiff, _ = _open_tiff(tiff_file)
+        start_index = 0
+
         while True:
-            # Reads up to the batch_size of frames from the processed .tiff file.
             frames = _read_tiff(tiff=tiff, start_index=start_index, batch_size=batch_size)
-
-            # If there are no more frames to read, advances to the next file or ends the runtime
             if frames is None:
                 break
 
-            # Initializes meanImg arrays while processing the first frame batch (as soon as the processed frame
-            # dimensions are known)
-            if file_index == 0 and start_index == 0:
-                for plane_index in range(plane_number):
-                    plane_ops[plane_index]["mean_image"] = np.zeros((frames.shape[1], frames.shape[2]), np.float32)
+            frame_count = frames.shape[0]
+            pbar.update(frame_count)
 
-                    # For 2-channel data, also initializes the mean image placeholder array for the second channel.
-                    if channel_number > 1:
-                        plane_ops[plane_index]["mean_image_channel_2"] = np.zeros(
-                            (frames.shape[1], frames.shape[2]), np.float32
-                        )
+            # Processes each context (plane or virtual plane).
+            for context_index, context in enumerate(contexts):
+                io_data = context.runtime.io
 
-            nframes = frames.shape[0]  # Determines the number of frames read from the processed .tiff file.
+                # Determines the physical plane index for frame extraction.
+                if is_mroi:
+                    physical_plane_index = io_data.plane_index if io_data.plane_index is not None else 0
+                    roi_lines = io_data.mroi_lines
+                else:
+                    physical_plane_index = context_index % plane_number
+                    roi_lines = []
 
-            # Updates progress bar with the number of frames processed in this batch.
-            pbar.update(nframes)
-
-            # Resolves the index of the functional channel (the channel that stores signal data).
-            functional_channel_index = ops["functional_chan"] - 1 if channel_number > 1 else 0
-
-            # Loops over all available planes and iteratively writes the frames for each plane into the plane-specific
-            # binary file(s).
-            for plane_index in range(plane_number):
-                # Calculates the starting frame index for this plane (assuming that frames for each plane are stacked
-                # in the same .tiff file).
-                plane_start_in_batch = (current_plane_offset + plane_index) % plane_number
-
-                # Suite2p assumes the frames are stacked in the order of: channels, planes, time. Generates the set of
-                # the functional channel frame indices for the current plane using the total number of planes and
-                # channels as iteration offsets, and the known plane-specific starting frame index.
-                frame_indices = range(
-                    plane_start_in_batch * plane_number + functional_channel_index,
-                    nframes,
-                    plane_number * channel_number,
-                )
-
-                # If there are frames to be added to the current plane's binary file, writes the frames to that binary
-                # file.
-                if frame_indices:
-                    # Extracts the set of frames to write to the current plane's binary file.
-                    frames_to_write = frames[frame_indices]
-
-                    # Converts all frames to bytes and writes (appends) them to the (functional) channel 1 memory-mapped
-                    # binary file.
-                    channel_1_binary_file[plane_index].write(frames_to_write.tobytes())
-
-                    # Appends the data from all processed frames to the data arrays in the plane-specific 'ops'
-                    # dictionary, as this data is used during further processing.
-                    plane_ops[plane_index]["mean_image"] += frames_to_write.sum(axis=0, dtype=np.float32)
-                    plane_ops[plane_index]["nframes"] += frames_to_write.shape[0]
-                    plane_ops[plane_index]["frames_per_file"][file_index] += frames_to_write.shape[0]
-                    plane_ops[plane_index]["frames_per_folder"][folder_index] += frames_to_write.shape[0]
-
-                    # If processed data uses two functional channels, repeats the steps above for the second
-                    # functional channel
-                    if channel_number > 1:
-                        # Generates indices for channel 2 frames of the processed plane.
-                        second_channel_indices = range(
-                            plane_start_in_batch * channel_number + (1 - functional_channel_index),
-                            nframes,
-                            plane_number * channel_number,
-                        )
-
-                        # Writes the frames to the channel 2 binary file and mean image 'ops' array.
-                        if second_channel_indices:
-                            channel_2_frames_to_write = frames[second_channel_indices]
-                            channel_2_binary_file[plane_index].write(channel_2_frames_to_write.tobytes())
-                            plane_ops[plane_index]["mean_image_channel_2"] += channel_2_frames_to_write.mean(axis=0)
-
-            # Updates plane offset for the next batch of frames
-            frames_per_plane_channel = nframes // (plane_number * channel_number)
-            current_plane_offset = (current_plane_offset + frames_per_plane_channel) % plane_number
-            start_index += nframes
-
-        # Releases all resources before processing the next file.
-        gc.collect()
-
-    # Closes the progress bar when binary conversion is over
-    pbar.close()
-
-    # Loops over each plane-specific 'ops' dictionary and adds descriptive information about the data to be processed
-    # (frames).
-    for ops in plane_ops:
-        ops["Ly"], ops["Lx"] = ops["mean_image"].shape
-        ops["yrange"] = np.array([0, ops["Ly"]])
-        ops["xrange"] = np.array([0, ops["Lx"]])
-        ops["mean_image"] /= ops["nframes"]
-        if channel_number > 1:
-            ops["mean_image_channel_2"] /= ops["nframes"]
-
-        # Caches each 'ops' dictionary to disk as an ops.npy file. The file is cached into the plane-specific processing
-        # subdirectory.
-        np.save(ops["ops_path"], ops)
-
-    # Closes all memory-mapped binary files
-    for plane_index in range(plane_number):
-        channel_1_binary_file[plane_index].close()
-
-        if channel_number > 1:
-            channel_2_binary_file[plane_index].close()
-
-    # Returns the first (and, potentially, only) plane's 'ops' dictionary to caller.
-    return plane_ops[0]
-
-
-def mesoscan_to_binary(ops: dict[str, Any]) -> dict[str, Any]:
-    """Reads the input mesoscope data stored as .tif and .tiff files and converts them to the suite2p plane binary
-    (.bin) file(s).
-
-    Args:
-        ops: The dictionary that stores the suite2p processing parameters.
-
-    Returns:
-        The 'ops' dictionary of the first available plane to be processed augmented with additional descriptive
-        parameters for the processed data. Specifically, the dictionary includes the following additional keys:
-        "Ly", "Lx", "first_tiffs", "frames_per_folder", "nframes", "mean_image", "mean_image_channel_2".
-    """
-    # Instantiates and resets the run timer
-    timer = PrecisionTimer("s")
-    timer.reset()
-
-    # If "lines" are not already provided in ops, loads parameters from the suite2p_parameters.json file expected to be
-    # stored inside the data directory. This file is generated by sl-experiment during mesoscope data preprocessing.
-    if "lines" not in ops:
-        file_path = Path(ops["data_path"])
-        files = list(file_path.glob("suite2p_parameters.json"))
-        if not files:
-            message = (
-                f"Unable to find 'suite2p_parameters.json' file in the data directory {file_path}. "
-                f"This file is required for mesoscope data processing to determine ROI line mappings."
-            )
-            console.error(message=message, error=FileNotFoundError)
-        with files[0].open() as f:
-            ops_json = json.load(f)
-
-        # Maps suite2p_parameters.json field names to the expected ops dictionary keys.
-        # suite2p_parameters.json uses: frame_rate, plane_number, channel_number, roi_number, roi_x_coordinates,
-        # roi_y_coordinates, roi_lines.
-        # ops dictionary expects: fs, nplanes, nrois, dx, dy, lines.
-        ops["lines"] = ops_json["roi_lines"]
-        ops["nrois"] = ops_json["roi_number"]
-        ops["nplanes"] = ops_json["plane_number"]
-        ops["dy"] = ops_json["roi_y_coordinates"]
-        ops["dx"] = ops_json["roi_x_coordinates"]
-        ops["fs"] = ops_json["frame_rate"]
-
-    # If "lines" already exists, sets the number of ROIs to the number of sub-lists stored inside the 'lines' list.
-    # This assumes that the lines for each ROI are stored as separate lists under the main 'lines' list.
-    else:
-        ops["nrois"] = len(ops["lines"])
-
-    # Extracts the total number of planes inside the input data to reduce the code complexity below.
-    plane_number = ops["nplanes"]
-
-    message = (
-        f"Converting input mesoscope data from nested structure with {plane_number} planes and {ops['nrois']} ROIs to "
-        f"a flattened structure with {ops['nrois'] * plane_number} ROI x plane combinations. Each combination is now "
-        f"treated as a separate plane."
-    )
-    # noinspection PyTypeChecker
-    console.echo(message=message, level=LogLevel.INFO)
-
-    # Copies original parameters to avoid modifying the original 'ops' dictionary by reference.
-    lines = ops["lines"].copy()
-    y_coordinates = ops["dy"].copy()
-    x_coordinates = ops["dx"].copy()
-
-    # Pre-initializes lists to hold the data for all available ROIs and planes.
-    ops["lines"] = [None] * plane_number * ops["nrois"]
-    ops["dy"] = [None] * plane_number * ops["nrois"]
-    ops["dx"] = [None] * plane_number * ops["nrois"]
-    ops["iplane"] = np.zeros((plane_number * ops["nrois"],), np.int32)
-
-    # Re-arranges the data to represent all ROI * plane combinations (de-nests planes from ROIs).
-    for roi_index in range(ops["nrois"]):
-        ops["lines"][roi_index :: ops["nrois"]] = [lines[roi_index]] * plane_number
-        ops["dy"][roi_index :: ops["nrois"]] = [y_coordinates[roi_index]] * plane_number
-        ops["dx"][roi_index :: ops["nrois"]] = [x_coordinates[roi_index]] * plane_number
-        ops["iplane"][roi_index :: ops["nrois"]] = np.arange(0, plane_number, 1, int)
-
-    # Updates the 'nplanes' to treat each unique ROI x plane combination as a unique plane. This makes mesoscope data
-    # behave like regular 2-photon data.
-    ops["nplanes"] = plane_number * ops["nrois"]
-
-    # Uses the input 'ops' dictionary to generate the list of plane-specific 'ops' dictionaries. Converts the output
-    # list to tuple for efficiency
-    plane_ops: tuple[dict[str, Any], ...] = tuple(initialize_plane_ops(ops=ops))
-
-    # Generates and opens the binary files for each plane for writing. If configured, looks for .tiff and .tif files in
-    # multiple data folders.
-    plane_ops, files, channel_1_binary_file, channel_2_binary_file = find_files_open_binaries(plane_ops=plane_ops)
-    ops = plane_ops[0]  # Queries the first (and, potentially, only) plane's 'ops' dictionary for further processing.
-
-    # Queries the number of channels and the batch_size (how many frames to store in memory at the same time) from the
-    # first (and, potentially, only) available plane-specific 'ops' dictionary
-    channel_number = ops["nchannels"]
-    batch_size = ops["batch_size"]
-
-    # Determines the number of frames across all .tiff files. This is used for the progress bar visualization
-    total_frames = 0
-    for file in files:
-        tiff, tiff_length = _open_tiff(file)
-        total_frames += tiff_length
-
-    # Creates the progress bar.
-    pbar = tqdm(
-        total=total_frames,
-        desc="Converting mesoscope frames to binary",
-        unit="frames",
-        disable=not ops["progress_bars"],
-    )
-
-    # Loops over all discovered .tiff and .tif files.
-    folder_index = -1
-    current_plane_offset = 0  # Tracks which plane is currently being processed
-    for file_index, file in enumerate(files):
-        # Opens each target file for reading
-        tiff, tiff_length = _open_tiff(file)
-
-        # Resets plane offsets at the start of each new folder and increments the processed folder index.
-        if ops["first_tiffs"][file_index]:
-            folder_index += 1  # Increments the folder index
-            current_plane_offset = 0  # Resets the plane number to 0
-
-        # Loops until all frames from the target file are processed.
-        start_index = 0  # Determines the index from which to start reading the frames
-        while True:
-            # Reads up to the batch_size of frames from the processed .tiff file.
-            frames = _read_tiff(tiff=tiff, start_index=start_index, batch_size=batch_size)
-
-            # If there are no more frames to read, advances to the next file or ends the runtime
-            if frames is None:
-                break
-
-            # Determines the number of frames read from the processed .tiff file.
-            nframes = frames.shape[0]
-
-            # Updates progress bar with the number of frames processed in this batch.
-            pbar.update(nframes)
-
-            # Resolves the index of the functional channel (the channel that stores signal data).
-            functional_channel_index = ops["functional_chan"] - 1 if channel_number > 1 else 0
-
-            # Loops over all available planes and iteratively writes the frames for each plane into the plane-specific
-            # binary file(s).
-            for roi_plane_index in range(ops["nplanes"]):
-                # Queries the set of lines used for the current ROI-plane.
-                roi_plane_lines = np.array(plane_ops[roi_plane_index]["lines"]).astype(np.int32)
-
-                # Retrieves the plane index.
-                plane_index = plane_ops[roi_plane_index]["iplane"]
-
-                if file_index == 0 and start_index == 0:
-                    plane_ops[roi_plane_index]["mean_image"] = np.zeros(
-                        (len(roi_plane_lines), frames.shape[2]), np.float32
+                # Generates frame indices for this plane's functional channel.
+                frame_indices = list(
+                    range(
+                        physical_plane_index * channel_number + functional_channel_index,
+                        frame_count,
+                        plane_number * channel_number,
                     )
-                    if channel_number > 1:
-                        plane_ops[roi_plane_index]["mean_image_channel_2"] = np.zeros(
-                            (len(roi_plane_lines), frames.shape[2]), np.float32
-                        )
-                    plane_ops[roi_plane_index]["nframes"] = 0
-
-                # Calculates the starting frame index for this plane (assuming that frames for each plane are stacked
-                # in the same .tiff file).
-                plane_start_in_batch = (current_plane_offset + plane_index) % plane_number
-
-                # Suite2p assumes the frames are stacked in the order of: channels, planes, time. Generates the set of
-                # the functional channel frame indices for the current plane using the total number of planes and
-                # channels as iteration offsets, and the known plane-specific starting frame index.
-                frame_indices = range(
-                    plane_start_in_batch * plane_number + functional_channel_index,
-                    nframes,
-                    plane_number * channel_number,
                 )
 
-                # If there are frames to be added to the current plane's binary file, writes the frames to that binary
-                # file.
-                if frame_indices:
-                    # Extracts the set of frames to write to the current plane's binary file.
-                    frames_to_write = frames[frame_indices, roi_plane_lines[0] : (roi_plane_lines[-1] + 1), :]
+                if not frame_indices:
+                    continue
 
-                    # Converts all frames to bytes and writes (appends) them to the (functional) channel 1 memory-mapped
-                    # binary file.
-                    channel_1_binary_file[roi_plane_index].write(frames_to_write.tobytes())
+                plane_frames = frames[frame_indices]
 
-                    # Appends the data from all processed frames to the data arrays in the plane-specific 'ops'
-                    # dictionary, as this data is used during further processing.
-                    plane_ops[roi_plane_index]["mean_image"] += frames_to_write.astype(np.float32).sum(axis=0)
-                    plane_ops[roi_plane_index]["nframes"] += frames_to_write.shape[0]
-                    plane_ops[roi_plane_index]["frames_per_folder"][folder_index] += frames_to_write.shape[0]
+                # For MROI data, slices frames to extract only the ROI lines.
+                if is_mroi and len(roi_lines) > 0:
+                    line_start = roi_lines[0]
+                    line_end = roi_lines[-1] + 1
+                    plane_frames = plane_frames[:, line_start:line_end, :]
 
-                    # If processed data uses two functional channels, repeats the steps above for the second
-                    # functional channel
-                    if channel_number > 1:
-                        # Generates indices for channel 2 frames of the processed plane.
-                        second_channel_indices = range(
-                            plane_start_in_batch * channel_number + (1 - functional_channel_index),
-                            nframes,
+                # Initializes mean image accumulator on first batch.
+                if mean_images[context_index] is None:
+                    mean_images[context_index] = np.zeros(
+                        (plane_frames.shape[1], plane_frames.shape[2]), dtype=np.float32
+                    )
+
+                # Writes frames to binary file using indexed assignment.
+                batch_frame_count = plane_frames.shape[0]
+                write_start = write_indices[context_index]
+                channel_1_binaries[context_index][write_start : write_start + batch_frame_count] = plane_frames
+                write_indices[context_index] += batch_frame_count
+
+                mean_images[context_index] += plane_frames.sum(axis=0, dtype=np.float32)
+                frame_counts[context_index] += batch_frame_count
+
+                # Processes channel 2 if applicable.
+                if channel_number > 1:
+                    second_channel_index = 1 - functional_channel_index
+                    channel_2_frame_indices = list(
+                        range(
+                            physical_plane_index * channel_number + second_channel_index,
+                            frame_count,
                             plane_number * channel_number,
                         )
+                    )
 
-                        # Writes the frames to the channel 2 binary file and mean image 'ops' array.
-                        if second_channel_indices:
-                            channel_2_frames_to_write = frames[
-                                second_channel_indices, roi_plane_lines[0] : roi_plane_lines[-1] + 1, :
-                            ]
-                            channel_2_binary_file[roi_plane_index].write(channel_2_frames_to_write.tobytes())
-                            plane_ops[roi_plane_index]["mean_image_channel_2"] += channel_2_frames_to_write.astype(
-                                np.float32
-                            ).sum(axis=0)
+                    if channel_2_frame_indices:
+                        channel_2_frames = frames[channel_2_frame_indices]
 
-            # Updates plane offset for the next batch of frames
-            frames_per_plane_channel = nframes // (plane_number * channel_number)
-            current_plane_offset = (current_plane_offset + frames_per_plane_channel) % plane_number
-            start_index += nframes
+                        if is_mroi and len(roi_lines) > 0:
+                            line_start = roi_lines[0]
+                            line_end = roi_lines[-1] + 1
+                            channel_2_frames = channel_2_frames[:, line_start:line_end, :]
 
-        # Releases all resources before processing the next file.
+                        if mean_images_channel_2[context_index] is None:
+                            mean_images_channel_2[context_index] = np.zeros(
+                                (channel_2_frames.shape[1], channel_2_frames.shape[2]), dtype=np.float32
+                            )
+
+                        # Writes channel 2 frames to binary file using indexed assignment.
+                        # Note: write_indices is shared between channels since they have the same frame count.
+                        ch2_batch_count = channel_2_frames.shape[0]
+                        ch2_write_start = write_indices[context_index] - batch_frame_count
+                        channel_2_binaries[context_index][ch2_write_start : ch2_write_start + ch2_batch_count] = (
+                            channel_2_frames
+                        )
+                        mean_images_channel_2[context_index] += channel_2_frames.sum(axis=0, dtype=np.float32)
+
+            start_index += frame_count
+
         gc.collect()
 
-    # Closes the progress bar when binary conversion is over
     pbar.close()
 
-    # Determines whether the current runtime is configured to perform motion registration
-    do_registration = ops["do_registration"]
-
-    # Loops over each plane-specific 'ops' dictionary and adds descriptive information about the data to be processed
-    # (frames).
-    for ops in plane_ops:
-        ops["Ly"], ops["Lx"] = ops["mean_image"].shape
-
-        # If registration is disabled, sets the pixel ranges to span the full height and width of the frame. Pixels on
-        # the edges of each frame are excluded during registration as they are typically unstable and should be
-        # discarded anyway.
-        if not do_registration:
-            ops["yrange"] = np.array([0, ops["Ly"]])
-            ops["xrange"] = np.array([0, ops["Lx"]])
-
-        ops["mean_image"] /= ops["nframes"]
+    # Closes binary files and updates runtime data in each context.
+    for context_index, context in enumerate(contexts):
+        channel_1_binaries[context_index].close()
         if channel_number > 1:
-            ops["mean_image_channel_2"] /= ops["nframes"]
+            channel_2_binaries[context_index].close()
 
-        # Caches each 'ops' dictionary to disk as an ops.npy file. The file is cached into the plane-specific processing
-        # subdirectory.
-        np.save(ops["ops_path"], ops)
+        # Computes final mean image by dividing by frame count.
+        mean_img = mean_images[context_index]
+        if mean_img is not None and frame_counts[context_index] > 0:
+            mean_img /= frame_counts[context_index]
 
-    # Closes all memory-mapped binary files
-    for roi_plane_index in range(ops["nplanes"]):
-        channel_1_binary_file[roi_plane_index].close()
+        mean_img_ch2 = mean_images_channel_2[context_index]
+        if mean_img_ch2 is not None and frame_counts[context_index] > 0:
+            mean_img_ch2 /= frame_counts[context_index]
 
+        # Updates IOData with frame dimensions.
+        io_data = context.runtime.io
+        if mean_img is not None:
+            io_data.frame_height = mean_img.shape[0]
+            io_data.frame_width = mean_img.shape[1]
+        io_data.frame_count = frame_counts[context_index]
+
+        # Updates DetectionData with mean images.
+        context.runtime.detection.mean_image = mean_img
         if channel_number > 1:
-            channel_2_binary_file[roi_plane_index].close()
+            context.runtime.detection.mean_image_channel_2 = mean_img_ch2
 
-    # Returns the first (and, potentially, only) plane's 'ops' dictionary to caller.
-    return plane_ops[0]
+        # Sets initial valid pixel ranges to full frame (registration will update these).
+        context.runtime.registration.valid_y_range = [0, io_data.frame_height]
+        context.runtime.registration.valid_x_range = [0, io_data.frame_width]
+
+    message = f"Converted {total_frames} frames across {len(tiff_files)} TIFF files to binary format."
+    console.echo(message=message, level=LogLevel.SUCCESS)
+
+    return contexts

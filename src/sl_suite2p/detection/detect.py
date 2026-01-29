@@ -132,8 +132,7 @@ def detection_wrapper(
     timer.reset()
     stat = select_rois(ops=ops, mov=mov, plane_number=plane_number)
     message = (
-        f"Plane {plane_number} cell masks: discovered. Detected ROIs: {len(stat)}. "
-        f"Time taken: {timer.elapsed} seconds."
+        f"Plane {plane_number} cell masks: discovered. Detected ROIs: {len(stat)}. Time taken: {timer.elapsed} seconds."
     )
     console.echo(message=message, level=LogLevel.SUCCESS)
 
