@@ -15,13 +15,23 @@ data (computed by pipeline).
 - Functions pass entire dictionary, extract what they need
 - Runtime data (images, offsets) embedded in same dict as config
 
-### Target Architecture (RuntimeData)
+### Target Architecture (RuntimeContext)
 
 - `SingleDayConfiguration` - user config (YAML, human-readable)
+- `AcquisitionParameters` - input metadata from JSON (describes recording setup)
 - `SingleDayRuntimeData` - pipeline outputs (YAML + .npy for arrays)
-- `RuntimeContext` - combines both for function calls
-- Clear separation: what user sets vs what pipeline computes
+- `RuntimeContext` - combines all three for function calls
+- Clear separation: user config vs input metadata vs pipeline outputs
 - No backward compatibility - clean break from legacy format
+
+### Unified Input Format
+
+All inputs are now standardized as:
+- TIFF files containing the imaging data
+- `suite2p_parameters.json` file containing acquisition metadata (frame rate, planes, channels, MROI geometry)
+
+This replaces the previous `InputFormat` enum approach and allows easy extension to support new microscope types
+by implementing converter algorithms that produce this standardized format.
 
 ---
 
@@ -35,27 +45,68 @@ All configuration and runtime dataclasses have been updated with descriptive fie
 - `src/sl_suite2p/configuration/__init__.py` - Updated exports
 
 **Key changes:**
-- Added `InputFormat` and `BaselineMethod` StrEnums for type-safe configuration
+- Added `BaselineMethod` StrEnum for type-safe configuration
+- Added `AcquisitionParameters` dataclass for input metadata
+- Added `ExtractionData` dataclass for fluorescence, spikes, and classification data (two-channel support)
+- Added `ROIStatistics` dataclass with pickle-free serialization (replaces dict-based stat.npy)
 - Changed all path fields from `str` to `Path | None` with `__post_init__` conversion
-- Added `allow_pickle=False` to all NumPy save/load operations
+- Changed tuple fields to list for YAML serialization compatibility (valid_y_range, valid_x_range, centroid)
+- Consolidated registration arrays into single `registration_data.npz` file
+- Consolidated detection arrays into single `detection_data.npz` file
+- Added `allow_pickle=False` to all NumPy save/load/savez operations
 - Added channel 2 detection and timing fields for independent dual-channel processing
+- Renamed IOData fields: mesoscope_* → mroi_* (e.g., mroi_y_offset, mroi_x_offset, mroi_lines)
 - Removed deprecated sections (Channel2, Output)
+- Removed `InputFormat` enum (replaced by unified TIFF + JSON input architecture)
 - Imported shared SignalExtraction and SpikeDeconvolution in multi_day.py
 
 See `REFACTOR_CHANGES.md` for the complete field rename mappings and deprecation decisions.
 
 ---
 
-## Phase 2: Update IO Module (PENDING)
+## Phase 2: Update IO Module (COMPLETED)
 
-**Files:**
+**Files modified:**
 
-- `src/sl_suite2p/io/utils.py`
-- `src/sl_suite2p/io/tiff.py`
+- `src/sl_suite2p/io/tiff.py` - All IO functionality consolidated here
+- `src/sl_suite2p/io/__init__.py` - Updated exports
+- `src/sl_suite2p/io/utils.py` - **REMOVED** (merged into tiff.py)
 
-1. Create `initialize_plane_runtime()` replacing `initialize_plane_ops()`
-2. Update `tiff_to_binary()` and `mesoscan_to_binary()` to use RuntimeContext
-3. Save images as separate `.npy` files, paths in runtime data
+**Key changes:**
+
+1. Created `AcquisitionParameters` dataclass with `from_json()` method
+2. Added `AcquisitionParameters` field to `RuntimeContext`
+3. Created `initialize_plane_contexts()` replacing `initialize_plane_ops()`
+   - Now accepts `config` + `acquisition` instead of ops dictionaries
+   - Uses `acquisition.is_mroi` and `acquisition.virtual_plane_count` for plane setup
+   - Computes ROI index and physical plane index for MROI data
+4. Implemented optimized TIFF discovery with two-step approach:
+   - `find_acquisition_parameters()` - recursively finds `suite2p_parameters.json`
+   - `discover_tiff_files()` - non-recursive scan in the same directory as JSON
+5. Created unified `convert_tiffs_to_binary()` replacing both `tiff_to_binary()` and `mesoscan_to_binary()`
+   - Handles both standard TIFF and MROI data based on `acquisition.is_mroi`
+   - Uses `RuntimeContext` instead of ops dictionaries
+   - Updates runtime data with frame dimensions, counts, and mean images
+6. Removed `InputFormat` enum (no longer needed with unified input format)
+7. Removed `input_format` field from `FileIO` class
+8. Merged all utility functions from `utils.py` into `tiff.py`
+9. Removed legacy `tiff_to_binary()` and `mesoscan_to_binary()` functions
+
+**New public API:**
+
+```python
+# Find acquisition parameters (recursively searches for JSON)
+acquisition, data_dir = find_acquisition_parameters(config.file_io.data_path)
+
+# Discover TIFF files (non-recursive in same directory as JSON)
+tiff_files = discover_tiff_files(data_dir, config.file_io.ignored_file_names)
+
+# Initialize plane contexts
+contexts = initialize_plane_contexts(config, acquisition)
+
+# Convert TIFFs to binary format
+contexts = convert_tiffs_to_binary(contexts, tiff_files)
+```
 
 ---
 
@@ -102,16 +153,20 @@ See `REFACTOR_CHANGES.md` for the complete field rename mappings and deprecation
 
 ---
 
-## Phase 6: Update Combined Folder Generation (PENDING)
+## Phase 6: Update Combined Folder Generation (PARTIALLY COMPLETE)
 
 **File:** `src/sl_suite2p/io/save.py`
 
-Update `combined()` function:
+**Completed:**
+- Renamed `compute_dydx()` → `compute_plane_offsets()`
+- Renamed `combined()` → `combine_planes()`
+- Refactored `combine_planes()` to accept `list[RuntimeContext]` instead of loading ops.npy
+- Removed legacy `_compute_dydx_from_legacy_ops()` function
+- Function now reads data from `ctx.runtime.extraction.*` instead of loading .npy files from disk
 
-- Read from `runtime_data.yaml` instead of `ops.npy`
-- Load images from `.npy` paths
-- Save combined `runtime_data.yaml` + image `.npy` files
-- Keep saving `stat.npy`, `F.npy`, etc. as before
+**Remaining:**
+- Update callers in `single_day.py`, `gui/io.py`, `gui/reggui.py`, and `multiday/process.py`
+- Save combined `runtime_data.yaml` with aggregated metadata
 
 ---
 
@@ -169,24 +224,21 @@ suite2p/
 ```
 suite2p/
 ├── configuration.yaml
-├── plane0/
+├── plane_0/
 │   ├── runtime_data.yaml
-│   ├── reference_image.npy
-│   ├── mean_image.npy
-│   ├── enhanced_mean_image.npy
-│   ├── maximum_projection.npy
-│   ├── correlation_map.npy
-│   ├── rigid_y_offsets.npy, rigid_x_offsets.npy, rigid_correlations.npy
-│   ├── nonrigid_y_offsets.npy, nonrigid_x_offsets.npy, nonrigid_correlations.npy
-│   ├── data.bin
-│   └── F.npy, Fneu.npy, stat.npy, ...
+│   ├── registration_data.npz     # reference_image, rigid/nonrigid offsets and correlations
+│   ├── detection_data.npz        # mean_image, enhanced_mean_image, max_proj, correlation_map (+chan2)
+│   ├── roi_statistics.npz        # Pickle-free ROI statistics
+│   ├── channel_1_data.bin
+│   ├── F.npy, Fneu.npy, Fsub.npy, spks.npy, iscell.npy
+│   └── redcell.npy (if two channels)
 └── combined/
     ├── runtime_data.yaml
     ├── mean_image.npy
     ├── enhanced_mean_image.npy
     ├── maximum_projection.npy
     ├── correlation_map.npy
-    └── F.npy, Fneu.npy, stat.npy, ...
+    └── F.npy, Fneu.npy, Fsub.npy, spks.npy, stat.npy, iscell.npy
 ```
 
 ---
@@ -228,5 +280,8 @@ suite2p/
 - **Non-sparse detection removed:** Only sparse detection supported (sourcery.py deleted)
 - **FFT padding:** Always enabled (hardcoded)
 - **Two-channel support:** Expanded to support independent ROI detection in both channels
-- **Registration offsets:** Persist all offsets as .npy files to enable re-processing
-- **Pickle disabled:** All np.save/np.load use allow_pickle=False
+- **Consolidated .npz archives:** Registration and detection arrays stored in single .npz files
+- **ROIStatistics dataclass:** Replaces dictionary-based stat.npy with typed, pickle-free structure
+- **ExtractionData dataclass:** Stores fluorescence, spikes, classification with two-channel support
+- **Pickle disabled:** All np.save/np.load/np.savez use allow_pickle=False
+- **YAML-safe types:** All tuple fields changed to list for YAML serialization compatibility

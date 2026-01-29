@@ -2,21 +2,25 @@
 suite2p dataset.
 """
 
-from typing import Any
-from pathlib import Path
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
-from natsort import natsorted
-from numpy.typing import NDArray
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
-def compute_dydx(plane_ops: list[dict[str, Any]]) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
-    """Computes the displacement for each plane in the input list of plane-specific 'ops' dictionaries.
+    from ..configuration.single_day import RuntimeContext
 
-    The displacement values are calculated based on the dimensions and configuration parameters provided in the 'ops'
-    dictionary. If "dx" and "dy" are already specified in the 'ops' dictionaries, those values are used. If not, the
-    function computes the displacement using the dimensions of each plane.
+
+def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
+    """Computes the displacement for each plane in the input list of plane-specific RuntimeContext instances.
+
+    The displacement values are calculated based on the dimensions and configuration parameters provided in each
+    RuntimeContext. If mroi_x_offset and mroi_y_offset are already specified in the RuntimeContext, those values are
+    used. If not, the function computes the displacement using the dimensions of each plane.
 
     Notes:
         The output of this function is used to properly arrange the data from multiple planes in the 'shared' recording
@@ -24,42 +28,42 @@ def compute_dydx(plane_ops: list[dict[str, Any]]) -> tuple[NDArray[np.int64], ND
         suite2p-processed data as a 'combined' dataset that integrates the data from all available planes.
 
     Args:
-        plane_ops: A list of plane-specific dictionaries that stores the suite2p processing parameters.
+        plane_contexts: A list of RuntimeContext instances, one for each plane being processed.
 
     Returns:
         A tuple of two elements. The first element is an array of y-displacement values, and the second element is an
         array of x-displacement values.
     """
-    # Copies the first available plane-specific 'ops' dictionary to prevent modification by referencing.
-    ops = plane_ops[0].copy()
+    # Extracts data from the first context for reference.
+    first_context = plane_contexts[0]
 
     # Calculates the number of planes.
-    plane_number = len(plane_ops)
+    plane_number = len(plane_contexts)
 
     # Initializes NumPy arrays to store the calculated displacement values for y-axis and x-axis.
-    y_displacement = np.zeros(plane_number, np.int64)
-    x_displacement = np.zeros(plane_number, np.int64)
+    y_displacement = np.zeros(plane_number, dtype=np.int32)
+    x_displacement = np.zeros(plane_number, dtype=np.int32)
 
-    # If "dy" and "dx" are not already provided in the first 'ops' dictionary, computes them based on the dimensions.
-    if ("dy" not in ops) or ("dx" not in ops):
-        # Queries the height and width of the first plane's 'ops' dictionary.
-        height = ops["Ly"]
-        width = ops["Lx"]
+    # If mroi_y_offset and mroi_x_offset are not already provided, computes them based on the dimensions.
+    if first_context.runtime.io.mroi_y_offset is None or first_context.runtime.io.mroi_x_offset is None:
+        # Queries the height and width of the first plane.
+        height = first_context.runtime.io.frame_height
+        width = first_context.runtime.io.frame_width
 
         # Calculates the number of pixel columns needed to arrange the planes, based on their dimension.
-        column_number = np.ceil(np.sqrt(ops["Ly"] * ops["Lx"] * plane_number) / ops["Lx"]).astype(int)
+        column_number = int(np.ceil(np.sqrt(height * width * plane_number) / width))
 
         # Loops over all available planes and calculates the displacement values of each plane based on the column and
         # row positions.
         for plane_index in range(plane_number):
             x_displacement[plane_index] = (plane_index % column_number) * width
-            y_displacement[plane_index] = np.floor_divide(plane_index, column_number) * height
+            y_displacement[plane_index] = (plane_index // column_number) * height
 
-    # Otherwise, uses "dy" and "dx" values directly.
+    # Otherwise, uses mroi_y_offset and mroi_x_offset values directly.
     else:
-        # Queries the values of "dy" and "dx" from each plane-specific 'ops' dictionary.
-        x_displacement = np.array([ops["dx"] for ops in plane_ops])
-        y_displacement = np.array([ops["dy"] for ops in plane_ops])
+        # Queries the values of mroi_x_offset and mroi_y_offset from each plane-specific RuntimeContext.
+        x_displacement = np.array([ctx.runtime.io.mroi_x_offset for ctx in plane_contexts], dtype=np.int32)
+        y_displacement = np.array([ctx.runtime.io.mroi_y_offset for ctx in plane_contexts], dtype=np.int32)
 
         # Identifies the unique (dy, dx) pairs and determines the number of unique regions of interests (ROIs).
         unique_positions = np.unique(np.vstack((y_displacement, x_displacement)), axis=1)
@@ -72,15 +76,15 @@ def compute_dydx(plane_ops: list[dict[str, Any]]) -> tuple[NDArray[np.int64], ND
             plane_number //= roi_number
 
             # Queries the widths and heights for each plane.
-            height = np.array([ops["Ly"] for ops in plane_ops])
-            width = np.array([ops["Lx"] for ops in plane_ops])
+            height = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts])
+            width = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts])
 
             # Calculates the maximum height and width based on the computed displacement values and plane dimensions.
             maximum_height = (y_displacement + height).max()
             maximum_width = (x_displacement + width).max()
 
             # Recalculates the number of columns needed to arrange the planes.
-            column_number = np.ceil(np.sqrt(maximum_height * maximum_width * plane_number) / maximum_width).astype(int)
+            column_number = int(np.ceil(np.sqrt(maximum_height * maximum_width * plane_number) / maximum_width))
 
             # Loops over all available planes and updates the displacement values for each region of interest (ROI)
             # based on the column and row positions.
@@ -88,216 +92,163 @@ def compute_dydx(plane_ops: list[dict[str, Any]]) -> tuple[NDArray[np.int64], ND
                 for roi_index in range(roi_number):
                     roi_plane_index = plane_index * roi_number + roi_index
                     x_displacement[roi_plane_index] += (plane_index % column_number) * maximum_width
-                    y_displacement[roi_plane_index] += np.floor_divide(plane_index, column_number) * maximum_height
+                    y_displacement[roi_plane_index] += (plane_index // column_number) * maximum_height
 
     # Returns the lists of the y-axis and x-axis displacement values.
     return y_displacement, x_displacement
 
 
 # noinspection PyUnboundLocalVariable
-def combined(
-    save_directory: Path, save: bool = True
-) -> tuple[
-    NDArray[Any],
-    dict[str, Any],
-    NDArray[np.float32],
-    NDArray[np.float32],
-    NDArray[np.float32],
-    NDArray[np.float32],
-    NDArray[Any],
-    NDArray[Any],
-    NDArray[Any],
-    NDArray[Any],
-    bool,
-]:
-    """Combines the data from each input plane-specific directory under 'save_directory' into a single resulting
-    'combined' directory.
+def combine_planes(plane_contexts: list[RuntimeContext], save: bool = True) -> None:
+    """Combines processed data from multiple planes into a unified 'combined' directory.
 
-    This function combines multi-plane and multi-roi recording data into a unified recording dataset, effectively
-    reassembling the original recording from individually processed planes, adjusting their placement according to the
-    specified displacement values for both planes and ROIs.
+    This function combines multi-plane and multi-ROI recording data into a unified dataset, reassembling the original
+    recording from individually processed planes. The combined data is saved to a 'combined' subdirectory alongside the
+    plane directories.
 
     Args:
-        save_directory: The directory containing all processed plane subdirectories.
+        plane_contexts: A list of RuntimeContext instances, one for each plane being combined. All contexts must have
+            their runtime.io.output_directory set to valid plane output directories.
         save: Determines whether to save the combined data to disk.
-
-    Returns:
-        A tuple of 11 elements. The first element is a NumPy array that stores the ROI statistics. The second element
-        is the 'ops' dictionary that combines the data for all processed planes. The third, fourth, fifth, and sixths
-        elements are the NumPy arrays storing the cell fluorescence, neuropil fluorescence,
-        baseline-and-neuropil-subtracted cell fluorescence, and deconvolved spike data. The seventh and eights elements
-        are NumPy arrays that store the boolean cell classification and likelihood data (in this order) for the first
-        channel. The ninth and tenth elements are NumPy arrays that store the boolean cell classification and
-        likelihood data for the second channel. The elevens element is a boolean flag that indicates whether the
-        processed recording contained the second channel.
     """
-    # Extracts the list of plane directories in the save folder and sorts them in the natural (ascending) order.
-    plane_directories = natsorted(
-        [directory for directory in save_directory.iterdir() if directory.is_dir() and directory.name[:5] == "plane"]
-    )
+    # Extracts plane directories from the RuntimeContext instances.
+    plane_directories = [ctx.runtime.io.output_directory for ctx in plane_contexts]
 
-    # Loads the ops.npy file for each plane as a dictionary.
-    plane_ops = [np.load(directory.joinpath("ops.npy"), allow_pickle=True).item() for directory in plane_directories]
+    # Derives the save directory from the first plane's output directory (parent of plane0, plane1, etc.).
+    save_directory = plane_directories[0].parent
 
     # Computes the y-axis and x-axis displacement for each plane. These displacement values are used to arrange
     # individual planes back into the original recording movie.
-    y_displacement, x_displacement = compute_dydx(plane_ops)
+    y_offsets, x_offsets = compute_plane_offsets(plane_contexts)
 
     # Queries the height and width for each plane.
-    height = np.array([ops["Ly"] for ops in plane_ops])
-    width = np.array([ops["Lx"] for ops in plane_ops])
+    heights = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts], dtype=np.int32)
+    widths = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts], dtype=np.int32)
 
     # Calculates the overall height and width of the entire recording plane after accounting for plane displacement.
-    maximum_height = int(np.amax(y_displacement + height))
-    maximum_width = int(np.amax(x_displacement + width))
+    combined_height = int(np.amax(y_offsets + heights))
+    combined_width = int(np.amax(x_offsets + widths))
 
-    # Initializes 2D NumPy arrays to store the mean images and filtered mean images for the combined data.
-    channel_1_mean_image = np.zeros((maximum_height, maximum_width))
-    filtered_mean_image = np.zeros((maximum_height, maximum_width))
+    # Determines whether two channels are present.
+    has_two_channels = plane_contexts[0].config.main.two_channels
 
-    message = (
-        f"Combining the processed data for {plane_ops[0]['nchannels']} channels from directories "
-        f"{[Path(folder).name for folder in plane_directories]}..."
+    # Initializes 2D NumPy arrays to store the combined images.
+    combined_mean_image = np.zeros((combined_height, combined_width), dtype=np.float32)
+    combined_enhanced_mean_image = np.zeros((combined_height, combined_width), dtype=np.float32)
+    combined_correlation_map = np.zeros((combined_height, combined_width), dtype=np.float32)
+
+    # Checks if maximum projection images are available in any plane.
+    has_max_projection = any(ctx.runtime.detection.maximum_projection is not None for ctx in plane_contexts)
+    if has_max_projection:
+        combined_max_projection = np.zeros((combined_height, combined_width), dtype=np.float32)
+
+    # Initializes channel 2 arrays if two channels are present.
+    if has_two_channels:
+        combined_mean_image_channel_2 = np.zeros((combined_height, combined_width), dtype=np.float32)
+
+    # Logs the combining operation.
+    channel_count = 2 if has_two_channels else 1
+    directory_names = [d.name for d in plane_directories]
+    console.echo(
+        f"Combining processed data for {channel_count} channels from {directory_names}...", level=LogLevel.INFO
     )
-    console.echo(message=message, level=LogLevel.INFO)
-
-    # If the processed data uses two channels, initializes a 2D NumPy array to store the second channel's mean image.
-    if plane_ops[0]["nchannels"] > 1:
-        channel_2_mean_image = np.zeros((maximum_height, maximum_width))
-
-    # Initializes a 2D NumPy array to store the second channel's corrected mean image if specified in any of the
-    # plane-specific 'ops' dictionaries.
-    if any("meanImg_chan2_corrected" in ops for ops in plane_ops):
-        channel_2_corrected_mean_image = np.zeros((maximum_height, maximum_width))
-
-    # Initializes a 2D NumPy array to store the maximum projection image if specified in any of the plane-specific
-    # 'ops' dictionaries.
-    if any("max_proj" in ops for ops in plane_ops):
-        maximum_projection = np.zeros((maximum_height, maximum_width))
-
-    # Initializes a 2D NumPy array to store the correlation map.
-    correlation_map = np.zeros((maximum_height, maximum_width))
 
     # Finds the maximum number of frames across all planes.
-    maximum_frame_number = np.amax(np.array([ops["nframes"] for ops in plane_ops]))
+    max_frame_count = max(ctx.runtime.io.frame_count for ctx in plane_contexts)
 
-    # Checks whether the first valid plane has been processed (used to initialize combined arrays).
+    # Tracks whether a valid plane has been processed (used to initialize combined arrays).
     first_valid_plane = True
 
     # Loops over all available planes to process each plane's data.
-    for plane_index, ops in enumerate(plane_ops):
-        # Queries the path to the directory of the processed plane.
-        plane_directory_path = plane_directories[plane_index]
-
-        # If there is no stats.npy file in the directory (the plane has no ROIs), skips to the next plane.
-        if not plane_directory_path.joinpath("stat.npy").exists():
+    for plane_index, ctx in enumerate(plane_contexts):
+        # Skips planes without ROI statistics (no detected cells).
+        if ctx.runtime.extraction.roi_statistics is None:
             continue
 
-        # Loads the regions of interest (ROI) statistics from stat.npy for the processed plane.
-        plane_roi_statistics = np.load(plane_directory_path.joinpath("stat.npy"), allow_pickle=True)
+        # Creates a copy of ROI statistics to avoid modifying the original.
+        plane_roi_stats = ctx.runtime.extraction.roi_statistics.copy()
 
-        # Calculates the y-pixel and x-pixel ranges based on the displacement and the dimensions of the processed plane.
-        y_range = np.arange(y_displacement[plane_index], y_displacement[plane_index] + height[plane_index])
-        x_range = np.arange(x_displacement[plane_index], x_displacement[plane_index] + width[plane_index])
+        # Calculates the pixel ranges for placing this plane's data in the combined view.
+        y_start, y_end = y_offsets[plane_index], y_offsets[plane_index] + heights[plane_index]
+        x_start, x_end = x_offsets[plane_index], x_offsets[plane_index] + widths[plane_index]
+        y_range = np.arange(y_start, y_end)
+        x_range = np.arange(x_start, x_end)
 
-        # Updates the mean image and the filtered mean image with the processed plane's mean image and filtered mean
-        # image data.
-        channel_1_mean_image[np.ix_(y_range, x_range)] = ops["mean_image"]
-        filtered_mean_image[np.ix_(y_range, x_range)] = ops["enhanced_mean_image"]
+        # Updates combined images with this plane's data.
+        if ctx.runtime.detection.mean_image is not None:
+            combined_mean_image[np.ix_(y_range, x_range)] = ctx.runtime.detection.mean_image
+        if ctx.runtime.detection.enhanced_mean_image is not None:
+            combined_enhanced_mean_image[np.ix_(y_range, x_range)] = ctx.runtime.detection.enhanced_mean_image
+        if has_two_channels and ctx.runtime.detection.mean_image_channel_2 is not None:
+            combined_mean_image_channel_2[np.ix_(y_range, x_range)] = ctx.runtime.detection.mean_image_channel_2
 
-        # If the processed data uses two channels, updates the second channels' mean image with the processed plane's
-        # data.
-        if "mean_image_channel_2" in ops:
-            channel_2_mean_image[np.ix_(y_range, x_range)] = ops["mean_image_channel_2"]
+        # Updates correlation map using valid pixel range.
+        valid_y_start, valid_y_end = ctx.runtime.registration.valid_y_range
+        valid_x_start, valid_x_end = ctx.runtime.registration.valid_x_range
+        corr_y_range = np.arange(y_offsets[plane_index] + valid_y_start, y_offsets[plane_index] + valid_y_end)
+        corr_x_range = np.arange(x_offsets[plane_index] + valid_x_start, x_offsets[plane_index] + valid_x_end)
+        if ctx.runtime.detection.correlation_map is not None:
+            combined_correlation_map[np.ix_(corr_y_range, corr_x_range)] = ctx.runtime.detection.correlation_map
 
-        # Updates the corrected second channel's mean image if specified in the processed plane's 'ops' dictionary.
-        if "meanImg_chan2_corrected" in ops:
-            channel_2_corrected_mean_image[np.ix_(y_range, x_range)] = ops["meanImg_chan2_corrected"]
+        # Updates maximum projection if available.
+        if has_max_projection and ctx.runtime.detection.maximum_projection is not None:
+            combined_max_projection[np.ix_(corr_y_range, corr_x_range)] = ctx.runtime.detection.maximum_projection
 
-        # Updates the correlation map using the processed plane's data.
-        y_range = np.arange(
-            y_displacement[plane_index] + ops["yrange"][0], y_displacement[plane_index] + ops["yrange"][-1]
-        )
-        x_range = np.arange(
-            x_displacement[plane_index] + ops["xrange"][0], x_displacement[plane_index] + ops["xrange"][-1]
-        )
-        correlation_map[np.ix_(y_range, x_range)] = ops["Vcorr"]
+        # Updates ROI statistics with combined-view coordinates and plane index.
+        for roi_index in range(len(plane_roi_stats)):
+            plane_roi_stats[roi_index]["xpix"] += x_offsets[plane_index]
+            plane_roi_stats[roi_index]["ypix"] += y_offsets[plane_index]
+            plane_roi_stats[roi_index]["med"][0] += y_offsets[plane_index]
+            plane_roi_stats[roi_index]["med"][1] += x_offsets[plane_index]
+            plane_roi_stats[roi_index]["iplane"] = plane_index
 
-        # Updates the maximum projection image if specified in the processed plane's 'ops' dictionary.
-        if "max_proj" in ops:
-            maximum_projection[np.ix_(y_range, x_range)] = ops["max_proj"]
+        # Extracts fluorescence and classification data from the RuntimeContext.
+        plane_cell_fluorescence = ctx.runtime.extraction.cell_fluorescence
+        plane_neuropil_fluorescence = ctx.runtime.extraction.neuropil_fluorescence
+        plane_subtracted_fluorescence = ctx.runtime.extraction.subtracted_fluorescence
+        plane_spikes = ctx.runtime.extraction.spikes
+        plane_cell_classification = ctx.runtime.extraction.cell_classification
 
-        # Updates the regions of interest (ROI) statistics with the processed plane's displacement values and index.
-        for plane_roi_index in range(len(plane_roi_statistics)):
-            plane_roi_statistics[plane_roi_index]["xpix"] += x_displacement[plane_index]
-            plane_roi_statistics[plane_roi_index]["ypix"] += y_displacement[plane_index]
-            plane_roi_statistics[plane_roi_index]["med"][0] += y_displacement[plane_index]
-            plane_roi_statistics[plane_roi_index]["med"][1] += x_displacement[plane_index]
-            plane_roi_statistics[plane_roi_index]["iplane"] = plane_index
+        # Extracts channel 2 colocalization data if available.
+        plane_cell_colocalization = ctx.runtime.extraction.cell_colocalization
+        has_colocalization = plane_cell_colocalization is not None
 
-        # Loads the 'cell_fluorescence', 'neuropil_fluorescence', 'spikes', and 'is_cell' data for the processed plane.
-        plane_cell_fluorescence = np.load(plane_directory_path.joinpath("F.npy"))
-        plane_neuropil_fluorescence = np.load(plane_directory_path.joinpath("Fneu.npy"))
-        plane_baseline_subtracted_fluorescence = np.load(plane_directory_path.joinpath("Fsub.npy"))
-        plane_spikes = np.load(plane_directory_path.joinpath("spks.npy"))
-        plane_is_cell = np.load(plane_directory_path.joinpath("iscell.npy"))
-
-        # Checks if the 'red_cell' (channel 2 cell classification data) data is available and loads it if present.
-        if plane_directory_path.joinpath("redcell.npy").is_file():
-            plane_red_cell = np.load(plane_directory_path.joinpath("redcell.npy"))
-            has_red = True
-        else:
-            plane_red_cell = []
-            has_red = False
-
-        # Extracts the number of cells (ROIs) and frame count from the processed plane's cell fluorescence data.
+        # Pads fluorescence data if this plane has fewer frames than the maximum.
         cell_count, frame_count = plane_cell_fluorescence.shape
-
-        # Ensures the number of frames in the processed plane's data matches the maximum frame number by padding
-        # with zeros to match the recording's maximum frame number.
-        if frame_count < maximum_frame_number:
-            # noinspection PyUnresolvedReferences
-            padding = np.zeros((cell_count, maximum_frame_number - frame_count), "float32")
+        if frame_count < max_frame_count:
+            padding = np.zeros((cell_count, max_frame_count - frame_count), dtype=np.float32)
             plane_cell_fluorescence = np.concatenate((plane_cell_fluorescence, padding), axis=1)
-            plane_spikes = np.concatenate((plane_spikes, padding), axis=1)
             plane_neuropil_fluorescence = np.concatenate((plane_neuropil_fluorescence, padding), axis=1)
-            plane_baseline_subtracted_fluorescence = np.concatenate(
-                (plane_baseline_subtracted_fluorescence, padding), axis=1
-            )
+            plane_subtracted_fluorescence = np.concatenate((plane_subtracted_fluorescence, padding), axis=1)
+            plane_spikes = np.concatenate((plane_spikes, padding), axis=1)
 
-        # Appends the processed plane's data to the combined arrays.
+        # Initializes or concatenates combined arrays.
         if first_valid_plane:
-            (
-                cell_fluorescence,
-                neuropil_fluorescence,
-                subtracted_fluorescence,
-                spikes,
-                roi_statistics,
-                is_cell,
-                red_cell,
-            ) = (
-                plane_cell_fluorescence,
-                plane_neuropil_fluorescence,
-                plane_baseline_subtracted_fluorescence,
-                plane_spikes,
-                plane_roi_statistics,
-                plane_is_cell,
-                plane_red_cell,
-            )
+            combined_roi_stats = plane_roi_stats
+            combined_cell_fluorescence = plane_cell_fluorescence
+            combined_neuropil_fluorescence = plane_neuropil_fluorescence
+            combined_subtracted_fluorescence = plane_subtracted_fluorescence
+            combined_spikes = plane_spikes
+            combined_cell_classification = plane_cell_classification
+            combined_cell_colocalization = plane_cell_colocalization
             first_valid_plane = False
         else:
-            cell_fluorescence = np.concatenate((cell_fluorescence, plane_cell_fluorescence))
-            neuropil_fluorescence = np.concatenate((neuropil_fluorescence, plane_neuropil_fluorescence))
-            subtracted_fluorescence = np.concatenate((subtracted_fluorescence, plane_baseline_subtracted_fluorescence))
-            spikes = np.concatenate((spikes, plane_spikes))
-            roi_statistics = np.concatenate((roi_statistics, plane_roi_statistics))
-            is_cell = np.concatenate((is_cell, plane_is_cell))
-            if has_red:
-                red_cell = np.concatenate((red_cell, plane_red_cell))
+            combined_roi_stats = np.concatenate((combined_roi_stats, plane_roi_stats))
+            combined_cell_fluorescence = np.concatenate((combined_cell_fluorescence, plane_cell_fluorescence))
+            combined_neuropil_fluorescence = np.concatenate(
+                (combined_neuropil_fluorescence, plane_neuropil_fluorescence)
+            )
+            combined_subtracted_fluorescence = np.concatenate(
+                (combined_subtracted_fluorescence, plane_subtracted_fluorescence)
+            )
+            combined_spikes = np.concatenate((combined_spikes, plane_spikes))
+            combined_cell_classification = np.concatenate((combined_cell_classification, plane_cell_classification))
+            if has_colocalization:
+                combined_cell_colocalization = np.concatenate((combined_cell_colocalization, plane_cell_colocalization))
 
-        console.echo(message=f"Appended plane {plane_index} data to combined view.", level=LogLevel.SUCCESS)
+        console.echo(f"Appended plane {plane_index} data to combined view.", level=LogLevel.SUCCESS)
 
-    # If no valid planes were found, raises an error.
+    # Raises an error if no valid planes were found.
     if first_valid_plane:
         message = (
             "Unable to combine plane data. No valid planes with ROI statistics (stat.npy) were found. "
@@ -305,58 +256,28 @@ def combined(
         )
         console.error(message=message, error=ValueError)
 
-    # Modifies the combined 'ops' dictionary to include descriptive information about the combined recording data
-    ops["mean_image"] = channel_1_mean_image
-    ops["enhanced_mean_image"] = filtered_mean_image
-    if ops["nchannels"] > 1:
-        ops["mean_image_channel_2"] = channel_2_mean_image
-    if "meanImg_chan2_corrected" in ops:
-        ops["meanImg_chan2_corrected"] = channel_2_corrected_mean_image
-    if "max_proj" in ops:
-        ops["max_proj"] = maximum_projection
-    ops["Vcorr"] = correlation_map
-    ops["Ly"] = maximum_height
-    ops["Lx"] = maximum_width
-    ops["xrange"] = [0, ops["Lx"]]
-    ops["yrange"] = [0, ops["Ly"]]
+    # Prepares the combined output directory.
+    combined_directory = save_directory / "combined"
+    ensure_directory_exists(combined_directory)
 
-    # Prepares the path to the directory that will store the combined data files
-    combined_directory_path = save_directory.joinpath("combined")
+    # Saves classification data (always saved for GUI compatibility).
+    np.save(combined_directory / "iscell.npy", combined_cell_classification)
+    if has_colocalization:
+        np.save(combined_directory / "redcell.npy", combined_cell_colocalization)
 
-    # Creates the save directory if it does not exist.
-    ensure_directory_exists(combined_directory_path)
-
-    # Stores the path to the save directory in the 'ops' dictionary.
-    ops["save_path"] = combined_directory_path
-
-    # Caches cell classification data to disk. Since cell classification data is required for the suite2p GUI to work
-    # is expected, this is done regardless of the 'save' argument value.
-    np.save(combined_directory_path.joinpath("iscell.npy"), is_cell)
-    if has_red:
-        np.save(combined_directory_path.joinpath("redcell.npy"), red_cell)
-    else:
-        red_cell = np.zeros_like(is_cell)
-
-    # If 'save' is set to True, saves the combined data in the save directory.
+    # Saves all combined data if requested.
     if save:
-        np.save(combined_directory_path.joinpath("F.npy"), cell_fluorescence)
-        np.save(combined_directory_path.joinpath("Fneu.npy"), neuropil_fluorescence)
-        np.save(combined_directory_path.joinpath("Fsub.npy"), subtracted_fluorescence)
-        np.save(combined_directory_path.joinpath("spks.npy"), spikes)
-        np.save(combined_directory_path.joinpath("ops.npy"), ops)
-        np.save(combined_directory_path.joinpath("stat.npy"), roi_statistics)
+        np.save(combined_directory / "F.npy", combined_cell_fluorescence)
+        np.save(combined_directory / "Fneu.npy", combined_neuropil_fluorescence)
+        np.save(combined_directory / "Fsub.npy", combined_subtracted_fluorescence)
+        np.save(combined_directory / "spks.npy", combined_spikes)
+        np.save(combined_directory / "stat.npy", combined_roi_stats)
+        np.save(combined_directory / "mean_image.npy", combined_mean_image)
+        np.save(combined_directory / "enhanced_mean_image.npy", combined_enhanced_mean_image)
+        np.save(combined_directory / "correlation_map.npy", combined_correlation_map)
+        if has_max_projection:
+            np.save(combined_directory / "maximum_projection.npy", combined_max_projection)
+        if has_two_channels:
+            np.save(combined_directory / "mean_image_channel_2.npy", combined_mean_image_channel_2)
 
-    # Returns the combined data as a tuple.
-    return (
-        roi_statistics,
-        ops,
-        cell_fluorescence,
-        neuropil_fluorescence,
-        subtracted_fluorescence,
-        spikes,
-        is_cell[:, 0],
-        is_cell[:, 1],
-        red_cell[:, 0],
-        red_cell[:, 1],
-        has_red,
-    )
+    console.echo(f"Combined data saved to {combined_directory}.", level=LogLevel.SUCCESS)

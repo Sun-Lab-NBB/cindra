@@ -433,9 +433,6 @@ def _parse_db(data_string: str) -> dict[str, Any]:
             "e.g.: '{'key1': value1, 'key2': 'value2'}'"
         )
         console.error(message=message, error=TypeError)
-
-        # Fallback to appease mypy, should not be reachable.
-        raise TypeError(message)
     else:
         # Otherwise, returns the parsed dictionary
         return parsed

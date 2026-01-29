@@ -1,16 +1,13 @@
-"""This package provides tools to import, convert, and save multi-plane imaging data."""
+"""Provides tools to import, convert, and save multi-plane imaging data."""
 
-from .save import combined, compute_dydx
-from .tiff import save_tiff, tiff_to_binary, mesoscan_to_binary, generate_tiff_filename
+from .save import combine_planes, compute_plane_offsets
+from .tiff import convert_tiffs_to_binary
 from .binary import BinaryFile, BinaryFileCombined
 
 __all__ = [
     "BinaryFile",
     "BinaryFileCombined",
-    "combined",
-    "compute_dydx",
-    "generate_tiff_filename",
-    "mesoscan_to_binary",
-    "save_tiff",
-    "tiff_to_binary",
+    "combine_planes",
+    "compute_plane_offsets",
+    "convert_tiffs_to_binary",
 ]

@@ -215,7 +215,6 @@ def process_single_day(
             "valid single-day configuration .yaml file."
         )
         console.error(message=message, error=FileNotFoundError)
-        return  # Fallback to appease mypy
 
     # Overrides the 'workers' and 'progress_bars' parameters with the provided values.
     config.main.progress_bars = progress_bars
@@ -499,7 +498,6 @@ def process_multi_day(
             "valid multi-day configuration .yaml file."
         )
         console.error(message=message, error=FileNotFoundError)
-        return  # Fallback to appease mypy
 
     # Validates that the configuration contains the required session directories.
     if not config.io.session_directories:
@@ -509,7 +507,6 @@ def process_multi_day(
             "directories specified."
         )
         console.error(message=message, error=ValueError)
-        return  # Fallback to appease mypy
 
     # Validates that the configuration contains a dataset name.
     if not config.io.dataset_name:
@@ -518,7 +515,6 @@ def process_multi_day(
             "name under 'io.dataset_name'. The provided configuration has no dataset name specified."
         )
         console.error(message=message, error=ValueError)
-        return  # Fallback to appease mypy
 
     # Overrides the 'workers' and 'progress_bars' parameters with the provided values.
     config.main.progress_bars = progress_bars

@@ -10,7 +10,7 @@ from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console
 
 from .. import extraction
-from ..io import compute_dydx
+from ..io import compute_plane_offsets
 from ..io.binary import BinaryFileCombined
 from ..detection.stats import roi_stats
 
@@ -50,7 +50,7 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
         np.load(plane_folder.joinpath("ops.npy"), allow_pickle=True).item() for plane_folder in plane_folders
     ]
     registered_data_path = [plane_folder.joinpath("data.bin") for plane_folder in plane_folders]
-    plane_y_coordinate, plane_x_coordinate = compute_dydx(plane_ops)
+    plane_y_coordinate, plane_x_coordinate = compute_plane_offsets(plane_contexts)
     plane_heights = np.array([ops["Ly"] for ops in plane_ops])
     plane_widths = np.array([ops["Lx"] for ops in plane_ops])
     movie_height = int(np.amax(plane_y_coordinate + plane_heights))

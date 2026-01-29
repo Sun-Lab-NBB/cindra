@@ -47,7 +47,6 @@ def _find_combined_path(input_directory: Path) -> Path:
             f"{len(combined_path_list)} 'combined' directories."
         )
         console.error(message=message, error=RuntimeError)
-        raise RuntimeError(message)  # Fallback to appease mypy, should not be reachable
 
     return combined_path_list.pop()
 

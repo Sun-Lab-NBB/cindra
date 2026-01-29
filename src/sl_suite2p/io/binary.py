@@ -1,13 +1,18 @@
-"""This module provides tools for reading and writing image data stored in suite2p binary (.bin) files."""
+"""Provides tools for reading and writing image data stored in suite2p binary (.bin) files."""
 
-import types
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Self
 from pathlib import Path
 
 import numpy as np
 from tifffile import TiffWriter
-from numpy.typing import NDArray
 from ataraxis_base_utilities import LogLevel, console
+
+if TYPE_CHECKING:
+    from types import TracebackType
+
+    from numpy.typing import NDArray
 
 
 class BinaryFile:
@@ -61,7 +66,7 @@ class BinaryFile:
         elif not write:
             frame_number = self.frame_number
 
-        # Determines the shape of the file using the default order of frames x height x width used by suite2p
+        # Determines the shape of the file using the default order of frames x height x width used by suite2p.
         shape = (frame_number, self.height, self.width)
 
         # Resolves the memory-mapping mode used to initialize the memory-mapped NumPy array for the file's data.
@@ -69,9 +74,8 @@ class BinaryFile:
         mode = "w+" if write else "r+"
 
         # Creates a memory-mapped NumPy array to access and interface with the contents of the binary file.
-        # noinspection PyTypeChecker
-        self.file: NDArray[np.int16] = np.memmap(
-            filename=self.file_path,
+        self.file: np.memmap[Any, np.dtype[np.int16]] = np.memmap(  # type: ignore[call-overload]
+            filename=str(self.file_path),
             dtype=self.dtype,
             mode=mode,
             shape=shape,
@@ -115,7 +119,7 @@ class BinaryFile:
 
     @property
     def byte_number(self) -> int:
-        """Returns the total number of frames stored in the file."""
+        """Returns the total number of bytes stored in the file."""
         return self.file_path.stat().st_size
 
     @property
@@ -139,10 +143,10 @@ class BinaryFile:
 
     def close(self) -> None:
         """Closes the memory-mapped file view."""
-        # noinspection PyProtectedMember,PyUnresolvedReferences
-        self.file._mmap.close()
+        # noinspection PyProtectedMember
+        self.file._mmap.close()  # type: ignore[attr-defined]
 
-    def __enter__(self) -> BinaryFile:
+    def __enter__(self) -> Self:
         """Supports accessing the file via a context manager by returning self to caller upon entering the context."""
         return self
 
@@ -150,7 +154,7 @@ class BinaryFile:
         self,
         execution_type: type[BaseException] | None,
         execution_value: BaseException | None,
-        execution_traceback: types.TracebackType | None,
+        execution_traceback: TracebackType | None,
     ) -> None:
         """Ensures the memory-mapped file view is closed upon termination of the context that uses the file."""
         self.close()
@@ -166,11 +170,11 @@ class BinaryFile:
             indices: A slice, integer, or iterable that specifies the indices at which to write the data.
             data: The data to be written to the specified indices.
         """
-        # Checks and converts data type to int16, if needed
+        # Checks and converts data type to int16, if needed.
         if data.dtype != "int16":
             data = np.minimum(data, 2**15 - 2).astype("int16")
 
-        # Writes data to the memory-mapped file
+        # Writes data to the memory-mapped file.
         self.file[indices] = data
 
     def __getitem__(self, indices: slice | int | tuple[int, ...] | NDArray[Any]) -> NDArray[np.int16]:
@@ -182,7 +186,7 @@ class BinaryFile:
         Returns:
             A NumPy array of the data read from the binary file at the specified indices.
         """
-        # Directly passes indices to the memory-mapped file
+        # Directly passes indices to the memory-mapped file.
         return self.file[indices]
 
     @property
@@ -196,7 +200,7 @@ class BinaryFile:
         bin_size: int,
         x_range: tuple[int, int] | None = None,
         y_range: tuple[int, int] | None = None,
-        bad_frames: NDArray[np.bool] | None = None,
+        bad_frames: NDArray[np.bool_] | None = None,
         reject_threshold: float = 0.5,
     ) -> NDArray[np.float32]:
         """Bins the frames of the movie (frame sequence) stored inside the file wrapped by this instance.
@@ -268,7 +272,7 @@ class BinaryFile:
                 batches.append(data.astype(np.float32).mean(axis=0))
 
         # Stacks and returns the batches as a single NumPy array representing the binned movie.
-        return np.stack(batches, dtype=np.float32)
+        return np.stack(batches).astype(np.float32)
 
     def write_tiff(
         self,
@@ -324,7 +328,7 @@ class BinaryFile:
 
 
 class BinaryFileCombined:
-    """Creates or opens a set of Suite2p BinaryFiles (.bin) for reading image data across planes.
+    """Creates or opens a collection of Suite2p BinaryFiles (.bin) for reading image data across planes.
 
     This class allows working with multiple imaging planes, each stored inside a separate Suite2p BinaryFile.
     It provides similar functionality to the BinaryFile class but extends it to handle multiple planes.
@@ -375,14 +379,12 @@ class BinaryFileCombined:
         self.plane_widths: NDArray[np.int_] = plane_widths
         self.plane_y_coordinates: NDArray[np.int_] = plane_y_coordinates
         self.plane_x_coordinates: NDArray[np.int_] = plane_x_coordinates
-        self.file_paths: tuple[Path, ...] = tuple([Path(file_path) for file_path in file_paths])
+        self.file_paths: tuple[Path, ...] = tuple(Path(path) for path in file_paths)
 
         # Opens BinaryFile instances for requested planes, using the input data.
-        self.files = [
-            BinaryFile(int(plane_heights), int(plane_widths), file_name)
-            for (plane_heights, plane_widths, file_name) in zip(
-                self.plane_heights, self.plane_widths, self.file_paths, strict=False
-            )
+        self.files: list[BinaryFile] = [
+            BinaryFile(int(height), int(width), file_path)
+            for height, width, file_path in zip(self.plane_heights, self.plane_widths, self.file_paths, strict=False)
         ]
 
         # Verifies that all opened files have the same number of frames.
@@ -395,7 +397,7 @@ class BinaryFileCombined:
             )
             console.error(message=message, error=ValueError)
 
-    def __enter__(self) -> BinaryFileCombined:
+    def __enter__(self) -> Self:
         """Supports accessing managed files via a context manager by returning self to caller upon entering the
         context.
         """
@@ -405,7 +407,7 @@ class BinaryFileCombined:
         self,
         execution_type: type[BaseException] | None,
         execution_value: BaseException | None,
-        execution_traceback: types.TracebackType | None,
+        execution_traceback: TracebackType | None,
     ) -> None:
         """Ensures the memory-mapped files are closed upon termination of the context that uses the files."""
         self.close()
@@ -418,7 +420,7 @@ class BinaryFileCombined:
     @property
     def byte_number(self) -> NDArray[np.int64]:
         """Returns an array that stores the size of each managed BinaryFile, in bytes."""
-        byte_number = np.zeros(len(self.files), np.int64)
+        byte_number = np.zeros(len(self.files), dtype=np.int64)
         for file_index, file in enumerate(self.files):
             byte_number[file_index] = file.byte_number
         return byte_number
@@ -456,17 +458,13 @@ class BinaryFileCombined:
         first_file_data = self.files[0][indices]
         actual_frames = first_file_data.shape[0]
 
-        # Initializes the combined array using the frame count from the slice
-        data = np.zeros((actual_frames, self.height, self.width), dtype="int16")
+        # Initializes the combined array using the frame count from the slice.
+        data = np.zeros((actual_frames, self.height, self.width), dtype=np.int16)
 
         # Iterates through each file and copies the relevant data slice(s) into the combined array.
         for file_index, file in enumerate(self.files):
-            # Uses the data already read from the first file
-            if file_index == 0:
-                file_data = first_file_data
-            # Reads the requested data slice from each file
-            else:
-                file_data = file[indices]
+            # Uses the data already read from the first file, otherwise reads from the current file.
+            file_data = first_file_data if file_index == 0 else file[indices]
 
             # Overwrites the specific section of the combined file data with the data read from the target file. Note,
             # this assumes that planes do not overlap.

@@ -149,28 +149,28 @@ reference when updating the rest of the codebase to use the new field names.
 | `reg_file_chan2` | `registered_binary_path_channel_2` | `Path \| None` | |
 | `raw_file_chan2` | `raw_binary_path_channel_2` | `Path \| None` | |
 | `save_path`, `ops_path` | `output_directory` | `Path \| None` | |
-| `dy` | `mesoscope_y_offset` | `int \| None` | |
-| `dx` | `mesoscope_x_offset` | `int \| None` | |
-| `lines` | `mesoscope_lines` | `list[int]` | |
+| `dy` | `mroi_y_offset` | `int \| None` | Renamed from mesoscope to mroi |
+| `dx` | `mroi_x_offset` | `int \| None` | Renamed from mesoscope to mroi |
+| `lines` | `mroi_lines` | `list[int]` | Renamed from mesoscope to mroi |
 | `iplane` | `plane_index` | `int \| None` | Tracks all input types, not just mesoscope |
 
 ### RegistrationData
 
 | Old Name (ops key) | New Name | Type | Notes |
 |--------------------|----------|------|-------|
-| `yrange` | `valid_y_range` | `tuple[int, int]` | |
-| `xrange` | `valid_x_range` | `tuple[int, int]` | |
+| `yrange` | `valid_y_range` | `list[int]` | Changed from tuple for YAML serialization |
+| `xrange` | `valid_x_range` | `list[int]` | Changed from tuple for YAML serialization |
 | `bidiphase` | `bidirectional_phase_offset` | `int` | |
 | `bidi_corrected` | `bidirectional_phase_corrected` | `bool` | |
 | `rmin` | `normalization_minimum` | `int` | |
 | `rmax` | `normalization_maximum` | `int` | |
-| `refImg` | `reference_image` | `NDArray[np.float32] \| None` | Saved as reference_image.npy |
-| `yoff` | `rigid_y_offsets` | `NDArray[np.float32] \| None` | Saved as rigid_y_offsets.npy |
-| `xoff` | `rigid_x_offsets` | `NDArray[np.float32] \| None` | Saved as rigid_x_offsets.npy |
-| `corrXY` | `rigid_correlations` | `NDArray[np.float32] \| None` | Saved as rigid_correlations.npy |
-| `yoff1` | `nonrigid_y_offsets` | `NDArray[np.float32] \| None` | Saved as nonrigid_y_offsets.npy |
-| `xoff1` | `nonrigid_x_offsets` | `NDArray[np.float32] \| None` | Saved as nonrigid_x_offsets.npy |
-| `corrXY1` | `nonrigid_correlations` | `NDArray[np.float32] \| None` | Saved as nonrigid_correlations.npy |
+| `refImg` | `reference_image` | `NDArray[np.float32] \| None` | Saved in registration_data.npz |
+| `yoff` | `rigid_y_offsets` | `NDArray[np.float32] \| None` | Saved in registration_data.npz |
+| `xoff` | `rigid_x_offsets` | `NDArray[np.float32] \| None` | Saved in registration_data.npz |
+| `corrXY` | `rigid_correlations` | `NDArray[np.float32] \| None` | Saved in registration_data.npz |
+| `yoff1` | `nonrigid_y_offsets` | `NDArray[np.float32] \| None` | Saved in registration_data.npz |
+| `xoff1` | `nonrigid_x_offsets` | `NDArray[np.float32] \| None` | Saved in registration_data.npz |
+| `corrXY1` | `nonrigid_correlations` | `NDArray[np.float32] \| None` | Saved in registration_data.npz |
 
 ### DetectionData
 
@@ -179,14 +179,14 @@ reference when updating the rest of the codebase to use the new field names.
 | `spatial_scale_pixels` | `spatial_scale` | `float` | |
 | `diameter` | `cell_diameter` | `int` | |
 | `aspect` | `aspect_ratio` | `float` | Moved from Output section |
-| `meanImg` | `mean_image` | `NDArray[np.float32] \| None` | Saved as mean_image.npy |
-| `meanImgE` | `enhanced_mean_image` | `NDArray[np.float32] \| None` | Saved as enhanced_mean_image.npy |
-| `max_proj` | `maximum_projection` | `NDArray[np.float32] \| None` | Saved as maximum_projection.npy |
-| `Vcorr` | `correlation_map` | `NDArray[np.float32] \| None` | Saved as correlation_map.npy |
-| `meanImg_chan2` | `mean_image_channel_2` | `NDArray[np.float32] \| None` | Saved as mean_image_channel_2.npy |
-| N/A | `enhanced_mean_image_channel_2` | `NDArray[np.float32] \| None` | NEW: Saved as enhanced_mean_image_channel_2.npy |
-| N/A | `maximum_projection_channel_2` | `NDArray[np.float32] \| None` | NEW: Saved as maximum_projection_channel_2.npy |
-| N/A | `correlation_map_channel_2` | `NDArray[np.float32] \| None` | NEW: Saved as correlation_map_channel_2.npy |
+| `meanImg` | `mean_image` | `NDArray[np.float32] \| None` | Saved in detection_data.npz |
+| `meanImgE` | `enhanced_mean_image` | `NDArray[np.float32] \| None` | Saved in detection_data.npz |
+| `max_proj` | `maximum_projection` | `NDArray[np.float32] \| None` | Saved in detection_data.npz |
+| `Vcorr` | `correlation_map` | `NDArray[np.float32] \| None` | Saved in detection_data.npz |
+| `meanImg_chan2` | `mean_image_channel_2` | `NDArray[np.float32] \| None` | Saved in detection_data.npz |
+| N/A | `enhanced_mean_image_channel_2` | `NDArray[np.float32] \| None` | NEW: Saved in detection_data.npz |
+| N/A | `maximum_projection_channel_2` | `NDArray[np.float32] \| None` | NEW: Saved in detection_data.npz |
+| N/A | `correlation_map_channel_2` | `NDArray[np.float32] \| None` | NEW: Saved in detection_data.npz |
 
 ### TimingData
 
@@ -205,6 +205,79 @@ reference when updating the rest of the codebase to use the new field names.
 | N/A | `deconvolution_time_channel_2` | `float` | NEW: For independent channel 2 deconvolution |
 | `timing['total_plane_runtime']` | `total_plane_time` | `float` | |
 | `date_processed` | `date_processed` | `str` | Unchanged |
+
+### ExtractionData (NEW)
+
+This dataclass stores extraction and classification results, supporting two-channel workflows.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `roi_statistics` | `list[ROIStatistics] \| None` | Saved as roi_statistics.npz (pickle-free) |
+| `cell_fluorescence` | `NDArray[np.float32] \| None` | Saved as F.npy |
+| `neuropil_fluorescence` | `NDArray[np.float32] \| None` | Saved as Fneu.npy |
+| `subtracted_fluorescence` | `NDArray[np.float32] \| None` | Saved as Fsub.npy |
+| `spikes` | `NDArray[np.float32] \| None` | Saved as spks.npy |
+| `cell_classification` | `NDArray[np.float32] \| None` | Saved as iscell.npy |
+| `roi_statistics_channel_2` | `list[ROIStatistics] \| None` | Saved as roi_statistics_channel_2.npz |
+| `cell_fluorescence_channel_2` | `NDArray[np.float32] \| None` | Saved as F_chan2.npy |
+| `neuropil_fluorescence_channel_2` | `NDArray[np.float32] \| None` | Saved as Fneu_chan2.npy |
+| `subtracted_fluorescence_channel_2` | `NDArray[np.float32] \| None` | Saved as Fsub_chan2.npy |
+| `spikes_channel_2` | `NDArray[np.float32] \| None` | Saved as spks_chan2.npy |
+| `cell_classification_channel_2` | `NDArray[np.float32] \| None` | Saved as iscell_chan2.npy |
+| `cell_colocalization` | `NDArray[np.float32] \| None` | Saved as redcell.npy |
+
+### ROIStatistics (NEW)
+
+This dataclass replaces the legacy dictionary-based `stat.npy` format with a pickle-free structure.
+
+**Core pixel data (required):**
+
+| Field | Type | Legacy Name |
+|-------|------|-------------|
+| `y_pixels` | `NDArray[np.int32]` | `ypix` |
+| `x_pixels` | `NDArray[np.int32]` | `xpix` |
+| `pixel_weights` | `NDArray[np.float32]` | `lam` |
+| `centroid` | `list[float]` | `med` |
+| `footprint` | `int` | `footprint` |
+
+**Shape statistics (required):**
+
+| Field | Type | Legacy Name |
+|-------|------|-------------|
+| `mean_r_squared` | `float` | `mrs` |
+| `mean_r_squared_baseline` | `float` | `mrs0` |
+| `compactness` | `float` | `compact` |
+| `solidity` | `float` | `solidity` |
+| `pixel_count` | `int` | `npix` |
+| `soma_pixel_count` | `int` | `npix_soma` |
+| `soma_mask` | `NDArray[np.bool_]` | `soma_crop` |
+| `overlap_mask` | `NDArray[np.bool_]` | `overlap` |
+| `radius` | `float` | `radius` |
+| `aspect_ratio` | `float` | `aspect_ratio` |
+| `normalized_pixel_count` | `float` | `npix_norm` |
+| `normalized_pixel_count_full` | `float` | `npix_norm_no_crop` |
+
+**Optional extraction data:**
+
+| Field | Type | Legacy Name |
+|-------|------|-------------|
+| `skewness` | `float \| None` | `skew` |
+| `standard_deviation` | `float \| None` | `std` |
+| `neuropil_mask` | `NDArray[np.bool_] \| None` | `neuropil_mask` |
+
+**Optional multi-plane/multi-day data:**
+
+| Field | Type | Legacy Name |
+|-------|------|-------------|
+| `plane_index` | `int \| None` | `iplane` |
+| `cluster_id` | `int \| None` | `id` |
+| `raveled_pixels` | `NDArray[np.int32] \| None` | `ipix` |
+| `session_count` | `int \| None` | `num_sessions` |
+
+**Serialization methods:**
+
+- `save_list(roi_list, file_path)` - Saves to .npz with `allow_pickle=False`
+- `load_list(file_path)` - Loads from .npz file
 
 ---
 
@@ -266,17 +339,93 @@ The option to delete binary files after processing has been removed. Binary file
 
 ---
 
-## New Enumerations
+## Input Architecture Changes
 
-### InputFormat
+### Unified Input Format
+
+The input format has been simplified and standardized. All input data must now be in TIFF format accompanied by a
+`suite2p_parameters.json` metadata file. This replaces the previous `InputFormat` enum approach.
+
+**Key changes:**
+- `InputFormat` enum has been **REMOVED** (no longer needed)
+- `FileIO.input_format` field has been **REMOVED**
+- All inputs are TIFF files + JSON metadata
+- The JSON file describes acquisition parameters (frame rate, planes, channels, MROI geometry)
+
+### AcquisitionParameters Dataclass
+
+A new `AcquisitionParameters` dataclass stores acquisition metadata loaded from the input JSON file:
 
 ```python
-class InputFormat(StrEnum):
-    TIFF = "tiff"      # Standard TIFF files
-    MESOSCAN = "mesoscan"  # ScanImage Mesoscope TIFFs
+@dataclass
+class AcquisitionParameters(YamlConfig):
+    frame_rate: float           # Volume acquisition rate in Hz
+    plane_number: int = 1       # Physical planes per volume
+    channel_number: int = 1     # Channels per plane (1 or 2)
+    roi_number: int = 1         # ROIs per plane (1 for standard, >1 for MROI)
+    roi_lines: list[list[int]]  # Line indices for each ROI (MROI only)
+    roi_x_coordinates: list[int] # X offsets for each ROI (MROI only)
+    roi_y_coordinates: list[int] # Y offsets for each ROI (MROI only)
+
+    @property
+    def is_mroi(self) -> bool: ...        # True if roi_number > 1
+
+    @property
+    def virtual_plane_count(self) -> int: ...  # roi_number * plane_number
+
+    @classmethod
+    def from_json(cls, path: Path) -> AcquisitionParameters: ...
 ```
 
-Replaces the boolean `mesoscan` parameter with a type-safe enum.
+### RuntimeContext Updated
+
+`RuntimeContext` now includes `AcquisitionParameters` as a required field:
+
+```python
+@dataclass
+class RuntimeContext:
+    config: SingleDayConfiguration    # User configuration (immutable)
+    acquisition: AcquisitionParameters # Acquisition metadata from JSON
+    runtime: SingleDayRuntimeData     # Pipeline-computed data (mutable)
+```
+
+### MROI (Multi-ROI) Generalization
+
+The "mesoscope" handling has been generalized to support any line-scanning microscope with MROI capability:
+
+| Old Term | New Term | Description |
+|----------|----------|-------------|
+| Mesoscope data | MROI data | Multi-ROI line-scanning data |
+| `mesoscan` format | `is_mroi` property | Whether data uses multiple ROIs |
+| Mesoscope parameters | ROI geometry | `roi_lines`, `roi_x_coordinates`, `roi_y_coordinates` |
+
+Virtual planes are computed as ROI × physical plane combinations. For 2 ROIs and 3 planes, there are 6 virtual planes
+organized as: ROI 0 plane 0, ROI 0 plane 1, ROI 0 plane 2, ROI 1 plane 0, ROI 1 plane 1, ROI 1 plane 2.
+
+### Data Discovery
+
+The TIFF discovery process now uses a two-step approach:
+
+1. **Recursively search** for `suite2p_parameters.json` in the data directory
+2. **Non-recursively scan** the same directory as the JSON file for TIFF files
+
+This ensures that TIFF files and their metadata are co-located and simplifies the discovery process.
+
+### Required JSON Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `frame_rate` | float | Always | Volume acquisition rate in Hz |
+| `plane_number` | int | Always | Number of physical imaging planes |
+| `channel_number` | int | Always | Number of channels (1 or 2) |
+| `roi_number` | int | Optional | Number of ROIs (defaults to 1) |
+| `roi_lines` | list[list[int]] | MROI only | Line indices for each ROI |
+| `roi_x_coordinates` | list[int] | MROI only | X offset for each ROI |
+| `roi_y_coordinates` | list[int] | MROI only | Y offset for each ROI |
+
+---
+
+## New Enumerations
 
 ### BaselineMethod
 
@@ -304,6 +453,30 @@ to convert strings to `Path` objects when loading from YAML.
 
 ---
 
+## Output File Structure Changes
+
+### Plane Directory Naming
+
+Plane directories now use underscore separators for readability:
+
+| Old Pattern | New Pattern |
+|-------------|-------------|
+| `plane0/` | `plane_0/` |
+| `plane1/` | `plane_1/` |
+
+### Binary File Naming
+
+Binary files now use a consistent `channel_N_` prefix pattern:
+
+| Old Name | New Name |
+|----------|----------|
+| `data.bin` | `channel_1_data.bin` |
+| `data_raw.bin` | `channel_1_data_raw.bin` |
+| `data_chan2.bin` | `channel_2_data.bin` |
+| `data_chan2_raw.bin` | `channel_2_data_raw.bin` |
+
+---
+
 ## Pickle Disabled
 
 All NumPy save/load operations now use `allow_pickle=False` to eliminate the security risk from pickle serialization.
@@ -315,7 +488,35 @@ np.load(path, allow_pickle=False)
 
 # Saving
 np.save(path, array, allow_pickle=False)
+
+# Saving multiple arrays to .npz
+np.savez(path, allow_pickle=False, **arrays_dict)
 ```
+
+---
+
+## Function Renames
+
+### io/save.py
+
+| Old Name | New Name | Notes |
+|----------|----------|-------|
+| `compute_dydx` | `compute_plane_offsets` | Computes y/x displacement for each plane |
+| `combined` | `combine_planes` | Combines multi-plane data into unified output |
+
+Both functions now accept `list[RuntimeContext]` instead of loading ops.npy from disk.
+
+---
+
+## Consolidated .npz Files
+
+Arrays are now saved in consolidated .npz archives instead of individual .npy files:
+
+| Archive File | Contents |
+|--------------|----------|
+| `registration_data.npz` | reference_image, rigid_y_offsets, rigid_x_offsets, rigid_correlations, nonrigid_y_offsets, nonrigid_x_offsets, nonrigid_correlations |
+| `detection_data.npz` | mean_image, enhanced_mean_image, maximum_projection, correlation_map, mean_image_channel_2, enhanced_mean_image_channel_2, maximum_projection_channel_2, correlation_map_channel_2 |
+| `roi_statistics.npz` | All ROIStatistics fields (concatenated with counts for variable-length arrays) |
 
 ---
 
