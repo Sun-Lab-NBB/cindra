@@ -13,7 +13,6 @@ from qtpy.QtWidgets import QLabel, QWidget, QCheckBox, QLineEdit, QGridLayout, Q
 from ataraxis_base_utilities import LogLevel, console
 
 from . import io, masks, menus, merge, views, traces, buttons, classgui, graphics
-from ..configuration import generate_default_ops
 
 
 class MainWindow(QMainWindow):

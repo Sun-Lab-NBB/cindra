@@ -16,7 +16,6 @@ from . import (
     bidiphase as bidi,
 )
 from .. import io
-from ..configuration import generate_default_ops
 
 
 def compute_crop(xoff: int, yoff: int, corrXY, th_badframes, badframes, maxregshift, Ly: int, Lx: int):

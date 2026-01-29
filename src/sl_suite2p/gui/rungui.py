@@ -118,13 +118,11 @@ class RunWindow(QDialog):
             "reg_tif_chan2",
             "one_p_reg",
             "nonrigid",
-            "connected",
             "roidetect",
             "extract_neuropil",
             "extract_spikes",
             "keep_movie_raw",
             "allow_overlap",
-            "sparse_mode",
         ]
         self.stringkeys = []
         tifkeys = [
@@ -162,10 +160,8 @@ class RunWindow(QDialog):
         ]
         cellkeys = [
             "roidetect",
-            "sparse_mode",
             "denoise",
             "spatial_scale",
-            "connected",
             "threshold_scaling",
             "max_overlap",
             "max_iterations",
@@ -219,10 +215,8 @@ class RunWindow(QDialog):
             "whether to smooth before high-pass filtering before registration",
             "how much to ignore on edges (important for vignetted windows, for FFT padding do not set BELOW 3*smooth_sigma)",
             "if 1, run cell (ROI) detection",
-            "if 1, run sparse_mode cell detection",
             "if 1, run PCA denoising on binned movie to improve cell detection",
             "choose size of ROIs: 0 = multi-scale; 1 = 6 pixels, 2 = 12, 3 = 24, 4 = 48",
-            "whether or not to require ROIs to be fully connected (set to 0 for dendrites/boutons)",
             "adjust the automatically determined threshold for finding ROIs by this scalar multiplier",
             "ROIs with greater than this overlap as a fraction of total pixels will be discarded",
             "maximum number of iterations for ROI detection",
