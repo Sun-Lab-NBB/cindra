@@ -281,6 +281,13 @@ class FileIO:
         if isinstance(self.save_path, str):
             self.save_path = Path(self.save_path) if self.save_path else None
 
+    def prepare_for_saving(self) -> None:
+        """Converts Path fields to strings for YAML serialization."""
+        if self.data_path is not None:
+            self.data_path = str(self.data_path)  # type: ignore[assignment]
+        if self.save_path is not None:
+            self.save_path = str(self.save_path)  # type: ignore[assignment]
+
 
 @dataclass
 class Registration:
@@ -537,6 +544,10 @@ class SpikeDeconvolution:
         if isinstance(self.baseline_method, str):
             self.baseline_method = BaselineMethod(self.baseline_method)
 
+    def prepare_for_saving(self) -> None:
+        """Converts enum fields to strings for YAML serialization."""
+        self.baseline_method = str(self.baseline_method)  # type: ignore[assignment]
+
 
 @dataclass
 class Classification:
@@ -564,46 +575,54 @@ class Classification:
         if isinstance(self.custom_classifier_path, str):
             self.custom_classifier_path = Path(self.custom_classifier_path) if self.custom_classifier_path else None
 
+    def prepare_for_saving(self) -> None:
+        """Converts Path fields to strings for YAML serialization."""
+        if self.custom_classifier_path is not None:
+            self.custom_classifier_path = str(self.custom_classifier_path)  # type: ignore[assignment]
+
 
 @dataclass
 class IOData:
     """Stores runtime data from the IO/binarization stage."""
 
     frame_height: int = 0
-    """Frame height in pixels. Legacy: Ly."""
+    """The height of each frame in pixels (Y dimension of the imaging field of view)."""
 
     frame_width: int = 0
-    """Frame width in pixels. Legacy: Lx."""
+    """The width of each frame in pixels (X dimension of the imaging field of view)."""
 
     frame_count: int = 0
-    """Total frames in the binary file. Legacy: nframes."""
+    """The total number of frames written to the binary file during binarization."""
 
     registered_binary_path: Path | None = None
-    """Path to registered binary file (channel 1). Legacy: reg_file."""
+    """The absolute path to the motion-corrected binary file for the primary imaging channel."""
 
     raw_binary_path: Path | None = None
-    """Path to raw binary file (channel 1). Legacy: raw_file."""
+    """The absolute path to the raw (unregistered) binary file for the primary imaging channel."""
 
     registered_binary_path_channel_2: Path | None = None
-    """Path to registered binary file (channel 2). Legacy: reg_file_chan2."""
+    """The absolute path to the motion-corrected binary file for the second imaging channel."""
 
     raw_binary_path_channel_2: Path | None = None
-    """Path to raw binary file (channel 2). Legacy: raw_file_chan2."""
+    """The absolute path to the raw (unregistered) binary file for the second imaging channel."""
 
     output_directory: Path | None = None
-    """Plane output directory. Legacy: save_path, ops_path."""
+    """The absolute path to the plane-specific output directory where all results are saved."""
 
     mroi_y_offset: int | None = None
-    """Y-offset for mesoscope ROI positioning. Legacy: dy."""
+    """The vertical offset in pixels for positioning this ROI within the full combined field of view. Only used
+    for MROI recordings."""
 
     mroi_x_offset: int | None = None
-    """X-offset for mesoscope ROI positioning. Legacy: dx."""
+    """The horizontal offset in pixels for positioning this ROI within the full combined field of view. Only used
+    for MROI recordings."""
 
     mroi_lines: list[int] = field(default_factory=list)
-    """Line indices for mesoscope ROI extraction. Legacy: lines."""
+    """The list of scan line indices used for extracting this ROI from raw multi-ROI data. Only used for MROI
+    recordings."""
 
     plane_index: int | None = None
-    """Plane index in multi-plane recording. Legacy: iplane."""
+    """The zero-based index identifying this plane's position in a multi-plane volumetric recording."""
 
     def __post_init__(self) -> None:
         """Converts string paths to Path objects after YAML loading."""
@@ -622,49 +641,127 @@ class IOData:
         if isinstance(self.output_directory, str):
             self.output_directory = Path(self.output_directory) if self.output_directory else None
 
+    def prepare_for_saving(self) -> None:
+        """Converts Path fields to strings for YAML serialization."""
+        if self.registered_binary_path is not None:
+            self.registered_binary_path = str(self.registered_binary_path)  # type: ignore[assignment]
+        if self.raw_binary_path is not None:
+            self.raw_binary_path = str(self.raw_binary_path)  # type: ignore[assignment]
+        if self.registered_binary_path_channel_2 is not None:
+            self.registered_binary_path_channel_2 = str(  # type: ignore[assignment]
+                self.registered_binary_path_channel_2
+            )
+        if self.raw_binary_path_channel_2 is not None:
+            self.raw_binary_path_channel_2 = str(self.raw_binary_path_channel_2)  # type: ignore[assignment]
+        if self.output_directory is not None:
+            self.output_directory = str(self.output_directory)  # type: ignore[assignment]
+
 
 @dataclass
 class RegistrationData:
     """Stores runtime data from the registration stage."""
 
     valid_y_range: list[int] = field(default_factory=lambda: [0, 0])
-    """Valid Y pixel range after cropping, as [start, end]. Legacy: yrange."""
+    """The valid Y pixel range [start, end] defining the usable recording region after border cropping."""
 
     valid_x_range: list[int] = field(default_factory=lambda: [0, 0])
-    """Valid X pixel range after cropping, as [start, end]. Legacy: xrange."""
+    """The valid X pixel range [start, end] defining the usable recording region after border cropping."""
 
     bidirectional_phase_offset: int = 0
-    """Computed or user-specified bidirectional phase offset. Legacy: bidiphase."""
+    """The phase offset in pixels used to correct bidirectional scanning artifacts."""
 
     bidirectional_phase_corrected: bool = False
-    """Whether bidirectional phase correction was applied. Legacy: bidi_corrected."""
+    """Determines whether bidirectional phase correction was applied during registration."""
 
     normalization_minimum: int = 0
-    """Minimum intensity for frame normalization. Legacy: rmin."""
+    """The minimum intensity value used for normalizing frames during registration."""
 
     normalization_maximum: int = 0
-    """Maximum intensity for frame normalization. Legacy: rmax."""
+    """The maximum intensity value used for normalizing frames during registration."""
 
     reference_image: NDArray[np.float32] | None = None
-    """Reference image for frame alignment. Legacy: refImg."""
+    """The template image used as the alignment target for motion correction."""
 
     rigid_y_offsets: NDArray[np.float32] | None = None
-    """Y rigid registration offsets per frame. Legacy: yoff."""
+    """The vertical (Y) translation offsets from rigid registration, one value per frame."""
 
     rigid_x_offsets: NDArray[np.float32] | None = None
-    """X rigid registration offsets per frame. Legacy: xoff."""
+    """The horizontal (X) translation offsets from rigid registration, one value per frame."""
 
     rigid_correlations: NDArray[np.float32] | None = None
-    """Rigid registration correlation per frame. Legacy: corrXY."""
+    """The phase correlation values from rigid registration, indicating alignment quality per frame."""
 
     nonrigid_y_offsets: NDArray[np.float32] | None = None
-    """Y non-rigid offsets per frame and block. Legacy: yoff1."""
+    """The vertical (Y) translation offsets from non-rigid registration, per frame and per block."""
 
     nonrigid_x_offsets: NDArray[np.float32] | None = None
-    """X non-rigid offsets per frame and block. Legacy: xoff1."""
+    """The horizontal (X) translation offsets from non-rigid registration, per frame and per block."""
 
     nonrigid_correlations: NDArray[np.float32] | None = None
-    """Non-rigid correlation per frame and block. Legacy: corrXY1."""
+    """The phase correlation values from non-rigid registration, indicating alignment quality per frame and block."""
+
+    def prepare_for_saving(self) -> None:
+        """Sets all array fields to None for YAML serialization."""
+        self.reference_image = None
+        self.rigid_y_offsets = None
+        self.rigid_x_offsets = None
+        self.rigid_correlations = None
+        self.nonrigid_y_offsets = None
+        self.nonrigid_x_offsets = None
+        self.nonrigid_correlations = None
+
+    def save_arrays(self, output_path: Path) -> None:
+        """Saves all registration arrays to a single .npz file.
+
+        Args:
+            output_path: The directory where to save the registration_data.npz file.
+        """
+        save_dict: dict[str, NDArray[np.float32]] = {}
+
+        if self.reference_image is not None:
+            save_dict["reference_image"] = self.reference_image
+        if self.rigid_y_offsets is not None:
+            save_dict["rigid_y_offsets"] = self.rigid_y_offsets
+        if self.rigid_x_offsets is not None:
+            save_dict["rigid_x_offsets"] = self.rigid_x_offsets
+        if self.rigid_correlations is not None:
+            save_dict["rigid_correlations"] = self.rigid_correlations
+        if self.nonrigid_y_offsets is not None:
+            save_dict["nonrigid_y_offsets"] = self.nonrigid_y_offsets
+        if self.nonrigid_x_offsets is not None:
+            save_dict["nonrigid_x_offsets"] = self.nonrigid_x_offsets
+        if self.nonrigid_correlations is not None:
+            save_dict["nonrigid_correlations"] = self.nonrigid_correlations
+
+        if save_dict:
+            np.savez(output_path / "registration_data.npz", allow_pickle=False, **save_dict)
+
+    def load_arrays(self, output_path: Path) -> None:
+        """Loads registration arrays from a .npz file into this instance.
+
+        Args:
+            output_path: The directory containing the registration_data.npz file.
+        """
+        file_path = output_path / "registration_data.npz"
+        if not file_path.exists():
+            return
+
+        data = np.load(file_path, allow_pickle=False)
+
+        if "reference_image" in data:
+            self.reference_image = data["reference_image"].astype(np.float32)
+        if "rigid_y_offsets" in data:
+            self.rigid_y_offsets = data["rigid_y_offsets"].astype(np.float32)
+        if "rigid_x_offsets" in data:
+            self.rigid_x_offsets = data["rigid_x_offsets"].astype(np.float32)
+        if "rigid_correlations" in data:
+            self.rigid_correlations = data["rigid_correlations"].astype(np.float32)
+        if "nonrigid_y_offsets" in data:
+            self.nonrigid_y_offsets = data["nonrigid_y_offsets"].astype(np.float32)
+        if "nonrigid_x_offsets" in data:
+            self.nonrigid_x_offsets = data["nonrigid_x_offsets"].astype(np.float32)
+        if "nonrigid_correlations" in data:
+            self.nonrigid_correlations = data["nonrigid_correlations"].astype(np.float32)
 
 
 @dataclass
@@ -672,37 +769,111 @@ class DetectionData:
     """Stores runtime data from the detection/extraction stage."""
 
     spatial_scale: float = 0.0
-    """Computed spatial scale in pixels. Legacy: spatial_scale_pixels."""
+    """The estimated spatial scale of the recording in pixels, used for automatic cell diameter detection."""
 
     cell_diameter: int = 0
-    """Computed or user-specified cell diameter in pixels. Legacy: diameter."""
+    """The cell diameter in pixels, either computed automatically from spatial scale or specified by the user."""
 
     aspect_ratio: float = 0.0
-    """Computed aspect ratio (diameter[0] / diameter[1]). Legacy: aspect."""
+    """The aspect ratio of detected cells, computed as the ratio of vertical to horizontal diameter."""
 
     mean_image: NDArray[np.float32] | None = None
-    """Mean image from all registered frames. Legacy: mean_image, meanImg."""
+    """The temporal mean of all registered frames, providing a static view of the imaging field."""
 
     enhanced_mean_image: NDArray[np.float32] | None = None
-    """High-pass filtered mean image. Legacy: enhanced_mean_image, meanImgE."""
+    """The high-pass filtered mean image that enhances cell boundaries for improved detection."""
 
     maximum_projection: NDArray[np.float32] | None = None
-    """Maximum projection from all frames. Legacy: max_proj."""
+    """The maximum intensity projection across all frames, highlighting active structures."""
 
     correlation_map: NDArray[np.float32] | None = None
-    """Correlation map for cell detection. Legacy: Vcorr."""
+    """The pixel-wise correlation map used to identify regions with correlated activity for cell detection."""
 
     mean_image_channel_2: NDArray[np.float32] | None = None
-    """Mean image for channel 2. Legacy: mean_image_channel_2, meanImg_chan2."""
+    """The temporal mean of all registered frames for the second imaging channel."""
 
     enhanced_mean_image_channel_2: NDArray[np.float32] | None = None
-    """High-pass filtered mean image for channel 2. Legacy: enhanced_mean_image_chan2."""
+    """The high-pass filtered mean image for the second imaging channel."""
 
     maximum_projection_channel_2: NDArray[np.float32] | None = None
-    """Maximum projection for channel 2. Legacy: max_proj_chan2."""
+    """The maximum intensity projection across all frames for the second imaging channel."""
 
     correlation_map_channel_2: NDArray[np.float32] | None = None
-    """Correlation map for channel 2 detection. Legacy: Vcorr_chan2."""
+    """The pixel-wise correlation map for the second imaging channel."""
+
+    def prepare_for_saving(self) -> None:
+        """Sets all array fields to None for YAML serialization."""
+        self.mean_image = None
+        self.enhanced_mean_image = None
+        self.maximum_projection = None
+        self.correlation_map = None
+        self.mean_image_channel_2 = None
+        self.enhanced_mean_image_channel_2 = None
+        self.maximum_projection_channel_2 = None
+        self.correlation_map_channel_2 = None
+
+    def save_arrays(self, output_path: Path) -> None:
+        """Saves all detection arrays to a single .npz file.
+
+        Args:
+            output_path: The directory where to save the detection_data.npz file.
+        """
+        save_dict: dict[str, NDArray[np.float32]] = {}
+
+        # Channel 1 arrays.
+        if self.mean_image is not None:
+            save_dict["mean_image"] = self.mean_image
+        if self.enhanced_mean_image is not None:
+            save_dict["enhanced_mean_image"] = self.enhanced_mean_image
+        if self.maximum_projection is not None:
+            save_dict["maximum_projection"] = self.maximum_projection
+        if self.correlation_map is not None:
+            save_dict["correlation_map"] = self.correlation_map
+
+        # Channel 2 arrays.
+        if self.mean_image_channel_2 is not None:
+            save_dict["mean_image_channel_2"] = self.mean_image_channel_2
+        if self.enhanced_mean_image_channel_2 is not None:
+            save_dict["enhanced_mean_image_channel_2"] = self.enhanced_mean_image_channel_2
+        if self.maximum_projection_channel_2 is not None:
+            save_dict["maximum_projection_channel_2"] = self.maximum_projection_channel_2
+        if self.correlation_map_channel_2 is not None:
+            save_dict["correlation_map_channel_2"] = self.correlation_map_channel_2
+
+        if save_dict:
+            np.savez(output_path / "detection_data.npz", allow_pickle=False, **save_dict)
+
+    def load_arrays(self, output_path: Path) -> None:
+        """Loads detection arrays from a .npz file into this instance.
+
+        Args:
+            output_path: The directory containing the detection_data.npz file.
+        """
+        file_path = output_path / "detection_data.npz"
+        if not file_path.exists():
+            return
+
+        data = np.load(file_path, allow_pickle=False)
+
+        # Channel 1 arrays.
+        if "mean_image" in data:
+            self.mean_image = data["mean_image"].astype(np.float32)
+        if "enhanced_mean_image" in data:
+            self.enhanced_mean_image = data["enhanced_mean_image"].astype(np.float32)
+        if "maximum_projection" in data:
+            self.maximum_projection = data["maximum_projection"].astype(np.float32)
+        if "correlation_map" in data:
+            self.correlation_map = data["correlation_map"].astype(np.float32)
+
+        # Channel 2 arrays.
+        if "mean_image_channel_2" in data:
+            self.mean_image_channel_2 = data["mean_image_channel_2"].astype(np.float32)
+        if "enhanced_mean_image_channel_2" in data:
+            self.enhanced_mean_image_channel_2 = data["enhanced_mean_image_channel_2"].astype(np.float32)
+        if "maximum_projection_channel_2" in data:
+            self.maximum_projection_channel_2 = data["maximum_projection_channel_2"].astype(np.float32)
+        if "correlation_map_channel_2" in data:
+            self.correlation_map_channel_2 = data["correlation_map_channel_2"].astype(np.float32)
 
 
 @dataclass
@@ -715,87 +886,85 @@ class ROIStatistics:
     multi-plane/multi-day properties (added during combined view generation or cross-session tracking).
 
     Notes:
-        This dataclass replaces the legacy dictionary-based stat.npy format. Legacy field names are noted in each
-        field's docstring for reference.
+        This dataclass replaces the legacy dictionary-based stat.npy format.
     """
 
     # Core pixel data (required, from detection).
     y_pixels: NDArray[np.int32]
-    """Y-coordinates (row indices) of all pixels belonging to this ROI. Legacy: ypix."""
+    """The y-coordinates (row indices) of all pixels belonging to this ROI."""
 
     x_pixels: NDArray[np.int32]
-    """X-coordinates (column indices) of all pixels belonging to this ROI. Legacy: xpix."""
+    """The x-coordinates (column indices) of all pixels belonging to this ROI."""
 
     pixel_weights: NDArray[np.float32]
-    """Spatial filter weights (lambda values) for each pixel, indicating contribution to the ROI signal. Legacy: lam."""
+    """The spatial filter weights (lambda values) for each pixel, indicating contribution to the ROI signal."""
 
     centroid: list[float]
-    """Median [y, x] position of the ROI, representing its approximate center. Legacy: med."""
+    """The median [y, x] position of the ROI, representing its approximate center."""
 
     footprint: int
-    """Spatial scale (hop size) used during sparse detection for this ROI. Legacy: footprint."""
+    """The spatial scale (hop size) used during sparse detection for this ROI."""
 
     # Shape statistics (required, from roi_stats computation).
     mean_r_squared: float
-    """Normalized mean R-squared value measuring ROI compactness. Legacy: mrs."""
+    """The normalized mean R-squared value measuring ROI compactness."""
 
     mean_r_squared_baseline: float
-    """Unnormalized mean R-squared baseline value. Legacy: mrs0."""
+    """The unnormalized mean R-squared baseline value."""
 
     compactness: float
-    """Normalized compactness ratio (mean_r_squared / mean_r_squared_baseline). Legacy: compact."""
+    """The normalized compactness ratio (mean_r_squared / mean_r_squared_baseline)."""
 
     solidity: float
-    """Ratio of soma pixels to convex hull area, measuring how solid/filled the ROI is. Legacy: solidity."""
+    """The ratio of soma pixels to convex hull area, measuring how solid/filled the ROI is."""
 
     pixel_count: int
-    """Total number of pixels in the complete ROI. Legacy: npix."""
+    """The total number of pixels in the complete ROI."""
 
     soma_pixel_count: int
-    """Number of pixels in the soma-cropped region of the ROI. Legacy: npix_soma."""
+    """The number of pixels in the soma-cropped region of the ROI."""
 
     soma_mask: NDArray[np.bool_]
-    """Boolean mask indicating which pixels belong to the soma region. Legacy: soma_crop."""
+    """The boolean mask indicating which pixels belong to the soma region."""
 
     overlap_mask: NDArray[np.bool_]
-    """Boolean mask indicating which pixels overlap with other ROIs. Legacy: overlap."""
+    """The boolean mask indicating which pixels overlap with other ROIs."""
 
     radius: float
-    """Fitted ellipse radius representing the approximate ROI size. Legacy: radius."""
+    """The fitted ellipse radius representing the approximate ROI size."""
 
     aspect_ratio: float
-    """Ratio of ellipse axes, indicating ROI elongation. Legacy: aspect_ratio."""
+    """The ratio of ellipse axes, indicating ROI elongation."""
 
     normalized_pixel_count: float
-    """Pixel count normalized by expected cell size (soma region only). Legacy: npix_norm."""
+    """The pixel count normalized by expected cell size (soma region only)."""
 
     normalized_pixel_count_full: float
-    """Pixel count normalized by expected cell size (full ROI). Legacy: npix_norm_no_crop."""
+    """The pixel count normalized by expected cell size (full ROI)."""
 
     # Optional extraction data (added during signal extraction).
     skewness: float | None = None
-    """Skewness of the baseline-subtracted fluorescence time series. Legacy: skew."""
+    """The skewness of the baseline-subtracted fluorescence time series."""
 
     standard_deviation: float | None = None
-    """Standard deviation of the baseline-subtracted fluorescence time series. Legacy: std."""
+    """The standard deviation of the baseline-subtracted fluorescence time series."""
 
     neuropil_mask: NDArray[np.bool_] | None = None
-    """Boolean mask indicating pixels used for neuropil signal extraction. Legacy: neuropil_mask."""
+    """The boolean mask indicating pixels used for neuropil signal extraction."""
 
     # Optional multi-plane data (added during combined view generation).
     plane_index: int | None = None
-    """Index of the imaging plane this ROI belongs to in multi-plane recordings. Legacy: iplane."""
+    """The index of the imaging plane this ROI belongs to in multi-plane recordings."""
 
     # Optional multi-day data (added during cross-session tracking).
     cluster_id: int | None = None
-    """Multi-day cell cluster ID. Zero indicates unclustered, positive values indicate cluster membership. 
-    Legacy: id."""
+    """The multi-day cell cluster ID. Zero indicates unclustered, positive values indicate cluster membership."""
 
     raveled_pixels: NDArray[np.int32] | None = None
-    """Raveled (flattened) pixel indices in the deformed multi-day visual space. Legacy: ipix."""
+    """The raveled (flattened) pixel indices in the deformed multi-day visual space."""
 
     session_count: int | None = None
-    """Number of sessions in which this cell was detected during multi-day tracking. Legacy: num_sessions."""
+    """The number of sessions in which this cell was detected during multi-day tracking."""
 
     @staticmethod
     def save_list(roi_list: list[ROIStatistics], file_path: Path) -> None:
@@ -1016,46 +1185,172 @@ class ExtractionData:
 
     # Channel 1 extraction data.
     roi_statistics: list[ROIStatistics] | None = None
-    """List of ROI statistics containing per-cell spatial and shape information. Legacy: stat."""
+    """The list of ROI statistics containing per-cell spatial and shape information."""
 
     cell_fluorescence: NDArray[np.float32] | None = None
-    """Cell fluorescence traces with shape (cells, frames). Legacy: F."""
+    """The cell fluorescence traces with shape (cells, frames)."""
 
     neuropil_fluorescence: NDArray[np.float32] | None = None
-    """Neuropil fluorescence traces with shape (cells, frames). Legacy: Fneu."""
+    """The neuropil fluorescence traces with shape (cells, frames)."""
 
     subtracted_fluorescence: NDArray[np.float32] | None = None
-    """Baseline-and-neuropil-subtracted fluorescence traces with shape (cells, frames). Legacy: Fsub."""
+    """The baseline-and-neuropil-subtracted fluorescence traces with shape (cells, frames)."""
 
     spikes: NDArray[np.float32] | None = None
-    """Deconvolved spike traces with shape (cells, frames). Legacy: spks."""
+    """The deconvolved spike traces with shape (cells, frames)."""
 
     cell_classification: NDArray[np.float32] | None = None
-    """Cell classification results with shape (cells, 2) containing (probability, is_cell_boolean). Legacy: iscell."""
+    """The cell classification results with shape (cells, 2) containing (probability, is_cell_boolean)."""
 
     # Channel 2 extraction data (when both channels are functional).
     roi_statistics_channel_2: list[ROIStatistics] | None = None
-    """List of ROI statistics for channel 2 when both channels are functional. Legacy: stat_chan2."""
+    """The list of ROI statistics for channel 2 when both channels are functional."""
 
     cell_fluorescence_channel_2: NDArray[np.float32] | None = None
-    """Cell fluorescence traces for channel 2. Legacy: F_chan2."""
+    """The cell fluorescence traces for channel 2."""
 
     neuropil_fluorescence_channel_2: NDArray[np.float32] | None = None
-    """Neuropil fluorescence traces for channel 2. Legacy: Fneu_chan2."""
+    """The neuropil fluorescence traces for channel 2."""
 
     subtracted_fluorescence_channel_2: NDArray[np.float32] | None = None
-    """Baseline-and-neuropil-subtracted fluorescence for channel 2. Legacy: Fsub_chan2."""
+    """The baseline-and-neuropil-subtracted fluorescence for channel 2."""
 
     spikes_channel_2: NDArray[np.float32] | None = None
-    """Deconvolved spike traces for channel 2. Legacy: spks_chan2."""
+    """The deconvolved spike traces for channel 2."""
 
     cell_classification_channel_2: NDArray[np.float32] | None = None
-    """Cell classification results for channel 2. Legacy: iscell_chan2."""
+    """The cell classification results for channel 2."""
 
     # Colocalization data (channel 1 ROIs presence in channel 2).
     cell_colocalization: NDArray[np.float32] | None = None
-    """Colocalization results indicating whether channel 1 ROIs are present in channel 2. Shape is (cells, 2)
-    containing (probability, is_colocalized_boolean). Legacy: redcell."""
+    """The colocalization results indicating whether channel 1 ROIs are present in channel 2. Shape is (cells, 2)
+    containing (probability, is_colocalized_boolean)."""
+
+    def prepare_for_saving(self) -> None:
+        """Sets all array and list fields to None for YAML serialization."""
+        # Channel 1.
+        self.roi_statistics = None
+        self.cell_fluorescence = None
+        self.neuropil_fluorescence = None
+        self.subtracted_fluorescence = None
+        self.spikes = None
+        self.cell_classification = None
+
+        # Channel 2.
+        self.roi_statistics_channel_2 = None
+        self.cell_fluorescence_channel_2 = None
+        self.neuropil_fluorescence_channel_2 = None
+        self.subtracted_fluorescence_channel_2 = None
+        self.spikes_channel_2 = None
+        self.cell_classification_channel_2 = None
+
+        # Colocalization.
+        self.cell_colocalization = None
+
+    def save_arrays(self, output_path: Path) -> None:
+        """Saves all extraction arrays to .npy files and ROI statistics to .npz files.
+
+        Args:
+            output_path: The directory where to save the extraction data files.
+        """
+        # Channel 1 ROI statistics.
+        if self.roi_statistics is not None:
+            ROIStatistics.save_list(self.roi_statistics, output_path / "roi_statistics.npz")
+
+        # Channel 1 trace arrays.
+        if self.cell_fluorescence is not None:
+            np.save(output_path / "F.npy", self.cell_fluorescence, allow_pickle=False)
+        if self.neuropil_fluorescence is not None:
+            np.save(output_path / "Fneu.npy", self.neuropil_fluorescence, allow_pickle=False)
+        if self.subtracted_fluorescence is not None:
+            np.save(output_path / "Fsub.npy", self.subtracted_fluorescence, allow_pickle=False)
+        if self.spikes is not None:
+            np.save(output_path / "spks.npy", self.spikes, allow_pickle=False)
+        if self.cell_classification is not None:
+            np.save(output_path / "iscell.npy", self.cell_classification, allow_pickle=False)
+
+        # Channel 2 ROI statistics.
+        if self.roi_statistics_channel_2 is not None:
+            ROIStatistics.save_list(self.roi_statistics_channel_2, output_path / "roi_statistics_channel_2.npz")
+
+        # Channel 2 trace arrays.
+        if self.cell_fluorescence_channel_2 is not None:
+            np.save(output_path / "F_chan2.npy", self.cell_fluorescence_channel_2, allow_pickle=False)
+        if self.neuropil_fluorescence_channel_2 is not None:
+            np.save(output_path / "Fneu_chan2.npy", self.neuropil_fluorescence_channel_2, allow_pickle=False)
+        if self.subtracted_fluorescence_channel_2 is not None:
+            np.save(output_path / "Fsub_chan2.npy", self.subtracted_fluorescence_channel_2, allow_pickle=False)
+        if self.spikes_channel_2 is not None:
+            np.save(output_path / "spks_chan2.npy", self.spikes_channel_2, allow_pickle=False)
+        if self.cell_classification_channel_2 is not None:
+            np.save(output_path / "iscell_chan2.npy", self.cell_classification_channel_2, allow_pickle=False)
+
+        # Colocalization array.
+        if self.cell_colocalization is not None:
+            np.save(output_path / "redcell.npy", self.cell_colocalization, allow_pickle=False)
+
+    def load_arrays(self, output_path: Path) -> None:
+        """Loads extraction arrays from .npy files and ROI statistics from .npz files into this instance.
+
+        Args:
+            output_path: The directory containing the extraction data files.
+        """
+        # Channel 1 ROI statistics.
+        roi_stats_path = output_path / "roi_statistics.npz"
+        if self.roi_statistics is None and roi_stats_path.exists():
+            self.roi_statistics = ROIStatistics.load_list(roi_stats_path)
+
+        # Channel 1 trace arrays.
+        f_path = output_path / "F.npy"
+        if self.cell_fluorescence is None and f_path.exists():
+            self.cell_fluorescence = np.load(f_path, allow_pickle=False).astype(np.float32)
+
+        fneu_path = output_path / "Fneu.npy"
+        if self.neuropil_fluorescence is None and fneu_path.exists():
+            self.neuropil_fluorescence = np.load(fneu_path, allow_pickle=False).astype(np.float32)
+
+        fsub_path = output_path / "Fsub.npy"
+        if self.subtracted_fluorescence is None and fsub_path.exists():
+            self.subtracted_fluorescence = np.load(fsub_path, allow_pickle=False).astype(np.float32)
+
+        spks_path = output_path / "spks.npy"
+        if self.spikes is None and spks_path.exists():
+            self.spikes = np.load(spks_path, allow_pickle=False).astype(np.float32)
+
+        iscell_path = output_path / "iscell.npy"
+        if self.cell_classification is None and iscell_path.exists():
+            self.cell_classification = np.load(iscell_path, allow_pickle=False).astype(np.float32)
+
+        # Channel 2 ROI statistics.
+        roi_stats_chan2_path = output_path / "roi_statistics_channel_2.npz"
+        if self.roi_statistics_channel_2 is None and roi_stats_chan2_path.exists():
+            self.roi_statistics_channel_2 = ROIStatistics.load_list(roi_stats_chan2_path)
+
+        # Channel 2 trace arrays.
+        f_chan2_path = output_path / "F_chan2.npy"
+        if self.cell_fluorescence_channel_2 is None and f_chan2_path.exists():
+            self.cell_fluorescence_channel_2 = np.load(f_chan2_path, allow_pickle=False).astype(np.float32)
+
+        fneu_chan2_path = output_path / "Fneu_chan2.npy"
+        if self.neuropil_fluorescence_channel_2 is None and fneu_chan2_path.exists():
+            self.neuropil_fluorescence_channel_2 = np.load(fneu_chan2_path, allow_pickle=False).astype(np.float32)
+
+        fsub_chan2_path = output_path / "Fsub_chan2.npy"
+        if self.subtracted_fluorescence_channel_2 is None and fsub_chan2_path.exists():
+            self.subtracted_fluorescence_channel_2 = np.load(fsub_chan2_path, allow_pickle=False).astype(np.float32)
+
+        spks_chan2_path = output_path / "spks_chan2.npy"
+        if self.spikes_channel_2 is None and spks_chan2_path.exists():
+            self.spikes_channel_2 = np.load(spks_chan2_path, allow_pickle=False).astype(np.float32)
+
+        iscell_chan2_path = output_path / "iscell_chan2.npy"
+        if self.cell_classification_channel_2 is None and iscell_chan2_path.exists():
+            self.cell_classification_channel_2 = np.load(iscell_chan2_path, allow_pickle=False).astype(np.float32)
+
+        # Colocalization array.
+        redcell_path = output_path / "redcell.npy"
+        if self.cell_colocalization is None and redcell_path.exists():
+            self.cell_colocalization = np.load(redcell_path, allow_pickle=False).astype(np.float32)
 
 
 @dataclass
@@ -1063,43 +1358,43 @@ class TimingData:
     """Stores pipeline timing information."""
 
     registration_time: float = 0.0
-    """Registration step time in seconds. Legacy: timing['registration']."""
+    """The registration step time in seconds."""
 
     two_step_registration_time: float = 0.0
-    """Second registration step time in seconds. Legacy: timing['two_step_registration']."""
+    """The second registration step time in seconds."""
 
     registration_metrics_time: float = 0.0
-    """Registration metrics computation time in seconds. Legacy: timing['registration_metrics']."""
+    """The registration metrics computation time in seconds."""
 
     detection_time: float = 0.0
-    """ROI detection time in seconds. Legacy: timing['detection']."""
+    """The ROI detection time in seconds."""
 
     extraction_time: float = 0.0
-    """Fluorescence extraction time in seconds. Legacy: timing['extraction']."""
+    """The fluorescence extraction time in seconds."""
 
     classification_time: float = 0.0
-    """ROI classification time in seconds. Legacy: timing['classification']."""
+    """The ROI classification time in seconds."""
 
     deconvolution_time: float = 0.0
-    """Spike deconvolution time in seconds. Legacy: timing['deconvolution']."""
+    """The spike deconvolution time in seconds."""
 
     detection_time_channel_2: float = 0.0
-    """Channel 2 ROI detection time in seconds. Legacy: timing['detection_chan2']."""
+    """The channel 2 ROI detection time in seconds."""
 
     extraction_time_channel_2: float = 0.0
-    """Channel 2 fluorescence extraction time in seconds. Legacy: timing['extraction_chan2']."""
+    """The channel 2 fluorescence extraction time in seconds."""
 
     classification_time_channel_2: float = 0.0
-    """Channel 2 ROI classification time in seconds. Legacy: timing['classification_chan2']."""
+    """The channel 2 ROI classification time in seconds."""
 
     deconvolution_time_channel_2: float = 0.0
-    """Channel 2 spike deconvolution time in seconds. Legacy: timing['deconvolution_chan2']."""
+    """The channel 2 spike deconvolution time in seconds."""
 
     total_plane_time: float = 0.0
-    """Total plane processing time in seconds. Legacy: timing['total_plane_runtime']."""
+    """The total plane processing time in seconds."""
 
     date_processed: str = ""
-    """ISO timestamp when processing completed. Legacy: date_processed."""
+    """The ISO timestamp when processing completed."""
 
     python_version: str = python_version
     """Python version used for processing."""
@@ -1148,137 +1443,10 @@ class SingleDayRuntimeData(YamlConfig):
         if isinstance(self.output_path, str):
             self.output_path = Path(self.output_path)
 
-        # Loads registration arrays from .npy files.
-        self._load_registration_arrays()
-
-        # Loads detection arrays from .npy files.
-        self._load_detection_arrays()
-
-        # Loads extraction arrays from .npy files.
-        self._load_extraction_arrays()
-
-    def _load_registration_arrays(self) -> None:
-        """Loads registration arrays from .npz file in the output directory."""
-        path = self.output_path / "registration_data.npz"
-        if not path.exists():
-            return
-
-        data = np.load(path, allow_pickle=False)
-
-        # Loads reference image.
-        if self.registration.reference_image is None and "reference_image" in data:
-            self.registration.reference_image = data["reference_image"].astype(np.float32)
-
-        # Loads rigid registration offsets.
-        if self.registration.rigid_y_offsets is None and "rigid_y_offsets" in data:
-            self.registration.rigid_y_offsets = data["rigid_y_offsets"].astype(np.float32)
-
-        if self.registration.rigid_x_offsets is None and "rigid_x_offsets" in data:
-            self.registration.rigid_x_offsets = data["rigid_x_offsets"].astype(np.float32)
-
-        if self.registration.rigid_correlations is None and "rigid_correlations" in data:
-            self.registration.rigid_correlations = data["rigid_correlations"].astype(np.float32)
-
-        # Loads non-rigid registration offsets.
-        if self.registration.nonrigid_y_offsets is None and "nonrigid_y_offsets" in data:
-            self.registration.nonrigid_y_offsets = data["nonrigid_y_offsets"].astype(np.float32)
-
-        if self.registration.nonrigid_x_offsets is None and "nonrigid_x_offsets" in data:
-            self.registration.nonrigid_x_offsets = data["nonrigid_x_offsets"].astype(np.float32)
-
-        if self.registration.nonrigid_correlations is None and "nonrigid_correlations" in data:
-            self.registration.nonrigid_correlations = data["nonrigid_correlations"].astype(np.float32)
-
-    def _load_detection_arrays(self) -> None:
-        """Loads detection arrays from .npz file in the output directory."""
-        path = self.output_path / "detection_data.npz"
-        if not path.exists():
-            return
-
-        data = np.load(path, allow_pickle=False)
-
-        # Channel 1 arrays.
-        if self.detection.mean_image is None and "mean_image" in data:
-            self.detection.mean_image = data["mean_image"].astype(np.float32)
-
-        if self.detection.enhanced_mean_image is None and "enhanced_mean_image" in data:
-            self.detection.enhanced_mean_image = data["enhanced_mean_image"].astype(np.float32)
-
-        if self.detection.maximum_projection is None and "maximum_projection" in data:
-            self.detection.maximum_projection = data["maximum_projection"].astype(np.float32)
-
-        if self.detection.correlation_map is None and "correlation_map" in data:
-            self.detection.correlation_map = data["correlation_map"].astype(np.float32)
-
-        # Channel 2 arrays.
-        if self.detection.mean_image_channel_2 is None and "mean_image_channel_2" in data:
-            self.detection.mean_image_channel_2 = data["mean_image_channel_2"].astype(np.float32)
-
-        if self.detection.enhanced_mean_image_channel_2 is None and "enhanced_mean_image_channel_2" in data:
-            self.detection.enhanced_mean_image_channel_2 = data["enhanced_mean_image_channel_2"].astype(np.float32)
-
-        if self.detection.maximum_projection_channel_2 is None and "maximum_projection_channel_2" in data:
-            self.detection.maximum_projection_channel_2 = data["maximum_projection_channel_2"].astype(np.float32)
-
-        if self.detection.correlation_map_channel_2 is None and "correlation_map_channel_2" in data:
-            self.detection.correlation_map_channel_2 = data["correlation_map_channel_2"].astype(np.float32)
-
-    def _load_extraction_arrays(self) -> None:
-        """Loads extraction arrays from .npy/.npz files in the output directory."""
-        # Channel 1 ROI statistics.
-        path = self.output_path / "roi_statistics.npz"
-        if self.extraction.roi_statistics is None and path.exists():
-            self.extraction.roi_statistics = ROIStatistics.load_list(path)
-
-        path = self.output_path / "F.npy"
-        if self.extraction.cell_fluorescence is None and path.exists():
-            self.extraction.cell_fluorescence = np.load(path, allow_pickle=False).astype(np.float32)
-
-        path = self.output_path / "Fneu.npy"
-        if self.extraction.neuropil_fluorescence is None and path.exists():
-            self.extraction.neuropil_fluorescence = np.load(path, allow_pickle=False).astype(np.float32)
-
-        path = self.output_path / "Fsub.npy"
-        if self.extraction.subtracted_fluorescence is None and path.exists():
-            self.extraction.subtracted_fluorescence = np.load(path, allow_pickle=False).astype(np.float32)
-
-        path = self.output_path / "spks.npy"
-        if self.extraction.spikes is None and path.exists():
-            self.extraction.spikes = np.load(path, allow_pickle=False).astype(np.float32)
-
-        path = self.output_path / "iscell.npy"
-        if self.extraction.cell_classification is None and path.exists():
-            self.extraction.cell_classification = np.load(path, allow_pickle=False).astype(np.float32)
-
-        # Channel 2 ROI statistics (when both channels are functional).
-        path = self.output_path / "roi_statistics_channel_2.npz"
-        if self.extraction.roi_statistics_channel_2 is None and path.exists():
-            self.extraction.roi_statistics_channel_2 = ROIStatistics.load_list(path)
-
-        path = self.output_path / "F_chan2.npy"
-        if self.extraction.cell_fluorescence_channel_2 is None and path.exists():
-            self.extraction.cell_fluorescence_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
-
-        path = self.output_path / "Fneu_chan2.npy"
-        if self.extraction.neuropil_fluorescence_channel_2 is None and path.exists():
-            self.extraction.neuropil_fluorescence_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
-
-        path = self.output_path / "Fsub_chan2.npy"
-        if self.extraction.subtracted_fluorescence_channel_2 is None and path.exists():
-            self.extraction.subtracted_fluorescence_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
-
-        path = self.output_path / "spks_chan2.npy"
-        if self.extraction.spikes_channel_2 is None and path.exists():
-            self.extraction.spikes_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
-
-        path = self.output_path / "iscell_chan2.npy"
-        if self.extraction.cell_classification_channel_2 is None and path.exists():
-            self.extraction.cell_classification_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
-
-        # Colocalization array.
-        path = self.output_path / "redcell.npy"
-        if self.extraction.cell_colocalization is None and path.exists():
-            self.extraction.cell_colocalization = np.load(path, allow_pickle=False).astype(np.float32)
+        # Loads arrays from each child dataclass.
+        self.registration.load_arrays(self.output_path)
+        self.detection.load_arrays(self.output_path)
+        self.extraction.load_arrays(self.output_path)
 
     def save(self, output_path: Path) -> None:
         """Saves the runtime data to a YAML file and arrays to .npy files.
@@ -1297,194 +1465,24 @@ class SingleDayRuntimeData(YamlConfig):
         ensure_directory_exists(output_path)
         self.output_path = output_path
 
-        # Saves registration arrays as .npy files.
-        self._save_registration_arrays(output_path)
-
-        # Saves detection arrays as .npy files.
-        self._save_detection_arrays(output_path)
-
-        # Saves extraction arrays as .npy files.
-        self._save_extraction_arrays(output_path)
+        # Saves arrays from each child dataclass.
+        self.registration.save_arrays(output_path)
+        self.detection.save_arrays(output_path)
+        self.extraction.save_arrays(output_path)
 
         # Creates a deep copy for YAML serialization.
         yaml_copy = copy.deepcopy(self)
 
-        # Converts Path fields to strings for YAML serialization.
+        # Prepares each child dataclass for YAML serialization.
         yaml_copy.output_path = str(output_path)  # type: ignore[assignment]
-        yaml_copy._convert_paths_to_strings()
-
-        # Sets array fields to None in the YAML representation.
-        yaml_copy._nullify_arrays()
+        yaml_copy.io.prepare_for_saving()
+        yaml_copy.registration.prepare_for_saving()
+        yaml_copy.detection.prepare_for_saving()
+        yaml_copy.extraction.prepare_for_saving()
 
         # Saves the YAML file.
         file_path = output_path / "runtime_data.yaml"
         yaml_copy.to_yaml(file_path=file_path)
-
-    def _save_registration_arrays(self, output_path: Path) -> None:
-        """Saves registration arrays to a single .npz file."""
-        save_dict = {}
-
-        if self.registration.reference_image is not None:
-            save_dict["reference_image"] = self.registration.reference_image
-
-        if self.registration.rigid_y_offsets is not None:
-            save_dict["rigid_y_offsets"] = self.registration.rigid_y_offsets
-
-        if self.registration.rigid_x_offsets is not None:
-            save_dict["rigid_x_offsets"] = self.registration.rigid_x_offsets
-
-        if self.registration.rigid_correlations is not None:
-            save_dict["rigid_correlations"] = self.registration.rigid_correlations
-
-        if self.registration.nonrigid_y_offsets is not None:
-            save_dict["nonrigid_y_offsets"] = self.registration.nonrigid_y_offsets
-
-        if self.registration.nonrigid_x_offsets is not None:
-            save_dict["nonrigid_x_offsets"] = self.registration.nonrigid_x_offsets
-
-        if self.registration.nonrigid_correlations is not None:
-            save_dict["nonrigid_correlations"] = self.registration.nonrigid_correlations
-
-        if save_dict:
-            np.savez(output_path / "registration_data.npz", allow_pickle=False, **save_dict)
-
-    def _save_detection_arrays(self, output_path: Path) -> None:
-        """Saves detection arrays to a single .npz file."""
-        save_dict = {}
-
-        # Channel 1 arrays.
-        if self.detection.mean_image is not None:
-            save_dict["mean_image"] = self.detection.mean_image
-
-        if self.detection.enhanced_mean_image is not None:
-            save_dict["enhanced_mean_image"] = self.detection.enhanced_mean_image
-
-        if self.detection.maximum_projection is not None:
-            save_dict["maximum_projection"] = self.detection.maximum_projection
-
-        if self.detection.correlation_map is not None:
-            save_dict["correlation_map"] = self.detection.correlation_map
-
-        # Channel 2 arrays.
-        if self.detection.mean_image_channel_2 is not None:
-            save_dict["mean_image_channel_2"] = self.detection.mean_image_channel_2
-
-        if self.detection.enhanced_mean_image_channel_2 is not None:
-            save_dict["enhanced_mean_image_channel_2"] = self.detection.enhanced_mean_image_channel_2
-
-        if self.detection.maximum_projection_channel_2 is not None:
-            save_dict["maximum_projection_channel_2"] = self.detection.maximum_projection_channel_2
-
-        if self.detection.correlation_map_channel_2 is not None:
-            save_dict["correlation_map_channel_2"] = self.detection.correlation_map_channel_2
-
-        if save_dict:
-            np.savez(output_path / "detection_data.npz", allow_pickle=False, **save_dict)
-
-    def _save_extraction_arrays(self, output_path: Path) -> None:
-        """Saves extraction arrays to .npy/.npz files."""
-        # Channel 1 ROI statistics.
-        if self.extraction.roi_statistics is not None:
-            ROIStatistics.save_list(self.extraction.roi_statistics, output_path / "roi_statistics.npz")
-
-        if self.extraction.cell_fluorescence is not None:
-            np.save(output_path / "F.npy", self.extraction.cell_fluorescence, allow_pickle=False)
-
-        if self.extraction.neuropil_fluorescence is not None:
-            np.save(output_path / "Fneu.npy", self.extraction.neuropil_fluorescence, allow_pickle=False)
-
-        if self.extraction.subtracted_fluorescence is not None:
-            np.save(output_path / "Fsub.npy", self.extraction.subtracted_fluorescence, allow_pickle=False)
-
-        if self.extraction.spikes is not None:
-            np.save(output_path / "spks.npy", self.extraction.spikes, allow_pickle=False)
-
-        if self.extraction.cell_classification is not None:
-            np.save(output_path / "iscell.npy", self.extraction.cell_classification, allow_pickle=False)
-
-        # Channel 2 ROI statistics (when both channels are functional).
-        if self.extraction.roi_statistics_channel_2 is not None:
-            ROIStatistics.save_list(
-                self.extraction.roi_statistics_channel_2, output_path / "roi_statistics_channel_2.npz"
-            )
-
-        if self.extraction.cell_fluorescence_channel_2 is not None:
-            np.save(output_path / "F_chan2.npy", self.extraction.cell_fluorescence_channel_2, allow_pickle=False)
-
-        if self.extraction.neuropil_fluorescence_channel_2 is not None:
-            np.save(output_path / "Fneu_chan2.npy", self.extraction.neuropil_fluorescence_channel_2, allow_pickle=False)
-
-        if self.extraction.subtracted_fluorescence_channel_2 is not None:
-            np.save(
-                output_path / "Fsub_chan2.npy", self.extraction.subtracted_fluorescence_channel_2, allow_pickle=False
-            )
-
-        if self.extraction.spikes_channel_2 is not None:
-            np.save(output_path / "spks_chan2.npy", self.extraction.spikes_channel_2, allow_pickle=False)
-
-        if self.extraction.cell_classification_channel_2 is not None:
-            np.save(output_path / "iscell_chan2.npy", self.extraction.cell_classification_channel_2, allow_pickle=False)
-
-        # Colocalization array.
-        if self.extraction.cell_colocalization is not None:
-            np.save(output_path / "redcell.npy", self.extraction.cell_colocalization, allow_pickle=False)
-
-    def _convert_paths_to_strings(self) -> None:
-        """Converts all Path fields to strings for YAML serialization."""
-        if self.io.registered_binary_path is not None:
-            self.io.registered_binary_path = str(self.io.registered_binary_path)  # type: ignore[assignment]
-        if self.io.raw_binary_path is not None:
-            self.io.raw_binary_path = str(self.io.raw_binary_path)  # type: ignore[assignment]
-        if self.io.registered_binary_path_channel_2 is not None:
-            self.io.registered_binary_path_channel_2 = str(  # type: ignore[assignment]
-                self.io.registered_binary_path_channel_2
-            )
-        if self.io.raw_binary_path_channel_2 is not None:
-            self.io.raw_binary_path_channel_2 = str(self.io.raw_binary_path_channel_2)  # type: ignore[assignment]
-        if self.io.output_directory is not None:
-            self.io.output_directory = str(self.io.output_directory)  # type: ignore[assignment]
-
-    def _nullify_arrays(self) -> None:
-        """Sets all array and list fields to None for YAML serialization."""
-        # Nullifies registration arrays.
-        self.registration.reference_image = None
-        self.registration.rigid_y_offsets = None
-        self.registration.rigid_x_offsets = None
-        self.registration.rigid_correlations = None
-        self.registration.nonrigid_y_offsets = None
-        self.registration.nonrigid_x_offsets = None
-        self.registration.nonrigid_correlations = None
-
-        # Nullifies detection arrays (channel 1).
-        self.detection.mean_image = None
-        self.detection.enhanced_mean_image = None
-        self.detection.maximum_projection = None
-        self.detection.correlation_map = None
-
-        # Nullifies detection arrays (channel 2).
-        self.detection.mean_image_channel_2 = None
-        self.detection.enhanced_mean_image_channel_2 = None
-        self.detection.maximum_projection_channel_2 = None
-        self.detection.correlation_map_channel_2 = None
-
-        # Nullifies extraction arrays (channel 1).
-        self.extraction.roi_statistics = None
-        self.extraction.cell_fluorescence = None
-        self.extraction.neuropil_fluorescence = None
-        self.extraction.subtracted_fluorescence = None
-        self.extraction.spikes = None
-        self.extraction.cell_classification = None
-
-        # Nullifies extraction arrays (channel 2).
-        self.extraction.roi_statistics_channel_2 = None
-        self.extraction.cell_fluorescence_channel_2 = None
-        self.extraction.neuropil_fluorescence_channel_2 = None
-        self.extraction.subtracted_fluorescence_channel_2 = None
-        self.extraction.spikes_channel_2 = None
-        self.extraction.cell_classification_channel_2 = None
-
-        # Nullifies colocalization array.
-        self.extraction.cell_colocalization = None
 
     @classmethod
     def load(cls, output_path: Path) -> SingleDayRuntimeData:
@@ -1550,20 +1548,10 @@ class SingleDayConfiguration(YamlConfig):
         # Creates a deep copy to avoid modifying the original instance.
         yaml_copy = copy.deepcopy(self)
 
-        # Converts enums to strings for YAML serialization.
-        yaml_copy.spike_deconvolution.baseline_method = str(  # type: ignore[assignment]
-            yaml_copy.spike_deconvolution.baseline_method
-        )
-
-        # Converts Path fields to strings for YAML serialization.
-        if yaml_copy.file_io.data_path is not None:
-            yaml_copy.file_io.data_path = str(yaml_copy.file_io.data_path)  # type: ignore[assignment]
-        if yaml_copy.file_io.save_path is not None:
-            yaml_copy.file_io.save_path = str(yaml_copy.file_io.save_path)  # type: ignore[assignment]
-        if yaml_copy.classification.custom_classifier_path is not None:
-            yaml_copy.classification.custom_classifier_path = str(  # type: ignore[assignment]
-                yaml_copy.classification.custom_classifier_path
-            )
+        # Prepares each child dataclass for YAML serialization.
+        yaml_copy.file_io.prepare_for_saving()
+        yaml_copy.spike_deconvolution.prepare_for_saving()
+        yaml_copy.classification.prepare_for_saving()
 
         yaml_copy.to_yaml(file_path=file_path)
 

@@ -223,7 +223,7 @@ def init_masks(parent):
     whether or not iscell is True for a given ROI
     args:
         ops: mean_image, Vcorr
-        stat: xpix,ypix,xext,yext
+        stat: x_pixels, y_pixels, xext, yext
         iscell: vector with True if ROI is cell
         ops_plot: plotROI, view, color, randcols
     outputs:
@@ -250,14 +250,14 @@ def init_masks(parent):
     iignore = np.zeros(ncells, "bool")
     parent.roi_text_labels = []
     for n in np.arange(ncells - 1, -1, -1, int):
-        ypix = stat[n]["ypix"]
+        ypix = stat[n]["y_pixels"]
         if ypix is not None and not iignore[n]:
             if "imerge" in stat[n]:
                 for k in stat[n]["imerge"]:
                     iignore[k] = True
                     console.echo(message=f"ROI {k} in merged ROI")
-            xpix = stat[n]["xpix"]
-            lam = stat[n]["lam"]
+            xpix = stat[n]["x_pixels"]
+            lam = stat[n]["pixel_weights"]
             lam = lam / lam.sum()
             i = int(1 - iscell[n])
             # add cell on top
@@ -271,7 +271,7 @@ def init_masks(parent):
             parent.rois["Lam"][i, 0, ypix, xpix] = lam
             parent.rois["Sroi"][i, ypix, xpix] = 1
             LamAll[ypix, xpix] = lam
-            med = stat[n]["med"]
+            med = stat[n]["centroid"]
             cell_str = str(n)
         else:
             cell_str = ""
@@ -301,7 +301,7 @@ def draw_masks(parent):  # ops, stat, ops_plot, iscell, ichosen):
     whether or not iscell is True for a given ROI
     args:
         ops: mean_image, Vcorr
-        stat: xpix,ypix
+        stat: x_pixels, y_pixels
         iscell: vector with True if ROI is cell
         ops_plot: plotROI, view, color, randcols
     outputs:
@@ -325,8 +325,8 @@ def draw_masks(parent):  # ops, stat, ops_plot, iscell, ichosen):
 
     if view == 0:
         for n in parent.imerge:
-            ypix = parent.stat[n]["ypix"].flatten()
-            xpix = parent.stat[n]["xpix"].flatten()
+            ypix = parent.stat[n]["y_pixels"].flatten()
+            xpix = parent.stat[n]["x_pixels"].flatten()
             v = (parent.rois["iROI"][wplot][:, ypix, xpix] > -1).sum(axis=0) - 1
             v = 1 - v / 3
             M[wplot] = make_chosen_ROI(M[wplot], ypix, xpix, v)
@@ -334,8 +334,8 @@ def draw_masks(parent):  # ops, stat, ops_plot, iscell, ichosen):
         for n in parent.imerge:
             ycirc = parent.stat[n]["ycirc"]
             xcirc = parent.stat[n]["xcirc"]
-            ypix = parent.stat[n]["ypix"].flatten()
-            xpix = parent.stat[n]["xpix"].flatten()
+            ypix = parent.stat[n]["y_pixels"].flatten()
+            xpix = parent.stat[n]["x_pixels"].flatten()
             M[wplot][ypix, xpix, 3] = 0
             col = parent.colors["cols"][color, n]
             sat = 1
@@ -476,8 +476,8 @@ def plot_masks(parent, M):
 
 def remove_roi(parent, n, i0):
     """Removes roi n from view i0"""
-    ypix = parent.stat[n]["ypix"]
-    xpix = parent.stat[n]["xpix"]
+    ypix = parent.stat[n]["y_pixels"]
+    xpix = parent.stat[n]["x_pixels"]
     # cell indices
     ipix = np.array((parent.rois["iROI"][i0, 0, :, :] == n).nonzero()).astype(np.int32)
     ipix1 = np.array((parent.rois["iROI"][i0, 1, :, :] == n).nonzero()).astype(np.int32)
@@ -504,9 +504,9 @@ def remove_roi(parent, n, i0):
 
 def add_roi(parent, n, i):
     """Add roi n to view i"""
-    ypix = parent.stat[n]["ypix"]
-    xpix = parent.stat[n]["xpix"]
-    lam = parent.stat[n]["lam"]
+    ypix = parent.stat[n]["y_pixels"]
+    xpix = parent.stat[n]["x_pixels"]
+    lam = parent.stat[n]["pixel_weights"]
     parent.rois["iROI"][i, 2, ypix, xpix] = parent.rois["iROI"][i, 1, ypix, xpix]
     parent.rois["iROI"][i, 1, ypix, xpix] = parent.rois["iROI"][i, 0, ypix, xpix]
     parent.rois["iROI"][i, 0, ypix, xpix] = n
@@ -552,8 +552,8 @@ def flip_roi(parent):
     # add cell to other side (on top) and push down overlaps
     add_roi(parent, n, i)
     # redraw colors
-    ypix = parent.stat[n]["ypix"]
-    xpix = parent.stat[n]["xpix"]
+    ypix = parent.stat[n]["y_pixels"]
+    xpix = parent.stat[n]["x_pixels"]
     redraw_masks(parent, ypix, xpix)
 
 

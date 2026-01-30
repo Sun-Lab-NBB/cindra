@@ -196,11 +196,11 @@ def combine_planes(plane_contexts: list[RuntimeContext], save: bool = True) -> N
 
         # Updates ROI statistics with combined-view coordinates and plane index.
         for roi_index in range(len(plane_roi_stats)):
-            plane_roi_stats[roi_index]["xpix"] += x_offsets[plane_index]
-            plane_roi_stats[roi_index]["ypix"] += y_offsets[plane_index]
-            plane_roi_stats[roi_index]["med"][0] += y_offsets[plane_index]
-            plane_roi_stats[roi_index]["med"][1] += x_offsets[plane_index]
-            plane_roi_stats[roi_index]["iplane"] = plane_index
+            plane_roi_stats[roi_index]["x_pixels"] += x_offsets[plane_index]
+            plane_roi_stats[roi_index]["y_pixels"] += y_offsets[plane_index]
+            plane_roi_stats[roi_index]["centroid"][0] += y_offsets[plane_index]
+            plane_roi_stats[roi_index]["centroid"][1] += x_offsets[plane_index]
+            plane_roi_stats[roi_index]["plane_index"] = plane_index
 
         # Extracts fluorescence and classification data from the RuntimeContext.
         plane_cell_fluorescence = ctx.runtime.extraction.cell_fluorescence

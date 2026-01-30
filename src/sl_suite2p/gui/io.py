@@ -48,12 +48,12 @@ def make_masks_and_enable_buttons(parent):
     # add boundaries to stat for ROI overlays
     ncells = len(parent.stat)
     for n in range(ncells):
-        ypix = parent.stat[n]["ypix"].flatten()
-        xpix = parent.stat[n]["xpix"].flatten()
+        ypix = parent.stat[n]["y_pixels"].flatten()
+        xpix = parent.stat[n]["x_pixels"].flatten()
         yext, xext = utils.boundary(ypix, xpix)
         parent.stat[n]["yext"] = yext
         parent.stat[n]["xext"] = xext
-        ycirc, xcirc = utils.circle(parent.stat[n]["med"], parent.stat[n]["radius"])
+        ycirc, xcirc = utils.circle(parent.stat[n]["centroid"], parent.stat[n]["radius"])
         goodi = (ycirc >= 0) & (xcirc >= 0) & (ycirc < parent.ops["frame_height"]) & (xcirc < parent.ops["frame_width"])
         parent.stat[n]["ycirc"] = ycirc[goodi]
         parent.stat[n]["xcirc"] = xcirc[goodi]
@@ -212,7 +212,7 @@ def load_files(name):
     """Give stat.npy path and load all needed files for suite2p"""
     try:
         stat = np.load(name, allow_pickle=True)
-        ypix = stat[0]["ypix"]
+        ypix = stat[0]["y_pixels"]
     except (ValueError, KeyError, OSError, RuntimeError, TypeError, NameError):
         console.echo(message="ERROR: this is not a stat.npy file (needs stat[n]['ypix'])", level=LogLevel.ERROR)
         stat = None

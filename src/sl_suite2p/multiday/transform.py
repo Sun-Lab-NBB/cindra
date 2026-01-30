@@ -111,7 +111,7 @@ def _register_session(registration: DiffeomorphicDemonsRegistration, deform_inde
     deformed_cells = deform_masks(session.cell_masks, session.deform)
 
     # Adds the session number (index) to each cell dictionary and sets clustering ID to 0 (unassigned/not clustered)
-    session.deformed_cell_masks = tuple([dict(item, session=deform_index, id=0) for item in deformed_cells])
+    session.deformed_cell_masks = tuple([dict(item, session=deform_index, cluster_id=0) for item in deformed_cells])
 
     return session
 
@@ -167,7 +167,7 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
     minimum_sessions = int(np.ceil((mask_prevalence / 100) * len(data.sessions)))
 
     # Pre-extracts all cells with ID=0 from all sessions
-    all_cells = [cell for session in data.sessions for cell in session.deformed_cell_masks if cell["id"] == 0]
+    all_cells = [cell for session in data.sessions for cell in session.deformed_cell_masks if cell["cluster_id"] == 0]
 
     # Organizes the cells by the spatial grid before entering the main processing loop. Specifically, bins the cells
     # based on their position in the 2-dimensional space of each session. By pre-binning the sessions, the clustering
@@ -176,8 +176,8 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
     cell_grid: dict[tuple[int, int], list[dict[str, Any]]] = {}
     grid_size = max(step_x, step_y)
     for cell in all_cells:
-        grid_y = cell["med"][0] // grid_size
-        grid_x = cell["med"][1] // grid_size
+        grid_y = cell["centroid"][0] // grid_size
+        grid_x = cell["centroid"][1] // grid_size
         cell_grid.setdefault((grid_y, grid_x), []).append(cell)
 
     # Creates a set of grid positions to process. This streamlines the main processing loop and prepares the code
@@ -219,8 +219,8 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
             for gx in range(grid_x_min, grid_x_max):
                 if (gy, gx) in cell_grid:
                     for cell in cell_grid[(gy, gx)]:
-                        if cell["id"] == 0:  # Only processes cells that haven't been clustered yet
-                            y, x = cell["med"]
+                        if cell["cluster_id"] == 0:  # Only processes cells that haven't been clustered yet
+                            y, x = cell["centroid"]
                             if (
                                 y_position - bin_size < y < y_position + step_x + bin_size
                                 and x_position - bin_size < x < x_position + step_y + bin_size
@@ -234,7 +234,7 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
             continue
 
         # Extracts the centerpoints of each processed cell into a separate array
-        centers = np.array([cell["med"] for cell in cell_info])
+        centers = np.array([cell["centroid"] for cell in cell_info])
 
         # Calculates the distances between each pair of cells inside the spatial bin and compares each distance against
         # the distance threshold. Distances smaller than the threshold are considered as possible cell pairs.
@@ -266,9 +266,9 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
         # Calculates jaccard distances between all pre-filtered across-session cell pairs
         for _i, cell_1, cell_2 in pair_indices:
             # noinspection PyTypeChecker
-            cell_1_pixels = cell_info[cell_1]["ipix"]
+            cell_1_pixels = cell_info[cell_1]["raveled_pixels"]
             # noinspection PyTypeChecker
-            cell_2_pixels = cell_info[cell_2]["ipix"]
+            cell_2_pixels = cell_info[cell_2]["raveled_pixels"]
 
             # Determines how many pixels from cell 1 are also in cell 2. This assumes that the same cell would generally
             # appear in roughly the same spatial position across motion-corrected session images. In turn, the cell
@@ -322,8 +322,8 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
                 cluster_cells = [cell_info[i] for i in np.where(cluster_cell_pixels)[0]]
 
                 # Extracts the pixel coordinates (x, y) and lambda (intensity) values for all cluster cells.
-                cluster_cell_pixels = np.hstack([mask["ipix"] for mask in cluster_cells])
-                cluster_cell_intensities = np.hstack([mask["lam"] for mask in cluster_cells])
+                cluster_cell_pixels = np.hstack([mask["raveled_pixels"] for mask in cluster_cells])
+                cluster_cell_intensities = np.hstack([mask["pixel_weights"] for mask in cluster_cells])
 
                 # Finds pixels that consistently appear in most cell masks across sessions and only keeps these pixels.
                 # This resolves the 'consensus' cell mask across session, which only includes the pixels that are
@@ -348,21 +348,21 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
                 # Adds the template mask to the temporary storage list.
                 template_masks.append(
                     {
-                        "id": counter,
-                        "ipix": filtered_pixels,
-                        "xpix": xpix,
-                        "ypix": ypix,
-                        "med": center,
-                        "lam": np.array(average_lambda),
+                        "cluster_id": counter,
+                        "raveled_pixels": filtered_pixels,
+                        "x_pixels": xpix,
+                        "y_pixels": ypix,
+                        "centroid": center,
+                        "pixel_weights": np.array(average_lambda),
                         "radius": radius,
-                        "num_sessions": len(cluster_cells),
+                        "session_count": len(cluster_cells),
                     }
                 )
 
                 # Updates cluster IDs for all cells in the processed cluster. This excludes these cells from further
                 # processing iterations.
                 for cell in cluster_cells:
-                    cell["id"] = counter
+                    cell["cluster_id"] = counter
 
     # Adds overlap pixel information to each template mask and records the number of template masks before the final
     # filtering step.
@@ -373,7 +373,7 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
     # filters out templates that appear too small to be considered valid cells. Adds the filtered tuple of template
     # masks to the MultiDayData object.
     data.template_cell_masks = tuple(
-        [mask for mask in template_masks if (len(mask["ipix"]) - sum(mask["overlap"])) >= ops["minimum_size"]]
+        [mask for mask in template_masks if (len(mask["raveled_pixels"]) - sum(mask["overlap_mask"])) >= ops["minimum_size"]]
     )
     after_size = len(data.template_cell_masks)
     removed_templates = before_size - after_size
@@ -455,6 +455,6 @@ def _backward_transform_session(template_masks: tuple[dict[str, Any], ...], sess
     # results can be stored and loaded with other transformed image information stored in the transformed_images.npy
     # output file.
     session.transformed_images["lambda_weights"] = create_mask_image(
-        session.template_cell_masks, session.deform.field_shape, field="lam"
+        session.template_cell_masks, session.deform.field_shape, field="pixel_weights"
     )
     return session

@@ -149,7 +149,7 @@ class MainWindow(QMainWindow):
 
         # ------ CELL STATS / ROI SELECTION --------
         # which stats
-        self.stats_to_show = ["med", "npix", "skew", "compact", "footprint", "aspect_ratio"]
+        self.stats_to_show = ["centroid", "pixel_count", "skewness", "compactness", "footprint", "aspect_ratio"]
         lilfont = QtGui.QFont("Arial", 8)
         qlabel = QLabel(self)
         qlabel.setFont(self.boldfont)
@@ -510,7 +510,7 @@ class MainWindow(QMainWindow):
         icells = np.unique(iROI0[iROI0 >= 0])
         self.imerge = []
         for n in icells:
-            if (self.rois["iROI"][i, :, ypix, xpix] == n).sum() > 0.6 * self.stat[n]["npix"]:
+            if (self.rois["iROI"][i, :, ypix, xpix] == n).sum() > 0.6 * self.stat[n]["pixel_count"]:
                 self.imerge.append(n)
         if len(self.imerge) > 0:
             self.ichosen = self.imerge[0]
@@ -642,7 +642,7 @@ class MainWindow(QMainWindow):
                 apix = np.append(
                     apix,
                     np.concatenate(
-                        (self.stat[k]["ypix"].flatten()[:, np.newaxis], self.stat[k]["xpix"].flatten()[:, np.newaxis]),
+                        (self.stat[k]["y_pixels"].flatten()[:, np.newaxis], self.stat[k]["x_pixels"].flatten()[:, np.newaxis]),
                         axis=1,
                     ),
                     axis=0,
@@ -656,7 +656,7 @@ class MainWindow(QMainWindow):
             imax[0] = max(icent[0] + irange, imax[0])
             imax[1] = max(icent[1] + irange, imax[1])
         else:
-            icent = np.array(self.stat[self.ichosen]["med"])
+            icent = np.array(self.stat[self.ichosen]["centroid"])
             imin = icent - irange
             imax = icent + irange
         self.p1.setYRange(imin[0], imax[0])

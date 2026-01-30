@@ -10,7 +10,7 @@ identify cells with channel 2 brightness (aka red cells)
 
 main function is detect
 takes from ops: "mean_image", "mean_image_channel_2", "Ly", "Lx"
-takes from stat: "ypix", "xpix", "lam"
+takes from stat: "y_pixels", "x_pixels", "pixel_weights"
 """
 
 
