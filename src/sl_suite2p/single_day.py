@@ -75,7 +75,7 @@ def _register_plane(
     timer = PrecisionTimer("s")
 
     # Memory-maps the necessary binary files.
-    n_frames, height, width = ops["nframes"], ops["Ly"], ops["Lx"]
+    n_frames, height, width = ops["frame_count"], ops["frame_height"], ops["frame_width"]
     null = contextlib.nullcontext()
     with (
         BinaryFile(height=height, width=width, file_path=raw_frames_path, frame_number=n_frames)
@@ -90,17 +90,13 @@ def _register_plane(
         else null as frames_channel_2,
     ):
         # Skips applying bidiphase correction if frames have already been bidiphase-corrected.
-        if raw_frames is None and ops["do_bidiphase"] and ops["bidiphase"] != 0:
-            ops["bidi_corrected"] = True
+        if raw_frames is None and ops["compute_bidirectional_phase_offset"] and ops["bidirectional_phase_offset"] != 0:
+            ops["bidirectional_phase_corrected"] = True
 
         # First registration step:
         message = f"Running plane {plane_number} registration step one..."
         console.echo(message=message, level=LogLevel.INFO)
         timer.reset()
-
-        # Determines whether to compute the reference image or use an existing reference image (if available). During
-        # registration, each frame is registered to this reference image.
-        reference_image = ops["refImg"] if "refImg" in ops and ops.get("force_ref_img", False) else None
 
         # Determines whether the registration should be performed using the first or the second functional channel if
         # the processed data contains two functional channels.
@@ -113,7 +109,6 @@ def _register_plane(
             f_raw=raw_frames,
             f_reg_chan2=frames_channel_2,
             f_raw_chan2=raw_frames_channel_2,
-            refImg=reference_image,
             align_by_chan2=align_by_channel_2,
             ops=ops,
         )
@@ -213,7 +208,7 @@ def _compute_registration_metrics(ops: dict[str, Any], plane_number: int, frames
     timer.reset()
 
     # Memory-maps the necessary binary files.
-    n_frames, height, width = ops["nframes"], ops["Ly"], ops["Lx"]
+    n_frames, height, width = ops["frame_count"], ops["frame_height"], ops["frame_width"]
     with (
         BinaryFile(height=height, width=width, file_path=frames_path, frame_number=n_frames) as frames,
     ):
@@ -229,7 +224,7 @@ def _compute_registration_metrics(ops: dict[str, Any], plane_number: int, frames
         # Bins the processed movie according to the binning criteria calculated above
         indices = np.linspace(0, n_frames - 1, n_samples).astype("int")
         movie = frames[indices]
-        movie = movie[:, ops["yrange"][0] : ops["yrange"][-1], ops["xrange"][0] : ops["xrange"][-1]]
+        movie = movie[:, ops["valid_y_range"][0] : ops["valid_y_range"][-1], ops["valid_x_range"][0] : ops["valid_x_range"][-1]]
 
         # Runs the registration evaluation pipeline.
         ops = registration.get_pc_metrics(movie, ops, plane_number=plane_number)
@@ -279,7 +274,7 @@ def _process_rois(
         classifier_file = user_classifier_file
 
     # Memory-maps the necessary binary files.
-    n_frames, height, width = ops["nframes"], ops["Ly"], ops["Lx"]
+    n_frames, height, width = ops["frame_count"], ops["frame_height"], ops["frame_width"]
     null = contextlib.nullcontext()
     with (
         BinaryFile(height=height, width=width, file_path=frames_path, frame_number=n_frames) as frames,
@@ -361,7 +356,7 @@ def _process_rois(
                     cell_fluorescence=df,
                     batch_size=ops["batch_size"],
                     time_constant=ops["tau"],
-                    sampling_rate=ops["fs"],
+                    sampling_rate=ops["sampling_rate"],
                 )
                 ops["timing"]["deconvolution"] = timer.elapsed
 
@@ -379,8 +374,8 @@ def _process_rois(
                 spikes = np.zeros_like(cell_fluorescence)
 
             # Saves pipeline output to disk as .npy files.
-            fpath = Path(ops["output_path"])
-            if ops.get("output_path"):
+            fpath = Path(ops["output_directory"])
+            if ops.get("output_directory"):
                 np.save(fpath.joinpath("stat.npy"), roi_statistics)
                 np.save(fpath.joinpath("F.npy"), cell_fluorescence)
                 np.save(fpath.joinpath("Fneu.npy"), neuropil_fluorescence)
@@ -450,8 +445,8 @@ def resolve_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
 
     # Adjusts the aspect ratio for the processed data, if necessary. This is only used in gui, so may or may not be
     # important for certain processing runtimes.
-    if isinstance(ops["diameter"], list) and len(ops["diameter"]) > 1 and ops["aspect"] == 1.0:
-        ops["aspect"] = ops["diameter"][0] / ops["diameter"][1]
+    if isinstance(ops["cell_diameter"], list) and len(ops["cell_diameter"]) > 1 and ops["aspect_ratio"] == 1.0:
+        ops["aspect_ratio"] = ops["cell_diameter"][0] / ops["cell_diameter"][1]
 
     # If necessary, resolves the output (save folder) path, based on the input data path.
     if "save_path" not in ops or len(ops["save_path"]) == 0:
@@ -586,13 +581,13 @@ def resolve_binaries(ops_path: Path) -> None:
             ops["bin_file"] = folder.joinpath("data.bin")  # Path to the existing binary file.
 
             # Computes plane dimensions.
-            ops["Ly"] = ops["Lys"][i]
-            ops["Lx"] = ops["Lxs"][i]
+            ops["frame_height"] = ops["Lys"][i]
+            ops["frame_width"] = ops["Lxs"][i]
 
             # Uses plane dimension and a static assumption that each pixel uses 16-bit encoding to determine the
             # number of frames stored inside the plane binary file.
-            n_bytes_read = np.int64(2 * ops["Ly"] * ops["Lx"])
-            ops["nframes"] = Path(ops["bin_file"]).stat().st_size // n_bytes_read
+            n_bytes_read = np.int64(2 * ops["frame_height"] * ops["frame_width"])
+            ops["frame_count"] = Path(ops["bin_file"]).stat().st_size // n_bytes_read
             np.save(ops_file, ops)  # Overwrites the ops.npy with modified settings
 
         files_found_flag = True
@@ -781,14 +776,14 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
 
     # Ensures that the plane contains enough frames for the processing to work as expected and, if not, either
     # aborts or notifies the user about the unexpected behavior possibility.
-    if ops["nframes"] < _MINIMUM_PROCESSING_FRAMES:
+    if ops["frame_count"] < _MINIMUM_PROCESSING_FRAMES:
         message = (
             f"Unable to process plane {plane_index}. A plane must contain at least 50 frames to be processed, but "
             f"the input plane contains only {ops['nframes']} frames."
         )
         console.error(message=message, error=ValueError)
 
-    if ops["nframes"] < _RECOMMENDED_PROCESSING_FRAMES:
+    if ops["frame_count"] < _RECOMMENDED_PROCESSING_FRAMES:
         message = (
             f"The number of frames for plane {plane_index} is below 200, unexpected behavior may occur during "
             f"processing."
@@ -819,7 +814,7 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
                 message=f"Plane {plane_index} registration: disabled. The plane is already registered.",
                 level=LogLevel.INFO,
             )
-            console.echo(message=f"Plane {plane_index} binary path: {ops['reg_file']}.", level=LogLevel.INFO)
+            console.echo(message=f"Plane {plane_index} binary path: {ops['registered_binary_path']}.", level=LogLevel.INFO)
             run_registration = False
 
     # If the user specifically disables plane registration, skips plane registration
@@ -829,27 +824,27 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
             f"configuration parameter."
         )
         console.echo(message=message, level=LogLevel.INFO)
-        console.echo(message=f"Plane {plane_index} binary path: {ops['reg_file']}.", level=LogLevel.INFO)
+        console.echo(message=f"Plane {plane_index} binary path: {ops['registered_binary_path']}.", level=LogLevel.INFO)
         run_registration = False
 
     # Determines whether suite2p is configured to preserve the unregistered (raw) binary files.
-    raw_file_available = ops.get("keep_movie_raw") and "raw_file" in ops and Path(ops["raw_file"]).is_file()
+    raw_file_available = ops.get("keep_movie_raw") and "raw_binary_path" in ops and Path(ops["raw_binary_path"]).is_file()
 
     # Resolves the paths to registered and, if available, raw binary files for channel 1
-    registered_file = ops["reg_file"]
-    raw_file = ops.get("raw_file", 0) if raw_file_available else registered_file
+    registered_file = ops["registered_binary_path"]
+    raw_file = ops.get("raw_binary_path", 0) if raw_file_available else registered_file
 
     # Gets the number of frames in each binary file to use to initialize channel 2 files, if needed. This is only used
     # when processing data with two functional channels.
     if ops["nchannels"] > 1:
-        registered_file_channel_2 = ops["reg_file_chan2"]
-        raw_file_channel_2 = ops.get("raw_file_chan2", 0) if raw_file_available else registered_file_channel_2
+        registered_file_channel_2 = ops["registered_binary_path_channel_2"]
+        raw_file_channel_2 = ops.get("raw_binary_path_channel_2", 0) if raw_file_available else registered_file_channel_2
     else:
         registered_file_channel_2 = registered_file
         raw_file_channel_2 = registered_file
 
     # Determines the shape and layout of each binary file
-    n_frames, _height, _width = ops["nframes"], ops["Ly"], ops["Lx"]
+    n_frames, _height, _width = ops["frame_count"], ops["frame_height"], ops["frame_width"]
 
     # Determines which binary files are available for this plane and resolves their paths. Previously, this step
     # constructed the BinaryFile instances. Now, each processing step resolves the necessary binary files as part of its
@@ -911,19 +906,19 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
         console.echo(message=f"Deleting plane {plane_index} binary files...", level=LogLevel.INFO)
 
         # Registered binary file for channel 1
-        Path(ops["reg_file"]).unlink()
+        Path(ops["registered_binary_path"]).unlink()
 
         # Registered binary file for channel 2
         if ops["nchannels"] > 1:
-            Path(ops["reg_file_chan2"]).unlink()
+            Path(ops["registered_binary_path_channel_2"]).unlink()
 
         # Raw binary file for channel 1
-        if "raw_file" in ops:
-            Path(ops["raw_file"]).unlink()
+        if "raw_binary_path" in ops:
+            Path(ops["raw_binary_path"]).unlink()
 
         # Raw binary file for channel 2
-        if "raw_file" in ops and ops["nchannels"] > 1:
-            Path(ops["raw_file_chan2"]).unlink()
+        if "raw_binary_path" in ops and ops["nchannels"] > 1:
+            Path(ops["raw_binary_path_channel_2"]).unlink()
 
     message = (
         f"Plane {plane_index} processed in {ops['timing']['total_plane_runtime']} seconds. Processing results "

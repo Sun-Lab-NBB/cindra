@@ -39,7 +39,7 @@ def make_masks_and_enable_buttons(parent):
     parent.isROI = False
     parent.setWindowTitle(parent.fname)
     # set bin size to be 0.5s by default
-    parent.bin = int(parent.ops["tau"] * parent.ops["fs"] / 2)
+    parent.bin = int(parent.ops["tau"] * parent.ops["sampling_rate"] / 2)
     parent.binedit.setText(str(parent.bin))
     if "chan2_thres" not in parent.ops:
         parent.ops["chan2_thres"] = 0.6
@@ -54,7 +54,7 @@ def make_masks_and_enable_buttons(parent):
         parent.stat[n]["yext"] = yext
         parent.stat[n]["xext"] = xext
         ycirc, xcirc = utils.circle(parent.stat[n]["med"], parent.stat[n]["radius"])
-        goodi = (ycirc >= 0) & (xcirc >= 0) & (ycirc < parent.ops["Ly"]) & (xcirc < parent.ops["Lx"])
+        goodi = (ycirc >= 0) & (xcirc >= 0) & (ycirc < parent.ops["frame_height"]) & (xcirc < parent.ops["frame_width"])
         parent.stat[n]["ycirc"] = ycirc[goodi]
         parent.stat[n]["xcirc"] = xcirc[goodi]
         parent.stat[n]["inmerge"] = 0
@@ -88,13 +88,13 @@ def make_masks_and_enable_buttons(parent):
     traces.plot_trace(parent)
     parent.xyrat = 1.0
     if (
-        isinstance(parent.ops["diameter"], (list, np.ndarray))
-        and len(parent.ops["diameter"]) > 1
-        and parent.ops.get("aspect", 1.0)
+        isinstance(parent.ops["cell_diameter"], (list, np.ndarray))
+        and len(parent.ops["cell_diameter"]) > 1
+        and parent.ops.get("aspect_ratio", 1.0)
     ):
-        parent.xyrat = parent.ops["diameter"][0] / parent.ops["diameter"][1]
+        parent.xyrat = parent.ops["cell_diameter"][0] / parent.ops["cell_diameter"][1]
     else:
-        parent.xyrat = parent.ops.get("aspect", 1.0)
+        parent.xyrat = parent.ops.get("aspect_ratio", 1.0)
 
     parent.p1.setAspectLocked(lock=True, ratio=parent.xyrat)
     parent.p2.setAspectLocked(lock=True, ratio=parent.xyrat)

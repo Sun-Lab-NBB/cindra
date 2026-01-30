@@ -316,7 +316,7 @@ class VisWindow(QMainWindow):
         self.sp /= 12
         self.tsort = np.arange(0, sp.shape[1]).astype(np.int32)
         # 100 ms bins
-        self.bin = int(np.maximum(1, int(self.parent.ops["fs"] / 10)))
+        self.bin = int(np.maximum(1, int(self.parent.ops["sampling_rate"] / 10)))
         # draw axes
         self.p1.setXRange(0, sp.shape[1])
         self.p1.setYRange(0, sp.shape[0])

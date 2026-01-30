@@ -108,10 +108,10 @@ def merge_activity_masks(parent):
     stat0["med"] = median_pix(ypix, xpix)
     stat0["lam"] = lam / lam.sum()
 
-    if "aspect" in parent.ops:
-        d0 = np.array([int(parent.ops["aspect"] * 10), 10])
+    if "aspect_ratio" in parent.ops:
+        d0 = np.array([int(parent.ops["aspect_ratio"] * 10), 10])
     else:
-        d0 = parent.ops["diameter"]
+        d0 = parent.ops["cell_diameter"]
         if isinstance(d0, int):
             d0 = [d0, d0]
 
@@ -135,7 +135,7 @@ def merge_activity_masks(parent):
         cell_fluorescence=dF[np.newaxis, :],
         batch_size=parent.ops["batch_size"],
         time_constant=parent.ops["tau"],
-        sampling_rate=parent.ops["fs"],
+        sampling_rate=parent.ops["sampling_rate"],
     )
 
     ### remove previously merged cell from FOV (do not replace)
@@ -159,9 +159,9 @@ def merge_activity_masks(parent):
         parent.stat,
         parent.Ly,
         parent.Lx,
-        aspect=parent.ops.get("aspect", None),
-        diameter=parent.ops.get("diameter", None),
-        do_crop=parent.ops.get("soma_crop", 1),
+        aspect=parent.ops.get("aspect_ratio", None),
+        diameter=parent.ops.get("cell_diameter", None),
+        do_crop=parent.ops.get("crop_to_soma", 1),
     )
     parent.stat[-1]["lam"] = parent.stat[-1]["lam"] * merged_cells.size
     parent.Fcell = np.concatenate((parent.Fcell, F[np.newaxis, :]), axis=0)
@@ -179,7 +179,7 @@ def merge_activity_masks(parent):
 
     ### for GUI drawing
     ycirc, xcirc = utils.circle(parent.stat[-1]["med"], parent.stat[-1]["radius"])
-    goodi = (ycirc >= 0) & (xcirc >= 0) & (ycirc < parent.ops["Ly"]) & (xcirc < parent.ops["Lx"])
+    goodi = (ycirc >= 0) & (xcirc >= 0) & (ycirc < parent.ops["frame_height"]) & (xcirc < parent.ops["frame_width"])
     parent.stat[-1]["ycirc"] = ycirc[goodi]
     parent.stat[-1]["xcirc"] = xcirc[goodi]
 
