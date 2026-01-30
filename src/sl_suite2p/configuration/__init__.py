@@ -4,6 +4,7 @@ from .multi_day import MultiDayConfiguration
 from .single_day import (
     IOData,
     TimingData,
+    CombinedData,
     DetectionData,
     ROIStatistics,
     BaselineMethod,
@@ -18,6 +19,7 @@ from .single_day import (
 __all__ = [
     "AcquisitionParameters",
     "BaselineMethod",
+    "CombinedData",
     "DetectionData",
     "ExtractionData",
     "IOData",

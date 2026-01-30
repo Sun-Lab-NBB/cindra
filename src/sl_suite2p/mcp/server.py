@@ -765,11 +765,11 @@ def generate_config_file(output_path: str, pipeline_type: Literal["single-day", 
         output = output.with_suffix(".yaml")
 
     if pipeline_type == "single-day":
-        config: SingleDayConfiguration = generate_default_ops(as_dict=False)
+        config: SingleDayConfiguration | MultiDayConfiguration = SingleDayConfiguration()
     else:
-        config: MultiDayConfiguration = generate_default_multiday_ops(as_dict=False)
+        config = MultiDayConfiguration()
 
-    config.to_config(file_path=output)
+    config.save(file_path=output)
 
     return {"success": True, "file_path": str(output), "pipeline_type": pipeline_type}
 
