@@ -53,7 +53,6 @@ def import_sessions(ops: dict[str, Any]) -> MultiDayData:
                 f"generate the 'combined' folder as part of the single-session processing."
             )
             console.error(message=message, error=FileNotFoundError)
-            raise FileNotFoundError(message)  # Fallback to appease mypy, should not be reachable
 
         # Extracts single-day .npy files from the combined folder:
         # Configuration parameters and general processing data.
@@ -67,11 +66,11 @@ def import_sessions(ops: dict[str, Any]) -> MultiDayData:
         images = {
             "mean": single_day_ops["mean_image"].astype(np.float32),
             "enhanced": single_day_ops["enhanced_mean_image"].astype(np.float32),
-            "max": single_day_ops["max_proj"].astype(np.float32),
+            "max": single_day_ops["maximum_projection"].astype(np.float32),
         }
 
         # Resolves parameters for the list comprehension below to make it visually simpler
-        keys_to_keep = ["xpix", "ypix", "lam", "med", "radius", "overlap"]
+        keys_to_keep = ["x_pixels", "y_pixels", "pixel_weights", "centroid", "radius", "overlap_mask"]
         prob_threshold = ops["probability_threshold"]
         max_size = ops["maximum_size"]
 
@@ -81,17 +80,17 @@ def import_sessions(ops: dict[str, Any]) -> MultiDayData:
         selected_cells = [
             {key: mask[key] for key in keys_to_keep}
             for cell_index, mask in enumerate(single_day_stat)
-            if single_day_iscell[cell_index, 1] > prob_threshold and mask["npix"] < max_size
+            if single_day_iscell[cell_index, 1] > prob_threshold and mask["pixel_count"] < max_size
         ]  # Loads cell data for all single-day ROIs that satisfy the size and probability thresholds
 
         # Removes ROIs too close to stripe margins. This step is skipped if the runtime is not configured to filter
         # cells around borders (if the stripe borders list is empty).
-        if ops["mesoscope_stripe_borders"]:
+        if ops["mroi_stripe_borders"]:
             stripe_margin = ops["stripe_margin"]
             filtered_cells = [
                 cell
                 for cell in selected_cells
-                if all(abs(cell["med"][1] - border) > stripe_margin for border in ops["mesoscope_stripe_borders"])
+                if all(abs(cell["centroid"][1] - border) > stripe_margin for border in ops["mroi_stripe_borders"])
             ]
         else:
             # Otherwise, all selected cells automatically pass the stripe filtering step.

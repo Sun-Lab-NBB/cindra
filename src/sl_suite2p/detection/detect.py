@@ -7,7 +7,7 @@ import numpy as np
 from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console
 
-from . import sourcery, chan2detect, sparsedetect
+from . import chan2detect, sparsedetect
 from .stats import roi_stats
 from .denoise import pca_denoise
 from ..io.binary import BinaryFile
@@ -18,17 +18,19 @@ from ..classification import classify, user_classfile
 def detect(ops, plane_number: int, classfile=None):
     timer = PrecisionTimer("s")
 
-    bin_size = int(max(1, ops["nframes"] // ops["nbinned"], np.round(ops["tau"] * ops["fs"])))
+    bin_size = int(
+        max(1, ops["frame_count"] // ops["maximum_binned_frames"], np.round(ops["tau"] * ops["sampling_rate"]))
+    )
 
     console.echo(f"Binning plane {plane_number} movie in chunks of length {bin_size}...", level=LogLevel.INFO)
     timer.reset()
 
-    with BinaryFile(file_path=ops["reg_file"], height=ops["Ly"], width=ops["Lx"]) as f:
+    with BinaryFile(file_path=ops["registered_binary_path"], height=ops["frame_height"], width=ops["frame_width"]) as f:
         mov = f.bin_movie(
             bin_size=bin_size,
             bad_frames=ops.get("badframes"),
-            y_range=ops["yrange"],
-            x_range=ops["xrange"],
+            y_range=ops["valid_y_range"],
+            x_range=ops["valid_x_range"],
         )
 
         message = (
@@ -73,20 +75,20 @@ def detection_wrapper(
     ----------------
     ops : dictionary or list of dicts
 
-    stat : dictionary "ypix", "xpix", "lam"
+    stat : dictionary "y_pixels", "x_pixels", "pixel_weights"
             Dictionary containing statistics for ROIs
 
 
     """
     timer = PrecisionTimer("s")
     n_frames, Ly, Lx = f_reg.shape
-    yrange = ops.get("yrange", [0, Ly]) if yrange is None else yrange
-    xrange = ops.get("xrange", [0, Lx]) if xrange is None else xrange
-    ops["yrange"] = yrange
-    ops["xrange"] = xrange
+    yrange = ops.get("valid_y_range", [0, Ly]) if yrange is None else yrange
+    xrange = ops.get("valid_x_range", [0, Lx]) if xrange is None else xrange
+    ops["valid_y_range"] = yrange
+    ops["valid_x_range"] = xrange
 
     if mov is None:
-        bin_size = int(max(1, n_frames // ops["nbinned"], np.round(ops["tau"] * ops["fs"])))
+        bin_size = int(max(1, n_frames // ops["maximum_binned_frames"], np.round(ops["tau"] * ops["sampling_rate"])))
         console.echo(f"Binning plane {plane_number} movie in chunks of length {bin_size}...", level=LogLevel.INFO)
 
         timer.reset()
@@ -117,7 +119,7 @@ def detection_wrapper(
 
     if "mean_image" not in ops:
         ops["mean_image"] = mov.mean(axis=0)
-        ops["max_proj"] = mov.max(axis=0)
+        ops["maximum_projection"] = mov.max(axis=0)
 
     if ops.get("inverted_activity", False):
         mov -= mov.min()
@@ -130,10 +132,9 @@ def detection_wrapper(
     message = f"Finding cell mask ROIs for plane {plane_number}..."
     console.echo(message=message, level=LogLevel.INFO)
     timer.reset()
-    stat = select_rois(ops=ops, mov=mov, sparse_mode=ops["sparse_mode"], plane_number=plane_number)
+    stat = select_rois(ops=ops, mov=mov, plane_number=plane_number)
     message = (
-        f"Plane {plane_number} cell masks: discovered. Detected ROIs: {len(stat)}. "
-        f"Time taken: {timer.elapsed} seconds."
+        f"Plane {plane_number} cell masks: discovered. Detected ROIs: {len(stat)}. Time taken: {timer.elapsed} seconds."
     )
     console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -141,12 +142,12 @@ def detection_wrapper(
     xmin = int(xrange[0])
     if len(stat) > 0:
         for s in stat:
-            s["ypix"] += ymin
-            s["xpix"] += xmin
-            s["med"][0] += ymin
-            s["med"][1] += xmin
+            s["y_pixels"] += ymin
+            s["x_pixels"] += xmin
+            s["centroid"][0] += ymin
+            s["centroid"][1] += xmin
 
-        if ops["preclassify"] > 0:
+        if ops["preclassification_threshold"] > 0:
             if classfile is None:
                 classfile = user_classfile
 
@@ -157,19 +158,19 @@ def detection_wrapper(
                 stat,
                 Ly,
                 Lx,
-                aspect=ops.get("aspect", None),
-                diameter=ops.get("diameter", None),
-                do_crop=ops.get("soma_crop", 1),
+                aspect=ops.get("aspect_ratio", None),
+                diameter=ops.get("cell_diameter", None),
+                do_crop=ops.get("crop_to_soma", 1),
             )
             if len(stat) == 0:
                 iscell = np.zeros((0, 2))
             else:
                 iscell = classify(stat=stat, classfile=classfile)
-            np.save(Path(ops["output_path"]).joinpath("iscell.npy"), iscell)
-            ic = (iscell[:, 0] > ops["preclassify"]).flatten().astype("bool")
+            np.save(Path(ops["output_directory"]).joinpath("iscell.npy"), iscell)
+            ic = (iscell[:, 0] > ops["preclassification_threshold"]).flatten().astype("bool")
             stat = stat[ic]
             message = (
-                f"Plane {plane_number} preclassification pass with threshold {ops['preclassify']}: complete. Removed "
+                f"Plane {plane_number} preclassification pass with threshold {ops['preclassification_threshold']}: complete. Removed "
                 f"{(~ic).sum()} ROIs."
             )
             console.echo(message=message, level=LogLevel.SUCCESS)
@@ -178,10 +179,10 @@ def detection_wrapper(
             stat,
             Ly,
             Lx,
-            aspect=ops.get("aspect", None),
-            diameter=ops.get("diameter", None),
-            max_overlap=ops["max_overlap"],
-            do_crop=ops.get("soma_crop", 1),
+            aspect=ops.get("aspect_ratio", None),
+            diameter=ops.get("cell_diameter", None),
+            max_overlap=ops["maximum_overlap"],
+            do_crop=ops.get("crop_to_soma", 1),
         )
         message = f"Plane {plane_number} overlapping ROI filtering: complete. Kept {len(stat)} ROIs."
         console.echo(message=message, level=LogLevel.SUCCESS)
@@ -191,40 +192,39 @@ def detection_wrapper(
         if "chan2_thres" not in ops:
             ops["chan2_thres"] = 0.65
         ops, redcell = chan2detect.detect(ops, stat)
-        np.save(Path(ops["output_path"]).joinpath("redcell.npy"), redcell)
+        np.save(Path(ops["output_directory"]).joinpath("redcell.npy"), redcell)
 
     return ops, stat
 
 
-def select_rois(ops: dict[str, Any], mov: np.ndarray, plane_number: int, sparse_mode: bool = True):
-    if sparse_mode:
-        ops.update({"Lyc": mov.shape[1], "Lxc": mov.shape[2]})
-        new_ops, stat = sparsedetect.sparsery(
-            mov=mov,
-            high_pass=ops["high_pass"],
-            neuropil_high_pass=ops["spatial_hp_detect"],
-            batch_size=ops["batch_size"],
-            spatial_scale=ops["spatial_scale"],
-            threshold_scaling=ops["threshold_scaling"],
-            max_iterations=250 * ops["max_iterations"],
-            percentile=ops.get("active_percentile", 0.0),
-            plane_number=plane_number,
-        )
-        ops.update(new_ops)
+def select_rois(ops: dict[str, Any], mov: np.ndarray, plane_number: int):
+    """Detects ROIs using sparse detection algorithm.
 
-        # Sets the diameter from the computed spatial_scale_pixels if not explicitly configured.
-        if ops.get("diameter", 0) == 0:
-            ops["diameter"] = ops["spatial_scale_pixels"]
-    else:
-        # Non-sparse mode (sourcery) requires an explicit diameter value.
-        if ops.get("diameter", 0) == 0:
-            message = (
-                "Unable to run non-sparse ROI detection. The 'diameter' parameter must be set to a non-zero value "
-                "when using sparse_mode=False. Either set 'diameter' explicitly in the configuration or use "
-                "sparse_mode=True (recommended)."
-            )
-            console.error(message=message, error=ValueError)
-        ops, stat = sourcery.sourcery(mov=mov, ops=ops, plane_number=plane_number)
+    Args:
+        ops: Pipeline options dictionary containing detection parameters.
+        mov: Binned movie array with shape (frames, height, width).
+        plane_number: Index of the imaging plane being processed.
+
+    Returns:
+        Array of ROI statistics dictionaries.
+    """
+    ops.update({"Lyc": mov.shape[1], "Lxc": mov.shape[2]})
+    new_ops, stat = sparsedetect.sparsery(
+        mov=mov,
+        high_pass=ops["high_pass"],
+        neuropil_high_pass=ops["spatial_hp_detect"],
+        batch_size=ops["batch_size"],
+        spatial_scale=ops["spatial_scale"],
+        threshold_scaling=ops["threshold_scaling"],
+        max_iterations=250 * ops["max_iterations"],
+        percentile=ops.get("active_percentile", 0.0),
+        plane_number=plane_number,
+    )
+    ops.update(new_ops)
+
+    # Sets the cell_diameter from the computed spatial_scale_pixels if not explicitly configured.
+    if ops.get("cell_diameter", 0) == 0:
+        ops["cell_diameter"] = ops["spatial_scale_pixels"]
 
     stat = np.array(stat)
 

@@ -68,7 +68,7 @@ def init_views(parent):
     assigns parent.views
 
     """
-    parent.Ly, parent.Lx = parent.ops["Ly"], parent.ops["Lx"]
+    parent.Ly, parent.Lx = parent.ops["frame_height"], parent.ops["frame_width"]
     parent.views = np.zeros((7, parent.Ly, parent.Lx, 3), np.float32)
     for k in range(7):
         if k == 2:
@@ -83,28 +83,29 @@ def init_views(parent):
             mimg = np.maximum(0, np.minimum(1, mimg))
         elif k == 3:
             if "Vcorr" in parent.ops:
-                vcorr = parent.ops["Vcorr"]
+                vcorr = parent.ops["correlation_map"]
                 mimg1 = np.percentile(vcorr, 1)
                 mimg99 = np.percentile(vcorr, 99)
                 vcorr = (vcorr - mimg1) / (mimg99 - mimg1)
                 mimg = mimg1 * np.ones((parent.Ly, parent.Lx), np.float32)
                 mimg[
-                    parent.ops["yrange"][0] : parent.ops["yrange"][1], parent.ops["xrange"][0] : parent.ops["xrange"][1]
+                    parent.ops["valid_y_range"][0] : parent.ops["valid_y_range"][1],
+                    parent.ops["valid_x_range"][0] : parent.ops["valid_x_range"][1],
                 ] = vcorr
                 mimg = np.maximum(0, np.minimum(1, mimg))
             else:
                 mimg = np.zeros((parent.Ly, parent.Lx), np.float32)
         elif k == 4:
             if "max_proj" in parent.ops:
-                mproj = parent.ops["max_proj"]
+                mproj = parent.ops["maximum_projection"]
                 mimg1 = np.percentile(mproj, 1)
                 mimg99 = np.percentile(mproj, 99)
                 mproj = (mproj - mimg1) / (mimg99 - mimg1)
                 mimg = np.zeros((parent.Ly, parent.Lx), np.float32)
                 try:
                     mimg[
-                        parent.ops["yrange"][0] : parent.ops["yrange"][1],
-                        parent.ops["xrange"][0] : parent.ops["xrange"][1],
+                        parent.ops["valid_y_range"][0] : parent.ops["valid_y_range"][1],
+                        parent.ops["valid_x_range"][0] : parent.ops["valid_x_range"][1],
                     ] = mproj
                 except:
                     console.echo(message="Max projection not in combined view", level=LogLevel.WARNING)

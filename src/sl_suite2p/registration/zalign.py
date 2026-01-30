@@ -23,17 +23,17 @@ def register_stack(Z, ops):
         Z-stack
     ops: dict
     """
-    if "refImg" not in ops:
-        ops["refImg"] = Z.mean(axis=0)
-    ops["nframes"], ops["Ly"], ops["Lx"] = Z.shape
+    if "reference_image" not in ops:
+        ops["reference_image"] = Z.mean(axis=0)
+    ops["frame_count"], ops["frame_height"], ops["frame_width"] = Z.shape
 
     if ops["nonrigid"]:
         ops["yblock"], ops["xblock"], ops["nblocks"], ops["block_size"], ops["NRsm"] = nonrigid.make_blocks(
-            Ly=ops["Ly"], Lx=ops["Lx"], block_size=ops["block_size"]
+            Ly=ops["frame_height"], Lx=ops["frame_width"], block_size=ops["block_size"]
         )
 
-    Ly = ops["Ly"]
-    Lx = ops["Lx"]
+    Ly = ops["frame_height"]
+    Lx = ops["frame_width"]
 
     nbatch = ops["batch_size"]
     meanImg = np.zeros((Ly, Lx))  # mean of this stack
@@ -99,22 +99,22 @@ def register_stack(Z, ops):
     px = dxy / np.mean(dxy) / np.maximum(0, cXY)
     ops["badframes"] = px > ops["th_badframes"]
     ymin = np.maximum(0, np.ceil(np.amax(yoff[np.logical_not(ops["badframes"])])))
-    ymax = ops["Ly"] + np.minimum(0, np.floor(np.amin(yoff)))
+    ymax = ops["frame_height"] + np.minimum(0, np.floor(np.amin(yoff)))
     xmin = np.maximum(0, np.ceil(np.amax(xoff[np.logical_not(ops["badframes"])])))
-    xmax = ops["Lx"] + np.minimum(0, np.floor(np.amin(xoff)))
-    ops["yrange"] = [int(ymin), int(ymax)]
-    ops["xrange"] = [int(xmin), int(xmax)]
-    ops["corrXY"] = corrXY
+    xmax = ops["frame_width"] + np.minimum(0, np.floor(np.amin(xoff)))
+    ops["valid_y_range"] = [int(ymin), int(ymax)]
+    ops["valid_x_range"] = [int(xmin), int(xmax)]
+    ops["rigid_correlations"] = corrXY
 
-    ops["yoff"] = yoff
-    ops["xoff"] = xoff
+    ops["rigid_y_offsets"] = yoff
+    ops["rigid_x_offsets"] = xoff
 
     if ops["nonrigid"]:
-        ops["yoff1"] = yoff1
-        ops["xoff1"] = xoff1
-        ops["corrXY1"] = corrXY1
+        ops["nonrigid_y_offsets"] = yoff1
+        ops["nonrigid_x_offsets"] = xoff1
+        ops["nonrigid_correlations"] = corrXY1
 
-    ops["mean_image"] = meanImg / ops["nframes"]
+    ops["mean_image"] = meanImg / ops["frame_count"]
 
     return Zreg, ops
 
@@ -129,7 +129,7 @@ def compute_zpos(Zreg, ops, reg_file=None):
         size [nplanes x Ly x Lx], z-stack
 
     ops : dictionary
-        "reg_file" <- binary to register to z-stack, "smooth_sigma",
+        "registered_binary_path" <- binary to register to z-stack, "smooth_sigma",
         "Ly", "Lx", "batch_size"
 
     Returns:
@@ -137,13 +137,13 @@ def compute_zpos(Zreg, ops, reg_file=None):
     ops_orig
     zcorr
     """
-    if "reg_file" not in ops:
-        message = "Unable to compute z-position of frames. The 'reg_file' key is not present in the ops dictionary."
+    if "registered_binary_path" not in ops:
+        message = "Unable to compute z-position of frames. The 'registered_binary_path' key is not present in the ops dictionary."
         console.error(message=message, error=OSError)
 
     nbatch = ops["batch_size"]
-    Ly = ops["Ly"]
-    Lx = ops["Lx"]
+    Ly = ops["frame_height"]
+    Lx = ops["frame_width"]
     nbytesread = 2 * Ly * Lx * nbatch
 
     ops_orig = ops.copy()
@@ -152,7 +152,7 @@ def compute_zpos(Zreg, ops, reg_file=None):
     if Zreg.shape[1] > Ly or Zreg.shape[2] != Lx:
         Zreg = Zreg[:,]
 
-    reg_file = ops["reg_file"] if reg_file is None else reg_file
+    reg_file = ops["registered_binary_path"] if reg_file is None else reg_file
     nbytes = os.path.getsize(reg_file)
     nFrames = int(nbytes / (2 * Ly * Lx))
 
@@ -182,7 +182,7 @@ def compute_zpos(Zreg, ops, reg_file=None):
     while True:
         buff = reg_file.read(nbytesread)
         data = np.frombuffer(buff, dtype=np.int16, offset=0).copy()
-        if (data.size == 0) | (nfr >= ops["nframes"]):
+        if (data.size == 0) | (nfr >= ops["frame_count"]):
             break
         data = np.float32(np.reshape(data, (-1, Ly, Lx)))
         inds = np.arange(nfr, nfr + data.shape[0], 1, int)

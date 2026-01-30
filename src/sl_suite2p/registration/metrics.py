@@ -212,7 +212,7 @@ def pc_register(
 def get_pc_metrics(mov, ops, plane_number: int):
     """Computes registration metrics using top PCs of registered movie
 
-    movie saved as binary file ops["reg_file"]
+    movie saved as binary file ops["registered_binary_path"]
     metrics saved to ops["regPC"] and ops["X"]
     "regDX" is nPC x 3 where X[:,0] is rigid, X[:,1] is average nonrigid, X[:,2] is max nonrigid shifts
     "regPC" is average of top and bottom frames for each PC
@@ -221,7 +221,7 @@ def get_pc_metrics(mov, ops, plane_number: int):
     Parameters
     ----------
     ops : dict
-        "nframes", "Ly", "Lx", "reg_file" (if use_red=True, "reg_file_chan2")
+        "nframes", "Ly", "Lx", "registered_binary_path" (if use_red=True, "registered_binary_path_channel_2")
         (optional, "refImg", "block_size", "maxregshift_nr", "smooth_sigma", "maxregshift", "one_p_reg")
 
     Returns:
@@ -243,7 +243,7 @@ def get_pc_metrics(mov, ops, plane_number: int):
     )
     timer.reset()
     pclow, pchigh, sv, ops["tPC"] = pclowhigh(
-        mov, nlowhigh=np.minimum(300, int(ops["nframes"] / 2)), nPC=nPC, random_state=None
+        mov, nlowhigh=np.minimum(300, int(ops["frame_count"] / 2)), nPC=nPC, random_state=None
     )
     console.echo(
         message=f"Plane {plane_number} PCs: computed. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS
@@ -258,7 +258,7 @@ def get_pc_metrics(mov, ops, plane_number: int):
         pchigh,
         spatial_hp=ops["spatial_hp_reg"],
         pre_smooth=ops["pre_smooth"],
-        bidi_corrected=ops["bidi_corrected"],
+        bidi_corrected=ops["bidirectional_phase_corrected"],
         smooth_sigma=ops["smooth_sigma"] if "smooth_sigma" in ops else 1.15,
         smooth_sigma_time=ops["smooth_sigma_time"],
         block_size=ops["block_size"] if "block_size" in ops else [128, 128],
@@ -267,7 +267,7 @@ def get_pc_metrics(mov, ops, plane_number: int):
         reg_1p=ops["one_p_reg"] if "one_p_reg" in ops else False,
         snr_thresh=ops["snr_thresh"],
         is_nonrigid=ops["nonrigid"],
-        bidiphase_offset=ops["bidiphase"],
+        bidiphase_offset=ops["bidirectional_phase_offset"],
         spatial_taper=ops["spatial_taper"],
     )
     console.echo(
@@ -393,14 +393,14 @@ def optic_flow(mov, tmpl, nflows):
 def get_flow_metrics(ops):
     """Get farneback optical flow and some other stats from normcorre paper"""
     # done in batches for memory reasons
-    Ly = ops["Ly"]
-    Lx = ops["Lx"]
-    reg_file = open(ops["reg_file"], "rb")
+    Ly = ops["frame_height"]
+    Lx = ops["frame_width"]
+    reg_file = open(ops["registered_binary_path"], "rb")
     nbatch = ops["batch_size"]
     nbytesread = 2 * Ly * Lx * nbatch
 
-    Lyc = ops["yrange"][1] - ops["yrange"][0]
-    Lxc = ops["xrange"][1] - ops["xrange"][0]
+    Lyc = ops["valid_y_range"][1] - ops["valid_y_range"][0]
+    Lxc = ops["valid_x_range"][1] - ops["valid_x_range"][0]
     img_corr = np.zeros((Lyc, Lxc), np.float32)
     img_median = np.zeros((Lyc, Lxc), np.float32)
     correlations = np.zeros((0,), np.float32)
@@ -409,8 +409,8 @@ def get_flow_metrics(ops):
     smoothness = 0
     smoothness_corr = 0
 
-    nflows = np.minimum(ops["nframes"], int(np.floor(100 / (ops["nframes"] / nbatch))))
-    ncorrs = np.minimum(ops["nframes"], int(np.floor(1000 / (ops["nframes"] / nbatch))))
+    nflows = np.minimum(ops["frame_count"], int(np.floor(100 / (ops["frame_count"] / nbatch))))
+    ncorrs = np.minimum(ops["frame_count"], int(np.floor(1000 / (ops["frame_count"] / nbatch))))
 
     k = 0
     while True:
@@ -424,8 +424,8 @@ def get_flow_metrics(ops):
         mov = mov[
             np.ix_(
                 np.arange(0, mov.shape[0], 1, int),
-                np.arange(ops["yrange"][0], ops["yrange"][1], 1, int),
-                np.arange(ops["xrange"][0], ops["xrange"][1], 1, int),
+                np.arange(ops["valid_y_range"][0], ops["valid_y_range"][1], 1, int),
+                np.arange(ops["valid_x_range"][0], ops["valid_x_range"][1], 1, int),
             )
         ]
 

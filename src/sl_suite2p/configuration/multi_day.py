@@ -1,17 +1,18 @@
-"""This module stores the classes used to configure the multi-day (across-session) sl-suite2p pipeline. This pipeline
-extends the original suite2p code to support tracking the same objects (cells) across multiple days.
-"""
+"""Provides configuration classes for the multi-day (across-session) sl-suite2p pipeline."""
 
-from typing import Any
-from pathlib import Path
-from dataclasses import field, asdict, dataclass
+from __future__ import annotations
 
-import numpy as np
+from typing import TYPE_CHECKING
+from dataclasses import field, dataclass
+
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from ..version import version, python_version
-from .single_day import extract_params_for_section
+from .single_day import SignalExtraction, SpikeDeconvolution
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @dataclass()
@@ -48,7 +49,7 @@ class IO:
     """Specifies the list of sessions to register across days, as absolute paths to their root directories.
     Sessions are natural-sorted, and the first session after sorting becomes the 'main session' which stores
     the processing tracker file. Each directory must contain a 'combined' plane folder created by the single-day
-    suite2p pipeline. The 'combined' folder is created when the 'combined' SingleDayS2PConfiguration attribute is
+    suite2p pipeline. The 'combined' folder is created when the 'combined' SingleDayConfiguration attribute is
     set to True."""
 
     dataset_name: str = ""
@@ -69,17 +70,17 @@ class CellSelection:
     maximum_size: int = 1000
     """The maximum allowed cell (ROI) size, in pixels. Cells with a larger pixel size are excluded from processing."""
 
-    mesoscope_stripe_borders: list[int] = field(default_factory=list)
-    """Stores the x-coordinates of combined mesoscope image stripe (ROI) borders. For mesoscope images, 'stripes' are 
-    the individual imaging ROIs acquired in the 'multiple-ROI' mode. Keep this field set to an empty list to skip 
-    stripe border-filtering or when working with non-mesoscope images.
+    mroi_stripe_borders: list[int] = field(default_factory=list)
+    """Stores the x-coordinates of combined MROI image stripe borders. For MROI images, 'stripes' are the individual
+    imaging ROIs acquired in multi-ROI mode. Keep this field set to an empty list to skip stripe border-filtering or
+    when working with non-MROI images.
     """
 
     stripe_margin: int = 30
-    """The minimum required distance, in pixels, between the center-point (the median x-coordinate) of the cell (ROI) 
-    and the mesoscope stripe border. Cells that are too close to stripe borders are excluded from processing to avoid 
-    ambiguities associated with tracking cells that span multiple stripes. This parameter is only used if 
-    'mesoscope_stripe_borders' field is not set to an empty list."""
+    """The minimum required distance, in pixels, between the center-point (the median x-coordinate) of the cell (ROI)
+    and the MROI stripe border. Cells that are too close to stripe borders are excluded from processing to avoid
+    ambiguities associated with tracking cells that span multiple stripes. This parameter is only used if
+    'mroi_stripe_borders' field is not set to an empty list."""
 
 
 @dataclass()
@@ -154,60 +155,8 @@ class Clustering:
     (if any), for the purpose of tracking it across sessions."""
 
 
-@dataclass
-class SignalExtraction:
-    """Stores parameters for extracting fluorescence signals from cell ROIs and surrounding neuropil regions."""
-
-    extract_neuropil: bool = True
-    """Determines whether to extract the neuropil activity. If this is set to False, the neuropil fluorescence is 
-    assumed to be zero during further signal processing."""
-
-    allow_overlap: bool = False
-    """Determines whether to use the overlapping pixels (pixels shared by multiple ROIs) for signal extraction."""
-
-    minimum_neuropil_pixels: int = 350
-    """The minimum size of the computed neuropil region, in pixels. During neuropil computation, the algorithm expands 
-    the neuropil region outward from each cell until it accumulates at least this number of pixels."""
-
-    inner_neuropil_border_radius: int = 2
-    """The number of pixels to keep as the separation between the cell ROI and the surrounding neuropil region."""
-
-    lambda_percentile: int = 50
-    """The percentile of Lambda (cell classification confidence) within the tentative neuropil area to ignore when 
-    constructing the neuropil masks. A pixel with the lambda score higher than this value is labeled as belonging
-    to the cell region of an ROI and excluded from each neuropil mask."""
-
-
-@dataclass
-class SpikeDeconvolution:
-    """Stores parameters for deconvolving fluorescence signals to infer spike trains."""
-
-    extract_spikes: bool = True
-    """Determines whether to deconvolve the spike activity from the extracted fluorescence traces."""
-
-    neuropil_coefficient: float = 0.7
-    """The coefficient used to scale the neuropil fluorescence before it is subtracted from the ROI fluorescence. This 
-    is performed before computing and subtracting the baseline fluorescence from each ROI fluorescence trace."""
-
-    baseline: str = "maximin"
-    """Specifies the method for computing the baseline of the ROI fluorescence traces. This baseline is subtracted from
-    each ROI's fluorescence before deconvolving the spike activity for each ROI. 'maximin' uses a sliding window of 
-    size 'baseline_window' to compute the baseline. 'constant' computes the baseline for the entire trace. 
-    'constant_percentile' uses the specific low-end percentile of each trace's overall activity as the baseline for the
-    entire trace."""
-
-    baseline_window: float = 60.0
-    """The size of the sliding window, in seconds, over which to compute the 'maximin' baseline."""
-
-    baseline_sigma: float = 10.0
-    """The standard deviation, in seconds, of the Gaussian filter used to compute the baseline."""
-
-    baseline_percentile: float = 8.0
-    """The percentile of each trace's activity used as the 'constant_percentile' baseline."""
-
-
 @dataclass()
-class MultiDayS2PConfiguration(YamlConfig):
+class MultiDayConfiguration(YamlConfig):
     """Aggregates the configuration parameters for the multi-day suite2p pipeline.
 
     Notes:
@@ -233,90 +182,23 @@ class MultiDayS2PConfiguration(YamlConfig):
     spike_deconvolution: SpikeDeconvolution = field(default_factory=SpikeDeconvolution)
     """Stores parameters for deconvolving fluorescence signals to infer spike trains."""
 
-    def to_npy(self, output_directory: Path) -> None:
-        """Saves the managed configuration data as an 'ops.npy' file under the target directory.
-
-        Notes:
-            If the target output directory does not exist when this method is called, creates the directory before
-            saving the file.
-
-        Args:
-            output_directory: The path to the directory where to save the 'ops.npy' file.
-        """
-        ensure_directory_exists(output_directory)  # Creates the directory, if necessary
-        file_path = output_directory.joinpath("ops.npy")  # Computes the output path
-        # Dumps the configuration data to the 'ops.npy' file.
-        np.save(file_path, self.to_ops(), allow_pickle=True)  # type: ignore
-
-    def to_config(self, file_path: Path) -> None:
-        """Saves the managed configuration data as a .yaml file under the target directory.
-
-        Notes:
-            If the target output directory does not exist when this method is called, creates the directory before
-            saving the file.
+    def save(self, file_path: Path) -> None:
+        """Saves the configuration to a YAML file.
 
         Args:
             file_path: The path to the .yaml file where to save the configuration data.
         """
-        ensure_directory_exists(file_path)  # Creates the file's parent directory, if necessary
-        self.to_yaml(file_path=file_path)  # Dumps the data to a 'yaml' file.
-
-    def to_ops(self) -> dict[str, Any]:
-        """Returns the instance as a dictionary."""
-        # Creates an empty dictionary to store all keys and values
-        combined_ops = {}
-
-        # Iterates through all dataclass fields
-        # noinspection PyTypeChecker
-        for section_name, section in asdict(self).items():
-            # Adds all keys and values from each section to the combined dictionary
-            if isinstance(section, dict):
-                combined_ops.update(section)
-
-        return combined_ops
+        ensure_directory_exists(file_path)
+        self.to_yaml(file_path=file_path)
 
     @classmethod
-    def from_ops(cls, ops_dict: dict[str, Any]) -> MultiDayS2PConfiguration:
-        """Creates a MultiDayS2PConfiguration instance from the target 'ops'' dictionary.
-
-        Notes:
-            This method replaces any missing parameters with default initialization values and ignores extra parameters
-            not recognized by the configuration schema.
+    def load(cls, file_path: Path) -> MultiDayConfiguration:
+        """Loads configuration from a YAML file.
 
         Args:
-            ops_dict: The dictionary that contains the multi-day suite2p processing parameters.
+            file_path: The path to the .yaml configuration file.
 
         Returns:
-            A MultiDayS2PConfiguration instance.
+            A MultiDayConfiguration instance populated with the loaded data.
         """
-        # Extracts parameters for each configuration section using the imported helper function
-        main_params = extract_params_for_section(Main, ops_dict)
-        io_params = extract_params_for_section(IO, ops_dict)
-        cell_selection_params = extract_params_for_section(CellSelection, ops_dict)
-        registration_params = extract_params_for_section(Registration, ops_dict)
-        clustering_params = extract_params_for_section(Clustering, ops_dict)
-
-        # Creates the configuration instance using the extracted parameters
-        # Missing parameters will automatically use the default values defined in each dataclass
-        return cls(
-            main=Main(**main_params),
-            io=IO(**io_params),
-            cell_selection=CellSelection(**cell_selection_params),
-            registration=Registration(**registration_params),
-            clustering=Clustering(**clustering_params),
-        )
-
-
-def generate_default_multiday_ops(as_dict: bool = True) -> dict[str, Any] | MultiDayS2PConfiguration:
-    """Instantiates and returns an 'ops' dictionary or configuration class that contains default multi-day
-    pipeline parameters.
-
-    Args:
-        as_dict: If True, the function converts the class to dictionary format. Otherwise, returns the class as the
-            'MultiDayS2PConfiguration' dataclass instance.
-    """
-    default_configuration = MultiDayS2PConfiguration()  # Instantiates the default configuration instance.
-
-    if not as_dict:
-        return default_configuration
-    return default_configuration.to_ops()  # Converts the configuration instance to dictionary format.
+        return cls.from_yaml(file_path=file_path)

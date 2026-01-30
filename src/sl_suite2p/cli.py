@@ -13,10 +13,8 @@ from ataraxis_base_utilities import LogLevel, console
 from .gui import run
 from .pipeline import process_multi_day, process_single_day
 from .configuration import (
-    MultiDayS2PConfiguration,
-    SingleDayS2PConfiguration,
-    generate_default_ops,
-    generate_default_multiday_ops,
+    MultiDayConfiguration,
+    SingleDayConfiguration,
 )
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
@@ -98,8 +96,8 @@ def ss2p_sd_config(ctx: Any) -> None:
     file_path = Path(ctx.obj["file_path"])
 
     # Generates the precursor configuration file in the specified output directory.
-    precursor: SingleDayS2PConfiguration = generate_default_ops(as_dict=False)
-    precursor.to_config(file_path=file_path)
+    config = SingleDayConfiguration()
+    config.save(file_path=file_path)
 
     message = (
         f"Default single-day pipeline configuration file: generated in the {file_path.parent} directory. Modify "
@@ -125,8 +123,8 @@ def ss2p_md_config(ctx: Any) -> None:
     file_path = Path(ctx.obj["file_path"])
 
     # Generates the precursor configuration file in the specified output directory.
-    precursor: MultiDayS2PConfiguration = generate_default_multiday_ops(as_dict=False)
-    precursor.to_config(file_path=file_path)
+    config = MultiDayConfiguration()
+    config.save(file_path=file_path)
 
     message = (
         f"Default multi-day pipeline configuration file: generated in the {file_path.parent} directory. Modify "
@@ -435,9 +433,6 @@ def _parse_db(data_string: str) -> dict[str, Any]:
             "e.g.: '{'key1': value1, 'key2': 'value2'}'"
         )
         console.error(message=message, error=TypeError)
-
-        # Fallback to appease mypy, should not be reachable.
-        raise TypeError(message)
     else:
         # Otherwise, returns the parsed dictionary
         return parsed

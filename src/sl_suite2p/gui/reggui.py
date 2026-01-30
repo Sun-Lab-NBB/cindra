@@ -29,7 +29,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from . import masks, utils
 from .. import registration
-from ..io.save import compute_dydx
+from ..io.save import compute_plane_offsets
 
 
 class BinaryPlayer(QMainWindow):
@@ -325,11 +325,11 @@ class BinaryPlayer(QMainWindow):
         self.sroi = np.zeros((self.LY, self.LX), np.uint8)
 
         for n in np.nonzero(self.iscell)[0]:
-            ypix = self.stat[n]["ypix"].flatten()
-            xpix = self.stat[n]["xpix"].flatten()
+            ypix = self.stat[n]["y_pixels"].flatten()
+            xpix = self.stat[n]["x_pixels"].flatten()
             if not self.ops[0]["allow_overlap"]:
-                ypix = ypix[~self.stat[n]["overlap"]]
-                xpix = xpix[~self.stat[n]["overlap"]]
+                ypix = ypix[~self.stat[n]["overlap_mask"]]
+                xpix = xpix[~self.stat[n]["overlap_mask"]]
             yext, xext = utils.boundary(ypix, xpix)
             if len(yext) > 0:
                 goodi = (yext >= 0) & (xext >= 0) & (yext < self.LY) & (xext < self.LX)
@@ -388,17 +388,17 @@ class BinaryPlayer(QMainWindow):
             self.wred = False
             self.wraw_wred = False
             # check that all binaries still exist
-            dy, dx = compute_dydx(ops1)
+            dy, dx = compute_plane_offsets(ops1)
             for ipl, ops in enumerate(ops1):
-                if os.path.isfile(ops["reg_file"]):
-                    reg_file = ops["reg_file"]
+                if os.path.isfile(ops["registered_binary_path"]):
+                    reg_file = ops["registered_binary_path"]
                 else:
                     reg_file = os.path.abspath(os.path.join(os.path.dirname(filename), "plane%d" % ipl, "data.bin"))
                 console.echo(message=f"Registration file: {reg_file}, exists: {os.path.isfile(reg_file)}")
                 self.reg_loc.append(reg_file)
                 self.reg_file.append(open(self.reg_loc[-1], "rb"))
-                self.Ly.append(ops["Ly"])
-                self.Lx.append(ops["Lx"])
+                self.Ly.append(ops["frame_height"])
+                self.Lx.append(ops["frame_width"])
                 self.dy.append(dy[ipl])
                 self.dx.append(dx[ipl])
                 self.LY = np.maximum(self.LY, self.Ly[-1] + self.dy[-1])
@@ -430,33 +430,30 @@ class BinaryPlayer(QMainWindow):
             elif ext == ".json":
                 with open(filename) as f:
                     ops = json.load(f)
-                ops["Ly"] = ops["Lys"] if isinstance(ops["Lys"], int) else ops["Lys"][0]
-                ops["Lx"] = ops["Lxs"] if isinstance(ops["Lxs"], int) else ops["Lxs"][0]
+                ops["frame_height"] = ops["Lys"] if isinstance(ops["Lys"], int) else ops["Lys"][0]
+                ops["frame_width"] = ops["Lxs"] if isinstance(ops["Lxs"], int) else ops["Lxs"][0]
                 dirname = os.path.join(os.path.dirname(filename), "suite2p/plane0/")
-                ops["reg_file"] = os.path.join(dirname, "data.bin")
-                nbytesread = np.int64(2 * ops["Ly"] * ops["Lx"])
-                ops["nframes"] = os.path.getsize(ops["reg_file"]) // nbytesread
-            self.LY = ops["Ly"]
-            self.LX = ops["Lx"]
-            self.Ly = [ops["Ly"]]
-            self.Lx = [ops["Lx"]]
+                ops["registered_binary_path"] = os.path.join(dirname, "data.bin")
+                nbytesread = np.int64(2 * ops["frame_height"] * ops["frame_width"])
+                ops["frame_count"] = os.path.getsize(ops["registered_binary_path"]) // nbytesread
+            self.LY = ops["frame_height"]
+            self.LX = ops["frame_width"]
+            self.Ly = [ops["frame_height"]]
+            self.Lx = [ops["frame_width"]]
             self.dx = [0]
             self.dy = [0]
 
-            if os.path.isfile(ops["reg_file"]):
-                self.reg_loc = [ops["reg_file"]]
+            if os.path.isfile(ops["registered_binary_path"]):
+                self.reg_loc = [ops["registered_binary_path"]]
             else:
                 self.reg_loc = [os.path.abspath(os.path.join(dirname, "data.bin"))]
             self.reg_file = [open(self.reg_loc[-1], "rb")]
             self.wraw = False
             self.wred = False
             self.wraw_wred = False
-            if "reg_file_raw" in ops or "raw_file" in ops:
-                if self.reg_loc == ops["reg_file"]:
-                    if "reg_file_raw" in ops:
-                        self.reg_loc_raw = ops["reg_file_raw"]
-                    else:
-                        self.reg_loc_raw = ops["raw_file"]
+            if "raw_binary_path" in ops:
+                if self.reg_loc == ops["registered_binary_path"]:
+                    self.reg_loc_raw = ops["raw_binary_path"]
                 else:
                     self.reg_loc_raw = os.path.abspath(os.path.join(os.path.dirname(filename), "data_raw.bin"))
                 try:
@@ -464,19 +461,16 @@ class BinaryPlayer(QMainWindow):
                     self.wraw = True
                 except:
                     self.wraw = False
-            if "reg_file_chan2" in ops:
-                if self.reg_loc == ops["reg_file"]:
-                    self.reg_loc_red = ops["reg_file_chan2"]
+            if "registered_binary_path_channel_2" in ops:
+                if self.reg_loc == ops["registered_binary_path"]:
+                    self.reg_loc_red = ops["registered_binary_path_channel_2"]
                 else:
                     self.reg_loc_red = os.path.abspath(os.path.join(os.path.dirname(filename), "data_chan2.bin"))
                 self.reg_file_chan2 = open(self.reg_loc_red, "rb")
                 self.wred = True
-            if "reg_file_raw_chan2" in ops or "raw_file_chan2" in ops:
-                if self.reg_loc == ops["reg_file"]:
-                    if "reg_file_raw_chan2" in ops:
-                        self.reg_loc_raw_chan2 = ops["reg_file_raw_chan2"]
-                    else:
-                        self.reg_loc_raw_chan2 = ops["raw_file_chan2"]
+            if "raw_binary_path_channel_2" in ops:
+                if self.reg_loc == ops["registered_binary_path"]:
+                    self.reg_loc_raw_chan2 = ops["raw_binary_path_channel_2"]
                 else:
                     self.reg_loc_raw_chan2 = os.path.abspath(
                         os.path.join(os.path.dirname(filename), "data_raw_chan2.bin")
@@ -505,7 +499,10 @@ class BinaryPlayer(QMainWindow):
             console.echo(message=f"Fluorescence data loaded: {self.Floaded}")
             self.filename = filename
         except Exception as e:
-            console.echo(message="ERROR: ops.npy incorrect / missing ops['reg_file'] and others", level=LogLevel.ERROR)
+            console.echo(
+                message="ERROR: ops.npy incorrect / missing ops['registered_binary_path'] and others",
+                level=LogLevel.ERROR,
+            )
             console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
             try:
                 for n in range(len(self.reg_loc)):
@@ -526,7 +523,7 @@ class BinaryPlayer(QMainWindow):
         self.ROIedit.setText("0")
         # get scaling from 100 random frames
         ops = self.ops[-1]
-        frames = subsample_frames(ops, np.minimum(ops["nframes"] - 1, 100), self.reg_loc[-1])
+        frames = subsample_frames(ops, np.minimum(ops["frame_count"] - 1, 100), self.reg_loc[-1])
         self.srange = frames.mean() + frames.std() * np.array([-2, 5])
 
         self.movieLabel.setText(self.reg_loc[-1])
@@ -535,17 +532,17 @@ class BinaryPlayer(QMainWindow):
             self.nbytesread.append(2 * self.Ly[n] * self.Lx[n])
 
         # aspect ratio
-        if "aspect" in ops:
-            self.xyrat = ops["aspect"]
-        elif "diameter" in ops and (type(ops["diameter"]) is not int) and (len(ops["diameter"]) > 1):
-            self.xyrat = ops["diameter"][0] / ops["diameter"][1]
+        if "aspect_ratio" in ops:
+            self.xyrat = ops["aspect_ratio"]
+        elif "cell_diameter" in ops and (type(ops["cell_diameter"]) is not int) and (len(ops["cell_diameter"]) > 1):
+            self.xyrat = ops["cell_diameter"][0] / ops["cell_diameter"][1]
         else:
             self.xyrat = 1.0
         self.vmain.setAspectLocked(lock=True, ratio=self.xyrat)
         self.vside.setAspectLocked(lock=True, ratio=self.xyrat)
 
-        self.nframes = ops["nframes"]
-        self.time_step = 1.0 / ops["fs"] * 1000 / 5  # 5x real-time
+        self.nframes = ops["frame_count"]
+        self.time_step = 1.0 / ops["sampling_rate"] * 1000 / 5  # 5x real-time
         self.frameDelta = int(np.maximum(5, self.nframes / 200))
         self.frameSlider.setSingleStep(self.frameDelta)
         self.currentMovieDirectory = QtCore.QFileInfo(self.filename).path()
@@ -553,12 +550,12 @@ class BinaryPlayer(QMainWindow):
             self.updateFrameSlider()
             self.updateButtons()
         # plot ops X-Y offsets
-        if "yoff" in ops:
-            self.yoff = ops["yoff"]
-            self.xoff = ops["xoff"]
+        if "rigid_y_offsets" in ops:
+            self.yoff = ops["rigid_y_offsets"]
+            self.xoff = ops["rigid_x_offsets"]
         else:
-            self.yoff = np.zeros((ops["nframes"],))
-            self.xoff = np.zeros((ops["nframes"],))
+            self.yoff = np.zeros((ops["frame_count"],))
+            self.xoff = np.zeros((ops["frame_count"],))
         self.p1.plot(self.yoff, pen="g")
         self.p1.plot(self.xoff, pen="y")
         self.p1.setRange(
@@ -832,9 +829,9 @@ class BinaryPlayer(QMainWindow):
 
 
 def subsample_frames(ops, nsamps, reg_loc):
-    nFrames = ops["nframes"]
-    Ly = ops["Ly"]
-    Lx = ops["Lx"]
+    nFrames = ops["frame_count"]
+    Ly = ops["frame_height"]
+    Lx = ops["frame_width"]
     frames = np.zeros((nsamps, Ly, Lx), dtype="int16")
     nbytesread = 2 * Ly * Lx
     istart = np.linspace(0, nFrames, 1 + nsamps).astype("int64")
