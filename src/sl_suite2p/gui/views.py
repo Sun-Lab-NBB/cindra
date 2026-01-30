@@ -89,7 +89,8 @@ def init_views(parent):
                 vcorr = (vcorr - mimg1) / (mimg99 - mimg1)
                 mimg = mimg1 * np.ones((parent.Ly, parent.Lx), np.float32)
                 mimg[
-                    parent.ops["valid_y_range"][0] : parent.ops["valid_y_range"][1], parent.ops["valid_x_range"][0] : parent.ops["valid_x_range"][1]
+                    parent.ops["valid_y_range"][0] : parent.ops["valid_y_range"][1],
+                    parent.ops["valid_x_range"][0] : parent.ops["valid_x_range"][1],
                 ] = vcorr
                 mimg = np.maximum(0, np.minimum(1, mimg))
             else:

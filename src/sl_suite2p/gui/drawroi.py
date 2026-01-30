@@ -32,7 +32,13 @@ def masks_and_traces(ops, stat_manual, stat_orig):
     for n in range(len(stat_orig)):
         stat_all.append(stat_orig[n])
 
-    stat_all = roi_stats(stat_all, ops["frame_height"], ops["frame_width"], aspect=ops.get("aspect_ratio", None), diameter=ops["cell_diameter"])
+    stat_all = roi_stats(
+        stat_all,
+        ops["frame_height"],
+        ops["frame_width"],
+        aspect=ops.get("aspect_ratio", None),
+        diameter=ops["cell_diameter"],
+    )
     cell_masks, manual_neuropil_masks = masks.create_masks(
         roi_statistics=stat_all, height=ops["frame_height"], width=ops["frame_width"], neuropil=True, ops=ops
     )
@@ -62,14 +68,19 @@ def masks_and_traces(ops, stat_manual, stat_orig):
     for n in range(F.shape[0]):
         manual_roi_stats[n]["skewness"] = sk[n]
         manual_roi_stats[n]["standard_deviation"] = sd[n]
-        manual_roi_stats[n]["centroid"] = [np.mean(manual_roi_stats[n]["y_pixels"]), np.mean(manual_roi_stats[n]["x_pixels"])]
+        manual_roi_stats[n]["centroid"] = [
+            np.mean(manual_roi_stats[n]["y_pixels"]),
+            np.mean(manual_roi_stats[n]["x_pixels"]),
+        ]
 
     dF = preprocess(
         roi_fluorescence=F,
         neuropil_fluorescence=Fneu,
         ops=ops,
     )
-    spks = oasis(cell_fluorescence=dF, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["sampling_rate"])
+    spks = oasis(
+        cell_fluorescence=dF, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["sampling_rate"]
+    )
 
     return F, Fneu, F_chan2, Fneu_chan2, spks, ops, manual_roi_stats
 
@@ -402,7 +413,9 @@ class ROIDraw(QMainWindow):
             ypix = y[ellipse].flatten()
             xpix = x[ellipse].flatten()
             lam = np.ones(ypix.shape)
-            stat0.append({"y_pixels": ypix, "x_pixels": xpix, "pixel_weights": lam, "pixel_count": ypix.size, "centroid": med})
+            stat0.append(
+                {"y_pixels": ypix, "x_pixels": xpix, "pixel_weights": lam, "pixel_count": ypix.size, "centroid": med}
+            )
             self.tlabel.append(pg.TextItem(str(n), self.ROIs[n].color, anchor=(0, 0)))
             self.tlabel[-1].setPos(xpix.mean(), ypix.mean())
             self.p0.addItem(self.tlabel[-1])
@@ -410,7 +423,9 @@ class ROIDraw(QMainWindow):
             self.p0.addItem(self.scatter[-1])
         if not os.path.isfile(self.parent.ops["registered_binary_path"]):
             self.parent.ops["registered_binary_path"] = os.path.join(self.parent.basename, "data.bin")
-        if "registered_binary_path_channel_2" in self.parent.ops and not os.path.isfile(self.parent.ops["registered_binary_path_channel_2"]):
+        if "registered_binary_path_channel_2" in self.parent.ops and not os.path.isfile(
+            self.parent.ops["registered_binary_path_channel_2"]
+        ):
             self.parent.ops["registered_binary_path_channel_2"] = os.path.join(self.parent.basename, "data_chan2.bin")
 
         F, Fneu, F_chan2, Fneu_chan2, spks, ops, stat = masks_and_traces(self.parent.ops, stat0, self.parent.stat)

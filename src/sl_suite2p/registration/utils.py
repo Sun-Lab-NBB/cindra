@@ -242,7 +242,7 @@ def complex_fft2(img: np.ndarray) -> np.ndarray:
     img: Ly x Lx
         The image to process.
 
-    Returns
+    Returns:
     -------
     np.ndarray
         The complex conjugate of the FFT-transformed and padded image.

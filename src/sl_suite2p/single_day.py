@@ -224,7 +224,9 @@ def _compute_registration_metrics(ops: dict[str, Any], plane_number: int, frames
         # Bins the processed movie according to the binning criteria calculated above
         indices = np.linspace(0, n_frames - 1, n_samples).astype("int")
         movie = frames[indices]
-        movie = movie[:, ops["valid_y_range"][0] : ops["valid_y_range"][-1], ops["valid_x_range"][0] : ops["valid_x_range"][-1]]
+        movie = movie[
+            :, ops["valid_y_range"][0] : ops["valid_y_range"][-1], ops["valid_x_range"][0] : ops["valid_x_range"][-1]
+        ]
 
         # Runs the registration evaluation pipeline.
         ops = registration.get_pc_metrics(movie, ops, plane_number=plane_number)
@@ -814,7 +816,9 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
                 message=f"Plane {plane_index} registration: disabled. The plane is already registered.",
                 level=LogLevel.INFO,
             )
-            console.echo(message=f"Plane {plane_index} binary path: {ops['registered_binary_path']}.", level=LogLevel.INFO)
+            console.echo(
+                message=f"Plane {plane_index} binary path: {ops['registered_binary_path']}.", level=LogLevel.INFO
+            )
             run_registration = False
 
     # If the user specifically disables plane registration, skips plane registration
@@ -828,7 +832,9 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
         run_registration = False
 
     # Determines whether suite2p is configured to preserve the unregistered (raw) binary files.
-    raw_file_available = ops.get("keep_movie_raw") and "raw_binary_path" in ops and Path(ops["raw_binary_path"]).is_file()
+    raw_file_available = (
+        ops.get("keep_movie_raw") and "raw_binary_path" in ops and Path(ops["raw_binary_path"]).is_file()
+    )
 
     # Resolves the paths to registered and, if available, raw binary files for channel 1
     registered_file = ops["registered_binary_path"]
@@ -838,7 +844,9 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
     # when processing data with two functional channels.
     if ops["nchannels"] > 1:
         registered_file_channel_2 = ops["registered_binary_path_channel_2"]
-        raw_file_channel_2 = ops.get("raw_binary_path_channel_2", 0) if raw_file_available else registered_file_channel_2
+        raw_file_channel_2 = (
+            ops.get("raw_binary_path_channel_2", 0) if raw_file_available else registered_file_channel_2
+        )
     else:
         registered_file_channel_2 = registered_file
         raw_file_channel_2 = registered_file
