@@ -13,7 +13,7 @@ Complete parameter reference for the multi-day (cross-session) sl-suite2p cell t
 
 ## Configuration Overview
 
-The multi-day pipeline uses `MultiDayS2PConfiguration`, a dataclass with 7 nested sections. This pipeline tracks cells
+The multi-day pipeline uses `MultiDayConfiguration`, a dataclass with 7 nested sections. This pipeline tracks cells
 across multiple recording sessions and extracts consistent fluorescence traces.
 
 ### Prerequisites

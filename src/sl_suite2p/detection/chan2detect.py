@@ -10,7 +10,7 @@ identify cells with channel 2 brightness (aka red cells)
 
 main function is detect
 takes from ops: "mean_image", "mean_image_channel_2", "Ly", "Lx"
-takes from stat: "ypix", "xpix", "lam"
+takes from stat: "y_pixels", "x_pixels", "pixel_weights"
 """
 
 
@@ -51,9 +51,9 @@ def intensity_ratio(ops, stats):
     """Compute pixels in cell and in area around cell (including overlaps)
     (exclude pixels from other cells)
     """
-    Ly, Lx = ops["Ly"], ops["Lx"]
+    Ly, Lx = ops["frame_height"], ops["frame_width"]
     cell_masks0, neuropil_ipix = masks.create_masks(
-        roi_statistics=stats, height=ops["Ly"], width=ops["Lx"], neuropil=True, ops=ops
+        roi_statistics=stats, height=ops["frame_height"], width=ops["frame_width"], neuropil=True, ops=ops
     )
     cell_masks = np.zeros((len(stats), Ly * Lx), np.float32)
     neuropil_masks = np.zeros((len(stats), Ly * Lx), np.float32)
@@ -87,7 +87,7 @@ def detect(ops, stats):
 
     # Subtracts bleedthrough of green into red channel using non-rigid regression with nblks x nblks pieces.
     nblks = 3
-    Ly, Lx = ops["Ly"], ops["Lx"]
+    Ly, Lx = ops["frame_height"], ops["frame_width"]
     ops["meanImg_chan2_corrected"] = correct_bleedthrough(Ly, Lx, nblks, mimg, mimg2)
 
     redstats = intensity_ratio(ops, stats)

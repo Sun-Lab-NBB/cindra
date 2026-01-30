@@ -21,8 +21,8 @@ from .multiday import show_images_with_masks
 from .pipeline import MultiDayJobNames, SingleDayJobNames, get_session_root, process_multi_day, process_single_day
 from .detection import ROI
 from .multi_day import run_s2p_multiday, resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
-from .single_day import run_s2p, resolve_ops, process_plane, combine_planes, resolve_binaries
-from .configuration import generate_default_ops, generate_default_multiday_ops
+from .single_day import run_s2p, process_plane, combine_planes, resolve_processing_contexts
+from .configuration import CombinedData, RuntimeContext, MultiDayConfiguration, SingleDayConfiguration
 
 # Ensures console output is enabled whenever the suite2p library is imported. In sl-suite2p, the 'Console' class is
 # used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal
@@ -31,21 +31,22 @@ if not console.enabled:
     console.enable()
 
 __all__ = [
-    "MultiDayJobNames",
     "ROI",
+    "CombinedData",
+    "MultiDayConfiguration",
+    "MultiDayJobNames",
+    "RuntimeContext",
+    "SingleDayConfiguration",
     "SingleDayJobNames",
     "combine_planes",
     "discover_multiday_cells",
     "extract_multiday_fluorescence",
-    "generate_default_multiday_ops",
-    "generate_default_ops",
     "get_session_root",
     "process_multi_day",
     "process_plane",
     "process_single_day",
-    "resolve_binaries",
     "resolve_multiday_ops",
-    "resolve_ops",
+    "resolve_processing_contexts",
     "run_s2p",
     "run_s2p_multiday",
     "show_images_with_masks",

@@ -10,7 +10,7 @@ from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console
 
 from .. import extraction
-from ..io import compute_dydx
+from ..io import compute_plane_offsets
 from ..io.binary import BinaryFileCombined
 from ..detection.stats import roi_stats
 
@@ -50,9 +50,9 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
         np.load(plane_folder.joinpath("ops.npy"), allow_pickle=True).item() for plane_folder in plane_folders
     ]
     registered_data_path = [plane_folder.joinpath("data.bin") for plane_folder in plane_folders]
-    plane_y_coordinate, plane_x_coordinate = compute_dydx(plane_ops)
-    plane_heights = np.array([ops["Ly"] for ops in plane_ops])
-    plane_widths = np.array([ops["Lx"] for ops in plane_ops])
+    plane_y_coordinate, plane_x_coordinate = compute_plane_offsets(plane_contexts)
+    plane_heights = np.array([ops["frame_height"] for ops in plane_ops])
+    plane_widths = np.array([ops["frame_width"] for ops in plane_ops])
     movie_height = int(np.amax(plane_y_coordinate + plane_heights))
     movie_width = int(np.amax(plane_x_coordinate + plane_widths))
 
@@ -69,11 +69,13 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     console.echo(f"Creating session {session_id} multi-day cell masks...")
     timer.reset()
     # Re-computes the ROI stats for all multi-day tracked cells
-    roi_statistics = roi_stats(multiday_cell_masks, ops["Ly"], ops["Lx"], ops["aspect"], ops["diameter"])
+    roi_statistics = roi_stats(
+        multiday_cell_masks, ops["frame_height"], ops["frame_width"], ops["aspect_ratio"], ops["cell_diameter"]
+    )
     cell_masks, neuropil_masks = extraction.masks.create_masks(
         roi_statistics=roi_statistics,
-        height=ops["Ly"],
-        width=ops["Lx"],
+        height=ops["frame_height"],
+        width=ops["frame_width"],
         neuropil=ops.get("extract_neuropil", True),
         ops=ops,
     )
@@ -114,7 +116,10 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
 
         # Extracts the cell fluorescence spikes using the OASIS algorithm.
         spikes = extraction.oasis(
-            cell_fluorescence=df, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["fs"]
+            cell_fluorescence=df,
+            batch_size=ops["batch_size"],
+            time_constant=ops["tau"],
+            sampling_rate=ops["sampling_rate"],
         )
         ops["timing"]["multiday_deconvolution"] = timer.elapsed
 

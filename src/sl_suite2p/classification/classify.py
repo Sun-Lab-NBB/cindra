@@ -23,7 +23,7 @@ def classify(
     Parameters
     ----------------
 
-    stat: dictionary "ypix", "xpix", "lam"
+    stat: dictionary "y_pixels", "x_pixels", "pixel_weights"
         Dictionary containing statistics for ROIs
 
     classfile: string (optional, default None)

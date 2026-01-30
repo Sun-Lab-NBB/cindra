@@ -145,7 +145,7 @@ def preprocess(
     baseline_method: str = ops["baseline"]
     baseline_filter_window: float = ops["baseline_window"]
     baseline_filter_sigma: float = ops["baseline_sigma"]
-    sampling_rate: float = ops["fs"]
+    sampling_rate: float = ops["sampling_rate"]
     baseline_percentile: float = ops["baseline_percentile"]
     neuropil_coefficient: float = ops["neuropil_coefficient"]
 
@@ -173,9 +173,6 @@ def preprocess(
             f"'constant_percentile'."
         )
         console.error(message=message, error=ValueError)
-
-        # Fallback to appease mypy
-        raise ValueError(message)  # pragma: no cover
 
     # Subtracts the computed baseline fluorescence from the neuropil-subtracted trace.
     return subtracted - baseline

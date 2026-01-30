@@ -31,17 +31,17 @@ def _create_roi_masks(
     for roi_data in roi_statistics:
         # Extracts the ROI pixels from the data dictionary. Depending on the 'allow_overlap' flag, selects all pixels or
         # excludes any overlapping pixels from the selection.
-        pixel_mask = slice(None) if allow_overlap else ~roi_data["overlap"]
+        pixel_mask = slice(None) if allow_overlap else ~roi_data["overlap_mask"]
 
         # Convert 2D pixel coordinates (y, x) to 1D flattened indices, applies the pixel selection mask, and extracts
         # the lambda weights for the processed pixels. The lambda weights track the likelihood that the pixel belongs
         # to a cell object.
         # noinspection PyTypeChecker
         cell_mask_indices: NDArray[np.int64] = np.ravel_multi_index(
-            multi_index=(roi_data["ypix"], roi_data["xpix"]), dims=(height, width)
+            multi_index=(roi_data["y_pixels"], roi_data["x_pixels"]), dims=(height, width)
         )
         cell_mask_indices = cell_mask_indices[pixel_mask]
-        lambda_weights = roi_data["lam"][pixel_mask]
+        lambda_weights = roi_data["pixel_weights"][pixel_mask]
 
         # Normalizes the lambda weights sum to 1.0, creating a probability distribution of each pixel belonging to
         # a cell ROI.
@@ -86,8 +86,8 @@ def _create_neuropil_masks(
     # Process each ROI to create its neuropil mask
     for roi_data in roi_statistics:
         # Extracts the y-coordinates and x-coordinates of the current ROI's pixels.
-        y_pixels = np.array(roi_data["ypix"], np.uint32)
-        x_pixels = np.array(roi_data["xpix"], np.uint32)
+        y_pixels = np.array(roi_data["y_pixels"], np.uint32)
+        x_pixels = np.array(roi_data["x_pixels"], np.uint32)
 
         # Pre-creates the boolean array to store the neuropil mask. Uses the dimensions of the imaging area to define
         # the array
@@ -165,10 +165,10 @@ def _create_roi_pixels(
     # Loops over each ROI and extracts the data required for processing.
     for roi_index, data in enumerate(roi_statistics):
         cell_radii[roi_index] = data["radius"]
-        y_pixels = data["ypix"]
-        x_pixels = data["xpix"]
+        y_pixels = data["y_pixels"]
+        x_pixels = data["x_pixels"]
         # Lambda weight. Measures the likelihood of the pixel belonging to a cell ROI.
-        pixel_cell_likelihood = data["lam"]
+        pixel_cell_likelihood = data["pixel_weights"]
 
         # Ensures that the cell likelihood is measured using positive numbers only to make the percentile filter below.
         cell_likelihood_map[y_pixels, x_pixels] = np.maximum(

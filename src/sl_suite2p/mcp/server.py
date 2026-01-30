@@ -25,10 +25,8 @@ from ..pipeline import (
     process_single_day,
 )
 from ..configuration import (
-    MultiDayS2PConfiguration,
-    SingleDayS2PConfiguration,
-    generate_default_ops,
-    generate_default_multiday_ops,
+    MultiDayConfiguration,
+    SingleDayConfiguration,
 )
 
 # Initializes the MCP server with JSON response mode for structured output.
@@ -542,7 +540,7 @@ def _run_discover_job(config_path: Path, session_paths: list[Path], workers: int
         )
 
         # Loads ops to get session IDs.
-        config = MultiDayS2PConfiguration.from_yaml(file_path=config_path)
+        config = MultiDayConfiguration.from_yaml(file_path=config_path)
         main_session = sorted(session_paths, key=lambda p: p.name)[0]
         dataset_name = config.io.dataset_name
         ops_path = main_session / "multiday" / dataset_name / "ops.npy"
@@ -677,7 +675,7 @@ def _multi_day_batch_manager() -> None:
     # Builds animal key to config/sessions mapping.
     animal_configs: dict[str, tuple[Path, list[Path]]] = {}
     for config_path, session_paths in _multi_day_batch_state.animals:
-        config = MultiDayS2PConfiguration.from_yaml(file_path=config_path)
+        config = MultiDayConfiguration.from_yaml(file_path=config_path)
         animal_key = config.io.dataset_name
         animal_configs[animal_key] = (config_path, session_paths)
 
@@ -767,11 +765,11 @@ def generate_config_file(output_path: str, pipeline_type: Literal["single-day", 
         output = output.with_suffix(".yaml")
 
     if pipeline_type == "single-day":
-        config: SingleDayS2PConfiguration = generate_default_ops(as_dict=False)
+        config: SingleDayConfiguration | MultiDayConfiguration = SingleDayConfiguration()
     else:
-        config: MultiDayS2PConfiguration = generate_default_multiday_ops(as_dict=False)
+        config = MultiDayConfiguration()
 
-    config.to_config(file_path=output)
+    config.save(file_path=output)
 
     return {"success": True, "file_path": str(output), "pipeline_type": pipeline_type}
 
@@ -1289,7 +1287,7 @@ def start_multiday_batch_processing_tool(
 
         # Extracts animal key from config.
         try:
-            config = MultiDayS2PConfiguration.from_yaml(file_path=config_path)
+            config = MultiDayConfiguration.from_yaml(file_path=config_path)
             animal_keys.append(config.io.dataset_name)
         except Exception as error:
             invalid_configs.append(f"Failed to load config {config_path}: {error}")
@@ -1378,7 +1376,7 @@ def get_multiday_batch_processing_status_tool() -> dict[str, Any]:
         animal_keys_ordered: list[str] = []
         for config_path, _ in _multi_day_batch_state.animals:
             try:
-                config = MultiDayS2PConfiguration.from_yaml(file_path=config_path)
+                config = MultiDayConfiguration.from_yaml(file_path=config_path)
                 animal_keys_ordered.append(config.io.dataset_name)
             except Exception:
                 continue

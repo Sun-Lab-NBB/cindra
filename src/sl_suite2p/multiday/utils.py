@@ -29,7 +29,7 @@ def create_mask_image(
     """Creates labeled images from cell masks with optional overlap marking and contour generation.
 
     Args:
-        cell_masks: A list or tuple of cell mask dictionaries containing 'xpix' and 'ypix' keys.
+        cell_masks: A list or tuple of cell mask dictionaries containing 'x_pixels' and 'y_pixels' keys.
         image_size: The dimensions of the output image in the order of (height, width).
         field: Optional. The cell_masks dictionary field (key) to use for setting the labeled image pixel values. If
             this argument is set to None, the function uses cell mask indices as pixel values.
@@ -64,7 +64,7 @@ def create_mask_image(
 
     for index, mask in enumerate(cell_masks):
         value = mask[field] if field else index  # Determines the pixel value to use for labeling the mask
-        ypix, xpix = mask["ypix"], mask["xpix"]  # Determines mask locations
+        ypix, xpix = mask["y_pixels"], mask["x_pixels"]  # Determines mask locations
 
         # If fully rendering cells, sets each pixel defined by the cell mask to the pixel value computed above
         if not contours:
@@ -72,7 +72,7 @@ def create_mask_image(
 
             # If overlap rendering is enabled, overwrites all overlapping pixels with the value 100.
             if mark_overlap:
-                image[ypix[mask["overlap"]], xpix[mask["overlap"]]] = 100
+                image[ypix[mask["overlap_mask"]], xpix[mask["overlap_mask"]]] = 100
         else:
             # Otherwise, when only rendering contours, generates a contoured image:
 
@@ -149,27 +149,28 @@ def deform_masks(
         The function creates new mask dictionaries with updated pixel coordinates in the deformed visual space.
 
     Args:
-        cell_masks: The tuple or list of cell mask dictionaries, each containing 'xpix', 'ypix', 'lam', 'med',
-            and 'radius' keys.
+        cell_masks: The tuple or list of cell mask dictionaries, each containing 'x_pixels', 'y_pixels',
+            'pixel_weights', 'centroid', and 'radius' keys.
         deform: The Deformation instance computed by DiffeomorphicDemonsRegistration to apply to the cell masks.
         crop_bin: The size of the local deformation field crop in pixels. This controls the trade-off between
             memory usage and processing speed.
 
     Returns:
         A tuple of new cell mask dictionaries with coordinates transformed to the deformed visual space. Each
-        dictionary includes updated 'xpix', 'ypix', 'ipix', 'med', 'lam', 'radius', and 'overlap' keys.
+        dictionary includes updated 'x_pixels', 'y_pixels', 'raveled_pixels', 'centroid', 'pixel_weights',
+        'radius', and 'overlap_mask' keys.
     """
     deformed = []
     for mask in cell_masks:
         # Generates cropped deformation field windows to split the procedure into smaller steps
-        crop_origin = np.array(mask["med"], dtype=np.int32) - crop_bin // 2
+        crop_origin = np.array(mask["centroid"], dtype=np.int32) - crop_bin // 2
         crop_def, adj_origin = create_cropped_deform_field(deform, crop_origin, (crop_bin, crop_bin))
 
         # Processes lambda weights
-        y_local = mask["ypix"] - adj_origin[0]
-        x_local = mask["xpix"] - adj_origin[1]
+        y_local = mask["y_pixels"] - adj_origin[0]
+        x_local = mask["x_pixels"] - adj_origin[1]
         lam_img = np.zeros((crop_bin, crop_bin), dtype=np.float32)
-        lam_img[y_local, x_local] = mask["lam"]
+        lam_img[y_local, x_local] = mask["pixel_weights"]
 
         # Applies the deformation using the cropped deformation field
         warped_lam = np.asarray(crop_def.apply_deformation(lam_img, interpolation=0))
@@ -184,11 +185,11 @@ def deform_masks(
         # field.
         deformed.append(
             {
-                "xpix": x_global,
-                "ypix": y_global,
-                "ipix": np.ravel_multi_index((y_global, x_global), deform[0].shape),
-                "med": [np.median(y_global), np.median(x_global)],
-                "lam": lam_values,
+                "x_pixels": x_global,
+                "y_pixels": y_global,
+                "raveled_pixels": np.ravel_multi_index((y_global, x_global), deform[0].shape),
+                "centroid": [np.median(y_global), np.median(x_global)],
+                "pixel_weights": lam_values,
                 "radius": regionprops(warped_lam.astype(np.uint8))[0].axis_minor_length,
             }
         )
@@ -251,13 +252,13 @@ def add_overlap_info(masks: list[dict[str, Any]]) -> list[dict[str, NDArray[np.b
     overlapping pixel information.
 
     Args:
-        masks: The list of cell mask dictionaries with 'ipix' keys.
+        masks: The list of cell mask dictionaries with 'raveled_pixels' keys.
 
     Returns:
-        The list of modified mask dictionaries, which now contain the added 'overlap' boolean arrays.
+        The list of modified mask dictionaries, which now contain the added 'overlap_mask' boolean arrays.
     """
     # Extracts pixel indices from all masks
-    mask_pixel_indices = [mask["ipix"] for mask in masks]
+    mask_pixel_indices = [mask["raveled_pixels"] for mask in masks]
     mask_count = len(mask_pixel_indices)
 
     # Flattens mask pixel indices into a contiguous array with offset pointers.
@@ -279,7 +280,7 @@ def add_overlap_info(masks: list[dict[str, Any]]) -> list[dict[str, NDArray[np.b
     for mask_index, mask in enumerate(masks):
         start = mask_offsets[mask_index]
         end = mask_offsets[mask_index + 1]
-        mask["overlap"] = flat_overlap[start:end]
+        mask["overlap_mask"] = flat_overlap[start:end]
 
     return masks
 
