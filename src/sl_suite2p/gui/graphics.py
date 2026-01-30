@@ -135,8 +135,8 @@ def ROI_index(ops, stat):
     Lx = ops["frame_width"]
     iROI = -1 * np.ones((Ly, Lx), dtype=np.int32)
     for n in range(ncells):
-        ypix = stat[n]["ypix"][~stat[n]["overlap"]]
+        ypix = stat[n]["y_pixels"][~stat[n]["overlap_mask"]]
         if ypix is not None:
-            xpix = stat[n]["xpix"][~stat[n]["overlap"]]
+            xpix = stat[n]["x_pixels"][~stat[n]["overlap_mask"]]
             iROI[ypix, xpix] = n
     return iROI

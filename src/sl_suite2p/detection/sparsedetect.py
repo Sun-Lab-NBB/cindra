@@ -457,10 +457,10 @@ def sparsery(
 
         stats.append(
             {
-                "ypix": ypix0.astype(int),
-                "xpix": xpix0.astype(int),
-                "lam": lam0 * sdmov[ypix0, xpix0],
-                "med": med,
+                "y_pixels": ypix0.astype(int),
+                "x_pixels": xpix0.astype(int),
+                "pixel_weights": lam0 * sdmov[ypix0, xpix0],
+                "centroid": med,
                 "footprint": ihop[tj],
             }
         )

@@ -43,16 +43,16 @@ def masks_and_traces(ops, stat_manual, stat_orig):
     F, Fneu, F_chan2, Fneu_chan2 = extract_traces_from_masks(ops, manual_cell_masks, manual_neuropil_masks)
 
     # compute activity statistics for classifier
-    npix = np.array([stat_orig[n]["npix"] for n in range(len(stat_orig))]).astype("float32")
+    npix = np.array([stat_orig[n]["pixel_count"] for n in range(len(stat_orig))]).astype("float32")
     for n in range(len(manual_roi_stats)):
-        manual_roi_stats[n]["npix_norm"] = manual_roi_stats[n]["npix"] / np.mean(
+        manual_roi_stats[n]["normalized_pixel_count"] = manual_roi_stats[n]["pixel_count"] / np.mean(
             npix[:100]
         )  # What if there are less than 100 cells?
-        manual_roi_stats[n]["compact"] = 1
+        manual_roi_stats[n]["compactness"] = 1
         manual_roi_stats[n]["footprint"] = 2
         manual_roi_stats[n]["manual"] = 1  # Add manual key
         if "iplane" in stat_orig[0]:
-            manual_roi_stats[n]["iplane"] = stat_orig[0]["iplane"]
+            manual_roi_stats[n]["plane_index"] = stat_orig[0]["plane_index"]
 
     # subtract neuropil and compute skew, std from F
     dF = F - ops["neuropil_coefficient"] * Fneu
@@ -60,9 +60,9 @@ def masks_and_traces(ops, stat_manual, stat_orig):
     sd = np.std(dF, axis=1)
 
     for n in range(F.shape[0]):
-        manual_roi_stats[n]["skew"] = sk[n]
-        manual_roi_stats[n]["std"] = sd[n]
-        manual_roi_stats[n]["med"] = [np.mean(manual_roi_stats[n]["ypix"]), np.mean(manual_roi_stats[n]["xpix"])]
+        manual_roi_stats[n]["skewness"] = sk[n]
+        manual_roi_stats[n]["standard_deviation"] = sd[n]
+        manual_roi_stats[n]["centroid"] = [np.mean(manual_roi_stats[n]["y_pixels"]), np.mean(manual_roi_stats[n]["x_pixels"])]
 
     dF = preprocess(
         roi_fluorescence=F,
@@ -326,8 +326,8 @@ class ROIDraw(QMainWindow):
 
         for n in np.arange(np.shape(self.parent.iscell)[0]):
             if self.parent.iscell[n] == 1:
-                ypix = self.parent.stat[n]["ypix"].flatten()
-                xpix = self.parent.stat[n]["xpix"].flatten()
+                ypix = self.parent.stat[n]["y_pixels"].flatten()
+                xpix = self.parent.stat[n]["x_pixels"].flatten()
                 H[ypix, xpix] = np.random.rand()
                 S[ypix, xpix] = 1
 
@@ -402,7 +402,7 @@ class ROIDraw(QMainWindow):
             ypix = y[ellipse].flatten()
             xpix = x[ellipse].flatten()
             lam = np.ones(ypix.shape)
-            stat0.append({"ypix": ypix, "xpix": xpix, "lam": lam, "npix": ypix.size, "med": med})
+            stat0.append({"y_pixels": ypix, "x_pixels": xpix, "pixel_weights": lam, "pixel_count": ypix.size, "centroid": med})
             self.tlabel.append(pg.TextItem(str(n), self.ROIs[n].color, anchor=(0, 0)))
             self.tlabel[-1].setPos(xpix.mean(), ypix.mean())
             self.p0.addItem(self.tlabel[-1])

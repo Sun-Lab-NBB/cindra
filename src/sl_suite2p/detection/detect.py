@@ -73,7 +73,7 @@ def detection_wrapper(
     ----------------
     ops : dictionary or list of dicts
 
-    stat : dictionary "ypix", "xpix", "lam"
+    stat : dictionary "y_pixels", "x_pixels", "pixel_weights"
             Dictionary containing statistics for ROIs
 
 
@@ -140,10 +140,10 @@ def detection_wrapper(
     xmin = int(xrange[0])
     if len(stat) > 0:
         for s in stat:
-            s["ypix"] += ymin
-            s["xpix"] += xmin
-            s["med"][0] += ymin
-            s["med"][1] += xmin
+            s["y_pixels"] += ymin
+            s["x_pixels"] += xmin
+            s["centroid"][0] += ymin
+            s["centroid"][1] += xmin
 
         if ops["preclassification_threshold"] > 0:
             if classfile is None:

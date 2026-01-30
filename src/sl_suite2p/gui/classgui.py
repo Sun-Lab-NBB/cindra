@@ -145,7 +145,7 @@ def load_data(parent, keys, trainfiles):
                 lstat = 0
                 try:
                     stat = np.load(basename + "/stat.npy", allow_pickle=True)
-                    ypix = stat[0]["ypix"]
+                    ypix = stat[0]["y_pixels"]
                     lstat = len(stat)
                 except (IndexError, KeyError, OSError, RuntimeError, TypeError, NameError):
                     console.echo(message=f"  {basename}: incorrect or missing stat.npy file", level=LogLevel.WARNING)

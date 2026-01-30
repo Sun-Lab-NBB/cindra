@@ -21,8 +21,8 @@ def distance_matrix(parent, ilist):
             if ij < ik:
                 idist[ij, ik] = (
                     (
-                        (parent.stat[j]["ypix"][np.newaxis, :] - parent.stat[k]["ypix"][:, np.newaxis]) ** 2
-                        + (parent.stat[j]["xpix"][np.newaxis, :] - parent.stat[k]["xpix"][:, np.newaxis]) ** 2
+                        (parent.stat[j]["y_pixels"][np.newaxis, :] - parent.stat[k]["y_pixels"][:, np.newaxis]) ** 2
+                        + (parent.stat[j]["x_pixels"][np.newaxis, :] - parent.stat[k]["x_pixels"][:, np.newaxis]) ** 2
                     )
                     ** 0.5
                 ).mean()
@@ -74,9 +74,9 @@ def merge_activity_masks(parent):
     merged_cells = np.unique(np.array(merged_cells))
 
     for n in merged_cells:
-        ypix = np.append(ypix, parent.stat[n]["ypix"])
-        xpix = np.append(xpix, parent.stat[n]["xpix"])
-        lam = np.append(lam, parent.stat[n]["lam"])
+        ypix = np.append(ypix, parent.stat[n]["y_pixels"])
+        xpix = np.append(xpix, parent.stat[n]["x_pixels"])
+        lam = np.append(lam, parent.stat[n]["pixel_weights"])
         footprints = np.append(footprints, parent.stat[n]["footprint"])
         F = np.append(F, parent.Fcell[n, :][np.newaxis, :], axis=0)
         Fneu = np.append(Fneu, parent.Fneu[n, :][np.newaxis, :], axis=0)
@@ -102,11 +102,11 @@ def merge_activity_masks(parent):
     stat0 = {}
     stat0["imerge"] = merged_cells
     if "iplane" in parent.stat[merged_cells[0]]:
-        stat0["iplane"] = parent.stat[merged_cells[0]]["iplane"]
-    stat0["ypix"] = ypix
-    stat0["xpix"] = xpix
-    stat0["med"] = median_pix(ypix, xpix)
-    stat0["lam"] = lam / lam.sum()
+        stat0["plane_index"] = parent.stat[merged_cells[0]]["plane_index"]
+    stat0["y_pixels"] = ypix
+    stat0["x_pixels"] = xpix
+    stat0["centroid"] = median_pix(ypix, xpix)
+    stat0["pixel_weights"] = lam / lam.sum()
 
     if "aspect_ratio" in parent.ops:
         d0 = np.array([int(parent.ops["aspect_ratio"] * 10), 10])
@@ -128,8 +128,8 @@ def merge_activity_masks(parent):
         Fneu_chan2 = Fneu_chan2.mean(axis=0)
     dF = F - parent.ops["neuropil_coefficient"] * Fneu
     # activity stats
-    stat0["skew"] = stats.skew(dF)
-    stat0["std"] = dF.std()
+    stat0["skewness"] = stats.skew(dF)
+    stat0["standard_deviation"] = dF.std()
 
     spks = oasis(
         cell_fluorescence=dF[np.newaxis, :],
@@ -163,7 +163,7 @@ def merge_activity_masks(parent):
         diameter=parent.ops.get("cell_diameter", None),
         do_crop=parent.ops.get("crop_to_soma", 1),
     )
-    parent.stat[-1]["lam"] = parent.stat[-1]["lam"] * merged_cells.size
+    parent.stat[-1]["pixel_weights"] = parent.stat[-1]["pixel_weights"] * merged_cells.size
     parent.Fcell = np.concatenate((parent.Fcell, F[np.newaxis, :]), axis=0)
     parent.Fneu = np.concatenate((parent.Fneu, Fneu[np.newaxis, :]), axis=0)
     if parent.hasred:
@@ -178,7 +178,7 @@ def merge_activity_masks(parent):
     parent.notmerged = np.append(parent.notmerged, False)
 
     ### for GUI drawing
-    ycirc, xcirc = utils.circle(parent.stat[-1]["med"], parent.stat[-1]["radius"])
+    ycirc, xcirc = utils.circle(parent.stat[-1]["centroid"], parent.stat[-1]["radius"])
     goodi = (ycirc >= 0) & (xcirc >= 0) & (ycirc < parent.ops["frame_height"]) & (xcirc < parent.ops["frame_width"])
     parent.stat[-1]["ycirc"] = ycirc[goodi]
     parent.stat[-1]["xcirc"] = xcirc[goodi]
