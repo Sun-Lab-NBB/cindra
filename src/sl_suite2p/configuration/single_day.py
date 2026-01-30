@@ -980,8 +980,6 @@ class ROIStatistics:
         if not roi_list:
             return
 
-        n_rois = len(roi_list)
-
         # Concatenates variable-length pixel arrays and stores counts for reconstruction.
         pixel_counts = np.array([len(roi.y_pixels) for roi in roi_list], dtype=np.int32)
         all_y_pixels = np.concatenate([roi.y_pixels for roi in roi_list])
@@ -1185,7 +1183,7 @@ class ExtractionData:
 
     # Channel 1 extraction data.
     roi_statistics: list[ROIStatistics] | None = None
-    """The list of ROI statistics containing per-cell spatial and shape information."""
+    """The list of ROIStatistics instances containing spatial and shape statistics for each detected ROI."""
 
     cell_fluorescence: NDArray[np.float32] | None = None
     """The cell fluorescence traces with shape (cells, frames)."""
@@ -1204,7 +1202,8 @@ class ExtractionData:
 
     # Channel 2 extraction data (when both channels are functional).
     roi_statistics_channel_2: list[ROIStatistics] | None = None
-    """The list of ROI statistics for channel 2 when both channels are functional."""
+    """The list of ROIStatistics instances containing spatial and shape statistics for each detected ROI for channel 
+    2 when both channels are functional."""
 
     cell_fluorescence_channel_2: NDArray[np.float32] | None = None
     """The cell fluorescence traces for channel 2."""
@@ -1259,15 +1258,15 @@ class ExtractionData:
 
         # Channel 1 trace arrays.
         if self.cell_fluorescence is not None:
-            np.save(output_path / "F.npy", self.cell_fluorescence, allow_pickle=False)
+            np.save(output_path / "cell_fluorescence.npy", self.cell_fluorescence, allow_pickle=False)
         if self.neuropil_fluorescence is not None:
-            np.save(output_path / "Fneu.npy", self.neuropil_fluorescence, allow_pickle=False)
+            np.save(output_path / "neuropil_fluorescence.npy", self.neuropil_fluorescence, allow_pickle=False)
         if self.subtracted_fluorescence is not None:
-            np.save(output_path / "Fsub.npy", self.subtracted_fluorescence, allow_pickle=False)
+            np.save(output_path / "subtracted_fluorescence.npy", self.subtracted_fluorescence, allow_pickle=False)
         if self.spikes is not None:
-            np.save(output_path / "spks.npy", self.spikes, allow_pickle=False)
+            np.save(output_path / "spikes.npy", self.spikes, allow_pickle=False)
         if self.cell_classification is not None:
-            np.save(output_path / "iscell.npy", self.cell_classification, allow_pickle=False)
+            np.save(output_path / "cell_classification.npy", self.cell_classification, allow_pickle=False)
 
         # Channel 2 ROI statistics.
         if self.roi_statistics_channel_2 is not None:
@@ -1275,19 +1274,33 @@ class ExtractionData:
 
         # Channel 2 trace arrays.
         if self.cell_fluorescence_channel_2 is not None:
-            np.save(output_path / "F_chan2.npy", self.cell_fluorescence_channel_2, allow_pickle=False)
+            np.save(
+                output_path / "cell_fluorescence_channel_2.npy", self.cell_fluorescence_channel_2, allow_pickle=False
+            )
         if self.neuropil_fluorescence_channel_2 is not None:
-            np.save(output_path / "Fneu_chan2.npy", self.neuropil_fluorescence_channel_2, allow_pickle=False)
+            np.save(
+                output_path / "neuropil_fluorescence_channel_2.npy",
+                self.neuropil_fluorescence_channel_2,
+                allow_pickle=False,
+            )
         if self.subtracted_fluorescence_channel_2 is not None:
-            np.save(output_path / "Fsub_chan2.npy", self.subtracted_fluorescence_channel_2, allow_pickle=False)
+            np.save(
+                output_path / "subtracted_fluorescence_channel_2.npy",
+                self.subtracted_fluorescence_channel_2,
+                allow_pickle=False,
+            )
         if self.spikes_channel_2 is not None:
-            np.save(output_path / "spks_chan2.npy", self.spikes_channel_2, allow_pickle=False)
+            np.save(output_path / "spikes_channel_2.npy", self.spikes_channel_2, allow_pickle=False)
         if self.cell_classification_channel_2 is not None:
-            np.save(output_path / "iscell_chan2.npy", self.cell_classification_channel_2, allow_pickle=False)
+            np.save(
+                output_path / "cell_classification_channel_2.npy",
+                self.cell_classification_channel_2,
+                allow_pickle=False,
+            )
 
         # Colocalization array.
         if self.cell_colocalization is not None:
-            np.save(output_path / "redcell.npy", self.cell_colocalization, allow_pickle=False)
+            np.save(output_path / "cell_colocalization.npy", self.cell_colocalization, allow_pickle=False)
 
     def load_arrays(self, output_path: Path) -> None:
         """Loads extraction arrays from .npy files and ROI statistics from .npz files into this instance.
@@ -1301,25 +1314,25 @@ class ExtractionData:
             self.roi_statistics = ROIStatistics.load_list(roi_stats_path)
 
         # Channel 1 trace arrays.
-        f_path = output_path / "F.npy"
-        if self.cell_fluorescence is None and f_path.exists():
-            self.cell_fluorescence = np.load(f_path, allow_pickle=False).astype(np.float32)
+        cell_fluorescence_path = output_path / "cell_fluorescence.npy"
+        if self.cell_fluorescence is None and cell_fluorescence_path.exists():
+            self.cell_fluorescence = np.load(cell_fluorescence_path, allow_pickle=False).astype(np.float32)
 
-        fneu_path = output_path / "Fneu.npy"
-        if self.neuropil_fluorescence is None and fneu_path.exists():
-            self.neuropil_fluorescence = np.load(fneu_path, allow_pickle=False).astype(np.float32)
+        neuropil_fluorescence_path = output_path / "neuropil_fluorescence.npy"
+        if self.neuropil_fluorescence is None and neuropil_fluorescence_path.exists():
+            self.neuropil_fluorescence = np.load(neuropil_fluorescence_path, allow_pickle=False).astype(np.float32)
 
-        fsub_path = output_path / "Fsub.npy"
-        if self.subtracted_fluorescence is None and fsub_path.exists():
-            self.subtracted_fluorescence = np.load(fsub_path, allow_pickle=False).astype(np.float32)
+        subtracted_fluorescence_path = output_path / "subtracted_fluorescence.npy"
+        if self.subtracted_fluorescence is None and subtracted_fluorescence_path.exists():
+            self.subtracted_fluorescence = np.load(subtracted_fluorescence_path, allow_pickle=False).astype(np.float32)
 
-        spks_path = output_path / "spks.npy"
-        if self.spikes is None and spks_path.exists():
-            self.spikes = np.load(spks_path, allow_pickle=False).astype(np.float32)
+        spikes_path = output_path / "spikes.npy"
+        if self.spikes is None and spikes_path.exists():
+            self.spikes = np.load(spikes_path, allow_pickle=False).astype(np.float32)
 
-        iscell_path = output_path / "iscell.npy"
-        if self.cell_classification is None and iscell_path.exists():
-            self.cell_classification = np.load(iscell_path, allow_pickle=False).astype(np.float32)
+        cell_classification_path = output_path / "cell_classification.npy"
+        if self.cell_classification is None and cell_classification_path.exists():
+            self.cell_classification = np.load(cell_classification_path, allow_pickle=False).astype(np.float32)
 
         # Channel 2 ROI statistics.
         roi_stats_chan2_path = output_path / "roi_statistics_channel_2.npz"
@@ -1327,74 +1340,85 @@ class ExtractionData:
             self.roi_statistics_channel_2 = ROIStatistics.load_list(roi_stats_chan2_path)
 
         # Channel 2 trace arrays.
-        f_chan2_path = output_path / "F_chan2.npy"
-        if self.cell_fluorescence_channel_2 is None and f_chan2_path.exists():
-            self.cell_fluorescence_channel_2 = np.load(f_chan2_path, allow_pickle=False).astype(np.float32)
+        cell_fluorescence_channel_2_path = output_path / "cell_fluorescence_channel_2.npy"
+        if self.cell_fluorescence_channel_2 is None and cell_fluorescence_channel_2_path.exists():
+            self.cell_fluorescence_channel_2 = np.load(cell_fluorescence_channel_2_path, allow_pickle=False).astype(
+                np.float32
+            )
 
-        fneu_chan2_path = output_path / "Fneu_chan2.npy"
-        if self.neuropil_fluorescence_channel_2 is None and fneu_chan2_path.exists():
-            self.neuropil_fluorescence_channel_2 = np.load(fneu_chan2_path, allow_pickle=False).astype(np.float32)
+        neuropil_fluorescence_channel_2_path = output_path / "neuropil_fluorescence_channel_2.npy"
+        if self.neuropil_fluorescence_channel_2 is None and neuropil_fluorescence_channel_2_path.exists():
+            self.neuropil_fluorescence_channel_2 = np.load(
+                neuropil_fluorescence_channel_2_path, allow_pickle=False
+            ).astype(np.float32)
 
-        fsub_chan2_path = output_path / "Fsub_chan2.npy"
-        if self.subtracted_fluorescence_channel_2 is None and fsub_chan2_path.exists():
-            self.subtracted_fluorescence_channel_2 = np.load(fsub_chan2_path, allow_pickle=False).astype(np.float32)
+        subtracted_fluorescence_channel_2_path = output_path / "subtracted_fluorescence_channel_2.npy"
+        if self.subtracted_fluorescence_channel_2 is None and subtracted_fluorescence_channel_2_path.exists():
+            self.subtracted_fluorescence_channel_2 = np.load(
+                subtracted_fluorescence_channel_2_path, allow_pickle=False
+            ).astype(np.float32)
 
-        spks_chan2_path = output_path / "spks_chan2.npy"
-        if self.spikes_channel_2 is None and spks_chan2_path.exists():
-            self.spikes_channel_2 = np.load(spks_chan2_path, allow_pickle=False).astype(np.float32)
+        spikes_channel_2_path = output_path / "spikes_channel_2.npy"
+        if self.spikes_channel_2 is None and spikes_channel_2_path.exists():
+            self.spikes_channel_2 = np.load(spikes_channel_2_path, allow_pickle=False).astype(np.float32)
 
-        iscell_chan2_path = output_path / "iscell_chan2.npy"
-        if self.cell_classification_channel_2 is None and iscell_chan2_path.exists():
-            self.cell_classification_channel_2 = np.load(iscell_chan2_path, allow_pickle=False).astype(np.float32)
+        cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
+        if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
+            self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, allow_pickle=False).astype(
+                np.float32
+            )
 
         # Colocalization array.
-        redcell_path = output_path / "redcell.npy"
-        if self.cell_colocalization is None and redcell_path.exists():
-            self.cell_colocalization = np.load(redcell_path, allow_pickle=False).astype(np.float32)
+        cell_colocalization_path = output_path / "cell_colocalization.npy"
+        if self.cell_colocalization is None and cell_colocalization_path.exists():
+            self.cell_colocalization = np.load(cell_colocalization_path, allow_pickle=False).astype(np.float32)
 
 
 @dataclass
 class TimingData:
-    """Stores pipeline timing information."""
+    """Stores pipeline timing information.
 
-    registration_time: float = 0.0
+    All time durations are stored as integers representing seconds.
+    """
+
+    registration_time: int = 0
     """The registration step time in seconds."""
 
-    two_step_registration_time: float = 0.0
+    two_step_registration_time: int = 0
     """The second registration step time in seconds."""
 
-    registration_metrics_time: float = 0.0
+    registration_metrics_time: int = 0
     """The registration metrics computation time in seconds."""
 
-    detection_time: float = 0.0
+    detection_time: int = 0
     """The ROI detection time in seconds."""
 
-    extraction_time: float = 0.0
+    extraction_time: int = 0
     """The fluorescence extraction time in seconds."""
 
-    classification_time: float = 0.0
+    classification_time: int = 0
     """The ROI classification time in seconds."""
 
-    deconvolution_time: float = 0.0
+    deconvolution_time: int = 0
     """The spike deconvolution time in seconds."""
 
-    detection_time_channel_2: float = 0.0
+    detection_time_channel_2: int = 0
     """The channel 2 ROI detection time in seconds."""
 
-    extraction_time_channel_2: float = 0.0
+    extraction_time_channel_2: int = 0
     """The channel 2 fluorescence extraction time in seconds."""
 
-    classification_time_channel_2: float = 0.0
+    classification_time_channel_2: int = 0
     """The channel 2 ROI classification time in seconds."""
 
-    deconvolution_time_channel_2: float = 0.0
+    deconvolution_time_channel_2: int = 0
     """The channel 2 spike deconvolution time in seconds."""
 
-    total_plane_time: float = 0.0
+    total_plane_time: int = 0
     """The total plane processing time in seconds."""
 
     date_processed: str = ""
-    """The ISO timestamp when processing completed."""
+    """The timestamp when processing completed in ataraxis-time format (yyyy-mm-dd-hh-mm-ss-us)."""
 
     python_version: str = python_version
     """Python version used for processing."""

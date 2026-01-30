@@ -642,7 +642,10 @@ class MainWindow(QMainWindow):
                 apix = np.append(
                     apix,
                     np.concatenate(
-                        (self.stat[k]["y_pixels"].flatten()[:, np.newaxis], self.stat[k]["x_pixels"].flatten()[:, np.newaxis]),
+                        (
+                            self.stat[k]["y_pixels"].flatten()[:, np.newaxis],
+                            self.stat[k]["x_pixels"].flatten()[:, np.newaxis],
+                        ),
                         axis=1,
                     ),
                     axis=0,

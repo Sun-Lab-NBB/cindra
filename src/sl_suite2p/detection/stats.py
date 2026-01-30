@@ -105,7 +105,9 @@ class ROI:
 
     @classmethod
     def get_overlap_count_image(cls, rois: Sequence[ROI], Ly: int, Lx: int) -> np.ndarray:
-        return count_overlaps(Ly=Ly, Lx=Lx, y_pixels_list=[roi.y_pixels for roi in rois], x_pixels_list=[roi.x_pixels for roi in rois])
+        return count_overlaps(
+            Ly=Ly, Lx=Lx, y_pixels_list=[roi.y_pixels for roi in rois], x_pixels_list=[roi.x_pixels for roi in rois]
+        )
 
     @classmethod
     def filter_overlappers(cls, rois: Sequence[ROI], overlap_image: np.ndarray, max_overlap: float) -> list[bool]:
@@ -186,7 +188,12 @@ class ROI:
 
     def fit_ellipse(self, dy: float, dx: float) -> EllipseData:
         return fitMVGaus(
-            self.y_pixels[self.soma_mask], self.x_pixels[self.soma_mask], self.pixel_weights[self.soma_mask], dy=dy, dx=dx, thres=2
+            self.y_pixels[self.soma_mask],
+            self.x_pixels[self.soma_mask],
+            self.pixel_weights[self.soma_mask],
+            dy=dy,
+            dx=dx,
+            thres=2,
         )
 
 
@@ -221,7 +228,16 @@ def roi_stats(stat, Ly: int, Lx: int, aspect=None, diameter=None, max_overlap=No
     else:
         dy, dx = (int(d0), int(d0)) if not isinstance(d0, (list, np.ndarray)) else (int(d0[0]), int(d0[0]))
 
-    rois = [ROI(y_pixels=s["y_pixels"], x_pixels=s["x_pixels"], pixel_weights=s["pixel_weights"], centroid=s["centroid"], do_crop=do_crop) for s in stat]
+    rois = [
+        ROI(
+            y_pixels=s["y_pixels"],
+            x_pixels=s["x_pixels"],
+            pixel_weights=s["pixel_weights"],
+            centroid=s["centroid"],
+            do_crop=do_crop,
+        )
+        for s in stat
+    ]
     n_overlaps = ROI.get_overlap_count_image(rois=rois, Ly=Ly, Lx=Lx)
     for roi, s in zip(rois, stat, strict=False):
         s["mean_r_squared"] = roi.mean_r_squared
@@ -253,7 +269,16 @@ def roi_stats(stat, Ly: int, Lx: int, aspect=None, diameter=None, max_overlap=No
         keep_rois = ROI.filter_overlappers(rois=rois, overlap_image=n_overlaps, max_overlap=max_overlap)
         stat = stat[keep_rois]
         n_overlaps = ROI.get_overlap_count_image(rois=rois, Ly=Ly, Lx=Lx)
-        rois = [ROI(y_pixels=s["y_pixels"], x_pixels=s["x_pixels"], pixel_weights=s["pixel_weights"], centroid=s["centroid"], do_crop=do_crop) for s in stat]
+        rois = [
+            ROI(
+                y_pixels=s["y_pixels"],
+                x_pixels=s["x_pixels"],
+                pixel_weights=s["pixel_weights"],
+                centroid=s["centroid"],
+                do_crop=do_crop,
+            )
+            for s in stat
+        ]
         for roi, s in zip(rois, stat, strict=False):
             s["overlap_mask"] = roi.get_overlap_image(n_overlaps)
 

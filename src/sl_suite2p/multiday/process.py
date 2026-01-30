@@ -69,7 +69,9 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     console.echo(f"Creating session {session_id} multi-day cell masks...")
     timer.reset()
     # Re-computes the ROI stats for all multi-day tracked cells
-    roi_statistics = roi_stats(multiday_cell_masks, ops["frame_height"], ops["frame_width"], ops["aspect_ratio"], ops["cell_diameter"])
+    roi_statistics = roi_stats(
+        multiday_cell_masks, ops["frame_height"], ops["frame_width"], ops["aspect_ratio"], ops["cell_diameter"]
+    )
     cell_masks, neuropil_masks = extraction.masks.create_masks(
         roi_statistics=roi_statistics,
         height=ops["frame_height"],
@@ -114,7 +116,10 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
 
         # Extracts the cell fluorescence spikes using the OASIS algorithm.
         spikes = extraction.oasis(
-            cell_fluorescence=df, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["sampling_rate"]
+            cell_fluorescence=df,
+            batch_size=ops["batch_size"],
+            time_constant=ops["tau"],
+            sampling_rate=ops["sampling_rate"],
         )
         ops["timing"]["multiday_deconvolution"] = timer.elapsed
 

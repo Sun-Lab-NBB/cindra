@@ -337,7 +337,11 @@ def compute_reference_and_register_frames(
         # grab frames
         frames = f_align_in[np.linspace(0, n_frames, 1 + np.minimum(ops["nimg_init"], n_frames), dtype=int)[:-1]]
         # compute bidiphase shift
-        if ops["compute_bidirectional_phase_offset"] and ops["bidirectional_phase_offset"] == 0 and not ops["bidirectional_phase_corrected"]:
+        if (
+            ops["compute_bidirectional_phase_offset"]
+            and ops["bidirectional_phase_offset"] == 0
+            and not ops["bidirectional_phase_corrected"]
+        ):
             bidiphase = bidi.compute(frames)
             console.echo(
                 f"Plane {plane_number} estimated bidiphase offset from data: {bidiphase} pixels.",

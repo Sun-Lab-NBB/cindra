@@ -373,7 +373,11 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
     # filters out templates that appear too small to be considered valid cells. Adds the filtered tuple of template
     # masks to the MultiDayData object.
     data.template_cell_masks = tuple(
-        [mask for mask in template_masks if (len(mask["raveled_pixels"]) - sum(mask["overlap_mask"])) >= ops["minimum_size"]]
+        [
+            mask
+            for mask in template_masks
+            if (len(mask["raveled_pixels"]) - sum(mask["overlap_mask"])) >= ops["minimum_size"]
+        ]
     )
     after_size = len(data.template_cell_masks)
     removed_templates = before_size - after_size

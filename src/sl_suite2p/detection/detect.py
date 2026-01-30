@@ -18,7 +18,9 @@ from ..classification import classify, user_classfile
 def detect(ops, plane_number: int, classfile=None):
     timer = PrecisionTimer("s")
 
-    bin_size = int(max(1, ops["frame_count"] // ops["maximum_binned_frames"], np.round(ops["tau"] * ops["sampling_rate"])))
+    bin_size = int(
+        max(1, ops["frame_count"] // ops["maximum_binned_frames"], np.round(ops["tau"] * ops["sampling_rate"]))
+    )
 
     console.echo(f"Binning plane {plane_number} movie in chunks of length {bin_size}...", level=LogLevel.INFO)
     timer.reset()

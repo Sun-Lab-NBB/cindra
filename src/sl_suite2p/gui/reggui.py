@@ -499,7 +499,10 @@ class BinaryPlayer(QMainWindow):
             console.echo(message=f"Fluorescence data loaded: {self.Floaded}")
             self.filename = filename
         except Exception as e:
-            console.echo(message="ERROR: ops.npy incorrect / missing ops['registered_binary_path'] and others", level=LogLevel.ERROR)
+            console.echo(
+                message="ERROR: ops.npy incorrect / missing ops['registered_binary_path'] and others",
+                level=LogLevel.ERROR,
+            )
             console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
             try:
                 for n in range(len(self.reg_loc)):
