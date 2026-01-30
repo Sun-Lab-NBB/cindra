@@ -1,6 +1,5 @@
-"""This module contains the high-level API for the single-day suite2p processing pipeline."""
+"""Provides the high-level API for the single-day suite2p processing pipeline."""
 
-import os
 from typing import Any
 from pathlib import Path
 from datetime import datetime
@@ -8,22 +7,21 @@ import contextlib
 
 import numba
 import numpy as np
-from natsort import natsorted
 from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console
 
 from . import io, detection, extraction, registration, classification
-from .version import version, python_version
 from .io.binary import BinaryFile
 from .configuration import (
+    RuntimeContext,
     SingleDayConfiguration,
 )
 
 # Defines constants used in this module
-# Frame binning parameters. Determine how to bin the frames for steps that support splitting the processed movie into
-# batches of frames.
-_MINIMUM_FRAMES_PER_BIN = 2000  # Minimum number of frames in each batch.
-_MAXIMUM_FRAMES_PER_BIN = 5000  # Maximum number of frames in each batch.
+# Frame binning parameters. They determine how to bin the frames for steps that support splitting the processed movie
+# into batches of frames.
+_MINIMUM_FRAMES_PER_BIN = 2000  # The minimum number of frames in each batch.
+_MAXIMUM_FRAMES_PER_BIN = 5000  # The maximum number of frames in each batch.
 _MAXIMUM_HEIGHT_PER_BIN = 700  # The maximum height of each image that can be binned using the maximum bin size.
 _MAXIMUM_WIDTH_PER_BIN = 700  # The maximum width of each image that can be binned using the maximum bin size.
 
@@ -35,6 +33,117 @@ _MINIMUM_PROCESSING_FRAMES = 50  # The minimum number of frames in the processed
 _RECOMMENDED_PROCESSING_FRAMES = 200  # The recommended number of frames in the processed movie.
 
 _MINIMUM_REGISTRATION_METRIC_FRAMES = 1500  # The minimum number of frames required to compute registration metrics.
+
+
+def _initialize_pipeline(config: SingleDayConfiguration) -> list[RuntimeContext]:
+    """Initializes the single-day processing pipeline.
+
+    This function validates the input configuration, imports the processed data by converting it fom the TIFF to
+    the binary format, and initializes the output data hierarchy.
+
+    Args:
+        config: The single-day pipeline configuration.
+
+    Returns:
+        A list of RuntimeContext instances, one per each plane to be processed (or virtual plane for MROI data).
+
+    Raises:
+        ValueError: If data_path is not configured.
+    """
+    # Validates that data_path is configured.
+    if config.file_io.data_path is None:
+        message = (
+            "Unable to initialize the pipeline. The data_path must be configured in the FileIO section of the "
+            "configuration, but it is currently None."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Defaults save_path to data_path if not explicitly set.
+    if config.file_io.save_path is None:
+        config.file_io.save_path = config.file_io.data_path
+
+    # Finds and converts the input data stored as one or more TIFFs to binary format and creates RuntimeContext
+    # instances.
+    contexts = io.convert_tiffs_to_binary(config)
+
+    # Saves shared configuration and acquisition parameters once (using first plane's context).
+    contexts[0].save_shared()
+
+    # Saves runtime data for each plane.
+    for context in contexts:
+        context.save_runtime()
+
+    return contexts
+
+
+def resolve_processing_contexts(config: SingleDayConfiguration) -> list[RuntimeContext]:
+    """Resolves RuntimeContext instances for all planes in the processed session.
+
+    This function serves as the primary entry point for obtaining the runtime contexts needed by subsequent pipeline
+    stages. It first checks for existing processed data in the output directory. If valid configuration and binary
+    files are found, it loads and returns the existing RuntimeContext instances. If binaries are missing or invalid,
+    it imports the raw data, converts it to the internal binary format, and initializes new contexts.
+
+    Args:
+        config: The single-day pipeline configuration.
+
+    Returns:
+        A list of RuntimeContext instances, one for each plane to be processed.
+
+    Raises:
+        ValueError: If save_path is not configured.
+    """
+    # Validates that save_path is configured (or can be derived from data_path).
+    if config.file_io.save_path is None:
+        if config.file_io.data_path is None:
+            message = (
+                "Unable to resolve processing contexts. Either save_path or data_path must be configured in the "
+                "FileIO section of the configuration, but both are currently None."
+            )
+            console.error(message=message, error=ValueError)
+        config.file_io.save_path = config.file_io.data_path
+
+    # Statically uses 'suite2p' as the rot output directory.
+    root_path = config.file_io.save_path / "suite2p"
+
+    # Checks for existing configuration file.
+    config_path = root_path / "configuration.yaml"
+    if config_path.exists():
+        console.echo(message=f"Found existing configuration at: {config_path}.", level=LogLevel.INFO)
+
+        # Loads all existing contexts.
+        loaded_contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
+
+        # Validates that required binary files exist for all contexts.
+        binaries_valid = True
+        for context in loaded_contexts:
+            # Registered binary must always exist.
+            registered_path = context.runtime.io.registered_binary_path
+            if registered_path is None or not registered_path.exists():
+                binaries_valid = False
+                break
+
+            # Raw binary must exist if keep_movie_raw is enabled.
+            if config.registration.keep_movie_raw:
+                raw_path = context.runtime.io.raw_binary_path
+                if raw_path is None or not raw_path.exists():
+                    binaries_valid = False
+                    break
+
+        if binaries_valid:
+            message = f"Loaded {len(loaded_contexts)} existing plane contexts with valid binaries."
+            console.echo(message=message, level=LogLevel.SUCCESS)
+            return loaded_contexts
+
+        # Binaries are missing or invalid - need to recreate.
+        console.echo(
+            message="Existing binaries are missing or invalid. Recreating from TIFF files...", level=LogLevel.WARNING
+        )
+        return _initialize_pipeline(config)
+
+    # No existing data - create new binaries.
+    console.echo(message="No existing data found. Initializing a new pipeline...", level=LogLevel.INFO)
+    return _initialize_pipeline(config)
 
 
 def _register_plane(
@@ -397,303 +506,32 @@ def _process_rois(
     return ops
 
 
-def _resolve_plane_paths(ops: dict[str, Any]) -> tuple[list[Path], list[Path], Path]:
-    """Resolves and returns the paths to all output 'plane' folders and their respective 'ops.npy' files.
-
-    This service function is used by other processing functions to resolve the paths to all files used during
-    suite2p single-day processing.
-
-    Args:
-        ops: The dictionary that stores single-day processing parameters, including the plane save directory.
-
-    Returns:
-        A tuple of 3 elements. The first element is a list of paths to all 'plane' folders, the second is a list of
-        paths to all plane 'ops.npy' files, and the third is the path to the root save folder (suite2p directory).
-    """
-    # The output always goes to save_path/suite2p/
-    save_folder = Path(ops["save_path"]).joinpath("suite2p")
-    save_folder.mkdir(parents=True, exist_ok=True)
-    plane_folders = natsorted([file for file in save_folder.glob("*") if file.is_dir() and file.name[:5] == "plane"])
-    ops_paths = [folder.joinpath("ops.npy") for folder in plane_folders]
-    return plane_folders, ops_paths, save_folder
-
-
-def resolve_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
-    """Generates the output directory hierarchy and the main 'ops.npy' file for the single-day suite2p pipeline, using
-    the configuration parameters from ops and db.
-
-    This function should be used before the first step (binary file creation) of the single-day suite2p pipeline to
-    generate the necessary directories and files used by all further pipeline steps. During step-wise pipeline
-    execution, this function can also be used between steps to update the 'ops.npy' file with new runtime parameters.
-
-    Notes:
-        All single-day pipeline functions require the path generated by this function as the 'ops_path' argument.
-
-        If both 'ops' and 'db' do not contain some of the expected parameters, they are set using
-        the 'default' dictionary generated using the SingleDayConfiguration configuration class.
-
-    Args:
-        ops: A dictionary that contains the single-day configuration parameters.
-        db: An optional dictionary that contains the same keys as 'ops'. Values from this dictionary are used to
-            override the matching keys in the 'ops' dictionary.
-
-    Returns:
-        The path to the generated 'ops.npy' file.
-    """
-    # Builds up the 'ops' dictionary. Specifically, first fills the dictionary with the 'default' keys. Then overwrites
-    # all default keys with keys from the input 'ops' dictionary. Finally, overwrites any keys from the input 'db'
-    # dictionary with values from 'db'. This way, there is the following order of precedence: db > ops > default.
-    ops = {**generate_default_ops(as_dict=True), **ops, **db}
-
-    # Adjusts the aspect ratio for the processed data, if necessary. This is only used in gui, so may or may not be
-    # important for certain processing runtimes.
-    if isinstance(ops["cell_diameter"], list) and len(ops["cell_diameter"]) > 1 and ops["aspect_ratio"] == 1.0:
-        ops["aspect_ratio"] = ops["cell_diameter"][0] / ops["cell_diameter"][1]
-
-    # If necessary, resolves the output (save folder) path, based on the input data path.
-    if "save_path" not in ops or len(ops["save_path"]) == 0:
-        ops["save_path"] = ops["data_path"]
-
-    # Ensures the root save directory exists, creating it, if necessary. Output always goes to save_path/suite2p/.
-    save_folder = Path(ops["save_path"]).joinpath("suite2p")
-    save_folder.mkdir(parents=True, exist_ok=True)
-
-    # Saves the updated 'ops' file to the root output folder. During the rest of the runtime, this file is loaded
-    # back into memory for various processing steps.
-    ops_path = save_folder.joinpath("ops.npy")
-
-    # Actualizes version information to the generated ops.npy file.
-    ops["sl_suite2p_version"] = version
-    ops["python_version"] = python_version
-
-    # If the user does not specify the maximum parallel worker limit, sets it based on the number of available
-    # CPU cores
-    if ops["parallel_workers"] < 1:
-        # noinspection PyUnresolvedReferences
-        ops["parallel_workers"] = os.process_cpu_count()
-
-    # Caches the generated ops dictionary to disk as ops.npy
-    np.save(ops_path, ops, allow_pickle=True)
-
-    # Also generates a 'single_day_ss2p_configuration.yaml' file that stores the same configuration data as the
-    # ops.npy file. This ensures each runtime always has a human-readable configuration file that does not rely on
-    # unpickling (which is inherently unsafe).
-    config = SingleDayConfiguration.from_ops(ops_dict=ops)
-    config.to_config(file_path=save_folder.joinpath("single_day_ss2p_configuration.yaml"))
-
-    # Returns the path to the generated 'ops.npy' file.
-    return ops_path
-
-
-def run_s2p(ops_path: Path) -> None:
-    """Executes the single-day suite2p processing pipeline using the parameters stored in the target ops.npy file.
+def run_s2p(config: SingleDayConfiguration) -> None:
+    """Executes the single-day suite2p processing pipeline.
 
     This function sequentially calls all steps of the suite2p single-day processing pipeline, converting raw data
     frames into extracted cell fluorescence data.
 
-    Notes:
-        This function works as a high-level API wrapper over the three pipeline step functions: 'resolve_binaries',
-        'process_plane', and 'combine_planes'.
-
     Args:
-        ops_path: The path to the ops.npy file that stores the single-day suite2p processing parameters. Compatible
-            ops.npy files are generated by the resolve_ops() function.
+        config: The single-day pipeline configuration.
     """
-    # Guards against invalid inputs.
-    if not ops_path.exists() or not ops_path.is_file() or ops_path.suffix != ".npy":
-        message = (
-            f"Unable to run the single-day suite2p pipeline, as the 'ops.npy' file does not exist at the specified "
-            f"path {ops_path}."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Instantiates and resets the execution timer
     timer = PrecisionTimer("s")
     timer.reset()
 
     console.echo(message="Initializing single-day suite2p runtime...", level=LogLevel.INFO)
 
-    # Loads the runtime configuration parameters
-    ops = np.load(ops_path, allow_pickle=True).item()
+    # Step 1: Ensures the processed data is converted to the internal BinaryFile format.
+    contexts = resolve_processing_contexts(config)
 
-    # Step 1: Ensures the data to analyze is stored as one or more 'plane' folders. Each plane should contain the
-    # data.bin file that stores the frame data and the ops.npy file that stores the processing settings.
-    resolve_binaries(ops_path=ops_path)
+    # Step 2: Processes each plane. Note: process_plane() will be refactored to accept RuntimeContext.
+    for context in contexts:
+        process_plane(context)
 
-    save_folder = Path(ops["save_path"]).joinpath("suite2p")
-    plane_folders = natsorted([file for file in save_folder.glob("*") if file.is_dir() and file.name[:5] == "plane"])
-    ops_paths = [folder.joinpath("ops.npy") for folder in plane_folders]
-
-    # Step 2: Processes each plane. This applies the suite2p processing pipeline to each of the planes resolved during
-    # the first step.
-    for index in range(len(ops_paths)):
-        process_plane(plane_index=index, ops_path=ops_path)
-
-    # Step 3: Applies post-plane-processing transformations, such as generating the 'combined' folder used during
-    # multi-day processing.
-    combine_planes(ops_path=ops_path)
+    # Step 3: Combines planes. Note: combine_planes() will be refactored to accept list[RuntimeContext].
+    combine_planes(contexts)
 
     message = f"Single-day suite2p runtime: Complete. Total time: {timer.elapsed} seconds."
     console.echo(message=message, level=LogLevel.SUCCESS)
-
-
-def resolve_binaries(ops_path: Path) -> None:
-    """Ensures that the data.bin files and settings ops.npy dictionaries exist for all imaging planes in the processed
-    movie.
-
-    Notes:
-        If necessary, the function converts the input data to the suite2p binary (.bin) data format. Following the
-        conversion, most other processing steps utilize memory-mapping to reduce the RAM overhead during runtime.
-
-    Args:
-        ops_path: The path to the ops.npy file that stores the single-day suite2p processing parameters. Compatible
-            ops.npy files are generated by the resolve_ops() function.
-    """
-    # Guards against invalid inputs.
-    if not ops_path.exists() or not ops_path.is_file() or ops_path.suffix != ".npy":
-        message = (
-            f"Unable to run the single-day suite2p pipeline, as the 'ops.npy' file does not exist at the specified "
-            f"path {ops_path}."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Initializes the execution timer
-    timer = PrecisionTimer("s")
-    timer.reset()
-
-    # Loads the 'ops' dictionary from the specified storage file
-    ops = np.load(ops_path, allow_pickle=True).item()
-
-    # Determines the path to all existing plane folders and ops.npy files (if any)
-    plane_folders, ops_paths, save_folder = _resolve_plane_paths(ops)
-
-    # If at least one plane folder exists and the input format is 'binary', uses existing binary files stored under
-    # each available plane folder.
-    if len(plane_folders) > 0 and ("input_format" in ops and ops["input_format"] == "binary"):
-        # Not sure where this is used in the current version, searching the codebase does not return any use outside
-        # a single reference in the gui code. The purpose of this transformation is likely to make the code below
-        # (setting Ly and Lx) work regardless of whether Lys/Lxs are lists or integers.
-        if isinstance(ops["Lys"], int):
-            ops["Lys"] = [ops["Lys"]]
-            ops["Lxs"] = [ops["Lxs"]]
-
-        # Loops over plane folders and 'ops.npy' files. Reconfigures and overwrites each existing .npy file to
-        # facilitate further data (re)processing.
-        for i, (folder, ops_file) in enumerate(zip(plane_folders, ops_paths, strict=False)):
-            ops["bin_file"] = folder.joinpath("data.bin")  # Path to the existing binary file.
-
-            # Computes plane dimensions.
-            ops["frame_height"] = ops["Lys"][i]
-            ops["frame_width"] = ops["Lxs"][i]
-
-            # Uses plane dimension and a static assumption that each pixel uses 16-bit encoding to determine the
-            # number of frames stored inside the plane binary file.
-            n_bytes_read = np.int64(2 * ops["frame_height"] * ops["frame_width"])
-            ops["frame_count"] = Path(ops["bin_file"]).stat().st_size // n_bytes_read
-            np.save(ops_file, ops)  # Overwrites the ops.npy with modified settings
-
-        files_found_flag = True
-
-    # Otherwise, if the input format is not 'binary', tries to find binaries and ops for each plane. Unlike with the
-    # previous case, where input data is in binary and, therefore, binaries have to exist, here the binaries might
-    # not be available for all planes.
-    elif len(plane_folders) > 0:
-        # Ensures that both ops.npy setting files and binary files are available for each plane and, if so, sets the
-        # file discovery flag to true.
-        ops_found_flag = all(ops_paths)
-        binaries_found_flag = all(
-            folder.joinpath("data_raw.bin").is_file() or folder.joinpath("data.bin").is_file()
-            for folder in plane_folders
-        )
-        files_found_flag = ops_found_flag and binaries_found_flag
-
-    # If there are no plane folders or the code above was not able to find binary files and ops.npy files for all
-    # available planes, sets the file discovery flag to false. In turn, this triggers the binary file recreation below.
-    else:
-        files_found_flag = False
-
-    # If binary and ops.npy files already exist, removes all processed data files from each plane folder
-    # before rerunning registration on the already available binary files.
-    if files_found_flag:
-        message = (
-            f"Found existing binaries (.bin files) and ops (ops.npy files) inside {len(plane_folders)} "
-            f"available plane directories."
-        )
-        console.echo(message=message, level=LogLevel.SUCCESS)
-
-        message = "Removing previous cell detection and fluorescence extraction files, if present."
-        console.echo(message=message, level=LogLevel.INFO)
-
-        files_to_remove = (
-            "stat.npy",
-            "F.npy",
-            "Fneu.npy",
-            "Fsub.npy",
-            "F_chan2.npy",
-            "Fneu_chan2.npy",
-            "iscell.npy",
-            "redcell.npy",
-        )
-
-        # Loops over each plane folder and, for each, removes any existing files from the remove tuple.
-        for path in plane_folders:
-            for file in files_to_remove:
-                path.joinpath(file).unlink(missing_ok=True)
-
-    # Otherwise, regenerates all binaries from the source data.
-    else:
-        # For mesoscope scan, manually overrides the input format field. This distinct step is likely due to mesoscope
-        # scanning being implemented as an extension of the general .tiff processing method.
-        if ops.get("mesoscan"):
-            ops["input_format"] = "mesoscan"
-
-        # Defaults to 'tif' input format if the explicit format is not provided.
-        elif "input_format" not in ops:
-            message = (
-                "No explicit input data format specified via the 'input_format' field of the 'ops' dictionary. "
-                "Substituting the default 'tif' format instead."
-            )
-            console.echo(message=message, level=LogLevel.WARNING)
-            ops["input_format"] = "tiff"
-
-        # Builds a dictionary of callable 'converter' functions. These functions are used to convert various supported
-        # input formats to the binary format used during the rest of the processing pipeline. Note, each converter
-        # function also writes the plane-specific ops.npy file to the output plane folder.
-        convert_functions = {
-            "mesoscan": io.mesoscan_to_binary,
-            "tiff": io.tiff_to_binary,
-        }
-
-        # If input data matches one of the supported conversion formats, retrieves and calls the converter function
-        # for that format
-        if ops["input_format"] in convert_functions:
-            ops0 = convert_functions[ops["input_format"]](ops.copy())
-
-        # Otherwise, if the format is not supported, defaults to using the 'tiff' format.
-        else:
-            message = (
-                f"The 'input_format' configuration (ops) dictionary field is set to an unsupported format "
-                f"{ops['input_format']}. Only the following formats are supported: {convert_functions.keys()}. "
-                f"Substituting the default 'tif' format instead."
-            )
-            console.echo(message=message, level=LogLevel.WARNING)
-            ops0 = io.tiff_to_binary(ops.copy())
-
-        # Rebuilds the plane_folders list to use in the printout below. This is done to account for any new plane
-        # folders added as part of the processing
-        plane_folders = natsorted(
-            [file for file in save_folder.glob("*") if file.is_dir() and file.name[:5] == "plane"]
-        )
-
-        message = (
-            f"Binaries: Created. Took {timer.elapsed} seconds and wrote {ops0['nframes']} frames per binary for "
-            f"{len(plane_folders)} planes."
-        )
-        console.echo(message=message, level=LogLevel.SUCCESS)
-
-    # Updates the main ops.npy file with the actual number of planes discovered during binarization.
-    ops["nplanes"] = len(plane_folders)
-    np.save(ops_path, ops)
 
 
 def process_plane(ops_path: Path, plane_index: int) -> None:

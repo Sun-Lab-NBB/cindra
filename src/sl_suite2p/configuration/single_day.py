@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import copy
 from enum import StrEnum
+import json
 from typing import TYPE_CHECKING
 from pathlib import Path
 from dataclasses import field, dataclass
 
 import numpy as np
-from ataraxis_base_utilities import ensure_directory_exists
+from natsort import natsorted
+from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from ..version import version, python_version
@@ -86,7 +88,7 @@ class AcquisitionParameters(YamlConfig):
     def virtual_plane_count(self) -> int:
         """Returns the total number of virtual planes (roi_number * plane_number).
 
-        For single-ROI data, this equals plane_number. For MROI data, each ROI × plane combination becomes a
+        For single-ROI data, this equals plane_number. For MROI data, each ROI x plane combination becomes a
         separate virtual plane for processing.
         """
         return self.roi_number * self.plane_number
@@ -107,10 +109,6 @@ class AcquisitionParameters(YamlConfig):
                 channel_number are required. For MROI data (roi_number > 1), roi_lines, roi_x_coordinates, and
                 roi_y_coordinates are additionally required.
         """
-        import json
-
-        from ataraxis_base_utilities import console
-
         if not path.exists():
             message = f"Acquisition parameters file not found: {path}"
             console.error(message=message, error=FileNotFoundError)
@@ -952,18 +950,18 @@ class ROIStatistics:
     neuropil_mask: NDArray[np.bool_] | None = None
     """The boolean mask indicating pixels used for neuropil signal extraction."""
 
-    # Optional multi-plane data (added during combined view generation).
-    plane_index: int | None = None
+    # Multi-plane data. The plane_index should be set from IOData.plane_index during ROI creation.
+    plane_index: int = 0
     """The index of the imaging plane this ROI belongs to in multi-plane recordings."""
 
-    # Optional multi-day data (added during cross-session tracking).
-    cluster_id: int | None = None
+    # Multi-day tracking data. Zero values indicate the ROI has not been processed by multi-day tracking.
+    cluster_id: int = 0
     """The multi-day cell cluster ID. Zero indicates unclustered, positive values indicate cluster membership."""
 
     raveled_pixels: NDArray[np.int32] | None = None
     """The raveled (flattened) pixel indices in the deformed multi-day visual space."""
 
-    session_count: int | None = None
+    session_count: int = 0
     """The number of sessions in which this cell was detected during multi-day tracking."""
 
     @staticmethod
@@ -980,29 +978,31 @@ class ROIStatistics:
         if not roi_list:
             return
 
-        # Concatenates variable-length pixel arrays and stores counts for reconstruction.
-        pixel_counts = np.array([len(roi.y_pixels) for roi in roi_list], dtype=np.int32)
+        # Concatenates variable-length pixel arrays and stores counts for reconstruction. Uses uint32 for pixel
+        # counts since they are always non-negative and can be large for big ROIs.
+        pixel_counts = np.array([len(roi.y_pixels) for roi in roi_list], dtype=np.uint32)
         all_y_pixels = np.concatenate([roi.y_pixels for roi in roi_list])
         all_x_pixels = np.concatenate([roi.x_pixels for roi in roi_list])
         all_pixel_weights = np.concatenate([roi.pixel_weights for roi in roi_list])
         all_soma_mask = np.concatenate([roi.soma_mask for roi in roi_list])
         all_overlap_mask = np.concatenate([roi.overlap_mask for roi in roi_list])
 
-        # Stores scalar fields as 1D arrays.
+        # Stores scalar fields as 1D arrays using appropriate types: uint16 for small non-negative integers,
+        # uint32 for larger counts, and float32 for real-valued measurements.
         centroids = np.array([roi.centroid for roi in roi_list], dtype=np.float32)
-        footprints = np.array([roi.footprint for roi in roi_list], dtype=np.int32)
+        footprints = np.array([roi.footprint for roi in roi_list], dtype=np.uint16)
         mean_r_squared = np.array([roi.mean_r_squared for roi in roi_list], dtype=np.float32)
         mean_r_squared_baseline = np.array([roi.mean_r_squared_baseline for roi in roi_list], dtype=np.float32)
         compactness = np.array([roi.compactness for roi in roi_list], dtype=np.float32)
         solidity = np.array([roi.solidity for roi in roi_list], dtype=np.float32)
-        pixel_count = np.array([roi.pixel_count for roi in roi_list], dtype=np.int32)
-        soma_pixel_count = np.array([roi.soma_pixel_count for roi in roi_list], dtype=np.int32)
+        pixel_count = np.array([roi.pixel_count for roi in roi_list], dtype=np.uint32)
+        soma_pixel_count = np.array([roi.soma_pixel_count for roi in roi_list], dtype=np.uint32)
         radius = np.array([roi.radius for roi in roi_list], dtype=np.float32)
         aspect_ratio = np.array([roi.aspect_ratio for roi in roi_list], dtype=np.float32)
         normalized_pixel_count = np.array([roi.normalized_pixel_count for roi in roi_list], dtype=np.float32)
         normalized_pixel_count_full = np.array([roi.normalized_pixel_count_full for roi in roi_list], dtype=np.float32)
 
-        # Stores optional scalar fields, using NaN for missing values.
+        # Stores optional float fields using NaN for missing values.
         skewness = np.array(
             [roi.skewness if roi.skewness is not None else np.nan for roi in roi_list], dtype=np.float32
         )
@@ -1010,15 +1010,12 @@ class ROIStatistics:
             [roi.standard_deviation if roi.standard_deviation is not None else np.nan for roi in roi_list],
             dtype=np.float32,
         )
-        plane_index = np.array(
-            [roi.plane_index if roi.plane_index is not None else -1 for roi in roi_list], dtype=np.int32
-        )
-        cluster_id = np.array(
-            [roi.cluster_id if roi.cluster_id is not None else -1 for roi in roi_list], dtype=np.int32
-        )
-        session_count = np.array(
-            [roi.session_count if roi.session_count is not None else -1 for roi in roi_list], dtype=np.int32
-        )
+
+        # Stores plane and multi-day tracking fields. Uses unsigned types since these are non-negative counts/indices.
+        # Zero indicates "not set" or "unclustered" for multi-day fields.
+        plane_index = np.array([roi.plane_index for roi in roi_list], dtype=np.uint8)
+        cluster_id = np.array([roi.cluster_id for roi in roi_list], dtype=np.uint32)
+        session_count = np.array([roi.session_count for roi in roi_list], dtype=np.uint16)
 
         # Builds the save dictionary with required fields.
         save_dict = {
@@ -1047,22 +1044,24 @@ class ROIStatistics:
             "session_count": session_count,
         }
 
-        # Handles optional variable-length neuropil_mask arrays.
+        # Handles optional variable-length neuropil_mask arrays. Uses uint32 for counts since they are always
+        # non-negative and can be large.
         has_neuropil = [roi.neuropil_mask is not None for roi in roi_list]
         if any(has_neuropil):
             neuropil_counts = np.array(
-                [len(roi.neuropil_mask) if roi.neuropil_mask is not None else 0 for roi in roi_list], dtype=np.int32
+                [len(roi.neuropil_mask) if roi.neuropil_mask is not None else 0 for roi in roi_list], dtype=np.uint32
             )
             neuropil_masks = [roi.neuropil_mask for roi in roi_list if roi.neuropil_mask is not None]
             if neuropil_masks:
                 save_dict["neuropil_counts"] = neuropil_counts
                 save_dict["neuropil_mask"] = np.concatenate(neuropil_masks)
 
-        # Handles optional variable-length raveled_pixels arrays.
+        # Handles optional variable-length raveled_pixels arrays. Uses uint32 for counts since they are always
+        # non-negative and can be large.
         has_raveled = [roi.raveled_pixels is not None for roi in roi_list]
         if any(has_raveled):
             raveled_counts = np.array(
-                [len(roi.raveled_pixels) if roi.raveled_pixels is not None else 0 for roi in roi_list], dtype=np.int32
+                [len(roi.raveled_pixels) if roi.raveled_pixels is not None else 0 for roi in roi_list], dtype=np.uint32
             )
             raveled_arrays = [roi.raveled_pixels for roi in roi_list if roi.raveled_pixels is not None]
             if raveled_arrays:
@@ -1161,10 +1160,10 @@ class ROIStatistics:
                 skewness=None if np.isnan(skewness[i]) else float(skewness[i]),
                 standard_deviation=None if np.isnan(standard_deviation[i]) else float(standard_deviation[i]),
                 neuropil_mask=neuropil_mask_list[i],
-                plane_index=None if plane_index[i] == -1 else int(plane_index[i]),
-                cluster_id=None if cluster_id[i] == -1 else int(cluster_id[i]),
+                plane_index=int(plane_index[i]),
+                cluster_id=int(cluster_id[i]),
                 raveled_pixels=raveled_pixels_list[i],
-                session_count=None if session_count[i] == -1 else int(session_count[i]),
+                session_count=int(session_count[i]),
             )
             roi_list.append(roi)
 
@@ -1335,9 +1334,9 @@ class ExtractionData:
             self.cell_classification = np.load(cell_classification_path, allow_pickle=False).astype(np.float32)
 
         # Channel 2 ROI statistics.
-        roi_stats_chan2_path = output_path / "roi_statistics_channel_2.npz"
-        if self.roi_statistics_channel_2 is None and roi_stats_chan2_path.exists():
-            self.roi_statistics_channel_2 = ROIStatistics.load_list(roi_stats_chan2_path)
+        roi_stats_channel_2_path = output_path / "roi_statistics_channel_2.npz"
+        if self.roi_statistics_channel_2 is None and roi_stats_channel_2_path.exists():
+            self.roi_statistics_channel_2 = ROIStatistics.load_list(roi_stats_channel_2_path)
 
         # Channel 2 trace arrays.
         cell_fluorescence_channel_2_path = output_path / "cell_fluorescence_channel_2.npy"
@@ -1372,6 +1371,104 @@ class ExtractionData:
         cell_colocalization_path = output_path / "cell_colocalization.npy"
         if self.cell_colocalization is None and cell_colocalization_path.exists():
             self.cell_colocalization = np.load(cell_colocalization_path, allow_pickle=False).astype(np.float32)
+
+
+@dataclass
+class CombinedData:
+    """Stores combined multi-plane detection and extraction data.
+
+    This class provides a container for the results of combining processed data from multiple imaging planes
+    into a unified dataset. It holds DetectionData (combined images) and ExtractionData (combined ROI statistics,
+    fluorescence traces, and classification results) along with metadata about the combined field of view.
+
+    Notes:
+        Combined data is saved to the root suite2p directory alongside configuration.yaml and
+        acquisition_parameters.yaml. The same filenames are used as per-plane data, but stored at the root
+        level rather than in plane subdirectories.
+    """
+
+    detection: DetectionData
+    """The combined detection data including mean images, correlation maps, and maximum projections for both
+    channels."""
+
+    extraction: ExtractionData
+    """The combined extraction data including ROI statistics, fluorescence traces, and classification results for
+    both channels."""
+
+    plane_count: int = 0
+    """The number of planes that were combined."""
+
+    combined_height: int = 0
+    """The height of the combined field of view in pixels."""
+
+    combined_width: int = 0
+    """The width of the combined field of view in pixels."""
+
+    def save(self, root_path: Path) -> None:
+        """Saves combined data to the root suite2p directory.
+
+        This method saves all combined detection and extraction arrays to the root suite2p directory. Metadata
+        (plane count, dimensions) is saved to combined_metadata.npz.
+
+        Args:
+            root_path: The root suite2p output directory containing configuration.yaml.
+        """
+        ensure_directory_exists(root_path)
+
+        # Saves metadata using appropriate unsigned types for counts and dimensions.
+        np.savez(
+            root_path / "combined_metadata.npz",
+            allow_pickle=False,
+            plane_count=np.array([self.plane_count], dtype=np.uint8),
+            combined_height=np.array([self.combined_height], dtype=np.uint32),
+            combined_width=np.array([self.combined_width], dtype=np.uint32),
+        )
+
+        # Saves combined detection and extraction arrays using existing methods.
+        self.detection.save_arrays(root_path)
+        self.extraction.save_arrays(root_path)
+
+    @classmethod
+    def load(cls, root_path: Path) -> CombinedData:
+        """Loads combined data from the root suite2p directory.
+
+        Args:
+            root_path: The root suite2p output directory containing combined_metadata.npz.
+
+        Returns:
+            A CombinedData instance with all combined arrays loaded.
+
+        Raises:
+            FileNotFoundError: If the combined metadata file does not exist.
+        """
+        metadata_path = root_path / "combined_metadata.npz"
+        if not metadata_path.exists():
+            message = (
+                f"Unable to load combined data. The combined metadata file does not exist at the specified path: "
+                f"{metadata_path}."
+            )
+            console.error(message=message, error=FileNotFoundError)
+
+        # Loads metadata.
+        metadata = np.load(metadata_path, allow_pickle=False)
+        plane_count = int(metadata["plane_count"][0])
+        combined_height = int(metadata["combined_height"][0])
+        combined_width = int(metadata["combined_width"][0])
+
+        # Loads detection and extraction arrays using existing methods.
+        detection = DetectionData()
+        detection.load_arrays(root_path)
+
+        extraction = ExtractionData()
+        extraction.load_arrays(root_path)
+
+        return cls(
+            detection=detection,
+            extraction=extraction,
+            plane_count=plane_count,
+            combined_height=combined_height,
+            combined_width=combined_width,
+        )
 
 
 @dataclass
@@ -1614,3 +1711,105 @@ class RuntimeContext:
 
     runtime: SingleDayRuntimeData
     """The runtime data, which is computed and updated by pipeline stages."""
+
+    def save_shared(self) -> None:
+        """Saves shared configuration and acquisition parameters to the root output directory.
+
+        This method derives the root path from self.config.file_io.save_path and creates the suite2p subdirectory
+        if it does not exist. It should be called once at pipeline initialization to save the static data shared
+        across all planes.
+
+        Raises:
+            ValueError: If save_path is not configured in the configuration.
+        """
+        if self.config.file_io.save_path is None:
+            message = (
+                "Unable to save shared configuration data. The save_path must be configured in the FileIO section "
+                "of the configuration, but it is currently None."
+            )
+            console.error(message=message, error=ValueError)
+
+        root_path = self.config.file_io.save_path / "suite2p"
+        root_path.mkdir(parents=True, exist_ok=True)
+
+        self.config.save(file_path=root_path / "configuration.yaml")
+        self.acquisition.to_yaml(file_path=root_path / "acquisition_parameters.yaml")
+
+    def save_runtime(self) -> None:
+        """Saves this plane's runtime data to its output directory.
+
+        This method uses self.runtime.io.output_directory as the save location. This directory is set during plane
+        initialization and is plane-specific (e.g., plane_0/).
+
+        Raises:
+            ValueError: If output_directory is not set in the runtime IOData.
+        """
+        if self.runtime.io.output_directory is None:
+            message = (
+                "Unable to save runtime data. The output_directory must be set in the IOData section of the "
+                "runtime data, but it is currently None."
+            )
+            console.error(message=message, error=ValueError)
+
+        self.runtime.save(output_path=self.runtime.io.output_directory)
+
+    @classmethod
+    def load(cls, root_path: Path, plane_index: int = -1) -> RuntimeContext | list[RuntimeContext]:
+        """Loads one or more instances from disk.
+
+        This method loads the shared configuration and acquisition parameters from the root suite2p directory, then
+        loads plane-specific runtime data from plane directories. Use plane_index=-1 to load all available planes,
+        or specify a non-negative index to load a single plane.
+
+        Args:
+            root_path: The root suite2p output directory containing configuration.yaml and acquisition_parameters.yaml.
+            plane_index: The index of the plane to load. Use -1 to load all available planes.
+
+        Returns:
+            A single RuntimeContext if plane_index >= 0, or a list of all RuntimeContext instances if plane_index
+            is -1.
+
+        Raises:
+            FileNotFoundError: If the configuration files or specified plane directory do not exist.
+        """
+        config_path = root_path / "configuration.yaml"
+        acquisition_path = root_path / "acquisition_parameters.yaml"
+
+        if not config_path.exists():
+            message = (
+                f"Unable to load RuntimeContext. Configuration file does not exist at the specified path: "
+                f"{config_path}."
+            )
+            console.error(message=message, error=FileNotFoundError)
+
+        if not acquisition_path.exists():
+            message = (
+                f"Unable to load RuntimeContext. Acquisition parameters file does not exist at the specified path: "
+                f"{acquisition_path}."
+            )
+            console.error(message=message, error=FileNotFoundError)
+
+        config = SingleDayConfiguration.load(file_path=config_path)
+        acquisition = AcquisitionParameters.from_yaml(file_path=acquisition_path)
+
+        if plane_index == -1:
+            # Loads all planes.
+            plane_directories = natsorted([d for d in root_path.glob("plane_*") if d.is_dir()])
+            contexts: list[RuntimeContext] = []
+
+            for plane_directory in plane_directories:
+                runtime = SingleDayRuntimeData.load(output_path=plane_directory)
+                contexts.append(cls(config=config, acquisition=acquisition, runtime=runtime))
+
+            return contexts
+
+        # Loads a specific plane.
+        plane_path = root_path / f"plane_{plane_index}"
+        if not plane_path.exists():
+            message = (
+                f"Unable to load RuntimeContext. Plane directory does not exist at the specified path: {plane_path}."
+            )
+            console.error(message=message, error=FileNotFoundError)
+
+        runtime = SingleDayRuntimeData.load(output_path=plane_path)
+        return cls(config=config, acquisition=acquisition, runtime=runtime)

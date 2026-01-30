@@ -96,8 +96,8 @@ def ss2p_sd_config(ctx: Any) -> None:
     file_path = Path(ctx.obj["file_path"])
 
     # Generates the precursor configuration file in the specified output directory.
-    precursor: SingleDayConfiguration = generate_default_ops(as_dict=False)
-    precursor.to_config(file_path=file_path)
+    config = SingleDayConfiguration()
+    config.save(file_path=file_path)
 
     message = (
         f"Default single-day pipeline configuration file: generated in the {file_path.parent} directory. Modify "
@@ -123,8 +123,8 @@ def ss2p_md_config(ctx: Any) -> None:
     file_path = Path(ctx.obj["file_path"])
 
     # Generates the precursor configuration file in the specified output directory.
-    precursor: MultiDayConfiguration = generate_default_multiday_ops(as_dict=False)
-    precursor.to_config(file_path=file_path)
+    config = MultiDayConfiguration()
+    config.save(file_path=file_path)
 
     message = (
         f"Default multi-day pipeline configuration file: generated in the {file_path.parent} directory. Modify "

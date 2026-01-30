@@ -17,7 +17,7 @@ from sl_shared_assets import (
 from ataraxis_base_utilities import LogLevel, console
 
 from .multi_day import resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
-from .single_day import resolve_ops, process_plane, combine_planes, resolve_binaries
+from .single_day import process_plane, combine_planes
 from .configuration import MultiDayConfiguration, SingleDayConfiguration
 
 # Defines the session types and acquisition systems currently supported by the processing pipeline.
@@ -136,10 +136,14 @@ def _execute_single_day_job(
     tracker.start_job(job_id=job_id)
 
     try:
+        # NOTE: This function requires refactoring to use RuntimeContext instead of ops_path.
+        # The following calls will fail until process_plane() and combine_planes() are updated.
         if job_name.endswith(SingleDayJobNames.BINARIZE):
-            resolve_binaries(ops_path=ops_path)
+            # Was: resolve_processing_contexts(ops_path=ops_path)
+            # Now: resolve_processing_contexts(config) - but we don't have config here, need refactoring.
+            raise NotImplementedError("BINARIZE job requires refactoring to use RuntimeContext architecture.")
 
-        elif f"_{SingleDayJobNames.PROCESS}_plane_" in job_name:
+        if f"_{SingleDayJobNames.PROCESS}_plane_" in job_name:
             process_plane(ops_path=ops_path, plane_index=int(job_name.split("_plane_")[1]))
 
         elif job_name.endswith(SingleDayJobNames.COMBINE):
@@ -250,6 +254,15 @@ def process_single_day(
     config.file_io.save_path = str(session_data.processed_data.mesoscope_data_path)
     config.file_io.data_path = str(session_data.raw_data.mesoscope_data_path)
 
+    # NOTE: The ops-based architecture has been replaced with RuntimeContext.
+    # This function requires refactoring to use the new architecture.
+    # For now, raise an error to indicate the pipeline is not yet updated.
+    raise NotImplementedError(
+        "process_single_day() requires refactoring to use RuntimeContext architecture. "
+        "Use run_s2p(config) directly for the new API."
+    )
+
+    # Legacy code below - to be removed after refactoring:
     # Converts the dataclass to an 'ops' dictionary instance.
     ops = config.to_ops()
 
@@ -257,7 +270,8 @@ def process_single_day(
     db = overrides if overrides is not None else {}
 
     # Generates the ops.npy file for the runtime.
-    ops_path = resolve_ops(ops=ops, db=db)
+    # Was: ops_path = resolve_ops(ops=ops, db=db)
+    ops_path = None  # Placeholder - resolve_ops no longer exists
 
     # Determines which jobs to run based on the flags.
     requested_jobs: dict[str, bool] = {
