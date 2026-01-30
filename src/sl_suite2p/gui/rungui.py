@@ -112,10 +112,7 @@ class RunWindow(QDialog):
             "do_registration",
         ]
         self.boolkeys = [
-            "delete_bin",
-            "do_bidiphase",
-            "reg_tif",
-            "reg_tif_chan2",
+            "compute_bidirectional_phase_offset",
             "one_p_reg",
             "nonrigid",
             "roidetect",
@@ -131,16 +128,13 @@ class RunWindow(QDialog):
             "functional_chan",
             "tau",
             "fs",
-            "do_bidiphase",
-            "bidiphase",
+            "compute_bidirectional_phase_offset",
+            "bidirectional_phase_offset",
             "ignore_flyback",
         ]
         outkeys = [
-            "preclassify",
-            "reg_tif",
-            "reg_tif_chan2",
-            "aspect",
-            "delete_bin",
+            "preclassification_threshold",
+            "aspect_ratio",
         ]
         regkeys = [
             "do_registration",
@@ -163,14 +157,14 @@ class RunWindow(QDialog):
             "denoise",
             "spatial_scale",
             "threshold_scaling",
-            "max_overlap",
-            "max_iterations",
+            "maximum_overlap",
+            "maximum_iterations",
             "high_pass",
             "spatial_hp_detect",
         ]
         neudeconvkeys = [
             ["extract_neuropil", "allow_overlap", "inner_neuropil_border_radius", "minimum_neuropil_pixels"],
-            ["soma_crop", "extract_spikes", "baseline_window", "baseline_sigma", "neuropil_coefficient"],
+            ["crop_to_soma", "extract_spikes", "baseline_window", "baseline_sigma", "neuropil_coefficient"],
         ]
         keys = [tifkeys, outkeys, regkeys, nrkeys, cellkeys, neudeconvkeys]
         labels = [
@@ -192,10 +186,7 @@ class RunWindow(QDialog):
             "process each plane with a separate job on a computing cluster",
             "ignore flyback planes 0-indexed separated by a comma e.g. '0,10'; '-1' means no planes ignored so all planes processed",
             "apply ROI classifier before signal extraction with probability threshold (set to 0 to turn off)",
-            "if 1, registered tiffs are saved",
-            "if 1, registered tiffs of channel 2 (non-functional channel) are saved",
             "um/pixels in X / um/pixels in Y (for correct aspect ratio in GUI)",
-            "if 1, binary file is deleted after processing is complete",
             "if 1, registration is performed if it wasn't performed already",
             "when multi-channel, you can align by non-functional channel (1-based)",
             "# of subsampled frames for finding reference image",
@@ -661,7 +652,7 @@ class LineEdit(QLineEdit):
 
     def get_text(self, intkeys, boolkeys, stringkeys):
         key = self.key
-        if key == "diameter" or key == "block_size":
+        if key == "cell_diameter" or key == "block_size":
             diams = self.text().replace(" ", "").split(",")
             if len(diams) > 1:
                 okey = [int(diams[0]), int(diams[1])]
@@ -685,7 +676,7 @@ class LineEdit(QLineEdit):
 
     def set_text(self, ops):
         key = self.key
-        if key == "diameter" or key == "block_size":
+        if key == "cell_diameter" or key == "block_size":
             if (type(ops[key]) is not int) and (len(ops[key]) > 1):
                 dstr = str(int(ops[key][0])) + ", " + str(int(ops[key][1]))
             else:

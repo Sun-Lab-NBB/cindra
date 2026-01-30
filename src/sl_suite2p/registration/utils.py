@@ -234,20 +234,21 @@ def spatial_high_pass(data, N):
     return data_filtered.squeeze()
 
 
-def complex_fft2(img: np.ndarray, pad_fft: bool = False) -> np.ndarray:
-    """Returns the complex conjugate of the fft-transformed 2D array "img", optionally padded for speed.
+def complex_fft2(img: np.ndarray) -> np.ndarray:
+    """Returns the complex conjugate of the fft-transformed 2D array "img", padded for speed.
 
     Parameters
     ----------
     img: Ly x Lx
-        The image to process
-    pad_fft: bool
-        Whether to pad the image
+        The image to process.
 
-
+    Returns
+    -------
+    np.ndarray
+        The complex conjugate of the FFT-transformed and padded image.
     """
     Ly, Lx = img.shape
-    return np.conj(fft2(img, (next_fast_len(Ly), next_fast_len(Lx)))) if pad_fft else np.conj(fft2(img))
+    return np.conj(fft2(img, (next_fast_len(Ly), next_fast_len(Lx))))
 
 
 def kernelD(xs: np.ndarray, ys: np.ndarray, sigL: float = 0.85) -> np.ndarray:

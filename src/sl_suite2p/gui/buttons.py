@@ -99,8 +99,8 @@ class QuadButton(QPushButton):
             if parent.quadbtns.button(b).isEnabled():
                 parent.quadbtns.button(b).setStyleSheet(parent.styleUnpressed)
         self.setStyleSheet(parent.stylePressed)
-        self.xrange = np.array([self.xpos - 0.15, self.xpos + 1.15]) * parent.ops["Lx"] / 3
-        self.yrange = np.array([self.ypos - 0.15, self.ypos + 1.15]) * parent.ops["Ly"] / 3
+        self.xrange = np.array([self.xpos - 0.15, self.xpos + 1.15]) * parent.ops["frame_width"] / 3
+        self.yrange = np.array([self.ypos - 0.15, self.ypos + 1.15]) * parent.ops["frame_height"] / 3
         # change the zoom
         parent.p1.setXRange(self.xrange[0], self.xrange[1])
         parent.p1.setYRange(self.yrange[0], self.yrange[1])

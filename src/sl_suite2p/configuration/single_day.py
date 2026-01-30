@@ -427,7 +427,7 @@ class ROIDetection:
     Setting this to 0 forces the algorithm to determine this value automatically. Values above 0 are applied in
     increments of 6 pixels (1 -> 6 pixels, 2 -> 12 pixels, etc.)."""
 
-    diameter: int = 0
+    cell_diameter: int = 0
     """The expected cell diameter in pixels. Setting this to 0 forces the algorithm to estimate the diameter from the
     spatial scale during detection. The diameter is computed as 3 * 2^spatial_scale."""
 

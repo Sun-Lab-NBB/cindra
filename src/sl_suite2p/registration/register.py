@@ -290,8 +290,8 @@ def register_frames(refAndMasks, frames, rmin=-np.inf, rmax=np.inf, bidiphase=0,
 
 
 def shift_frames(frames, yoff, xoff, yoff1, xoff1, blocks=None, ops=generate_default_ops()):
-    if ops["bidiphase"] != 0 and not ops["bidi_corrected"]:
-        bidi.shift(frames, int(ops["bidiphase"]))
+    if ops["bidirectional_phase_offset"] != 0 and not ops["bidirectional_phase_corrected"]:
+        bidi.shift(frames, int(ops["bidirectional_phase_offset"]))
 
     for frame, dy, dx in zip(frames, yoff, xoff, strict=False):
         frame[:] = rigid.shift_frame(frame=frame, dy=dy, dx=dx)
@@ -337,16 +337,16 @@ def compute_reference_and_register_frames(
         # grab frames
         frames = f_align_in[np.linspace(0, n_frames, 1 + np.minimum(ops["nimg_init"], n_frames), dtype=int)[:-1]]
         # compute bidiphase shift
-        if ops["do_bidiphase"] and ops["bidiphase"] == 0 and not ops["bidi_corrected"]:
+        if ops["compute_bidirectional_phase_offset"] and ops["bidirectional_phase_offset"] == 0 and not ops["bidirectional_phase_corrected"]:
             bidiphase = bidi.compute(frames)
             console.echo(
                 f"Plane {plane_number} estimated bidiphase offset from data: {bidiphase} pixels.",
                 level=LogLevel.INFO,
             )
-            ops["bidiphase"] = bidiphase
+            ops["bidirectional_phase_offset"] = bidiphase
             # shift frames
             if bidiphase != 0:
-                bidi.shift(frames, int(ops["bidiphase"]))
+                bidi.shift(frames, int(ops["bidirectional_phase_offset"]))
 
         if refImg is None:
             console.echo(f"Computing plane {plane_number} reference frame...", level=LogLevel.INFO)
@@ -364,8 +364,8 @@ def compute_reference_and_register_frames(
     else:
         rmin, rmax = -np.inf, np.inf
 
-    if ops["bidiphase"] and not ops["bidi_corrected"]:
-        bidiphase = int(ops["bidiphase"])
+    if ops["bidirectional_phase_offset"] and not ops["bidirectional_phase_corrected"]:
+        bidiphase = int(ops["bidirectional_phase_offset"])
     else:
         bidiphase = 0
 
@@ -374,9 +374,6 @@ def compute_reference_and_register_frames(
     # Register frames to reference image
     mean_img = np.zeros((Ly, Lx), "float32")
     rigid_offsets, nonrigid_offsets, zpos, cmax_all = [], [], [], []
-
-    if ops["frames_include"] != -1:
-        n_frames = min(n_frames, ops["frames_include"])
 
     timer.reset()
     console.echo(f"Computing plane {plane_number} frame registration offsets for channel 1...", level=LogLevel.INFO)
@@ -447,9 +444,6 @@ def shift_frames_and_write(
             console.error(message=message, error=ValueError)
 
         blocks = nonrigid.make_blocks(Ly=Ly, Lx=Lx, block_size=ops["block_size"])
-
-    if ops["frames_include"] != -1:
-        n_frames = min(n_frames, ops["frames_include"])
 
     mean_img = np.zeros((Ly, Lx), "float32")
     batch_size = ops["batch_size"]
@@ -662,19 +656,19 @@ def save_registration_outputs_to_ops(registration_outputs, ops):
         registration_outputs
     )
     # assign reference image and normalizers
-    ops["refImg"] = refImg
+    ops["reference_image"] = refImg
     ops["rmin"], ops["rmax"] = rmin, rmax
     # assign rigid offsets to ops
-    ops["yoff"], ops["xoff"], ops["corrXY"] = rigid_offsets
+    ops["rigid_y_offsets"], ops["rigid_x_offsets"], ops["rigid_correlations"] = rigid_offsets
     # assign nonrigid offsets to ops
     if ops["nonrigid"]:
-        ops["yoff1"], ops["xoff1"], ops["corrXY1"] = nonrigid_offsets
+        ops["nonrigid_y_offsets"], ops["nonrigid_x_offsets"], ops["nonrigid_correlations"] = nonrigid_offsets
     # assign mean images
     ops["mean_image"] = meanImg
     if meanImg_chan2 is not None:
         ops["mean_image_channel_2"] = meanImg_chan2
     # assign crop computation and badframes
-    ops["badframes"], ops["yrange"], ops["xrange"] = badframes, yrange, xrange
+    ops["badframes"], ops["valid_y_range"], ops["valid_x_range"] = badframes, yrange, xrange
     if len(zest[0]) > 0:
         ops["zpos_registration"] = np.array(zest[0])
         ops["cmax_registration"] = np.array(zest[1])
@@ -699,12 +693,12 @@ def create_enhanced_mean_image(ops):
     maximum_intensity = 6
 
     # If the spatial scaling is not defined inside the 'ops' dictionary, determines the optimal spatial scaling based
-    # on the diameter of the discovered cell ROI objects.
+    # on the cell_diameter of the discovered cell ROI objects.
     if "spatial_scale_pixels" not in ops:
-        if isinstance(ops["diameter"], int):
-            cell_diameter = np.array([ops["diameter"], ops["diameter"]])
+        if isinstance(ops["cell_diameter"], int):
+            cell_diameter = np.array([ops["cell_diameter"], ops["cell_diameter"]])
         else:
-            cell_diameter = np.array(ops["diameter"])
+            cell_diameter = np.array(ops["cell_diameter"])
 
         # If the diameter is set to 0, the CellPose algorithm has not yet established the ROI diameter. In this case,
         # defaults to using the diameter of 12 pixels.
@@ -713,10 +707,10 @@ def create_enhanced_mean_image(ops):
 
         # Calculates the spatial scaling and the aspect ratio based on the resolved cell ROI diameter.
         ops["spatial_scale_pixels"] = cell_diameter[1]
-        ops["aspect"] = cell_diameter[0] / cell_diameter[1]
+        ops["aspect_ratio"] = cell_diameter[0] / cell_diameter[1]
 
     # Creates a median filter with a large kernel (4 * cell diameter)
-    filter_height = scale_background * np.ceil(ops["spatial_scale_pixels"] * ops["aspect"]) + 1
+    filter_height = scale_background * np.ceil(ops["spatial_scale_pixels"] * ops["aspect_ratio"]) + 1
     filter_width = scale_background * np.ceil(ops["spatial_scale_pixels"]) + 1
     filter_kernel_size = (int(filter_height), int(filter_width))
 
@@ -731,8 +725,8 @@ def create_enhanced_mean_image(ops):
 
     # Excludes the pixels along the border of the image, as they are typically discarded during the registration
     # process.
-    y_start, y_end = ops["yrange"]
-    x_start, x_end = ops["xrange"]
+    y_start, y_end = ops["valid_y_range"]
+    x_start, x_end = ops["valid_x_range"]
     roi_image = normalized_image[y_start:y_end, x_start:x_end]
 
     # Clips the normalized image intensities to +-6 standard deviations after normalization and scales the image to
@@ -742,7 +736,7 @@ def create_enhanced_mean_image(ops):
 
     # Places the enhanced mean image back into the original mean image array, replacing the pixels along the border with
     # the minimal intensity values.
-    height, width = ops["Ly"], ops["Lx"]
+    height, width = ops["frame_height"], ops["frame_width"]
     enhanced_image = np.full((height, width), scaled_roi.min(), dtype=np.float32)
     enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
 

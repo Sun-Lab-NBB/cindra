@@ -498,9 +498,9 @@ class MainWindow(QMainWindow):
         xrange = (np.arange(-1 * int(sizex), 1) + int(posx)).astype(np.int32)
         yrange = (np.arange(-1 * int(sizey), 1) + int(posy)).astype(np.int32)
         xrange = xrange[xrange >= 0]
-        xrange = xrange[xrange < self.ops["Lx"]]
+        xrange = xrange[xrange < self.ops["frame_width"]]
         yrange = yrange[yrange >= 0]
-        yrange = yrange[yrange < self.ops["Ly"]]
+        yrange = yrange[yrange < self.ops["frame_height"]]
         ypix, xpix = np.meshgrid(yrange, xrange)
         self.select_cells(ypix, xpix)
 

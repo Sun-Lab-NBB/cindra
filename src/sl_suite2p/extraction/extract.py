@@ -241,10 +241,10 @@ def extract_traces_from_masks(
         neuropil_masks: An array containing pixel indices of the neuropil surrounding the ROI.
     """
     batch_size = ops["batch_size"]
-    height = ops["Ly"]
-    width = ops["Lx"]
+    height = ops["frame_height"]
+    width = ops["frame_width"]
 
-    with BinaryFile(height=height, width=width, file_path=ops["reg_file"]) as f:
+    with BinaryFile(height=height, width=width, file_path=ops["registered_binary_path"]) as f:
         cell_fluorescence, neuropil_fluorescence = extract_traces(
             data=f, cell_masks=cell_masks, neuropil_masks=neuropil_masks, batch_size=batch_size
         )
@@ -252,8 +252,8 @@ def extract_traces_from_masks(
     cell_fluorescence_channel_2 = []
     neuropil_fluorescence_channel_2 = []
 
-    if ops.get("reg_file_chan2"):
-        with BinaryFile(height=height, width=width, file_path=ops["reg_file_chan2"]) as f:
+    if ops.get("registered_binary_path_channel_2"):
+        with BinaryFile(height=height, width=width, file_path=ops["registered_binary_path_channel_2"]) as f:
             cell_fluorescence_channel_2, neuropil_fluorescence_channel_2 = extract_traces(
                 data=f, cell_masks=cell_masks, neuropil_masks=neuropil_masks, batch_size=batch_size
             )

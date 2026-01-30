@@ -66,7 +66,7 @@ def import_sessions(ops: dict[str, Any]) -> MultiDayData:
         images = {
             "mean": single_day_ops["mean_image"].astype(np.float32),
             "enhanced": single_day_ops["enhanced_mean_image"].astype(np.float32),
-            "max": single_day_ops["max_proj"].astype(np.float32),
+            "max": single_day_ops["maximum_projection"].astype(np.float32),
         }
 
         # Resolves parameters for the list comprehension below to make it visually simpler

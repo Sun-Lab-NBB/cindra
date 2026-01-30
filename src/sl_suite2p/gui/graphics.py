@@ -112,18 +112,18 @@ class ViewBox(pg.ViewBox):
                 self.parent.update_plot()
 
     def zoom_plot(self):
-        self.setXRange(0, self.parent.ops["Lx"])
-        self.setYRange(0, self.parent.ops["Ly"])
+        self.setXRange(0, self.parent.ops["frame_width"])
+        self.setYRange(0, self.parent.ops["frame_height"])
         self.parent.p2.setXLink(self.parent.p1)
         self.parent.p2.setYLink(self.parent.p1)
         self.parent.show()
 
 
 def init_range(parent):
-    parent.p1.setXRange(0, parent.ops["Lx"])
-    parent.p1.setYRange(0, parent.ops["Ly"])
-    parent.p2.setXRange(0, parent.ops["Lx"])
-    parent.p2.setYRange(0, parent.ops["Ly"])
+    parent.p1.setXRange(0, parent.ops["frame_width"])
+    parent.p1.setYRange(0, parent.ops["frame_height"])
+    parent.p2.setXRange(0, parent.ops["frame_width"])
+    parent.p2.setYRange(0, parent.ops["frame_height"])
     parent.p3.setLimits(xMin=0, xMax=parent.Fcell.shape[1])
     parent.trange = np.arange(0, parent.Fcell.shape[1])
 
@@ -131,8 +131,8 @@ def init_range(parent):
 def ROI_index(ops, stat):
     """Matrix Ly x Lx where each pixel is an ROI index (-1 if no ROI present)"""
     ncells = len(stat) - 1
-    Ly = ops["Ly"]
-    Lx = ops["Lx"]
+    Ly = ops["frame_height"]
+    Lx = ops["frame_width"]
     iROI = -1 * np.ones((Ly, Lx), dtype=np.int32)
     for n in range(ncells):
         ypix = stat[n]["ypix"][~stat[n]["overlap"]]
