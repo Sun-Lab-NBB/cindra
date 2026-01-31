@@ -14,6 +14,15 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
+# Number of bytes used to store each int16 pixel value.
+_BYTES_PER_INT16: int = 2
+
+# Maximum value that can be stored in a signed 16-bit integer, minus a small buffer.
+_INT16_MAX_VALUE: int = 2**15 - 2
+
+# Default maximum batch size for frame binning operations.
+_DEFAULT_BIN_BATCH_SIZE: int = 500
+
 
 class BinaryFile:
     """Creates or opens a Suite2p BinaryFile (.bin) for reading and/or writing image data.
@@ -104,18 +113,18 @@ class BinaryFile:
             )
             console.error(message=message, error=FileNotFoundError)
 
-        # Ensures that the destination file uses the .bin suffix. If the destination path points to a directory, this
-        # converts the directory path to a binary file path by adding the .bin suffix.
-        if destination_file_name.suffix == ".bin":
-            destination_file_name.with_suffix(".bin")
+        # Ensures that the destination file uses the .bin suffix. If the destination path does not have the .bin suffix,
+        # this appends the .bin suffix to the path.
+        if destination_file_name.suffix != ".bin":
+            destination_file_name = destination_file_name.with_suffix(".bin")
 
         # Uses NumPy API to convert the file.
         np.load(source_file_name).tofile(destination_file_name)
 
     @property
-    def bytes_per_frame_number(self) -> int:
+    def bytes_per_frame(self) -> int:
         """Returns the memory size, in bytes, reserved by each frame stored inside the file."""
-        return int(2 * self.height * self.width)
+        return int(_BYTES_PER_INT16 * self.height * self.width)
 
     @property
     def byte_number(self) -> int:
@@ -125,7 +134,7 @@ class BinaryFile:
     @property
     def frame_number(self) -> int:
         """Returns the total number of frames stored in the file."""
-        return int(self.byte_number // self.bytes_per_frame_number)
+        return int(self.byte_number // self.bytes_per_frame)
 
     @property
     def shape(self) -> tuple[int, int, int]:
@@ -170,9 +179,9 @@ class BinaryFile:
             indices: A slice, integer, or iterable that specifies the indices at which to write the data.
             data: The data to be written to the specified indices.
         """
-        # Checks and converts data type to int16, if needed.
+        # Checks and converts data type to int16, if needed. Clips values to the maximum representable int16 value.
         if data.dtype != "int16":
-            data = np.minimum(data, 2**15 - 2).astype("int16")
+            data = np.minimum(data, _INT16_MAX_VALUE).astype("int16")
 
         # Writes data to the memory-mapped file.
         self.file[indices] = data
@@ -231,9 +240,9 @@ class BinaryFile:
         # the frames as good.
         good_frames = ~bad_frames if bad_frames is not None else np.ones(self.frame_number, dtype=bool)
 
-        # Resolves the batch size. It is capped either to the provided maximum limit or the total number of good frames
-        # if there are fewer good frames than 500.
-        batch_size = min(int(np.sum(good_frames.astype(int))), 500)
+        # Resolves the batch size. It is capped either to the total number of good frames or the default maximum batch
+        # size, whichever is smaller.
+        batch_size = min(int(np.sum(good_frames.astype(int))), _DEFAULT_BIN_BATCH_SIZE)
 
         # Bins the frames in batches to reduce memory consumption
         batches: list[NDArray[np.float32]] = []  # Stores frames of each batch
@@ -334,19 +343,18 @@ class BinaryFileCombined:
     It provides similar functionality to the BinaryFile class but extends it to handle multiple planes.
 
     Args:
-        plane_heights: The height of the combined ROI, in pixels, obtained by combining all managed planes
-            (BinaryFiles). This is the height of the ROI that would be drawn if all managed planes were combined
-            into a single image.
-        width: The width of the combined ROI, in pixels, obtained by combining all managed planes
-            (BinaryFiles). This is the width of the ROI that would be drawn if all managed planes were combined
-            into a single image.
-        plane_heights: An NumPy array that stores the heights of each plane (BinaryFile) managed by this instance.
+        height: The height of the combined ROI, in pixels, obtained by combining all managed planes (BinaryFiles).
+            This is the height of the ROI that would be drawn if all managed planes were combined into a single image.
+        width: The width of the combined ROI, in pixels, obtained by combining all managed planes (BinaryFiles).
+            This is the width of the ROI that would be drawn if all managed planes were combined into a single image.
+        plane_heights: A NumPy array that stores the heights of each plane (BinaryFile) managed by this instance.
         plane_widths: A NumPy array that stores the widths of each plane (BinaryFile) managed by this instance.
         plane_y_coordinates: A NumPy array that stores the top-left-corner pixel y-coordinate of each managed
             plane, relative to the original image from which plane data was extracted.
         plane_x_coordinates: A NumPy array that stores the top-left-corner pixel x-coordinate of each managed
             plane, relative to the original image from which plane data was extracted.
-        file_paths: An iterable that stores the absolute paths to the binary files from which to read the plane data.
+        file_paths: A list or tuple that stores the absolute paths to the binary files from which to read the plane
+            data.
 
     Attributes:
         height: Stores the combined height of all managed planes.
@@ -414,8 +422,8 @@ class BinaryFileCombined:
 
     def close(self) -> None:
         """Closes the memory-mapped file view for all managed plane files."""
-        for f in self.files:
-            f.close()
+        for file in self.files:
+            file.close()
 
     @property
     def byte_number(self) -> NDArray[np.int64]:

@@ -17,8 +17,8 @@ from sl_shared_assets import (
 from ataraxis_base_utilities import LogLevel, console
 
 from .multi_day import resolve_multiday_ops, discover_multiday_cells, extract_multiday_fluorescence
-from .single_day import process_plane, combine_planes
-from .configuration import MultiDayConfiguration, SingleDayConfiguration
+from .single_day import process_plane, resolve_processing_contexts, save_combined_data
+from .configuration import MultiDayConfiguration, SingleDayConfiguration, RuntimeContext
 
 # Defines the session types and acquisition systems currently supported by the processing pipeline.
 _supported_systems = tuple(AcquisitionSystems)
@@ -116,7 +116,7 @@ def _initialize_single_day_processing_tracker(
 
 
 def _execute_single_day_job(
-    ops_path: Path,
+    config: SingleDayConfiguration,
     job_name: str,
     job_id: str,
     tracker: ProcessingTracker,
@@ -124,7 +124,7 @@ def _execute_single_day_job(
     """Executes a single processing job of the single-day suite2p pipeline.
 
     Args:
-        ops_path: The path to the ops.npy file that stores the single-day suite2p processing parameters.
+        config: The SingleDayConfiguration instance for the pipeline.
         job_name: The name of the job to run.
         job_id: The unique hexadecimal identifier for this processing job.
         tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
@@ -136,18 +136,19 @@ def _execute_single_day_job(
     tracker.start_job(job_id=job_id)
 
     try:
-        # NOTE: This function requires refactoring to use RuntimeContext instead of ops_path.
-        # The following calls will fail until process_plane() and combine_planes() are updated.
         if job_name.endswith(SingleDayJobNames.BINARIZE):
-            # Was: resolve_processing_contexts(ops_path=ops_path)
-            # Now: resolve_processing_contexts(config) - but we don't have config here, need refactoring.
-            raise NotImplementedError("BINARIZE job requires refactoring to use RuntimeContext architecture.")
+            resolve_processing_contexts(config)
 
-        if f"_{SingleDayJobNames.PROCESS}_plane_" in job_name:
+        elif f"_{SingleDayJobNames.PROCESS}_plane_" in job_name:
+            # PROCESS still uses legacy ops_path pattern - requires refactoring.
+            ops_path = config.file_io.save_path / "suite2p" / "ops.npy"
             process_plane(ops_path=ops_path, plane_index=int(job_name.split("_plane_")[1]))
 
         elif job_name.endswith(SingleDayJobNames.COMBINE):
-            combine_planes(ops_path=ops_path)
+            # Load contexts from disk and combines all processed planes into a dataset.
+            root_path = config.file_io.save_path / "suite2p"
+            contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
+            save_combined_data(contexts)
 
         else:
             message = (
@@ -251,27 +252,8 @@ def process_single_day(
         console.error(message=message, error=ValueError)
 
     # Adjusts the runtime configuration to work with the Sun lab data hierarchy.
-    config.file_io.save_path = str(session_data.processed_data.mesoscope_data_path)
-    config.file_io.data_path = str(session_data.raw_data.mesoscope_data_path)
-
-    # NOTE: The ops-based architecture has been replaced with RuntimeContext.
-    # This function requires refactoring to use the new architecture.
-    # For now, raise an error to indicate the pipeline is not yet updated.
-    raise NotImplementedError(
-        "process_single_day() requires refactoring to use RuntimeContext architecture. "
-        "Use run_s2p(config) directly for the new API."
-    )
-
-    # Legacy code below - to be removed after refactoring:
-    # Converts the dataclass to an 'ops' dictionary instance.
-    ops = config.to_ops()
-
-    # Parses the override parameters as a 'db' dictionary.
-    db = overrides if overrides is not None else {}
-
-    # Generates the ops.npy file for the runtime.
-    # Was: ops_path = resolve_ops(ops=ops, db=db)
-    ops_path = None  # Placeholder - resolve_ops no longer exists
+    config.file_io.save_path = session_data.processed_data.mesoscope_data_path
+    config.file_io.data_path = session_data.raw_data.mesoscope_data_path
 
     # Determines which jobs to run based on the flags.
     requested_jobs: dict[str, bool] = {
@@ -298,10 +280,16 @@ def process_single_day(
     # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
         # REMOTE mode: Finds the job name matching the provided job_id.
+        # Loads contexts to determine the number of planes.
+        root_path = config.file_io.save_path / "suite2p"
+        contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
+        if not isinstance(contexts, list):
+            contexts = [contexts]
+        nplanes = len(contexts)
+
         # Generates all possible base job names including plane-specific PROCESS jobs.
-        final_ops = np.load(ops_path, allow_pickle=True).item()
         all_base_job_names: list[str] = [SingleDayJobNames.BINARIZE, SingleDayJobNames.COMBINE]
-        for plane in range(final_ops["nplanes"]):
+        for plane in range(nplanes):
             all_base_job_names.append(f"{SingleDayJobNames.PROCESS}_plane_{plane}")
 
         all_job_ids = _generate_job_ids(
@@ -319,7 +307,7 @@ def process_single_day(
 
         # Runs the job whose id matches the target job_id.
         job_name = id_to_name[job_id]
-        _execute_single_day_job(ops_path=ops_path, job_name=job_name, job_id=job_id, tracker=tracker)
+        _execute_single_day_job(config=config, job_name=job_name, job_id=job_id, tracker=tracker)
     else:
         # LOCAL mode: Runs BINARIZE first (if requested) to determine nplanes, then expands and runs remaining jobs.
 
@@ -331,7 +319,7 @@ def process_single_day(
             )
             full_binarize_name = f"{session_name}_{SingleDayJobNames.BINARIZE}"
             _execute_single_day_job(
-                ops_path=ops_path,
+                config=config,
                 job_name=full_binarize_name,
                 job_id=binarize_job_ids[full_binarize_name],
                 tracker=tracker,
@@ -341,14 +329,18 @@ def process_single_day(
         remaining_jobs = [job for job in jobs_to_run if job != SingleDayJobNames.BINARIZE]
 
         if remaining_jobs:
-            # Reloads ops to get the correct nplanes after binarization.
-            final_ops = np.load(ops_path, allow_pickle=True).item()
+            # Loads contexts to determine the number of planes after binarization.
+            root_path = config.file_io.save_path / "suite2p"
+            contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
+            if not isinstance(contexts, list):
+                contexts = [contexts]
+            nplanes = len(contexts)
 
             # Expands PROCESS jobs to plane-specific jobs if target_plane == -1.
             expanded_jobs: list[tuple[str, int]] = []
             for base_job_name in remaining_jobs:
                 if base_job_name == SingleDayJobNames.PROCESS and target_plane == -1:
-                    for plane in range(final_ops["nplanes"]):
+                    for plane in range(nplanes):
                         expanded_jobs.append((base_job_name, plane))
                 else:
                     expanded_jobs.append((base_job_name, target_plane))
@@ -369,7 +361,7 @@ def process_single_day(
             for base_job_name in base_job_names_for_tracking:
                 full_job_name = f"{session_name}_{base_job_name}"
                 _execute_single_day_job(
-                    ops_path=ops_path,
+                    config=config,
                     job_name=full_job_name,
                     job_id=job_ids[full_job_name],
                     tracker=tracker,

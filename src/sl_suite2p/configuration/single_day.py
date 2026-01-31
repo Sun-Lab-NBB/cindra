@@ -888,10 +888,10 @@ class ROIStatistics:
     """
 
     # Core pixel data (required, from detection).
-    y_pixels: NDArray[np.int32]
+    y_pixels: NDArray[np.uint32]
     """The y-coordinates (row indices) of all pixels belonging to this ROI."""
 
-    x_pixels: NDArray[np.int32]
+    x_pixels: NDArray[np.uint32]
     """The x-coordinates (column indices) of all pixels belonging to this ROI."""
 
     pixel_weights: NDArray[np.float32]
@@ -1140,8 +1140,8 @@ class ROIStatistics:
         roi_list = []
         for i in range(n_rois):
             roi = ROIStatistics(
-                y_pixels=y_pixels_list[i].astype(np.int32),
-                x_pixels=x_pixels_list[i].astype(np.int32),
+                y_pixels=y_pixels_list[i].astype(np.uint32),
+                x_pixels=x_pixels_list[i].astype(np.uint32),
                 pixel_weights=pixel_weights_list[i].astype(np.float32),
                 centroid=[float(centroids[i, 0]), float(centroids[i, 1])],
                 footprint=int(footprints[i]),
