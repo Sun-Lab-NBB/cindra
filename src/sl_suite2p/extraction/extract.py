@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from numba import njit, config, prange
+from numba import njit, prange
 import numpy as np
 from scipy import stats
 from numpy.typing import NDArray
@@ -11,9 +11,6 @@ from ataraxis_base_utilities import LogLevel, console
 
 from .masks import create_masks
 from ..io.binary import BinaryFile, BinaryFileCombined
-
-# Configures the numba threading layer.
-config.THREADING_LAYER = "tbb"
 
 
 @njit(parallel=True)

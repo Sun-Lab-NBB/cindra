@@ -6,14 +6,13 @@ import numpy as np
 from sklearn.decomposition import PCA
 from ataraxis_base_utilities import LogLevel, console
 
-from ..registration import compute_spatial_taper_mask
-from ..registration.nonrigid import make_blocks
+from ..registration import compute_spatial_taper_mask, compute_registration_blocks
 
 
 def pca_denoise(mov: np.ndarray, block_size: list, n_comps_frac: float):
     t0 = time.time()
     nframes, Ly, Lx = mov.shape
-    yblock, xblock, _, block_size, _ = make_blocks(Ly, Lx, block_size=block_size)
+    yblock, xblock, _, block_size, _ = compute_registration_blocks(height=Ly, width=Lx, block_size=tuple(block_size))
 
     mov_mean = mov.mean(axis=0)
     mov -= mov_mean

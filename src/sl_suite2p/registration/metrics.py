@@ -58,8 +58,8 @@ def pclowhigh(mov, nlowhigh, nPC, random_state):
     w = pca.singular_values_
     mov += mimg
     mov = np.transpose(np.reshape(mov, (-1, Ly, Lx)), (1, 2, 0))
-    pclow = np.zeros((nPC, Ly, Lx), np.float32)
-    pchigh = np.zeros((nPC, Ly, Lx), np.float32)
+    pclow = np.empty((nPC, Ly, Lx), np.float32)
+    pchigh = np.empty((nPC, Ly, Lx), np.float32)
     isort = np.argsort(v, axis=0)
     for i in range(nPC):
         pclow[i] = mov[:, :, isort[:nlowhigh, i]].mean(axis=-1)
@@ -123,7 +123,9 @@ def pc_register(
     """
     # registration settings
     nPC, Ly, Lx = pclow.shape
-    yblock, xblock, nblocks, block_size, NRsm = nonrigid.make_blocks(Ly=Ly, Lx=Lx, block_size=np.array(block_size))
+    yblock, xblock, nblocks, block_size, NRsm = nonrigid.compute_registration_blocks(
+        height=Ly, width=Lx, block_size=tuple(block_size)
+    )
     maxregshift_nr = np.array(maxregshift_nr)
 
     X = np.zeros((nPC, 3))
@@ -155,12 +157,12 @@ def pc_register(
         if is_nonrigid:
             maskSlope = spatial_taper if reg_1p else 3 * smooth_sigma  # slope of taper mask at the edges
 
-            maskMulNR, maskOffsetNR, cfRefImgNR = nonrigid.compute_phase_correlation_kernel(
-                refImg0=refImg,
-                maskSlope=maskSlope,
-                smooth_sigma=smooth_sigma,
-                yblock=yblock,
-                xblock=xblock,
+            maskMulNR, maskOffsetNR, cfRefImgNR = nonrigid.compute_nonrigid_reference_data(
+                reference_image=refImg,
+                taper_slope=maskSlope,
+                smoothing_sigma=smooth_sigma,
+                y_blocks=yblock,
+                x_blocks=xblock,
             )
 
         if bidiphase_offset and not bidi_corrected:
@@ -198,16 +200,16 @@ def pc_register(
                 ymax1,
                 xmax1,
                 cmax1,
-            ) = nonrigid.phasecorr(
-                data=dwrite,
-                maskMul=maskMulNR.squeeze(),
-                maskOffset=maskOffsetNR.squeeze(),
-                cfRefImg=cfRefImgNR.squeeze(),
-                snr_thresh=snr_thresh,
-                NRsm=NRsm,
-                xblock=xblock,
-                yblock=yblock,
-                maxregshift_nr=maxregshift_nr,
+            ) = nonrigid.compute_nonrigid_shifts(
+                frames=dwrite,
+                taper_mask=maskMulNR,
+                mean_offset=maskOffsetNR,
+                reference_kernel=cfRefImgNR,
+                snr_threshold=snr_thresh,
+                smoothing_kernel=NRsm,
+                x_blocks=xblock,
+                y_blocks=yblock,
+                maximum_shift=maxregshift_nr,
             )
 
             X[i, 1] = np.mean((ymax1**2 + xmax1**2) ** 0.5)
@@ -383,8 +385,8 @@ def optic_flow(mov, tmpl, nflows):
     flags = 0
 
     nframes, Ly, Lx = mov.shape
-    norms = np.zeros((nframes,))
-    flows = np.zeros((nframes, Ly, Lx, 2))
+    norms = np.empty((nframes,))
+    flows = np.empty((nframes, Ly, Lx, 2))
 
     for n in range(nframes):
         flow = cv2.calcOpticalFlowFarneback(

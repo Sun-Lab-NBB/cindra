@@ -185,16 +185,16 @@ def compute_reference_masks(refImg, ops=generate_default_ops()):
     Ly, Lx = refImg.shape
     blocks = []
     if ops.get("nonrigid"):
-        blocks = nonrigid.make_blocks(Ly=Ly, Lx=Lx, block_size=ops["block_size"])
+        blocks = nonrigid.compute_registration_blocks(height=Ly, width=Lx, block_size=tuple(ops["block_size"]))
 
-        maskMulNR, maskOffsetNR, cfRefImgNR = nonrigid.compute_phase_correlation_kernel(
-            refImg0=refImg,
-            maskSlope=ops["spatial_taper"]
+        maskMulNR, maskOffsetNR, cfRefImgNR = nonrigid.compute_nonrigid_reference_data(
+            reference_image=refImg_float,
+            taper_slope=ops["spatial_taper"]
             if ops["one_p_reg"]
             else 3 * ops["smooth_sigma"],  # slope of taper mask at the edges
-            smooth_sigma=ops["smooth_sigma"],
-            yblock=blocks[0],
-            xblock=blocks[1],
+            smoothing_sigma=ops["smooth_sigma"],
+            y_blocks=blocks[0],
+            x_blocks=blocks[1],
         )
     else:
         maskMulNR, maskOffsetNR, cfRefImgNR = [], [], []
@@ -265,25 +265,25 @@ def register_frames(refAndMasks, frames, rmin=-np.inf, rmax=np.inf, bidiphase=0,
             for fsm, dy, dx in zip(fsmooth, ymax, xmax, strict=False):
                 fsm[:] = rigid.shift_frame(frame=fsm, y_shift=dy, x_shift=dx)
 
-        ymax1, xmax1, cmax1 = nonrigid.compute_rigid_shifts(
-            data=np.clip(fsmooth, rmin, rmax) if rmin > -np.inf else fsmooth,
-            maskMul=maskMulNR.squeeze(),
-            maskOffset=maskOffsetNR.squeeze(),
-            cfRefImg=cfRefImgNR.squeeze(),
-            snr_thresh=ops["snr_thresh"],
-            NRsm=blocks[-1],
-            xblock=blocks[1],
-            yblock=blocks[0],
-            maxregshift_nr=ops["maxregshift_nr"],
+        ymax1, xmax1, cmax1 = nonrigid.compute_nonrigid_shifts(
+            frames=np.clip(fsmooth, rmin, rmax) if rmin > -np.inf else fsmooth,
+            taper_mask=maskMulNR,
+            mean_offset=maskOffsetNR,
+            reference_kernel=cfRefImgNR,
+            snr_threshold=ops["snr_thresh"],
+            smoothing_kernel=blocks[-1],
+            x_blocks=blocks[1],
+            y_blocks=blocks[0],
+            maximum_shift=ops["maxregshift_nr"],
         )
 
-        frames = nonrigid.transform_data(
-            data=frames,
-            yblock=blocks[0],
-            xblock=blocks[1],
-            nblocks=blocks[2],
-            ymax1=ymax1,
-            xmax1=xmax1,
+        frames = nonrigid.apply_nonrigid_correction(
+            frames=frames.astype(np.float32),
+            y_blocks=blocks[0],
+            x_blocks=blocks[1],
+            block_counts=blocks[2],
+            y_block_shifts=ymax1,
+            x_block_shifts=xmax1,
         )
     else:
         ymax1, xmax1, cmax1 = None, None, None
@@ -302,14 +302,13 @@ def shift_frames(frames, yoff, xoff, yoff1, xoff1, blocks=None, ops=generate_def
         frame[:] = rigid.shift_frame(frame=frame, y_shift=dy, x_shift=dx)
 
     if ops["nonrigid"]:
-        frames = nonrigid.transform_data(
-            frames,
-            yblock=blocks[0],
-            xblock=blocks[1],
-            nblocks=blocks[2],
-            ymax1=yoff1,
-            xmax1=xoff1,
-            bilinear=ops.get("bilinear_reg", True),
+        frames = nonrigid.apply_nonrigid_correction(
+            frames=frames.astype(np.float32),
+            y_blocks=blocks[0],
+            x_blocks=blocks[1],
+            block_counts=blocks[2],
+            y_block_shifts=yoff1,
+            x_block_shifts=xoff1,
         )
     return frames
 
@@ -455,7 +454,7 @@ def shift_frames_and_write(
             message = f"Unable to shift and write frames. Non-rigid registration offsets size mismatch: expected {n_frames} frames, but got yoff1={yoff1.shape[0]}, xoff1={xoff1.shape[0]}."
             console.error(message=message, error=ValueError)
 
-        blocks = nonrigid.make_blocks(Ly=Ly, Lx=Lx, block_size=ops["block_size"])
+        blocks = nonrigid.compute_registration_blocks(height=Ly, width=Lx, block_size=ops["block_size"])
 
     mean_img = np.zeros((Ly, Lx), "float32")
     batch_size = ops["batch_size"]

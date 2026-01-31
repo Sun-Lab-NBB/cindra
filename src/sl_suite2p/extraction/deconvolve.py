@@ -4,14 +4,11 @@ movies.
 
 from typing import Any
 
-from numba import njit, config, prange
+from numba import njit, prange
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter, maximum_filter1d, minimum_filter1d
 from ataraxis_base_utilities import console
-
-# Configures the numba threading layer.
-config.THREADING_LAYER = "tbb"
 
 
 @njit(
