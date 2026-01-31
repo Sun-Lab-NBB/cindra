@@ -21,10 +21,12 @@ from .metrics import get_pc_metrics
 from .register import registration_wrapper, create_enhanced_mean_image, save_registration_outputs_to_ops
 from .deformation import Deformation
 from .diffeomorphic import DiffeomorphicDemonsRegistration
+from .utils import compute_spatial_taper_mask
 
 __all__ = [
     "Deformation",
     "DiffeomorphicDemonsRegistration",
+    "compute_spatial_taper_mask",
     "compute_zpos",
     "create_enhanced_mean_image",
     "get_pc_metrics",

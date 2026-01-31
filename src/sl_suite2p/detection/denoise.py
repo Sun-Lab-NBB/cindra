@@ -6,7 +6,8 @@ import numpy as np
 from sklearn.decomposition import PCA
 from ataraxis_base_utilities import LogLevel, console
 
-from ..registration.nonrigid import make_blocks, spatial_taper
+from ..registration import compute_spatial_taper_mask
+from ..registration.nonrigid import make_blocks
 
 
 def pca_denoise(mov: np.ndarray, block_size: list, n_comps_frac: float):
@@ -20,7 +21,7 @@ def pca_denoise(mov: np.ndarray, block_size: list, n_comps_frac: float):
     nblocks = len(yblock)
     Lyb, Lxb = block_size
     n_comps = int(min(min(Lyb * Lxb, nframes), min(Lyb, Lxb) * n_comps_frac))
-    maskMul = spatial_taper(Lyb // 4, Lyb, Lxb)
+    maskMul = compute_spatial_taper_mask(sigma=Lyb // 4, height=Lyb, width=Lxb)
     norm = np.zeros((Ly, Lx), np.float32)
     reconstruction = np.zeros_like(mov)
     block_re = np.zeros((nblocks, nframes, Lyb * Lxb))

@@ -53,8 +53,8 @@ def compute_zpos(Zreg, ops, reg_file=None):
             Z = Z.astype(np.float32)
             Z = Z[np.newaxis, :, :]
             if ops["pre_smooth"]:
-                Z = utils.spatial_smooth(Z, int(ops["pre_smooth"]))
-            Z = utils.spatial_high_pass(Z, int(ops["spatial_hp_reg"]))
+                Z = utils.apply_spatial_smoothing(Z, int(ops["pre_smooth"]))
+            Z = utils.apply_spatial_high_pass(Z, int(ops["spatial_hp_reg"]))
             Z = Z.squeeze()
 
         maskMul, maskOffset = rigid.compute_masks(
@@ -77,13 +77,11 @@ def compute_zpos(Zreg, ops, reg_file=None):
         data = np.float32(np.reshape(data, (-1, Ly, Lx)))
         inds = np.arange(nfr, nfr + data.shape[0], 1, int)
         for z, ref in enumerate(refAndMasks):
-            # preprocessing for 1P recordings
+            # Preprocessing for 1P recordings. Data is already float32 from conversion at line 77.
             if ops["one_p_reg"]:
-                data = data.astype(np.float32)
-
                 if ops["pre_smooth"]:
-                    data = utils.spatial_smooth(data, int(ops["pre_smooth"]))
-                data = utils.spatial_high_pass(data, int(ops["spatial_hp_reg"]))
+                    data = utils.apply_spatial_smoothing(data, int(ops["pre_smooth"]))
+                data = utils.apply_spatial_high_pass(data, int(ops["spatial_hp_reg"]))
 
             maskMul, maskOffset, cfRefImg = ref
             cfRefImg = cfRefImg.squeeze()
