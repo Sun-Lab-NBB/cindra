@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING
 import numpy as np
 from ataraxis_base_utilities import LogLevel, console
 
-from ..configuration.single_day import CombinedData, DetectionData, ROIStatistics, ExtractionData
+from ..configuration import CombinedData, DetectionData, ROIStatistics, ExtractionData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ..configuration.single_day import RuntimeContext
+    from ..configuration import RuntimeContext
 
-8
+
 def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray[np.uint32], NDArray[np.uint32]]:
     """Computes the pixel displacement for each plane to arrange them in a combined view.
 

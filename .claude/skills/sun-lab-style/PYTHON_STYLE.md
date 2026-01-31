@@ -650,6 +650,34 @@ Order:
 5. Local imports
 6. `if TYPE_CHECKING:` block for type-only imports
 
+### Cross-Package vs Within-Package Imports
+
+**Cross-package imports** (importing from another package in the same library) must go through the package's `__init__.py`:
+
+```python
+# Good - imports from the package's __init__.py
+from ..configuration import RuntimeContext, SingleDayConfiguration
+
+# Bad - imports directly from a submodule in another package
+from ..configuration.single_day import RuntimeContext, SingleDayConfiguration
+```
+
+**Within-package imports** (importing from sibling modules in the same package) should use direct module imports:
+
+```python
+# Good - direct imports within the same package
+from .spline_grid import SplineGrid
+from .deformation import Deformation, zoom, diffuse
+
+# Unnecessary - going through __init__.py for same-package imports
+from . import SplineGrid  # Only if SplineGrid is exported in __init__.py
+```
+
+This rule ensures:
+- Cross-package dependencies are tracked through explicit package exports
+- Within-package implementation details remain encapsulated
+- Refactoring a module's internal structure doesn't break other packages
+
 ---
 
 ## Class Design
@@ -1119,6 +1147,7 @@ Python Style Compliance:
 - [ ] Error handling uses console.error() from ataraxis_base_utilities
 - [ ] Lines under 120 characters
 - [ ] Imports ordered: standard library, TYPE_CHECKING, third-party, local
+- [ ] Cross-package imports go through package __init__.py (not submodules)
 - [ ] Inline comments use third person imperative
 - [ ] No heavy section separator blocks (# ====== or # ------)
 - [ ] Numba functions use cache=True
