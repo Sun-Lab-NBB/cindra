@@ -134,32 +134,37 @@ def compute_reference(frames, ops=generate_default_ops()):
 
     niter = 8
     for iter in range(niter):
+        # Converts reference image to float32 for phase correlation functions.
+        refImg_float = refImg.astype(np.float32)
+        taper_mask, mean_offset = rigid.compute_edge_taper(
+            reference_image=refImg_float,
+            taper_slope=ops["spatial_taper"] if ops["one_p_reg"] else 3 * ops["smooth_sigma"],
+        )
+
         # rigid registration
-        ymax, xmax, cmax = rigid.phasecorr(
-            data=rigid.apply_masks(
-                frames,
-                *rigid.compute_masks(
-                    refImg=refImg,
-                    maskSlope=ops["spatial_taper"] if ops["one_p_reg"] else 3 * ops["smooth_sigma"],
-                ),
+        ymax, xmax, cmax = rigid.compute_rigid_shifts(
+            frames=rigid.apply_edge_taper(
+                frames=frames,
+                taper_mask=taper_mask,
+                mean_offset=mean_offset,
             ),
-            cfRefImg=rigid.phasecorr_reference(
-                refImg=refImg,
-                smooth_sigma=ops["smooth_sigma"],
+            reference_kernel=rigid.compute_phase_correlation_kernel(
+                reference_image=refImg_float,
+                smoothing_sigma=ops["smooth_sigma"],
             ),
-            maxregshift=ops["maxregshift"],
-            smooth_sigma_time=ops["smooth_sigma_time"],
+            maximum_shift_fraction=ops["maxregshift"],
+            temporal_smoothing_sigma=ops["smooth_sigma_time"],
         )
         for frame, dy, dx in zip(frames, ymax, xmax, strict=False):
-            frame[:] = rigid.shift_frame(frame=frame, dy=dy, dx=dx)
+            frame[:] = rigid.shift_frame(frame=frame, y_shift=dy, x_shift=dx)
 
         nmax = max(2, int(frames.shape[0] * (1.0 + iter) / (2 * niter)))
         isort = np.argsort(-cmax)[1:nmax]
-        # reset reference image
-        refImg = frames[isort].mean(axis=0).astype(np.int16)
-        # shift reference image to position of mean shifts
+        # Resets reference image using mean of top-correlated frames.
+        refImg = frames[isort].mean(axis=0).astype(np.float32)
+        # Shifts reference image to position of mean shifts.
         refImg = rigid.shift_frame(
-            frame=refImg, dy=int(np.round(-ymax[isort].mean())), dx=int(np.round(-xmax[isort].mean()))
+            frame=refImg, y_shift=int(np.round(-ymax[isort].mean())), x_shift=int(np.round(-xmax[isort].mean()))
         )
 
     return refImg
@@ -167,20 +172,22 @@ def compute_reference(frames, ops=generate_default_ops()):
 
 def compute_reference_masks(refImg, ops=generate_default_ops()):
     """Computes registration masks for the reference image."""
-    maskMul, maskOffset = rigid.compute_masks(
-        refImg=refImg,
-        maskSlope=ops["spatial_taper"] if ops["one_p_reg"] else 3 * ops["smooth_sigma"],
+    # Converts reference image to float32 for phase correlation functions.
+    refImg_float = refImg.astype(np.float32)
+    maskMul, maskOffset = rigid.compute_edge_taper(
+        reference_image=refImg_float,
+        taper_slope=ops["spatial_taper"] if ops["one_p_reg"] else 3 * ops["smooth_sigma"],
     )
-    cfRefImg = rigid.phasecorr_reference(
-        refImg=refImg,
-        smooth_sigma=ops["smooth_sigma"],
+    cfRefImg = rigid.compute_phase_correlation_kernel(
+        reference_image=refImg_float,
+        smoothing_sigma=ops["smooth_sigma"],
     )
     Ly, Lx = refImg.shape
     blocks = []
     if ops.get("nonrigid"):
         blocks = nonrigid.make_blocks(Ly=Ly, Lx=Lx, block_size=ops["block_size"])
 
-        maskMulNR, maskOffsetNR, cfRefImgNR = nonrigid.phasecorr_reference(
+        maskMulNR, maskOffsetNR, cfRefImgNR = nonrigid.compute_phase_correlation_kernel(
             refImg0=refImg,
             maskSlope=ops["spatial_taper"]
             if ops["one_p_reg"]
@@ -237,26 +244,28 @@ def register_frames(refAndMasks, frames, rmin=-np.inf, rmax=np.inf, bidiphase=0,
         fsmooth = utils.apply_spatial_high_pass(fsmooth, int(ops["spatial_hp_reg"]))
 
     # rigid registration
-    ymax, xmax, cmax = rigid.phasecorr(
-        data=rigid.apply_masks(
-            data=np.clip(fsmooth, rmin, rmax) if rmin > -np.inf else fsmooth, maskMul=maskMul, maskOffset=maskOffset
+    ymax, xmax, cmax = rigid.compute_rigid_shifts(
+        frames=rigid.apply_edge_taper(
+            frames=np.clip(fsmooth, rmin, rmax) if rmin > -np.inf else fsmooth,
+            taper_mask=maskMul,
+            mean_offset=maskOffset,
         ),
-        cfRefImg=cfRefImg,
-        maxregshift=ops["maxregshift"],
-        smooth_sigma_time=ops["smooth_sigma_time"],
+        reference_kernel=cfRefImg,
+        maximum_shift_fraction=ops["maxregshift"],
+        temporal_smoothing_sigma=ops["smooth_sigma_time"],
     )
 
     for frame, dy, dx in zip(frames, ymax, xmax, strict=False):
-        frame[:] = rigid.shift_frame(frame=frame, dy=dy, dx=dx)
+        frame[:] = rigid.shift_frame(frame=frame, y_shift=dy, x_shift=dx)
 
     # non-rigid registration
     if ops["nonrigid"]:
         # need to also shift smoothed/filtered data
         if ops["smooth_sigma_time"] or ops["one_p_reg"]:
             for fsm, dy, dx in zip(fsmooth, ymax, xmax, strict=False):
-                fsm[:] = rigid.shift_frame(frame=fsm, dy=dy, dx=dx)
+                fsm[:] = rigid.shift_frame(frame=fsm, y_shift=dy, x_shift=dx)
 
-        ymax1, xmax1, cmax1 = nonrigid.phasecorr(
+        ymax1, xmax1, cmax1 = nonrigid.compute_rigid_shifts(
             data=np.clip(fsmooth, rmin, rmax) if rmin > -np.inf else fsmooth,
             maskMul=maskMulNR.squeeze(),
             maskOffset=maskOffsetNR.squeeze(),
@@ -290,7 +299,7 @@ def shift_frames(frames, yoff, xoff, yoff1, xoff1, blocks=None, ops=generate_def
         )
 
     for frame, dy, dx in zip(frames, yoff, xoff, strict=False):
-        frame[:] = rigid.shift_frame(frame=frame, dy=dy, dx=dx)
+        frame[:] = rigid.shift_frame(frame=frame, y_shift=dy, x_shift=dx)
 
     if ops["nonrigid"]:
         frames = nonrigid.transform_data(

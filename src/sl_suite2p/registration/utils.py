@@ -19,8 +19,8 @@ from ataraxis_base_utilities import console
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-# Small epsilon value for numerical stability in normalization.
-_EPSILON: np.complex64 = np.complex64(1e-5 + 0j)
+# Small epsilon value for numerical stability when normalizing by magnitude.
+NORMALIZATION_EPSILON: float = 1e-5
 
 
 def _mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
@@ -110,7 +110,7 @@ def apply_phase_correlation(frames: NDArray[np.float32], kernel: NDArray[np.comp
 
     # Normalizes by magnitude to extract phase-only information. This makes the correlation robust to
     # intensity variations between frames. Epsilon prevents division by zero at DC component.
-    frames_fft /= _EPSILON + np.abs(frames_fft)
+    frames_fft /= NORMALIZATION_EPSILON + np.abs(frames_fft)
 
     # Multiplies by conjugate of reference spectrum. In frequency domain, this computes cross-correlation.
     frames_fft *= kernel

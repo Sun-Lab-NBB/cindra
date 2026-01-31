@@ -16,12 +16,12 @@ Copyright:
         Copyright 2024-2025 Sun Lab, Authored by Ivan Kondratyev (Inkaros).
 """
 
+from .utils import compute_spatial_taper_mask
 from .zalign import compute_zpos
 from .metrics import get_pc_metrics
 from .register import registration_wrapper, create_enhanced_mean_image, save_registration_outputs_to_ops
 from .deformation import Deformation
 from .diffeomorphic import DiffeomorphicDemonsRegistration
-from .utils import compute_spatial_taper_mask
 
 __all__ = [
     "Deformation",
