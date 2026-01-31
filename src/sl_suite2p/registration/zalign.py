@@ -49,19 +49,20 @@ def compute_zpos(Zreg, ops, reg_file=None):
     reg_file = open(reg_file, "rb")
     refAndMasks = []
     for Z in Zreg:
+        # Converts z-stack slice to float32 for phase correlation functions.
+        Z = Z.astype(np.float32)
         if ops["one_p_reg"]:
-            Z = Z.astype(np.float32)
             Z = Z[np.newaxis, :, :]
             if ops["pre_smooth"]:
                 Z = utils.apply_spatial_smoothing(Z, int(ops["pre_smooth"]))
             Z = utils.apply_spatial_high_pass(Z, int(ops["spatial_hp_reg"]))
             Z = Z.squeeze()
 
-        maskMul, maskOffset = rigid.compute_masks(
-            refImg=Z,
-            maskSlope=ops["spatial_taper"] if ops["one_p_reg"] else 3 * ops["smooth_sigma"],
+        maskMul, maskOffset = rigid.compute_edge_taper(
+            reference_image=Z,
+            taper_slope=ops["spatial_taper"] if ops["one_p_reg"] else 3 * ops["smooth_sigma"],
         )
-        cfRefImag = rigid.phasecorr_reference(refImg=Z, smooth_sigma=ops["smooth_sigma"])
+        cfRefImag = rigid.compute_phase_correlation_kernel(reference_image=Z, smoothing_sigma=ops["smooth_sigma"])
         cfRefImag = cfRefImag[np.newaxis, :, :]
         refAndMasks.append((maskMul, maskOffset, cfRefImag))
 
@@ -86,11 +87,15 @@ def compute_zpos(Zreg, ops, reg_file=None):
             maskMul, maskOffset, cfRefImg = ref
             cfRefImg = cfRefImg.squeeze()
 
-            _, _, zcorr[z, inds] = rigid.phasecorr(
-                data=rigid.apply_masks(data=data, maskMul=maskMul, maskOffset=maskOffset),
-                cfRefImg=cfRefImg,
-                maxregshift=ops["maxregshift"],
-                smooth_sigma_time=ops["smooth_sigma_time"],
+            _, _, zcorr[z, inds] = rigid.compute_rigid_shifts(
+                frames=rigid.apply_edge_taper(
+                    frames=data,
+                    taper_mask=maskMul,
+                    mean_offset=maskOffset,
+                ),
+                reference_kernel=cfRefImg,
+                maximum_shift_fraction=ops["maxregshift"],
+                temporal_smoothing_sigma=ops["smooth_sigma_time"],
             )
             if z % 10 == 1:
                 console.echo(

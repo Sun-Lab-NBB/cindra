@@ -141,19 +141,21 @@ def pc_register(
         rmin, rmax = np.int16(np.percentile(refImg, 1)), np.int16(np.percentile(refImg, 99))
         refImg = np.clip(refImg, rmin, rmax)
 
-        maskMul, maskOffset = rigid.compute_masks(
-            refImg=refImg, maskSlope=spatial_taper if reg_1p else 3 * smooth_sigma
+        # Converts reference image to float32 for phase correlation functions.
+        refImg_float = refImg.astype(np.float32)
+        maskMul, maskOffset = rigid.compute_edge_taper(
+            reference_image=refImg_float, taper_slope=spatial_taper if reg_1p else 3 * smooth_sigma
         )
-        cfRefImg = rigid.phasecorr_reference(
-            refImg=refImg,
-            smooth_sigma=smooth_sigma,
+        cfRefImg = rigid.compute_phase_correlation_kernel(
+            reference_image=refImg_float,
+            smoothing_sigma=smooth_sigma,
         )
 
         cfRefImg = cfRefImg[np.newaxis, :, :]
         if is_nonrigid:
             maskSlope = spatial_taper if reg_1p else 3 * smooth_sigma  # slope of taper mask at the edges
 
-            maskMulNR, maskOffsetNR, cfRefImgNR = nonrigid.phasecorr_reference(
+            maskMulNR, maskOffsetNR, cfRefImgNR = nonrigid.compute_phase_correlation_kernel(
                 refImg0=refImg,
                 maskSlope=maskSlope,
                 smooth_sigma=smooth_sigma,
@@ -173,14 +175,18 @@ def pc_register(
         dwrite = np.clip(dwrite, rmin, rmax)
 
         # rigid registration
-        ymax, xmax, cmax = rigid.phasecorr(
-            data=rigid.apply_masks(data=dwrite, maskMul=maskMul, maskOffset=maskOffset),
-            cfRefImg=cfRefImg.squeeze(),
-            maxregshift=maxregshift,
-            smooth_sigma_time=0,
+        ymax, xmax, cmax = rigid.compute_rigid_shifts(
+            frames=rigid.apply_edge_taper(
+                frames=dwrite,
+                taper_mask=maskMul,
+                mean_offset=maskOffset,
+            ),
+            reference_kernel=cfRefImg.squeeze(),
+            maximum_shift_fraction=maxregshift,
+            temporal_smoothing_sigma=0,
         )
         for frame, dy, dx in zip(Img, ymax.flatten(), xmax.flatten(), strict=False):
-            frame[:] = rigid.shift_frame(frame=frame, dy=dy, dx=dx)
+            frame[:] = rigid.shift_frame(frame=frame, y_shift=dy, x_shift=dx)
         ###
 
         # non-rigid registration
