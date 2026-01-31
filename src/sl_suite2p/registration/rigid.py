@@ -30,7 +30,7 @@ def compute_edge_taper(
     borders that could create spurious correlation peaks.
 
     Args:
-        reference_image: The 2D reference image with shape (height, width) used to compute the mean offset.
+        reference_image: The reference image with shape (height, width) used to compute the mean offset.
         taper_slope: Controls the steepness of the edge falloff. Larger values produce a more gradual taper.
 
     Returns:
@@ -54,7 +54,7 @@ def apply_edge_taper(
     This preprocessing step reduces wraparound artifacts in phase correlation by attenuating frame borders.
 
     Args:
-        frames: The 3D frame data with shape (num_frames, height, width).
+        frames: The frame data with shape (num_frames, height, width).
         taper_mask: The edge taper mask with shape (height, width) from compute_edge_taper.
         mean_offset: The mean intensity offset with shape (height, width) from compute_edge_taper.
 
@@ -75,12 +75,12 @@ def compute_phase_correlation_kernel(
     cross-correlation with data frames during motion estimation.
 
     Args:
-        reference_image: The 2D reference image with shape (height, width).
-        smoothing_sigma: The standard deviation of the Gaussian smoothing kernel in pixels. Values <= 0
-            disable smoothing.
+        reference_image: The reference image with shape (height, width).
+        smoothing_sigma: The standard deviation of Gaussian smoothing in pixels. Values <= 0 disable
+            smoothing.
 
     Returns:
-        The complex-valued phase correlation kernel with shape determined by the FFT padding.
+        The phase correlation kernel with shape determined by FFT padding.
     """
     reference_fft = compute_reference_fft(reference_image=reference_image)
     reference_fft /= NORMALIZATION_EPSILON + np.absolute(reference_fft)
@@ -108,8 +108,8 @@ def compute_rigid_shifts(
     maps before peak detection.
 
     Args:
-        frames: The 3D frame data with shape (num_frames, height, width) after edge tapering.
-        reference_kernel: The complex-valued phase correlation kernel from compute_phase_correlation_kernel.
+        frames: The frame data with shape (num_frames, height, width) after edge tapering.
+        reference_kernel: The phase correlation kernel from compute_phase_correlation_kernel.
         maximum_shift_fraction: The maximum allowed shift as a fraction of the minimum spatial dimension.
             The search window is limited to min(height, width) * maximum_shift_fraction pixels.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation
@@ -117,8 +117,8 @@ def compute_rigid_shifts(
 
     Returns:
         A tuple of (y_shifts, x_shifts, correlation_maxima) arrays with shape (num_frames,). The shifts
-        are integer pixel offsets from the reference, and correlation_maxima indicates the peak
-        correlation value for each frame.
+        are pixel offsets from the reference, and correlation_maxima indicates the peak correlation
+        value for each frame.
     """
     # Computes the correlation search window size based on maximum allowed shift.
     minimum_dimension = np.minimum(*frames.shape[1:])
@@ -170,9 +170,10 @@ def shift_frame(frame: NDArray[np.float32], y_shift: int, x_shift: int) -> NDArr
     image content in the negative direction (i.e., a positive y_shift moves content upward).
 
     Args:
-        frame: The 2D frame with shape (height, width) to be shifted.
-        y_shift: The vertical shift amount in pixels. Positive values shift content upward.
-        x_shift: The horizontal shift amount in pixels. Positive values shift content leftward.
+        frame: The frame with shape (height, width) to be shifted.
+        y_shift: The vertical shift amount in pixels from compute_rigid_shifts. Positive values shift content upward.
+        x_shift: The horizontal shift amount in pixels from compute_rigid_shifts. Positive values shift content
+            leftward.
 
     Returns:
         The shifted frame with the same shape as input.
