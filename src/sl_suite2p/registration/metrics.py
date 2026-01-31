@@ -17,7 +17,8 @@ try:
 except ImportError:
     HAS_CV2 = False
 
-from . import rigid, utils, nonrigid, bidiphase
+from . import rigid, utils, nonrigid
+from .bidiphase_correction import apply_bidirectional_phase_correction
 
 
 def pclowhigh(mov, nlowhigh, nPC, random_state):
@@ -161,7 +162,7 @@ def pc_register(
             )
 
         if bidiphase_offset and not bidi_corrected:
-            bidiphase.shift(Img, bidiphase_offset)
+            apply_bidirectional_phase_correction(frames=Img, bidirectional_phase_offset=bidiphase_offset)
 
         # preprocessing for 1P recordings
         dwrite = Img.astype(np.float32)
