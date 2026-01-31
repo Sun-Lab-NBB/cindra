@@ -5,7 +5,8 @@ frame-to-frame motion correction) and diffeomorphic Demons registration from pir
 anatomical alignment).
 
 Copyright:
-    Single-day registration code (register.py, rigid.py, nonrigid.py, bidiphase.py, zalign.py, metrics.py, utils.py):
+    Single-day registration code (register.py, rigid.py, nonrigid.py, bidiphase_correction.py, zalign.py, metrics.py,
+        utils.py):
         Copyright 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
 
     Multi-day registration code (diffeomorphic.py, deformation.py, spline_grid.py, pyramid.py):

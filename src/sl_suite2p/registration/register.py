@@ -9,11 +9,10 @@ from scipy.signal import medfilt, medfilt2d
 from ataraxis_time import PrecisionTimer
 from ataraxis_base_utilities import LogLevel, console
 
-from . import (
-    rigid,
-    utils,
-    nonrigid,
-    bidiphase as bidi,
+from . import rigid, utils, nonrigid
+from .bidiphase_correction import (
+    compute_bidirectional_phase_offset,
+    apply_bidirectional_phase_correction,
 )
 
 
@@ -226,7 +225,7 @@ def register_frames(refAndMasks, frames, rmin=-np.inf, rmax=np.inf, bidiphase=0,
         )
 
     if bidiphase != 0:
-        bidi.shift(frames, bidiphase)
+        apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=bidiphase)
 
     # if smoothing or filtering or clipping to compute registration shifts, make a copy of the frames
     dtype = "float32" if ops["smooth_sigma_time"] > 0 or ops["one_p_reg"] else frames.dtype
@@ -291,7 +290,10 @@ def register_frames(refAndMasks, frames, rmin=-np.inf, rmax=np.inf, bidiphase=0,
 
 def shift_frames(frames, yoff, xoff, yoff1, xoff1, blocks=None, ops=generate_default_ops()):
     if ops["bidirectional_phase_offset"] != 0 and not ops["bidirectional_phase_corrected"]:
-        bidi.shift(frames, int(ops["bidirectional_phase_offset"]))
+        apply_bidirectional_phase_correction(
+            frames=frames,
+            bidirectional_phase_offset=int(ops["bidirectional_phase_offset"]),
+        )
 
     for frame, dy, dx in zip(frames, yoff, xoff, strict=False):
         frame[:] = rigid.shift_frame(frame=frame, dy=dy, dx=dx)
@@ -342,15 +344,18 @@ def compute_reference_and_register_frames(
             and ops["bidirectional_phase_offset"] == 0
             and not ops["bidirectional_phase_corrected"]
         ):
-            bidiphase = bidi.compute(frames)
+            bidiphase = compute_bidirectional_phase_offset(frames=frames)
             console.echo(
                 f"Plane {plane_number} estimated bidiphase offset from data: {bidiphase} pixels.",
                 level=LogLevel.INFO,
             )
             ops["bidirectional_phase_offset"] = bidiphase
-            # shift frames
+            # Applies bidirectional phase correction to the sampled frames.
             if bidiphase != 0:
-                bidi.shift(frames, int(ops["bidirectional_phase_offset"]))
+                apply_bidirectional_phase_correction(
+                    frames=frames,
+                    bidirectional_phase_offset=int(ops["bidirectional_phase_offset"]),
+                )
 
         if refImg is None:
             console.echo(f"Computing plane {plane_number} reference frame...", level=LogLevel.INFO)
