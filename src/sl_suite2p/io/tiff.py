@@ -11,7 +11,7 @@ from tifffile import TiffFile
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
 from .binary import BinaryFile
-from ..configuration.single_day import (
+from ..configuration import (
     IOData,
     RuntimeContext,
     SingleDayRuntimeData,
