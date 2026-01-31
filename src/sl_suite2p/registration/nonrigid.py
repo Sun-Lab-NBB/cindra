@@ -2,9 +2,16 @@
 
 from numba import njit, config, prange, float32
 import numpy as np
-from numpy import fft
+from scipy.fft import rfft2
 
-from .utils import convolve, kernelD2, addmultiply, gaussian_fft, mat_upsample, spatial_taper
+from .utils import (
+    apply_mask,
+    apply_phase_correlation,
+    compute_upsampling_kernel,
+    compute_spatial_taper_mask,
+    compute_block_smoothing_kernel,
+    compute_gaussian_frequency_filter,
+)
 
 # Configures the numba threading layer.
 config.THREADING_LAYER = "tbb"
@@ -56,7 +63,7 @@ def make_blocks(Ly, Lx, block_size=(128, 128)):
     yblock = [np.array([ystart[iy], ystart[iy] + block_size[0]]) for iy in range(ny) for _ in range(nx)]
     xblock = [np.array([xstart[ix], xstart[ix] + block_size[1]]) for _ in range(ny) for ix in range(nx)]
 
-    NRsm = kernelD2(xs=np.arange(nx), ys=np.arange(ny)).T
+    NRsm = compute_block_smoothing_kernel(x_block_count=nx, y_block_count=ny).T
 
     return yblock, xblock, [ny, nx], block_size, NRsm
 
@@ -81,13 +88,14 @@ def phasecorr_reference(refImg0: np.ndarray, maskSlope, smooth_sigma, yblock: np
     """
     nb, Ly, Lx = len(yblock), yblock[0][1] - yblock[0][0], xblock[0][1] - xblock[0][0]
     dims = (nb, Ly, Lx)
-    cfRef_dims = dims
-    gaussian_filter = gaussian_fft(smooth_sigma, *cfRef_dims[1:])
-    cfRefImg1 = np.zeros(cfRef_dims, "complex64")
+    # Real FFT output has shape (height, width // 2 + 1) for the frequency dimension.
+    rfft_width = Lx // 2 + 1
+    gaussian_filter = compute_gaussian_frequency_filter(sigma=smooth_sigma, height=Ly, width=Lx)
+    cfRefImg1 = np.zeros((nb, Ly, rfft_width), "complex64")
 
-    maskMul = spatial_taper(maskSlope, *refImg0.shape)
+    maskMul = compute_spatial_taper_mask(sigma=maskSlope, height=refImg0.shape[0], width=refImg0.shape[1])
     maskMul1 = np.zeros(dims, "float32")
-    maskMul1[:] = spatial_taper(2 * smooth_sigma, Ly, Lx)
+    maskMul1[:] = compute_spatial_taper_mask(sigma=2 * smooth_sigma, height=Ly, width=Lx)
     maskOffset1 = np.zeros(dims, "float32")
     for yind, xind, maskMul1_n, maskOffset1_n, cfRefImg1_n in zip(
         yblock, xblock, maskMul1, maskOffset1, cfRefImg1, strict=False
@@ -100,7 +108,7 @@ def phasecorr_reference(refImg0: np.ndarray, maskSlope, smooth_sigma, yblock: np
         maskOffset1_n[:] = refImg.mean() * (1.0 - maskMul1_n)
 
         # gaussian filter
-        cfRefImg1_n[:] = np.conj(fft.fft2(refImg))
+        cfRefImg1_n[:] = np.conj(rfft2(refImg))
         cfRefImg1_n /= 1e-5 + np.absolute(cfRefImg1_n)
         cfRefImg1_n[:] *= gaussian_filter
 
@@ -176,7 +184,7 @@ def phasecorr(
     xmax1
     cmax1
     """
-    Kmat, nup = mat_upsample(lpad=3)
+    Kmat, nup = compute_upsampling_kernel(padding=3)
 
     nimg = data.shape[0]
     ly, lx = cfRefImg.shape[-2:]
@@ -190,11 +198,11 @@ def phasecorr(
     for n in range(nb):
         yind, xind = yblock[n], xblock[n]
         Y[:, n] = data[:, yind[0] : yind[-1], xind[0] : xind[-1]]
-    Y = addmultiply(Y, maskMul, maskOffset)
+    Y = apply_mask(Y, maskMul, maskOffset)
     batch = min(64, Y.shape[1])  # 16
     for n in np.arange(0, nb, batch):
         nend = min(Y.shape[1], n + batch)
-        Y[:, n:nend] = convolve(mov=Y[:, n:nend], img=cfRefImg[n:nend])
+        Y[:, n:nend] = apply_phase_correlation(frames=Y[:, n:nend], kernel=cfRefImg[n:nend])
 
     # calculate ccsm
     lhalf = lcorr + lpad

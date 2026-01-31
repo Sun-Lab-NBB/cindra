@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy import fft
+from scipy import fft
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -28,11 +28,11 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.int16]) -> int:
 
     # Computes the real FFT of odd lines (1, 3, 5, ...) along the x-axis. Uses rfft since input is real-valued,
     # which is ~2x faster than fft and uses half the memory.
-    odd_lines_fft = fft.rfft(frames[:, 1::2, :], axis=2)
+    odd_lines_fft = fft.rfft(frames[:, 1::2, :], axis=2, workers=-1)
     odd_lines_fft /= np.abs(odd_lines_fft) + 1e-5
 
     # Computes the conjugate FFT of even lines (0, 2, 4, ...) along the x-axis.
-    even_lines_fft = fft.rfft(frames[:, ::2, :], axis=2)
+    even_lines_fft = fft.rfft(frames[:, ::2, :], axis=2, workers=-1)
     np.conj(even_lines_fft, out=even_lines_fft)
     even_lines_fft /= np.abs(even_lines_fft) + 1e-5
 
@@ -40,7 +40,7 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.int16]) -> int:
     even_lines_fft = even_lines_fft[:, : odd_lines_fft.shape[1], :]
 
     # Computes the cross-correlation via inverse FFT of the product and averages across all frames and lines.
-    cross_correlation = fft.irfft(odd_lines_fft * even_lines_fft, n=width, axis=2).mean(axis=(0, 1))
+    cross_correlation = fft.irfft(odd_lines_fft * even_lines_fft, n=width, axis=2, workers=-1).mean(axis=(0, 1))
     cross_correlation = fft.fftshift(cross_correlation)
 
     # Finds the peak in a small window around zero to determine the offset.
@@ -70,6 +70,10 @@ def apply_bidirectional_phase_correction(
         return
 
     if bidirectional_phase_offset > 0:
+        # Shifts odd lines right and zeros the left border for consistency with spatial filtering zero-padding.
         frames[:, 1::2, bidirectional_phase_offset:] = frames[:, 1::2, :-bidirectional_phase_offset]
+        frames[:, 1::2, :bidirectional_phase_offset] = 0
     else:
+        # Shifts odd lines left and zeros the right border for consistency with spatial filtering zero-padding.
         frames[:, 1::2, :bidirectional_phase_offset] = frames[:, 1::2, -bidirectional_phase_offset:]
+        frames[:, 1::2, bidirectional_phase_offset:] = 0

@@ -135,8 +135,8 @@ def pc_register(
             data = refImg
             data = data.astype(np.float32)
             if pre_smooth:
-                data = utils.spatial_smooth(data, int(pre_smooth))
-            refImg = utils.spatial_high_pass(data, int(spatial_hp))
+                data = utils.apply_spatial_smoothing(data, int(pre_smooth))
+            refImg = utils.apply_spatial_high_pass(data, int(spatial_hp))
 
         rmin, rmax = np.int16(np.percentile(refImg, 1)), np.int16(np.percentile(refImg, 99))
         refImg = np.clip(refImg, rmin, rmax)
@@ -168,8 +168,8 @@ def pc_register(
         dwrite = Img.astype(np.float32)
         if reg_1p:
             if pre_smooth:
-                dwrite = utils.spatial_smooth(dwrite, int(pre_smooth))
-            dwrite = utils.spatial_high_pass(dwrite, int(spatial_hp))[np.newaxis, :]
+                dwrite = utils.apply_spatial_smoothing(dwrite, int(pre_smooth))
+            dwrite = utils.apply_spatial_high_pass(dwrite, int(spatial_hp))[np.newaxis, :]
         dwrite = np.clip(dwrite, rmin, rmax)
 
         # rigid registration

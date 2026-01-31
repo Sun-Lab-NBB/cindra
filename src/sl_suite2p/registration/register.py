@@ -109,32 +109,28 @@ def pick_initial_reference(frames: np.ndarray, k=20) -> np.ndarray:
 
 
 def compute_reference(frames, ops=generate_default_ops()):
-    """Computes the reference image
+    """Computes the reference image.
 
-    picks initial reference then iteratively aligns frames to create reference
+    Picks an initial reference then iteratively aligns frames to create the final reference.
 
-    Parameters
-    ----------
-
-    ops : dictionary
-        need registration options
-
-    frames : 3D array, int16
-        size [nimg_init x Ly x Lx], frames to use to create initial reference
+    Args:
+        frames: Frames to use for reference computation with shape (num_frames, height, width).
+        ops: Registration options dictionary.
 
     Returns:
-    -------
-    refImg : 2D array, int16
-        size [Ly x Lx], initial reference image
-
+        The computed reference image with shape (height, width) as int16.
     """
+    # Converts frames to float32 for registration processing. This standardizes the dtype for all downstream
+    # operations (masking, FFT, smoothing) and avoids conditional dtype handling.
+    frames = frames.astype(np.float32)
+
     refImg = pick_initial_reference(frames)
     if ops["one_p_reg"]:
         if ops["pre_smooth"]:
-            refImg = utils.spatial_smooth(refImg, int(ops["pre_smooth"]))
-            frames = utils.spatial_smooth(frames, int(ops["pre_smooth"]))
-        refImg = utils.spatial_high_pass(refImg, int(ops["spatial_hp_reg"]))
-        frames = utils.spatial_high_pass(frames, int(ops["spatial_hp_reg"]))
+            refImg = utils.apply_spatial_smoothing(refImg, int(ops["pre_smooth"]))
+            frames = utils.apply_spatial_smoothing(frames, int(ops["pre_smooth"]))
+        refImg = utils.apply_spatial_high_pass(refImg, int(ops["spatial_hp_reg"]))
+        frames = utils.apply_spatial_high_pass(frames, int(ops["spatial_hp_reg"]))
 
     niter = 8
     for iter in range(niter):
@@ -227,20 +223,18 @@ def register_frames(refAndMasks, frames, rmin=-np.inf, rmax=np.inf, bidiphase=0,
     if bidiphase != 0:
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=bidiphase)
 
-    # if smoothing or filtering or clipping to compute registration shifts, make a copy of the frames
-    dtype = "float32" if ops["smooth_sigma_time"] > 0 or ops["one_p_reg"] else frames.dtype
-    fsmooth = frames.copy().astype(dtype) if ops["smooth_sigma_time"] > 0 or ops["one_p_reg"] else frames
+    # Converts frames to float32 for registration processing. This standardizes the dtype for all downstream
+    # operations (masking, FFT, smoothing) and avoids conditional dtype handling.
+    fsmooth = frames.astype(np.float32, copy=True)
 
     if ops["smooth_sigma_time"]:
-        fsmooth = utils.temporal_smooth(data=fsmooth, sigma=ops["smooth_sigma_time"])
-    else:
-        fsmooth = frames
+        fsmooth = utils.apply_temporal_smoothing(frames=fsmooth, sigma=ops["smooth_sigma_time"])
 
     # preprocessing for 1P recordings
     if ops["one_p_reg"]:
         if ops["pre_smooth"]:
-            fsmooth = utils.spatial_smooth(fsmooth, int(ops["pre_smooth"]))
-        fsmooth = utils.spatial_high_pass(fsmooth, int(ops["spatial_hp_reg"]))
+            fsmooth = utils.apply_spatial_smoothing(fsmooth, int(ops["pre_smooth"]))
+        fsmooth = utils.apply_spatial_high_pass(fsmooth, int(ops["spatial_hp_reg"]))
 
     # rigid registration
     ymax, xmax, cmax = rigid.phasecorr(
@@ -417,9 +411,9 @@ def compute_reference_and_register_frames(
         level=LogLevel.SUCCESS,
     )
 
-    rigid_offsets = utils.combine_offsets_across_batches(rigid_offsets, rigid=True)
+    rigid_offsets = utils.combine_rigid_offsets(rigid_offsets)
     if ops["nonrigid"]:
-        nonrigid_offsets = utils.combine_offsets_across_batches(nonrigid_offsets, rigid=False)
+        nonrigid_offsets = utils.combine_nonrigid_offsets(nonrigid_offsets)
 
     return refImg_orig, rmin, rmax, mean_img, rigid_offsets, nonrigid_offsets, (zpos, cmax_all)
 

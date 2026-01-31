@@ -2,7 +2,14 @@
 
 import numpy as np
 
-from .utils import convolve, addmultiply, complex_fft2, gaussian_fft, spatial_taper, temporal_smooth
+from .utils import (
+    apply_mask,
+    compute_reference_fft,
+    apply_phase_correlation,
+    apply_temporal_smoothing,
+    compute_spatial_taper_mask,
+    compute_gaussian_frequency_filter,
+)
 
 
 def compute_masks(refImg, maskSlope) -> tuple[np.ndarray, np.ndarray]:
@@ -20,7 +27,7 @@ def compute_masks(refImg, maskSlope) -> tuple[np.ndarray, np.ndarray]:
     maskOffset: float array
     """
     Ly, Lx = refImg.shape
-    maskMul = spatial_taper(maskSlope, Ly, Lx)
+    maskMul = compute_spatial_taper_mask(sigma=maskSlope, height=Ly, width=Lx)
     maskOffset = refImg.mean() * (1.0 - maskMul)
     return maskMul.astype("float32"), maskOffset.astype("float32")
 
@@ -38,7 +45,7 @@ def apply_masks(data: np.ndarray, maskMul: np.ndarray, maskOffset: np.ndarray) -
     --------
     maskedData: nImg x Ly x Lx
     """
-    return addmultiply(data, maskMul, maskOffset)
+    return apply_mask(data, maskMul, maskOffset)
 
 
 def phasecorr_reference(refImg: np.ndarray, smooth_sigma=None) -> np.ndarray:
@@ -54,9 +61,9 @@ def phasecorr_reference(refImg: np.ndarray, smooth_sigma=None) -> np.ndarray:
     -------
     cfRefImg : 2D array, complex64
     """
-    cfRefImg = complex_fft2(img=refImg)
+    cfRefImg = compute_reference_fft(reference_image=refImg)
     cfRefImg /= 1e-5 + np.absolute(cfRefImg)
-    cfRefImg *= gaussian_fft(smooth_sigma, cfRefImg.shape[0], cfRefImg.shape[1])
+    cfRefImg *= compute_gaussian_frequency_filter(sigma=smooth_sigma, height=cfRefImg.shape[0], width=cfRefImg.shape[1])
     return cfRefImg.astype("complex64")
 
 
@@ -85,7 +92,7 @@ def phasecorr(data, cfRefImg, maxregshift, smooth_sigma_time) -> tuple[int, int,
     min_dim = np.minimum(*data.shape[1:])  # maximum registration shift allowed
     lcorr = int(np.minimum(np.round(maxregshift * min_dim), min_dim // 2))
 
-    data = convolve(data, cfRefImg)
+    data = apply_phase_correlation(frames=data, kernel=cfRefImg)
     cc = np.real(
         np.block(
             [
@@ -95,7 +102,7 @@ def phasecorr(data, cfRefImg, maxregshift, smooth_sigma_time) -> tuple[int, int,
         )
     )
 
-    cc = temporal_smooth(cc, smooth_sigma_time) if smooth_sigma_time > 0 else cc
+    cc = apply_temporal_smoothing(frames=cc, sigma=smooth_sigma_time) if smooth_sigma_time > 0 else cc
 
     ymax, xmax = np.zeros(data.shape[0], np.int32), np.zeros(data.shape[0], np.int32)
     for t in np.arange(data.shape[0]):
