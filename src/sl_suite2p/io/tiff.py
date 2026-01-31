@@ -369,14 +369,17 @@ def _create_binary_files(
 
 
 def _open_tiff(file_path: Path) -> tuple[TiffFile, int]:
-    """Returns the TiffFile instance wrapping the specified .tiff file and the number of pages inside the wrapped
-    .tiff file.
+    """Opens a TIFF file and returns the file handle with page count.
 
     This function is a prerequisite for reading the data stored inside the specified .tiff file. It does not load the
     data into memory.
 
     Args:
         file_path: The absolute path to the .tiff file from which to read the frame data.
+
+    Returns:
+        A tuple containing the TiffFile instance wrapping the specified file and the number of pages (frames) stored
+        inside the file.
     """
     tiff = TiffFile(file_path)
     tiff_length = len(tiff.pages)
@@ -394,7 +397,8 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.
         batch_size: Maximum number of frames to read in this batch.
 
     Returns:
-        Number of frames, height, and width stored as a 3D NumPy array, or None if there are no frames to be read.
+        A 3D NumPy array with shape (frames, height, width) containing the requested frame data, or None if the
+        start_index is beyond the end of the file.
     """
     tiff_length = len(tiff.pages)
 
@@ -408,7 +412,8 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.
     if len(frames.shape) < _MULTIDIMENSIONAL_PROCESSING_THRESHOLD:
         frames = np.expand_dims(frames, axis=0)
 
-    # Converts to int16, rescaling where possible.
+    # Converts to int16, rescaling where possible. Divides by 2 to shift uint16 (0 to 65535) or int32 values into the
+    # int16 range (-32768 to 32767) without overflow.
     if frames.dtype.type in {np.uint16, np.int32}:
         frames = (frames // 2).astype(np.int16)
     elif frames.dtype.type != np.int16:

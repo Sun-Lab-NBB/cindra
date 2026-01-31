@@ -1,6 +1,4 @@
-"""This module provides tools for exporting the multiplane data processed by a Suite2p single-day pipeline as a unified
-suite2p dataset.
-"""
+"""Provides tools for exporting multiplane data processed by a Suite2p single-day pipeline as a unified dataset."""
 
 from __future__ import annotations
 
@@ -17,13 +15,15 @@ if TYPE_CHECKING:
 
     from ..configuration.single_day import RuntimeContext
 
-
+8
 def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray[np.uint32], NDArray[np.uint32]]:
-    """Computes the displacement for each plane in the input list of plane-specific RuntimeContext instances.
+    """Computes the pixel displacement for each plane to arrange them in a combined view.
 
-    The displacement values are calculated based on the dimensions and configuration parameters provided in each
-    RuntimeContext. If mroi_x_offset and mroi_y_offset are already specified in the RuntimeContext, those values are
-    used. If not, the function computes the displacement using the dimensions of each plane.
+    Handles three scenarios based on the recording type. For standard multi-plane recordings without MROI data, computes
+    a simple grid layout where each plane is tiled sequentially. For MROI recordings with a single z-plane per ROI, uses
+    the MROI offsets directly to preserve spatial relationships between ROIs. For MROI recordings with multiple z-planes
+    per ROI, applies two-level tiling: ROI positions are preserved within each tile, and tiles are offset for each
+    z-plane to prevent overlap.
 
     Notes:
         The output of this function is used to properly arrange the data from multiple planes in the 'shared' recording
@@ -40,7 +40,7 @@ def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray
     # Extracts data from the first context for reference.
     first_context = plane_contexts[0]
 
-    # Calculates the number of planes.
+    # Determines the number of planes.
     plane_number = len(plane_contexts)
 
     # Initializes NumPy arrays to store the calculated displacement values for y-axis and x-axis. Uses uint32
@@ -48,50 +48,48 @@ def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray
     y_displacement = np.zeros(plane_number, dtype=np.uint32)
     x_displacement = np.zeros(plane_number, dtype=np.uint32)
 
-    # If mroi_y_offset and mroi_x_offset are not already provided, computes them based on the dimensions.
+    # Handles standard (non-MROI) recordings by computing a simple grid layout for all planes.
     if first_context.runtime.io.mroi_y_offset is None or first_context.runtime.io.mroi_x_offset is None:
-        # Queries the height and width of the first plane.
         height = first_context.runtime.io.frame_height
         width = first_context.runtime.io.frame_width
 
-        # Calculates the number of pixel columns needed to arrange the planes, based on their dimension.
+        # Calculates the number of columns needed to arrange planes in a roughly square grid.
         column_number = int(np.ceil(np.sqrt(height * width * plane_number) / width))
 
-        # Loops over all available planes and calculates the displacement values of each plane based on the column and
-        # row positions.
+        # Assigns each plane to a grid position based on its index.
         for plane_index in range(plane_number):
             x_displacement[plane_index] = (plane_index % column_number) * width
             y_displacement[plane_index] = (plane_index // column_number) * height
 
-    # Otherwise, uses mroi_y_offset and mroi_x_offset values directly.
+    # Handles MROI (Multi-ROI) recordings where each ROI has a known spatial position in the original field of view.
     else:
-        # Queries the values of mroi_x_offset and mroi_y_offset from each plane-specific RuntimeContext.
+        # Starts with the MROI offsets, which position each ROI correctly relative to each other.
         x_displacement = np.array([ctx.runtime.io.mroi_x_offset for ctx in plane_contexts], dtype=np.uint32)
         y_displacement = np.array([ctx.runtime.io.mroi_y_offset for ctx in plane_contexts], dtype=np.uint32)
 
-        # Identifies the unique (dy, dx) pairs and determines the number of unique regions of interests (ROIs).
+        # Checks if multiple virtual planes share the same (x, y) position. This happens when MROI recordings have
+        # multiple z-planes per ROI: all z-planes within one ROI share the same spatial position.
         unique_positions = np.unique(np.vstack((y_displacement, x_displacement)), axis=1)
         roi_number = unique_positions.shape[1]
 
-        # If the number of regions of interest (ROIs) is lower than the number of planes, recalculates the displacement
-        # values based on the maximum dimensions.
+        # If fewer unique positions than virtual planes exist, we have multiple z-planes per ROI. In this case, we need
+        # two-level tiling: preserve ROI positions within each tile, but offset entire tiles for each z-plane.
         if roi_number < plane_number:
-            # Recalculates the number of planes.
+            # Computes the number of z-planes (total virtual planes divided by unique ROI positions).
             plane_number //= roi_number
 
-            # Queries the widths and heights for each plane.
-            height = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts])
-            width = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts])
+            heights_array = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts])
+            widths_array = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts])
 
-            # Calculates the maximum height and width based on the computed displacement values and plane dimensions.
-            maximum_height = (y_displacement + height).max()
-            maximum_width = (x_displacement + width).max()
+            # Calculates the tile size as the bounding box that contains all ROIs at their MROI positions.
+            maximum_height = (y_displacement + heights_array).max()
+            maximum_width = (x_displacement + widths_array).max()
 
-            # Recalculates the number of columns needed to arrange the planes.
+            # Calculates the number of columns needed to arrange z-plane tiles in a roughly square grid.
             column_number = int(np.ceil(np.sqrt(maximum_height * maximum_width * plane_number) / maximum_width))
 
-            # Loops over all available planes and updates the displacement values for each region of interest (ROI)
-            # based on the column and row positions.
+            # Adds tile offsets to the base MROI positions. Each z-plane gets its own tile, and within each tile the
+            # ROIs maintain their relative MROI positions.
             for plane_index in range(plane_number):
                 for roi_index in range(roi_number):
                     roi_plane_index = plane_index * roi_number + roi_index
@@ -111,8 +109,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     detection images and extraction data for both channels.
 
     Args:
-        plane_contexts: A list of RuntimeContext instances, one for each plane being combined. All contexts must have
-            their runtime.io.output_directory set to valid plane output directories.
+        plane_contexts: A list of RuntimeContext instances, one for each plane being combined.
 
     Returns:
         A CombinedData instance containing the combined detection and extraction data.
@@ -165,7 +162,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
     # Logs the combining operation.
     channel_count = 2 if has_two_channels else 1
-    directory_names = [d.name for d in plane_directories]
+    directory_names = [d.name for d in plane_directories if d is not None]
     console.echo(
         message=f"Combining processed data for {channel_count} channel(s) from {directory_names}...",
         level=LogLevel.INFO,
@@ -208,9 +205,17 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
             combined_mean_image[np.ix_(y_range, x_range)] = context.runtime.detection.mean_image
         if context.runtime.detection.enhanced_mean_image is not None:
             combined_enhanced_mean_image[np.ix_(y_range, x_range)] = context.runtime.detection.enhanced_mean_image
-        if has_two_channels and context.runtime.detection.mean_image_channel_2 is not None:
+        if (
+            has_two_channels
+            and combined_mean_image_channel_2 is not None
+            and context.runtime.detection.mean_image_channel_2 is not None
+        ):
             combined_mean_image_channel_2[np.ix_(y_range, x_range)] = context.runtime.detection.mean_image_channel_2
-        if second_channel_functional and context.runtime.detection.enhanced_mean_image_channel_2 is not None:
+        if (
+            second_channel_functional
+            and combined_enhanced_mean_image_channel_2 is not None
+            and context.runtime.detection.enhanced_mean_image_channel_2 is not None
+        ):
             combined_enhanced_mean_image_channel_2[np.ix_(y_range, x_range)] = (
                 context.runtime.detection.enhanced_mean_image_channel_2
             )
@@ -222,13 +227,21 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         corr_x_range = np.arange(x_offsets[plane_index] + valid_x_start, x_offsets[plane_index] + valid_x_end)
         if context.runtime.detection.correlation_map is not None:
             combined_correlation_map[np.ix_(corr_y_range, corr_x_range)] = context.runtime.detection.correlation_map
-        if second_channel_functional and context.runtime.detection.correlation_map_channel_2 is not None:
+        if (
+            second_channel_functional
+            and combined_correlation_map_channel_2 is not None
+            and context.runtime.detection.correlation_map_channel_2 is not None
+        ):
             combined_correlation_map_channel_2[np.ix_(corr_y_range, corr_x_range)] = (
                 context.runtime.detection.correlation_map_channel_2
             )
 
         # Updates maximum projection if available.
-        if has_max_projection and context.runtime.detection.maximum_projection is not None:
+        if (
+            has_max_projection
+            and combined_max_projection is not None
+            and context.runtime.detection.maximum_projection is not None
+        ):
             combined_max_projection[np.ix_(corr_y_range, corr_x_range)] = context.runtime.detection.maximum_projection
         if (
             second_channel_functional
@@ -267,6 +280,16 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         plane_spikes = context.runtime.extraction.spikes
         plane_cell_classification = context.runtime.extraction.cell_classification
 
+        # Skips fluorescence processing if data is not available.
+        if (
+            plane_cell_fluorescence is None
+            or plane_neuropil_fluorescence is None
+            or plane_subtracted_fluorescence is None
+            or plane_spikes is None
+            or plane_cell_classification is None
+        ):
+            continue
+
         # Pads fluorescence data if this plane has fewer frames than the maximum.
         cell_count, frame_count = plane_cell_fluorescence.shape
         if frame_count < max_frame_count:
@@ -295,7 +318,13 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
             plane_spikes_channel_2 = context.runtime.extraction.spikes_channel_2
             plane_cell_classification_channel_2 = context.runtime.extraction.cell_classification_channel_2
 
-            if plane_cell_fluorescence_channel_2 is not None:
+            if (
+                plane_cell_fluorescence_channel_2 is not None
+                and plane_neuropil_fluorescence_channel_2 is not None
+                and plane_subtracted_fluorescence_channel_2 is not None
+                and plane_spikes_channel_2 is not None
+                and plane_cell_classification_channel_2 is not None
+            ):
                 cell_count_channel_2, frame_count_channel_2 = plane_cell_fluorescence_channel_2.shape
                 if frame_count_channel_2 < max_frame_count:
                     padding_channel_2 = np.zeros(
@@ -324,7 +353,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     if not combined_roi_stats:
         message = (
             "Unable to combine plane data. No valid planes with ROI statistics were found. Ensure that at least one "
-            "plane has been processed successfully before combining."
+            "plane has been processed successfully before attempting to combine the data."
         )
         console.error(message=message, error=ValueError)
 
