@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from ..configuration.single_day import RuntimeContext
 
-
+8
 def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray[np.uint32], NDArray[np.uint32]]:
     """Computes the pixel displacement for each plane to arrange them in a combined view.
 
@@ -78,12 +78,12 @@ def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray
             # Computes the number of z-planes (total virtual planes divided by unique ROI positions).
             plane_number //= roi_number
 
-            height = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts])
-            width = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts])
+            heights_array = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts])
+            widths_array = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts])
 
             # Calculates the tile size as the bounding box that contains all ROIs at their MROI positions.
-            maximum_height = (y_displacement + height).max()
-            maximum_width = (x_displacement + width).max()
+            maximum_height = (y_displacement + heights_array).max()
+            maximum_width = (x_displacement + widths_array).max()
 
             # Calculates the number of columns needed to arrange z-plane tiles in a roughly square grid.
             column_number = int(np.ceil(np.sqrt(maximum_height * maximum_width * plane_number) / maximum_width))
@@ -162,7 +162,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
     # Logs the combining operation.
     channel_count = 2 if has_two_channels else 1
-    directory_names = [d.name for d in plane_directories]
+    directory_names = [d.name for d in plane_directories if d is not None]
     console.echo(
         message=f"Combining processed data for {channel_count} channel(s) from {directory_names}...",
         level=LogLevel.INFO,
@@ -205,9 +205,17 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
             combined_mean_image[np.ix_(y_range, x_range)] = context.runtime.detection.mean_image
         if context.runtime.detection.enhanced_mean_image is not None:
             combined_enhanced_mean_image[np.ix_(y_range, x_range)] = context.runtime.detection.enhanced_mean_image
-        if has_two_channels and context.runtime.detection.mean_image_channel_2 is not None:
+        if (
+            has_two_channels
+            and combined_mean_image_channel_2 is not None
+            and context.runtime.detection.mean_image_channel_2 is not None
+        ):
             combined_mean_image_channel_2[np.ix_(y_range, x_range)] = context.runtime.detection.mean_image_channel_2
-        if second_channel_functional and context.runtime.detection.enhanced_mean_image_channel_2 is not None:
+        if (
+            second_channel_functional
+            and combined_enhanced_mean_image_channel_2 is not None
+            and context.runtime.detection.enhanced_mean_image_channel_2 is not None
+        ):
             combined_enhanced_mean_image_channel_2[np.ix_(y_range, x_range)] = (
                 context.runtime.detection.enhanced_mean_image_channel_2
             )
@@ -219,13 +227,21 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         corr_x_range = np.arange(x_offsets[plane_index] + valid_x_start, x_offsets[plane_index] + valid_x_end)
         if context.runtime.detection.correlation_map is not None:
             combined_correlation_map[np.ix_(corr_y_range, corr_x_range)] = context.runtime.detection.correlation_map
-        if second_channel_functional and context.runtime.detection.correlation_map_channel_2 is not None:
+        if (
+            second_channel_functional
+            and combined_correlation_map_channel_2 is not None
+            and context.runtime.detection.correlation_map_channel_2 is not None
+        ):
             combined_correlation_map_channel_2[np.ix_(corr_y_range, corr_x_range)] = (
                 context.runtime.detection.correlation_map_channel_2
             )
 
         # Updates maximum projection if available.
-        if has_max_projection and context.runtime.detection.maximum_projection is not None:
+        if (
+            has_max_projection
+            and combined_max_projection is not None
+            and context.runtime.detection.maximum_projection is not None
+        ):
             combined_max_projection[np.ix_(corr_y_range, corr_x_range)] = context.runtime.detection.maximum_projection
         if (
             second_channel_functional
@@ -264,6 +280,16 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         plane_spikes = context.runtime.extraction.spikes
         plane_cell_classification = context.runtime.extraction.cell_classification
 
+        # Skips fluorescence processing if data is not available.
+        if (
+            plane_cell_fluorescence is None
+            or plane_neuropil_fluorescence is None
+            or plane_subtracted_fluorescence is None
+            or plane_spikes is None
+            or plane_cell_classification is None
+        ):
+            continue
+
         # Pads fluorescence data if this plane has fewer frames than the maximum.
         cell_count, frame_count = plane_cell_fluorescence.shape
         if frame_count < max_frame_count:
@@ -292,7 +318,13 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
             plane_spikes_channel_2 = context.runtime.extraction.spikes_channel_2
             plane_cell_classification_channel_2 = context.runtime.extraction.cell_classification_channel_2
 
-            if plane_cell_fluorescence_channel_2 is not None:
+            if (
+                plane_cell_fluorescence_channel_2 is not None
+                and plane_neuropil_fluorescence_channel_2 is not None
+                and plane_subtracted_fluorescence_channel_2 is not None
+                and plane_spikes_channel_2 is not None
+                and plane_cell_classification_channel_2 is not None
+            ):
                 cell_count_channel_2, frame_count_channel_2 = plane_cell_fluorescence_channel_2.shape
                 if frame_count_channel_2 < max_frame_count:
                     padding_channel_2 = np.zeros(
