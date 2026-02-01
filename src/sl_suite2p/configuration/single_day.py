@@ -698,6 +698,27 @@ class RegistrationData:
     nonrigid_correlations: NDArray[np.float32] | None = None
     """The phase correlation values from non-rigid registration, indicating alignment quality per frame and block."""
 
+    principal_component_extreme_images: NDArray[np.float32] | None = None
+    """The mean images from frames at extreme ends of each principal component of the registered recording movie, with 
+    shape (2, num_components, height, width). Index 0 contains low-projection means, index 1 contains high-projection 
+    means. Used for visualizing registration quality in the GUI."""
+
+    principal_component_projections: NDArray[np.float32] | None = None
+    """The projection of each frame onto the principal components of the registered recording movie, with shape
+    (num_frames, num_components). Shows how each frame relates to the computed PCs over time."""
+
+    principal_component_shift_metrics: NDArray[np.float32] | None = None
+    """The registration shift metrics computed by aligning PC extreme images of the registered recording movie, with 
+    shape (num_components, 3). Column 0 contains mean rigid shift magnitude, column 1 contains mean nonrigid shift 
+    magnitude, and column 2 contains maximum nonrigid shift magnitude. Large values indicate poor registration 
+    quality."""
+
+    z_stack_correlations: NDArray[np.float32] | None = None
+    """The phase correlation values between each frame and each plane of the reference z-stack constructed before
+    starting the acquisition, with shape (num_z_planes, num_frames). Higher values indicate better alignment with that
+    z-plane, enabling reconstruction of the focal plane position over time. Only populated when a z-stack reference
+    is provided."""
+
     def prepare_for_saving(self) -> None:
         """Sets all array fields to None for YAML serialization."""
         self.reference_image = None
@@ -707,6 +728,10 @@ class RegistrationData:
         self.nonrigid_y_offsets = None
         self.nonrigid_x_offsets = None
         self.nonrigid_correlations = None
+        self.principal_component_extreme_images = None
+        self.principal_component_projections = None
+        self.principal_component_shift_metrics = None
+        self.z_stack_correlations = None
 
     def save_arrays(self, output_path: Path) -> None:
         """Saves all registration arrays to a single .npz file.
@@ -730,6 +755,14 @@ class RegistrationData:
             save_dict["nonrigid_x_offsets"] = self.nonrigid_x_offsets
         if self.nonrigid_correlations is not None:
             save_dict["nonrigid_correlations"] = self.nonrigid_correlations
+        if self.principal_component_extreme_images is not None:
+            save_dict["principal_component_extreme_images"] = self.principal_component_extreme_images
+        if self.principal_component_projections is not None:
+            save_dict["principal_component_projections"] = self.principal_component_projections
+        if self.principal_component_shift_metrics is not None:
+            save_dict["principal_component_shift_metrics"] = self.principal_component_shift_metrics
+        if self.z_stack_correlations is not None:
+            save_dict["z_stack_correlations"] = self.z_stack_correlations
 
         if save_dict:
             np.savez(output_path / "registration_data.npz", allow_pickle=False, **save_dict)
@@ -760,6 +793,14 @@ class RegistrationData:
             self.nonrigid_x_offsets = data["nonrigid_x_offsets"].astype(np.float32)
         if "nonrigid_correlations" in data:
             self.nonrigid_correlations = data["nonrigid_correlations"].astype(np.float32)
+        if "principal_component_extreme_images" in data:
+            self.principal_component_extreme_images = data["principal_component_extreme_images"].astype(np.float32)
+        if "principal_component_projections" in data:
+            self.principal_component_projections = data["principal_component_projections"].astype(np.float32)
+        if "principal_component_shift_metrics" in data:
+            self.principal_component_shift_metrics = data["principal_component_shift_metrics"].astype(np.float32)
+        if "z_stack_correlations" in data:
+            self.z_stack_correlations = data["z_stack_correlations"].astype(np.float32)
 
 
 @dataclass

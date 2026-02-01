@@ -18,7 +18,7 @@ Copyright:
 
 from .utils import compute_spatial_taper_mask
 from .zalign import compute_z_position
-from .metrics import get_pc_metrics
+from .metrics import compute_pc_metrics
 from .nonrigid import compute_registration_blocks
 from .register import registration_wrapper, create_enhanced_mean_image, save_registration_outputs_to_ops
 from .deformation import Deformation
@@ -27,11 +27,11 @@ from .diffeomorphic import DiffeomorphicDemonsRegistration
 __all__ = [
     "Deformation",
     "DiffeomorphicDemonsRegistration",
+    "compute_pc_metrics",
     "compute_registration_blocks",
     "compute_spatial_taper_mask",
     "compute_z_position",
     "create_enhanced_mean_image",
-    "get_pc_metrics",
     "registration_wrapper",
     "save_registration_outputs_to_ops",
 ]

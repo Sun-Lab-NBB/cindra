@@ -6,7 +6,7 @@ from numba import njit, prange
 import numpy as np
 from scipy import stats
 from numpy.typing import NDArray
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
 from .masks import create_masks
@@ -115,7 +115,7 @@ def extract_traces(
         console.echo(message=f"Extracting ROI fluorescence data for session {session_id}...", level=LogLevel.INFO)
 
     # Instantiates and starts the execution timer.
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
     # Extracts processed movie statistics. For BinaryFileCombined objects, uses the height/width properties
@@ -275,7 +275,7 @@ def extraction_wrapper(
         channel_2_frames: Same as 'frames_path', but for the second functional channel, if the plane data contains
                 data from two channels.
     """
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     _, height, width = frames.shape
     batch_size = ops["batch_size"]
     neuropil_coefficient = ops["neuropil_coefficient"]
