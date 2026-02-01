@@ -6,7 +6,7 @@ from warnings import warn
 from tqdm import tqdm
 import numpy as np
 from scipy.signal import medfilt, medfilt2d
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
 from . import rigid, utils, nonrigid
@@ -331,7 +331,7 @@ def compute_reference_and_register_frames(
 
     """
     # Initializes a timer to time processing stages
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
     n_frames, Ly, Lx = f_align_in.shape
 
@@ -458,7 +458,7 @@ def shift_frames_and_write(
 
     mean_img = np.zeros((Ly, Lx), "float32")
     batch_size = ops["batch_size"]
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     console.echo(f"Computing plane {plane_number} frame registration offsets for channel 2...", level=LogLevel.INFO)
     timer.reset()
     for batch_number in tqdm(

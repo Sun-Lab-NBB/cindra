@@ -4,7 +4,7 @@ from typing import Any
 from pathlib import Path
 
 import numpy as np
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
 from . import chan2detect, sparsedetect
@@ -16,7 +16,7 @@ from ..classification import classify, user_classfile
 
 
 def detect(ops, plane_number: int, classfile=None):
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
     bin_size = int(
         max(1, ops["frame_count"] // ops["maximum_binned_frames"], np.round(ops["tau"] * ops["sampling_rate"]))
@@ -80,7 +80,7 @@ def detection_wrapper(
 
 
     """
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     n_frames, Ly, Lx = f_reg.shape
     yrange = ops.get("valid_y_range", [0, Ly]) if yrange is None else yrange
     xrange = ops.get("valid_x_range", [0, Lx]) if xrange is None else xrange

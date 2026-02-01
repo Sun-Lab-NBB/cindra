@@ -7,7 +7,7 @@ import contextlib
 
 import numba
 import numpy as np
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
 from . import io, detection, extraction, registration, classification
@@ -181,7 +181,7 @@ def _register_plane(
         runtime.
 
     """
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
     # Memory-maps the necessary binary files.
     n_frames, height, width = ops["frame_count"], ops["frame_height"], ops["frame_width"]
@@ -310,47 +310,46 @@ def _compute_registration_metrics(ops: dict[str, Any], plane_number: int, frames
         dictionary is expanded to include the "regPC", "tPC", and "regDX" fields, in addition to the
         'registration_metrics' subfield stored under the 'timing' field.
     """
-    timer = PrecisionTimer("s")
-
-    message = f"Computing plane {plane_number} registration quality metrics..."
-    console.echo(message=message, level=LogLevel.INFO)
-    timer.reset()
-
-    # Memory-maps the necessary binary files.
-    n_frames, height, width = ops["frame_count"], ops["frame_height"], ops["frame_width"]
-    with (
-        BinaryFile(height=height, width=width, file_path=frames_path, frame_number=n_frames) as frames,
-    ):
-        # Determines how to bin the processed movie to optimize memory overhead.
-        n_frames, height, width = frames.shape
-        n_samples = min(
-            _MINIMUM_FRAMES_PER_BIN
-            if n_frames < _MAXIMUM_FRAMES_PER_BIN or height > _MAXIMUM_HEIGHT_PER_BIN or width > _MAXIMUM_WIDTH_PER_BIN
-            else _MAXIMUM_FRAMES_PER_BIN,
-            n_frames,
-        )
-
-        # Bins the processed movie according to the binning criteria calculated above
-        indices = np.linspace(0, n_frames - 1, n_samples).astype("int")
-        movie = frames[indices]
-        movie = movie[
-            :, ops["valid_y_range"][0] : ops["valid_y_range"][-1], ops["valid_x_range"][0] : ops["valid_x_range"][-1]
-        ]
-
-        # Runs the registration evaluation pipeline.
-        ops = registration.get_pc_metrics(movie, ops, plane_number=plane_number)
-
-        reg_metrics_time = timer.elapsed
-        message = (
-            f"Plane {plane_number} registration quality metrics: computed. Time taken: {reg_metrics_time} seconds."
-        )
-        console.echo(message=message, level=LogLevel.SUCCESS)
-
-        # Adds processing time information to ops
-        ops["timing"]["registration_metrics"] = reg_metrics_time
-
-    # Returns the modified ops to caller
+    # TODO: Refactor to use RuntimeContext. The compute_pc_metrics function now requires a RuntimeContext instead of
+    # individual parameters. This function needs to be updated to either:
+    # 1. Construct a RuntimeContext from the legacy ops dictionary, or
+    # 2. Load the RuntimeContext from disk if available
+    # For now, this functionality is broken until the single-day pipeline is refactored to use the new data
+    # architecture.
+    console.echo(
+        message="Registration metrics computation is temporarily disabled. The single-day pipeline needs to be "
+        "refactored to use RuntimeContext instead of the legacy ops dictionary.",
+        level=LogLevel.WARNING,
+    )
     return ops
+
+    # Legacy code preserved for reference during refactoring:
+    # timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    # message = f"Computing plane {plane_number} registration quality metrics..."
+    # console.echo(message=message, level=LogLevel.INFO)
+    # timer.reset()
+    # n_frames, height, width = ops["frame_count"], ops["frame_height"], ops["frame_width"]
+    # with BinaryFile(height=height, width=width, file_path=frames_path, frame_number=n_frames) as frames:
+    #     n_frames, height, width = frames.shape
+    #     n_samples = min(
+    #         _MINIMUM_FRAMES_PER_BIN
+    #         if n_frames < _MAXIMUM_FRAMES_PER_BIN or height > _MAXIMUM_HEIGHT_PER_BIN or width > _MAXIMUM_WIDTH_PER_BIN
+    #         else _MAXIMUM_FRAMES_PER_BIN,
+    #         n_frames,
+    #     )
+    #     indices = np.linspace(0, n_frames - 1, n_samples).astype("int")
+    #     movie = frames[indices]
+    #     movie = movie[
+    #         :, ops["valid_y_range"][0] : ops["valid_y_range"][-1], ops["valid_x_range"][0] : ops["valid_x_range"][-1]
+    #     ]
+    #     ops = registration.get_pc_metrics(movie, ops, plane_number=plane_number)
+    #     reg_metrics_time = timer.elapsed
+    #     message = (
+    #         f"Plane {plane_number} registration quality metrics: computed. Time taken: {reg_metrics_time} seconds."
+    #     )
+    #     console.echo(message=message, level=LogLevel.SUCCESS)
+    #     ops["timing"]["registration_metrics"] = reg_metrics_time
+    # return ops
 
 
 def _process_rois(
@@ -371,7 +370,7 @@ def _process_rois(
         The input 'ops' dictionary, modified to include the processed ROI information. Also, caches extracted ROI data
         to disk as a series of .npy files (stats.npy, spks.npy, etc.).
     """
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
     # Selects the classifier file, based on the processing configuration
     ops_classifier_file = ops.get("classifier_path")
@@ -550,7 +549,7 @@ def run_s2p(config: SingleDayConfiguration) -> None:
     Args:
         config: The single-day pipeline configuration.
     """
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
     console.echo(message="Initializing single-day suite2p runtime...", level=LogLevel.INFO)
@@ -735,7 +734,7 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
     frames_channel_2_path = str(registered_file_channel_2) if two_channels else None
 
     # Initializes processing timer for the plane
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
     # If plane registration is enabled, runs the registration pipeline

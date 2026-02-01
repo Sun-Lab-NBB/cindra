@@ -8,7 +8,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 from tqdm import tqdm
 import numpy as np
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from scipy.spatial.distance import pdist, squareform
 from ataraxis_base_utilities import LogLevel, console
 import scipy.cluster.hierarchy
@@ -29,7 +29,7 @@ def register_sessions(ops: dict[str, Any], data: MultiDayData) -> MultiDayData:
         The MultiDayData instance updated with the outcome of the registration process.
     """
     # Initializes the runtime timer
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
     # Extracts the type of reference image to use for the registration process.
     images = [session.reference_images[ops["image_type"]] for session in data.sessions]

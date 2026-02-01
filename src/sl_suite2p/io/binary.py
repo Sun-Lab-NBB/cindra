@@ -203,6 +203,45 @@ class BinaryFile:
         """Returns all frames stored inside the file as a NumPy array."""
         return self.file[:]
 
+    def subsample_movie(
+        self,
+        sample_count: int,
+        x_range: tuple[int, int] | None = None,
+        y_range: tuple[int, int] | None = None,
+    ) -> NDArray[np.float32]:
+        """Subsamples the movie by selecting evenly-spaced frames across the recording.
+
+        This method selects frames at regular intervals to create a representative subset of the full recording. Unlike
+        temporal binning which averages consecutive frames, subsampling preserves individual frame characteristics while
+        reducing memory requirements.
+
+        Args:
+            sample_count: The number of frames to sample from the movie. The actual number of returned frames is
+                min(sample_count, frame_number).
+            x_range: A tuple of (start, end) indices for cropping frames along the x-axis. If None, the full width
+                is used.
+            y_range: A tuple of (start, end) indices for cropping frames along the y-axis. If None, the full height
+                is used.
+
+        Returns:
+            A 3D float32 array with shape (num_samples, height, width) containing the subsampled and optionally
+            cropped frames.
+        """
+        # Determines the actual number of samples, capped by the total frame count.
+        actual_samples = min(sample_count, self.frame_number)
+
+        # Computes evenly-spaced indices across the recording.
+        indices = np.linspace(0, self.frame_number - 1, actual_samples).astype(np.int64)
+
+        # Reads the subsampled frames.
+        movie = self.file[indices]
+
+        # Applies cropping if ranges are provided.
+        if y_range is not None and x_range is not None:
+            movie = movie[:, y_range[0] : y_range[1], x_range[0] : x_range[1]]
+
+        return movie.astype(np.float32)
+
     # noinspection PyTypeHints
     def bin_movie(
         self,

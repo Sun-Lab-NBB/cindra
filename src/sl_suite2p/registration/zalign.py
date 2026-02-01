@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from pathlib import Path  # noqa: TC003 - Path is used at runtime for .exists() and .open()
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor
 
+from tqdm import tqdm
 import numpy as np
 from ataraxis_base_utilities import console
 
@@ -16,6 +16,8 @@ from .utils import apply_spatial_high_pass, apply_spatial_smoothing
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+    from ..configuration import RuntimeContext
 
 
 def _compute_plane_correlation(
@@ -60,62 +62,45 @@ def _compute_plane_correlation(
 
 
 def compute_z_position(
+    context: RuntimeContext,
     z_stack: NDArray[np.float32],
-    registered_binary_path: Path,
-    frame_height: int,
-    frame_width: int,
-    frame_count: int,
-    batch_size: int = 100,
-    one_photon_mode: bool = False,
-    pre_smoothing_sigma: float = 0.0,
-    spatial_highpass_window: int = 42,
-    edge_taper_slope: float = 3.45,
-    spatial_smoothing_sigma: float = 1.15,
-    maximum_shift_fraction: float = 0.1,
-    temporal_smoothing_sigma: float = 0.0,
-) -> NDArray[np.float32]:
+) -> RuntimeContext:
     """Computes z-position correlation for each frame against a reference z-stack.
 
-    Correlates each frame from the registered binary file against each plane of the z-stack using phase
-    correlation. The resulting correlation values indicate how well each frame matches each z-stack plane,
-    enabling reconstruction of the focal plane position over time.
+    Correlates each frame from the registered binary file against each plane of the z-stack using phase correlation.
+    The resulting correlation values indicate how well each frame matches each z-stack plane, enabling reconstruction
+    of the focal plane position over time.
 
     Notes:
-        The function reads frames in batches from the binary file and computes phase correlations against
-        pre-computed reference kernels for each z-stack plane. For one-photon recordings, additional
-        preprocessing (smoothing and high-pass filtering) is applied to both z-stack planes and frames
-        before correlation.
+        This function processes frames from a single processing plane at a time. For multi-plane recordings, call this
+        function separately for each plane's RuntimeContext.
+
+        The function reads frames in batches from the binary file and computes phase correlations against pre-computed
+        reference kernels for each z-stack plane. For one-photon recordings, additional preprocessing (smoothing and
+        high-pass filtering) is applied to both z-stack planes and frames before correlation.
+
+        The computed correlations are stored in context.runtime.registration.z_stack_correlations.
 
     Args:
-        z_stack: The reference z-stack with shape (planes, height, width). Each plane represents a
-            different focal depth.
-        registered_binary_path: The absolute path to the motion-corrected binary file that stores the recording frames.
-        frame_height: The height of each frame in pixels.
-        frame_width: The width of each frame in pixels.
-        frame_count: The total number of frames in the binary file.
-        batch_size: The number of frames to load and process at once.
-        one_photon_mode: Determines whether to apply one-photon preprocessing (high-pass filtering and
-            pre-smoothing) to the data.
-        pre_smoothing_sigma: The standard deviation in pixels for Gaussian smoothing applied before
-            high-pass filtering in one-photon mode. Only used when one_photon_mode is True.
-        spatial_highpass_window: The window size in pixels for spatial high-pass filtering in one-photon
-            mode. Only used when one_photon_mode is True.
-        edge_taper_slope: Controls the steepness of the edge taper applied before phase correlation.
-            Larger values produce a more gradual taper. For two-photon data, typically 3x the spatial
-            smoothing sigma.
-        spatial_smoothing_sigma: The standard deviation in pixels for Gaussian smoothing of the phase
-            correlation surface.
-        maximum_shift_fraction: The maximum allowed shift as a fraction of the minimum frame dimension.
-        temporal_smoothing_sigma: The standard deviation in frames for temporal smoothing of correlation
-            values.
+        context: The runtime context containing pipeline configuration and runtime data for the current plane.
+        z_stack: The reference z-stack with shape (num_z_planes, height, width) constructed before starting the
+            acquisition. Each plane represents a different focal depth.
 
     Returns:
-        A 2D array of shape (num_planes, frame_count) containing the peak phase correlation value for each
-        frame against each z-stack plane. Higher values indicate better alignment with that z-plane.
+        The updated runtime context with z_stack_correlations populated in the registration data.
 
     Raises:
         FileNotFoundError: If the registered binary file does not exist at the specified path.
+        ValueError: If the registered binary path is not set in the runtime context.
     """
+    # Extracts IO parameters from runtime context.
+    registered_binary_path = context.runtime.io.registered_binary_path
+    if registered_binary_path is None:
+        message = (
+            "Unable to compute z-position alignment. The registered binary path is not set in the runtime context."
+        )
+        console.error(message=message, error=ValueError)
+
     if not registered_binary_path.exists():
         message = (
             f"Unable to compute z-position alignment. The registered binary file does not exist at the "
@@ -123,7 +108,36 @@ def compute_z_position(
         )
         console.error(message=message, error=FileNotFoundError)
 
-    num_planes = z_stack.shape[0]
+    frame_height = context.runtime.io.frame_height
+    frame_width = context.runtime.io.frame_width
+    frame_count = context.runtime.io.frame_count
+
+    # Extracts configuration parameters.
+    batch_size = context.config.registration.batch_size
+    maximum_shift_fraction = context.config.registration.maximum_shift_fraction
+    spatial_smoothing_sigma = context.config.registration.spatial_smoothing_sigma
+    temporal_smoothing_sigma = context.config.registration.temporal_smoothing_sigma
+
+    # Extracts one-photon registration parameters.
+    one_photon_mode = context.config.one_photon_registration.enabled
+    pre_smoothing_sigma = context.config.one_photon_registration.pre_smoothing_sigma
+    spatial_highpass_window = context.config.one_photon_registration.spatial_highpass_window
+    edge_taper_pixels = context.config.one_photon_registration.edge_taper_pixels
+
+    # Computes edge taper slope based on imaging mode.
+    edge_taper_slope = edge_taper_pixels if one_photon_mode else 3.0 * spatial_smoothing_sigma
+
+    # Extracts main configuration parameters.
+    display_progress = context.config.main.display_progress_bars
+    parallel_workers = context.config.main.parallel_workers
+
+    num_z_planes = z_stack.shape[0]
+
+    # Determines the number of workers for parallel processing.
+    if parallel_workers <= 0:
+        max_workers = min(num_z_planes, 8)
+    else:
+        max_workers = min(num_z_planes, parallel_workers, 8)
 
     # Prepares reference kernels and edge taper masks for each z-stack plane.
     reference_data: list[tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.complex64]]] = []
@@ -156,7 +170,7 @@ def compute_z_position(
         reference_data.append((taper_mask, mean_offset, correlation_kernel))
 
     # Allocates output array for correlation values.
-    z_correlations = np.zeros((num_planes, frame_count), dtype=np.float32)
+    z_correlations = np.zeros((num_z_planes, frame_count), dtype=np.float32)
 
     # Processes frames in batches using memory-mapped BinaryFile access.
     total_batches = (frame_count + batch_size - 1) // batch_size
@@ -179,7 +193,10 @@ def compute_z_position(
     # Reuses a single executor across all batches to avoid repeated thread pool creation overhead.
     with (
         BinaryFile(height=frame_height, width=frame_width, file_path=registered_binary_path) as binary_file,
-        ThreadPoolExecutor(max_workers=min(num_planes, 8)) as executor,
+        ThreadPoolExecutor(max_workers=max_workers) as executor,
+        tqdm(
+            total=total_batches, desc="Computing frame z-positions", unit="batch", disable=not display_progress
+        ) as pbar,
     ):
         for batch_index in range(total_batches):
             batch_start = batch_index * batch_size
@@ -199,8 +216,9 @@ def compute_z_position(
             for plane_index, correlation_maxima in executor.map(lambda task: task(), batch_tasks):
                 z_correlations[plane_index, batch_start:batch_end] = correlation_maxima
 
-            console.echo(
-                message=f"Z-position: batch {batch_index + 1}/{total_batches}, frames {batch_end}/{frame_count}."
-            )
+            pbar.update(1)
 
-    return z_correlations
+    # Stores the computed correlations in the runtime context.
+    context.runtime.registration.z_stack_correlations = z_correlations
+
+    return context

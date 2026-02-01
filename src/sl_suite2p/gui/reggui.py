@@ -28,7 +28,6 @@ from qtpy.QtWidgets import (
 from ataraxis_base_utilities import LogLevel, console
 
 from . import masks, utils
-from .. import registration
 from ..io.save import compute_plane_offsets
 
 
@@ -830,53 +829,40 @@ class BinaryPlayer(QMainWindow):
         console.echo(message="Video paused")
 
     def compute_z(self, parent):
-        ops = self.ops[0]
-
-        # Extracts parameters from ops for the z-position computation.
-        registered_binary_path = Path(ops["registered_binary_path"])
-        frame_height = ops["frame_height"]
-        frame_width = ops["frame_width"]
-        frame_count = ops["frame_count"]
-        batch_size = ops.get("batch_size", 100)
-        one_photon_mode = ops.get("one_p_reg", False)
-        pre_smoothing_sigma = float(ops.get("pre_smooth", 0))
-        spatial_highpass_window = int(ops.get("spatial_hp_reg", 42))
-        spatial_smoothing_sigma = float(ops.get("smooth_sigma", 1.15))
-
-        # Computes edge taper slope based on imaging mode.
-        if one_photon_mode:
-            edge_taper_slope = float(ops.get("spatial_taper", 40.0))
-        else:
-            edge_taper_slope = 3.0 * spatial_smoothing_sigma
-
-        maximum_shift_fraction = float(ops.get("maxregshift", 0.1))
-        temporal_smoothing_sigma = float(ops.get("smooth_sigma_time", 0.0))
-
-        # Computes z-position correlations.
-        self.zcorr = registration.compute_z_position(
-            z_stack=self.zstack.astype(np.float32),
-            registered_binary_path=registered_binary_path,
-            frame_height=frame_height,
-            frame_width=frame_width,
-            frame_count=frame_count,
-            batch_size=batch_size,
-            one_photon_mode=one_photon_mode,
-            pre_smoothing_sigma=pre_smoothing_sigma,
-            spatial_highpass_window=spatial_highpass_window,
-            edge_taper_slope=edge_taper_slope,
-            spatial_smoothing_sigma=spatial_smoothing_sigma,
-            maximum_shift_fraction=maximum_shift_fraction,
-            temporal_smoothing_sigma=temporal_smoothing_sigma,
+        # TODO: Refactor to use RuntimeContext. The compute_z_position function now requires a RuntimeContext
+        # instead of individual parameters. This GUI method needs to be updated to either:
+        # 1. Construct a RuntimeContext from the legacy ops dictionary, or
+        # 2. Load the RuntimeContext from disk if available
+        # For now, this functionality is broken until the GUI is refactored to use the new data architecture.
+        console.echo(
+            message="Z-position computation is temporarily disabled. The GUI needs to be refactored to use "
+            "RuntimeContext instead of the legacy ops dictionary.",
+            level="WARNING",
         )
 
-        self.zmax = np.argmax(gaussian_filter1d(self.zcorr.T.copy(), 2, axis=1), axis=1)
-
-        # Saves zcorr to a separate file instead of embedding in ops.
-        zcorr_path = Path(self.filename).parent / "zcorr.npy"
-        np.save(zcorr_path, self.zcorr)
-        console.echo(message=f"Z-position correlations saved to: {zcorr_path}")
-
-        self.plot_zcorr()
+        # Legacy code preserved for reference during refactoring:
+        # ops = self.ops[0]
+        # registered_binary_path = Path(ops["registered_binary_path"])
+        # frame_height = ops["frame_height"]
+        # frame_width = ops["frame_width"]
+        # frame_count = ops["frame_count"]
+        # batch_size = ops.get("batch_size", 100)
+        # one_photon_mode = ops.get("one_p_reg", False)
+        # pre_smoothing_sigma = float(ops.get("pre_smooth", 0))
+        # spatial_highpass_window = int(ops.get("spatial_hp_reg", 42))
+        # spatial_smoothing_sigma = float(ops.get("smooth_sigma", 1.15))
+        # if one_photon_mode:
+        #     edge_taper_slope = float(ops.get("spatial_taper", 40.0))
+        # else:
+        #     edge_taper_slope = 3.0 * spatial_smoothing_sigma
+        # maximum_shift_fraction = float(ops.get("maxregshift", 0.1))
+        # temporal_smoothing_sigma = float(ops.get("smooth_sigma_time", 0.0))
+        # self.zcorr = registration.compute_z_position(...)
+        # self.zmax = np.argmax(gaussian_filter1d(self.zcorr.T.copy(), 2, axis=1), axis=1)
+        # zcorr_path = Path(self.filename).parent / "zcorr.npy"
+        # np.save(zcorr_path, self.zcorr)
+        # console.echo(message=f"Z-position correlations saved to: {zcorr_path}")
+        # self.plot_zcorr()
 
     def plot_zcorr(self):
         self.p3.clear()
