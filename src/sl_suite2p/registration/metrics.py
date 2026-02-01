@@ -2,6 +2,7 @@
 
 from multiprocessing import Pool
 
+import cv2
 import numpy as np
 from numpy.linalg import norm
 from scipy.signal import convolve2d
@@ -9,13 +10,6 @@ from ataraxis_time import PrecisionTimer
 from scipy.ndimage import gaussian_filter1d
 from sklearn.decomposition import PCA
 from ataraxis_base_utilities import LogLevel, console
-
-try:
-    import cv2
-
-    HAS_CV2 = True
-except ImportError:
-    HAS_CV2 = False
 
 from . import rigid, utils, nonrigid
 from .bidiphase_correction import apply_bidirectional_phase_correction
@@ -449,15 +443,7 @@ def get_flow_metrics(ops):
 
         correlations0 = corr_to_template(mov, tmpl)
         correlations = np.hstack((correlations, correlations0))
-        if HAS_CV2:
-            flows0, norms0 = optic_flow(mov, tmpl, nflows)
-        else:
-            flows0 = []
-            norms0 = []
-            console.echo(
-                message="Optical flows not computed: cv2 (OpenCV) not installed or import failed.",
-                level=LogLevel.WARNING,
-            )
+        flows0, norms0 = optic_flow(mov, tmpl, nflows)
 
         flows = np.vstack((flows, flows0))
         norms = np.hstack((norms, norms0))
