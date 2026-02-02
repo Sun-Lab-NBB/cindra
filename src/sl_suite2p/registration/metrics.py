@@ -231,7 +231,7 @@ def _register_pc_extremes(
     return metrics
 
 
-def compute_pc_metrics(context: RuntimeContext) -> RuntimeContext:
+def compute_pc_metrics(context: RuntimeContext) -> None:
     """Computes registration quality metrics using principal component analysis.
 
     Evaluates registration quality by computing principal components of the registered frames and measuring how well
@@ -252,10 +252,8 @@ def compute_pc_metrics(context: RuntimeContext) -> RuntimeContext:
         shift metrics computed by aligning PC extremes.
 
     Args:
-        context: The runtime context containing pipeline configuration and runtime data for the current plane.
-
-    Returns:
-        The updated runtime context with PC metrics populated in the registration data.
+        context: The runtime context containing pipeline configuration and runtime data for the current plane. Modified
+            in-place to store the computed metrics.
 
     Raises:
         FileNotFoundError: If the registered binary file does not exist at the specified path.
@@ -401,5 +399,3 @@ def compute_pc_metrics(context: RuntimeContext) -> RuntimeContext:
     context.runtime.registration.principal_component_extreme_images = principal_component_extreme_images
     context.runtime.registration.principal_component_projections = principal_component_projections
     context.runtime.registration.principal_component_shift_metrics = principal_component_shift_metrics
-
-    return context

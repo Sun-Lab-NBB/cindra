@@ -119,7 +119,7 @@ def apply_phase_correlation(frames: NDArray[np.float32], kernel: NDArray[np.comp
     return scipy_irfft2(frames_fft, s=(frames.shape[-2], width), axes=(-2, -1), workers=-1).astype(np.float32)
 
 
-@vectorize(  # type: ignore[untyped-decorator]
+@vectorize(
     ["float32(float32, float32, float32)"],
     nopython=True,
     target="parallel",

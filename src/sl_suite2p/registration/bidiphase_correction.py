@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-def compute_bidirectional_phase_offset(frames: NDArray[np.int16]) -> int:
+def compute_bidirectional_phase_offset(frames: NDArray[np.float32]) -> int:
     """Computes the bidirectional phase offset from a sample of imaging frames.
 
     Bidirectional scanning microscopes acquire alternating lines in opposite directions, which can introduce a
@@ -53,7 +53,7 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.int16]) -> int:
 
 
 def apply_bidirectional_phase_correction(
-    frames: NDArray[np.int16],
+    frames: NDArray[np.float32],
     bidirectional_phase_offset: int,
 ) -> None:
     """Applies bidirectional phase correction to imaging frames in-place.

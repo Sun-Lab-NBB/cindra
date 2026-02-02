@@ -164,9 +164,6 @@ def _initialize_plane_contexts(
     # Determines whether the recording uses two channels.
     has_two_channels = acquisition.channel_number > 1
 
-    # Determines whether to keep raw (unregistered) binary files.
-    keep_raw = config.registration.keep_movie_raw
-
     # Initializes the list to store RuntimeContext instances for each plane.
     contexts: list[RuntimeContext] = []
 
@@ -185,15 +182,9 @@ def _initialize_plane_contexts(
             plane_index=virtual_plane_index,
         )
 
-        # Configures the raw binary path if raw movie retention is enabled.
-        if keep_raw:
-            io_data.raw_binary_path = plane_output_path / "channel_1_data_raw.bin"
-
         # Configures second channel binary paths if using two channels.
         if has_two_channels:
             io_data.registered_binary_path_channel_2 = plane_output_path / "channel_2_data.bin"
-            if keep_raw:
-                io_data.raw_binary_path_channel_2 = plane_output_path / "channel_2_data_raw.bin"
 
         # Populates MROI-specific fields if processing multi-ROI data.
         if acquisition.is_mroi:
@@ -304,12 +295,8 @@ def _create_binary_files(
         message = "Unable to create binary files. At least one RuntimeContext must be provided."
         console.error(message=message, error=ValueError)
 
-    # Uses the first context to get shared configuration.
-    config = contexts[0].config
+    # Uses the first context to get shared acquisition parameters.
     acquisition = contexts[0].acquisition
-
-    # Determines whether raw binaries should be used (vs registered binaries).
-    keep_raw = config.registration.keep_movie_raw
 
     # Determines whether the recording uses two channels.
     has_two_channels = acquisition.channel_number > 1
@@ -324,46 +311,26 @@ def _create_binary_files(
         height = frame_heights[context_index]
         width = frame_widths[context_index]
 
-        # Creates channel 1 binary file (raw or registered depending on configuration).
-        if keep_raw:
-            raw_path = io_data.raw_binary_path
-            if raw_path is None:
-                message = (
-                    f"Unable to create raw binary file for plane {io_data.plane_index}. The raw_binary_path is not "
-                    f"configured in IOData."
-                )
-                console.error(message=message, error=ValueError)
-            channel_1_binary_files.append(BinaryFile(height, width, raw_path, frames_per_plane))
-        else:
-            registered_path = io_data.registered_binary_path
-            if registered_path is None:
-                message = (
-                    f"Unable to create registered binary file for plane {io_data.plane_index}. The "
-                    f"registered_binary_path is not configured in IOData."
-                )
-                console.error(message=message, error=ValueError)
-            channel_1_binary_files.append(BinaryFile(height, width, registered_path, frames_per_plane))
+        # Creates channel 1 binary file.
+        registered_path = io_data.registered_binary_path
+        if registered_path is None:
+            message = (
+                f"Unable to create binary file for plane {io_data.plane_index}. The registered_binary_path is not "
+                f"configured in IOData."
+            )
+            console.error(message=message, error=ValueError)
+        channel_1_binary_files.append(BinaryFile(height, width, registered_path, frames_per_plane))
 
         # Creates channel 2 binary file if applicable.
         if has_two_channels:
-            if keep_raw:
-                raw_path_ch2 = io_data.raw_binary_path_channel_2
-                if raw_path_ch2 is None:
-                    message = (
-                        f"Unable to create raw binary file for plane {io_data.plane_index} channel 2. The "
-                        f"raw_binary_path_channel_2 is not configured in IOData."
-                    )
-                    console.error(message=message, error=ValueError)
-                channel_2_binary_files.append(BinaryFile(height, width, raw_path_ch2, frames_per_plane))
-            else:
-                registered_path_ch2 = io_data.registered_binary_path_channel_2
-                if registered_path_ch2 is None:
-                    message = (
-                        f"Unable to create registered binary file for plane {io_data.plane_index} channel 2. The "
-                        f"registered_binary_path_channel_2 is not configured in IOData."
-                    )
-                    console.error(message=message, error=ValueError)
-                channel_2_binary_files.append(BinaryFile(height, width, registered_path_ch2, frames_per_plane))
+            registered_path_ch2 = io_data.registered_binary_path_channel_2
+            if registered_path_ch2 is None:
+                message = (
+                    f"Unable to create binary file for plane {io_data.plane_index} channel 2. The "
+                    f"registered_binary_path_channel_2 is not configured in IOData."
+                )
+                console.error(message=message, error=ValueError)
+            channel_2_binary_files.append(BinaryFile(height, width, registered_path_ch2, frames_per_plane))
 
     return channel_1_binary_files, channel_2_binary_files
 
