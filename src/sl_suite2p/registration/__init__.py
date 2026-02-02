@@ -17,7 +17,7 @@ Copyright:
 
 from .utils import compute_spatial_taper_mask
 from .nonrigid import compute_registration_blocks
-from .register import register_plane, create_enhanced_mean_image
+from .register import register_plane
 from .deformation import Deformation
 from .diffeomorphic import DiffeomorphicDemonsRegistration
 
@@ -26,6 +26,5 @@ __all__ = [
     "DiffeomorphicDemonsRegistration",
     "compute_registration_blocks",
     "compute_spatial_taper_mask",
-    "create_enhanced_mean_image",
     "register_plane",
 ]

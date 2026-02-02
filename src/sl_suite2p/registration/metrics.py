@@ -178,7 +178,10 @@ def _register_pc_extremes(
             if pre_smoothing_window:
                 target_frame = apply_spatial_smoothing(data=target_frame, window=pre_smoothing_window)
             target_frame = apply_spatial_high_pass(data=target_frame, window=spatial_highpass_window)
-        preprocessed_target = np.clip(target_frame, intensity_min, intensity_max)[np.newaxis, :, :]
+
+        # Clips target frame in-place and adds batch dimension.
+        np.clip(target_frame, intensity_min, intensity_max, out=target_frame)
+        preprocessed_target = target_frame[np.newaxis, :, :]
 
         # Computes rigid registration shifts.
         tapered_target = apply_edge_taper(frames=preprocessed_target, taper_mask=taper_mask, mean_offset=mean_offset)
@@ -313,7 +316,7 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
 
     console.echo(
         message=(
-            f"Computing {num_components} Principal Components (PCs) for plane {plane_index} to asses the registration "
+            f"Computing {num_components} Principal Components (PCs) for plane {plane_index} to assess registration "
             f"quality..."
         ),
         level=LogLevel.INFO,
@@ -355,10 +358,7 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
     )
 
     # Stores PC extreme images in the runtime context. Stacks low and high projections along axis 0.
-    principal_component_extreme_images = np.concatenate(
-        (pc_low[np.newaxis, :, :, :], pc_high[np.newaxis, :, :, :]),
-        axis=0,
-    )
+    principal_component_extreme_images = np.stack((pc_low, pc_high), axis=0)
 
     console.echo(
         message=(

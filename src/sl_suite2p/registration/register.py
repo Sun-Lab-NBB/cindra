@@ -231,6 +231,7 @@ def _compute_reference(
     spatial_smoothing_sigma: float,
     maximum_shift_fraction: float,
     temporal_smoothing_sigma: float,
+    workers: int,
 ) -> NDArray[np.float32]:
     """Computes the reference image through iterative alignment.
 
@@ -252,6 +253,7 @@ def _compute_reference(
             The search window is limited to min(height, width) * maximum_shift_fraction pixels.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation maps.
             If 0, no smoothing is applied.
+        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
         The computed reference image with shape (height, width).
@@ -289,6 +291,7 @@ def _compute_reference(
             ),
             maximum_shift_fraction=maximum_shift_fraction,
             temporal_smoothing_sigma=temporal_smoothing_sigma,
+            workers=workers,
         )
 
         # Applies computed shifts to align all frames to current reference.
@@ -300,8 +303,8 @@ def _compute_reference(
         num_frames_for_reference = max(2, int(frames.shape[0] * (1.0 + iteration) / (2 * num_iterations)))
         sorted_indices = np.argsort(-correlations)[1:num_frames_for_reference]
 
-        # Updates reference as the mean of the best-aligned frames.
-        reference_image = frames[sorted_indices].mean(axis=0).astype(np.float32)
+        # Updates reference as the mean of the best-aligned frames. Input frames are float32, mean preserves dtype.
+        reference_image = frames[sorted_indices].mean(axis=0)
 
         # Centers the reference by reversing the mean shift of selected frames.
         reference_image = shift_frame(
@@ -327,6 +330,7 @@ def _register_frames_batch(
     nonrigid_enabled: bool,
     signal_to_noise_threshold: float,
     maximum_block_shift: float,
+    workers: int,
 ) -> _BatchRegistrationResult:
     """Registers the input batch of frames to the reference image using rigid and optionally nonrigid phase correlation.
 
@@ -349,6 +353,7 @@ def _register_frames_batch(
         signal_to_noise_threshold: The SNR threshold below which additional smoothing is applied to correlation
             peaks. Higher values apply more smoothing; typical values range from 1.0 to 1.5.
         maximum_block_shift: The maximum allowed shift for nonrigid blocks in pixels.
+        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
         A _BatchRegistrationResult containing registered frames and computed shifts. Nonrigid arrays are None if
@@ -388,6 +393,7 @@ def _register_frames_batch(
         reference_kernel=reference_data.reference_kernel,
         maximum_shift_fraction=maximum_shift_fraction,
         temporal_smoothing_sigma=temporal_smoothing_sigma,
+        workers=workers,
     )
 
     # Applies rigid shifts to original (unsmoothed) frames.
@@ -442,6 +448,7 @@ def _register_frames_batch(
             x_blocks=blocks[1],
             y_blocks=blocks[0],
             maximum_shift=maximum_block_shift,
+            workers=workers,
         )
 
         # Applies nonrigid warping to original frames using computed block shifts.
@@ -527,6 +534,68 @@ def _shift_frames_batch(
     return frames
 
 
+def _create_enhanced_mean_image(
+    mean_image: NDArray[np.float32],
+    cell_diameter: int,
+    valid_y_range: list[int],
+    valid_x_range: list[int],
+    frame_height: int,
+    frame_width: int,
+) -> NDArray[np.float32]:
+    """Creates an enhanced version of the mean image by removing background fluorescence and normalizing local contrast.
+
+    Args:
+        mean_image: The mean image to enhance.
+        cell_diameter: The estimated cell diameter in pixels, used to compute filter kernel size.
+        valid_y_range: The valid Y range [start, end] from registration crop computation.
+        valid_x_range: The valid X range [start, end] from registration crop computation.
+        frame_height: The height of the full frame.
+        frame_width: The width of the full frame.
+
+    Returns:
+        The enhanced mean image with background removed and local contrast normalized.
+    """
+    # Defines parameters for enhancing the mean image.
+    background_scale = 4
+    minimum_intensity = -6
+    maximum_intensity = 6
+
+    # Uses cell diameter for spatial scaling, with a default fallback.
+    spatial_scale_pixels = cell_diameter if cell_diameter > 0 else 12
+
+    # Computes median filter kernel size (4 * cell diameter).
+    filter_height = int(background_scale * np.ceil(spatial_scale_pixels) + 1)
+    filter_width = int(background_scale * np.ceil(spatial_scale_pixels) + 1)
+    filter_kernel_size = (filter_height, filter_width)
+
+    # Subtracts background fluorescence using median filter. Reuses the background array for the result.
+    background_removed = medfilt2d(mean_image, kernel_size=filter_kernel_size)
+    np.subtract(mean_image, background_removed, out=background_removed)
+
+    # Computes absolute values for local variance calculation.
+    abs_background_removed = np.abs(background_removed)
+
+    # Normalizes cell contrast by dividing by local variance.
+    local_variance = medfilt2d(abs_background_removed, kernel_size=filter_kernel_size)
+    np.add(local_variance, 1e-10, out=local_variance)
+    np.divide(background_removed, local_variance, out=background_removed)
+
+    # Extracts the valid region excluding border pixels.
+    y_start, y_end = valid_y_range
+    x_start, x_end = valid_x_range
+    roi_image = background_removed[y_start:y_end, x_start:x_end]
+
+    # Clips intensities to [-6, 6] range then scales to [0, 1].
+    clipped_roi = np.clip(roi_image, minimum_intensity, maximum_intensity)
+    scaled_roi = (clipped_roi - minimum_intensity) / (maximum_intensity - minimum_intensity)
+
+    # Places enhanced image into full-size array with border set to minimum value.
+    enhanced_image = np.full((frame_height, frame_width), scaled_roi.min(), dtype=np.float32)
+    enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
+
+    return enhanced_image
+
+
 def _register_alignment_channel(context: RuntimeContext) -> None:
     """Computes registration offsets from the alignment channel and applies them to that channel's frames.
 
@@ -557,8 +626,9 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
     signal_to_noise_threshold = config.non_rigid_registration.signal_to_noise_threshold
     maximum_block_shift = config.non_rigid_registration.maximum_block_shift
     display_progress_bars = config.main.display_progress_bars
-    enable_bidiphase_computation = config.main.compute_bidirectional_phase_offset
-    initial_bidirectional_phase_offset = config.main.bidirectional_phase_offset
+    parallel_workers = config.main.parallel_workers
+    enable_bidiphase_computation = config.registration.compute_bidirectional_phase_offset
+    initial_bidirectional_phase_offset = config.registration.bidirectional_phase_offset_override
 
     # Extracts runtime IO data.
     io_data = context.runtime.io
@@ -622,6 +692,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
             spatial_smoothing_sigma=spatial_smoothing_sigma,
             maximum_shift_fraction=maximum_shift_fraction,
             temporal_smoothing_sigma=temporal_smoothing_sigma,
+            workers=parallel_workers,
         )
         console.echo(
             message=f"Plane {plane_index} reference frame: computed. Time taken: {timer.elapsed} seconds.",
@@ -644,15 +715,14 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
             bidiphase_for_registration = 0
 
         # Computes registration masks for the reference image.
-        reference_float = reference_image.astype(np.float32)
         taper_slope = edge_taper_pixels if one_photon_enabled else 3 * spatial_smoothing_sigma
 
         taper_mask, mean_offset = compute_edge_taper(
-            reference_image=reference_float,
+            reference_image=reference_image,
             taper_slope=taper_slope,
         )
         reference_kernel = compute_phase_correlation_kernel(
-            reference_image=reference_float,
+            reference_image=reference_image,
             smoothing_sigma=spatial_smoothing_sigma,
         )
 
@@ -660,7 +730,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
         if nonrigid_enabled:
             blocks = compute_registration_blocks(height=height, width=width, block_size=block_size)
             taper_mask_nonrigid, mean_offset_nonrigid, reference_kernel_nonrigid = compute_nonrigid_reference_data(
-                reference_image=reference_float,
+                reference_image=reference_image,
                 taper_slope=taper_slope,
                 smoothing_sigma=spatial_smoothing_sigma,
                 y_blocks=blocks[0],
@@ -717,6 +787,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
                 nonrigid_enabled=nonrigid_enabled,
                 signal_to_noise_threshold=signal_to_noise_threshold,
                 maximum_block_shift=maximum_block_shift,
+                workers=parallel_workers,
             )
 
             rigid_offsets_batches.append((batch_result.y_shifts, batch_result.x_shifts, batch_result.correlations))
@@ -772,8 +843,8 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
     registration_data.normalization_maximum = int(normalization_maximum) if normalization_maximum < np.inf else 0
     registration_data.bidirectional_phase_offset = bidirectional_phase_offset
     registration_data.bidirectional_phase_corrected = bidirectional_phase_offset != 0
-    registration_data.rigid_y_offsets = rigid_y_offsets.astype(np.float32)
-    registration_data.rigid_x_offsets = rigid_x_offsets.astype(np.float32)
+    registration_data.rigid_y_offsets = rigid_y_offsets
+    registration_data.rigid_x_offsets = rigid_x_offsets
     registration_data.rigid_correlations = rigid_correlations
     if nonrigid_enabled:
         registration_data.nonrigid_y_offsets = nonrigid_y_offsets
@@ -947,7 +1018,29 @@ def register_plane(context: RuntimeContext) -> None:
     """
     config = context.config
     io_data = context.runtime.io
+    registration_data = context.runtime.registration
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
+
+    # Checks if registration should be skipped (already registered and not forcing re-registration).
+    if registration_data.is_registered() and not config.registration.repeat_registration:
+        console.echo(
+            message=(
+                f"Plane {plane_index} registration: skipped. The plane is already registered and re-registration is "
+                f"disabled."
+            ),
+            level=LogLevel.INFO,
+        )
+        return
+
+    # Clears existing registration data if re-registering.
+    if registration_data.is_registered():
+        console.echo(
+            message=(
+                f"Plane {plane_index} registration: forced. Clearing existing data and re-running the registration."
+            ),
+            level=LogLevel.INFO,
+        )
+        registration_data.clear()
 
     # Determines channel configuration.
     has_second_channel = io_data.registered_binary_path_channel_2 is not None
@@ -1022,26 +1115,26 @@ def register_plane(context: RuntimeContext) -> None:
     height, width = io_data.frame_height, io_data.frame_width
 
     # Extracts offsets for crop computation. Fallback assignments are for type checker only; these are always present
-    # after _register_alignment_channel.
+    # after _register_alignment_channel. Uses np.empty to avoid initialization overhead.
     y_offsets = (
         registration_data.rigid_y_offsets
         if registration_data.rigid_y_offsets is not None
-        else np.zeros(1, dtype=np.float32)
+        else np.empty(1, dtype=np.int32)
     )
     x_offsets = (
         registration_data.rigid_x_offsets
         if registration_data.rigid_x_offsets is not None
-        else np.zeros(1, dtype=np.float32)
+        else np.empty(1, dtype=np.int32)
     )
     correlations = (
         registration_data.rigid_correlations
         if registration_data.rigid_correlations is not None
-        else np.ones(1, dtype=np.float32)
+        else np.empty(1, dtype=np.float32)
     )
 
     _, valid_y_range, valid_x_range = _compute_crop(
-        x_offsets=x_offsets.astype(np.int32),
-        y_offsets=y_offsets.astype(np.int32),
+        x_offsets=x_offsets,
+        y_offsets=y_offsets,
         correlations=correlations,
         bad_frame_threshold=config.registration.bad_frame_threshold,
         bad_frames=bad_frames,
@@ -1055,84 +1148,34 @@ def register_plane(context: RuntimeContext) -> None:
     registration_data.valid_x_range = valid_x_range
 
     # Computes registration quality metrics if enabled and recording has enough frames.
-    if config.registration.compute_registration_metrics and num_frames >= _MINIMUM_REGISTRATION_METRIC_FRAMES:
+    num_principal_components = config.registration.registration_metric_principal_components
+    if num_principal_components > 0 and num_frames >= _MINIMUM_REGISTRATION_METRIC_FRAMES:
+        timer.reset()
         compute_pc_metrics(context)
-    elif config.registration.compute_registration_metrics:
+        context.runtime.timing.registration_metrics_time = int(timer.elapsed)
         console.echo(
             message=(
-                f"Skipping plane {plane_index} registration quality metrics. Recording has {num_frames} frames, "
-                f"but at least {_MINIMUM_REGISTRATION_METRIC_FRAMES} are required."
+                f"Plane {plane_index} registration metrics processing: complete. Time taken: {timer.elapsed} seconds."
+            ),
+            level=LogLevel.SUCCESS,
+        )
+    elif num_principal_components > 0:
+        console.echo(
+            message=(
+                f"Skipping plane {plane_index} registration quality metrics computation. Recording has {num_frames} "
+                f"frames, but at least {_MINIMUM_REGISTRATION_METRIC_FRAMES} are required."
             ),
             level=LogLevel.INFO,
         )
 
-
-def create_enhanced_mean_image(context: RuntimeContext) -> None:
-    """Computes and stores an enhanced mean image in the RuntimeContext.
-
-    Creates an enhanced version of the mean image by removing background fluorescence and normalizing local contrast.
-    The enhanced image is stored in the context's runtime.detection.enhanced_mean_image field.
-
-    Args:
-        context: The RuntimeContext containing the mean_image in runtime.detection and valid ranges in
-            runtime.registration. Modified in-place to store the enhanced mean image.
-    """
+    # Computes enhanced mean image for visualization and ROI detection.
     mean_image = context.runtime.detection.mean_image
-
-    # Validates that mean_image exists.
-    if mean_image is None:
-        console.error(
-            message="Unable to create enhanced mean image. The mean_image field is not set in the RuntimeContext.",
-            error=ValueError,
+    if mean_image is not None:
+        context.runtime.detection.enhanced_mean_image = _create_enhanced_mean_image(
+            mean_image=mean_image,
+            cell_diameter=config.roi_detection.cell_diameter,
+            valid_y_range=valid_y_range,
+            valid_x_range=valid_x_range,
+            frame_height=height,
+            frame_width=width,
         )
-
-    # Defines parameters for enhancing the mean image.
-    background_scale = 4
-    minimum_intensity = -6
-    maximum_intensity = 6
-
-    # Determines spatial scaling from cell diameter if not already computed.
-    detection = context.runtime.detection
-    if detection.spatial_scale == 0:
-        cell_diameter = context.config.roi_detection.cell_diameter
-        if cell_diameter == 0:
-            cell_diameter = 12  # Default if not yet computed.
-        spatial_scale_pixels = cell_diameter
-        aspect_ratio = 1.0
-    else:
-        spatial_scale_pixels = detection.cell_diameter if detection.cell_diameter > 0 else 12
-        aspect_ratio = detection.aspect_ratio if detection.aspect_ratio > 0 else 1.0
-
-    # Computes median filter kernel size (4 * cell diameter).
-    filter_height = int(background_scale * np.ceil(spatial_scale_pixels * aspect_ratio) + 1)
-    filter_width = int(background_scale * np.ceil(spatial_scale_pixels) + 1)
-    filter_kernel_size = (filter_height, filter_width)
-
-    # Subtracts background fluorescence using median filter. Reuses the background array for the result.
-    background_removed = medfilt2d(mean_image, kernel_size=filter_kernel_size)
-    np.subtract(mean_image, background_removed, out=background_removed)
-
-    # Computes absolute values for local variance calculation.
-    abs_background_removed = np.abs(background_removed)
-
-    # Normalizes cell contrast by dividing by local variance.
-    local_variance = medfilt2d(abs_background_removed, kernel_size=filter_kernel_size)
-    np.add(local_variance, 1e-10, out=local_variance)
-    np.divide(background_removed, local_variance, out=background_removed)
-
-    # Extracts the valid region excluding border pixels.
-    y_start, y_end = context.runtime.registration.valid_y_range
-    x_start, x_end = context.runtime.registration.valid_x_range
-    roi_image = background_removed[y_start:y_end, x_start:x_end]
-
-    # Clips intensities to [-6, 6] range then scales to [0, 1].
-    clipped_roi = np.clip(roi_image, minimum_intensity, maximum_intensity)
-    scaled_roi = (clipped_roi - minimum_intensity) / (maximum_intensity - minimum_intensity)
-
-    # Places enhanced image into full-size array with border set to minimum value.
-    height = context.runtime.io.frame_height
-    width = context.runtime.io.frame_width
-    enhanced_image = np.full((height, width), scaled_roi.min(), dtype=np.float32)
-    enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
-
-    context.runtime.detection.enhanced_mean_image = enhanced_image

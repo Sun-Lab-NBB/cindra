@@ -223,20 +223,8 @@ class Main:
     Mesoscope and likely needs to be increased for most other use cases."""
 
     sampling_rate: float = 10.0014
-    """The data sampling rate per each imaging plane in Hertz. For a 10-plane recording acquired at 30 Hz, the 
+    """The data sampling rate per each imaging plane in Hertz. For a 10-plane recording acquired at 30 Hz, the
     sampling rate per plane would be 3 Hz."""
-
-    compute_bidirectional_phase_offset: bool = False
-    """Determines whether to compute the bidirectional phase offset for misaligned line scanning in two-photon
-    recordings. This correction addresses misalignment between odd and even scan lines caused by bidirectional resonant
-    scanning. Most recording software (including ScanImage) handles this correction during acquisition, so this option
-    is rarely needed for properly configured systems."""
-
-    bidirectional_phase_offset: int = 0
-    """The bidirectional phase offset for line scanning 2-photon recordings. If set to any value besides 0, this
-    offset is used and applied to all frames in the recording when compute_bidirectional_phase_offset is True. If set 
-    to 0, the pipeline estimates the bidirectional phase offset automatically from the initial reference frames. The 
-    computed or user-defined offset is applied to all frames before the main processing pipeline."""
 
     parallel_workers: int = 20
     """The number of workers used to parallelize certain processing operations. This worker pool is used by numba when
@@ -316,7 +304,7 @@ class Registration:
     use."""
 
     maximum_shift_fraction: float = 0.1
-    """The maximum allowed shift during registration, given as a fraction of t88he frame size (e.g., 0.1 indicates 10%).
+    """The maximum allowed shift during registration, given as a fraction of the frame size (e.g., 0.1 indicates 10%).
     This determines how much the algorithm is allowed to shift the entire frame to align it to the reference image."""
 
     spatial_smoothing_sigma: float = 1.15
@@ -348,15 +336,24 @@ class Registration:
     extreme outlier pixels from both the reference image and each frame before computing phase correlation, improving
     shift detection accuracy by reducing the influence of anomalously bright or dark pixels."""
 
-    compute_registration_metrics: bool = True
-    """Determines whether to compute registration quality metrics after registration completes. These metrics are not
-    used by the processing pipeline but are useful for assessing registration quality via the GUI. Computing metrics
-    is a fairly expensive operation that can take as long as the registration itself."""
-
     registration_metric_principal_components: int = 5
-    """The number of Principal Components (PCs) used to compute the registration metrics. Note, the time to compute
-    the registration metrics scales with the number of computed PCs, so it is recommended to keep the number as low
-    as feasible for each use case."""
+    """The number of Principal Components (PCs) used to compute the registration quality metrics. These metrics are
+    not used by the processing pipeline but are useful for assessing registration quality via the GUI. Computing
+    metrics is a fairly expensive operation that can take as long as the registration itself. The time to compute
+    scales with the number of computed PCs, so it is recommended to keep this as low as feasible. Set to 0 to disable
+    registration metrics computation entirely."""
+
+    compute_bidirectional_phase_offset: bool = False
+    """Determines whether to compute the bidirectional phase offset for misaligned line scanning in two-photon
+    recordings. This correction addresses misalignment between odd and even scan lines caused by bidirectional resonant
+    scanning. Most recording software (including ScanImage) handles this correction during acquisition, so this option
+    is rarely needed for properly configured systems."""
+
+    bidirectional_phase_offset_override: int = 0
+    """Manual override for the bidirectional phase offset in line scanning 2-photon recordings. If set to any value
+    besides 0, this offset is used instead of computing it automatically. If set to 0 and
+    compute_bidirectional_phase_offset is True, the pipeline estimates the offset automatically from the initial
+    reference frames."""
 
 
 @dataclass
@@ -539,7 +536,7 @@ class SpikeDeconvolution:
 
     def prepare_for_saving(self) -> None:
         """Converts enum fields to strings for YAML serialization."""
-        self.baseline_method = str(self.baseline_method)  # type: ignore[assignment]
+        self.baseline_method = str(self.baseline_method)
 
 
 @dataclass
@@ -659,10 +656,10 @@ class RegistrationData:
     reference_image: NDArray[np.float32] | None = None
     """The template image used as the alignment target for motion correction."""
 
-    rigid_y_offsets: NDArray[np.float32] | None = None
+    rigid_y_offsets: NDArray[np.int32] | None = None
     """The vertical (Y) translation offsets from rigid registration, one value per frame."""
 
-    rigid_x_offsets: NDArray[np.float32] | None = None
+    rigid_x_offsets: NDArray[np.int32] | None = None
     """The horizontal (X) translation offsets from rigid registration, one value per frame."""
 
     rigid_correlations: NDArray[np.float32] | None = None
@@ -687,16 +684,39 @@ class RegistrationData:
     (num_frames, num_components). Shows how each frame relates to the computed PCs over time."""
 
     principal_component_shift_metrics: NDArray[np.float32] | None = None
-    """The registration shift metrics computed by aligning PC extreme images of the registered recording movie, with 
-    shape (num_components, 3). Column 0 contains mean rigid shift magnitude, column 1 contains mean nonrigid shift 
-    magnitude, and column 2 contains maximum nonrigid shift magnitude. Large values indicate poor registration 
+    """The registration shift metrics computed by aligning PC extreme images of the registered recording movie, with
+    shape (num_components, 3). Column 0 contains mean rigid shift magnitude, column 1 contains mean nonrigid shift
+    magnitude, and column 2 contains maximum nonrigid shift magnitude. Large values indicate poor registration
     quality."""
 
-    z_stack_correlations: NDArray[np.float32] | None = None
-    """The phase correlation values between each frame and each plane of the reference z-stack constructed before
-    starting the acquisition, with shape (num_z_planes, num_frames). Higher values indicate better alignment with that
-    z-plane, enabling reconstruction of the focal plane position over time. Only populated when a z-stack reference
-    is provided."""
+    def is_registered(self) -> bool:
+        """Checks whether registration data exists.
+
+        Returns:
+            True if the plane has been registered (has reference image and offsets), False otherwise.
+        """
+        return (
+            self.reference_image is not None and self.rigid_y_offsets is not None and self.rigid_x_offsets is not None
+        )
+
+    def clear(self) -> None:
+        """Clears all registration data to prepare for re-registration."""
+        self.valid_y_range = [0, 0]
+        self.valid_x_range = [0, 0]
+        self.bidirectional_phase_offset = 0
+        self.bidirectional_phase_corrected = False
+        self.normalization_minimum = 0
+        self.normalization_maximum = 0
+        self.reference_image = None
+        self.rigid_y_offsets = None
+        self.rigid_x_offsets = None
+        self.rigid_correlations = None
+        self.nonrigid_y_offsets = None
+        self.nonrigid_x_offsets = None
+        self.nonrigid_correlations = None
+        self.principal_component_extreme_images = None
+        self.principal_component_projections = None
+        self.principal_component_shift_metrics = None
 
     def prepare_for_saving(self) -> None:
         """Sets all array fields to None for YAML serialization."""
@@ -710,7 +730,6 @@ class RegistrationData:
         self.principal_component_extreme_images = None
         self.principal_component_projections = None
         self.principal_component_shift_metrics = None
-        self.z_stack_correlations = None
 
     def save_arrays(self, output_path: Path) -> None:
         """Saves all registration arrays to a single .npz file.
@@ -718,7 +737,7 @@ class RegistrationData:
         Args:
             output_path: The directory where to save the registration_data.npz file.
         """
-        save_dict: dict[str, NDArray[np.float32]] = {}
+        save_dict: dict[str, NDArray[np.float32] | NDArray[np.int32]] = {}
 
         if self.reference_image is not None:
             save_dict["reference_image"] = self.reference_image
@@ -740,8 +759,6 @@ class RegistrationData:
             save_dict["principal_component_projections"] = self.principal_component_projections
         if self.principal_component_shift_metrics is not None:
             save_dict["principal_component_shift_metrics"] = self.principal_component_shift_metrics
-        if self.z_stack_correlations is not None:
-            save_dict["z_stack_correlations"] = self.z_stack_correlations
 
         if save_dict:
             np.savez(output_path / "registration_data.npz", allow_pickle=False, **save_dict)
@@ -761,9 +778,9 @@ class RegistrationData:
         if "reference_image" in data:
             self.reference_image = data["reference_image"].astype(np.float32)
         if "rigid_y_offsets" in data:
-            self.rigid_y_offsets = data["rigid_y_offsets"].astype(np.float32)
+            self.rigid_y_offsets = data["rigid_y_offsets"].astype(np.int32)
         if "rigid_x_offsets" in data:
-            self.rigid_x_offsets = data["rigid_x_offsets"].astype(np.float32)
+            self.rigid_x_offsets = data["rigid_x_offsets"].astype(np.int32)
         if "rigid_correlations" in data:
             self.rigid_correlations = data["rigid_correlations"].astype(np.float32)
         if "nonrigid_y_offsets" in data:
@@ -778,8 +795,6 @@ class RegistrationData:
             self.principal_component_projections = data["principal_component_projections"].astype(np.float32)
         if "principal_component_shift_metrics" in data:
             self.principal_component_shift_metrics = data["principal_component_shift_metrics"].astype(np.float32)
-        if "z_stack_correlations" in data:
-            self.z_stack_correlations = data["z_stack_correlations"].astype(np.float32)
 
 
 @dataclass

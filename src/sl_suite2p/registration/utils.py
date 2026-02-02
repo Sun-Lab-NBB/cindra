@@ -11,7 +11,6 @@ from numpy.fft import ifftshift
 from scipy.fft import (
     rfft2 as scipy_rfft2,
     irfft2 as scipy_irfft2,
-    next_fast_len,
 )
 from scipy.ndimage import gaussian_filter1d
 from ataraxis_base_utilities import console
@@ -89,7 +88,11 @@ def _compute_gaussian_rbf_weights(
     return np.exp(-(delta_x**2 + delta_y**2) / (2 * sigma**2))
 
 
-def apply_phase_correlation(frames: NDArray[np.float32], kernel: NDArray[np.complex64]) -> NDArray[np.float32]:
+def apply_phase_correlation(
+    frames: NDArray[np.float32],
+    kernel: NDArray[np.complex64],
+    workers: int,
+) -> NDArray[np.float32]:
     """Applies phase correlation between frames and reference kernel.
 
     Computes normalized cross-correlation in the frequency domain for motion estimation. Uses real FFT
@@ -98,6 +101,7 @@ def apply_phase_correlation(frames: NDArray[np.float32], kernel: NDArray[np.comp
     Args:
         frames: The frames to correlate with shape (num_frames, height, width).
         kernel: The reference kernel from compute_reference_fft.
+        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
         The correlation maps with the same shape as input frames.
@@ -105,8 +109,8 @@ def apply_phase_correlation(frames: NDArray[np.float32], kernel: NDArray[np.comp
     # Stores original width for inverse FFT reconstruction.
     width = frames.shape[-1]
 
-    # Transforms frames to frequency domain using all available CPU cores.
-    frames_fft = scipy_rfft2(frames, axes=(-2, -1), workers=-1)
+    # Transforms frames to frequency domain.
+    frames_fft = scipy_rfft2(frames, axes=(-2, -1), workers=workers)
 
     # Normalizes by magnitude to extract phase-only information. This makes the correlation robust to
     # intensity variations between frames. Epsilon prevents division by zero at DC component.
@@ -116,7 +120,9 @@ def apply_phase_correlation(frames: NDArray[np.float32], kernel: NDArray[np.comp
     frames_fft *= kernel
 
     # Transforms back to spatial domain to get correlation surface. The peak location indicates the shift.
-    return scipy_irfft2(frames_fft, s=(frames.shape[-2], width), axes=(-2, -1), workers=-1).astype(np.float32)
+    return scipy_irfft2(frames_fft, s=(frames.shape[-2], width), axes=(-2, -1), workers=workers).astype(
+        np.float32, copy=False
+    )
 
 
 @vectorize(
@@ -197,10 +203,10 @@ def compute_gaussian_frequency_filter(sigma: float, height: int, width: int) -> 
         width: The width of the frames or images to be filtered, in pixels.
 
     Returns:
-        The smoothing filter in the Fourier domain, with width reduced for real FFT symmetry.
+        The smoothing filter in the Fourier domain with shape (height, width // 2 + 1) for real FFT compatibility.
     """
-    # Creates grids of distances from center. Arguments swapped to match image coordinate convention.
-    column_distances, row_distances = _mean_centered_meshgrid(height=width, width=height)
+    # Creates grids of distances from center for a spatial-domain kernel.
+    column_distances, row_distances = _mean_centered_meshgrid(height=height, width=width)
 
     # Computes separable 1D Gaussians along each axis, then combines into 2D kernel.
     gaussian_column = np.exp(-np.square(column_distances / sigma) / 2)
@@ -290,7 +296,8 @@ def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[n
     )
 
     # Computes integral image (summed area table) via cumulative sums along height then width.
-    data_summed = data_padded.cumsum(axis=1).cumsum(axis=2, dtype=np.float32)
+    # Specifies float32 dtype on both cumsum calls to avoid intermediate float64 arrays.
+    data_summed = data_padded.cumsum(axis=1, dtype=np.float32).cumsum(axis=2, dtype=np.float32)
 
     # Extracts box sums using integral image differences. For each pixel, computes sum of (window x window) region
     # centered on that pixel, then normalizes to get the mean.
@@ -340,7 +347,9 @@ def apply_spatial_high_pass(data: NDArray[np.float32], window: int) -> NDArray[n
     normalization = _get_normalization_weights(height=data.shape[1], width=data.shape[2], window=window)
 
     # Subtracts normalized low-pass (local mean) from original to extract high-frequency components.
-    low_pass = apply_spatial_smoothing(data=data, window=window) / normalization
+    # Uses in-place division to avoid creating an intermediate array.
+    low_pass = apply_spatial_smoothing(data=data, window=window)
+    low_pass /= normalization
     data_filtered = data - low_pass
 
     # Squeezes back to 2D if input was 2D.
@@ -348,21 +357,18 @@ def apply_spatial_high_pass(data: NDArray[np.float32], window: int) -> NDArray[n
 
 
 def compute_reference_fft(reference_image: NDArray[np.float32]) -> NDArray[np.complex64]:
-    """Computes the complex conjugate of the real FFT for a reference image, padded for speed.
+    """Computes the complex conjugate of the real FFT for a reference image.
 
-    Pads the image to the next FFT-friendly dimensions before transforming. The complex conjugate is taken because
-    phase correlation requires multiplication by the conjugate of the reference spectrum.
+    The complex conjugate is taken because phase correlation requires multiplication by the conjugate of the reference
+    spectrum. No padding is applied to ensure dimension compatibility with frame FFTs computed without padding.
 
     Args:
         reference_image: The 2D reference image with shape (height, width).
 
     Returns:
-        The complex conjugate of the FFT with dimensions expanded to optimal FFT lengths.
+        The complex conjugate of the FFT with shape (height, width // 2 + 1).
     """
-    height, width = reference_image.shape
-    return np.conj(scipy_rfft2(reference_image, s=(next_fast_len(height), next_fast_len(width)), axes=(-2, -1))).astype(
-        np.complex64
-    )
+    return np.conj(scipy_rfft2(reference_image, axes=(-2, -1))).astype(np.complex64)
 
 
 @lru_cache(maxsize=5)

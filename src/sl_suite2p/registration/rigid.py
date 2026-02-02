@@ -40,7 +40,7 @@ def compute_edge_taper(
     height, width = reference_image.shape
     taper_mask = compute_spatial_taper_mask(sigma=taper_slope, height=height, width=width)
     mean_offset = reference_image.mean() * (1.0 - taper_mask)
-    return taper_mask.astype(np.float32), mean_offset.astype(np.float32)
+    return taper_mask, mean_offset.astype(np.float32)
 
 
 def apply_edge_taper(
@@ -80,16 +80,17 @@ def compute_phase_correlation_kernel(
             smoothing.
 
     Returns:
-        The phase correlation kernel with shape determined by FFT padding.
+        The phase correlation kernel with shape (height, width // 2 + 1) from real FFT.
     """
+    height, width = reference_image.shape
     reference_fft = compute_reference_fft(reference_image=reference_image)
     reference_fft /= NORMALIZATION_EPSILON + np.absolute(reference_fft)
 
     if smoothing_sigma > 0:
         reference_fft *= compute_gaussian_frequency_filter(
             sigma=smoothing_sigma,
-            height=reference_fft.shape[0],
-            width=reference_fft.shape[1],
+            height=height,
+            width=width,
         )
 
     return reference_fft.astype(np.complex64)
@@ -100,6 +101,7 @@ def compute_rigid_shifts(
     reference_kernel: NDArray[np.complex64],
     maximum_shift_fraction: float,
     temporal_smoothing_sigma: float,
+    workers: int,
 ) -> tuple[NDArray[np.int32], NDArray[np.int32], NDArray[np.float32]]:
     """Computes rigid translation shifts using phase correlation.
 
@@ -114,6 +116,7 @@ def compute_rigid_shifts(
             The search window is limited to min(height, width) * maximum_shift_fraction pixels.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation
             maps. If 0, no smoothing is applied.
+        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
         A tuple of (y_shifts, x_shifts, correlation_maxima) arrays with shape (num_frames,). The shifts
@@ -126,7 +129,7 @@ def compute_rigid_shifts(
     correlation_radius = int(np.minimum(np.round(maximum_shift_fraction * minimum_dimension), maximum_radius))
 
     # Applies phase correlation in frequency domain.
-    correlation_data = apply_phase_correlation(frames=frames, kernel=reference_kernel)
+    correlation_data = apply_phase_correlation(frames=frames, kernel=reference_kernel, workers=workers)
 
     # Extracts the central region containing valid correlation peaks. The correlation surface wraps around,
     # so negative shifts appear at the end of each axis. This block rearranges the four quadrants into a

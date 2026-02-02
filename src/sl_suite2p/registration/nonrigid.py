@@ -408,10 +408,10 @@ def compute_nonrigid_reference_data(
         width=reference_image.shape[1],
     )
 
-    # Computes the block-level taper mask used for each extracted block.
+    # Computes the block-level taper mask used for each extracted block. compute_spatial_taper_mask returns float32,
+    # and np.tile preserves dtype, so no cast is needed.
     block_taper = compute_spatial_taper_mask(sigma=2 * smoothing_sigma, height=block_height, width=block_width)
-
-    taper_mask = np.tile(block_taper, (num_blocks, 1, 1)).astype(np.float32)
+    taper_mask = np.tile(block_taper, (num_blocks, 1, 1))
     mean_offset = np.empty((num_blocks, block_height, block_width), dtype=np.float32)
 
     for block_index, (y_range, x_range) in enumerate(zip(y_blocks, x_blocks, strict=True)):
@@ -440,6 +440,7 @@ def compute_nonrigid_shifts(
     x_blocks: list[NDArray[np.uint32]],
     y_blocks: list[NDArray[np.uint32]],
     maximum_shift: float,
+    workers: int,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """Computes nonrigid shifts using block-wise phase correlation.
 
@@ -463,6 +464,7 @@ def compute_nonrigid_shifts(
         x_blocks: The list of x-coordinate ranges for each block from compute_registration_blocks.
         y_blocks: The list of y-coordinate ranges for each block from compute_registration_blocks.
         maximum_shift: The maximum allowed shift in pixels. Constrains the correlation search window.
+        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
         A tuple of (y_shifts, x_shifts, correlation_maxima) arrays with shape (num_frames, num_blocks).
@@ -493,6 +495,7 @@ def compute_nonrigid_shifts(
         extracted_blocks[:, batch_start:batch_end] = apply_phase_correlation(
             frames=extracted_blocks[:, batch_start:batch_end],
             kernel=reference_kernel[batch_start:batch_end],
+            workers=workers,
         )
 
     # Extracts the central correlation window containing valid peaks.
