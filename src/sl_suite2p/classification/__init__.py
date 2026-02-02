@@ -1,4 +1,8 @@
-"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+"""Provides ROI classification functionality for distinguishing cells from artifacts."""
 
-from .classify import classify, user_classfile, builtin_classfile
-from .classifier import Classifier
+from .classify import Classifier, classify
+
+__all__ = [
+    "Classifier",
+    "classify",
+]
