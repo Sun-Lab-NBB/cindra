@@ -5,7 +5,7 @@ frame-to-frame motion correction) and diffeomorphic Demons registration from pir
 anatomical alignment).
 
 Copyright:
-    Single-day registration code (register.py, rigid.py, nonrigid.py, bidiphase.py, zalign.py, metrics.py, utils.py):
+    Single-day registration code (register.py, rigid.py, nonrigid.py, bidiphase_correction.py, metrics.py, utils.py):
         Copyright 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
 
     Multi-day registration code (diffeomorphic.py, deformation.py, spline_grid.py, pyramid.py):
@@ -15,18 +15,16 @@ Copyright:
         Copyright 2024-2025 Sun Lab, Authored by Ivan Kondratyev (Inkaros).
 """
 
-from .zalign import compute_zpos
-from .metrics import get_pc_metrics
-from .register import registration_wrapper, create_enhanced_mean_image, save_registration_outputs_to_ops
+from .utils import compute_spatial_taper_mask
+from .nonrigid import compute_registration_blocks
+from .register import register_plane
 from .deformation import Deformation
 from .diffeomorphic import DiffeomorphicDemonsRegistration
 
 __all__ = [
     "Deformation",
     "DiffeomorphicDemonsRegistration",
-    "compute_zpos",
-    "create_enhanced_mean_image",
-    "get_pc_metrics",
-    "registration_wrapper",
-    "save_registration_outputs_to_ops",
+    "compute_registration_blocks",
+    "compute_spatial_taper_mask",
+    "register_plane",
 ]
