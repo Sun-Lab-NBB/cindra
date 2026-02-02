@@ -5,11 +5,21 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-import numba
+import numba  # type: ignore[import-untyped]
 import numpy as np
 import scipy.ndimage
 
 from .spline_grid import SplineGrid, compute_cardinal_coefficients
+
+# Minimum sigma value below which diffusion kernel returns a delta function (no smoothing).
+_MINIMUM_DIFFUSION_SIGMA: float = 0.1
+
+# Interpolation order constant for cubic cardinal spline interpolation.
+_CUBIC_INTERPOLATION_ORDER: int = 3
+
+# Boundary tolerance for determining if a sample point falls within valid image bounds. Pixels are centered at integer
+# coordinates, so valid samples extend from -0.5 to (dimension - 0.5).
+_BOUNDARY_TOLERANCE: float = -0.5
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -30,7 +40,7 @@ def _create_diffusion_kernel(sigma: float) -> NDArray[np.float32]:
         The normalized diffusion kernel as a 1D array. Returns a delta kernel [1.0] if sigma is too small.
     """
     # For very small sigma, return a delta kernel (no smoothing).
-    if sigma < 0.1:
+    if sigma < _MINIMUM_DIFFUSION_SIGMA:
         return np.array([1.0], dtype=np.float32)
 
     sigma_squared = sigma * sigma
@@ -139,7 +149,7 @@ def _warp(
     # Uses a 4x4 neighborhood around each sample point. Cardinal splines pass
     # through control points exactly, with tension controlling curve tightness.
     # -------------------------------------------------------------------------
-    if order == 3:
+    if order == _CUBIC_INTERPOLATION_ORDER:
         for sample_index in numba.prange(num_samples):
             # Allocates coefficient arrays inside the parallel loop to avoid race conditions.
             coefficients_x = np.empty((4,), dtype=np.float32)
@@ -169,7 +179,10 @@ def _warp(
 
             # Edge case: sample is within bounds but near the border.
             # Uses partial neighborhood and renormalizes coefficients.
-            elif -0.5 <= sample_x <= width - 0.5 and -0.5 <= sample_y <= height - 0.5:
+            elif (
+                _BOUNDARY_TOLERANCE <= sample_x <= width + _BOUNDARY_TOLERANCE
+                and _BOUNDARY_TOLERANCE <= sample_y <= height + _BOUNDARY_TOLERANCE
+            ):
                 compute_cardinal_coefficients(interpolation_factor=fraction_x, coefficients=coefficients_x)
                 compute_cardinal_coefficients(interpolation_factor=fraction_y, coefficients=coefficients_y)
 
@@ -237,7 +250,10 @@ def _warp(
                 result[sample_index] = interpolated_value
 
             # Edge case: clamps indices to valid range and adjusts fractions accordingly.
-            elif -0.5 <= sample_x <= width - 0.5 and -0.5 <= sample_y <= height - 0.5:
+            elif (
+                _BOUNDARY_TOLERANCE <= sample_x <= width + _BOUNDARY_TOLERANCE
+                and _BOUNDARY_TOLERANCE <= sample_y <= height + _BOUNDARY_TOLERANCE
+            ):
                 if pixel_x < 0:
                     fraction_x += pixel_x
                     pixel_x = 0

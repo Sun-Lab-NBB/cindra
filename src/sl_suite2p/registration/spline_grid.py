@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import numba
+import numba  # type: ignore[import-untyped]
 from numba import prange
 import numpy as np
 
@@ -226,10 +226,8 @@ class SplineGrid:
         # Applies injectivity constraint and freezes edges if requested.
         if injective:
             self._unfold(factor=injective_factor)
-        if freeze_edges:
-            if not self._freeze_edges():
-                return False
-        return True
+
+        return not (freeze_edges and not self._freeze_edges())
 
     def _unfold(self, factor: float = 0.9) -> None:
         """Prevents folds in the grid by limiting the B-spline control values (knots) to ensure injectivity.

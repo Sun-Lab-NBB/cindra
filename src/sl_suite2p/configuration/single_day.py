@@ -330,15 +330,10 @@ class Registration:
     across consecutive frames. This reduces frame-to-frame noise in correlation values and can improve registration
     stability for noisy recordings. Setting this to 0.0 disables temporal smoothing."""
 
-    keep_movie_raw: bool = False
-    """Determines whether to keep the binary file of the raw (non-registered) frames. This is desirable when initially
-    configuring the suite2p parameters, as it allows visually comparing registered frames to non-registered frames in
-    the GUI. For well-calibrated runtimes, it is advised to have this set to False."""
-
     two_step_registration: bool = False
     """Determines whether to perform a two-step registration. This process consists of the initial registration
     (first step) followed by refinement (second step) registration. This procedure is helpful when working with low
-    signal-to-noise data and requires 'keep_movie_raw' to be set to True."""
+    signal-to-noise data."""
 
     bad_frame_threshold: float = 1.0
     """The threshold for identifying frames with excessive motion or poor correlation quality. The algorithm computes
@@ -595,14 +590,8 @@ class IOData:
     registered_binary_path: Path | None = None
     """The absolute path to the motion-corrected binary file for the primary imaging channel."""
 
-    raw_binary_path: Path | None = None
-    """The absolute path to the raw (unregistered) binary file for the primary imaging channel."""
-
     registered_binary_path_channel_2: Path | None = None
     """The absolute path to the motion-corrected binary file for the second imaging channel."""
-
-    raw_binary_path_channel_2: Path | None = None
-    """The absolute path to the raw (unregistered) binary file for the second imaging channel."""
 
     output_directory: Path | None = None
     """The absolute path to the plane-specific output directory where all results are saved."""
@@ -626,15 +615,9 @@ class IOData:
         """Converts string paths to Path objects after YAML loading."""
         if isinstance(self.registered_binary_path, str):
             self.registered_binary_path = Path(self.registered_binary_path) if self.registered_binary_path else None
-        if isinstance(self.raw_binary_path, str):
-            self.raw_binary_path = Path(self.raw_binary_path) if self.raw_binary_path else None
         if isinstance(self.registered_binary_path_channel_2, str):
             self.registered_binary_path_channel_2 = (
                 Path(self.registered_binary_path_channel_2) if self.registered_binary_path_channel_2 else None
-            )
-        if isinstance(self.raw_binary_path_channel_2, str):
-            self.raw_binary_path_channel_2 = (
-                Path(self.raw_binary_path_channel_2) if self.raw_binary_path_channel_2 else None
             )
         if isinstance(self.output_directory, str):
             self.output_directory = Path(self.output_directory) if self.output_directory else None
@@ -643,14 +626,10 @@ class IOData:
         """Converts Path fields to strings for YAML serialization."""
         if self.registered_binary_path is not None:
             self.registered_binary_path = str(self.registered_binary_path)  # type: ignore[assignment]
-        if self.raw_binary_path is not None:
-            self.raw_binary_path = str(self.raw_binary_path)  # type: ignore[assignment]
         if self.registered_binary_path_channel_2 is not None:
             self.registered_binary_path_channel_2 = str(  # type: ignore[assignment]
                 self.registered_binary_path_channel_2
             )
-        if self.raw_binary_path_channel_2 is not None:
-            self.raw_binary_path_channel_2 = str(self.raw_binary_path_channel_2)  # type: ignore[assignment]
         if self.output_directory is not None:
             self.output_directory = str(self.output_directory)  # type: ignore[assignment]
 
