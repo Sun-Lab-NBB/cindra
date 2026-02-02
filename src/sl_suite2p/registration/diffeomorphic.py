@@ -12,6 +12,10 @@ from .pyramid import ScaleSpacePyramid
 from .deformation import Deformation
 from .spline_grid import SplineGrid
 
+# Minimum B-spline grid dimension required for frozen edge constraints. Grids smaller than this cannot properly
+# constrain edge deformations.
+_MINIMUM_GRID_DIMENSION: int = 4
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
@@ -211,7 +215,7 @@ class DiffeomorphicDemonsRegistration:
             grid_shape = SplineGrid.compute_grid_shape(
                 field_height=image_height, field_width=image_width, grid_sampling=grid_sampling
             )
-            if all(dimension < 4 for dimension in grid_shape):
+            if all(dimension < _MINIMUM_GRID_DIMENSION for dimension in grid_shape):
                 return None
 
         # Accumulates pairwise deformations from this image to all others.
@@ -255,11 +259,11 @@ class DiffeomorphicDemonsRegistration:
 
         # Checks cache for this pair or its symmetric counterpart.
         cached = self._get_cached(key=f"deform_{source_index}_{target_index}", iteration_key=iteration_key)
-        if cached is not None:
+        if isinstance(cached, Deformation):
             return cached
 
         cached = self._get_cached(key=f"deform_{target_index}_{source_index}", iteration_key=iteration_key)
-        if cached is not None:
+        if isinstance(cached, Deformation):
             # Negates the cached symmetric result by scaling by -1.
             return cached.scale(factor=-1.0)
 
@@ -325,7 +329,7 @@ class DiffeomorphicDemonsRegistration:
 
         # Tries to retrieve cached image.
         cached = self._get_cached(key=f"img_{image_index}", iteration_key=iteration_key)
-        if cached is not None:
+        if isinstance(cached, np.ndarray):
             image = cached
         else:
             image = self._get_deformed_image(image_index=image_index, scale=scale)
@@ -348,6 +352,11 @@ class DiffeomorphicDemonsRegistration:
         Returns:
             The deformed image at the specified scale.
         """
+        # Validates that pyramids have been initialized (should always be true when this method is called).
+        if self._pyramids is None:
+            message = "Cannot retrieve image: pyramids have not been initialized. Call register() first."
+            raise RuntimeError(message)
+
         image = self._pyramids[image_index].get_scale(scale=scale)
 
         # Applies current accumulated deformation if one exists.
@@ -398,12 +407,18 @@ class DiffeomorphicDemonsRegistration:
         if self._injective:
             injective_factor = min(self._deformation_limit * scale / grid_sampling, 0.9)
 
-        return deformation.regularize(
+        regularized = deformation.regularize(
             grid_sampling=grid_sampling,
             injective=self._injective,
             injective_factor=injective_factor,
             freeze_edges=self._freeze_edges,
         )
+
+        # Returns original deformation if regularization failed (grid too small).
+        if regularized is None:
+            return deformation
+
+        return regularized
 
     def _compute_grid_sampling(self, scale: float) -> float:
         """Computes the B-spline grid sampling for the given scale.

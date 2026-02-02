@@ -7,7 +7,7 @@ from pathlib import Path
 from tqdm import tqdm
 import numpy as np
 from natsort import natsorted
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
 from .version import version, python_version
@@ -203,7 +203,7 @@ def run_s2p_multiday(ops_path: Path) -> None:
         console.error(message=message, error=FileNotFoundError)
 
     # Instantiates and resets the execution timer
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
     console.echo(message="Initializing multi-day suite2p runtime...", level=LogLevel.INFO)
@@ -244,8 +244,8 @@ def discover_multiday_cells(ops_path: Path) -> None:
     ops = np.load(ops_path, allow_pickle=True).item()
 
     # Initializes the runtime timer
-    timer = PrecisionTimer("s")
-    step_timer = PrecisionTimer("s")  # Times the whole registration processing step.
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    step_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)  # Times the whole registration processing step.
     step_timer.reset()
 
     # Imports the data required to carry out registration for each session.

@@ -6,6 +6,13 @@ from typing import TYPE_CHECKING
 
 from .deformation import zoom, diffuse
 
+# Maximum zoom factor threshold below which downsampling is applied. A factor of 0.9 means downsampling occurs when
+# resolution would be reduced by more than 10%.
+_DOWNSAMPLE_ZOOM_THRESHOLD: float = 0.9
+
+# Minimum image dimension (in either axis) required before pyramid downsampling is applied.
+_MINIMUM_DOWNSAMPLE_DIMENSION: int = 8
+
 if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
@@ -49,7 +56,7 @@ class ScaleSpacePyramid:
 
             # Downsamples if scale is large enough (reduces resolution by more than 10%).
             zoom_factor = 1.0 / min_scale
-            if zoom_factor < 0.9:
+            if zoom_factor < _DOWNSAMPLE_ZOOM_THRESHOLD:
                 data = zoom(data=data, factor=zoom_factor, order=3)
 
         self._levels.append(data)
@@ -102,7 +109,7 @@ class ScaleSpacePyramid:
         data = diffuse(data=data, sigma=additional_sigma)
 
         # Downsamples if the image is large enough.
-        if min(data.shape) > 8:
+        if min(data.shape) > _MINIMUM_DOWNSAMPLE_DIMENSION:
             factor = 1.0 / self._LEVEL_FACTOR
             data = zoom(data=data, factor=factor, order=3)
 

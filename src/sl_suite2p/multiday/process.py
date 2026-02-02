@@ -6,7 +6,7 @@ from typing import Any
 from pathlib import Path
 
 import numpy as np
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
 from .. import extraction
@@ -34,7 +34,7 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
             the trace extraction pipeline.
     """
     # Initializes the run timer
-    timer = PrecisionTimer("s")
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
     # Resolves the path to the multi-day output folder of the session, which stores cached multi-day registration data.
     session_ids: list[str] = ops["session_ids"]
