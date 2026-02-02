@@ -10,20 +10,15 @@ import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
-from . import io, detection, extraction, registration, classification
+from . import io, detection, extraction, classification
 from .io.binary import BinaryFile
+from .registration import register_plane
 from .configuration import (
     RuntimeContext,
     SingleDayConfiguration,
 )
 
 # Defines constants used in this module
-# Frame binning parameters. They determine how to bin the frames for steps that support splitting the processed movie
-# into batches of frames.
-_MINIMUM_FRAMES_PER_BIN = 2000  # The minimum number of frames in each batch.
-_MAXIMUM_FRAMES_PER_BIN = 5000  # The maximum number of frames in each batch.
-_MAXIMUM_HEIGHT_PER_BIN = 700  # The maximum height of each image that can be binned using the maximum bin size.
-_MAXIMUM_WIDTH_PER_BIN = 700  # The maximum width of each image that can be binned using the maximum bin size.
 
 # Specifies the maximum number of channels in processed movie images.
 _MAXIMUM_SUPPORTED_CHANNELS = 2  # At most two channels: red and green.
@@ -144,212 +139,6 @@ def resolve_processing_contexts(config: SingleDayConfiguration) -> list[RuntimeC
     # No existing data - create new binaries.
     console.echo(message="No existing data found. Initializing a new pipeline...", level=LogLevel.INFO)
     return _initialize_pipeline(config)
-
-
-def _register_plane(
-    ops: dict[str, Any],
-    plane_number: int,
-    frames_path: str,
-    raw_frames_path: str | None = None,
-    frames_channel_2_path: str | None = None,
-    raw_frames_channel_2_path: str | None = None,
-) -> dict[str, Any]:
-    """Registers (motion-corrects) the frames acquired at the target imaging plane of the processed movie.
-
-    The registration process involves computing rigid and non-rigid offsets (deformation) to register all frames inside
-    the processed movie to the reference image. This corrects motion in the X and Y directions and is a prerequisite
-    for all other pipeline steps.
-
-    Notes:
-        This process does not correct Z-drift. For the best results, z-drift correction should be performed 'online',
-        as the movie is being acquired.
-
-    Args:
-        ops: The dictionary that stores the plane registration parameters.
-        plane_number: The number (index) of the processed plane.
-        frames_path: The path to the binary file that stores registered or unregistered frames to process. During
-            processing, the contents of the file are overwritten with registered frames (frames with registration
-            offsets applied).
-        raw_frames_path: Same as 'raw_frames_path', but the data in this file is not overwritten during processing,
-            keeping it 'raw'.
-        frames_channel_2_path: Same as 'frames_path', but for the second functional channel, if plane data contains
-            data from two channels.
-        raw_frames_channel_2_path: Same as 'raw_frames_channel_2_path', but for the second functional channel.
-
-    Returns:
-        The input 'ops' dictionary, modified to include additional parameters and data generated during registration
-        runtime.
-
-    """
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-
-    # Memory-maps the necessary binary files.
-    n_frames, height, width = ops["frame_count"], ops["frame_height"], ops["frame_width"]
-    null = contextlib.nullcontext()
-    with (
-        BinaryFile(height=height, width=width, file_path=raw_frames_path, frame_number=n_frames)
-        if raw_frames_path
-        else null as raw_frames,
-        BinaryFile(height=height, width=width, file_path=frames_path, frame_number=n_frames) as frames,
-        BinaryFile(height=height, width=width, file_path=raw_frames_channel_2_path, frame_number=n_frames)
-        if raw_frames_channel_2_path
-        else null as raw_frames_channel_2,
-        BinaryFile(height=height, width=width, file_path=frames_channel_2_path, frame_number=n_frames)
-        if frames_channel_2_path
-        else null as frames_channel_2,
-    ):
-        # Skips applying bidiphase correction if frames have already been bidiphase-corrected.
-        if raw_frames is None and ops["compute_bidirectional_phase_offset"] and ops["bidirectional_phase_offset"] != 0:
-            ops["bidirectional_phase_corrected"] = True
-
-        # First registration step:
-        message = f"Running plane {plane_number} registration step one..."
-        console.echo(message=message, level=LogLevel.INFO)
-        timer.reset()
-
-        # Determines whether the registration should be performed using the first or the second functional channel if
-        # the processed data contains two functional channels.
-        align_by_channel_2 = ops["functional_chan"] != ops["align_by_chan"]
-
-        # Runs the registration pipeline.
-        registration_outputs = registration.registration_wrapper(
-            frames,
-            plane_number=plane_number,
-            f_raw=raw_frames,
-            f_reg_chan2=frames_channel_2,
-            f_raw_chan2=raw_frames_channel_2,
-            align_by_chan2=align_by_channel_2,
-            ops=ops,
-        )
-
-        # Adds registration outputs to the plane 'ops' file.
-        ops = registration.save_registration_outputs_to_ops(registration_outputs, ops)
-
-        # Computes and adds the enhanced mean image to the plane 'ops' file.
-        ops = registration.create_enhanced_mean_image(ops)
-
-        # Adds registration time to the plane 'ops' file.
-        ops["timing"]["registration"] = timer.elapsed
-
-        message = (
-            f"Plane {plane_number} registration step one: complete. Time taken: {ops['timing']['registration']} "
-            f"seconds."
-        )
-        console.echo(message=message, level=LogLevel.SUCCESS)
-
-        # Caches the registration output to disk by overwriting the plane ops file.
-        if ops.get("ops_path"):
-            np.save(ops["ops_path"], ops)
-
-        # If necessary, carries out the second registration step.
-        if ops["two_step_registration"] and ops["keep_movie_raw"]:
-            message = f"Running plane {plane_number} second-step registration..."
-            console.echo(message=message, level=LogLevel.INFO)
-
-            # Resets the timer for the second step.
-            timer.reset()
-
-            message = f"Generating plane {plane_number} mean image excluding bad frames from first registration step..."
-            console.echo(message=message, level=LogLevel.INFO)
-
-            # Bins all available frames into groups of 1000 frames.
-            n_samples = min(frames.shape[0], 1000)
-            indices = np.linspace(0, frames.shape[0], 1 + n_samples).astype(np.int64)[:-1]
-
-            # Resolves the reference image, depending on the alignment channel setting.
-            if align_by_channel_2 and frames_channel_2 is not None:
-                reference_image = frames_channel_2[indices].astype(np.float32).mean(axis=0)
-            else:
-                reference_image = frames[indices].astype(np.float32).mean(axis=0)
-
-            # Runs the registration pipeline.
-            registration.registration_wrapper(
-                frames,
-                plane_number=plane_number,
-                f_raw=None,
-                f_reg_chan2=frames_channel_2,
-                f_raw_chan2=None,
-                refImg=reference_image,
-                align_by_chan2=align_by_channel_2,
-                ops=ops,
-            )
-
-            # Adds the second registration step time to the plane 'ops' file.
-            ops["timing"]["two_step_registration"] = timer.elapsed
-
-            # Caches the registration output to disk by overwriting the plane ops file.
-            if ops.get("ops_path"):
-                np.save(ops["ops_path"], ops)
-
-            message = (
-                f"Plane {plane_number} second-step registration: complete. Time taken: "
-                f"{ops['timing']['two_step_registration']} seconds."
-            )
-            console.echo(message=message, level=LogLevel.SUCCESS)
-
-    # Returns the modified ops to caller.
-    return ops
-
-
-def _compute_registration_metrics(ops: dict[str, Any], plane_number: int, frames_path: str) -> dict[str, Any]:
-    """Computes frame registration (motion-correction) quality metrics for the target imaging plane of the processed
-    movie.
-
-    Notes:
-        This step is optional. The metrics are designed for human operators to assess the quality of registration and
-        should be used in conjunction with the visual inspection of registered movies. Skipping this step altogether may
-        result in a significant processing time reduction for some runtimes.
-
-    Args:
-        ops: The dictionary that stores the plane registration quality metrics computation parameters.
-        plane_number: The number (index) of the processed plane.
-        frames_path: The path to the binary file that stores the registered plane frames to evaluate.
-
-    Returns:
-        The input 'ops' dictionary, modified to include the calculated registration metrics. Specifically, the
-        dictionary is expanded to include the "regPC", "tPC", and "regDX" fields, in addition to the
-        'registration_metrics' subfield stored under the 'timing' field.
-    """
-    # TODO: Refactor to use RuntimeContext. The compute_pc_metrics function now requires a RuntimeContext instead of
-    # individual parameters. This function needs to be updated to either:
-    # 1. Construct a RuntimeContext from the legacy ops dictionary, or
-    # 2. Load the RuntimeContext from disk if available
-    # For now, this functionality is broken until the single-day pipeline is refactored to use the new data
-    # architecture.
-    console.echo(
-        message="Registration metrics computation is temporarily disabled. The single-day pipeline needs to be "
-        "refactored to use RuntimeContext instead of the legacy ops dictionary.",
-        level=LogLevel.WARNING,
-    )
-    return ops
-
-    # Legacy code preserved for reference during refactoring:
-    # timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-    # message = f"Computing plane {plane_number} registration quality metrics..."
-    # console.echo(message=message, level=LogLevel.INFO)
-    # timer.reset()
-    # n_frames, height, width = ops["frame_count"], ops["frame_height"], ops["frame_width"]
-    # with BinaryFile(height=height, width=width, file_path=frames_path, frame_number=n_frames) as frames:
-    #     n_frames, height, width = frames.shape
-    #     n_samples = min(
-    #         _MINIMUM_FRAMES_PER_BIN
-    #         if n_frames < _MAXIMUM_FRAMES_PER_BIN or height > _MAXIMUM_HEIGHT_PER_BIN or width > _MAXIMUM_WIDTH_PER_BIN
-    #         else _MAXIMUM_FRAMES_PER_BIN,
-    #         n_frames,
-    #     )
-    #     indices = np.linspace(0, n_frames - 1, n_samples).astype("int")
-    #     movie = frames[indices]
-    #     movie = movie[
-    #         :, ops["valid_y_range"][0] : ops["valid_y_range"][-1], ops["valid_x_range"][0] : ops["valid_x_range"][-1]
-    #     ]
-    #     ops = registration.get_pc_metrics(movie, ops, plane_number=plane_number)
-    #     reg_metrics_time = timer.elapsed
-    #     message = (
-    #         f"Plane {plane_number} registration quality metrics: computed. Time taken: {reg_metrics_time} seconds."
-    #     )
-    #     console.echo(message=message, level=LogLevel.SUCCESS)
-    #     ops["timing"]["registration_metrics"] = reg_metrics_time
-    # return ops
 
 
 def _process_rois(
@@ -662,106 +451,8 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
         )
         console.echo(message=message, level=LogLevel.WARNING)
 
-    # Determines whether the target plane needs to be registered. If so, adjusts the configuration parameters to
-    # support (re)running the registration process.
-    if ops["do_registration"] > 0:
-        # If the plane has not been registered or registration is forced, carries out registration
-        if "refImg" not in ops or "yoff" not in ops or ops["do_registration"] > 1:
-            message = (
-                f"Plane {plane_index} registration: enabled. The plane either has not been registered or "
-                f"re-registration was forced via the 'do_registration' configuration parameter."
-            )
-            console.echo(message=message, level=LogLevel.INFO)
-
-            # If the frame is being forcibly re-registered, ensures previous registration offsets are removed from the
-            # plane ops file.
-            ops.pop("yoff", None)
-            ops.pop("xoff", None)
-            ops.pop("corrXY", None)
-            run_registration = True
-
-        # Otherwise, if the plane has already been registered and re-registration is not forced, skips registration
-        else:
-            console.echo(
-                message=f"Plane {plane_index} registration: disabled. The plane is already registered.",
-                level=LogLevel.INFO,
-            )
-            console.echo(
-                message=f"Plane {plane_index} binary path: {ops['registered_binary_path']}.", level=LogLevel.INFO
-            )
-            run_registration = False
-
-    # If the user specifically disables plane registration, skips plane registration
-    else:
-        message = (
-            f"Plane {plane_index} registration: disabled. Plane registration was disabled via the 'do_registration' "
-            f"configuration parameter."
-        )
-        console.echo(message=message, level=LogLevel.INFO)
-        console.echo(message=f"Plane {plane_index} binary path: {ops['registered_binary_path']}.", level=LogLevel.INFO)
-        run_registration = False
-
-    # Determines whether suite2p is configured to preserve the unregistered (raw) binary files.
-    raw_file_available = (
-        ops.get("keep_movie_raw") and "raw_binary_path" in ops and Path(ops["raw_binary_path"]).is_file()
-    )
-
-    # Resolves the paths to registered and, if available, raw binary files for channel 1
-    registered_file = ops["registered_binary_path"]
-    raw_file = ops.get("raw_binary_path", 0) if raw_file_available else registered_file
-
-    # Gets the number of frames in each binary file to use to initialize channel 2 files, if needed. This is only used
-    # when processing data with two functional channels.
-    if ops["nchannels"] > 1:
-        registered_file_channel_2 = ops["registered_binary_path_channel_2"]
-        raw_file_channel_2 = (
-            ops.get("raw_binary_path_channel_2", 0) if raw_file_available else registered_file_channel_2
-        )
-    else:
-        registered_file_channel_2 = registered_file
-        raw_file_channel_2 = registered_file
-
-    # Determines the shape and layout of each binary file
-    n_frames, _height, _width = ops["frame_count"], ops["frame_height"], ops["frame_width"]
-
-    # Determines which binary files are available for this plane and resolves their paths. Previously, this step
-    # constructed the BinaryFile instances. Now, each processing step resolves the necessary binary files as part of its
-    # runtime to make it easier to parallelize the processing steps.
-    two_channels = ops["nchannels"] > 1
-    raw_frames_path = str(raw_file) if raw_file_available else None
-    frames_path = str(registered_file)
-    raw_frames_channel_2_path = str(raw_file_channel_2) if raw_file_available and two_channels else None
-    frames_channel_2_path = str(registered_file_channel_2) if two_channels else None
-
-    # Initializes processing timer for the plane
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-    timer.reset()
-
-    # If plane registration is enabled, runs the registration pipeline
-    if run_registration:
-        ops = _register_plane(
-            ops=ops,
-            plane_number=plane_index,
-            frames_path=frames_path,
-            raw_frames_path=raw_frames_path,
-            frames_channel_2_path=frames_channel_2_path,
-            raw_frames_channel_2_path=raw_frames_channel_2_path,
-        )
-
-    # If the processed movie contains at least 1500 frames and registration metric computation is enabled, computes
-    # registration quality metrics. Note, depending on the registration metric computation parameter, this step is
-    # either tied to registration or executed independently of carrying out registration.
-    if n_frames >= _MINIMUM_REGISTRATION_METRIC_FRAMES and (
-        ops["compute_registration_metrics"] > 1 or (ops["compute_registration_metrics"] == 1 and run_registration)
-    ):
-        ops = _compute_registration_metrics(ops=ops, plane_number=plane_index, frames_path=frames_path)
-    else:
-        message = (
-            f"Skipping computing plane {plane_index} registration quality metrics, as it is either disabled via the "
-            f"'compute_registration_metrics' configuration parameter, is skipped because plane registration was also "
-            f"skipped, or because the plane has less than 1500 frames (it has {n_frames} frames)."
-        )
-        console.echo(message=message, level=LogLevel.INFO)
+    # TODO implement proper registration
+    register_plane(context=None)
 
     # If ROI (cell) segmentation is enabled, segments (detects) cell ROIs
     if ops.get("roidetect", True):
@@ -778,25 +469,6 @@ def process_plane(ops_path: Path, plane_index: int) -> None:
     # Caches plane processing results to disk
     if ops.get("ops_path"):
         np.save(ops["ops_path"], ops)
-
-    # If suite2p is configured to delete binary files after processing, removes the necessary files
-    if ops.get("delete_bin"):
-        console.echo(message=f"Deleting plane {plane_index} binary files...", level=LogLevel.INFO)
-
-        # Registered binary file for channel 1
-        Path(ops["registered_binary_path"]).unlink()
-
-        # Registered binary file for channel 2
-        if ops["nchannels"] > 1:
-            Path(ops["registered_binary_path_channel_2"]).unlink()
-
-        # Raw binary file for channel 1
-        if "raw_binary_path" in ops:
-            Path(ops["raw_binary_path"]).unlink()
-
-        # Raw binary file for channel 2
-        if "raw_binary_path" in ops and ops["nchannels"] > 1:
-            Path(ops["raw_binary_path_channel_2"]).unlink()
 
     message = (
         f"Plane {plane_index} processed in {ops['timing']['total_plane_runtime']} seconds. Processing results "
