@@ -8,7 +8,6 @@ from dataclasses import field, dataclass
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
-from ..version import version, python_version
 from .single_day import SignalExtraction, SpikeDeconvolution
 
 if TYPE_CHECKING:
@@ -17,44 +16,35 @@ if TYPE_CHECKING:
 
 @dataclass()
 class Main:
-    """Stores global parameters that broadly define the suite2p multi-day processing configuration."""
+    """Stores the parameters that broadly affect the runtime and performance of the multi-day pipeline as a whole."""
 
     parallel_workers: int = 20
-    """The number of workers used to parallelize certain processing operations. This worker pool is used by numba when 
-    it parallelizes certain computations used during session ROI processing. Note, there is generally no benefit
-    from increasing this parameter above 20 cores per each processed session. On machines with a high number of cores, 
-    it is recommended to keep this value between 10 and 20 cores and to manually parallelize processing sessions. See 
-    the example notebook for details on manual parallelization. Setting this to -1 or 0 removes worker limits, forcing 
-    the pipeline to use all available CPU cores."""
+    """The number of workers used to parallelize certain processing operations. This worker pool is used by numba when
+    it parallelizes certain computations used during registration and ROI processing. There is generally no benefit from
+    increasing this parameter above 20 cores per each processed session. On machines with a high number of cores, it is
+    recommended to keep this value between 10 and 20 cores and to instead parallelize processing sessions.
+    Setting this to -1 or 0 removes worker limits, forcing the pipeline to use all available CPU cores."""
 
-    progress_bars: bool = False
-    """Determines whether to display progress bars for certain processing steps. Only enable this option when running 
-    a single multi-day processing pipeline at a time. Having this enabled when running multiple multi-day pipelines 
-    in-parallel will interfere with properly communicating progress via the terminal."""
-
-    python_version: str = python_version
-    """Stores the Python version that was used to instantiate this configuration file. This is a non-user-addressable
-    field that stores important runtime ID information."""
-
-    sl_suite2p_version: str = version
-    """Stores the sl-suite2p library version (release) that was used to instantiate this configuration file. This is a
-    non-user-addressable field that stores important runtime ID information."""
+    display_progress_bars: bool = False
+    """Determines whether to display progress bars for certain processing steps. Only enable this option when running
+    all processing steps sequentially. Having this enabled when running multiple sessions or planes in parallel may 
+    interfere with properly communicating progress via the terminal."""
 
 
 @dataclass()
 class IO:
-    """Stores parameters that control data input and output during various stages of the pipeline."""
+    """Stores the parameters that specify input data location, format, and output directories."""
 
     session_directories: list[str] = field(default_factory=list)
-    """Specifies the list of sessions to register across days, as absolute paths to their root directories.
+    """Specifies the sessions to register across days as absolute paths to their root directories.
     Sessions are natural-sorted, and the first session after sorting becomes the 'main session' which stores
-    the processing tracker file. Each directory must contain a 'combined' plane folder created by the single-day
-    suite2p pipeline. The 'combined' folder is created when the 'combined' SingleDayConfiguration attribute is
-    set to True."""
+    the processing tracker file. Each session directory is expected to contain the combined_metadata.npz file created 
+    by the single-day processing pipeline."""
 
     dataset_name: str = ""
-    """Specifies the name of the multiday dataset. This name is used to create the output folder under each session's
-    'multiday' directory (e.g., session/multiday/{dataset_name}/) and to identify the dataset in the tracker file."""
+    """Specifies the name of the multiday dataset. This name is used to create the output directory under each 
+    session's 'multiday' directory (e.g., session/multiday/{dataset_name}/) and to identify the dataset in the 
+    tracker file."""
 
 
 @dataclass()
@@ -64,19 +54,19 @@ class CellSelection:
     """
 
     probability_threshold: float = 0.85
-    """The minimum required probability score assigned to the cell (ROI) by the single-day suite2p classifier. Cells 
+    """The minimum required cell probability score assigned to the ROI by the single-day suite2p classifier. Cells 
     with a lower classifier score are excluded from multi-day processing."""
 
     maximum_size: int = 1000
-    """The maximum allowed cell (ROI) size, in pixels. Cells with a larger pixel size are excluded from processing."""
+    """The maximum allowed ROI size, in pixels. Cells with a larger pixel size are excluded from processing."""
 
     mroi_stripe_borders: list[int] = field(default_factory=list)
-    """Stores the x-coordinates of combined MROI image stripe borders. For MROI images, 'stripes' are the individual
-    imaging ROIs acquired in multi-ROI mode. Keep this field set to an empty list to skip stripe border-filtering or
-    when working with non-MROI images.
+    """Stores the x-coordinates of combined MROI image stripe borders. For MROI recordings, 'stripes' are the individual
+    imaging ROIs acquired in the multi-ROI mode. Keep this field set to an empty list to skip stripe border-filtering or
+    when working with non-MROI recordings.
     """
 
-    stripe_margin: int = 30
+    mroi_stripe_margin: int = 30
     """The minimum required distance, in pixels, between the center-point (the median x-coordinate) of the cell (ROI)
     and the MROI stripe border. Cells that are too close to stripe borders are excluded from processing to avoid
     ambiguities associated with tracking cells that span multiple stripes. This parameter is only used if
