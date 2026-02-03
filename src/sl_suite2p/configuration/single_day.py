@@ -549,16 +549,9 @@ class Classification:
     excludes pixels beyond where fluorescence contribution drops significantly. This focuses classification
     on the cell body, improving accuracy for neurons with extensive dendritic arbors."""
 
-    use_builtin_classifier: bool = True
-    """Determines whether to use the classifier bundled with sl-suite2p. When False, the pipeline looks for a
-    user-trained classifier at ~/.suite2p/classifiers/classifier_user.npy. If that file does not exist, the
-    builtin classifier is used as a fallback. Set this to True to always use the builtin classifier regardless
-    of whether a user classifier exists."""
-
     custom_classifier_path: Path | None = None
-    """The absolute path to a custom classifier file. When set, this classifier takes priority over both the
-    builtin classifier and the user classifier at the default location. Leave as None to use the standard
-    classifier selection logic based on use_builtin_classifier."""
+    """The absolute path to a custom classifier file. When set, this classifier is used instead of the built-in
+    classifier. Leave as None to use the built-in classifier bundled with sl-suite2p."""
 
     def __post_init__(self) -> None:
         """Converts string custom_classifier_path to Path after YAML loading."""
