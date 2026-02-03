@@ -12,14 +12,19 @@ from ataraxis_base_utilities import console
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ..configuration import ROIStatistics, RuntimeContext
+    from ..configuration import ROIStatistics
 
 
 # Path to the built-in classifier bundled with sl-suite2p.
 _BUILTIN_CLASSIFIER_PATH: Path = Path(__file__).parent / "classifier.npz"
 
-# The names of the ROI features used for classification, in the order they appear in the feature matrix.
-_FEATURE_NAMES: tuple[str, ...] = ("normalized_pixel_count", "compactness", "skewness")
+# The names of the ROI features used for full classification (after signal extraction), in the order they appear in
+# the feature matrix.
+_CLASSIFICATION_FEATURES: tuple[str, ...] = ("normalized_pixel_count", "compactness", "skewness")
+
+# The names of the ROI features used for preclassification (during detection, before signal extraction). This subset
+# excludes skewness which requires extracted fluorescence traces to compute.
+_PRECLASSIFICATION_FEATURES: tuple[str, ...] = ("normalized_pixel_count", "compactness")
 
 # The number of grid nodes used for probability estimation during model fitting.
 _GRID_NODE_COUNT: int = 100
@@ -33,7 +38,7 @@ def _resolve_classifier_path(custom_classifier_path: Path | None = None) -> Path
 
     Args:
         custom_classifier_path: An optional path to a custom classifier file. If provided, this path is returned.
-            Otherwise, the path to the built-in classifier filed bundled with the sl-suite2p release is returned.
+            Otherwise, the path to the built-in classifier file bundled with the sl-suite2p release is returned.
 
     Returns:
         The resolved path to the classifier .npz file.
@@ -51,6 +56,9 @@ class Classifier:
 
     Args:
         classifier_path: The path to a classifier .npz file containing training_labels and feature arrays.
+        feature_names: The tuple of feature names to use for classification. Only these features will be loaded from
+            the classifier file and used for model fitting. If None, all available features in the classifier file
+            are used.
 
     Notes:
         The classifier file format uses pickle-free npz serialization containing training_labels and feature arrays
@@ -59,7 +67,7 @@ class Classifier:
 
     Attributes:
         _classifier_path: The path to the loaded classifier file.
-        _available_features: The list of feature names available in the loaded classifier.
+        _available_features: The list of feature names used by the classifier.
         _training_features: A dictionary mapping feature names to their training value arrays.
         _training_labels: The boolean training labels array with shape (n_samples,).
         _probability_grid: The grid boundaries computed from sorted training statistics with shape
@@ -71,7 +79,7 @@ class Classifier:
         _model: The fitted LogisticRegression model.
     """
 
-    def __init__(self, classifier_path: Path) -> None:
+    def __init__(self, classifier_path: Path, feature_names: tuple[str, ...] | None = None) -> None:
         if not classifier_path.exists():
             message = (
                 f"Unable to load the classification training data. The classifier file does not exist at the "
@@ -97,10 +105,14 @@ class Classifier:
             training_features: dict[str, NDArray[np.float32]] = {}
             available_features: list[str] = []
 
-            # Supports flexible training feature extraction. As long as the dataset contains at least one valid
-            # feature, the class can train the model. This allows flexibly working with incomplete datasets and
-            # extending the feature set in the future.
-            for feature_name in _FEATURE_NAMES:
+            # Determines which features to load. If feature_names is specified, only those features are used.
+            # Otherwise, all available features in the classifier file are used.
+            target_features = feature_names if feature_names is not None else _CLASSIFICATION_FEATURES
+
+            # Loads the requested features from the classifier file. As long as the dataset contains at least one
+            # valid feature, the class can train the model. This allows flexibly working with incomplete datasets
+            # and extending the feature set in the future.
+            for feature_name in target_features:
                 if feature_name in data:
                     feature_array = data[feature_name].astype(np.float32)
                     if len(feature_array) == n_samples and not np.all(np.isnan(feature_array)):
@@ -110,7 +122,7 @@ class Classifier:
             if not available_features:
                 message = (
                     f"Unable to load the classification training data. The classifier file at {classifier_path} "
-                    f"does not contain any of the expected feature columns: {', '.join(_FEATURE_NAMES)}."
+                    f"does not contain any of the expected feature columns: {', '.join(target_features)}."
                 )
                 console.error(message=message, error=ValueError)
 
@@ -300,10 +312,10 @@ class Classifier:
         for feature_index in range(n_features):
             # Reorders labels by sorted feature values and computes cumulative sum.
             sorted_labels = self._training_labels[sort_indices[:, feature_index]].astype(np.float32)
-            cumulative_summ = np.concatenate([[0], np.cumsum(sorted_labels)])
+            cumulative_sum = np.concatenate([[0], np.cumsum(sorted_labels)])
 
             # Computes bin sums using cumulative sum differences, then converts to means.
-            bin_sums = cumulative_summ[grid_indices[1:]] - cumulative_summ[grid_indices[:-1]]
+            bin_sums = cumulative_sum[grid_indices[1:]] - cumulative_sum[grid_indices[:-1]]
             self._grid_cell_probabilities[:, feature_index] = bin_sums / bin_sizes
 
         # Smooths the probability estimates across bins to reduce noise.
@@ -317,23 +329,37 @@ class Classifier:
         self._model.fit(log_probabilities, self._training_labels)
 
 
-def classify(context: RuntimeContext) -> None:
+def classify(
+    roi_statistics: list[ROIStatistics],
+    classification_threshold: float = 0.5,
+    custom_classifier_path: Path | None = None,
+    preclassification: bool = False,
+) -> NDArray[np.float32]:
     """Classifies detected ROIs as cells or non-cells using a logistic regression model.
 
-    This function loads the classifier data from the file specified in the configuration and uses it to train the
-    logistic regression model that classifies the ROIs stored in the runtime context, and updates the
-    cell_classification field in-place.
+    This function loads classifier training data from the specified file (or the built-in classifier if no custom path
+    is provided), fits a logistic regression model, and uses it to classify the input ROIs based on their morphological
+    features.
 
     Args:
-        context: The runtime context containing configuration, ROI statistics, and where classification results
-            will be stored. The function reads from context.runtime.extraction.roi_statistics and writes to
-            context.runtime.extraction.cell_classification.
+        roi_statistics: The list of ROIStatistics instances containing the morphological features of the ROIs to
+            classify. Must contain at least one ROI.
+        classification_threshold: The probability threshold above which an ROI is classified as a cell. ROIs with
+            probabilities above this threshold are labeled as cells (1.0), others as non-cells (0.0). Defaults to 0.5.
+        custom_classifier_path: An optional path to a custom classifier .npz file. If None, the built-in classifier
+            bundled with sl-suite2p is used.
+        preclassification: Determines whether to use a 2-feature model (normalized_pixel_count, compactness) suitable
+            for early filtering during detection before signal extraction. When False, uses the full 3-feature model
+            that includes skewness computed from extracted fluorescence traces. Defaults to False.
+
+    Returns:
+        An array of shape (n_rois, 2) where each row contains [is_cell, probability]. The is_cell value is 1.0 if the
+        ROI is classified as a cell (probability > threshold) and 0.0 otherwise.
 
     Raises:
-        ValueError: If no ROIs have been detected prior to classification.
+        ValueError: If the input roi_statistics list is empty.
     """
-    roi_statistics = context.runtime.extraction.roi_statistics
-    if roi_statistics is None or len(roi_statistics) == 0:
+    if len(roi_statistics) == 0:
         message = (
             "Unable to classify ROIs. No ROIs appear to have been detected. Classification requires detection to "
             "discover at least one valid ROI candidate."
@@ -341,13 +367,12 @@ def classify(context: RuntimeContext) -> None:
         console.error(message=message, error=ValueError)
 
     # Resolves the classifier dataset to use for training the model.
-    classifier_path = _resolve_classifier_path(
-        custom_classifier_path=context.config.classification.custom_classifier_path
-    )
-    probability_threshold = context.config.roi_detection.preclassification_threshold
+    classifier_path = _resolve_classifier_path(custom_classifier_path=custom_classifier_path)
+
+    # Selects the feature set based on the classification mode. Preclassification uses only morphological features
+    # available during detection, while full classification includes skewness from extracted fluorescence.
+    feature_names = _PRECLASSIFICATION_FEATURES if preclassification else _CLASSIFICATION_FEATURES
 
     # Trains the logistic regression model (~10 ms) and uses it to classify the detected ROIs.
-    classifier = Classifier(classifier_path=classifier_path)
-    context.runtime.extraction.cell_classification = classifier.classify(
-        roi_statistics=roi_statistics, probability_threshold=probability_threshold
-    )
+    classifier = Classifier(classifier_path=classifier_path, feature_names=feature_names)
+    return classifier.classify(roi_statistics=roi_statistics, probability_threshold=classification_threshold)

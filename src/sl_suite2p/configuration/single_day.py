@@ -242,6 +242,21 @@ class Main:
     """The list of flyback plane indices to ignore when processing the data. Flyback planes typically contain no valid
     imaging data, so it is common to exclude them from processing."""
 
+    custom_classifier_path: Path | None = None
+    """The absolute path to a custom classifier file used for ROI classification. When set, this classifier is used
+    instead of the built-in classifier for both preclassification during detection and final classification after
+    signal extraction. Leave as None to use the built-in classifier bundled with sl-suite2p."""
+
+    def __post_init__(self) -> None:
+        """Converts string custom_classifier_path to Path after YAML loading."""
+        if isinstance(self.custom_classifier_path, str):
+            self.custom_classifier_path = Path(self.custom_classifier_path) if self.custom_classifier_path else None
+
+    def prepare_for_saving(self) -> None:
+        """Converts Path fields to strings for YAML serialization."""
+        if self.custom_classifier_path is not None:
+            self.custom_classifier_path = str(self.custom_classifier_path)  # type: ignore[assignment]
+
 
 @dataclass
 class FileIO:
@@ -463,6 +478,12 @@ class ROIDetection:
     """Determines whether to apply PCA-based denoising to the binned movie before ROI detection. This can improve
     detection in noisy recordings by removing uncorrelated noise while preserving spatially coherent signals."""
 
+    crop_to_soma: bool = True
+    """Determines whether to crop dendritic regions from detected ROIs before computing classification features.
+    When enabled, the algorithm analyzes the radial distribution of fluorescence from each ROI's centroid and
+    excludes pixels beyond where fluorescence contribution drops significantly. This focuses classification
+    on the cell body, improving accuracy for neurons with extensive dendritic arbors."""
+
 
 @dataclass
 class SignalExtraction:
@@ -492,6 +513,11 @@ class SignalExtraction:
     probability weight indicating how likely it belongs to a cell. Pixels with weights above this percentile
     (computed locally) are excluded from neuropil masks. Higher values are more permissive, including more
     pixels in neuropil masks but risking cell contamination."""
+
+    classification_threshold: float = 0.5
+    """The classifier probability threshold used to classify ROIs after signal extraction. This is the minimum
+    classifier confidence value (that the classified ROI is a cell) for the ROI to be labeled as a cell. ROIs with
+    probabilities below this threshold are labeled as non-cells but are still retained in the output data."""
 
 
 @dataclass
@@ -537,31 +563,6 @@ class SpikeDeconvolution:
     def prepare_for_saving(self) -> None:
         """Converts enum fields to strings for YAML serialization."""
         self.baseline_method = str(self.baseline_method)
-
-
-@dataclass
-class Classification:
-    """Stores parameters for classifying detected ROIs as real cells or artifacts."""
-
-    crop_to_soma: bool = True
-    """Determines whether to crop dendritic regions from detected ROIs before computing classification features.
-    When enabled, the algorithm analyzes the radial distribution of fluorescence from each ROI's centroid and
-    excludes pixels beyond where fluorescence contribution drops significantly. This focuses classification
-    on the cell body, improving accuracy for neurons with extensive dendritic arbors."""
-
-    custom_classifier_path: Path | None = None
-    """The absolute path to a custom classifier file. When set, this classifier is used instead of the built-in
-    classifier. Leave as None to use the built-in classifier bundled with sl-suite2p."""
-
-    def __post_init__(self) -> None:
-        """Converts string custom_classifier_path to Path after YAML loading."""
-        if isinstance(self.custom_classifier_path, str):
-            self.custom_classifier_path = Path(self.custom_classifier_path) if self.custom_classifier_path else None
-
-    def prepare_for_saving(self) -> None:
-        """Converts Path fields to strings for YAML serialization."""
-        if self.custom_classifier_path is not None:
-            self.custom_classifier_path = str(self.custom_classifier_path)  # type: ignore[assignment]
 
 
 @dataclass
@@ -1681,8 +1682,6 @@ class SingleDayConfiguration(YamlConfig):
     """Stores parameters for extracting fluorescence signals from ROIs and surrounding neuropil regions."""
     spike_deconvolution: SpikeDeconvolution = field(default_factory=SpikeDeconvolution)
     """Stores parameters for deconvolving fluorescence signals to infer spike trains."""
-    classification: Classification = field(default_factory=Classification)
-    """Stores parameters for classifying detected ROIs as real cells or artifacts."""
 
     def save(self, file_path: Path) -> None:
         """Saves the configuration to a YAML file.
@@ -1698,9 +1697,9 @@ class SingleDayConfiguration(YamlConfig):
         yaml_copy = copy.deepcopy(self)
 
         # Prepares each child dataclass for YAML serialization.
+        yaml_copy.main.prepare_for_saving()
         yaml_copy.file_io.prepare_for_saving()
         yaml_copy.spike_deconvolution.prepare_for_saving()
-        yaml_copy.classification.prepare_for_saving()
 
         yaml_copy.to_yaml(file_path=file_path)
 
