@@ -161,16 +161,8 @@ def _process_rois(
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
-    # Selects the classifier file, based on the processing configuration
-    ops_classifier_file = ops.get("classifier_path")
-    builtin_classifier_file = classification.builtin_classfile
-    user_classifier_file = classification.user_classfile
-    if ops_classifier_file:
-        classifier_file = ops_classifier_file
-    elif ops["use_builtin_classifier"] or not user_classifier_file.is_file():
-        classifier_file = builtin_classifier_file
-    else:
-        classifier_file = user_classifier_file
+    # Selects the classifier file based on the processing configuration.
+    classifier_file = classification.resolve_classifier_path(custom_classifier_path=ops.get("classifier_path"))
 
     # Memory-maps the necessary binary files.
     n_frames, height, width = ops["frame_count"], ops["frame_height"], ops["frame_width"]

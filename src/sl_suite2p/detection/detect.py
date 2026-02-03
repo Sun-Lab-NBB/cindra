@@ -12,7 +12,7 @@ from .stats import roi_stats
 from .denoise import pca_denoise
 from ..io.binary import BinaryFile
 from ..configuration import generate_default_ops
-from ..classification import classify, user_classfile
+from ..classification import classify, resolve_classifier_path
 
 
 def detect(ops, plane_number: int, classfile=None):
@@ -149,7 +149,7 @@ def detection_wrapper(
 
         if ops["preclassification_threshold"] > 0:
             if classfile is None:
-                classfile = user_classfile
+                classfile = resolve_classifier_path()
 
             message = f"Applying classifier {Path(classfile).name} to plane {plane_number}..."
             console.echo(message=message, level=LogLevel.INFO)
