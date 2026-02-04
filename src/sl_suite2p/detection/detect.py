@@ -127,7 +127,11 @@ def detection_wrapper(
         mov -= mov.min()
 
     if ops.get("denoise", 1):
-        mov = pca_denoise(mov, block_size=[ops["block_size"][0] // 2, ops["block_size"][1] // 2], n_comps_frac=0.5)
+        pca_denoise(
+            frames=mov,
+            block_size=(ops["block_size"][0] // 2, ops["block_size"][1] // 2),
+            component_fraction=0.5,
+        )
 
     message = f"Finding cell mask ROIs for plane {plane_number}..."
     console.echo(message=message, level=LogLevel.INFO)
@@ -213,7 +217,6 @@ def select_rois(ops: dict[str, Any], mov: np.ndarray, plane_number: int):
         mov=mov,
         high_pass=ops["high_pass"],
         neuropil_high_pass=ops["spatial_hp_detect"],
-        batch_size=ops["batch_size"],
         spatial_scale=ops["spatial_scale"],
         threshold_scaling=ops["threshold_scaling"],
         max_iterations=250 * ops["max_iterations"],

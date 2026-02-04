@@ -16,7 +16,7 @@ from ataraxis_base_utilities import LogLevel, console
 from . import utils
 
 
-def neuropil_subtraction(mov: np.ndarray, filter_size: int) -> None:
+def neuropil_subtraction(mov: np.ndarray, filter_size: int) -> np.ndarray:
     """Returns movie subtracted by a low-pass filtered version of itself to help ignore neuropil."""
     nbinned, Ly, Lx = mov.shape
     c1 = uniform_filter(np.ones((Ly, Lx)), size=filter_size, mode="constant")
@@ -315,7 +315,6 @@ def sparsery(
     mov: np.ndarray,
     high_pass: int,
     neuropil_high_pass: int,
-    batch_size: int,
     spatial_scale: int,
     threshold_scaling,
     max_iterations: int,
@@ -323,9 +322,9 @@ def sparsery(
     percentile=0,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Returns stats and ops from "mov" using correlations in time."""
-    mov = utils.temporal_high_pass_filter(mov=mov, width=int(high_pass))
+    utils.apply_temporal_high_pass_filter(frames=mov, kernel_size=int(high_pass))
     max_proj = mov.max(axis=0)
-    sdmov = utils.standard_deviation_over_time(mov, batch_size=batch_size)
+    sdmov = utils.compute_temporal_standard_deviation(frames=mov)
     mov = neuropil_subtraction(mov=mov / sdmov, filter_size=neuropil_high_pass)  # subtract low-pass filtered movie
 
     _, Lyc, Lxc = mov.shape
@@ -338,8 +337,8 @@ def sparsery(
     Lyp, Lxp = np.zeros(5, "int32"), np.zeros(5, "int32")  # downsampled sizes
     for j in range(5):
         movu0 = square_convolution_2d(dmov, 3)
-        dmov = 2 * utils.downsample(dmov)
-        gxy0 = utils.downsample(gxy[j], False)
+        dmov = 2 * utils.downsample(data=dmov)
+        gxy0 = utils.downsample(data=gxy[j], taper_edge=False)
         gxy.append(gxy0)
         _, Lyp[j], Lxp[j] = movu0.shape
         movu.append(movu0)
@@ -356,7 +355,6 @@ def sparsery(
     scale, estimate_mode = find_best_scale(I=I, spatial_scale=spatial_scale)
 
     spatscale_pix = 3 * 2**scale
-    mask_window = int(((spatscale_pix * 1.5) // 2) * 2)
     Th2 = threshold_scaling * 5 * max(1, scale)  # threshold for accepted peaks (scale it by spatial scale)
     vmultiplier = max(1, mov.shape[0] / 1200)
     message = (
@@ -366,7 +364,7 @@ def sparsery(
     console.echo(message=message, level=LogLevel.INFO)
 
     # get standard deviation for pixels for all values > Th2
-    v_map = [utils.threshold_reduce(movu0, Th2) for movu0 in movu]
+    v_map = [utils.compute_thresholded_variance(frames=movu0, intensity_threshold=Th2) for movu0 in movu]
     movu = [movu0.reshape(movu0.shape[0], -1) for movu0 in movu]
 
     mov = np.reshape(mov, (-1, Lyc * Lxc))
@@ -378,9 +376,6 @@ def sparsery(
     v_split = np.zeros(max_iterations)
     V1 = deepcopy(v_map)
     stats = []
-    patches = []
-    seeds = []
-    extract_patches = False
     tj = 0
     for tj in range(max_iterations):
         # find peaks in stddev"s
@@ -412,25 +407,15 @@ def sparsery(
             threshold = Th2
         active_frames = np.nonzero(tproj > threshold)[0]  # frames with activity > Th2
 
-        # get square around seed
-        if extract_patches:
-            mask = mov[active_frames].mean(axis=0).reshape(Lyc, Lxc)
-            patches.append(utils.square_mask(mask, mask_window, yi, xi))
-            seeds.append([yi, xi])
-
         # extend mask based on activity similarity
         for j in range(3):
             ypix0, xpix0, lam0 = iter_extend(ypix0, xpix0, mov, Lyc, Lxc, active_frames)
             tproj = mov[:, ypix0 * Lxc + xpix0] @ lam0
             active_frames = np.nonzero(tproj > threshold)[0]
             if len(active_frames) < 1:
-                if tj < nmasks:
-                    continue
                 break
         if len(active_frames) < 1:
-            if tj < nmasks:
-                continue
-            break
+            continue
 
         # check if ROI should be split
         v_split[tj], ipack = two_comps(mov[:, ypix0 * Lxc + xpix0], lam0, threshold)
