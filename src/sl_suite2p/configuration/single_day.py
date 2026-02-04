@@ -18,6 +18,76 @@ from ..version import version, python_version
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+    from numpy.lib.npyio import NpzFile
+
+
+def _save_optional_array_field(
+    field_name: str,
+    arrays: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | list[int] | None],
+    save_dictionary: dict[str, NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | NDArray[np.uint32]],
+    dtype: type,
+) -> None:
+    """Saves an optional variable-length array field to the provided save dictionary.
+
+    Notes:
+        This function handles the serialization pattern for optional array fields in dataclasses. It stores two arrays
+        in the save dictionary: a counts array with the length of each item's array (0 if None), and a concatenated
+        data array containing only the non-None values. This enables pickle-free serialization of variable-length
+        arrays.
+
+    Args:
+        field_name: The base name for the field. The function stores '{field_name}_counts' and '{field_name}' keys.
+        arrays: The list of arrays to save. None values and empty arrays are handled by storing 0 in the counts array.
+        save_dictionary: The dictionary to populate with the serialized arrays.
+        dtype: The numpy dtype to use when converting arrays.
+    """
+    has_data = [a is not None and len(a) > 0 for a in arrays]
+    if not any(has_data):
+        return
+
+    counts = np.array(object=[len(a) if a is not None else 0 for a in arrays], dtype=np.uint32)
+    valid_arrays: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_]] = [
+        np.asarray(a=a, dtype=dtype) for a in arrays if a is not None and len(a) > 0
+    ]
+    if valid_arrays:
+        save_dictionary[f"{field_name}_counts"] = counts
+        save_dictionary[field_name] = np.concatenate(valid_arrays)  # type: ignore[assignment]
+
+
+def _load_optional_array_field(
+    field_name: str,
+    item_count: int,
+    data: NpzFile,
+    dtype: type,
+) -> list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | None]:
+    """Loads an optional variable-length array field from a numpy NpzFile.
+
+    Notes:
+        This function reverses the serialization pattern used by _save_optional_array_field. It reads the counts array
+        and concatenated data array, then splits the data back into per-item arrays based on the stored counts.
+
+    Args:
+        field_name: The base name for the field. The function reads '{field_name}_counts' and '{field_name}' keys.
+        item_count: The total number of items expected (determines the length of the returned list).
+        data: The NpzFile containing the serialized arrays.
+        dtype: The numpy dtype to cast the loaded arrays to.
+
+    Returns:
+        A list of arrays with length equal to item_count. Items that had no data (count of 0) are returned as None.
+    """
+    result: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | None] = [None] * item_count
+    counts_key = f"{field_name}_counts"
+    if counts_key not in data:
+        return result
+
+    counts = data[counts_key]
+    array_data = data[field_name]
+    index = 0
+    for i, count in enumerate(counts):
+        if count > 0:
+            result[i] = array_data[index : index + count].astype(dtype=dtype)
+            index += count
+    return result
 
 
 class BaselineMethod(StrEnum):
@@ -909,11 +979,14 @@ class ROIStatistics:
 
     This dataclass represents the complete set of properties computed for each detected cell ROI during the detection,
     extraction, and optional multi-day processing stages. The fields are organized into required core properties
-    (always present after detection), optional extraction properties (added during signal extraction), and optional
-    multi-plane/multi-day properties (added during combined view generation or cross-session tracking).
+    (always present after detection), shape statistics (computed during ROI detection, with defaults for staged
+    construction), optional extraction properties (added during signal extraction), multi-plane/multi-day properties,
+    and GUI visualization properties.
 
     Notes:
-        This dataclass replaces the legacy dictionary-based stat.npy format.
+        This dataclass replaces the legacy dictionary-based stat.npy format. Shape statistics fields have default
+        values to support staged construction where ROIStatistics is first created during detection with only core
+        fields, then updated with computed shape statistics.
     """
 
     # Core pixel data (required, from detection).
@@ -926,47 +999,47 @@ class ROIStatistics:
     pixel_weights: NDArray[np.float32]
     """The spatial filter weights (lambda values) for each pixel, indicating contribution to the ROI signal."""
 
-    centroid: list[float]
-    """The median [y, x] position of the ROI, representing its approximate center."""
+    centroid: list[int]
+    """The median [y, x] pixel position of the ROI, representing its approximate center."""
 
-    footprint: int
+    footprint: int = 0
     """The spatial scale (hop size) used during sparse detection for this ROI."""
 
-    # Shape statistics (required, from roi_stats computation).
-    mean_r_squared: float
-    """The normalized mean R-squared value measuring ROI compactness."""
+    # Shape statistics (computed during ROI detection, with defaults for staged construction).
+    mean_radius: float = 0.0
+    """The mean Euclidean distance from ROI pixels to their median center."""
 
-    mean_r_squared_baseline: float
-    """The unnormalized mean R-squared baseline value."""
+    baseline_mean_radius: float = 0.0
+    """The expected mean radius for a uniformly distributed set of pixels of the same count as the ROI."""
 
-    compactness: float
-    """The normalized compactness ratio (mean_r_squared / mean_r_squared_baseline)."""
+    compactness: float = 0.0
+    """The ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
 
-    solidity: float
+    solidity: float = 0.0
     """The ratio of soma pixels to convex hull area, measuring how solid/filled the ROI is."""
 
-    pixel_count: int
+    pixel_count: int = 0
     """The total number of pixels in the complete ROI."""
 
-    soma_pixel_count: int
+    soma_pixel_count: int = 0
     """The number of pixels in the soma-cropped region of the ROI."""
 
-    soma_mask: NDArray[np.bool_]
+    soma_mask: NDArray[np.bool_] | None = None
     """The boolean mask indicating which pixels belong to the soma region."""
 
-    overlap_mask: NDArray[np.bool_]
+    overlap_mask: NDArray[np.bool_] | None = None
     """The boolean mask indicating which pixels overlap with other ROIs."""
 
-    radius: float
+    radius: float = 0.0
     """The fitted ellipse radius representing the approximate ROI size."""
 
-    aspect_ratio: float
+    aspect_ratio: float = 0.0
     """The ratio of ellipse axes, indicating ROI elongation."""
 
-    normalized_pixel_count: float
+    normalized_pixel_count: float = 0.0
     """The pixel count normalized by expected cell size (soma region only)."""
 
-    normalized_pixel_count_full: float
+    normalized_pixel_count_full: float = 0.0
     """The pixel count normalized by expected cell size (full ROI)."""
 
     # Optional extraction data (added during signal extraction).
@@ -993,6 +1066,28 @@ class ROIStatistics:
     session_count: int = 0
     """The number of sessions in which this cell was detected during multi-day tracking."""
 
+    # GUI visualization data (computed on demand by the GUI, persisted for session continuity).
+    boundary_y_pixels: NDArray[np.float32] | None = None
+    """The y-coordinates of the ROI boundary pixels used for drawing the ROI outline in the GUI."""
+
+    boundary_x_pixels: NDArray[np.float32] | None = None
+    """The x-coordinates of the ROI boundary pixels used for drawing the ROI outline in the GUI."""
+
+    circle_y_pixels: NDArray[np.float32] | None = None
+    """The y-coordinates of the circle drawn around the ROI centroid in the GUI."""
+
+    circle_x_pixels: NDArray[np.float32] | None = None
+    """The x-coordinates of the circle drawn around the ROI centroid in the GUI."""
+
+    merged_roi_indices: list[int] | None = None
+    """The list of original ROI indices that were merged to create this ROI. None indicates this is not a merged ROI."""
+
+    merged_into_roi_index: int | None = None
+    """The index of the merged ROI that this ROI was merged into. None indicates this ROI has not been merged."""
+
+    colocalization_probability: float | None = None
+    """The probability that this ROI is colocalized across imaging channels. None if not computed."""
+
     @staticmethod
     def save_list(roi_list: list[ROIStatistics], file_path: Path) -> None:
         """Saves a list of ROIStatistics instances to a compressed .npz file without pickle.
@@ -1013,15 +1108,13 @@ class ROIStatistics:
         all_y_pixels = np.concatenate([roi.y_pixels for roi in roi_list])
         all_x_pixels = np.concatenate([roi.x_pixels for roi in roi_list])
         all_pixel_weights = np.concatenate([roi.pixel_weights for roi in roi_list])
-        all_soma_mask = np.concatenate([roi.soma_mask for roi in roi_list])
-        all_overlap_mask = np.concatenate([roi.overlap_mask for roi in roi_list])
 
-        # Stores scalar fields as 1D arrays using appropriate types: uint16 for small non-negative integers,
-        # uint32 for larger counts, and float32 for real-valued measurements.
-        centroids = np.array([roi.centroid for roi in roi_list], dtype=np.float32)
+        # Stores scalar fields as 1D arrays using appropriate types: uint32 for pixel coordinates and larger counts,
+        # uint16 for small non-negative integers, and float32 for real-valued measurements.
+        centroids = np.array([roi.centroid for roi in roi_list], dtype=np.uint32)
         footprints = np.array([roi.footprint for roi in roi_list], dtype=np.uint16)
-        mean_r_squared = np.array([roi.mean_r_squared for roi in roi_list], dtype=np.float32)
-        mean_r_squared_baseline = np.array([roi.mean_r_squared_baseline for roi in roi_list], dtype=np.float32)
+        mean_radius = np.array([roi.mean_radius for roi in roi_list], dtype=np.float32)
+        baseline_mean_radius = np.array([roi.baseline_mean_radius for roi in roi_list], dtype=np.float32)
         compactness = np.array([roi.compactness for roi in roi_list], dtype=np.float32)
         solidity = np.array([roi.solidity for roi in roi_list], dtype=np.float32)
         pixel_count = np.array([roi.pixel_count for roi in roi_list], dtype=np.uint32)
@@ -1046,18 +1139,31 @@ class ROIStatistics:
         cluster_id = np.array([roi.cluster_id for roi in roi_list], dtype=np.uint32)
         session_count = np.array([roi.session_count for roi in roi_list], dtype=np.uint16)
 
-        # Builds the save dictionary with required fields.
-        save_dict = {
+        # Stores optional scalar float fields using NaN for missing values.
+        colocalization_probability = np.array(
+            [
+                roi.colocalization_probability if roi.colocalization_probability is not None else np.nan
+                for roi in roi_list
+            ],
+            dtype=np.float32,
+        )
+
+        # Stores optional integer fields using -1 for missing values (since valid indices are non-negative).
+        merged_into_roi_index = np.array(
+            [roi.merged_into_roi_index if roi.merged_into_roi_index is not None else -1 for roi in roi_list],
+            dtype=np.int32,
+        )
+
+        # Builds the save dictionary with core and scalar fields.
+        save_dict: dict[str, np.ndarray] = {
             "pixel_counts": pixel_counts,
             "y_pixels": all_y_pixels,
             "x_pixels": all_x_pixels,
             "pixel_weights": all_pixel_weights,
-            "soma_mask": all_soma_mask,
-            "overlap_mask": all_overlap_mask,
             "centroids": centroids,
             "footprints": footprints,
-            "mean_r_squared": mean_r_squared,
-            "mean_r_squared_baseline": mean_r_squared_baseline,
+            "mean_radius": mean_radius,
+            "baseline_mean_radius": baseline_mean_radius,
             "compactness": compactness,
             "solidity": solidity,
             "pixel_count": pixel_count,
@@ -1071,31 +1177,32 @@ class ROIStatistics:
             "plane_index": plane_index,
             "cluster_id": cluster_id,
             "session_count": session_count,
+            "colocalization_probability": colocalization_probability,
+            "merged_into_roi_index": merged_into_roi_index,
         }
 
-        # Handles optional variable-length neuropil_mask arrays. Uses uint32 for counts since they are always
-        # non-negative and can be large.
-        has_neuropil = [roi.neuropil_mask is not None for roi in roi_list]
-        if any(has_neuropil):
-            neuropil_counts = np.array(
-                [len(roi.neuropil_mask) if roi.neuropil_mask is not None else 0 for roi in roi_list], dtype=np.uint32
-            )
-            neuropil_masks = [roi.neuropil_mask for roi in roi_list if roi.neuropil_mask is not None]
-            if neuropil_masks:
-                save_dict["neuropil_counts"] = neuropil_counts
-                save_dict["neuropil_mask"] = np.concatenate(neuropil_masks)
-
-        # Handles optional variable-length raveled_pixels arrays. Uses uint32 for counts since they are always
-        # non-negative and can be large.
-        has_raveled = [roi.raveled_pixels is not None for roi in roi_list]
-        if any(has_raveled):
-            raveled_counts = np.array(
-                [len(roi.raveled_pixels) if roi.raveled_pixels is not None else 0 for roi in roi_list], dtype=np.uint32
-            )
-            raveled_arrays = [roi.raveled_pixels for roi in roi_list if roi.raveled_pixels is not None]
-            if raveled_arrays:
-                save_dict["raveled_counts"] = raveled_counts
-                save_dict["raveled_pixels"] = np.concatenate(raveled_arrays)
+        # Saves optional variable-length array fields.
+        _save_optional_array_field("soma_mask", [roi.soma_mask for roi in roi_list], save_dict, dtype=np.bool_)
+        _save_optional_array_field("overlap_mask", [roi.overlap_mask for roi in roi_list], save_dict, dtype=np.bool_)
+        _save_optional_array_field("neuropil_mask", [roi.neuropil_mask for roi in roi_list], save_dict, dtype=np.bool_)
+        _save_optional_array_field(
+            "raveled_pixels", [roi.raveled_pixels for roi in roi_list], save_dict, dtype=np.int32
+        )
+        _save_optional_array_field(
+            "boundary_y_pixels", [roi.boundary_y_pixels for roi in roi_list], save_dict, dtype=np.float32
+        )
+        _save_optional_array_field(
+            "boundary_x_pixels", [roi.boundary_x_pixels for roi in roi_list], save_dict, dtype=np.float32
+        )
+        _save_optional_array_field(
+            "circle_y_pixels", [roi.circle_y_pixels for roi in roi_list], save_dict, dtype=np.float32
+        )
+        _save_optional_array_field(
+            "circle_x_pixels", [roi.circle_x_pixels for roi in roi_list], save_dict, dtype=np.float32
+        )
+        _save_optional_array_field(
+            "merged_roi_indices", [roi.merged_roi_indices for roi in roi_list], save_dict, dtype=np.int32
+        )
 
         np.savez(file_path, allow_pickle=False, **save_dict)
 
@@ -1117,18 +1224,16 @@ class ROIStatistics:
         # Computes split indices for variable-length arrays.
         pixel_splits = np.cumsum(pixel_counts)[:-1]
 
-        # Splits concatenated arrays back into per-ROI arrays.
+        # Splits concatenated core pixel arrays back into per-ROI arrays.
         y_pixels_list = np.split(data["y_pixels"], pixel_splits)
         x_pixels_list = np.split(data["x_pixels"], pixel_splits)
         pixel_weights_list = np.split(data["pixel_weights"], pixel_splits)
-        soma_mask_list = np.split(data["soma_mask"], pixel_splits)
-        overlap_mask_list = np.split(data["overlap_mask"], pixel_splits)
 
         # Extracts scalar arrays.
         centroids = data["centroids"]
         footprints = data["footprints"]
-        mean_r_squared = data["mean_r_squared"]
-        mean_r_squared_baseline = data["mean_r_squared_baseline"]
+        mean_radius = data["mean_radius"]
+        baseline_mean_radius = data["baseline_mean_radius"]
         compactness = data["compactness"]
         solidity = data["solidity"]
         pixel_count = data["pixel_count"]
@@ -1142,57 +1247,61 @@ class ROIStatistics:
         plane_index = data["plane_index"]
         cluster_id = data["cluster_id"]
         session_count = data["session_count"]
+        colocalization_probability = data["colocalization_probability"]
+        merged_into_roi_index = data["merged_into_roi_index"]
 
-        # Handles optional neuropil_mask arrays.
-        neuropil_mask_list: list[NDArray[np.bool_] | None] = [None] * n_rois
-        if "neuropil_counts" in data:
-            neuropil_counts = data["neuropil_counts"]
-            neuropil_data = data["neuropil_mask"]
-            neuropil_idx = 0
-            for i, count in enumerate(neuropil_counts):
-                if count > 0:
-                    neuropil_mask_list[i] = neuropil_data[neuropil_idx : neuropil_idx + count]
-                    neuropil_idx += count
-
-        # Handles optional raveled_pixels arrays.
-        raveled_pixels_list: list[NDArray[np.int32] | None] = [None] * n_rois
-        if "raveled_counts" in data:
-            raveled_counts = data["raveled_counts"]
-            raveled_data = data["raveled_pixels"]
-            raveled_idx = 0
-            for i, count in enumerate(raveled_counts):
-                if count > 0:
-                    raveled_pixels_list[i] = raveled_data[raveled_idx : raveled_idx + count]
-                    raveled_idx += count
+        # Loads optional variable-length array fields.
+        soma_mask_list = _load_optional_array_field("soma_mask", n_rois, data, dtype=np.bool_)
+        overlap_mask_list = _load_optional_array_field("overlap_mask", n_rois, data, dtype=np.bool_)
+        neuropil_mask_list = _load_optional_array_field("neuropil_mask", n_rois, data, dtype=np.bool_)
+        raveled_pixels_list = _load_optional_array_field("raveled_pixels", n_rois, data, dtype=np.int32)
+        boundary_y_pixels_list = _load_optional_array_field("boundary_y_pixels", n_rois, data, dtype=np.float32)
+        boundary_x_pixels_list = _load_optional_array_field("boundary_x_pixels", n_rois, data, dtype=np.float32)
+        circle_y_pixels_list = _load_optional_array_field("circle_y_pixels", n_rois, data, dtype=np.float32)
+        circle_x_pixels_list = _load_optional_array_field("circle_x_pixels", n_rois, data, dtype=np.float32)
+        merged_roi_indices_list = _load_optional_array_field("merged_roi_indices", n_rois, data, dtype=np.int32)
 
         # Reconstructs ROIStatistics instances.
         roi_list = []
         for i in range(n_rois):
+            # Converts merged_roi_indices array back to list[int] if present.
+            merged_indices = merged_roi_indices_list[i]
+            merged_indices_as_list = list(merged_indices.astype(int)) if merged_indices is not None else None
+
             roi = ROIStatistics(
                 y_pixels=y_pixels_list[i].astype(np.uint32),
                 x_pixels=x_pixels_list[i].astype(np.uint32),
                 pixel_weights=pixel_weights_list[i].astype(np.float32),
-                centroid=[float(centroids[i, 0]), float(centroids[i, 1])],
+                centroid=[int(centroids[i, 0]), int(centroids[i, 1])],
                 footprint=int(footprints[i]),
-                mean_r_squared=float(mean_r_squared[i]),
-                mean_r_squared_baseline=float(mean_r_squared_baseline[i]),
+                mean_radius=float(mean_radius[i]),
+                baseline_mean_radius=float(baseline_mean_radius[i]),
                 compactness=float(compactness[i]),
                 solidity=float(solidity[i]),
                 pixel_count=int(pixel_count[i]),
                 soma_pixel_count=int(soma_pixel_count[i]),
-                soma_mask=soma_mask_list[i].astype(np.bool_),
-                overlap_mask=overlap_mask_list[i].astype(np.bool_),
+                soma_mask=soma_mask_list[i],  # type: ignore[arg-type]
+                overlap_mask=overlap_mask_list[i],  # type: ignore[arg-type]
                 radius=float(radius[i]),
                 aspect_ratio=float(aspect_ratio[i]),
                 normalized_pixel_count=float(normalized_pixel_count[i]),
                 normalized_pixel_count_full=float(normalized_pixel_count_full[i]),
                 skewness=None if np.isnan(skewness[i]) else float(skewness[i]),
                 standard_deviation=None if np.isnan(standard_deviation[i]) else float(standard_deviation[i]),
-                neuropil_mask=neuropil_mask_list[i],
+                neuropil_mask=neuropil_mask_list[i],  # type: ignore[arg-type]
                 plane_index=int(plane_index[i]),
                 cluster_id=int(cluster_id[i]),
-                raveled_pixels=raveled_pixels_list[i],
+                raveled_pixels=raveled_pixels_list[i],  # type: ignore[arg-type]
                 session_count=int(session_count[i]),
+                boundary_y_pixels=boundary_y_pixels_list[i],  # type: ignore[arg-type]
+                boundary_x_pixels=boundary_x_pixels_list[i],  # type: ignore[arg-type]
+                circle_y_pixels=circle_y_pixels_list[i],  # type: ignore[arg-type]
+                circle_x_pixels=circle_x_pixels_list[i],  # type: ignore[arg-type]
+                merged_roi_indices=merged_indices_as_list,
+                merged_into_roi_index=None if merged_into_roi_index[i] < 0 else int(merged_into_roi_index[i]),
+                colocalization_probability=(
+                    None if np.isnan(colocalization_probability[i]) else float(colocalization_probability[i])
+                ),
             )
             roi_list.append(roi)
 

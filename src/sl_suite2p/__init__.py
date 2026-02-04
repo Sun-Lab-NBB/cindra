@@ -31,7 +31,6 @@ from .pipeline import (
     process_multi_day,
     process_single_day,
 )
-from .detection import ROI
 from .multi_day import (
     run_s2p_multiday,
     resolve_multiday_ops,
@@ -48,7 +47,6 @@ if not console.enabled:
     console.enable()
 
 __all__ = [
-    "ROI",
     "CombinedData",
     "MultiDayConfiguration",
     "MultiDayJobNames",

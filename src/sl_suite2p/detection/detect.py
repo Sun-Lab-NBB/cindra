@@ -8,10 +8,10 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
 from . import chan2detect, sparsedetect
-from .stats import roi_stats
 from .denoise import pca_denoise
 from ..io.binary import BinaryFile
 from ..configuration import generate_default_ops
+from .roi_statistics import compute_roi_statistics
 from ..classification import classify, resolve_classifier_path
 
 
@@ -158,13 +158,13 @@ def detection_wrapper(
             message = f"Applying classifier {Path(classfile).name} to plane {plane_number}..."
             console.echo(message=message, level=LogLevel.INFO)
 
-            stat = roi_stats(
+            compute_roi_statistics(
                 stat,
                 Ly,
                 Lx,
                 aspect=ops.get("aspect_ratio", None),
                 diameter=ops.get("cell_diameter", None),
-                do_crop=ops.get("crop_to_soma", 1),
+                crop=ops.get("crop_to_soma", 1),
             )
             if len(stat) == 0:
                 iscell = np.zeros((0, 2))
@@ -179,14 +179,14 @@ def detection_wrapper(
             )
             console.echo(message=message, level=LogLevel.SUCCESS)
 
-        stat = roi_stats(
+        compute_roi_statistics(
             stat,
             Ly,
             Lx,
             aspect=ops.get("aspect_ratio", None),
             diameter=ops.get("cell_diameter", None),
-            max_overlap=ops["maximum_overlap"],
-            do_crop=ops.get("crop_to_soma", 1),
+            maximum_overlap_fraction=ops["maximum_overlap"],
+            crop=ops.get("crop_to_soma", 1),
         )
         message = f"Plane {plane_number} overlapping ROI filtering: complete. Kept {len(stat)} ROIs."
         console.echo(message=message, level=LogLevel.SUCCESS)
