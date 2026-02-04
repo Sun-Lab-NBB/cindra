@@ -73,36 +73,6 @@ class ROI:
             do_crop=do_crop,
         )
 
-    def to_array(self, Ly: int, Lx: int) -> np.ndarray:
-        """Returns a 2D boolean array of shape (Ly x Lx) indicating where the roi is located."""
-        arr = np.zeros((Ly, Lx), dtype=float)
-        arr[self.y_pixels, self.x_pixels] = 1
-        return arr
-
-    @classmethod
-    def stats_dicts_to_3d_array(cls, stats: Sequence[dict[str, Any]], Ly: int, Lx: int, label_id: bool = False):
-        """Outputs a (roi x Ly x Lx) float array from a sequence of stat dicts.
-        Convenience function that repeatedly calls ROI.from_stat_dict() and ROI.to_array() for all rois.
-
-        Parameters
-        ----------
-        stats : List of dictionary "y_pixels", "x_pixels", "pixel_weights"
-        Ly : y size of frame
-        Lx : x size of frame
-        label_id : whether array should be an integer value indicating ROI id or just 1 (indicating precence of ROI).
-        """
-        arrays = []
-        for i, stat in enumerate(stats):
-            array = cls.from_stat_dict(stat=stat).to_array(Ly=Ly, Lx=Lx)
-            if label_id:
-                array *= i + 1
-            arrays.append(array)
-        return np.stack(arrays)
-
-    def ravel_indices(self, Ly: int, Lx: int) -> np.ndarray:
-        """Returns a 1-dimensional array of indices from the y_pixels and x_pixels coordinates, assuming an image shape Ly x Lx."""
-        return np.ravel_multi_index((self.y_pixels, self.x_pixels), (Ly, Lx))
-
     @classmethod
     def get_overlap_count_image(cls, rois: Sequence[ROI], Ly: int, Lx: int) -> np.ndarray:
         return count_overlaps(
@@ -168,12 +138,6 @@ class ROI:
             volume = 10
         return self.soma_pixel_count / volume
 
-    @classmethod
-    def get_mean_r_squared_normed_all(cls, rois: Sequence[ROI], first_n: int = 100) -> np.ndarray:
-        return norm_by_average(
-            [roi.mean_r_squared for roi in rois], estimator=np.nanmedian, offset=1e-10, first_n=first_n
-        )
-
     @property
     def soma_pixel_count(self) -> int:
         return self.soma_mask.sum()
@@ -181,10 +145,6 @@ class ROI:
     @property
     def pixel_count(self) -> int:
         return self.x_pixels.size
-
-    @classmethod
-    def get_pixel_count_normed_all(cls, rois: Sequence[ROI], first_n: int = 100) -> np.ndarray:
-        return norm_by_average([roi.pixel_count for roi in rois], first_n=first_n)
 
     def fit_ellipse(self, dy: float, dx: float) -> EllipseData:
         return fitMVGaus(

@@ -1,43 +1,73 @@
-"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+"""Provides PCA-based denoising for movie data during ROI detection."""
 
-import time
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from sklearn.decomposition import PCA
 from ataraxis_base_utilities import LogLevel, console
 
 from ..registration import compute_spatial_taper_mask, compute_registration_blocks
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
-def pca_denoise(mov: np.ndarray, block_size: list, n_comps_frac: float):
-    t0 = time.time()
-    nframes, Ly, Lx = mov.shape
-    yblock, xblock, _, block_size, _ = compute_registration_blocks(height=Ly, width=Lx, block_size=tuple(block_size))
 
-    mov_mean = mov.mean(axis=0)
-    mov -= mov_mean
+def pca_denoise(
+    frames: NDArray[np.float32],
+    block_size: tuple[int, int],
+    component_fraction: float,
+) -> None:
+    """Applies PCA-based denoising to movie frames in-place using overlapping spatial blocks.
 
-    nblocks = len(yblock)
-    Lyb, Lxb = block_size
-    n_comps = int(min(min(Lyb * Lxb, nframes), min(Lyb, Lxb) * n_comps_frac))
-    maskMul = compute_spatial_taper_mask(sigma=Lyb // 4, height=Lyb, width=Lxb)
-    norm = np.zeros((Ly, Lx), np.float32)
-    reconstruction = np.zeros_like(mov)
-    block_re = np.zeros((nblocks, nframes, Lyb * Lxb))
-    for i in range(nblocks):
-        block = mov[:, yblock[i][0] : yblock[i][-1], xblock[i][0] : xblock[i][-1]].reshape(-1, Lyb * Lxb)
-        model = PCA(n_components=n_comps, random_state=0).fit(block)
-        block_re[i] = (block @ model.components_.T) @ model.components_
-        norm[yblock[i][0] : yblock[i][-1], xblock[i][0] : xblock[i][-1]] += maskMul
+    Notes:
+        The movie is divided into overlapping blocks, and PCA is applied to each block independently. The denoised
+        blocks are then blended together using a taper mask to ensure smooth transitions between adjacent blocks.
+        This approach reduces noise while preserving spatially localized signals.
 
-    block_re = block_re.reshape(nblocks, nframes, Lyb, Lxb)
-    block_re *= maskMul
-    for i in range(nblocks):
-        reconstruction[:, yblock[i][0] : yblock[i][-1], xblock[i][0] : xblock[i][-1]] += block_re[i]
-    reconstruction /= norm
-    console.echo(
-        message=f"PCA denoising of binned movie (for cell detection): complete. Time taken: {time.time() - t0:.2f} seconds.",
-        level=LogLevel.SUCCESS,
+    Args:
+        frames: The input movie array with shape (num_frames, height, width). Modified in-place.
+        block_size: The spatial dimensions (height, width) of each processing block.
+        component_fraction: The fraction of PCA components to retain, relative to the smaller block dimension.
+    """
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+
+    num_frames, height, width = frames.shape
+    y_blocks, x_blocks, _, (block_height, block_width), _ = compute_registration_blocks(
+        height=height, width=width, block_size=block_size
     )
-    reconstruction += mov_mean
-    return reconstruction
+
+    frame_mean = frames.mean(axis=0)
+    max_components = int(min(block_height, block_width) * component_fraction)
+    num_components = min(block_height * block_width, num_frames, max_components)
+    taper_mask = compute_spatial_taper_mask(sigma=block_height // 4, height=block_height, width=block_width)
+
+    normalization = np.zeros((height, width), dtype=np.float32)
+    reconstruction = np.zeros_like(frames)
+
+    # Applies PCA denoising to each block and accumulates the tapered result.
+    for block_index in range(len(y_blocks)):
+        y_slice = slice(y_blocks[block_index][0], y_blocks[block_index][-1])
+        x_slice = slice(x_blocks[block_index][0], x_blocks[block_index][-1])
+
+        # Extracts and centers the block for PCA.
+        block = frames[:, y_slice, x_slice].reshape(num_frames, -1) - frame_mean[y_slice, x_slice].ravel()
+        model = PCA(n_components=num_components, random_state=0).fit(block)
+
+        # Reconstructs, reshapes, tapers, and accumulates in a single step.
+        # noinspection PyUnresolvedReferences
+        block_recon = ((block @ model.components_.T) @ model.components_).reshape(num_frames, block_height, block_width)
+        reconstruction[:, y_slice, x_slice] += block_recon * taper_mask
+        normalization[y_slice, x_slice] += taper_mask
+
+    # Normalizes and restores the mean.
+    reconstruction /= normalization
+    reconstruction += frame_mean
+
+    # Copies result to input array for in-place semantics.
+    frames[:] = reconstruction
+
+    message = f"PCA denoising of binned movie: complete. Time taken: {timer.elapsed} seconds."
+    console.echo(message=message, level=LogLevel.SUCCESS)
