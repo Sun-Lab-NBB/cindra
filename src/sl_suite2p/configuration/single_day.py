@@ -280,12 +280,11 @@ class Main:
     the pipeline performs independent ROI detection on both channels."""
 
     colocalization_threshold: float = 0.65
-    """The threshold for determining whether an ROI detected in one channel is also present in the other channel.
-    The algorithm computes the ratio of mean brightness inside the ROI to the combined brightness of the ROI and
-    surrounding neuropil. ROIs with a ratio exceeding this threshold are marked as colocalized. When only one channel
-    is functional, the analysis checks if its ROIs are present in the other channel. When both channels are functional,
-    the analysis checks if first channel ROIs are present in the second channel. The output is a boolean .npy mask
-    file with one entry per ROI in the reference channel."""
+    """The threshold for determining whether ROIs from one channel correspond to ROIs or signals in the other channel.
+    When one channel is functional and the other is structural, this threshold applies to intensity-based
+    colocalization: ROIs are marked as colocalized if their inside-to-total intensity ratio in the structural channel
+    exceeds this value. When both channels are functional, this threshold applies to spatial colocalization: ROIs are
+    matched if their pixel overlap fraction exceeds this value."""
 
     tau: float = 0.4
     """The timescale of the sensor in seconds, used for computing the deconvolution kernel. The kernel is fixed to have
@@ -1362,6 +1361,12 @@ class ExtractionData:
     """The colocalization results indicating whether channel 1 ROIs are present in channel 2. Shape is (cells, 2)
     containing (probability, is_colocalized_boolean)."""
 
+    corrected_structural_mean_image: NDArray[np.float32] | None = None
+    """The bleed-through-corrected mean image for the structural channel, computed during intensity-based
+    colocalization. The structural channel is whichever channel is not functional (channel 1 if only channel 2 is
+    functional, or channel 2 if only channel 1 is functional). This field is not computed when both channels are
+    functional, as spatial colocalization is used instead."""
+
     def prepare_for_saving(self) -> None:
         """Sets all array and list fields to None for YAML serialization."""
         # Channel 1.
@@ -1382,6 +1387,7 @@ class ExtractionData:
 
         # Colocalization.
         self.cell_colocalization = None
+        self.corrected_structural_mean_image = None
 
     def save_arrays(self, output_path: Path) -> None:
         """Saves all extraction arrays to .npy files and ROI statistics to .npz files.
@@ -1435,9 +1441,15 @@ class ExtractionData:
                 allow_pickle=False,
             )
 
-        # Colocalization array.
+        # Colocalization arrays.
         if self.cell_colocalization is not None:
             np.save(output_path / "cell_colocalization.npy", self.cell_colocalization, allow_pickle=False)
+        if self.corrected_structural_mean_image is not None:
+            np.save(
+                output_path / "corrected_structural_mean_image.npy",
+                self.corrected_structural_mean_image,
+                allow_pickle=False,
+            )
 
     def load_arrays(self, output_path: Path) -> None:
         """Loads extraction arrays from .npy files and ROI statistics from .npz files into this instance.
@@ -1505,10 +1517,16 @@ class ExtractionData:
                 np.float32
             )
 
-        # Colocalization array.
+        # Colocalization arrays.
         cell_colocalization_path = output_path / "cell_colocalization.npy"
         if self.cell_colocalization is None and cell_colocalization_path.exists():
             self.cell_colocalization = np.load(cell_colocalization_path, allow_pickle=False).astype(np.float32)
+
+        corrected_structural_mean_image_path = output_path / "corrected_structural_mean_image.npy"
+        if self.corrected_structural_mean_image is None and corrected_structural_mean_image_path.exists():
+            self.corrected_structural_mean_image = np.load(
+                corrected_structural_mean_image_path, allow_pickle=False
+            ).astype(np.float32)
 
 
 @dataclass
