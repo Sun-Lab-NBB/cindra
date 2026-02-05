@@ -7,12 +7,11 @@ import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
-from . import chan2detect, sparsedetect
+from . import sparsedetect
 from .denoise import pca_denoise
 from ..io.binary import BinaryFile
-from ..configuration import generate_default_ops
 from .roi_statistics import compute_roi_statistics
-from ..classification import classify, resolve_classifier_path
+from ..classification import classify
 
 
 def detect(ops, plane_number: int, classfile=None):
