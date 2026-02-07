@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import percentile_filter
 
-from ..detection.sparsedetect import extend_roi
+from ..detection.detect_rois import extend_roi
 
 
 def _create_roi_masks(
@@ -86,8 +86,8 @@ def _create_neuropil_masks(
     # Process each ROI to create its neuropil mask
     for roi_data in roi_statistics:
         # Extracts the y-coordinates and x-coordinates of the current ROI's pixels.
-        y_pixels = np.array(roi_data["y_pixels"], np.uint32)
-        x_pixels = np.array(roi_data["x_pixels"], np.uint32)
+        y_pixels = np.array(roi_data["y_pixels"], np.int32)
+        x_pixels = np.array(roi_data["x_pixels"], np.int32)
 
         # Pre-creates the boolean array to store the neuropil mask. Uses the dimensions of the imaging area to define
         # the array

@@ -1,4 +1,4 @@
-"""Provides frame registration functions for the single-day suite2p processing pipeline."""
+"""Provides frame registration (motion correction) functions for the single-day suite2p processing pipeline."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     # Type alias for the registration block structure returned by compute_registration_blocks. Contains y_blocks,
     # x_blocks, block_counts, actual_block_size, and smoothing_kernel.
     RegistrationBlocks = tuple[
-        list[NDArray[np.uint32]], list[NDArray[np.uint32]], tuple[int, int], tuple[int, int], NDArray[np.float32]
+        list[NDArray[np.int32]], list[NDArray[np.int32]], tuple[int, int], tuple[int, int], NDArray[np.float32]
     ]
 
 

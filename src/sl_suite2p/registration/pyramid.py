@@ -1,4 +1,4 @@
-"""This module provides the assets for computing and storing the multi-resolution scale-space image pyramids."""
+"""provides the assets for computing and storing the multi-resolution scale-space image pyramids."""
 
 from __future__ import annotations
 

@@ -350,17 +350,21 @@ def compute_spatial_colocalization(
     # Handles edge cases with empty ROI lists.
     if count_1 == 0:
         channel_1_to_2 = np.zeros((0, 2), dtype=np.float32)
-        channel_2_to_1 = np.column_stack((
-            np.full(count_2, fill_value=-1, dtype=np.float32),
-            np.zeros(count_2, dtype=np.float32),
-        ))
+        channel_2_to_1 = np.column_stack(
+            (
+                np.full(count_2, fill_value=-1, dtype=np.float32),
+                np.zeros(count_2, dtype=np.float32),
+            )
+        )
         return channel_1_to_2, channel_2_to_1
 
     if count_2 == 0:
-        channel_1_to_2 = np.column_stack((
-            np.full(count_1, fill_value=-1, dtype=np.float32),
-            np.zeros(count_1, dtype=np.float32),
-        ))
+        channel_1_to_2 = np.column_stack(
+            (
+                np.full(count_1, fill_value=-1, dtype=np.float32),
+                np.zeros(count_1, dtype=np.float32),
+            )
+        )
         channel_2_to_1 = np.zeros((0, 2), dtype=np.float32)
         return channel_1_to_2, channel_2_to_1
 

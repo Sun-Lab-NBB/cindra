@@ -1,4 +1,4 @@
-"""Provides bidirectional phase offset correction for line-scanned imaging data."""
+"""Provides bidirectional phase offset correction algorithm for line-scanned imaging data."""
 
 from typing import TYPE_CHECKING
 
