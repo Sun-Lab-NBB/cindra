@@ -12,7 +12,7 @@ from ataraxis_base_utilities import console
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ..configuration import ROIStatistics
+    from ..dataclasses import ROIStatistics
 
 
 def _compute_distance_kernel(radius: int) -> NDArray[np.float32]:

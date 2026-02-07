@@ -1,16 +1,21 @@
-"""This module provides the classes used to organize and temporarily store processed data during the first step
+"""Provides the classes used to organize and temporarily store processed data during the first step
 (registration) of the multi-session suite2p processing pipeline.
 """
 
-from typing import Any
-from pathlib import Path
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 from dataclasses import field, dataclass
 
-import numpy as np
-from numpy.typing import NDArray
+from ..multiday.utils import create_mask_image
 
-from .utils import create_mask_image
-from ..registration import Deformation
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import numpy as np
+    from numpy.typing import NDArray
+
+    from ..registration import Deformation
 
 
 @dataclass()
@@ -25,11 +30,11 @@ class Session:
 
     # noinspection PyTypeHints
     reference_images: dict[str, NDArray[np.uint32 | np.float32]]
-    """Stores the reference images generated during single-day processing. Valid image query keys are: 'mean', 
+    """Stores the reference images generated during single-day processing. Valid image query keys are: 'mean',
     'enhanced', and 'max'."""
 
     cell_masks: tuple[dict[str, Any], ...]
-    """For each cell ROI discovered during the single-day suite2p processing, stores a dictionary that contains cell 
+    """For each cell ROI discovered during the single-day suite2p processing, stores a dictionary that contains cell
     mask data."""
 
     image_size: tuple[int, int]
@@ -37,8 +42,8 @@ class Session:
 
     # noinspection PyTypeHints
     transformed_images: dict[str, NDArray[np.uint32 | np.float32]] = field(init=False)
-    """Same as 'reference_images', but stores the reference images after applying multi-day registration deform offsets 
-    to translate them to the (deformed) visual space shared by all processed sessions. This represents the session's 
+    """Same as 'reference_images', but stores the reference images after applying multi-day registration deform offsets
+    to translate them to the (deformed) visual space shared by all processed sessions. This represents the session's
     reference images in the registered (deformed) visual space."""
 
     deform: Deformation = field(init=False)
@@ -46,16 +51,16 @@ class Session:
     (registered) visual space. Uses backward mapping to transform coordinates from registered to original space."""
 
     deformed_cell_masks: tuple[dict[str, Any], ...] = field(init=False)
-    """Same as 'cell_masks', but stores cell ROI data after multi-day registration deform offsets have been applied 
-    to the spatial coordinates of each ROI. This represents all session cell masks in the registered (deformed) visual 
+    """Same as 'cell_masks', but stores cell ROI data after multi-day registration deform offsets have been applied
+    to the spatial coordinates of each ROI. This represents all session cell masks in the registered (deformed) visual
     space."""
 
     shared_cell_masks: tuple[dict[str, Any], ...] = field(init=False)
-    """Same as 'deformed_cell_masks' but stores cell ROI data for the 'template' (across-session tracked) cells in the 
+    """Same as 'deformed_cell_masks' but stores cell ROI data for the 'template' (across-session tracked) cells in the
     shared (deformed / registered) visual space."""
 
     template_cell_masks: tuple[dict[str, Any], ...] = field(init=False)
-    """Same as 'cell_masks', but stores cell ROI data for the 'template' (across-session tracked) cells mapped back to 
+    """Same as 'cell_masks', but stores cell ROI data for the 'template' (across-session tracked) cells mapped back to
     the original session's visual space."""
 
     @property
@@ -93,5 +98,5 @@ class MultiDayData:
     """Stores Session class instances for each session that needs to be registered across days."""
 
     template_cell_masks: tuple[dict[str, Any], ...] = field(init=False)
-    """For each cell ROI tracked over sessions as part of multi-day processing, stores a dictionary that contains cell 
+    """For each cell ROI tracked over sessions as part of multi-day processing, stores a dictionary that contains cell
     mask data."""

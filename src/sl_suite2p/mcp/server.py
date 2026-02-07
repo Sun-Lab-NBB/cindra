@@ -24,7 +24,7 @@ from ..pipeline import (
     process_multi_day,
     process_single_day,
 )
-from ..configuration import (
+from ..dataclasses import (
     MultiDayConfiguration,
     SingleDayConfiguration,
 )
