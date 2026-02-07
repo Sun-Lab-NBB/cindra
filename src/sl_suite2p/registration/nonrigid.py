@@ -253,8 +253,8 @@ def _upsample_block_shifts(
     width: int,
     height: int,
     block_counts: tuple[int, int],
-    x_blocks: list[NDArray[np.uint32]],
-    y_blocks: list[NDArray[np.uint32]],
+    x_blocks: list[NDArray[np.int32]],
+    y_blocks: list[NDArray[np.int32]],
     y_block_shifts: NDArray[np.float32],
     x_block_shifts: NDArray[np.float32],
 ) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
@@ -309,7 +309,7 @@ def compute_registration_blocks(
     height: int,
     width: int,
     block_size: tuple[int, int] = (128, 128),
-) -> tuple[list[NDArray[np.uint32]], list[NDArray[np.uint32]], tuple[int, int], tuple[int, int], NDArray[np.float32]]:
+) -> tuple[list[NDArray[np.int32]], list[NDArray[np.int32]], tuple[int, int], tuple[int, int], NDArray[np.float32]]:
     """Computes overlapping blocks for nonrigid registration.
 
     Divides the field of view into overlapping blocks that are registered independently. The blocks
@@ -344,17 +344,17 @@ def compute_registration_blocks(
     actual_block_size = (block_size_y, block_size_x)
 
     # Computes evenly-spaced block start positions spanning from 0 to the last valid position.
-    y_starts = np.linspace(0, height - block_size_y, y_block_count).astype(np.uint32)
-    x_starts = np.linspace(0, width - block_size_x, x_block_count).astype(np.uint32)
+    y_starts = np.linspace(0, height - block_size_y, y_block_count).astype(np.int32)
+    x_starts = np.linspace(0, width - block_size_x, x_block_count).astype(np.int32)
 
     # Creates block boundary arrays in row-major order (all x positions for each y position).
     y_blocks = [
-        np.array([y_starts[y_index], y_starts[y_index] + block_size_y], dtype=np.uint32)
+        np.array([y_starts[y_index], y_starts[y_index] + block_size_y], dtype=np.int32)
         for y_index in range(y_block_count)
         for _ in range(x_block_count)
     ]
     x_blocks = [
-        np.array([x_starts[x_index], x_starts[x_index] + block_size_x], dtype=np.uint32)
+        np.array([x_starts[x_index], x_starts[x_index] + block_size_x], dtype=np.int32)
         for _ in range(y_block_count)
         for x_index in range(x_block_count)
     ]
@@ -372,8 +372,8 @@ def compute_nonrigid_reference_data(
     reference_image: NDArray[np.float32],
     taper_slope: float,
     smoothing_sigma: float,
-    y_blocks: list[NDArray[np.uint32]],
-    x_blocks: list[NDArray[np.uint32]],
+    y_blocks: list[NDArray[np.int32]],
+    x_blocks: list[NDArray[np.int32]],
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.complex64]]:
     """Computes edge taper masks and FFT reference kernel for nonrigid phase correlation.
 
@@ -437,8 +437,8 @@ def compute_nonrigid_shifts(
     reference_kernel: NDArray[np.complex64],
     snr_threshold: float,
     smoothing_kernel: NDArray[np.float32],
-    x_blocks: list[NDArray[np.uint32]],
-    y_blocks: list[NDArray[np.uint32]],
+    x_blocks: list[NDArray[np.int32]],
+    y_blocks: list[NDArray[np.int32]],
     maximum_shift: float,
     workers: int,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
@@ -588,8 +588,8 @@ def compute_nonrigid_shifts(
 def apply_nonrigid_correction(
     frames: NDArray[np.float32],
     block_counts: tuple[int, int],
-    x_blocks: list[NDArray[np.uint32]],
-    y_blocks: list[NDArray[np.uint32]],
+    x_blocks: list[NDArray[np.int32]],
+    y_blocks: list[NDArray[np.int32]],
     y_block_shifts: NDArray[np.float32],
     x_block_shifts: NDArray[np.float32],
 ) -> NDArray[np.float32]:

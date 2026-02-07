@@ -989,10 +989,10 @@ class ROIStatistics:
     """
 
     # Core pixel data (required, from detection).
-    y_pixels: NDArray[np.uint32]
+    y_pixels: NDArray[np.int32]
     """The y-coordinates (row indices) of all pixels belonging to this ROI."""
 
-    x_pixels: NDArray[np.uint32]
+    x_pixels: NDArray[np.int32]
     """The x-coordinates (column indices) of all pixels belonging to this ROI."""
 
     pixel_weights: NDArray[np.float32]
@@ -1108,9 +1108,9 @@ class ROIStatistics:
         all_x_pixels = np.concatenate([roi.x_pixels for roi in roi_list])
         all_pixel_weights = np.concatenate([roi.pixel_weights for roi in roi_list])
 
-        # Stores scalar fields as 1D arrays using appropriate types: uint32 for pixel coordinates and larger counts,
-        # uint16 for small non-negative integers, and float32 for real-valued measurements.
-        centroids = np.array([roi.centroid for roi in roi_list], dtype=np.uint32)
+        # Stores scalar fields as 1D arrays using appropriate types: int32 for pixel coordinates, uint32 for larger
+        # counts, uint16 for small non-negative integers, and float32 for real-valued measurements.
+        centroids = np.array([roi.centroid for roi in roi_list], dtype=np.int32)
         footprints = np.array([roi.footprint for roi in roi_list], dtype=np.uint16)
         mean_radius = np.array([roi.mean_radius for roi in roi_list], dtype=np.float32)
         baseline_mean_radius = np.array([roi.baseline_mean_radius for roi in roi_list], dtype=np.float32)
@@ -1268,8 +1268,8 @@ class ROIStatistics:
             merged_indices_as_list = list(merged_indices.astype(int)) if merged_indices is not None else None
 
             roi = ROIStatistics(
-                y_pixels=y_pixels_list[i].astype(np.uint32),
-                x_pixels=x_pixels_list[i].astype(np.uint32),
+                y_pixels=y_pixels_list[i].astype(np.int32),
+                x_pixels=x_pixels_list[i].astype(np.int32),
                 pixel_weights=pixel_weights_list[i].astype(np.float32),
                 centroid=[int(centroids[i, 0]), int(centroids[i, 1])],
                 footprint=int(footprints[i]),

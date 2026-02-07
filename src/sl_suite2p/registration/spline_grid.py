@@ -1,4 +1,4 @@
-"""This module provides the assets for B-spline based deformation field representation."""
+"""Provides the assets for B-spline based deformation field representation used in diffeomorphic Demons registration."""
 
 from __future__ import annotations
 

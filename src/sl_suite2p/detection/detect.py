@@ -7,7 +7,7 @@ import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
-from . import sparsedetect
+from . import detect_rois
 from .denoise import pca_denoise
 from ..io.binary import BinaryFile
 from .roi_statistics import compute_roi_statistics
@@ -212,21 +212,22 @@ def select_rois(ops: dict[str, Any], mov: np.ndarray, plane_number: int):
         Array of ROI statistics dictionaries.
     """
     ops.update({"Lyc": mov.shape[1], "Lxc": mov.shape[2]})
-    new_ops, stat = sparsedetect.sparsery(
-        mov=mov,
-        high_pass=ops["high_pass"],
-        neuropil_high_pass=ops["spatial_hp_detect"],
+    max_proj, correlation_map, spatial_scale_pixels, stat = detect_rois.detect(
+        frames=mov,
+        temporal_highpass_window=ops["high_pass"],
+        spatial_highpass_window=ops["spatial_hp_detect"],
         spatial_scale=ops["spatial_scale"],
         threshold_scaling=ops["threshold_scaling"],
-        max_iterations=250 * ops["max_iterations"],
-        percentile=ops.get("active_percentile", 0.0),
-        plane_number=plane_number,
+        maximum_iterations=250 * ops["max_iterations"],
+        plane_index=plane_number,
     )
-    ops.update(new_ops)
+    ops["max_proj"] = max_proj
+    ops["Vcorr"] = correlation_map
+    ops["spatial_scale_pixels"] = spatial_scale_pixels
 
     # Sets the cell_diameter from the computed spatial_scale_pixels if not explicitly configured.
     if ops.get("cell_diameter", 0) == 0:
-        ops["cell_diameter"] = ops["spatial_scale_pixels"]
+        ops["cell_diameter"] = spatial_scale_pixels
 
     stat = np.array(stat)
 

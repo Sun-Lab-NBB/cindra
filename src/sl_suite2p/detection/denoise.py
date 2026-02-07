@@ -1,4 +1,4 @@
-"""Provides PCA-based denoising for movie data during ROI detection."""
+"""Provides PCA-based denoising algorithm applied to the recording frames before ROI detection."""
 
 from __future__ import annotations
 

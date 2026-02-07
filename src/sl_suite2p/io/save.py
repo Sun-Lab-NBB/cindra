@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from ..configuration import RuntimeContext
 
 
-def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray[np.uint32], NDArray[np.uint32]]:
+def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
     """Computes the pixel displacement for each plane to arrange them in a combined view.
 
     Handles three scenarios based on the recording type. For standard multi-plane recordings without MROI data, computes
@@ -43,10 +43,9 @@ def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray
     # Determines the number of planes.
     plane_number = len(plane_contexts)
 
-    # Initializes NumPy arrays to store the calculated displacement values for y-axis and x-axis. Uses uint32
-    # since displacements are pixel positions which are always non-negative.
-    y_displacement = np.zeros(plane_number, dtype=np.uint32)
-    x_displacement = np.zeros(plane_number, dtype=np.uint32)
+    # Initializes NumPy arrays to store the calculated displacement values for y-axis and x-axis.
+    y_displacement = np.zeros(plane_number, dtype=np.int32)
+    x_displacement = np.zeros(plane_number, dtype=np.int32)
 
     # Handles standard (non-MROI) recordings by computing a simple grid layout for all planes.
     if first_context.runtime.io.mroi_y_offset is None or first_context.runtime.io.mroi_x_offset is None:
@@ -64,8 +63,8 @@ def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray
     # Handles MROI (Multi-ROI) recordings where each ROI has a known spatial position in the original field of view.
     else:
         # Starts with the MROI offsets, which position each ROI correctly relative to each other.
-        x_displacement = np.array([ctx.runtime.io.mroi_x_offset for ctx in plane_contexts], dtype=np.uint32)
-        y_displacement = np.array([ctx.runtime.io.mroi_y_offset for ctx in plane_contexts], dtype=np.uint32)
+        x_displacement = np.array([ctx.runtime.io.mroi_x_offset for ctx in plane_contexts], dtype=np.int32)
+        y_displacement = np.array([ctx.runtime.io.mroi_y_offset for ctx in plane_contexts], dtype=np.int32)
 
         # Checks if multiple virtual planes share the same (x, y) position. This happens when MROI recordings have
         # multiple z-planes per ROI: all z-planes within one ROI share the same spatial position.
@@ -124,9 +123,9 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     # individual planes back into the original recording movie.
     y_offsets, x_offsets = compute_plane_offsets(plane_contexts)
 
-    # Queries the height and width for each plane. Uses uint32 since dimensions are always non-negative.
-    heights = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts], dtype=np.uint32)
-    widths = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts], dtype=np.uint32)
+    # Queries the height and width for each plane.
+    heights = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts], dtype=np.uint16)
+    widths = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts], dtype=np.uint16)
 
     # Calculates the overall height and width of the entire recording plane after accounting for plane displacement.
     combined_height = int(np.amax(y_offsets + heights))

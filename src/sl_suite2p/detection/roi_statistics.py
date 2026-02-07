@@ -1,4 +1,4 @@
-"""Provides assets for processing ROIs and computing ROI statistics for detected cells."""
+"""Provides assets for computing ROI statistics after the initial ROI detection."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ class _EllipseData:
         return 2 * major / (major + minor + 0.01)
 
 
-def compute_median_pixel_position(y_pixels: NDArray[np.uint32], x_pixels: NDArray[np.uint32]) -> tuple[int, int]:
+def compute_median_pixel_position(y_pixels: NDArray[np.int32], x_pixels: NDArray[np.int32]) -> tuple[int, int]:
     """Computes the ROI centroid as the x and y coordinates of the pixel closest to the coordinate-wise median.
 
     Args:
@@ -133,12 +133,12 @@ class _ROI:
         return self._data
 
     @property
-    def y_pixels(self) -> NDArray[np.uint32]:
+    def y_pixels(self) -> NDArray[np.int32]:
         """Returns the y-coordinates of the ROI pixels."""
         return self._data.y_pixels
 
     @property
-    def x_pixels(self) -> NDArray[np.uint32]:
+    def x_pixels(self) -> NDArray[np.int32]:
         """Returns the x-coordinates of the ROI pixels."""
         return self._data.x_pixels
 
