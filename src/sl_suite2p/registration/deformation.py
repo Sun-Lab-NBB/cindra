@@ -1,4 +1,4 @@
-"""This module provides the assets for computing and representing image deformations."""
+"""Provides the assets for computing and representing image deformations used in diffeomorphic registrations."""
 
 from __future__ import annotations
 

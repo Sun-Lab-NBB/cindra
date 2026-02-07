@@ -1,4 +1,4 @@
-"""This module provides the assets for diffeomorphic Demons image registration."""
+"""Provides the diffeomorphic Demons image registration algorithm."""
 
 from __future__ import annotations
 
@@ -232,7 +232,7 @@ class DiffeomorphicDemonsRegistration:
             )
             if pairwise_deformation is not None:
                 pair_count += 1
-                total_deformation = total_deformation + pairwise_deformation
+                total_deformation += pairwise_deformation
 
         # Averages the accumulated deformations.
         if pair_count > 1:
@@ -357,6 +357,7 @@ class DiffeomorphicDemonsRegistration:
             message = "Cannot retrieve image: pyramids have not been initialized. Call register() first."
             raise RuntimeError(message)
 
+        # noinspection PyUnresolvedReferences
         image = self._pyramids[image_index].get_scale(scale=scale)
 
         # Applies current accumulated deformation if one exists.

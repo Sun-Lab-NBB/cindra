@@ -15,7 +15,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from . import io
 from ..extraction import masks, oasis, preprocess, extract_traces_from_masks
-from ..detection.stats import roi_stats
+from ..detection.roi_statistics import compute_roi_statistics
 
 
 def masks_and_traces(ops, stat_manual, stat_orig):
@@ -32,7 +32,7 @@ def masks_and_traces(ops, stat_manual, stat_orig):
     for n in range(len(stat_orig)):
         stat_all.append(stat_orig[n])
 
-    stat_all = roi_stats(
+    compute_roi_statistics(
         stat_all,
         ops["frame_height"],
         ops["frame_width"],
@@ -42,7 +42,7 @@ def masks_and_traces(ops, stat_manual, stat_orig):
     cell_masks, manual_neuropil_masks = masks.create_masks(
         roi_statistics=stat_all, height=ops["frame_height"], width=ops["frame_width"], neuropil=True, ops=ops
     )
-    manual_roi_stats = stat_all[: len(stat_manual)]
+    manual_stat = stat_all[: len(stat_manual)]
     manual_cell_masks = cell_masks[: len(stat_manual)]
     console.echo(message=f"Manual ROI masks: created in {time.time() - t0:.2f} seconds.", level=LogLevel.SUCCESS)
 
@@ -50,15 +50,15 @@ def masks_and_traces(ops, stat_manual, stat_orig):
 
     # compute activity statistics for classifier
     npix = np.array([stat_orig[n]["pixel_count"] for n in range(len(stat_orig))]).astype("float32")
-    for n in range(len(manual_roi_stats)):
-        manual_roi_stats[n]["normalized_pixel_count"] = manual_roi_stats[n]["pixel_count"] / np.mean(
+    for n in range(len(manual_stat)):
+        manual_stat[n]["normalized_pixel_count"] = manual_stat[n]["pixel_count"] / np.mean(
             npix[:100]
         )  # What if there are less than 100 cells?
-        manual_roi_stats[n]["compactness"] = 1
-        manual_roi_stats[n]["footprint"] = 2
-        manual_roi_stats[n]["manual"] = 1  # Add manual key
+        manual_stat[n]["compactness"] = 1
+        manual_stat[n]["footprint"] = 2
+        manual_stat[n]["manual"] = 1  # Add manual key
         if "iplane" in stat_orig[0]:
-            manual_roi_stats[n]["plane_index"] = stat_orig[0]["plane_index"]
+            manual_stat[n]["plane_index"] = stat_orig[0]["plane_index"]
 
     # subtract neuropil and compute skew, std from F
     dF = F - ops["neuropil_coefficient"] * Fneu
@@ -66,11 +66,11 @@ def masks_and_traces(ops, stat_manual, stat_orig):
     sd = np.std(dF, axis=1)
 
     for n in range(F.shape[0]):
-        manual_roi_stats[n]["skewness"] = sk[n]
-        manual_roi_stats[n]["standard_deviation"] = sd[n]
-        manual_roi_stats[n]["centroid"] = [
-            np.mean(manual_roi_stats[n]["y_pixels"]),
-            np.mean(manual_roi_stats[n]["x_pixels"]),
+        manual_stat[n]["skewness"] = sk[n]
+        manual_stat[n]["standard_deviation"] = sd[n]
+        manual_stat[n]["centroid"] = [
+            np.mean(manual_stat[n]["y_pixels"]),
+            np.mean(manual_stat[n]["x_pixels"]),
         ]
 
     dF = preprocess(
@@ -82,7 +82,7 @@ def masks_and_traces(ops, stat_manual, stat_orig):
         cell_fluorescence=dF, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["sampling_rate"]
     )
 
-    return F, Fneu, F_chan2, Fneu_chan2, spks, ops, manual_roi_stats
+    return F, Fneu, F_chan2, Fneu_chan2, spks, ops, manual_stat
 
 
 class ViewButton(QPushButton):

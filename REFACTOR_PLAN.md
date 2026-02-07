@@ -131,8 +131,7 @@ contexts = convert_tiffs_to_binary(contexts, tiff_files)
 **Files:**
 
 - `src/sl_suite2p/detection/detect.py`
-- `src/sl_suite2p/detection/sparsedetect.py`
-- `src/sl_suite2p/detection/sourcery.py` (remove or deprecate)
+- `src/sl_suite2p/detection/detect_rois.py`
 - `src/sl_suite2p/extraction/extract.py`
 
 1. Remove sourcery detection code path (always use sparse)
