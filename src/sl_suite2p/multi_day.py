@@ -10,7 +10,6 @@ from natsort import natsorted
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
-from .version import version, python_version
 from .multiday import (
     import_sessions,
     register_sessions,
@@ -21,6 +20,7 @@ from .multiday import (
     extract_unique_components,
 )
 from .dataclasses import MultiDayConfiguration
+from .dataclasses.version import version, python_version
 
 # THe minimum number of sessions required for multi-day processing
 _MINIMUM_SESSION_COUNT = 2

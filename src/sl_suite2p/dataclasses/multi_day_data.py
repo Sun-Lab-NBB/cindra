@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from dataclasses import field, dataclass
 
+from .version import version, python_version
 from ..multiday.utils import create_mask_image
 
 if TYPE_CHECKING:
@@ -16,6 +17,46 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from ..registration import Deformation
+
+
+@dataclass
+class MultiDayTimingData:
+    """Stores pipeline timing and version information for the multi-day processing pipeline.
+
+    All time durations are stored as integers representing seconds. Each field corresponds to a discrete step in the
+    multi-day pipeline: discover_multiday_cells() handles import through backward_transform, while
+    extract_session_traces() handles extraction and deconvolution.
+    """
+
+    import_time: int = 0
+    """The session data import time in seconds."""
+
+    registration_time: int = 0
+    """The across-session diffeomorphic demons registration time in seconds."""
+
+    template_mask_time: int = 0
+    """The template mask generation (cross-session cell tracking) time in seconds."""
+
+    backward_transform_time: int = 0
+    """The backward mask transformation time in seconds."""
+
+    total_registration_time: int = 0
+    """The total discover_multiday_cells() step time in seconds."""
+
+    extraction_time: int = 0
+    """The fluorescence extraction time in seconds."""
+
+    deconvolution_time: int = 0
+    """The spike deconvolution time in seconds."""
+
+    date_processed: str = ""
+    """The timestamp when processing completed."""
+
+    python_version: str = python_version
+    """The Python interpreter version used for processing."""
+
+    sl_suite2p_version: str = version
+    """The sl-suite2p library version used for processing."""
 
 
 @dataclass()
@@ -100,3 +141,6 @@ class MultiDayData:
     template_cell_masks: tuple[dict[str, Any], ...] = field(init=False)
     """For each cell ROI tracked over sessions as part of multi-day processing, stores a dictionary that contains cell
     mask data."""
+
+    timing: MultiDayTimingData = field(default_factory=MultiDayTimingData)
+    """The pipeline timing and version information for the multi-day processing pipeline."""

@@ -11,7 +11,7 @@ import numpy as np
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
-from ..version import version, python_version
+from .version import version, python_version
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
