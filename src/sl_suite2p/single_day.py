@@ -13,7 +13,7 @@ from ataraxis_base_utilities import LogLevel, console
 from . import io, detection, extraction, classification
 from .io.binary import BinaryFile
 from .registration import register_plane
-from .configuration import (
+from .dataclasses import (
     RuntimeContext,
     SingleDayConfiguration,
 )

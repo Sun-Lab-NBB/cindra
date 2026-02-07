@@ -25,7 +25,7 @@ from qtpy.QtWidgets import (
 from ataraxis_base_utilities import LogLevel, console
 
 from . import io
-from ..configuration import generate_default_ops
+from ..dataclasses import generate_default_ops
 
 ### ---- this file contains helper functions for GUI and the RUN window ---- ###
 

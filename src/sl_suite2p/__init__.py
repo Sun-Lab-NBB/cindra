@@ -38,7 +38,7 @@ from .multi_day import (
     extract_multiday_fluorescence,
 )
 from .single_day import run_s2p, process_plane, combine_planes, resolve_processing_contexts
-from .configuration import CombinedData, RuntimeContext, MultiDayConfiguration, SingleDayConfiguration
+from .dataclasses import CombinedData, RuntimeContext, MultiDayConfiguration, SingleDayConfiguration
 
 # Ensures console output is enabled whenever the suite2p library is imported. In sl-suite2p, the 'Console' class is
 # used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal

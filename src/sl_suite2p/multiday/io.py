@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from ataraxis_base_utilities import LogLevel, console
 
-from .dataclasses import Session, MultiDayData
+from ..dataclasses import Session, MultiDayData
 
 
 def import_sessions(ops: dict[str, Any]) -> MultiDayData:

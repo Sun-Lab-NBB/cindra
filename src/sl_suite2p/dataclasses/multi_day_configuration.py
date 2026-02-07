@@ -8,7 +8,7 @@ from dataclasses import field, dataclass
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
-from .single_day import SignalExtraction, SpikeDeconvolution
+from .single_day_configuration import SignalExtraction, SpikeDeconvolution
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -27,7 +27,7 @@ class Main:
 
     display_progress_bars: bool = False
     """Determines whether to display progress bars for certain processing steps. Only enable this option when running
-    all processing steps sequentially. Having this enabled when running multiple sessions or planes in parallel may 
+    all processing steps sequentially. Having this enabled when running multiple sessions or planes in parallel may
     interfere with properly communicating progress via the terminal."""
 
 
@@ -38,12 +38,12 @@ class IO:
     session_directories: list[str] = field(default_factory=list)
     """Specifies the sessions to register across days as absolute paths to their root directories.
     Sessions are natural-sorted, and the first session after sorting becomes the 'main session' which stores
-    the processing tracker file. Each session directory is expected to contain the combined_metadata.npz file created 
+    the processing tracker file. Each session directory is expected to contain the combined_metadata.npz file created
     by the single-day processing pipeline."""
 
     dataset_name: str = ""
-    """Specifies the name of the multiday dataset. This name is used to create the output directory under each 
-    session's 'multiday' directory (e.g., session/multiday/{dataset_name}/) and to identify the dataset in the 
+    """Specifies the name of the multiday dataset. This name is used to create the output directory under each
+    session's 'multiday' directory (e.g., session/multiday/{dataset_name}/) and to identify the dataset in the
     tracker file."""
 
 
@@ -54,7 +54,7 @@ class CellSelection:
     """
 
     probability_threshold: float = 0.85
-    """The minimum required cell probability score assigned to the ROI by the single-day suite2p classifier. Cells 
+    """The minimum required cell probability score assigned to the ROI by the single-day suite2p classifier. Cells
     with a lower classifier score are excluded from multi-day processing."""
 
     maximum_size: int = 1000
@@ -80,17 +80,17 @@ class Registration:
     """
 
     image_type: str = "enhanced"
-    """The type of suite2p-generated reference image to use for across-day registration. Supported options are 
+    """The type of suite2p-generated reference image to use for across-day registration. Supported options are
     'enhanced', 'mean' and 'max'. This 'template' image is used to calculate the necessary deformation (transformations)
     to register (align) all sessions to the same visual space."""
 
     grid_sampling_factor: float = 1
-    """Determines to what extent the grid sampling scales with the deformed image scale. Has to be between 0 and 1. By 
-    making this value lower than 1, the grid is relatively fine at the the higher scales, allowing for more 
+    """Determines to what extent the grid sampling scales with the deformed image scale. Has to be between 0 and 1. By
+    making this value lower than 1, the grid is relatively fine at the the higher scales, allowing for more
     deformations. This is used when resizing session images as part of the registration process."""
 
     scale_sampling: int = 30
-    """The number of iterations for each level (i.e. between each factor two in scale) to perform when computing the 
+    """The number of iterations for each level (i.e. between each factor two in scale) to perform when computing the
     deformations. Values between 20 and 30 are reasonable in most situations, but higher values yield better results in
     general. The speed of the algorithm scales linearly with this value."""
 
@@ -104,11 +104,11 @@ class Clustering:
     """Stores parameters for tracking (clustering) cell (ROI) masks across multiple registered sessions (days)."""
 
     criterion: str = "distance"
-    """Specifies the criterion for clustering (grouping) cell (ROI) masks from different sessions. Currently, the only 
+    """Specifies the criterion for clustering (grouping) cell (ROI) masks from different sessions. Currently, the only
     valid option is 'distance'."""
 
     threshold: float = 0.75
-    """Specifies the threshold for the clustering algorithm. Cell masks will be clustered (grouped) together if their  
+    """Specifies the threshold for the clustering algorithm. Cell masks will be clustered (grouped) together if their
     clustering criterion is below this threshold value."""
 
     mask_prevalence: int = 50
@@ -117,31 +117,31 @@ class Clustering:
     out cells that are mostly silent or not distinguishable across sessions."""
 
     pixel_prevalence: int = 50
-    """Specifies the minimum percentage of all registered sessions in which a cell mask pixel must be present for it to 
-    be used to construct the template mask. Pixels present in fewer percent of sessions than this value are not used to 
+    """Specifies the minimum percentage of all registered sessions in which a cell mask pixel must be present for it to
+    be used to construct the template mask. Pixels present in fewer percent of sessions than this value are not used to
     define the template masks. Template masks are used to extract the cell fluorescence from the original (non-deformed)
-    visual space of every session. This parameter is used to isolate the part of the cell that is stable across 
+    visual space of every session. This parameter is used to isolate the part of the cell that is stable across
     sessions, which is required for the extraction step to work correctly (target only the tracked cell)."""
 
     step_sizes: list[int] = field(default_factory=lambda: [200, 200])
-    """Specifies the block size for the cell clustering (across-session tracking) process, in pixels, in the order of 
-    (height, width). To reduce the memory (RAM) overhead, the algorithm divides the deformed (shared) visual space into 
+    """Specifies the block size for the cell clustering (across-session tracking) process, in pixels, in the order of
+    (height, width). To reduce the memory (RAM) overhead, the algorithm divides the deformed (shared) visual space into
     blocks and then processes one (or more) blocks at a time."""
 
     bin_size: int = 50
-    """Specifies the additional length, in pixels, the algorithm is allowed to extend into the neighboring regions when 
-    segmenting cells into grid bins. Before clustering cells across sessions, the algorithms pre-segments them into 
-    grid bins using 'step_sizes'. Additionally, it uses +- 'bin_size' to extend into neighboring regions to better 
+    """Specifies the additional length, in pixels, the algorithm is allowed to extend into the neighboring regions when
+    segmenting cells into grid bins. Before clustering cells across sessions, the algorithms pre-segments them into
+    grid bins using 'step_sizes'. Additionally, it uses +- 'bin_size' to extend into neighboring regions to better
     cluster the cells around grid borders."""
 
     maximum_distance: int = 20
-    """Specifies the maximum distance, in pixels, that can separate masks across multiple sessions. The clustering 
-    algorithm will consider cell masks located at most within this distance from each-other across days as the same 
+    """Specifies the maximum distance, in pixels, that can separate masks across multiple sessions. The clustering
+    algorithm will consider cell masks located at most within this distance from each-other across days as the same
     cells during tacking."""
 
     minimum_size: int = 25
-    """The minimum size of the non-overlapping cell (ROI) region, in pixels, that has to be covered by the template 
-    mask, for the cell to be assigned to that template. This is used to determine which template(s) the cell belongs to 
+    """The minimum size of the non-overlapping cell (ROI) region, in pixels, that has to be covered by the template
+    mask, for the cell to be assigned to that template. This is used to determine which template(s) the cell belongs to
     (if any), for the purpose of tracking it across sessions."""
 
 
@@ -167,7 +167,7 @@ class MultiDayConfiguration(YamlConfig):
     clustering: Clustering = field(default_factory=Clustering)
     """Stores parameters for tracking (clustering) cell (ROI) masks across multiple registered sessions (days)."""
     signal_extraction: SignalExtraction = field(default_factory=SignalExtraction)
-    """Stores parameters for extracting fluorescence signals from ROIs and surrounding neuropil regions of the cells 
+    """Stores parameters for extracting fluorescence signals from ROIs and surrounding neuropil regions of the cells
     tracked across days."""
     spike_deconvolution: SpikeDeconvolution = field(default_factory=SpikeDeconvolution)
     """Stores parameters for deconvolving fluorescence signals to infer spike trains."""

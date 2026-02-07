@@ -12,7 +12,7 @@ from .masks import create_masks
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ..configuration import ROIStatistics
+    from ..dataclasses import ROIStatistics
 
 
 def _create_quadrant_mask(
