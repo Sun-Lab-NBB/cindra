@@ -12,7 +12,7 @@ from ataraxis_base_utilities import console
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ..configuration import ROIStatistics
+    from ..dataclasses import ROIStatistics
 
 
 # Path to the built-in classifier bundled with sl-suite2p.

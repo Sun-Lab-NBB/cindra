@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from ..configuration import ROIDetection, ROIStatistics, RuntimeContext
+    from ..dataclasses import ROIDetection, ROIStatistics, RuntimeContext
 
 # Multiplier applied to the user-facing maximum_iterations parameter to determine the actual iteration limit used
 # by the sparse detection algorithm.

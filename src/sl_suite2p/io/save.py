@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 from ataraxis_base_utilities import LogLevel, console
 
-from ..configuration import CombinedData, DetectionData, ROIStatistics, ExtractionData
+from ..dataclasses import CombinedData, DetectionData, ROIStatistics, ExtractionData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ..configuration import RuntimeContext
+    from ..dataclasses import RuntimeContext
 
 
 def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray[np.int32], NDArray[np.int32]]:

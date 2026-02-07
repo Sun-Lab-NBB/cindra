@@ -20,7 +20,7 @@ from .multiday import (
     backward_transform_masks,
     extract_unique_components,
 )
-from .configuration import MultiDayConfiguration
+from .dataclasses import MultiDayConfiguration
 
 # THe minimum number of sessions required for multi-day processing
 _MINIMUM_SESSION_COUNT = 2
