@@ -503,15 +503,6 @@ class ROIDetection:
     classifier confidence value (that the classified ROI is a cell) for the ROI to be processed further. Setting this
     to 0.0 keeps all detected ROIs."""
 
-    spatial_scale: int = 0
-    """The optimal spatial scale, in pixels, for the processed data. This is used to adjust detection sensitivity.
-    Setting this to 0 forces the algorithm to determine this value automatically. Values above 0 are applied in
-    increments of 6 pixels (1 -> 6 pixels, 2 -> 12 pixels, etc.)."""
-
-    cell_diameter: int = 0
-    """The expected cell diameter in pixels. Setting this to 0 forces the algorithm to estimate the diameter from the
-    spatial scale during detection. The diameter is computed as 3 * 2^spatial_scale."""
-
     threshold_scaling: float = 2.0
     """The scaling factor for the ROI detection threshold. The final threshold is computed as this value multiplied
     by the spatial scale factor. Higher values require ROIs to stand out more distinctly from background noise,
@@ -704,6 +695,10 @@ class RegistrationData:
     valid_x_range: list[int] = field(default_factory=lambda: [0, 0])
     """The valid X pixel range [start, end] defining the usable recording region after border cropping."""
 
+    bad_frames: NDArray[np.bool_] | None = None
+    """A boolean array with shape (num_frames,) marking frames with excessive motion or poor correlation. Computed
+    during registration crop calculation and used during detection for temporal binning."""
+
     bidirectional_phase_offset: int = 0
     """The phase offset in pixels used to correct bidirectional scanning artifacts."""
 
@@ -766,6 +761,7 @@ class RegistrationData:
         """Clears all registration data to prepare for re-registration."""
         self.valid_y_range = [0, 0]
         self.valid_x_range = [0, 0]
+        self.bad_frames = None
         self.bidirectional_phase_offset = 0
         self.bidirectional_phase_corrected = False
         self.normalization_minimum = 0
@@ -783,6 +779,7 @@ class RegistrationData:
 
     def prepare_for_saving(self) -> None:
         """Sets all array fields to None for YAML serialization."""
+        self.bad_frames = None
         self.reference_image = None
         self.rigid_y_offsets = None
         self.rigid_x_offsets = None
@@ -800,8 +797,10 @@ class RegistrationData:
         Args:
             output_path: The directory where to save the registration_data.npz file.
         """
-        save_dict: dict[str, NDArray[np.float32] | NDArray[np.int32]] = {}
+        save_dict: dict[str, NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_]] = {}
 
+        if self.bad_frames is not None:
+            save_dict["bad_frames"] = self.bad_frames
         if self.reference_image is not None:
             save_dict["reference_image"] = self.reference_image
         if self.rigid_y_offsets is not None:
@@ -838,6 +837,8 @@ class RegistrationData:
 
         data = np.load(file_path, allow_pickle=False)
 
+        if "bad_frames" in data:
+            self.bad_frames = data["bad_frames"].astype(np.bool_)
         if "reference_image" in data:
             self.reference_image = data["reference_image"].astype(np.float32)
         if "rigid_y_offsets" in data:
@@ -864,11 +865,8 @@ class RegistrationData:
 class DetectionData:
     """Stores runtime data from the detection/extraction stage."""
 
-    spatial_scale: float = 0.0
-    """The estimated spatial scale of the recording in pixels, used for automatic cell diameter detection."""
-
     cell_diameter: int = 0
-    """The cell diameter in pixels, either computed automatically from spatial scale or specified by the user."""
+    """The estimated cell diameter in pixels, automatically computed from the spatial scale during detection."""
 
     aspect_ratio: float = 0.0
     """The aspect ratio of detected cells, computed as the ratio of vertical to horizontal diameter."""
@@ -884,6 +882,10 @@ class DetectionData:
 
     correlation_map: NDArray[np.float32] | None = None
     """The pixel-wise correlation map used to identify regions with correlated activity for cell detection."""
+
+    cell_diameter_channel_2: int = 0
+    """The estimated cell diameter for the second imaging channel in pixels. Computed independently because channel 2
+    may label a different cell population with different soma sizes."""
 
     mean_image_channel_2: NDArray[np.float32] | None = None
     """The temporal mean of all registered frames for the second imaging channel."""
@@ -1053,7 +1055,8 @@ class ROIStatistics:
 
     # Multi-plane data. The plane_index should be set from IOData.plane_index during ROI creation.
     plane_index: int = 0
-    """The index of the imaging plane this ROI belongs to in multi-plane recordings."""
+    """The index of the imaging plane this ROI belongs to. This field is not set during detection. It is populated
+    by the IO layer during multi-plane combination, when ROIs from individual planes are merged into a single list."""
 
     # Multi-day tracking data. Zero values indicate the ROI has not been processed by multi-day tracking.
     cluster_id: int = 0

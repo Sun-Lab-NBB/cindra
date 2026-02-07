@@ -25,9 +25,11 @@ if TYPE_CHECKING:
 # Fraction of the maximum weight below which pixels are excluded from the ROI.
 _MINIMUM_WEIGHT_FRACTION: float = 0.2
 
-# Valid spatial scale range. Scale 0 is excluded because the base filter size already covers the finest resolution.
+# Minimum valid spatial scale. Scale 0 is excluded because the base filter size already covers the finest resolution.
 _MINIMUM_SPATIAL_SCALE: int = 1
-_MAXIMUM_SPATIAL_SCALE: int = 4
+
+# Small epsilon added to denominators during alternating least squares normalization to prevent division by zero.
+_NORMALIZATION_EPSILON: float = 1e-6
 
 
 def _subtract_neuropil(frames: NDArray[np.float32], filter_size: int) -> None:
@@ -111,7 +113,7 @@ def _create_initial_square(
     x_coordinates = x_coordinates[valid_mask]
     y_coordinates = y_coordinates[valid_mask]
     weights = weights[valid_mask]
-    weights = weights / norm(weights)
+    weights = (weights / norm(weights)).astype(np.float32)
     return y_coordinates.flatten(), x_coordinates.flatten(), weights.flatten()
 
 
@@ -124,11 +126,13 @@ def _check_split_components(
 
     Notes:
         Performs alternating least squares to find two non-negative spatial components. If the variance explained by
-        the two-component model exceeds that of the single component, the ROI should be split.
+        the two-component model exceeds that of the single component, the ROI should be split. The pixel_frames array
+        is modified in-place as a working buffer to avoid a redundant full-array copy, since the caller always passes
+        a fancy-indexed slice that is already an independent copy of the original data.
 
     Args:
         pixel_frames: The temporal activity of the ROI's pixels, with shape (num_frames, num_roi_pixels). Each row
-            is a time-binned frame and each column is one pixel belonging to the ROI.
+            is a time-binned frame and each column is one pixel belonging to the ROI. Modified in-place.
         weights: The current pixel weights for the ROI.
         intensity_threshold: The minimum projection intensity for a frame to be considered active.
 
@@ -136,35 +140,35 @@ def _check_split_components(
         A tuple containing the variance ratio (two-component / single-component explained variance) and a tuple of
         the best component's spatial mask, temporal projections on active frames, and active frame boolean mask.
     """
-    normalization_epsilon = 1e-6
+    # Captures the total energy before any in-place modifications, since pixel_frames is used as a working buffer.
+    total_energy = np.dot(pixel_frames.ravel(), pixel_frames.ravel())
 
     # Establishes a single-component baseline to compare against. Since weights are unit-normalized, the explained
     # variance simplifies to the squared norm of the active projection, avoiding two full-array squared sums.
-    frames_copy = pixel_frames.copy()
-    projection = frames_copy @ weights
+    projection = pixel_frames @ weights
     active_frames = projection > intensity_threshold
     active_projection = projection[active_frames]
-    frames_copy[active_frames, :] -= np.outer(active_projection, weights)
+    pixel_frames[active_frames, :] -= np.outer(active_projection, weights)
     single_component_variance = np.dot(active_projection, active_projection)
 
     # Seeds the two-component split from the residual's most energetic frame: pixels with negative vs positive
     # residual are assigned to separate components, capturing the spatial pattern that the single component missed.
-    seed_frame_index = np.argmax(np.maximum(frames_copy, 0).sum(axis=1))
+    seed_frame_index = np.argmax(np.maximum(pixel_frames, 0).sum(axis=1))
     component_masks = [
-        np.where(frames_copy[seed_frame_index] < 0, weights, np.float32(0)),
-        np.where(frames_copy[seed_frame_index] > 0, weights, np.float32(0)),
+        np.where(pixel_frames[seed_frame_index] < 0, weights, np.float32(0)),
+        np.where(pixel_frames[seed_frame_index] > 0, weights, np.float32(0)),
     ]
 
     # Reverses the single-component subtraction in-place rather than allocating a second full copy.
-    frames_copy[active_frames, :] += np.outer(active_projection, weights)
+    pixel_frames[active_frames, :] += np.outer(active_projection, weights)
 
-    # Sequentially subtracts each initial component so frames_copy holds the two-component residual.
+    # Sequentially subtracts each initial component so pixel_frames holds the two-component residual.
     component_frames: list[NDArray[np.bool_]] = []
     projections: list[NDArray[np.float32]] = []
     for component_mask in component_masks:
-        component_mask[:] /= norm(component_mask) + normalization_epsilon
-        temporal_projection = frames_copy @ component_mask
-        frames_copy[active_frames, :] -= np.outer(temporal_projection[active_frames], component_mask)
+        component_mask[:] /= norm(component_mask) + _NORMALIZATION_EPSILON
+        temporal_projection = pixel_frames @ component_mask
+        pixel_frames[active_frames, :] -= np.outer(temporal_projection[active_frames], component_mask)
         component_frames.append(active_frames)
         projections.append(temporal_projection[active_frames])
 
@@ -178,10 +182,10 @@ def _check_split_components(
                 continue
 
             # Restores this component's contribution so re-projection sees the other component's residual only.
-            frames_copy[component_frames[component_index], :] += np.outer(
+            pixel_frames[component_frames[component_index], :] += np.outer(
                 projections[component_index], component_masks[component_index]
             )
-            temporal_projection = frames_copy @ component_masks[component_index]
+            temporal_projection = pixel_frames @ component_masks[component_index]
             component_frames[component_index] = temporal_projection > intensity_threshold
             component_variances[component_index] = np.dot(temporal_projection, temporal_projection)
             active_count = np.sum(component_frames[component_index])
@@ -193,19 +197,18 @@ def _check_split_components(
             # Updates the spatial mask via projection-weighted mean of active frames, then re-subtracts.
             projections[component_index] = temporal_projection[component_frames[component_index]]
             component_masks[component_index] = (
-                projections[component_index] @ frames_copy[component_frames[component_index], :] / active_count
-            )
+                projections[component_index] @ pixel_frames[component_frames[component_index], :] / active_count
+            ).astype(np.float32)
             component_masks[component_index][component_masks[component_index] < 0] = 0
-            component_masks[component_index] /= normalization_epsilon + norm(component_masks[component_index])
-            frames_copy[component_frames[component_index], :] -= np.outer(
+            component_masks[component_index] /= _NORMALIZATION_EPSILON + norm(component_masks[component_index])
+            pixel_frames[component_frames[component_index], :] -= np.outer(
                 projections[component_index], component_masks[component_index]
             )
 
     # Computes the variance ratio, where values above the caller's split threshold indicate that the two-component
     # model explains meaningfully more activity than the single component.
     best_component = np.argmax(component_variances)
-    total_energy = np.dot(pixel_frames.ravel(), pixel_frames.ravel())
-    residual_energy = np.dot(frames_copy.ravel(), frames_copy.ravel())
+    residual_energy = np.dot(pixel_frames.ravel(), pixel_frames.ravel())
     variance_ratio = (total_energy - residual_energy) / single_component_variance
     return variance_ratio, (
         component_masks[best_component],
@@ -223,6 +226,11 @@ def _extend_mask(
 ) -> tuple[NDArray[np.int32], NDArray[np.int32], NDArray[np.float32]]:
     """Extends a pixel mask into all 8 surrounding neighbors, distributing weights proportionally.
 
+    Notes:
+        Uses a dense bounding-box accumulator instead of coordinate tiling and sorting. Each of the 9 directional
+        offsets (center plus 8 neighbors) is scatter-added into a small local grid, avoiding the 9x coordinate
+        replication and the O(n log n) np.unique deduplication step.
+
     Args:
         y_pixels: The y-coordinates of the mask pixels.
         x_pixels: The x-coordinates of the mask pixels.
@@ -234,52 +242,34 @@ def _extend_mask(
         A tuple of three arrays: the extended y-coordinates, x-coordinates, and accumulated weights for the expanded
         mask.
     """
-    # Expands each pixel into its 8 neighbors plus itself, replicating and offsetting the coordinate arrays.
-    expanded_y = np.concatenate(
-        (
-            y_pixels,
-            y_pixels,
-            y_pixels,
-            y_pixels - 1,
-            y_pixels - 1,
-            y_pixels - 1,
-            y_pixels + 1,
-            y_pixels + 1,
-            y_pixels + 1,
-        ),
-    )
-    expanded_x = np.concatenate(
-        (
-            x_pixels,
-            x_pixels + 1,
-            x_pixels - 1,
-            x_pixels,
-            x_pixels + 1,
-            x_pixels - 1,
-            x_pixels,
-            x_pixels + 1,
-            x_pixels - 1,
-        ),
-    )
-    # Divides in-place because the caller discards the input array after this call returns.
-    weights /= 3
-    expanded_weights = np.tile(weights, reps=9)
+    # Computes a tight bounding box that encloses the original pixels plus 1-pixel expansion in each direction.
+    min_y = max(0, int(y_pixels.min()) - 1)
+    max_y = min(height - 1, int(y_pixels.max()) + 1)
+    min_x = max(0, int(x_pixels.min()) - 1)
+    max_x = min(width - 1, int(x_pixels.max()) + 1)
+    box_height = max_y - min_y + 1
+    box_width = max_x - min_x + 1
 
-    # Discards out-of-bounds pixels before deduplication so that flat-index encoding stays collision-free.
-    valid_mask = (expanded_y >= 0) & (expanded_y < height) & (expanded_x >= 0) & (expanded_x < width)
-    expanded_y = expanded_y[valid_mask]
-    expanded_x = expanded_x[valid_mask]
-    expanded_weights = expanded_weights[valid_mask]
+    # Shifts coordinates into the local bounding-box frame and divides weights by 3 (each pixel distributes its
+    # weight across 3 columns: left, center, right). Uses a copy to avoid mutating the caller's array.
+    local_y = y_pixels - min_y
+    local_x = x_pixels - min_x
+    weights = (weights / 3).astype(np.float32)
 
-    # Deduplicates via 1D flat-index encoding and accumulates overlapping weights with a vectorized scatter-add.
-    flat_indices = expanded_y * width + expanded_x
-    unique_flat, inverse_mapping = np.unique(flat_indices, return_inverse=True)
-    accumulated_weights = np.zeros(len(unique_flat), dtype=np.float32)
-    np.add.at(accumulated_weights, inverse_mapping, expanded_weights)
+    # Accumulates weights from each of the 9 directional offsets into the dense local grid. Boundary checks per
+    # offset are cheaper than a single check on the full 9x-expanded array.
+    accumulator = np.zeros((box_height, box_width), dtype=np.float32)
+    for dy, dx in ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)):
+        shifted_y = local_y + dy
+        shifted_x = local_x + dx
+        valid = (shifted_y >= 0) & (shifted_y < box_height) & (shifted_x >= 0) & (shifted_x < box_width)
+        np.add.at(accumulator, (shifted_y[valid], shifted_x[valid]), weights[valid])
 
-    extended_y = (unique_flat // width).astype(np.int32)
-    extended_x = (unique_flat % width).astype(np.int32)
-    return extended_y, extended_x, accumulated_weights
+    # Extracts the non-zero pixels from the accumulator and maps back to full-frame coordinates.
+    nonzero_y, nonzero_x = np.nonzero(accumulator)
+    extended_y = (nonzero_y + min_y).astype(np.int32)
+    extended_x = (nonzero_x + min_x).astype(np.int32)
+    return extended_y, extended_x, accumulator[nonzero_y, nonzero_x]
 
 
 def _estimate_spatial_scale(scale_images: NDArray[np.float32]) -> int:
@@ -437,39 +427,32 @@ def _extend_iteratively(
             break
         previous_count = y_pixels.size
 
-    weights = weights / norm(weights)
+    weights = (weights / norm(weights)).astype(np.float32)
     return y_pixels, x_pixels, weights
 
 
 def _find_best_scale(
     scale_images: NDArray[np.float32],
-    spatial_scale: int,
-) -> tuple[int, bool]:
-    """Determines the best spatial scale for ROI detection.
+) -> int:
+    """Determines the best spatial scale for ROI detection by estimating it from the multiscale projection data.
 
     Notes:
-        If spatial_scale is positive, it is clamped to the valid range [1, 4] and used directly. Otherwise, the
-        scale is estimated from the data. If estimation fails (returns 0), the scale defaults to 1 with a warning.
+        If the automatic estimation fails (returns 0), the scale defaults to 1 with a warning.
 
     Args:
         scale_images: The multiscale projection images with shape (num_scales, height, width).
-        spatial_scale: The user-specified spatial scale override. Non-positive values trigger automatic estimation.
 
     Returns:
-        A tuple containing the selected spatial scale index and a boolean that is True if the scale was estimated
-        from the data or False if it was forced.
+        The selected spatial scale index.
     """
-    if spatial_scale > 0:
-        # Clamps the user-provided scale to the valid range so out-of-bounds overrides don't cause index errors.
-        return int(np.clip(spatial_scale, _MINIMUM_SPATIAL_SCALE, _MAXIMUM_SPATIAL_SCALE)), False
     scale = _estimate_spatial_scale(scale_images=scale_images)
     if scale > 0:
-        return scale, True
+        return scale
     console.echo(
         message="Spatial scale estimation failed. Setting spatial scale to 1 in order to continue.",
         level=LogLevel.WARNING,
     )
-    return _MINIMUM_SPATIAL_SCALE, False
+    return _MINIMUM_SPATIAL_SCALE
 
 
 def extend_roi(
@@ -521,7 +504,6 @@ def detect(
     frames: NDArray[np.float32],
     temporal_highpass_window: int,
     spatial_highpass_window: int,
-    spatial_scale: int,
     threshold_scaling: float,
     maximum_iterations: int,
     plane_index: int,
@@ -540,7 +522,6 @@ def detect(
         frames: The binned frames with shape (num_frames, height, width). Modified in-place during detection.
         temporal_highpass_window: The temporal high-pass filter kernel size in frames.
         spatial_highpass_window: The spatial filter size for neuropil subtraction.
-        spatial_scale: The spatial scale for detection. Non-positive values trigger automatic estimation.
         threshold_scaling: The multiplier applied to the base threshold for peak acceptance.
         maximum_iterations: The maximum number of ROIs to detect.
         plane_index: The index of the imaging plane being processed, used for logging.
@@ -586,7 +567,7 @@ def detect(
     scale_widths = np.zeros(scale_count, dtype=np.uint16)
     for scale_index in range(scale_count):
         convolved_scale = _convolve_square_2d(frames=downsampled_frames, filter_size=base_filter_size)
-        downsampled_frames = 2 * downsample(data=downsampled_frames)
+        downsampled_frames = (2 * downsample(data=downsampled_frames)).astype(np.float32)
         scale_coordinates = downsample(data=grid_coordinates[scale_index], taper_edge=False)
         grid_coordinates.append(scale_coordinates)
         _, scale_heights[scale_index], scale_widths[scale_index] = convolved_scale.shape
@@ -618,7 +599,7 @@ def detect(
     correlation_map = scale_images.max(axis=0)
 
     # Scale selection and threshold computation.
-    scale, scale_was_estimated = _find_best_scale(scale_images=scale_images, spatial_scale=spatial_scale)
+    scale = _find_best_scale(scale_images=scale_images)
 
     spatial_scale_pixels = base_filter_size * 2**scale
     peak_threshold = threshold_scaling * base_threshold_multiplier * max(1, scale)
@@ -627,9 +608,8 @@ def detect(
     time_multiplier = max(1, frames.shape[0] / reference_frame_count)
     # Precomputes the effective detection threshold since both factors are constant across iterations.
     scaled_threshold = time_multiplier * peak_threshold
-    scale_label = "estimated" if scale_was_estimated else "forced"
     message = (
-        f"Plane {plane_index} detection: {scale_label} target cell diameter ~{int(spatial_scale_pixels)} pixels, "
+        f"Plane {plane_index} detection: estimated target cell diameter ~{int(spatial_scale_pixels)} pixels, "
         f"using {frames.shape[0]} binned frames and a minimum peak activity threshold of {round(scaled_threshold, 2)}."
     )
     console.echo(message=message, level=LogLevel.INFO)
@@ -754,10 +734,12 @@ def detect(
             convolved_scales[scale_index][np.ix_(active_frame_indices, scale_flat_indices)] -= np.outer(
                 time_projection[active_frame_indices], multiscale_weights[scale_index]
             )
+            # Fancy indexing produces an independent copy, so in-place zeroing avoids the extra temporary that
+            # np.where would allocate.
             residual_activity = convolved_scales[scale_index][:, scale_flat_indices]
-            thresholded_activity = np.where(residual_activity > peak_threshold, residual_activity, np.float32(0))
+            residual_activity[residual_activity <= peak_threshold] = 0
             variance_maps[scale_index][multiscale_y[scale_index], multiscale_x[scale_index]] = norm(
-                thresholded_activity, axis=0
+                residual_activity, axis=0
             ).astype(np.float32)
 
         # Rescales the pixel weights back to the original intensity scale before storing, since the detection operated

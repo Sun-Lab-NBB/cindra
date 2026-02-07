@@ -1,4 +1,4 @@
-"""Provides frame registration (motion correction) functions for the single-day suite2p processing pipeline."""
+"""Provides frame registration (motion correction) entry point for the single-day suite2p processing pipeline."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from tqdm import tqdm
 import numpy as np
-from scipy.signal import medfilt, medfilt2d
+from scipy.signal import medfilt
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
@@ -532,68 +532,6 @@ def _shift_frames_batch(
         )
 
     return frames
-
-
-def _create_enhanced_mean_image(
-    mean_image: NDArray[np.float32],
-    cell_diameter: int,
-    valid_y_range: list[int],
-    valid_x_range: list[int],
-    frame_height: int,
-    frame_width: int,
-) -> NDArray[np.float32]:
-    """Creates an enhanced version of the mean image by removing background fluorescence and normalizing local contrast.
-
-    Args:
-        mean_image: The mean image to enhance.
-        cell_diameter: The estimated cell diameter in pixels, used to compute filter kernel size.
-        valid_y_range: The valid Y range [start, end] from registration crop computation.
-        valid_x_range: The valid X range [start, end] from registration crop computation.
-        frame_height: The height of the full frame.
-        frame_width: The width of the full frame.
-
-    Returns:
-        The enhanced mean image with background removed and local contrast normalized.
-    """
-    # Defines parameters for enhancing the mean image.
-    background_scale = 4
-    minimum_intensity = -6
-    maximum_intensity = 6
-
-    # Uses cell diameter for spatial scaling, with a default fallback.
-    spatial_scale_pixels = cell_diameter if cell_diameter > 0 else 12
-
-    # Computes median filter kernel size (4 * cell diameter).
-    filter_height = int(background_scale * np.ceil(spatial_scale_pixels) + 1)
-    filter_width = int(background_scale * np.ceil(spatial_scale_pixels) + 1)
-    filter_kernel_size = (filter_height, filter_width)
-
-    # Subtracts background fluorescence using median filter. Reuses the background array for the result.
-    background_removed = medfilt2d(mean_image, kernel_size=filter_kernel_size)
-    np.subtract(mean_image, background_removed, out=background_removed)
-
-    # Computes absolute values for local variance calculation.
-    abs_background_removed = np.abs(background_removed)
-
-    # Normalizes cell contrast by dividing by local variance.
-    local_variance = medfilt2d(abs_background_removed, kernel_size=filter_kernel_size)
-    np.add(local_variance, 1e-10, out=local_variance)
-    np.divide(background_removed, local_variance, out=background_removed)
-
-    # Extracts the valid region excluding border pixels.
-    y_start, y_end = valid_y_range
-    x_start, x_end = valid_x_range
-    roi_image = background_removed[y_start:y_end, x_start:x_end]
-
-    # Clips intensities to [-6, 6] range then scales to [0, 1].
-    clipped_roi = np.clip(roi_image, minimum_intensity, maximum_intensity)
-    scaled_roi = (clipped_roi - minimum_intensity) / (maximum_intensity - minimum_intensity)
-
-    # Places enhanced image into full-size array with border set to minimum value.
-    enhanced_image = np.full((frame_height, frame_width), scaled_roi.min(), dtype=np.float32)
-    enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
-
-    return enhanced_image
 
 
 def _register_alignment_channel(context: RuntimeContext) -> None:
@@ -1132,7 +1070,7 @@ def register_plane(context: RuntimeContext) -> None:
         else np.empty(1, dtype=np.float32)
     )
 
-    _, valid_y_range, valid_x_range = _compute_crop(
+    computed_bad_frames, valid_y_range, valid_x_range = _compute_crop(
         x_offsets=x_offsets,
         y_offsets=y_offsets,
         correlations=correlations,
@@ -1143,9 +1081,10 @@ def register_plane(context: RuntimeContext) -> None:
         frame_width=width,
     )
 
-    # Stores valid ranges in context.
+    # Stores valid ranges and bad frames in context.
     registration_data.valid_y_range = valid_y_range
     registration_data.valid_x_range = valid_x_range
+    registration_data.bad_frames = computed_bad_frames
 
     # Computes registration quality metrics if enabled and recording has enough frames.
     num_principal_components = config.registration.registration_metric_principal_components
@@ -1166,16 +1105,4 @@ def register_plane(context: RuntimeContext) -> None:
                 f"frames, but at least {_MINIMUM_REGISTRATION_METRIC_FRAMES} are required."
             ),
             level=LogLevel.INFO,
-        )
-
-    # Computes enhanced mean image for visualization and ROI detection.
-    mean_image = context.runtime.detection.mean_image
-    if mean_image is not None:
-        context.runtime.detection.enhanced_mean_image = _create_enhanced_mean_image(
-            mean_image=mean_image,
-            cell_diameter=config.roi_detection.cell_diameter,
-            valid_y_range=valid_y_range,
-            valid_x_range=valid_x_range,
-            frame_height=height,
-            frame_width=width,
         )
