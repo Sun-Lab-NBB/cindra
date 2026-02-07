@@ -17,7 +17,7 @@ from .utils import (
     apply_temporal_high_pass_filter,
     compute_temporal_standard_deviation,
 )
-from ..configuration import ROIStatistics
+from ..dataclasses import ROIStatistics
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

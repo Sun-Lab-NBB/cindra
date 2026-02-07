@@ -14,7 +14,7 @@ from ataraxis_base_utilities import LogLevel, console
 import scipy.cluster.hierarchy
 
 from .utils import deform_masks, add_overlap_info, create_mask_image
-from .dataclasses import Session, MultiDayData
+from ..dataclasses import Session, MultiDayData
 from ..registration import DiffeomorphicDemonsRegistration
 
 

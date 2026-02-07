@@ -44,7 +44,7 @@ _BAD_FRAME_FRACTION_THRESHOLD: float = 0.5
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ..configuration import RuntimeContext
+    from ..dataclasses import RuntimeContext
 
     # Type alias for the registration block structure returned by compute_registration_blocks. Contains y_blocks,
     # x_blocks, block_counts, actual_block_size, and smoothing_kernel.

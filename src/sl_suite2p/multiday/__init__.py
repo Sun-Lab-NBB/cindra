@@ -12,7 +12,7 @@ from .transform import (
     generate_template_masks,
     backward_transform_masks,
 )
-from .dataclasses import Session, MultiDayData
+from ..dataclasses import Session, MultiDayData
 
 __all__ = [
     "MultiDayData",

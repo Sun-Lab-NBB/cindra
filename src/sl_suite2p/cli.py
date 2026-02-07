@@ -12,7 +12,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from .gui import run
 from .pipeline import process_multi_day, process_single_day
-from .configuration import (
+from .dataclasses import (
     MultiDayConfiguration,
     SingleDayConfiguration,
 )

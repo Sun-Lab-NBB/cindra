@@ -24,7 +24,7 @@ from .bidiphase_correction import apply_bidirectional_phase_correction
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ..configuration import RuntimeContext
+    from ..dataclasses import RuntimeContext
 
 # Frame subsampling parameters for PC metrics computation. These control how many frames are sampled from the
 # recording to reduce memory overhead while maintaining statistical representativeness.

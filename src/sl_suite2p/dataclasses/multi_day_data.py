@@ -1,16 +1,62 @@
-"""This module provides the classes used to organize and temporarily store processed data during the first step
+"""Provides the classes used to organize and temporarily store processed data during the first step
 (registration) of the multi-session suite2p processing pipeline.
 """
 
-from typing import Any
-from pathlib import Path
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 from dataclasses import field, dataclass
 
-import numpy as np
-from numpy.typing import NDArray
+from .version import version, python_version
+from ..multiday.utils import create_mask_image
 
-from .utils import create_mask_image
-from ..registration import Deformation
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import numpy as np
+    from numpy.typing import NDArray
+
+    from ..registration import Deformation
+
+
+@dataclass
+class MultiDayTimingData:
+    """Stores pipeline timing and version information for the multi-day processing pipeline.
+
+    All time durations are stored as integers representing seconds. Each field corresponds to a discrete step in the
+    multi-day pipeline: discover_multiday_cells() handles import through backward_transform, while
+    extract_session_traces() handles extraction and deconvolution.
+    """
+
+    import_time: int = 0
+    """The session data import time in seconds."""
+
+    registration_time: int = 0
+    """The across-session diffeomorphic demons registration time in seconds."""
+
+    template_mask_time: int = 0
+    """The template mask generation (cross-session cell tracking) time in seconds."""
+
+    backward_transform_time: int = 0
+    """The backward mask transformation time in seconds."""
+
+    total_registration_time: int = 0
+    """The total discover_multiday_cells() step time in seconds."""
+
+    extraction_time: int = 0
+    """The fluorescence extraction time in seconds."""
+
+    deconvolution_time: int = 0
+    """The spike deconvolution time in seconds."""
+
+    date_processed: str = ""
+    """The timestamp when processing completed."""
+
+    python_version: str = python_version
+    """The Python interpreter version used for processing."""
+
+    sl_suite2p_version: str = version
+    """The sl-suite2p library version used for processing."""
 
 
 @dataclass()
@@ -25,11 +71,11 @@ class Session:
 
     # noinspection PyTypeHints
     reference_images: dict[str, NDArray[np.uint32 | np.float32]]
-    """Stores the reference images generated during single-day processing. Valid image query keys are: 'mean', 
+    """Stores the reference images generated during single-day processing. Valid image query keys are: 'mean',
     'enhanced', and 'max'."""
 
     cell_masks: tuple[dict[str, Any], ...]
-    """For each cell ROI discovered during the single-day suite2p processing, stores a dictionary that contains cell 
+    """For each cell ROI discovered during the single-day suite2p processing, stores a dictionary that contains cell
     mask data."""
 
     image_size: tuple[int, int]
@@ -37,8 +83,8 @@ class Session:
 
     # noinspection PyTypeHints
     transformed_images: dict[str, NDArray[np.uint32 | np.float32]] = field(init=False)
-    """Same as 'reference_images', but stores the reference images after applying multi-day registration deform offsets 
-    to translate them to the (deformed) visual space shared by all processed sessions. This represents the session's 
+    """Same as 'reference_images', but stores the reference images after applying multi-day registration deform offsets
+    to translate them to the (deformed) visual space shared by all processed sessions. This represents the session's
     reference images in the registered (deformed) visual space."""
 
     deform: Deformation = field(init=False)
@@ -46,16 +92,16 @@ class Session:
     (registered) visual space. Uses backward mapping to transform coordinates from registered to original space."""
 
     deformed_cell_masks: tuple[dict[str, Any], ...] = field(init=False)
-    """Same as 'cell_masks', but stores cell ROI data after multi-day registration deform offsets have been applied 
-    to the spatial coordinates of each ROI. This represents all session cell masks in the registered (deformed) visual 
+    """Same as 'cell_masks', but stores cell ROI data after multi-day registration deform offsets have been applied
+    to the spatial coordinates of each ROI. This represents all session cell masks in the registered (deformed) visual
     space."""
 
     shared_cell_masks: tuple[dict[str, Any], ...] = field(init=False)
-    """Same as 'deformed_cell_masks' but stores cell ROI data for the 'template' (across-session tracked) cells in the 
+    """Same as 'deformed_cell_masks' but stores cell ROI data for the 'template' (across-session tracked) cells in the
     shared (deformed / registered) visual space."""
 
     template_cell_masks: tuple[dict[str, Any], ...] = field(init=False)
-    """Same as 'cell_masks', but stores cell ROI data for the 'template' (across-session tracked) cells mapped back to 
+    """Same as 'cell_masks', but stores cell ROI data for the 'template' (across-session tracked) cells mapped back to
     the original session's visual space."""
 
     @property
@@ -93,5 +139,8 @@ class MultiDayData:
     """Stores Session class instances for each session that needs to be registered across days."""
 
     template_cell_masks: tuple[dict[str, Any], ...] = field(init=False)
-    """For each cell ROI tracked over sessions as part of multi-day processing, stores a dictionary that contains cell 
+    """For each cell ROI tracked over sessions as part of multi-day processing, stores a dictionary that contains cell
     mask data."""
+
+    timing: MultiDayTimingData = field(default_factory=MultiDayTimingData)
+    """The pipeline timing and version information for the multi-day processing pipeline."""
