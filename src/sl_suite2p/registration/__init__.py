@@ -1,4 +1,4 @@
-"""This module provides image registration algorithms for the sl-suite2p processing pipelines.
+"""This module provides image registration algorithms.
 
 This module unifies two registration approaches: phase correlation-based registration from suite2p (single-day
 frame-to-frame motion correction) and diffeomorphic Demons registration from pirt (multi-day cross-session

@@ -144,7 +144,8 @@ def compute_thresholded_variance(frames: NDArray[np.float32], intensity_threshol
     """Computes the thresholded standard deviation of pixel intensities across frames.
 
     Notes:
-        This function computes a root-sum-of-squares measure for pixels exceeding the intensity threshold.
+        This function computes a root-sum-of-squares measure for pixels exceeding the intensity threshold. Uses
+        np.where with in-place squaring to avoid allocating separate boolean mask and squared-frames temporaries.
 
     Args:
         frames: The input frame array with shape (num_frames, height, width).
@@ -154,4 +155,7 @@ def compute_thresholded_variance(frames: NDArray[np.float32], intensity_threshol
     Returns:
         An array with shape (height, width) containing the thresholded standard deviation for each pixel.
     """
-    return np.sqrt(((frames > intensity_threshold) * frames**2).sum(axis=0))
+    # Zeros out below-threshold values in a single allocation, then squares in-place to avoid a second temporary.
+    thresholded = np.where(frames > intensity_threshold, frames, np.float32(0.0))
+    thresholded *= thresholded
+    return np.sqrt(thresholded.sum(axis=0))

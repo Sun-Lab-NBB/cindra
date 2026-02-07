@@ -92,7 +92,7 @@ def compute_median_pixel_position(y_pixels: NDArray[np.int32], x_pixels: NDArray
 
 
 class _ROI:
-    """Extends the ROIStatistics dataclass with methods to compute additional ROI properties.
+    """Wraps the ROIStatistics dataclass with methods to compute additional ROI properties.
 
     Notes:
         The class uses a shared class variable for the distance kernel to avoid recomputation across instances. The
@@ -407,23 +407,31 @@ def compute_roi_statistics(
     diameter: int | None = None,
     maximum_overlap_fraction: float | None = None,
     crop: bool = True,
+    lightweight: bool = False,
 ) -> None:
     """Computes shape statistics for a list of ROIStatistics instances in-place.
 
     Notes:
         This function computes statistics (compactness, solidity, radius, aspect ratio, etc.) for each input ROI and
         writes the computed values back to the ROIStatistics instances. If maximum_overlap_fraction is specified, ROIs
-        exceeding the overlap threshold are removed from the list in-place.
+        exceeding the overlap threshold are removed from the list in-place. When lightweight is True, only the minimal
+        statistics required for preclassification (compactness and normalized_pixel_count) are computed, skipping the
+        expensive ellipse fitting, convex hull solidity, and overlap computations.
 
     Args:
         rois: The list of ROIStatistics instances that define the ROIs to process. Modified in-place.
         frame_height: The height of the recording frames from which ROIs are segmented, in pixels.
         frame_width: The width of the recording frames from which ROIs are segmented, in pixels.
-        aspect: The aspect ratio of the recording. If provided, adjusts ROI ellipse fitting.
-        diameter: The expected cell diameter in pixels. Used for ROI ellipse fitting normalization.
+        aspect: The aspect ratio of the recording. If provided, adjusts ROI ellipse fitting. Ignored in lightweight
+            mode.
+        diameter: The expected cell diameter in pixels. Used for ROI ellipse fitting normalization. Ignored in
+            lightweight mode.
         maximum_overlap_fraction: The maximum fraction of pixels that can overlap with other ROIs. If specified, ROIs
-            exceeding this threshold are removed from the list in-place.
+            exceeding this threshold are removed from the list in-place. Ignored in lightweight mode.
         crop: Determines whether to crop processed ROIs to the soma region before computing statistics.
+        lightweight: Determines whether to compute only the minimal statistics needed for preclassification. When True,
+            skips ellipse fitting, solidity, and overlap computations. The aspect, diameter, and
+            maximum_overlap_fraction parameters are ignored.
 
     Raises:
         ValueError: If the input rois list is empty.
@@ -437,23 +445,21 @@ def compute_roi_statistics(
         if not roi.centroid or roi.centroid == [0, 0]:
             roi.centroid = list(compute_median_pixel_position(y_pixels=roi.y_pixels, x_pixels=roi.x_pixels))
 
-    # Resolves the cell diameter used to scale ellipse fitting. The diameter normalizes fitted ellipse radii to be
-    # comparable across recordings with different cell sizes.
-    default_diameter = 10
-    effective_diameter = default_diameter if diameter is None or diameter == 0 else diameter
-
-    # Applies aspect ratio correction for non-square pixels. MROI recordings often have non-isotropic pixel
-    # spacing, requiring separate y and x scaling factors.
-    if aspect is not None:
-        y_scale, x_scale = int(aspect * effective_diameter), effective_diameter
-    else:
-        y_scale, x_scale = effective_diameter, effective_diameter
-
     # Wraps each ROIStatistics in an _ROI processing object to compute derived statistics.
     roi_wrappers = [_ROI(data=roi, crop=crop) for roi in rois]
 
-    # Builds an overlap count image to identify pixels shared between multiple ROIs.
-    overlap_counts = _ROI.get_overlap_count_image(rois=roi_wrappers, height=frame_height, width=frame_width)
+    # Resolves the cell diameter, aspect correction, and overlap image only when full statistics are needed.
+    # Lightweight mode skips these because ellipse fitting and overlap filtering are not performed.
+    if not lightweight:
+        default_diameter = 10
+        effective_diameter = default_diameter if diameter is None or diameter == 0 else diameter
+
+        if aspect is not None:
+            y_scale, x_scale = int(aspect * effective_diameter), effective_diameter
+        else:
+            y_scale, x_scale = effective_diameter, effective_diameter
+
+        overlap_counts = _ROI.get_overlap_count_image(rois=roi_wrappers, height=frame_height, width=frame_width)
 
     # Pre-allocates arrays to collect statistics for normalization during the computation loop.
     roi_count = len(rois)
@@ -461,21 +467,24 @@ def compute_roi_statistics(
     pixel_count_values = np.empty(roi_count, dtype=np.float32)
     soma_pixel_count_values = np.empty(roi_count, dtype=np.float32)
 
-    # Computes shape statistics for each ROI and writes them back to the ROIStatistics instances.
+    # Computes shape statistics for each ROI and writes them back to the ROIStatistics instances. In lightweight mode,
+    # skips the expensive ellipse fitting, convex hull solidity, and overlap mask computations.
     for i, wrapper in enumerate(roi_wrappers):
         data = wrapper.data
         data.mean_radius = wrapper.mean_radius
         data.baseline_mean_radius = wrapper.baseline_mean_radius
         data.compactness = wrapper.compactness
-        data.solidity = wrapper.solidity
         data.pixel_count = wrapper.pixel_count
         data.soma_pixel_count = wrapper.soma_pixel_count
         data.soma_mask = wrapper.soma_mask
-        data.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
 
-        ellipse = wrapper.fit_ellipse(y_scale=y_scale, x_scale=x_scale)
-        data.radius = ellipse.radius
-        data.aspect_ratio = ellipse.aspect_ratio
+        if not lightweight:
+            data.solidity = wrapper.solidity
+            data.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
+
+            ellipse = wrapper.fit_ellipse(y_scale=y_scale, x_scale=x_scale)
+            data.radius = ellipse.radius
+            data.aspect_ratio = ellipse.aspect_ratio
 
         # Collects values for normalization to avoid re-iterating over ROIs.
         mean_radius_values[i] = data.mean_radius
@@ -500,7 +509,8 @@ def compute_roi_statistics(
         roi.normalized_pixel_count = float(soma_count_norm)
 
     # Removes ROIs with excessive overlap. High overlap often indicates over-segmentation or neuropil contamination.
-    if maximum_overlap_fraction is not None and maximum_overlap_fraction < 1.0:
+    # Skipped in lightweight mode since overlap computation is not performed.
+    if not lightweight and maximum_overlap_fraction is not None and maximum_overlap_fraction < 1.0:
         keep_flags = _ROI.remove_overlapping_rois(
             rois=roi_wrappers, overlap_image=overlap_counts, maximum_overlap_fraction=maximum_overlap_fraction
         )
