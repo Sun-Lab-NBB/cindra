@@ -1,4 +1,4 @@
-"""Provides registration quality metrics using principal component analysis."""
+"""Provides the algorithm for computing the registration quality metrics using principal component analysis."""
 
 from __future__ import annotations
 
@@ -100,6 +100,7 @@ def _register_pc_extremes(
     nonrigid_enabled: bool = True,
     bidirectional_phase_offset: int = 0,
     edge_taper_slope: float = 40.0,
+    workers: int = -1,
 ) -> NDArray[np.float32]:
     """Registers images at the extreme ends of each principal components to each-other to measure registration quality.
 
@@ -122,6 +123,7 @@ def _register_pc_extremes(
         nonrigid_enabled: Determines whether to compute nonrigid registration metrics.
         bidirectional_phase_offset: The bidirectional phase offset in pixels.
         edge_taper_slope: Controls the steepness of the edge taper for phase correlation.
+        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
         A 2D array with shape (num_components, 3) containing registration metrics. Column 0 contains the mean rigid
@@ -190,6 +192,7 @@ def _register_pc_extremes(
             reference_kernel=reference_kernel,
             maximum_shift_fraction=maximum_shift_fraction,
             temporal_smoothing_sigma=0,
+            workers=workers,
         )
 
         # Records rigid shift magnitude.
@@ -224,6 +227,7 @@ def _register_pc_extremes(
                 x_blocks=x_blocks,
                 y_blocks=y_blocks,
                 maximum_shift=maximum_nonrigid_shift,
+                workers=workers,
             )
 
             # Computes nonrigid shift magnitudes.
@@ -291,6 +295,7 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
     num_components = context.config.registration.registration_metric_principal_components
     spatial_smoothing_sigma = context.config.registration.spatial_smoothing_sigma
     maximum_shift_fraction = context.config.registration.maximum_shift_fraction
+    parallel_workers = context.config.main.parallel_workers
 
     # Extracts non-rigid registration parameters.
     nonrigid_enabled = context.config.non_rigid_registration.enabled
@@ -385,6 +390,7 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
         nonrigid_enabled=nonrigid_enabled,
         bidirectional_phase_offset=bidirectional_phase_offset,
         edge_taper_slope=edge_taper_slope,
+        workers=parallel_workers,
     )
 
     console.echo(

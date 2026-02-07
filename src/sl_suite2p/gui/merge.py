@@ -10,8 +10,8 @@ from qtpy.QtWidgets import QLabel, QDialog, QWidget, QLineEdit, QGridLayout, QMe
 from ataraxis_base_utilities import LogLevel, console
 
 from . import io, masks, utils
-from ..detection.stats import roi_stats, median_pix
 from ..extraction.deconvolve import oasis
+from ..detection.roi_statistics import compute_roi_statistics, compute_median_pixel_position
 
 
 def distance_matrix(parent, ilist):
@@ -105,7 +105,7 @@ def merge_activity_masks(parent):
         stat0["plane_index"] = parent.stat[merged_cells[0]]["plane_index"]
     stat0["y_pixels"] = ypix
     stat0["x_pixels"] = xpix
-    stat0["centroid"] = median_pix(ypix, xpix)
+    stat0["centroid"] = compute_median_pixel_position(y_pixels=ypix, x_pixels=xpix)
     stat0["pixel_weights"] = lam / lam.sum()
 
     if "aspect_ratio" in parent.ops:
@@ -155,13 +155,13 @@ def merge_activity_masks(parent):
 
     # add cell to structs
     parent.stat = np.concatenate((parent.stat, np.array([stat0])), axis=0)
-    parent.stat = roi_stats(
+    compute_roi_statistics(
         parent.stat,
         parent.Ly,
         parent.Lx,
         aspect=parent.ops.get("aspect_ratio", None),
         diameter=parent.ops.get("cell_diameter", None),
-        do_crop=parent.ops.get("crop_to_soma", 1),
+        crop=parent.ops.get("crop_to_soma", 1),
     )
     parent.stat[-1]["pixel_weights"] = parent.stat[-1]["pixel_weights"] * merged_cells.size
     parent.Fcell = np.concatenate((parent.Fcell, F[np.newaxis, :]), axis=0)

@@ -413,19 +413,19 @@ class BinaryFileCombined:
         self,
         height: int,
         width: int,
-        plane_heights: NDArray[np.int_],
-        plane_widths: NDArray[np.int_],
-        plane_y_coordinates: NDArray[np.int_],
-        plane_x_coordinates: NDArray[np.int_],
+        plane_heights: NDArray[np.uint16],
+        plane_widths: NDArray[np.uint16],
+        plane_y_coordinates: NDArray[np.int32],
+        plane_x_coordinates: NDArray[np.int32],
         file_paths: list[str | Path] | tuple[str | Path, ...],
     ) -> None:
         # Initializes class attributes using input arguments.
         self.height: int = height
         self.width: int = width
-        self.plane_heights: NDArray[np.int_] = plane_heights
-        self.plane_widths: NDArray[np.int_] = plane_widths
-        self.plane_y_coordinates: NDArray[np.int_] = plane_y_coordinates
-        self.plane_x_coordinates: NDArray[np.int_] = plane_x_coordinates
+        self.plane_heights: NDArray[np.uint16] = plane_heights
+        self.plane_widths: NDArray[np.uint16] = plane_widths
+        self.plane_y_coordinates: NDArray[np.int32] = plane_y_coordinates
+        self.plane_x_coordinates: NDArray[np.int32] = plane_x_coordinates
         self.file_paths: tuple[Path, ...] = tuple(Path(path) for path in file_paths)
 
         # Opens BinaryFile instances for requested planes, using the input data.
@@ -481,7 +481,7 @@ class BinaryFileCombined:
         return self.files[0].frame_number
 
     @property
-    def shape(self) -> tuple[int, NDArray[np.int_], NDArray[np.int_]]:
+    def shape(self) -> tuple[int, NDArray[np.uint16], NDArray[np.uint16]]:
         """Returns the dimensions of the data stored inside managed files as a tuple of three elements.
 
         The first element is the total number of frames inside each file, which is the same for all files. The second
