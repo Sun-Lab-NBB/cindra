@@ -353,9 +353,9 @@ def detect_plane_rois(context: RuntimeContext) -> None:
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
     # Extracts configuration.
-    detection_config = context.config.roi_detection
-    main_config = context.config.main
-    nonrigid_block_size = context.config.non_rigid_registration.block_size
+    detection_config = context.configuration.roi_detection
+    main_config = context.configuration.main
+    nonrigid_block_size = context.configuration.non_rigid_registration.block_size
 
     # Extracts runtime data.
     io_data = context.runtime.io

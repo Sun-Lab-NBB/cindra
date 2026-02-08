@@ -292,23 +292,23 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
     valid_x_range = context.runtime.registration.valid_x_range
 
     # Extracts registration configuration parameters.
-    num_components = context.config.registration.registration_metric_principal_components
-    spatial_smoothing_sigma = context.config.registration.spatial_smoothing_sigma
-    maximum_shift_fraction = context.config.registration.maximum_shift_fraction
-    parallel_workers = context.config.main.parallel_workers
+    num_components = context.configuration.registration.registration_metric_principal_components
+    spatial_smoothing_sigma = context.configuration.registration.spatial_smoothing_sigma
+    maximum_shift_fraction = context.configuration.registration.maximum_shift_fraction
+    parallel_workers = context.configuration.main.parallel_workers
 
     # Extracts non-rigid registration parameters.
-    nonrigid_enabled = context.config.non_rigid_registration.enabled
-    block_size_list = context.config.non_rigid_registration.block_size
+    nonrigid_enabled = context.configuration.non_rigid_registration.enabled
+    block_size_list = context.configuration.non_rigid_registration.block_size
     block_size = (block_size_list[0], block_size_list[1])
-    snr_threshold = context.config.non_rigid_registration.signal_to_noise_threshold
-    maximum_nonrigid_shift = context.config.non_rigid_registration.maximum_block_shift
+    snr_threshold = context.configuration.non_rigid_registration.signal_to_noise_threshold
+    maximum_nonrigid_shift = context.configuration.non_rigid_registration.maximum_block_shift
 
     # Extracts one-photon registration parameters.
-    one_photon_mode = context.config.one_photon_registration.enabled
-    pre_smoothing_sigma = context.config.one_photon_registration.pre_smoothing_sigma
-    spatial_highpass_window = context.config.one_photon_registration.spatial_highpass_window
-    edge_taper_pixels = context.config.one_photon_registration.edge_taper_pixels
+    one_photon_mode = context.configuration.one_photon_registration.enabled
+    pre_smoothing_sigma = context.configuration.one_photon_registration.pre_smoothing_sigma
+    spatial_highpass_window = context.configuration.one_photon_registration.spatial_highpass_window
+    edge_taper_pixels = context.configuration.one_photon_registration.edge_taper_pixels
 
     # Extracts registration state from runtime data.
     bidirectional_phase_offset = context.runtime.registration.bidirectional_phase_offset

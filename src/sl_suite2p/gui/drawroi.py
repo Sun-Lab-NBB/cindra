@@ -14,7 +14,7 @@ from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
 from . import io
-from ..extraction import masks, oasis, preprocess, extract_traces_from_masks
+from ..extraction import masks, apply_oasis_deconvolution, extract_traces_from_masks, compute_delta_fluorescence
 from ..detection.roi_statistics import compute_roi_statistics
 
 
@@ -73,13 +73,18 @@ def masks_and_traces(ops, stat_manual, stat_orig):
             np.mean(manual_stat[n]["x_pixels"]),
         ]
 
-    dF = preprocess(
+    dF = compute_delta_fluorescence(
         roi_fluorescence=F,
         neuropil_fluorescence=Fneu,
-        ops=ops,
+        neuropil_coefficient=ops["neuropil_coefficient"],
+        baseline_method=ops["baseline"],
+        baseline_window=ops["baseline_window"],
+        baseline_sigma=ops["baseline_sigma"],
+        baseline_percentile=ops["baseline_percentile"],
+        sampling_rate=ops["sampling_rate"],
     )
-    spks = oasis(
-        cell_fluorescence=dF, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["sampling_rate"]
+    spks = apply_oasis_deconvolution(
+        roi_fluorescence=dF, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["sampling_rate"]
     )
 
     return F, Fneu, F_chan2, Fneu_chan2, spks, ops, manual_stat
