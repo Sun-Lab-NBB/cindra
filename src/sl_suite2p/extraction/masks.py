@@ -94,7 +94,6 @@ def _create_neuropil_masks(
         cell_probability_percentile: The percentile threshold for labeling a pixel as belonging to the cell ROI region.
             This is used to determine the size of each ROI's cell region around which to form the neuropil mask.
         recompute: Determines whether to force recomputation of neuropil masks even when cached masks are available.
-            Defaults to False.
 
     Returns:
         The flattened neuropil masks for each ROI.
@@ -209,7 +208,7 @@ def _create_roi_pixels(
             input=cell_likelihood_map,
             percentile=cell_probability_percentile,
             size=neighborhood_size,
-        )
+        ).astype(np.float32)
         pixel_mask = (cell_likelihood_map > 0.0) & (cell_likelihood_map >= cell_threshold_filter)
     else:
         # Selects all pixels with a weight greater than zero.

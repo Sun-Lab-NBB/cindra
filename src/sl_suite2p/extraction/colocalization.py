@@ -179,7 +179,7 @@ def compute_intensity_colocalization(
 
     # Computes the colocalization probability as the ratio of inside to total intensity. Adds a small
     # epsilon to prevent division by zero and ensure numerical stability.
-    intensity_inside = np.maximum(_INTENSITY_EPSILON, intensity_inside)
+    intensity_inside = np.maximum(np.float32(_INTENSITY_EPSILON), intensity_inside)
     colocalization_probability = intensity_inside / (intensity_inside + intensity_outside)
 
     # Applies the threshold to determine which ROIs are colocalized.
@@ -233,14 +233,14 @@ def _build_sparse_roi_masks(
     masks = csr_matrix((data, (all_rows, all_columns)), shape=(roi_count, total_pixels))
 
     # Clips summed duplicates back to binary values to ensure each pixel is counted at most once.
-    masks.data = np.minimum(masks.data, 1.0)
+    masks.data = np.minimum(masks.data, np.float32(1.0))
 
     return masks
 
 
 def _compute_overlap_matrix(
-    rois_1: list[ROIStatistics],
-    rois_2: list[ROIStatistics],
+    rois_channel_1: list[ROIStatistics],
+    rois_channel_2: list[ROIStatistics],
     frame_height: int,
     frame_width: int,
 ) -> NDArray[np.float32]:
@@ -255,8 +255,8 @@ def _compute_overlap_matrix(
         counts via a single sparse matrix multiplication, avoiding explicit Python-level set operations.
 
     Args:
-        rois_1: The ROI statistics for channel 1.
-        rois_2: The ROI statistics for channel 2.
+        rois_channel_1: The ROI statistics for channel 1.
+        rois_channel_2: The ROI statistics for channel 2.
         frame_height: The height of the imaging field in pixels.
         frame_width: The width of the imaging field in pixels.
 
@@ -264,8 +264,8 @@ def _compute_overlap_matrix(
         An array of shape (n_rois_1, n_rois_2) where element [i, j] is the overlap fraction between
         ROI i from channel 1 and ROI j from channel 2.
     """
-    count_1 = len(rois_1)
-    count_2 = len(rois_2)
+    count_1 = len(rois_channel_1)
+    count_2 = len(rois_channel_2)
 
     # Handles edge cases with empty ROI lists. This case is handled explicitly by external callers, so this fallback is
     # mostly to appease mypy.
@@ -274,12 +274,12 @@ def _compute_overlap_matrix(
 
     # Builds sparse binary masks for both channels.
     sparse_masks_1 = _build_sparse_roi_masks(
-        rois=rois_1,
+        rois=rois_channel_1,
         frame_height=frame_height,
         frame_width=frame_width,
     )
     sparse_masks_2 = _build_sparse_roi_masks(
-        rois=rois_2,
+        rois=rois_channel_2,
         frame_height=frame_height,
         frame_width=frame_width,
     )
@@ -362,8 +362,8 @@ def compute_spatial_colocalization(
 
     # Computes the pairwise overlap matrix via sparse matrix multiplication.
     overlap_matrix = _compute_overlap_matrix(
-        rois_1=rois_channel_1,
-        rois_2=rois_channel_2,
+        rois_channel_1=rois_channel_1,
+        rois_channel_2=rois_channel_2,
         frame_height=frame_height,
         frame_width=frame_width,
     )
