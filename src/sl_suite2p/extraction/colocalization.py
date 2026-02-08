@@ -1,10 +1,11 @@
-"""Provides assets for determining ROI colocalization in multichannel imaging data."""
+"""Provides algorithms for determining ROI colocalization in multichannel imaging data."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import numpy as np
+from scipy.sparse import csr_matrix
 from scipy.ndimage import gaussian_filter
 
 from .masks import create_masks
@@ -14,105 +15,93 @@ if TYPE_CHECKING:
 
     from ..dataclasses import ROIStatistics
 
+# The number of spatial blocks along each axis used for block-wise bleedthrough regression.
+_BLOCK_COUNT: int = 3
 
-def _create_quadrant_mask(
-    frame_height: int,
-    frame_width: int,
-    y_indices: NDArray[np.uintp],
-    x_indices: NDArray[np.uintp],
-    smoothing_sigma: float,
-) -> NDArray[np.float32]:
-    """Creates a smoothed quadrant mask for local bleed-through regression.
+# The fraction of the mean block dimension used as the Gaussian smoothing sigma for quadrant masks.
+_SMOOTHING_FRACTION: float = 0.25
 
-    The mask is initialized with ones inside the specified region and zeros elsewhere, then smoothed
-    with a Gaussian filter to create soft boundaries between regions.
-
-    Args:
-        frame_height: The height of the imaging field in pixels.
-        frame_width: The width of the imaging field in pixels.
-        y_indices: The y-coordinates of pixels to include in the mask.
-        x_indices: The x-coordinates of pixels to include in the mask.
-        smoothing_sigma: The standard deviation of the Gaussian smoothing kernel.
-
-    Returns:
-        The smoothed quadrant mask with shape (frame_height, frame_width).
-    """
-    mask = np.zeros((frame_height, frame_width), dtype=np.float32)
-    mask[np.ix_(y_indices, x_indices)] = 1.0
-    return gaussian_filter(input=mask, sigma=smoothing_sigma).astype(np.float32)
+# The minimum intensity floor used to prevent division by zero in colocalization probability computation.
+_INTENSITY_EPSILON: float = 1e-3
 
 
-def _correct_bleed_through(
+def _correct_bleedthrough(
     functional_mean_image: NDArray[np.float32],
     structural_mean_image: NDArray[np.float32],
 ) -> NDArray[np.float32]:
-    """Corrects bleed-through from the functional channel into the structural channel using local regression.
+    """Corrects bleedthrough from the functional channel into the structural channel using local regression.
 
-    This function performs non-rigid regression to subtract the contribution of functional channel signal
-    that bleeds into the structural channel. The image is divided into a 3x3 grid of blocks, and for each
-    block a linear coefficient is computed to predict structural intensity from functional intensity. The
-    predicted bleed-through is then subtracted from the structural channel.
+    Performs non-rigid regression to subtract the contribution of functional channel signal that bleeds
+    into the structural channel. The image is divided into a 3x3 grid of blocks, and for each block a
+    linear coefficient is computed to predict structural intensity from functional intensity. The predicted
+    bleedthrough is then subtracted from the structural channel.
 
     Notes:
-        The block-wise approach accounts for spatial variations in bleed-through across the field of view.
+        The block-wise approach accounts for spatial variations in bleedthrough across the field of view.
+        Each 2D block mask is a Gaussian-smoothed rectangle, which factors as the outer product of two 1D
+        Gaussian-smoothed step functions. This separability reduces 9 2D convolutions to 6 1D convolutions
+        and allows the mask-normalized weighted correction to be expressed as a single matrix product.
 
     Args:
         functional_mean_image: The temporal mean image for the functional channel with shape (height, width).
         structural_mean_image: The temporal mean image for the structural channel with shape (height, width).
 
     Returns:
-        The bleed-through-corrected structural mean image with non-negative values.
+        The bleedthrough-corrected structural mean image with non-negative values.
     """
     frame_height, frame_width = functional_mean_image.shape
-    block_count = 3
 
     # Computes the smoothing sigma based on image dimensions and block count.
-    smoothing_sigma = round((frame_height + frame_width) / (block_count * 2) * 0.25)
+    smoothing_sigma = round((frame_height + frame_width) / (_BLOCK_COUNT * 2) * _SMOOTHING_FRACTION)
 
     # Computes block boundaries for dividing the image.
-    y_boundaries = np.linspace(start=0, stop=frame_height, num=block_count + 1).astype(np.uintp)
-    x_boundaries = np.linspace(start=0, stop=frame_width, num=block_count + 1).astype(np.uintp)
+    y_boundaries = np.linspace(start=0, stop=frame_height, num=_BLOCK_COUNT + 1).astype(np.intp)
+    x_boundaries = np.linspace(start=0, stop=frame_width, num=_BLOCK_COUNT + 1).astype(np.intp)
 
-    # First pass: computes masks and regression weights, accumulates mask sum for normalization.
-    mask_sum = np.zeros((frame_height, frame_width), dtype=np.float32)
-    block_data: list[tuple[NDArray[np.float32], float]] = []
+    # Computes 1D Gaussian-smoothed masks along each axis independently. Each 2D block mask is the
+    # outer product of a y-axis indicator and an x-axis indicator, and since the Gaussian filter is
+    # separable, the smoothed 2D mask equals the outer product of the two 1D smoothed indicators.
+    y_masks = np.zeros((_BLOCK_COUNT, frame_height), dtype=np.float32)
+    x_masks = np.zeros((_BLOCK_COUNT, frame_width), dtype=np.float32)
 
-    for y_block in range(block_count):
-        for x_block in range(block_count):
-            # Extracts the pixel indices for the current block.
-            y_indices = np.arange(y_boundaries[y_block], y_boundaries[y_block + 1], dtype=np.uintp)
-            x_indices = np.arange(x_boundaries[x_block], x_boundaries[x_block + 1], dtype=np.uintp)
+    for block_index in range(_BLOCK_COUNT):
+        y_indicator = np.zeros(frame_height, dtype=np.float32)
+        y_indicator[y_boundaries[block_index] : y_boundaries[block_index + 1]] = 1.0
+        y_masks[block_index] = gaussian_filter(input=y_indicator, sigma=smoothing_sigma).astype(np.float32)
 
-            # Creates the smoothed mask for this block.
-            mask = _create_quadrant_mask(
-                frame_height=frame_height,
-                frame_width=frame_width,
-                y_indices=y_indices,
-                x_indices=x_indices,
-                smoothing_sigma=smoothing_sigma,
-            )
+        x_indicator = np.zeros(frame_width, dtype=np.float32)
+        x_indicator[x_boundaries[block_index] : x_boundaries[block_index + 1]] = 1.0
+        x_masks[block_index] = gaussian_filter(input=x_indicator, sigma=smoothing_sigma).astype(np.float32)
 
-            # Extracts the pixel values from both channels for this block.
-            functional_block = functional_mean_image[np.ix_(y_indices, x_indices)].flatten()
-            structural_block = structural_mean_image[np.ix_(y_indices, x_indices)].flatten()
+    # Computes the linear regression weight for each block.
+    weights = np.zeros((_BLOCK_COUNT, _BLOCK_COUNT), dtype=np.float32)
+    for y_block in range(_BLOCK_COUNT):
+        y_slice = slice(y_boundaries[y_block], y_boundaries[y_block + 1])
+        for x_block in range(_BLOCK_COUNT):
+            x_slice = slice(x_boundaries[x_block], x_boundaries[x_block + 1])
 
-            # Computes the linear regression coefficient predicting structural from functional.
+            functional_block = functional_mean_image[y_slice, x_slice]
+            structural_block = structural_mean_image[y_slice, x_slice]
+
             numerator = (functional_block * structural_block).sum()
             denominator = (functional_block * functional_block).sum()
-            weight = numerator / denominator if denominator > 0 else 0.0
+            weights[y_block, x_block] = numerator / denominator if denominator > 0 else 0.0
 
-            mask_sum += mask
-            block_data.append((mask, weight))
+    # Normalizes each 1D mask by its per-axis sum. The 2D mask sum factors as the outer product of
+    # the 1D mask sums because each 2D mask is itself rank-1.
+    y_mask_sum = y_masks.sum(axis=0)
+    x_mask_sum = x_masks.sum(axis=0)
+    y_mask_sum[y_mask_sum == 0] = 1.0
+    x_mask_sum[x_mask_sum == 0] = 1.0
 
-    # Avoids division by zero in normalization.
-    mask_sum[mask_sum == 0] = 1.0
+    y_normalized = y_masks / y_mask_sum[np.newaxis, :]
+    x_normalized = x_masks / x_mask_sum[np.newaxis, :]
 
-    # Second pass: computes normalized weighted correction.
-    correction = np.zeros((frame_height, frame_width), dtype=np.float32)
-    for mask, weight in block_data:
-        correction += (mask / mask_sum) * weight * functional_mean_image
+    # Expresses the correction as F * (Y_norm.T @ W @ X_norm), which is equivalent to summing
+    # (normalized_mask * weight * F) over all blocks but avoids explicit 2D mask construction.
+    weighted_blend: NDArray[np.float32] = (y_normalized.T @ weights @ x_normalized).astype(np.float32)
+    correction = functional_mean_image * weighted_blend
 
-    # Generates and returns the corrected image.
     corrected: NDArray[np.float32] = np.maximum(0, structural_mean_image - correction).astype(np.float32)
     return corrected
 
@@ -127,11 +116,10 @@ def compute_intensity_colocalization(
 ) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     """Computes the intensity colocalization between the functional channel's ROIs and the structural channel.
 
-    This function computes a colocalization probability for each functional ROI by comparing the mean intensity
-    inside the ROI to the intensity in the surrounding neuropil region in the structural channel.
-    ROIs with a high inside-to-surround ratio are likely present in both channels. Bleed-through
-    correction is applied automatically to remove functional channel signal that leaks into the
-    structural channel.
+    Computes a colocalization probability for each functional ROI by comparing the mean intensity inside
+    the ROI to the intensity in the surrounding neuropil region in the structural channel. ROIs with a
+    high inside-to-surround ratio are likely present in both channels. Bleed-through correction is applied
+    automatically to remove functional channel signal that leaks into the structural channel.
 
     Notes:
         This method is appropriate when one channel contains functional data (e.g., GCaMP calcium
@@ -147,81 +135,51 @@ def compute_intensity_colocalization(
             intensity measurement.
         frame_height: The height of the imaging field in pixels.
         frame_width: The width of the imaging field in pixels.
-        colocalization_threshold: The minimum probability for classifying an ROI as colocalized,
-            sourced from the pipeline configuration. For intensity-based colocalization, this represents
-            the inside-to-total intensity ratio threshold.
+        colocalization_threshold: The minimum probability for classifying an ROI as colocalized. For intensity-based
+            colocalization, this represents the inside-to-total intensity ratio threshold.
 
     Returns:
         A tuple of two arrays. The first array has shape (n_rois, 2) where column 0 contains boolean
         colocalization flags and column 1 contains probability values. The second array is the
         bleedthrough-corrected structural mean image.
     """
-    # Handles the edge case of empty ROI list.
+    # Handles edge cases with empty ROI lists. This case is handled explicitly by external callers, so this fallback is
+    # mostly to appease mypy.
     if len(rois) == 0:
         empty_result = np.zeros((0, 2), dtype=np.float32)
         return empty_result, structural_mean_image.astype(np.float32)
 
     # Corrects for bleedthrough from functional channel into structural channel.
-    corrected_mean_image = _correct_bleed_through(
+    corrected_mean_image = _correct_bleedthrough(
         functional_mean_image=functional_mean_image,
         structural_mean_image=structural_mean_image.copy(),
     )
 
-    # Creates extraction configuration dictionary with required parameters.
-    extraction_ops = {
-        "allow_overlap": True,
-        "lambda_percentile": 50,
-        "inner_neuropil_border_radius": 2,
-        "minimum_neuropil_pixels": 350,
-    }
-
-    # Converts ROIStatistics to dict format for create_masks compatibility.
-    roi_dicts = [
-        {"y_pixels": roi.y_pixels, "x_pixels": roi.x_pixels, "pixel_weights": roi.pixel_weights, "radius": roi.radius}
-        for roi in rois
-    ]
-
     # Creates cell and neuropil masks from the ROI statistics.
-    cell_masks_sparse, neuropil_masks_sparse = create_masks(
-        roi_statistics=roi_dicts,
+    per_roi_masks = create_masks(
+        roi_statistics=rois,
         height=frame_height,
         width=frame_width,
         neuropil=True,
-        ops=extraction_ops,
+        include_overlap=True,
     )
 
-    # Verifies that neuropil masks were created since neuropil=True was specified. This check is required for type
-    # narrowing, as create_masks can return None when neuropil=False.
-    if neuropil_masks_sparse is None:
-        message = "Internal error: neuropil masks were not created despite neuropil=True."
-        raise RuntimeError(message)
-
-    # Converts sparse masks to dense format for matrix multiplication.
-    total_pixels = frame_height * frame_width
+    # Computes per-ROI weighted intensity inside each cell and mean intensity in the neuropil
+    # region directly from sparse mask data, avoiding dense (roi_count, total_pixels) allocation.
     roi_count = len(rois)
+    flattened_image = corrected_mean_image.ravel()
+    intensity_inside = np.zeros(roi_count, dtype=np.float32)
+    intensity_outside = np.zeros(roi_count, dtype=np.float32)
 
-    cell_masks_dense = np.zeros((roi_count, total_pixels), dtype=np.float32)
-    neuropil_masks_dense = np.zeros((roi_count, total_pixels), dtype=np.float32)
+    for roi_index, (cell_indices, cell_weights, neuropil_indices) in enumerate(per_roi_masks):
+        intensity_inside[roi_index] = np.dot(cell_weights, flattened_image[cell_indices])
 
-    for roi_index, (cell_mask, neuropil_mask) in enumerate(zip(cell_masks_sparse, neuropil_masks_sparse, strict=True)):
-        # Cell mask contains (indices, weights) tuple.
-        cell_indices, cell_weights = cell_mask
-        cell_masks_dense[roi_index, cell_indices.astype(np.int64)] = cell_weights
-
-        # Neuropil mask contains only indices, with uniform weights.
-        neuropil_count = len(neuropil_mask)
-        if neuropil_count > 0:
-            neuropil_masks_dense[roi_index, neuropil_mask.astype(np.int64)] = 1.0 / neuropil_count
-
-    # Computes the weighted intensity inside each ROI and in the neuropil region.
-    flattened_image = corrected_mean_image.flatten()
-    intensity_inside = cell_masks_dense @ flattened_image
-    intensity_outside = neuropil_masks_dense @ flattened_image
+        if neuropil_indices is not None and len(neuropil_indices) > 0:
+            intensity_outside[roi_index] = flattened_image[neuropil_indices].mean()
 
     # Computes the colocalization probability as the ratio of inside to total intensity. Adds a small
     # epsilon to prevent division by zero and ensure numerical stability.
-    epsilon = 1e-3
-    intensity_inside = np.maximum(epsilon, intensity_inside)
+    intensity_inside = np.maximum(np.float32(_INTENSITY_EPSILON), intensity_inside)
     colocalization_probability = intensity_inside / (intensity_inside + intensity_outside)
 
     # Applies the threshold to determine which ROIs are colocalized.
@@ -233,12 +191,12 @@ def compute_intensity_colocalization(
     return colocalization_result, corrected_mean_image
 
 
-def _compute_roi_pixel_sets(
+def _build_sparse_roi_masks(
     rois: list[ROIStatistics],
     frame_height: int,
     frame_width: int,
-) -> list[set[int]]:
-    """Converts ROI pixel coordinates to sets of flattened indices.
+) -> csr_matrix:
+    """Builds a sparse binary mask matrix from ROI pixel coordinates.
 
     Args:
         rois: The ROI statistics containing pixel coordinates.
@@ -246,25 +204,45 @@ def _compute_roi_pixel_sets(
         frame_width: The width of the imaging field in pixels.
 
     Returns:
-        A list of sets, where each set contains the flattened pixel indices for one ROI.
+        A Compressed Sparse Row (CSR) matrix of shape (n_rois, frame_height * frame_width) where each row contains
+        ones at the flattened pixel indices belonging to that ROI.
     """
-    pixel_sets = []
+    total_pixels = frame_height * frame_width
+    roi_count = len(rois)
 
-    for roi in rois:
-        # Converts 2D coordinates to flattened 1D indices.
-        flattened_indices = np.ravel_multi_index(
-            multi_index=(roi.y_pixels, roi.x_pixels),
-            dims=(frame_height, frame_width),
-        )
+    # Accumulates COO-format triplet arrays (row, column, value) for all ROIs. Each ROI contributes
+    # one entry per pixel, where the row is the ROI index and the column is the flattened pixel index.
+    row_indices: list[NDArray[np.intp]] = []
+    column_indices: list[NDArray[np.intp]] = []
 
-        pixel_sets.append(set(flattened_indices.tolist()))
+    for roi_index, roi in enumerate(rois):
+        # Converts 2D pixel coordinates to flattened 1D indices via row-major arithmetic.
+        flat_pixels = (roi.y_pixels * frame_width + roi.x_pixels).astype(np.intp)
 
-    return pixel_sets
+        # Assigns every pixel in this ROI to the same row (roi_index) in the sparse matrix.
+        row_indices.append(np.full(len(flat_pixels), fill_value=roi_index, dtype=np.intp))
+        column_indices.append(flat_pixels)
+
+    # Merges per-ROI arrays into single COO-format arrays for CSR construction.
+    all_rows = np.concatenate(row_indices)
+    all_columns = np.concatenate(column_indices)
+    data = np.ones(len(all_rows), dtype=np.float32)
+
+    # Constructs the CSR matrix from COO triplets. Duplicate (row, column) entries are summed by
+    # default, so any repeated pixel coordinates within an ROI will produce values greater than 1.
+    masks = csr_matrix((data, (all_rows, all_columns)), shape=(roi_count, total_pixels))
+
+    # Clips summed duplicates back to binary values to ensure each pixel is counted at most once.
+    masks.data = np.minimum(masks.data, np.float32(1.0))
+
+    return masks
 
 
 def _compute_overlap_matrix(
-    pixel_sets_1: list[set[int]],
-    pixel_sets_2: list[set[int]],
+    rois_channel_1: list[ROIStatistics],
+    rois_channel_2: list[ROIStatistics],
+    frame_height: int,
+    frame_width: int,
 ) -> NDArray[np.float32]:
     """Computes pairwise overlap fractions between two sets of ROIs.
 
@@ -272,41 +250,54 @@ def _compute_overlap_matrix(
     This normalization ensures that a small ROI fully contained within a large ROI receives an
     overlap score of 1.0.
 
+    Notes:
+        Builds sparse binary mask matrices for each channel and computes all pairwise intersection
+        counts via a single sparse matrix multiplication, avoiding explicit Python-level set operations.
+
     Args:
-        pixel_sets_1: The pixel sets for channel 1 ROIs.
-        pixel_sets_2: The pixel sets for channel 2 ROIs.
+        rois_channel_1: The ROI statistics for channel 1.
+        rois_channel_2: The ROI statistics for channel 2.
+        frame_height: The height of the imaging field in pixels.
+        frame_width: The width of the imaging field in pixels.
 
     Returns:
         An array of shape (n_rois_1, n_rois_2) where element [i, j] is the overlap fraction between
         ROI i from channel 1 and ROI j from channel 2.
     """
-    count_1 = len(pixel_sets_1)
-    count_2 = len(pixel_sets_2)
+    count_1 = len(rois_channel_1)
+    count_2 = len(rois_channel_2)
 
-    # Handles edge cases with empty ROI lists.
+    # Handles edge cases with empty ROI lists. This case is handled explicitly by external callers, so this fallback is
+    # mostly to appease mypy.
     if count_1 == 0 or count_2 == 0:
         return np.zeros((count_1, count_2), dtype=np.float32)
 
-    overlap_matrix = np.zeros((count_1, count_2), dtype=np.float32)
+    # Builds sparse binary masks for both channels.
+    sparse_masks_1 = _build_sparse_roi_masks(
+        rois=rois_channel_1,
+        frame_height=frame_height,
+        frame_width=frame_width,
+    )
+    sparse_masks_2 = _build_sparse_roi_masks(
+        rois=rois_channel_2,
+        frame_height=frame_height,
+        frame_width=frame_width,
+    )
 
-    for index_1, pixels_1 in enumerate(pixel_sets_1):
-        size_1 = len(pixels_1)
-        if size_1 == 0:
-            continue
+    # Computes all pairwise intersection counts via sparse matrix multiplication.
+    intersection_counts: NDArray[np.float32] = (sparse_masks_1 @ sparse_masks_2.T).toarray().astype(np.float32)
 
-        for index_2, pixels_2 in enumerate(pixel_sets_2):
-            size_2 = len(pixels_2)
-            if size_2 == 0:
-                continue
+    # Computes per-ROI pixel counts from sparse row sums.
+    sizes_1: NDArray[np.float32] = np.asarray(sparse_masks_1.sum(axis=1), dtype=np.float32).ravel()
+    sizes_2: NDArray[np.float32] = np.asarray(sparse_masks_2.sum(axis=1), dtype=np.float32).ravel()
 
-            # Computes the intersection size.
-            intersection_size = len(pixels_1 & pixels_2)
+    # Normalizes in-place by the smaller ROI size per pair, avoiding a second (count_1, count_2)
+    # allocation for the result.
+    minimum_sizes = np.minimum(sizes_1[:, np.newaxis], sizes_2[np.newaxis, :])
+    minimum_sizes[minimum_sizes == 0] = 1.0
+    intersection_counts /= minimum_sizes
 
-            # Normalizes by the smaller ROI size.
-            minimum_size = min(size_1, size_2)
-            overlap_matrix[index_1, index_2] = intersection_size / minimum_size
-
-    return overlap_matrix
+    return intersection_counts
 
 
 def compute_spatial_colocalization(
@@ -318,36 +309,37 @@ def compute_spatial_colocalization(
 ) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     """Computes spatial colocalization by matching ROIs between two channels based on pixel overlap.
 
-    This function computes pairwise overlap fractions between all ROIs in channel 1 and channel 2,
-    then finds the best matching pairs. The matching is performed bidirectionally, meaning each ROI
-    in one channel is matched to its best counterpart in the other channel independently.
+    Computes pairwise overlap fractions between all ROIs in channel 1 and channel 2, then finds
+    mutually consistent best-match pairs. A pair (i, j) is only accepted when channel 1 ROI i's
+    best match is channel 2 ROI j AND channel 2 ROI j's best match is channel 1 ROI i. This
+    enforces convergent bidirectional matching where every accepted pairing is reciprocal.
 
     Notes:
         This method is appropriate when both channels contain functional data with independently
         detected ROIs. The overlap fraction is normalized by the smaller ROI size, ensuring that
         a small ROI fully contained within a larger ROI receives an overlap score of 1.0. The
-        bidirectional matching allows for asymmetric relationships where ROI A's best match is ROI B,
-        but ROI B's best match might be a different ROI.
+        mutual best-match constraint guarantees that accepted pairings are consistent across both
+        output arrays: if channel_1_to_2[i] points to j, then channel_2_to_1[j] points to i.
 
     Args:
         rois_channel_1: The ROI statistics for channel 1 ROIs.
         rois_channel_2: The ROI statistics for channel 2 ROIs.
         frame_height: The height of the imaging field in pixels.
         frame_width: The width of the imaging field in pixels.
-        colocalization_threshold: The minimum overlap fraction for considering ROIs as matched,
-            sourced from the pipeline configuration. For spatial colocalization, this represents the
-            pixel overlap ratio threshold.
+        colocalization_threshold: The minimum overlap fraction for considering ROIs as matched. For spatial
+            colocalization, this represents the pixel overlap ratio threshold.
 
     Returns:
         A tuple of two arrays for bidirectional ROI mappings. The first array has shape
         (n_channel_1_rois, 2) where column 0 contains the matched channel 2 ROI index (-1 if no
         match) and column 1 contains the overlap score. The second array has shape
-        (n_channel_2_rois, 2) with the same format for channel 2 to channel 1 mappings.
+        (n_channel_2_rois, 2) with the same format for channel 2 to channel 1 mapping.
     """
     count_1 = len(rois_channel_1)
     count_2 = len(rois_channel_2)
 
-    # Handles edge cases with empty ROI lists.
+    # Handles edge cases with empty ROI lists. This case is handled explicitly by external callers, so this fallback is
+    # mostly to appease mypy.
     if count_1 == 0:
         channel_1_to_2 = np.zeros((0, 2), dtype=np.float32)
         channel_2_to_1 = np.column_stack(
@@ -368,41 +360,40 @@ def compute_spatial_colocalization(
         channel_2_to_1 = np.zeros((0, 2), dtype=np.float32)
         return channel_1_to_2, channel_2_to_1
 
-    # Converts ROI coordinates to pixel sets.
-    pixel_sets_1 = _compute_roi_pixel_sets(
-        rois=rois_channel_1,
-        frame_height=frame_height,
-        frame_width=frame_width,
-    )
-    pixel_sets_2 = _compute_roi_pixel_sets(
-        rois=rois_channel_2,
+    # Computes the pairwise overlap matrix via sparse matrix multiplication.
+    overlap_matrix = _compute_overlap_matrix(
+        rois_channel_1=rois_channel_1,
+        rois_channel_2=rois_channel_2,
         frame_height=frame_height,
         frame_width=frame_width,
     )
 
-    # Computes the pairwise overlap matrix.
-    overlap_matrix = _compute_overlap_matrix(pixel_sets_1=pixel_sets_1, pixel_sets_2=pixel_sets_2)
+    # Finds the best match index and score for each ROI in both directions.
+    best_indices_1 = np.argmax(overlap_matrix, axis=1)
+    best_scores_1 = np.max(overlap_matrix, axis=1)
+    best_indices_2 = np.argmax(overlap_matrix, axis=0)
+    best_scores_2 = np.max(overlap_matrix, axis=0)
 
-    # Finds the best match for each channel 1 ROI in channel 2.
-    best_match_1_to_2 = np.argmax(overlap_matrix, axis=1).astype(np.float32)
-    best_scores_1_to_2 = overlap_matrix[np.arange(count_1), best_match_1_to_2.astype(np.int32)]
+    # Enforces mutual best matching: a pair (i, j) is accepted only when channel 1 ROI i's best
+    # match is j AND channel 2 ROI j's best match is i. For each channel 1 ROI i, looks up its
+    # proposed partner j = best_indices_1[i], then checks whether j's best partner points back to i.
+    is_mutual_1 = best_indices_2[best_indices_1] == np.arange(count_1)
+    is_mutual_2 = best_indices_1[best_indices_2] == np.arange(count_2)
 
-    # Applies threshold to channel 1 to channel 2 matches.
-    below_threshold_1 = best_scores_1_to_2 < colocalization_threshold
-    best_match_1_to_2[below_threshold_1] = -1
-    best_scores_1_to_2[below_threshold_1] = 0.0
+    # Rejects non-mutual matches and pairs below the overlap threshold.
+    unmatched_1 = ~is_mutual_1 | (best_scores_1 < colocalization_threshold)
+    unmatched_2 = ~is_mutual_2 | (best_scores_2 < colocalization_threshold)
 
-    # Finds the best match for each channel 2 ROI in channel 1.
-    best_match_2_to_1 = np.argmax(overlap_matrix, axis=0).astype(np.float32)
-    best_scores_2_to_1 = overlap_matrix[best_match_2_to_1.astype(np.int32), np.arange(count_2)]
+    channel_1_to_2 = np.empty((count_1, 2), dtype=np.float32)
+    channel_1_to_2[:, 0] = best_indices_1
+    channel_1_to_2[:, 1] = best_scores_1
+    channel_1_to_2[unmatched_1, 0] = -1
+    channel_1_to_2[unmatched_1, 1] = 0.0
 
-    # Applies threshold to channel 2 to channel 1 matches.
-    below_threshold_2 = best_scores_2_to_1 < colocalization_threshold
-    best_match_2_to_1[below_threshold_2] = -1
-    best_scores_2_to_1[below_threshold_2] = 0.0
-
-    # Stacks results into (n_rois, 2) arrays.
-    channel_1_to_2 = np.column_stack((best_match_1_to_2, best_scores_1_to_2)).astype(np.float32)
-    channel_2_to_1 = np.column_stack((best_match_2_to_1, best_scores_2_to_1)).astype(np.float32)
+    channel_2_to_1 = np.empty((count_2, 2), dtype=np.float32)
+    channel_2_to_1[:, 0] = best_indices_2
+    channel_2_to_1[:, 1] = best_scores_2
+    channel_2_to_1[unmatched_2, 0] = -1
+    channel_2_to_1[unmatched_2, 1] = 0.0
 
     return channel_1_to_2, channel_2_to_1

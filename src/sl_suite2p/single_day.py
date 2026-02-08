@@ -12,11 +12,11 @@ from ataraxis_base_utilities import LogLevel, console
 
 from . import io, detection, extraction, classification
 from .io.binary import BinaryFile
-from .registration import register_plane
 from .dataclasses import (
     RuntimeContext,
     SingleDayConfiguration,
 )
+from .registration import register_plane
 
 # Defines constants used in this module
 
@@ -236,15 +236,20 @@ def _process_rois(
                 timer.reset()
 
                 # Computes delta f/f (neuropil-subtracted ROI fluorescence)
-                df = extraction.preprocess(
+                df = extraction.compute_delta_fluorescence(
                     roi_fluorescence=cell_fluorescence,
                     neuropil_fluorescence=neuropil_fluorescence,
-                    ops=ops,
+                    neuropil_coefficient=ops["neuropil_coefficient"],
+                    baseline_method=ops["baseline"],
+                    baseline_window=ops["baseline_window"],
+                    baseline_sigma=ops["baseline_sigma"],
+                    baseline_percentile=ops["baseline_percentile"],
+                    sampling_rate=ops["sampling_rate"],
                 )
 
                 # Extracts the cell fluorescence spikes using the OASIS algorithm.
-                spikes = extraction.oasis(
-                    cell_fluorescence=df,
+                spikes = extraction.apply_oasis_deconvolution(
+                    roi_fluorescence=df,
                     batch_size=ops["batch_size"],
                     time_constant=ops["tau"],
                     sampling_rate=ops["sampling_rate"],
@@ -305,7 +310,7 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
         console.error(message=message, error=ValueError)
 
     # Gets the root output path from the first context's configuration.
-    root_path = contexts[0].config.file_io.save_path
+    root_path = contexts[0].configuration.file_io.save_path
     if root_path is None:
         message = (
             "Unable to save combined data. The save_path must be configured in the FileIO section of the "

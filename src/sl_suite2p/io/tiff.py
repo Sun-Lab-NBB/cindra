@@ -207,7 +207,7 @@ def _initialize_plane_contexts(
 
         # Creates the RuntimeContext combining the shared configuration, acquisition parameters, and runtime data.
         context = RuntimeContext(
-            config=config,
+            configuration=config,
             acquisition=acquisition,
             runtime=runtime_data,
         )

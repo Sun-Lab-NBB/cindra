@@ -72,13 +72,20 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     compute_roi_statistics(
         multiday_cell_masks, ops["frame_height"], ops["frame_width"], ops["aspect_ratio"], ops["cell_diameter"]
     )
-    cell_masks, neuropil_masks = extraction.masks.create_masks(
+    per_roi_masks = extraction.masks.create_masks(
         roi_statistics=multiday_cell_masks,
         height=ops["frame_height"],
         width=ops["frame_width"],
         neuropil=ops.get("extract_neuropil", True),
-        ops=ops,
+        include_overlap=ops["allow_overlap"],
+        cell_probability_percentile=ops["cell_probability_percentile"],
+        inner_neuropil_border_radius=ops["inner_neuropil_border_radius"],
+        minimum_neuropil_pixels=ops["minimum_neuropil_pixels"],
     )
+
+    # Unpacks per-ROI masks into the separate formats expected by extract_traces.
+    cell_masks = tuple((indices, weights) for indices, weights, _ in per_roi_masks)
+    neuropil_masks = tuple(neuropil for _, _, neuropil in per_roi_masks) if per_roi_masks[0][2] is not None else None
     message = f"Session {session_id} multi-day masks: created. Time taken {timer.elapsed} seconds."
     console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -102,10 +109,15 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
         )
 
     # Computes delta fluorescence (dF) (neuropil-and-baseline-subtracted ROI fluorescence)
-    df = extraction.preprocess(
+    df = extraction.compute_delta_fluorescence(
         roi_fluorescence=cell_fluorescence,
         neuropil_fluorescence=neuropil_fluorescence,
-        ops=ops,
+        neuropil_coefficient=ops["neuropil_coefficient"],
+        baseline_method=ops["baseline"],
+        baseline_window=ops["baseline_window"],
+        baseline_sigma=ops["baseline_sigma"],
+        baseline_percentile=ops["baseline_percentile"],
+        sampling_rate=ops["sampling_rate"],
     )
 
     # Cell activity spike deconvolution
@@ -115,8 +127,8 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
         timer.reset()
 
         # Extracts the cell fluorescence spikes using the OASIS algorithm.
-        spikes = extraction.oasis(
-            cell_fluorescence=df,
+        spikes = extraction.apply_oasis_deconvolution(
+            roi_fluorescence=df,
             batch_size=ops["batch_size"],
             time_constant=ops["tau"],
             sampling_rate=ops["sampling_rate"],
