@@ -234,7 +234,7 @@ def extract_traces_from_masks(
     Args:
         ops: The dictionary that stores the plane registration parameters.
         cell_masks: A tuple containing an array of flattened ROI pixel indices and a corresponding
-                    array of normalized weights to compute the ROI`s fluorescence trace.
+            array of normalized weights to compute the ROI`s fluorescence trace.
         neuropil_masks: An array containing pixel indices of the neuropil surrounding the ROI.
     """
     batch_size = ops["batch_size"]
@@ -284,9 +284,20 @@ def extraction_wrapper(
     console.echo(f"Creating ROI masks for plane {plane_number}...", level=LogLevel.INFO)
     timer.reset()
 
-    cell_masks, neuropil_masks = create_masks(
-        roi_statistics=roi_statistics, height=height, width=width, neuropil=ops.get("extract_neuropil", True), ops=ops
+    per_roi_masks = create_masks(
+        roi_statistics=roi_statistics,
+        height=height,
+        width=width,
+        neuropil=ops.get("extract_neuropil", True),
+        include_overlap=ops["allow_overlap"],
+        cell_probability_percentile=ops["cell_probability_percentile"],
+        inner_neuropil_border_radius=ops["inner_neuropil_border_radius"],
+        minimum_neuropil_pixels=ops["minimum_neuropil_pixels"],
     )
+
+    # Unpacks per-ROI masks into the separate formats expected by extract_traces.
+    cell_masks = tuple((indices, weights) for indices, weights, _ in per_roi_masks)
+    neuropil_masks = tuple(neuropil for _, _, neuropil in per_roi_masks) if per_roi_masks[0][2] is not None else None
 
     console.echo(
         f"Plane {plane_number} ROI masks: created. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS
@@ -323,8 +334,6 @@ def extraction_wrapper(
 
     for i, (roi_stat, skew, std) in enumerate(zip(roi_statistics, skew_values, std_values, strict=False)):
         roi_stat.update({"skew": skew, "std": std})
-        if neuropil_masks is not None:
-            roi_stat["neuropil_mask"] = neuropil_masks[i]
 
     return (
         roi_statistics,

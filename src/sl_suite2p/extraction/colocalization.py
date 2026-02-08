@@ -167,51 +167,28 @@ def compute_intensity_colocalization(
         structural_mean_image=structural_mean_image.copy(),
     )
 
-    # Creates extraction configuration dictionary with required parameters.
-    extraction_ops = {
-        "allow_overlap": True,
-        "lambda_percentile": 50,
-        "inner_neuropil_border_radius": 2,
-        "minimum_neuropil_pixels": 350,
-    }
-
-    # Converts ROIStatistics to dict format for create_masks compatibility.
-    roi_dicts = [
-        {"y_pixels": roi.y_pixels, "x_pixels": roi.x_pixels, "pixel_weights": roi.pixel_weights, "radius": roi.radius}
-        for roi in rois
-    ]
-
     # Creates cell and neuropil masks from the ROI statistics.
-    cell_masks_sparse, neuropil_masks_sparse = create_masks(
-        roi_statistics=roi_dicts,
+    per_roi_masks = create_masks(
+        roi_statistics=rois,
         height=frame_height,
         width=frame_width,
         neuropil=True,
-        ops=extraction_ops,
+        include_overlap=True,
     )
 
-    # Verifies that neuropil masks were created since neuropil=True was specified. This check is required for type
-    # narrowing, as create_masks can return None when neuropil=False.
-    if neuropil_masks_sparse is None:
-        message = "Internal error: neuropil masks were not created despite neuropil=True."
-        raise RuntimeError(message)
-
-    # Converts sparse masks to dense format for matrix multiplication.
+    # Converts sparse per-ROI masks to dense format for matrix multiplication.
     total_pixels = frame_height * frame_width
     roi_count = len(rois)
 
     cell_masks_dense = np.zeros((roi_count, total_pixels), dtype=np.float32)
     neuropil_masks_dense = np.zeros((roi_count, total_pixels), dtype=np.float32)
 
-    for roi_index, (cell_mask, neuropil_mask) in enumerate(zip(cell_masks_sparse, neuropil_masks_sparse, strict=True)):
-        # Cell mask contains (indices, weights) tuple.
-        cell_indices, cell_weights = cell_mask
+    for roi_index, (cell_indices, cell_weights, neuropil_indices) in enumerate(per_roi_masks):
         cell_masks_dense[roi_index, cell_indices.astype(np.int64)] = cell_weights
 
-        # Neuropil mask contains only indices, with uniform weights.
-        neuropil_count = len(neuropil_mask)
-        if neuropil_count > 0:
-            neuropil_masks_dense[roi_index, neuropil_mask.astype(np.int64)] = 1.0 / neuropil_count
+        # Neuropil mask uses uniform weights across all pixels.
+        if neuropil_indices is not None and len(neuropil_indices) > 0:
+            neuropil_masks_dense[roi_index, neuropil_indices.astype(np.int64)] = 1.0 / len(neuropil_indices)
 
     # Computes the weighted intensity inside each ROI and in the neuropil region.
     flattened_image = corrected_mean_image.flatten()
