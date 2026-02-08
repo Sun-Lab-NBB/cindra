@@ -72,13 +72,20 @@ def extract_session_traces(ops: dict[str, Any], session_folder: Path, session_id
     compute_roi_statistics(
         multiday_cell_masks, ops["frame_height"], ops["frame_width"], ops["aspect_ratio"], ops["cell_diameter"]
     )
-    cell_masks, neuropil_masks = extraction.masks.create_masks(
+    per_roi_masks = extraction.masks.create_masks(
         roi_statistics=multiday_cell_masks,
         height=ops["frame_height"],
         width=ops["frame_width"],
         neuropil=ops.get("extract_neuropil", True),
-        ops=ops,
+        include_overlap=ops["allow_overlap"],
+        cell_probability_percentile=ops["cell_probability_percentile"],
+        inner_neuropil_border_radius=ops["inner_neuropil_border_radius"],
+        minimum_neuropil_pixels=ops["minimum_neuropil_pixels"],
     )
+
+    # Unpacks per-ROI masks into the separate formats expected by extract_traces.
+    cell_masks = tuple((indices, weights) for indices, weights, _ in per_roi_masks)
+    neuropil_masks = tuple(neuropil for _, _, neuropil in per_roi_masks) if per_roi_masks[0][2] is not None else None
     message = f"Session {session_id} multi-day masks: created. Time taken {timer.elapsed} seconds."
     console.echo(message=message, level=LogLevel.SUCCESS)
 

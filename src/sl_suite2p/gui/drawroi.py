@@ -39,11 +39,24 @@ def masks_and_traces(ops, stat_manual, stat_orig):
         aspect=ops.get("aspect_ratio", None),
         diameter=ops["cell_diameter"],
     )
-    cell_masks, manual_neuropil_masks = masks.create_masks(
-        roi_statistics=stat_all, height=ops["frame_height"], width=ops["frame_width"], neuropil=True, ops=ops
+    per_roi_masks = masks.create_masks(
+        roi_statistics=stat_all,
+        height=ops["frame_height"],
+        width=ops["frame_width"],
+        neuropil=True,
+        include_overlap=ops["allow_overlap"],
+        cell_probability_percentile=ops["cell_probability_percentile"],
+        inner_neuropil_border_radius=ops["inner_neuropil_border_radius"],
+        minimum_neuropil_pixels=ops["minimum_neuropil_pixels"],
     )
     manual_stat = stat_all[: len(stat_manual)]
-    manual_cell_masks = cell_masks[: len(stat_manual)]
+
+    # Unpacks per-ROI masks for manual ROIs into the separate formats expected by extract_traces_from_masks.
+    manual_masks = per_roi_masks[: len(stat_manual)]
+    manual_cell_masks = tuple((indices, weights) for indices, weights, _ in manual_masks)
+    manual_neuropil_masks = (
+        tuple(neuropil for _, _, neuropil in manual_masks) if manual_masks[0][2] is not None else None
+    )
     console.echo(message=f"Manual ROI masks: created in {time.time() - t0:.2f} seconds.", level=LogLevel.SUCCESS)
 
     F, Fneu, F_chan2, Fneu_chan2 = extract_traces_from_masks(ops, manual_cell_masks, manual_neuropil_masks)
