@@ -14,7 +14,7 @@ from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
 from . import io
-from ..extraction import masks, oasis, preprocess, extract_traces_from_masks
+from ..extraction import masks, apply_oasis_deconvolution, extract_traces_from_masks, compute_delta_fluorescence
 from ..detection.roi_statistics import compute_roi_statistics
 
 
@@ -39,11 +39,24 @@ def masks_and_traces(ops, stat_manual, stat_orig):
         aspect=ops.get("aspect_ratio", None),
         diameter=ops["cell_diameter"],
     )
-    cell_masks, manual_neuropil_masks = masks.create_masks(
-        roi_statistics=stat_all, height=ops["frame_height"], width=ops["frame_width"], neuropil=True, ops=ops
+    per_roi_masks = masks.create_masks(
+        roi_statistics=stat_all,
+        height=ops["frame_height"],
+        width=ops["frame_width"],
+        neuropil=True,
+        include_overlap=ops["allow_overlap"],
+        cell_probability_percentile=ops["cell_probability_percentile"],
+        inner_neuropil_border_radius=ops["inner_neuropil_border_radius"],
+        minimum_neuropil_pixels=ops["minimum_neuropil_pixels"],
     )
     manual_stat = stat_all[: len(stat_manual)]
-    manual_cell_masks = cell_masks[: len(stat_manual)]
+
+    # Unpacks per-ROI masks for manual ROIs into the separate formats expected by extract_traces_from_masks.
+    manual_masks = per_roi_masks[: len(stat_manual)]
+    manual_cell_masks = tuple((indices, weights) for indices, weights, _ in manual_masks)
+    manual_neuropil_masks = (
+        tuple(neuropil for _, _, neuropil in manual_masks) if manual_masks[0][2] is not None else None
+    )
     console.echo(message=f"Manual ROI masks: created in {time.time() - t0:.2f} seconds.", level=LogLevel.SUCCESS)
 
     F, Fneu, F_chan2, Fneu_chan2 = extract_traces_from_masks(ops, manual_cell_masks, manual_neuropil_masks)
@@ -73,13 +86,18 @@ def masks_and_traces(ops, stat_manual, stat_orig):
             np.mean(manual_stat[n]["x_pixels"]),
         ]
 
-    dF = preprocess(
+    dF = compute_delta_fluorescence(
         roi_fluorescence=F,
         neuropil_fluorescence=Fneu,
-        ops=ops,
+        neuropil_coefficient=ops["neuropil_coefficient"],
+        baseline_method=ops["baseline"],
+        baseline_window=ops["baseline_window"],
+        baseline_sigma=ops["baseline_sigma"],
+        baseline_percentile=ops["baseline_percentile"],
+        sampling_rate=ops["sampling_rate"],
     )
-    spks = oasis(
-        cell_fluorescence=dF, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["sampling_rate"]
+    spks = apply_oasis_deconvolution(
+        roi_fluorescence=dF, batch_size=ops["batch_size"], time_constant=ops["tau"], sampling_rate=ops["sampling_rate"]
     )
 
     return F, Fneu, F_chan2, Fneu_chan2, spks, ops, manual_stat

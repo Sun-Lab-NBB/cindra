@@ -132,8 +132,8 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     combined_width = int(np.amax(x_offsets + widths))
 
     # Determines channel configuration.
-    has_two_channels = plane_contexts[0].config.main.two_channels
-    second_channel_functional = plane_contexts[0].config.main.second_channel_functional
+    has_two_channels = plane_contexts[0].configuration.main.two_channels
+    second_channel_functional = plane_contexts[0].configuration.main.second_channel_functional
 
     # Initializes 2D NumPy arrays to store the combined images.
     combined_mean_image = np.zeros((combined_height, combined_width), dtype=np.float32)

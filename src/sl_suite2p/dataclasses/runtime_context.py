@@ -24,11 +24,11 @@ class RuntimeContext:
         acquisition parameters (from input data), and runtime data (computed by pipeline). It replaces the legacy ops
         dictionary pattern with a type-safe structure.
 
-        Each RuntimeContext instance represents a single plane (or virtual plane for MROI data). The config and
+        Each RuntimeContext instance represents a single plane (or virtual plane for MROI data). The configuration and
         acquisition fields are shared across all planes, while the runtime field contains plane-specific data.
     """
 
-    config: SingleDayConfiguration
+    configuration: SingleDayConfiguration
     """The user configuration, which remains immutable during processing."""
 
     acquisition: AcquisitionParameters
@@ -41,24 +41,24 @@ class RuntimeContext:
     def save_shared(self) -> None:
         """Saves shared configuration and acquisition parameters to the root output directory.
 
-        This method derives the root path from self.config.file_io.save_path and creates the suite2p subdirectory
+        This method derives the root path from self.configuration.file_io.save_path and creates the suite2p subdirectory
         if it does not exist. It should be called once at pipeline initialization to save the static data shared
         across all planes.
 
         Raises:
             ValueError: If save_path is not configured in the configuration.
         """
-        if self.config.file_io.save_path is None:
+        if self.configuration.file_io.save_path is None:
             message = (
                 "Unable to save shared configuration data. The save_path must be configured in the FileIO section "
                 "of the configuration, but it is currently None."
             )
             console.error(message=message, error=ValueError)
 
-        root_path = self.config.file_io.save_path / "suite2p"
+        root_path = self.configuration.file_io.save_path / "suite2p"
         root_path.mkdir(parents=True, exist_ok=True)
 
-        self.config.save(file_path=root_path / "configuration.yaml")
+        self.configuration.save(file_path=root_path / "configuration.yaml")
         self.acquisition.to_yaml(file_path=root_path / "acquisition_parameters.yaml")
 
     def save_runtime(self) -> None:
@@ -125,7 +125,7 @@ class RuntimeContext:
 
             for plane_directory in plane_directories:
                 runtime = SingleDayRuntimeData.load(output_path=plane_directory)
-                contexts.append(cls(config=config, acquisition=acquisition, runtime=runtime))
+                contexts.append(cls(configuration=config, acquisition=acquisition, runtime=runtime))
 
             return contexts
 
@@ -138,4 +138,4 @@ class RuntimeContext:
             console.error(message=message, error=FileNotFoundError)
 
         runtime = SingleDayRuntimeData.load(output_path=plane_path)
-        return cls(config=config, acquisition=acquisition, runtime=runtime)
+        return cls(configuration=config, acquisition=acquisition, runtime=runtime)
