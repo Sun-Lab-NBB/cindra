@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import numba  # type: ignore[import-untyped]
-from numba import prange
+from numba import njit, prange  # type: ignore[import-untyped]
 import numpy as np
 from scipy.ndimage import gaussian_filter, maximum_filter1d, minimum_filter1d
 from ataraxis_base_utilities import console
@@ -14,12 +13,12 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-@numba.njit(cache=True, parallel=True)
+@njit(cache=True, parallel=True)  # type: ignore[untyped-decorator]
 def _oasis_matrix(
     roi_fluorescence: NDArray[np.float32],
     pool_amplitude: NDArray[np.float32],
     pool_weight: NDArray[np.float32],
-    pool_start_frame: NDArray[np.int64],
+    pool_start_frame: NDArray[np.int32],
     pool_length: NDArray[np.float32],
     spike_trace: NDArray[np.float32],
     time_constant: float,
@@ -60,17 +59,17 @@ def _oasis_matrix(
     # gives the calcium decay factor over n frames.
     decay_constant = -1.0 / (time_constant * sampling_rate)
 
-    for i in prange(roi_fluorescence.shape[0]):
-        trace_length = roi_fluorescence[i].shape[0]
+    for roi_index in prange(roi_fluorescence.shape[0]):
+        trace_length = roi_fluorescence[roi_index].shape[0]
         pool_index = 0
 
         for time_index in range(trace_length):
             # Creates a new single-frame pool for the current time point. Each pool starts with unit weight,
             # unit length, and an amplitude equal to the observed fluorescence value.
-            pool_amplitude[i, pool_index] = roi_fluorescence[i, time_index]
-            pool_weight[i, pool_index] = 1
-            pool_start_frame[i, pool_index] = time_index
-            pool_length[i, pool_index] = 1
+            pool_amplitude[roi_index, pool_index] = roi_fluorescence[roi_index, time_index]
+            pool_weight[roi_index, pool_index] = 1
+            pool_start_frame[roi_index, pool_index] = time_index
+            pool_length[roi_index, pool_index] = 1
 
             # Walks backward through pools to enforce the non-negativity constraint on spikes. If a previous
             # pool's value, decayed forward to the current pool's start, exceeds the current pool's amplitude,
@@ -83,24 +82,28 @@ def _oasis_matrix(
 
                 # Computes the decay factor once and reuses it for the condition check, the weighted average
                 # update, and the squared decay term (via multiplication instead of a third exp() call).
-                previous_pool_decay = np.exp(decay_constant * pool_length[i, current_index - 1])
-                predicted = pool_amplitude[i, current_index - 1] * previous_pool_decay
-                if predicted <= pool_amplitude[i, current_index]:
+                previous_pool_decay = np.exp(decay_constant * pool_length[roi_index, current_index - 1])
+                predicted = pool_amplitude[roi_index, current_index - 1] * previous_pool_decay
+                if predicted <= pool_amplitude[roi_index, current_index]:
                     break
 
                 # Merges the current pool into the previous one using weighted least squares. The new weight
                 # accumulates the squared-decay contribution from the current pool, and the merged amplitude is
                 # recomputed as the weighted average of both pools' contributions.
                 decay_squared = previous_pool_decay * previous_pool_decay
-                new_pool_weight = pool_weight[i, current_index - 1] + pool_weight[i, current_index] * decay_squared
+                new_pool_weight = (
+                    pool_weight[roi_index, current_index - 1] + pool_weight[roi_index, current_index] * decay_squared
+                )
 
-                pool_amplitude[i, current_index - 1] = (
-                    pool_amplitude[i, current_index - 1] * pool_weight[i, current_index - 1]
-                    + pool_amplitude[i, current_index] * pool_weight[i, current_index] * previous_pool_decay
+                pool_amplitude[roi_index, current_index - 1] = (
+                    pool_amplitude[roi_index, current_index - 1] * pool_weight[roi_index, current_index - 1]
+                    + pool_amplitude[roi_index, current_index]
+                    * pool_weight[roi_index, current_index]
+                    * previous_pool_decay
                 ) / new_pool_weight
 
-                pool_weight[i, current_index - 1] = new_pool_weight
-                pool_length[i, current_index - 1] += pool_length[i, current_index]
+                pool_weight[roi_index, current_index - 1] = new_pool_weight
+                pool_length[roi_index, current_index - 1] += pool_length[roi_index, current_index]
                 current_index -= 1
 
             pool_index = current_index + 1
@@ -108,9 +111,9 @@ def _oasis_matrix(
         # Extracts spike amplitudes as the discontinuity between each consecutive pair of pools. The spike at a
         # pool boundary equals the current pool's amplitude minus the previous pool's value decayed to that point.
         for pool in range(1, pool_index):
-            spike_trace[i, pool_start_frame[i, pool]] = pool_amplitude[i, pool] - pool_amplitude[i, pool - 1] * np.exp(
-                decay_constant * pool_length[i, pool - 1]
-            )
+            spike_trace[roi_index, pool_start_frame[roi_index, pool]] = pool_amplitude[
+                roi_index, pool
+            ] - pool_amplitude[roi_index, pool - 1] * np.exp(decay_constant * pool_length[roi_index, pool - 1])
 
 
 def apply_oasis_deconvolution(
@@ -147,7 +150,7 @@ def apply_oasis_deconvolution(
         batch_count = end_index - start_index
         pool_amplitude = np.zeros((batch_count, frame_count), dtype=np.float32)
         pool_weight = np.zeros((batch_count, frame_count), dtype=np.float32)
-        pool_start_frame = np.zeros((batch_count, frame_count), dtype=np.int64)
+        pool_start_frame = np.zeros((batch_count, frame_count), dtype=np.int32)
         pool_length = np.zeros((batch_count, frame_count), dtype=np.float32)
 
         # Runs the OASIS algorithm that modifies spike_traces in-place.
@@ -200,19 +203,20 @@ def compute_delta_fluorescence(
     Returns:
         The neuropil-and-baseline-corrected delta fluorescence traces with shape (roi_count, frame_count).
     """
-    # Subtracts the scaled neuropil fluorescence from the ROI fluorescence.
-    subtracted = roi_fluorescence - neuropil_coefficient * neuropil_fluorescence
+    # Subtracts the scaled neuropil fluorescence from the ROI fluorescence. Casts the coefficient to float32 to
+    # prevent Python's native float64 from promoting the entire computation chain to double precision.
+    subtracted = roi_fluorescence - np.float32(neuropil_coefficient) * neuropil_fluorescence
 
     # Converts the baseline window from seconds to frames using the acquisition sampling rate.
     window_frames = int(baseline_window * sampling_rate)
 
     # Uses the requested method to calculate the baseline for the neuropil-subtracted fluorescence traces.
     if baseline_method == "maximin":
-        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_sigma])
+        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_sigma]).astype(np.float32)
         baseline = minimum_filter1d(input=baseline, size=window_frames, axis=1)
         baseline = maximum_filter1d(input=baseline, size=window_frames, axis=1)
     elif baseline_method == "constant":
-        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_sigma])
+        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_sigma]).astype(np.float32)
         baseline = np.amin(a=baseline)
     elif baseline_method == "constant_percentile":
         baseline = np.percentile(a=subtracted, q=baseline_percentile, axis=1, keepdims=True)
