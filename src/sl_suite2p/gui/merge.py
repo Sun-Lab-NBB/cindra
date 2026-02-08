@@ -10,7 +10,7 @@ from qtpy.QtWidgets import QLabel, QDialog, QWidget, QLineEdit, QGridLayout, QMe
 from ataraxis_base_utilities import LogLevel, console
 
 from . import io, masks, utils
-from ..extraction.deconvolve import oasis
+from ..extraction.deconvolve import apply_oasis_deconvolution
 from ..detection.roi_statistics import compute_roi_statistics, compute_median_pixel_position
 
 
@@ -131,8 +131,8 @@ def merge_activity_masks(parent):
     stat0["skewness"] = stats.skew(dF)
     stat0["standard_deviation"] = dF.std()
 
-    spks = oasis(
-        cell_fluorescence=dF[np.newaxis, :],
+    spks = apply_oasis_deconvolution(
+        roi_fluorescence=dF[np.newaxis, :],
         batch_size=parent.ops["batch_size"],
         time_constant=parent.ops["tau"],
         sampling_rate=parent.ops["sampling_rate"],

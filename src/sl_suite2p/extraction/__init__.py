@@ -2,4 +2,4 @@
 
 from .masks import create_masks
 from .extract import extract_traces, extraction_wrapper, extract_traces_from_masks
-from .deconvolve import oasis, preprocess
+from .deconvolve import apply_oasis_deconvolution, compute_delta_fluorescence

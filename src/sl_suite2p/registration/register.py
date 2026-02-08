@@ -546,7 +546,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
         context: The RuntimeContext containing configuration, acquisition parameters, and runtime data.
     """
     # Extracts configuration parameters.
-    config = context.config
+    config = context.configuration
     align_by_first_channel = config.registration.align_by_first_channel
     one_photon_enabled = config.one_photon_registration.enabled
     pre_smoothing_sigma = config.one_photon_registration.pre_smoothing_sigma
@@ -807,7 +807,7 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
         context: The RuntimeContext containing configuration, acquisition parameters, and runtime data.
     """
     # Extracts configuration parameters.
-    config = context.config
+    config = context.configuration
     align_by_first_channel = config.registration.align_by_first_channel
     nonrigid_enabled = config.non_rigid_registration.enabled
     block_size_config = config.non_rigid_registration.block_size
@@ -947,14 +947,14 @@ def register_plane(context: RuntimeContext) -> None:
     If two-step registration is enabled, a refinement pass is performed using the mean of registered frames as the
     reference.
 
-    All configuration is read from context.config, file paths from context.runtime.io, and results are stored in
+    All configuration is read from context.configuration, file paths from context.runtime.io, and results are stored in
     context.runtime.registration, context.runtime.detection, and context.runtime.timing.
 
     Args:
         context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
             in-place to store registration outputs including reference image, offsets, mean images, and timing data.
     """
-    config = context.config
+    config = context.configuration
     io_data = context.runtime.io
     registration_data = context.runtime.registration
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
