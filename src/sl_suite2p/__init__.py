@@ -37,7 +37,7 @@ from .multi_day import (
     discover_multiday_cells,
     extract_multiday_fluorescence,
 )
-from .single_day import run_s2p, process_plane, combine_planes, resolve_processing_contexts
+from .single_day import process_plane, save_combined_data, run_single_day_pipeline, resolve_processing_contexts
 from .dataclasses import CombinedData, RuntimeContext, MultiDayConfiguration, SingleDayConfiguration
 
 # Ensures console output is enabled whenever the suite2p library is imported. In sl-suite2p, the 'Console' class is
@@ -53,7 +53,6 @@ __all__ = [
     "RuntimeContext",
     "SingleDayConfiguration",
     "SingleDayJobNames",
-    "combine_planes",
     "discover_multiday_cells",
     "extract_multiday_fluorescence",
     "get_session_root",
@@ -62,7 +61,8 @@ __all__ = [
     "process_single_day",
     "resolve_multiday_ops",
     "resolve_processing_contexts",
-    "run_s2p",
     "run_s2p_multiday",
+    "run_single_day_pipeline",
+    "save_combined_data",
     "show_images_with_masks",
 ]

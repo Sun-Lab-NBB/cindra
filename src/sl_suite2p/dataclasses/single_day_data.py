@@ -100,6 +100,10 @@ class IOData:
     frame_count: int = 0
     """The total number of frames written to the binary file during binarization."""
 
+    sampling_rate: float = 0.0
+    """The per-plane sampling rate in Hertz, derived from the acquisition frame rate divided by the number of
+    imaging planes. This value is computed during binarization from the AcquisitionParameters."""
+
     registered_binary_path: Path | None = None
     """The absolute path to the motion-corrected binary file for the primary imaging channel."""
 
