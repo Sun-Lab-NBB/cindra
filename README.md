@@ -44,6 +44,9 @@ For the original suite2p API and, importantly, algorithm documentation, see the 
 All original multi-day pipeline code rights belong to the original authors of the 
 [OSM Manuscript](https://www.nature.com/articles/s41586-024-08548-w).
 
+Multi-day registration code (diffeomorphic.py, deformation.py, spline_grid.py, pyramid.py): 
+Original pirt library Copyright 2010-2017 Almar Klein, University of Twente.
+
 All enhancements introduced in this library belong to the original authors and fall under the following copyright 
 notice:
 **Copyright © 2025 Cornell University, Authored by Ivan Kondratyev, Kushaan Gupta, and Elaine Wu.**

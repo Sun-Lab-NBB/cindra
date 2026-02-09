@@ -419,7 +419,7 @@ def compute_nonrigid_reference_data(
 
         # Combines the global and block-level taper masks.
         taper_mask[block_index] *= global_taper[y_range[0] : y_range[1], x_range[0] : x_range[1]]
-        mean_offset[block_index] = reference_block.mean() * (1.0 - taper_mask[block_index])
+        mean_offset[block_index] = reference_block.mean() * (np.float32(1.0) - taper_mask[block_index])
 
         # Computes the phase-normalized FFT kernel with Gaussian smoothing.
         block_fft = np.conj(rfft2(reference_block))

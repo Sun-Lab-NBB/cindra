@@ -1,4 +1,4 @@
-"""Provides tools for exporting multiplane data processed by a Suite2p single-day pipeline as a unified dataset."""
+"""Provides tools for exporting multiplane data processed by the single-day pipeline as a unified dataset."""
 
 from __future__ import annotations
 
@@ -131,9 +131,12 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     combined_height = int(np.amax(y_offsets + heights))
     combined_width = int(np.amax(x_offsets + widths))
 
-    # Determines channel configuration.
+    # Determines channel configuration. The channel_2_data.bin binary only contains independently detectable functional
+    # data when both hardware channels are functional. When only the second hardware channel is functional, the import
+    # layer swaps it into channel_1_data.bin, leaving channel_2_data.bin with non-functional data.
     has_two_channels = plane_contexts[0].configuration.main.two_channels
-    second_channel_functional = plane_contexts[0].configuration.main.second_channel_functional
+    main_config = plane_contexts[0].configuration.main
+    second_channel_functional = main_config.first_channel_functional and main_config.second_channel_functional
 
     # Initializes 2D NumPy arrays to store the combined images.
     combined_mean_image = np.zeros((combined_height, combined_width), dtype=np.float32)
@@ -196,8 +199,8 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         y_end = y_offsets[plane_index] + heights[plane_index]
         x_start = x_offsets[plane_index]
         x_end = x_offsets[plane_index] + widths[plane_index]
-        y_range = np.arange(y_start, y_end)
-        x_range = np.arange(x_start, x_end)
+        y_range = np.arange(y_start, y_end, dtype=np.int32)
+        x_range = np.arange(x_start, x_end, dtype=np.int32)
 
         # Updates combined images with this plane's data.
         if context.runtime.detection.mean_image is not None:
@@ -222,8 +225,12 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         # Updates correlation map using valid pixel range.
         valid_y_start, valid_y_end = context.runtime.registration.valid_y_range
         valid_x_start, valid_x_end = context.runtime.registration.valid_x_range
-        corr_y_range = np.arange(y_offsets[plane_index] + valid_y_start, y_offsets[plane_index] + valid_y_end)
-        corr_x_range = np.arange(x_offsets[plane_index] + valid_x_start, x_offsets[plane_index] + valid_x_end)
+        corr_y_range = np.arange(
+            y_offsets[plane_index] + valid_y_start, y_offsets[plane_index] + valid_y_end, dtype=np.int32,
+        )
+        corr_x_range = np.arange(
+            x_offsets[plane_index] + valid_x_start, x_offsets[plane_index] + valid_x_end, dtype=np.int32,
+        )
         if context.runtime.detection.correlation_map is not None:
             combined_correlation_map[np.ix_(corr_y_range, corr_x_range)] = context.runtime.detection.correlation_map
         if (

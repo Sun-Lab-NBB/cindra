@@ -164,6 +164,9 @@ def _initialize_plane_contexts(
     # Determines whether the recording uses two channels.
     has_two_channels = acquisition.channel_number > 1
 
+    # Derives the per-plane sampling rate from the acquisition frame rate and the number of physical planes.
+    sampling_rate = acquisition.frame_rate / acquisition.plane_number
+
     # Initializes the list to store RuntimeContext instances for each plane.
     contexts: list[RuntimeContext] = []
 
@@ -180,6 +183,7 @@ def _initialize_plane_contexts(
             output_directory=plane_output_path,
             registered_binary_path=plane_output_path / "channel_1_data.bin",
             plane_index=virtual_plane_index,
+            sampling_rate=sampling_rate,
         )
 
         # Configures second channel binary paths if using two channels.
@@ -474,6 +478,11 @@ def convert_tiffs_to_binary(config: SingleDayConfiguration) -> list[RuntimeConte
     frame_counts: list[int] = [0] * len(contexts)
     write_indices: list[int] = [0] * len(contexts)
 
+    # Tracks the position within the plane/channel interleave cycle across file boundaries. When a TIFF file ends
+    # mid-cycle, the next file must continue from the correct interleave position rather than resetting to zero.
+    interleave_stride: int = plane_number * channel_number
+    interleave_offset: int = 0
+
     # Processes each TIFF file.
     for tiff_file in tiff_files:
         tiff, _ = _open_tiff(tiff_file)
@@ -499,14 +508,11 @@ def convert_tiffs_to_binary(config: SingleDayConfiguration) -> list[RuntimeConte
                     physical_plane_index = context_index % plane_number
                     roi_lines = []
 
-                # Generates frame indices for this plane's functional channel.
-                frame_indices = list(
-                    range(
-                        physical_plane_index * channel_number + functional_channel_index,
-                        frame_count,
-                        plane_number * channel_number,
-                    )
-                )
+                # Generates frame indices for this plane's functional channel, accounting for the interleave
+                # offset from previous files.
+                target_position = physical_plane_index * channel_number + functional_channel_index
+                first_frame_index = (target_position - interleave_offset) % interleave_stride
+                frame_indices = list(range(first_frame_index, frame_count, interleave_stride))
 
                 if not frame_indices:
                     continue
@@ -537,12 +543,10 @@ def convert_tiffs_to_binary(config: SingleDayConfiguration) -> list[RuntimeConte
                 # Processes channel 2 if applicable.
                 if channel_number > 1:
                     second_channel_index = 1 - functional_channel_index
+                    target_position_channel_2 = physical_plane_index * channel_number + second_channel_index
+                    first_frame_index_channel_2 = (target_position_channel_2 - interleave_offset) % interleave_stride
                     channel_2_frame_indices = list(
-                        range(
-                            physical_plane_index * channel_number + second_channel_index,
-                            frame_count,
-                            plane_number * channel_number,
-                        )
+                        range(first_frame_index_channel_2, frame_count, interleave_stride)
                     )
 
                     if channel_2_frame_indices:
@@ -568,6 +572,9 @@ def convert_tiffs_to_binary(config: SingleDayConfiguration) -> list[RuntimeConte
                         mean_images_channel_2[context_index] += channel_2_frames.sum(axis=0, dtype=np.float32)
 
             start_index += frame_count
+
+        # Updates the interleave offset for the next file based on the total frames in this file.
+        interleave_offset = (interleave_offset + start_index) % interleave_stride
 
         gc.collect()
 

@@ -1,4 +1,4 @@
-"""Provides ROI classification functionality for distinguishing cells from artifacts."""
+"""Provides classification algorithms for distinguishing cells from artifacts."""
 
 from .classify import Classifier, classify
 

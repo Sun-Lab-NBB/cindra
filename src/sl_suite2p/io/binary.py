@@ -14,9 +14,6 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-# Number of bytes used to store each int16 pixel value.
-_BYTES_PER_INT16: int = 2
-
 # Maximum value that can be stored in a signed 16-bit integer, minus a small buffer.
 _INT16_MAX_VALUE: int = 2**15 - 2
 
@@ -37,30 +34,49 @@ class BinaryFile:
         frame_number: The total number of frames in the file.
         dtype: The data type to use for pixel values stored inside the file, specified as a NumPy datatype
             string (e.g.: "int16").
+        read_only: Determines whether to open an existing file in read-only mode. When enabled, the file is
+            memory-mapped without write access and __setitem__ raises a PermissionError.
 
     Attributes:
         height: Stores the height of each frame stored inside the file.
         width: Stores the width of each frame stored inside the file.
         file_path: Stores the absolute path to the file managed by this instance.
         dtype: Stores the name of the datatype used by the file values.
+        _read_only: Stores whether the file was opened in read-only mode.
         file: Stores the NumPy array instance used to memory-map the contents of the binary file.
 
     Raises:
         ValueError: If the number of frames is not provided when creating (writing) a new BinaryFile
-            instance.
+            instance, or if read-only mode is requested for a file that does not exist.
+        PermissionError: If __setitem__ is called on a file opened in read-only mode.
     """
 
     def __init__(
-        self, height: int, width: int, file_path: str | Path, frame_number: int = 0, dtype: str = "int16"
+        self,
+        height: int,
+        width: int,
+        file_path: str | Path,
+        frame_number: int = 0,
+        dtype: str = "int16",
+        read_only: bool = False,
     ) -> None:
         # Initializes class attributes using input arguments.
         self.height: int = height
         self.width: int = width
         self.file_path: Path = Path(file_path)
         self.dtype: str = dtype
+        self._read_only: bool = read_only
 
         # Checks if the file exists, sets to True if it needs to be written, False if it exists.
         write = not self.file_path.exists()
+
+        # Prevents opening a non-existent file in read-only mode.
+        if write and read_only:
+            message = (
+                f"Unable to open the BinaryFile {file_path} in read-only mode, as the file does not exist. "
+                f"Read-only mode is only supported for existing files."
+            )
+            console.error(message=message, error=ValueError)
 
         # If the file does not exist and the number of frames is not provided, raises a ValueError.
         if write and frame_number == 0:
@@ -78,9 +94,14 @@ class BinaryFile:
         # Determines the shape of the file using the default order of frames x height x width used by suite2p.
         shape = (frame_number, self.height, self.width)
 
-        # Resolves the memory-mapping mode used to initialize the memory-mapped NumPy array for the file's data.
-        # If the file does not exist, sets the mode to 'w+'. Otherwise, sets the mode to 'r+'.
-        mode = "w+" if write else "r+"
+        # Resolves the memory-mapping mode. For new files, uses 'w+'. For existing files, uses 'r' if read-only
+        # or 'r+' for read-write access.
+        if write:
+            mode = "w+"
+        elif read_only:
+            mode = "r"
+        else:
+            mode = "r+"
 
         # Creates a memory-mapped NumPy array to access and interface with the contents of the binary file.
         self.file: np.memmap[Any, np.dtype[np.int16]] = np.memmap(  # type: ignore[call-overload]
@@ -124,7 +145,7 @@ class BinaryFile:
     @property
     def bytes_per_frame(self) -> int:
         """Returns the memory size, in bytes, reserved by each frame stored inside the file."""
-        return int(_BYTES_PER_INT16 * self.height * self.width)
+        return int(np.dtype(self.dtype).itemsize * self.height * self.width)
 
     @property
     def byte_number(self) -> int:
@@ -178,7 +199,17 @@ class BinaryFile:
         Args:
             indices: A slice, integer, or iterable that specifies the indices at which to write the data.
             data: The data to be written to the specified indices.
+
+        Raises:
+            PermissionError: If the file was opened in read-only mode.
         """
+        # Prevents writes to read-only files.
+        if self._read_only:
+            message = (
+                f"Unable to write data to the BinaryFile {self.file_path}. The file was opened in read-only mode."
+            )
+            console.error(message=message, error=PermissionError)
+
         # Checks and converts data type to int16, if needed. Clips values to the maximum representable int16 value.
         if data.dtype != "int16":
             data = np.minimum(data, _INT16_MAX_VALUE).astype("int16")
@@ -231,7 +262,7 @@ class BinaryFile:
         actual_samples = min(sample_count, self.frame_number)
 
         # Computes evenly-spaced indices across the recording.
-        indices = np.linspace(0, self.frame_number - 1, actual_samples).astype(np.int64)
+        indices = np.linspace(0, self.frame_number - 1, actual_samples).astype(np.intp)
 
         # Reads the subsampled frames.
         movie = self.file[indices]
@@ -281,7 +312,7 @@ class BinaryFile:
 
         # Resolves the batch size. It is capped either to the total number of good frames or the default maximum batch
         # size, whichever is smaller.
-        batch_size = min(int(np.sum(good_frames.astype(int))), _DEFAULT_BIN_BATCH_SIZE)
+        batch_size = min(int(np.sum(good_frames)), _DEFAULT_BIN_BATCH_SIZE)
 
         # Bins the frames in batches to reduce memory consumption
         batches: list[NDArray[np.float32]] = []  # Stores frames of each batch
@@ -320,7 +351,7 @@ class BinaryFile:
                 batches.append(data.astype(np.float32).mean(axis=0))
 
         # Stacks and returns the batches as a single NumPy array representing the binned movie.
-        return np.stack(batches).astype(np.float32)
+        return np.stack(batches)
 
     def write_tiff(
         self,

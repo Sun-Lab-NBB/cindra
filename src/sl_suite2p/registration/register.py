@@ -23,7 +23,6 @@ from .utils import (
     combine_rigid_offsets,
     apply_spatial_high_pass,
     apply_spatial_smoothing,
-    apply_temporal_smoothing,
     combine_nonrigid_offsets,
 )
 from .metrics import compute_pc_metrics
@@ -134,9 +133,10 @@ def _compute_crop(
     # This extracts a smooth baseline trend from the offset time series.
     filter_window = min((len(y_offsets) // 2) * 2 - 1, 101)
 
-    # Subtracts baseline to isolate high-frequency deviations (sudden jumps indicate bad frames).
-    delta_x = x_offsets - medfilt(x_offsets, kernel_size=filter_window)
-    delta_y = y_offsets - medfilt(y_offsets, kernel_size=filter_window)
+    # Subtracts baseline to isolate high-frequency deviations (sudden jumps indicate bad frames). Casts the medfilt
+    # output to float32 to prevent float64 promotion of the entire downstream chain.
+    delta_x = x_offsets - medfilt(x_offsets, kernel_size=filter_window).astype(np.float32)
+    delta_y = y_offsets - medfilt(y_offsets, kernel_size=filter_window).astype(np.float32)
 
     # Computes offset magnitude normalized by mean offset. If mean is 0 (no motion), delta_xy stays as zeros.
     delta_xy = np.hypot(delta_x, delta_y)
@@ -145,7 +145,7 @@ def _compute_crop(
         delta_xy = delta_xy / delta_xy_mean
 
     # Normalizes phase correlation relative to local median to detect quality drops.
-    correlation_normalized = correlations / medfilt(correlations, kernel_size=filter_window)
+    correlation_normalized = correlations / medfilt(correlations, kernel_size=filter_window).astype(np.float32)
 
     # Combines deviation and correlation metrics: bad frames have large shifts AND/OR poor correlation.
     outlier_metric = delta_xy / np.maximum(0, correlation_normalized)
@@ -298,10 +298,10 @@ def _compute_reference(
         for frame, y_shift, x_shift in zip(frames, y_shifts, x_shifts, strict=False):
             frame[:] = shift_frame(frame=frame, y_shift=y_shift, x_shift=x_shift)
 
-        # Selects top-correlated frames for next reference (excluding index 0 which is the reference itself).
+        # Selects top-correlated frames for next reference.
         # Number of frames increases each iteration: ~6% at iter 0, ~31% at iter 4, ~50% at iter 7.
         num_frames_for_reference = max(2, int(frames.shape[0] * (1.0 + iteration) / (2 * num_iterations)))
-        sorted_indices = np.argsort(-correlations)[1:num_frames_for_reference]
+        sorted_indices = np.argsort(-correlations)[:num_frames_for_reference]
 
         # Updates reference as the mean of the best-aligned frames. Input frames are float32, mean preserves dtype.
         reference_image = frames[sorted_indices].mean(axis=0)
@@ -363,12 +363,9 @@ def _register_frames_batch(
     if bidirectional_phase_offset != 0:
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=bidirectional_phase_offset)
 
-    # Creates a smoothed copy for correlation computation; original frames are shifted separately. Temporal smoothing
-    # returns a new array, so we skip the explicit copy when it's applied.
-    if temporal_smoothing_sigma > 0:
-        frames_smooth = apply_temporal_smoothing(frames=frames, sigma=temporal_smoothing_sigma)
-    else:
-        frames_smooth = frames.copy()
+    # Creates a working copy for correlation computation; original frames are shifted separately. Temporal smoothing
+    # is only applied to the correlation maps inside compute_rigid_shifts, not to the raw frames here.
+    frames_smooth = frames.copy()
 
     # Applies one-photon preprocessing: spatial smoothing followed by high-pass filtering.
     if one_photon_enabled:
@@ -1086,6 +1083,10 @@ def register_plane(context: RuntimeContext) -> None:
     registration_data.valid_x_range = valid_x_range
     registration_data.bad_frames = computed_bad_frames
 
+    # Persists registration results to disk before the optional metrics computation step, so that registration offsets
+    # and valid ranges are not lost if the metrics computation fails.
+    context.save_runtime()
+
     # Computes registration quality metrics if enabled and recording has enough frames.
     num_principal_components = config.registration.registration_metric_principal_components
     if num_principal_components > 0 and num_frames >= _MINIMUM_REGISTRATION_METRIC_FRAMES:
@@ -1106,3 +1107,6 @@ def register_plane(context: RuntimeContext) -> None:
             ),
             level=LogLevel.INFO,
         )
+
+    # Persists the final registration state (including metrics if computed) to disk.
+    context.save_runtime()

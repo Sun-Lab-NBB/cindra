@@ -113,6 +113,10 @@ def compute_intensity_colocalization(
     frame_height: int,
     frame_width: int,
     colocalization_threshold: float,
+    allow_overlap: bool,
+    cell_probability_percentile: int,
+    inner_neuropil_border_radius: int,
+    minimum_neuropil_pixels: int,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     """Computes the intensity colocalization between the functional channel's ROIs and the structural channel.
 
@@ -137,6 +141,12 @@ def compute_intensity_colocalization(
         frame_width: The width of the imaging field in pixels.
         colocalization_threshold: The minimum probability for classifying an ROI as colocalized. For intensity-based
             colocalization, this represents the inside-to-total intensity ratio threshold.
+        allow_overlap: Determines whether to include overlapping ROI pixels in the created masks.
+        cell_probability_percentile: The percentile threshold for classifying pixels as belonging to a cell versus
+            neuropil.
+        inner_neuropil_border_radius: The width, in pixels, of the exclusion zone between the cell ROI and its
+            neuropil mask.
+        minimum_neuropil_pixels: The minimum number of pixels required for each neuropil mask.
 
     Returns:
         A tuple of two arrays. The first array has shape (n_rois, 2) where column 0 contains boolean
@@ -155,13 +165,17 @@ def compute_intensity_colocalization(
         structural_mean_image=structural_mean_image.copy(),
     )
 
-    # Creates cell and neuropil masks from the ROI statistics.
+    # Creates cell and neuropil masks from the ROI statistics. Neuropil masks are always required for intensity
+    # colocalization since the algorithm compares inside-ROI vs. neuropil-region intensity.
     per_roi_masks = create_masks(
         roi_statistics=rois,
         height=frame_height,
         width=frame_width,
         neuropil=True,
-        include_overlap=True,
+        include_overlap=allow_overlap,
+        cell_probability_percentile=cell_probability_percentile,
+        inner_neuropil_border_radius=inner_neuropil_border_radius,
+        minimum_neuropil_pixels=minimum_neuropil_pixels,
     )
 
     # Computes per-ROI weighted intensity inside each cell and mean intensity in the neuropil
