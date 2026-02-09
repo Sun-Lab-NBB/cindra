@@ -140,9 +140,7 @@ def _execute_single_day_job(
             resolve_processing_contexts(config)
 
         elif f"_{SingleDayJobNames.PROCESS}_plane_" in job_name:
-            # PROCESS still uses legacy ops_path pattern - requires refactoring.
-            ops_path = config.file_io.save_path / "suite2p" / "ops.npy"
-            process_plane(ops_path=ops_path, plane_index=int(job_name.split("_plane_")[1]))
+            process_plane(configuration=config, plane_index=int(job_name.split("_plane_")[1]))
 
         elif job_name.endswith(SingleDayJobNames.COMBINE):
             # Load contexts from disk and combines all processed planes into a dataset.
@@ -222,7 +220,7 @@ def process_single_day(
         console.error(message=message, error=FileNotFoundError)
 
     # Overrides the 'workers' and 'progress_bars' parameters with the provided values.
-    config.main.progress_bars = progress_bars
+    config.main.display_progress_bars = progress_bars
     config.main.parallel_workers = workers
 
     # Instantiates the SessionData instance for the processed session.
@@ -523,7 +521,7 @@ def process_multi_day(
         console.error(message=message, error=ValueError)
 
     # Overrides the 'workers' and 'progress_bars' parameters with the provided values.
-    config.main.progress_bars = progress_bars
+    config.main.display_progress_bars = progress_bars
     config.main.parallel_workers = workers
 
     console.echo(f"Processing {len(config.io.session_directories)} sessions for dataset '{config.io.dataset_name}'...")

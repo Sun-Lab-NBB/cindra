@@ -111,6 +111,7 @@ def _apply_preclassification(
     frame_width: int,
     preclassification_threshold: float,
     crop_to_soma: bool,
+    custom_classifier_path: Path | None,
     plane_index: int,
     channel_label: str,
 ) -> list[ROIStatistics]:
@@ -128,6 +129,7 @@ def _apply_preclassification(
         frame_width: The width of the frame that contains the processed ROIs, in pixels.
         preclassification_threshold: The minimum classifier probability for an ROI to be kept.
         crop_to_soma: Determines whether to crop dendritic regions before computing classification features.
+        custom_classifier_path: The path to a custom classifier file, or None to use the built-in classifier.
         plane_index: The index of the imaging plane being processed, used for logging.
         channel_label: The channel identifier string used in log messages (e.g., "channel 1" or "channel 2").
 
@@ -144,7 +146,11 @@ def _apply_preclassification(
         lightweight=True,
     )
 
-    is_cell = classify(roi_statistics=roi_statistics, preclassification=True)
+    is_cell = classify(
+        roi_statistics=roi_statistics,
+        custom_classifier_path=custom_classifier_path,
+        preclassification=True,
+    )
 
     # Vectorizes the threshold comparison in numpy, then filters with C-level itertools.compress.
     pass_mask = is_cell[:, 1] > preclassification_threshold
@@ -172,6 +178,7 @@ def _detect_channel(
     detection_config: ROIDetection,
     nonrigid_block_size: list[int],
     parallel_workers: int,
+    custom_classifier_path: Path | None,
     plane_index: int,
     channel_label: str,
 ) -> tuple[
@@ -199,6 +206,7 @@ def _detect_channel(
             block dimensions.
         parallel_workers: The number of parallel threads for PCA denoising. Values of -1 or 0 use all available cores.
             A value of 1 disables parallelism.
+        custom_classifier_path: The path to a custom classifier file, or None to use the built-in classifier.
         plane_index: The index of the imaging plane being processed, used for logging.
         channel_label: The channel identifier string used in log messages (e.g., "channel 1" or "channel 2").
 
@@ -308,6 +316,7 @@ def _detect_channel(
             frame_width=frame_width,
             preclassification_threshold=detection_config.preclassification_threshold,
             crop_to_soma=detection_config.crop_to_soma,
+            custom_classifier_path=custom_classifier_path,
             plane_index=plane_index,
             channel_label=channel_label,
         )
@@ -356,6 +365,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
     detection_config = context.configuration.roi_detection
     main_config = context.configuration.main
     nonrigid_block_size = context.configuration.non_rigid_registration.block_size
+    custom_classifier_path = main_config.custom_classifier_path
 
     # Extracts runtime data.
     io_data = context.runtime.io
@@ -372,7 +382,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
         max(
             1,
             io_data.frame_count // detection_config.maximum_binned_frames,
-            np.round(main_config.tau * main_config.sampling_rate),
+            np.round(main_config.tau * io_data.sampling_rate),
         )
     )
 
@@ -403,6 +413,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
             detection_config=detection_config,
             nonrigid_block_size=nonrigid_block_size,
             parallel_workers=parallel_workers,
+            custom_classifier_path=custom_classifier_path,
             plane_index=plane_index,
             channel_label="channel 1",
         )
@@ -453,6 +464,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
             detection_config=detection_config,
             nonrigid_block_size=nonrigid_block_size,
             parallel_workers=parallel_workers,
+            custom_classifier_path=custom_classifier_path,
             plane_index=plane_index,
             channel_label="channel 2",
         )

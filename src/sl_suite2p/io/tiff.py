@@ -164,6 +164,9 @@ def _initialize_plane_contexts(
     # Determines whether the recording uses two channels.
     has_two_channels = acquisition.channel_number > 1
 
+    # Derives the per-plane sampling rate from the acquisition frame rate and the number of physical planes.
+    sampling_rate = acquisition.frame_rate / acquisition.plane_number
+
     # Initializes the list to store RuntimeContext instances for each plane.
     contexts: list[RuntimeContext] = []
 
@@ -180,6 +183,7 @@ def _initialize_plane_contexts(
             output_directory=plane_output_path,
             registered_binary_path=plane_output_path / "channel_1_data.bin",
             plane_index=virtual_plane_index,
+            sampling_rate=sampling_rate,
         )
 
         # Configures second channel binary paths if using two channels.
