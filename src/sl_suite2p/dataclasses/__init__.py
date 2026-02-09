@@ -1,8 +1,12 @@
 """Provides configuration and runtime data classes for the single-day and multi-day sl-suite2p pipelines."""
 
 from .version import version, python_version
-from .multi_day_data import Session, MultiDayData, MultiDayTimingData
-from .runtime_context import RuntimeContext
+from .multi_day_data import (
+    MultiDayIOData,
+    MultiDayTimingData,
+    MultiDayRuntimeData,
+    MultiDayRegistrationData,
+)
 from .single_day_data import (
     IOData,
     TimingData,
@@ -13,6 +17,7 @@ from .single_day_data import (
     RegistrationData,
     SingleDayRuntimeData,
 )
+from .runtime_contexts import RuntimeContext, MultiDayRuntimeContext
 from .multi_day_configuration import MultiDayConfiguration
 from .single_day_configuration import (
     Main,
@@ -20,6 +25,7 @@ from .single_day_configuration import (
     ROIDetection,
     Registration,
     BaselineMethod,
+    RuntimeSettings,
     SignalExtraction,
     SpikeDeconvolution,
     NonRigidRegistration,
@@ -38,7 +44,10 @@ __all__ = [
     "IOData",
     "Main",
     "MultiDayConfiguration",
-    "MultiDayData",
+    "MultiDayIOData",
+    "MultiDayRegistrationData",
+    "MultiDayRuntimeContext",
+    "MultiDayRuntimeData",
     "MultiDayTimingData",
     "NonRigidRegistration",
     "OnePhotonRegistration",
@@ -47,7 +56,7 @@ __all__ = [
     "Registration",
     "RegistrationData",
     "RuntimeContext",
-    "Session",
+    "RuntimeSettings",
     "SignalExtraction",
     "SingleDayConfiguration",
     "SingleDayRuntimeData",

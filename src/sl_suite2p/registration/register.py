@@ -560,8 +560,8 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
     block_size: tuple[int, int] = (block_size_config[0], block_size_config[1])
     signal_to_noise_threshold = config.non_rigid_registration.signal_to_noise_threshold
     maximum_block_shift = config.non_rigid_registration.maximum_block_shift
-    display_progress_bars = config.main.display_progress_bars
-    parallel_workers = config.main.parallel_workers
+    display_progress_bars = config.runtime.display_progress_bars
+    parallel_workers = config.runtime.parallel_workers
     enable_bidiphase_computation = config.registration.compute_bidirectional_phase_offset
     initial_bidirectional_phase_offset = config.registration.bidirectional_phase_offset_override
 
@@ -810,7 +810,7 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
     block_size_config = config.non_rigid_registration.block_size
     block_size: tuple[int, int] = (block_size_config[0], block_size_config[1])
     batch_size = config.registration.batch_size
-    display_progress_bars = config.main.display_progress_bars
+    display_progress_bars = config.runtime.display_progress_bars
 
     # Extracts runtime IO data.
     io_data = context.runtime.io

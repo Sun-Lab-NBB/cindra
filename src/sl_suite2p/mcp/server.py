@@ -542,7 +542,7 @@ def _run_discover_job(config_path: Path, session_paths: list[Path], workers: int
         # Loads ops to get session IDs.
         config = MultiDayConfiguration.from_yaml(file_path=config_path)
         main_session = sorted(session_paths, key=lambda p: p.name)[0]
-        dataset_name = config.io.dataset_name
+        dataset_name = config.session_io.dataset_name
         ops_path = main_session / "multiday" / dataset_name / "ops.npy"
 
         if ops_path.exists():
@@ -676,7 +676,7 @@ def _multi_day_batch_manager() -> None:
     animal_configs: dict[str, tuple[Path, list[Path]]] = {}
     for config_path, session_paths in _multi_day_batch_state.animals:
         config = MultiDayConfiguration.from_yaml(file_path=config_path)
-        animal_key = config.io.dataset_name
+        animal_key = config.session_io.dataset_name
         animal_configs[animal_key] = (config_path, session_paths)
 
     while True:
@@ -1288,7 +1288,7 @@ def start_multiday_batch_processing_tool(
         # Extracts animal key from config.
         try:
             config = MultiDayConfiguration.from_yaml(file_path=config_path)
-            animal_keys.append(config.io.dataset_name)
+            animal_keys.append(config.session_io.dataset_name)
         except Exception as error:
             invalid_configs.append(f"Failed to load config {config_path}: {error}")
             continue
@@ -1377,7 +1377,7 @@ def get_multiday_batch_processing_status_tool() -> dict[str, Any]:
         for config_path, _ in _multi_day_batch_state.animals:
             try:
                 config = MultiDayConfiguration.from_yaml(file_path=config_path)
-                animal_keys_ordered.append(config.io.dataset_name)
+                animal_keys_ordered.append(config.session_io.dataset_name)
             except Exception:
                 continue
 

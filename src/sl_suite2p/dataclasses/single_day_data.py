@@ -1,4 +1,4 @@
-"""Provides runtime data classes for the single-day (within-session) sl-suite2p pipeline."""
+"""Provides runtime data classes for the single-day (within-session) processing pipeline."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def _load_optional_array_field(
 
 @dataclass
 class IOData:
-    """Stores runtime data from the IO/binarization stage."""
+    """Stores the Input / Output runtime data for all stages of the single-day processing pipeline."""
 
     frame_height: int = 0
     """The height of each frame in pixels (Y dimension of the imaging field of view)."""
@@ -329,7 +329,7 @@ class RegistrationData:
 
 @dataclass
 class DetectionData:
-    """Stores runtime data from the detection/extraction stage."""
+    """Stores runtime data from the detection stage."""
 
     cell_diameter: int = 0
     """The estimated cell diameter in pixels, automatically computed from the spatial scale during detection."""
@@ -778,13 +778,7 @@ class ROIStatistics:
 
 @dataclass
 class ExtractionData:
-    """Stores runtime data from the signal extraction and classification stages.
-
-    This dataclass stores ROI statistics, fluorescence traces, deconvolved spikes, and cell classification results.
-    When both channels are functional (independent ROI detection on each channel), channel 2 data is stored in the
-    corresponding _channel_2 fields. The cell_colocalization field stores results indicating whether channel 1 ROIs
-    are also present in channel 2.
-    """
+    """Stores runtime data from the extraction stage."""
 
     # Channel 1 extraction data.
     roi_statistics: list[ROIStatistics] | None = None
@@ -921,7 +915,12 @@ class ExtractionData:
             )
 
     def load_arrays(self, output_path: Path) -> None:
-        """Loads extraction arrays from .npy files and ROI statistics from .npz files into this instance.
+        """Loads ROI statistics from disk.
+
+        This method loads only ROI statistics, which are the only extraction data needed during pipeline processing
+        (specifically for multi-day cell tracking). Fluorescence traces, classification results, and colocalization
+        data are not loaded because they are never needed during pipeline execution and consume significant memory.
+        Use load_results() to load all result arrays when needed for analysis or visualization.
 
         Args:
             output_path: The directory containing the extraction data files.
@@ -931,7 +930,23 @@ class ExtractionData:
         if self.roi_statistics is None and roi_stats_path.exists():
             self.roi_statistics = ROIStatistics.load_list(roi_stats_path)
 
-        # Channel 1 trace arrays.
+        # Channel 2 ROI statistics.
+        roi_stats_channel_2_path = output_path / "roi_statistics_channel_2.npz"
+        if self.roi_statistics_channel_2 is None and roi_stats_channel_2_path.exists():
+            self.roi_statistics_channel_2 = ROIStatistics.load_list(roi_stats_channel_2_path)
+
+    def load_results(self, output_path: Path) -> None:
+        """Loads all extraction result arrays from disk.
+
+        This method loads fluorescence traces, classification results, and colocalization data. These arrays are
+        not loaded by load_arrays() because they are never needed during pipeline processing (they are created
+        and saved but never re-loaded) and they consume significant memory. Call this method when result data
+        is needed for analysis or visualization.
+
+        Args:
+            output_path: The directory containing the result .npy files.
+        """
+        # Channel 1 traces.
         cell_fluorescence_path = output_path / "cell_fluorescence.npy"
         if self.cell_fluorescence is None and cell_fluorescence_path.exists():
             self.cell_fluorescence = np.load(cell_fluorescence_path, allow_pickle=False).astype(np.float32)
@@ -948,16 +963,12 @@ class ExtractionData:
         if self.spikes is None and spikes_path.exists():
             self.spikes = np.load(spikes_path, allow_pickle=False).astype(np.float32)
 
+        # Channel 1 classification.
         cell_classification_path = output_path / "cell_classification.npy"
         if self.cell_classification is None and cell_classification_path.exists():
             self.cell_classification = np.load(cell_classification_path, allow_pickle=False).astype(np.float32)
 
-        # Channel 2 ROI statistics.
-        roi_stats_channel_2_path = output_path / "roi_statistics_channel_2.npz"
-        if self.roi_statistics_channel_2 is None and roi_stats_channel_2_path.exists():
-            self.roi_statistics_channel_2 = ROIStatistics.load_list(roi_stats_channel_2_path)
-
-        # Channel 2 trace arrays.
+        # Channel 2 traces.
         cell_fluorescence_channel_2_path = output_path / "cell_fluorescence_channel_2.npy"
         if self.cell_fluorescence_channel_2 is None and cell_fluorescence_channel_2_path.exists():
             self.cell_fluorescence_channel_2 = np.load(cell_fluorescence_channel_2_path, allow_pickle=False).astype(
@@ -980,6 +991,7 @@ class ExtractionData:
         if self.spikes_channel_2 is None and spikes_channel_2_path.exists():
             self.spikes_channel_2 = np.load(spikes_channel_2_path, allow_pickle=False).astype(np.float32)
 
+        # Channel 2 classification.
         cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
             self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, allow_pickle=False).astype(
@@ -996,6 +1008,155 @@ class ExtractionData:
             self.corrected_structural_mean_image = np.load(
                 corrected_structural_mean_image_path, allow_pickle=False
             ).astype(np.float32)
+
+
+@dataclass
+class TimingData:
+    """Stores pipeline timing and version data.
+
+    All time durations are stored as integers representing seconds.
+    """
+
+    registration_time: int = 0
+    """The registration step time in seconds."""
+
+    two_step_registration_time: int = 0
+    """The second registration step time in seconds."""
+
+    registration_metrics_time: int = 0
+    """The registration metrics computation time in seconds."""
+
+    detection_time: int = 0
+    """The ROI detection time in seconds."""
+
+    extraction_time: int = 0
+    """The fluorescence extraction time in seconds."""
+
+    classification_time: int = 0
+    """The ROI classification time in seconds."""
+
+    deconvolution_time: int = 0
+    """The spike deconvolution time in seconds."""
+
+    detection_time_channel_2: int = 0
+    """The channel 2 ROI detection time in seconds."""
+
+    extraction_time_channel_2: int = 0
+    """The channel 2 fluorescence extraction time in seconds."""
+
+    classification_time_channel_2: int = 0
+    """The channel 2 ROI classification time in seconds."""
+
+    deconvolution_time_channel_2: int = 0
+    """The channel 2 spike deconvolution time in seconds."""
+
+    total_plane_time: int = 0
+    """The total plane processing time in seconds."""
+
+    date_processed: str = ""
+    """The timestamp when processing completed in ataraxis-time format (yyyy-mm-dd-hh-mm-ss-us)."""
+
+    python_version: str = python_version
+    """Python version used for processing."""
+
+    sl_suite2p_version: str = version
+    """sl-suite2p version used for processing."""
+
+
+@dataclass
+class SingleDayRuntimeData(YamlConfig):
+    """Aggregates all runtime data for a single plane."""
+
+    output_path: Path | None = None
+    """The path to the directory where runtime data and .npy files are stored."""
+
+    io: IOData = field(default_factory=IOData)
+    """The runtime data from the IO/binarization stage."""
+
+    registration: RegistrationData = field(default_factory=RegistrationData)
+    """The runtime data from the registration stage."""
+
+    detection: DetectionData = field(default_factory=DetectionData)
+    """The runtime data from the detection stage."""
+
+    extraction: ExtractionData = field(default_factory=ExtractionData)
+    """The runtime data from the extraction and classification stages."""
+
+    timing: TimingData = field(default_factory=TimingData)
+    """The pipeline timing information."""
+
+    def __post_init__(self) -> None:
+        """Loads NumPy arrays from .npy files if output_path is set and arrays are None."""
+        if self.output_path is None:
+            return
+
+        # Converts output_path to Path if it was loaded as a string from YAML.
+        if isinstance(self.output_path, str):
+            self.output_path = Path(self.output_path)
+
+        # Loads arrays from each child dataclass.
+        self.registration.load_arrays(self.output_path)
+        self.detection.load_arrays(self.output_path)
+        self.extraction.load_arrays(self.output_path)
+
+    def save(self, output_path: Path) -> None:
+        """Saves the runtime data to a YAML file and arrays to .npy files.
+
+        This method saves all NumPy arrays as separate .npy files in the output directory, then creates
+        a deep copy of the instance with arrays set to None and Path fields converted to strings before
+        writing the YAML file.
+
+        Notes:
+            This form of storing the data mitigates the use of pickle serialization in favor of using safer YAML and
+            NumPy serialization.
+
+        Args:
+            output_path: The directory where to save the runtime_data.yaml file and .npy files.
+        """
+        ensure_directory_exists(output_path)
+        self.output_path = output_path
+
+        # Saves arrays from each child dataclass.
+        self.registration.save_arrays(output_path)
+        self.detection.save_arrays(output_path)
+        self.extraction.save_arrays(output_path)
+
+        # Creates a deep copy for YAML serialization.
+        yaml_copy = copy.deepcopy(self)
+
+        # Prepares each child dataclass for YAML serialization.
+        yaml_copy.output_path = str(output_path)  # type: ignore[assignment]
+        yaml_copy.io.prepare_for_saving()
+        yaml_copy.registration.prepare_for_saving()
+        yaml_copy.detection.prepare_for_saving()
+        yaml_copy.extraction.prepare_for_saving()
+
+        # Saves the YAML file.
+        file_path = output_path / "runtime_data.yaml"
+        yaml_copy.to_yaml(file_path=file_path)
+
+    @classmethod
+    def load(cls, output_path: Path) -> SingleDayRuntimeData:
+        """Loads runtime data from a YAML file and associated .npy files.
+
+        Args:
+            output_path: The directory containing the runtime_data.yaml file.
+
+        Returns:
+            A SingleDayRuntimeData instance with all data loaded, including NumPy arrays.
+        """
+        file_path = output_path / "runtime_data.yaml"
+        return cls.from_yaml(file_path=file_path)
+
+    def load_results(self) -> None:
+        """Loads all extraction result arrays for this plane.
+
+        This method loads fluorescence traces, classification results, and colocalization data. These arrays
+        are not loaded automatically because they are never needed during pipeline processing and consume
+        significant memory. Call this method when result data is needed for analysis or visualization.
+        """
+        if self.output_path is not None:
+            self.extraction.load_results(self.output_path)
 
 
 @dataclass
@@ -1095,150 +1256,15 @@ class CombinedData:
             combined_width=combined_width,
         )
 
+    def load_results(self, root_path: Path) -> None:
+        """Loads all extraction result arrays for analysis.
 
-@dataclass
-class TimingData:
-    """Stores pipeline timing information.
-
-    All time durations are stored as integers representing seconds.
-    """
-
-    registration_time: int = 0
-    """The registration step time in seconds."""
-
-    two_step_registration_time: int = 0
-    """The second registration step time in seconds."""
-
-    registration_metrics_time: int = 0
-    """The registration metrics computation time in seconds."""
-
-    detection_time: int = 0
-    """The ROI detection time in seconds."""
-
-    extraction_time: int = 0
-    """The fluorescence extraction time in seconds."""
-
-    classification_time: int = 0
-    """The ROI classification time in seconds."""
-
-    deconvolution_time: int = 0
-    """The spike deconvolution time in seconds."""
-
-    detection_time_channel_2: int = 0
-    """The channel 2 ROI detection time in seconds."""
-
-    extraction_time_channel_2: int = 0
-    """The channel 2 fluorescence extraction time in seconds."""
-
-    classification_time_channel_2: int = 0
-    """The channel 2 ROI classification time in seconds."""
-
-    deconvolution_time_channel_2: int = 0
-    """The channel 2 spike deconvolution time in seconds."""
-
-    total_plane_time: int = 0
-    """The total plane processing time in seconds."""
-
-    date_processed: str = ""
-    """The timestamp when processing completed in ataraxis-time format (yyyy-mm-dd-hh-mm-ss-us)."""
-
-    python_version: str = python_version
-    """Python version used for processing."""
-
-    sl_suite2p_version: str = version
-    """sl-suite2p version used for processing."""
-
-
-@dataclass
-class SingleDayRuntimeData(YamlConfig):
-    """Aggregates all runtime data for a single plane.
-
-    This class combines IO, registration, detection, and timing data into a single structure.
-
-    Notes:
-        NumPy arrays (images, registration offsets) are saved as separate .npy files in the output directory and
-        loaded into memory during initialization via __post_init__. Path fields are converted to strings when saving
-        to YAML and restored to Path objects when loading. When save() is called, all arrays are written to .npy files
-        and their fields are set to None in the YAML representation.
-    """
-
-    output_path: Path | None = None
-    """The path to the directory where runtime data and .npy files are stored."""
-
-    io: IOData = field(default_factory=IOData)
-    """The runtime data from the IO/binarization stage."""
-
-    registration: RegistrationData = field(default_factory=RegistrationData)
-    """The runtime data from the registration stage."""
-
-    detection: DetectionData = field(default_factory=DetectionData)
-    """The runtime data from the detection stage."""
-
-    extraction: ExtractionData = field(default_factory=ExtractionData)
-    """The runtime data from the extraction and classification stages."""
-
-    timing: TimingData = field(default_factory=TimingData)
-    """The pipeline timing information."""
-
-    def __post_init__(self) -> None:
-        """Loads NumPy arrays from .npy files if output_path is set and arrays are None."""
-        if self.output_path is None:
-            return
-
-        # Converts output_path to Path if it was loaded as a string from YAML.
-        if isinstance(self.output_path, str):
-            self.output_path = Path(self.output_path)
-
-        # Loads arrays from each child dataclass.
-        self.registration.load_arrays(self.output_path)
-        self.detection.load_arrays(self.output_path)
-        self.extraction.load_arrays(self.output_path)
-
-    def save(self, output_path: Path) -> None:
-        """Saves the runtime data to a YAML file and arrays to .npy files.
-
-        This method saves all NumPy arrays as separate .npy files in the output directory, then creates
-        a deep copy of the instance with arrays set to None and Path fields converted to strings before
-        writing the YAML file.
-
-        Notes:
-            This form of storing the data mitigates the use of pickle serialization in favor of using safer YAML and
-            NumPy serialization.
+        This method loads fluorescence traces, classification results, and colocalization data. These arrays
+        are not loaded by the load() classmethod because they are never needed during pipeline processing
+        and consume significant memory. Call this method when result data is needed for post-processing
+        analysis or visualization.
 
         Args:
-            output_path: The directory where to save the runtime_data.yaml file and .npy files.
+            root_path: The root suite2p output directory containing the result .npy files.
         """
-        ensure_directory_exists(output_path)
-        self.output_path = output_path
-
-        # Saves arrays from each child dataclass.
-        self.registration.save_arrays(output_path)
-        self.detection.save_arrays(output_path)
-        self.extraction.save_arrays(output_path)
-
-        # Creates a deep copy for YAML serialization.
-        yaml_copy = copy.deepcopy(self)
-
-        # Prepares each child dataclass for YAML serialization.
-        yaml_copy.output_path = str(output_path)  # type: ignore[assignment]
-        yaml_copy.io.prepare_for_saving()
-        yaml_copy.registration.prepare_for_saving()
-        yaml_copy.detection.prepare_for_saving()
-        yaml_copy.extraction.prepare_for_saving()
-
-        # Saves the YAML file.
-        file_path = output_path / "runtime_data.yaml"
-        yaml_copy.to_yaml(file_path=file_path)
-
-    @classmethod
-    def load(cls, output_path: Path) -> SingleDayRuntimeData:
-        """Loads runtime data from a YAML file and associated .npy files.
-
-        Args:
-            output_path: The directory containing the runtime_data.yaml file.
-
-        Returns:
-            A SingleDayRuntimeData instance with all data loaded, including NumPy arrays.
-        """
-        file_path = output_path / "runtime_data.yaml"
-        return cls.from_yaml(file_path=file_path)
+        self.extraction.load_results(root_path)
