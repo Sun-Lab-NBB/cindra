@@ -73,7 +73,7 @@ def _convolve_square_2d(frames: NDArray[np.float32], filter_size: int) -> NDArra
     # Applies the uniform filter to all frames simultaneously using a 3D kernel with size 1 along the temporal axis.
     convolved_frames = uniform_filter(frames, size=(1, filter_size, filter_size), mode="constant")
     convolved_frames *= filter_size
-    return convolved_frames.astype(np.float32)
+    return convolved_frames
 
 
 def _create_initial_square(
@@ -143,13 +143,13 @@ def _check_split_components(
     # Captures the total energy before any in-place modifications, since pixel_frames is used as a working buffer.
     total_energy = np.dot(pixel_frames.ravel(), pixel_frames.ravel())
 
-    # Establishes a single-component baseline to compare against. Since weights are unit-normalized, the explained
-    # variance simplifies to the squared norm of the active projection, avoiding two full-array squared sums.
+    # Establishes a single-component baseline to compare against. Computes the actual explained variance as the
+    # difference in total energy before and after subtracting the single-component model.
     projection = pixel_frames @ weights
     active_frames = projection > intensity_threshold
     active_projection = projection[active_frames]
     pixel_frames[active_frames, :] -= np.outer(active_projection, weights)
-    single_component_variance = np.dot(active_projection, active_projection)
+    single_component_variance = total_energy - np.dot(pixel_frames.ravel(), pixel_frames.ravel())
 
     # Seeds the two-component split from the residual's most energetic frame: pixels with negative vs positive
     # residual are assigned to separate components, capturing the spatial pattern that the single component missed.

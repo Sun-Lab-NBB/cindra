@@ -39,7 +39,7 @@ def compute_edge_taper(
     """
     height, width = reference_image.shape
     taper_mask = compute_spatial_taper_mask(sigma=taper_slope, height=height, width=width)
-    mean_offset = reference_image.mean() * (1.0 - taper_mask)
+    mean_offset = reference_image.mean() * (np.float32(1.0) - taper_mask)
     return taper_mask, mean_offset.astype(np.float32)
 
 

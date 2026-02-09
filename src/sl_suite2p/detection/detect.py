@@ -77,13 +77,14 @@ def _create_enhanced_mean_image(
     kernel_dimension = int(_BACKGROUND_SCALE * np.ceil(spatial_scale_pixels) + 1)
     filter_kernel_size = (kernel_dimension, kernel_dimension)
 
-    # Subtracts background fluorescence using a median filter. Reuses the background array for the result.
-    background_removed = medfilt2d(mean_image, kernel_size=filter_kernel_size)
+    # Subtracts background fluorescence using a median filter. Casts medfilt2d output to float32 to prevent float64
+    # promotion of the entire downstream chain. Reuses the background array for the result.
+    background_removed = medfilt2d(mean_image, kernel_size=filter_kernel_size).astype(np.float32)
     np.subtract(mean_image, background_removed, out=background_removed)
 
     # Normalizes cell contrast by dividing by local absolute median.
     abs_background_removed = np.abs(background_removed)
-    local_variance = medfilt2d(abs_background_removed, kernel_size=filter_kernel_size)
+    local_variance = medfilt2d(abs_background_removed, kernel_size=filter_kernel_size).astype(np.float32)
     np.add(local_variance, _VARIANCE_EPSILON, out=local_variance)
     np.divide(background_removed, local_variance, out=background_removed)
 
@@ -114,6 +115,7 @@ def _apply_preclassification(
     custom_classifier_path: Path | None,
     plane_index: int,
     channel_label: str,
+    diameter: int = 10,
 ) -> list[ROIStatistics]:
     """Filters detected ROIs using a lightweight pre-classification model before signal extraction.
 
@@ -132,6 +134,7 @@ def _apply_preclassification(
         custom_classifier_path: The path to a custom classifier file, or None to use the built-in classifier.
         plane_index: The index of the imaging plane being processed, used for logging.
         channel_label: The channel identifier string used in log messages (e.g., "channel 1" or "channel 2").
+        diameter: The estimated cell diameter in pixels, used for distance normalization in compactness computation.
 
     Returns:
         The filtered list of ROIStatistics instances that passed the preclassification threshold.
@@ -142,6 +145,7 @@ def _apply_preclassification(
         rois=roi_statistics,
         frame_height=frame_height,
         frame_width=frame_width,
+        diameter=diameter,
         crop=crop_to_soma,
         lightweight=True,
     )
@@ -316,6 +320,7 @@ def _detect_channel(
             frame_width=frame_width,
             preclassification_threshold=detection_config.preclassification_threshold,
             crop_to_soma=detection_config.crop_to_soma,
+            diameter=cell_diameter,
             custom_classifier_path=custom_classifier_path,
             plane_index=plane_index,
             channel_label=channel_label,
@@ -439,10 +444,11 @@ def detect_plane_rois(context: RuntimeContext) -> None:
         level=LogLevel.SUCCESS,
     )
 
-    # Runs channel 2 detection if both channels are functional. Stores the path in a local variable so that the
-    # type checker can narrow it from Path | None to Path inside the guarded block.
+    # Runs channel 2 detection only when both hardware channels are functional, meaning channel_2_data.bin contains
+    # independently detectable functional data. When only the second hardware channel is functional, the import layer
+    # swaps it into channel_1_data.bin, so channel_2_data.bin holds non-functional data and must not be detected.
     channel_2_path = io_data.registered_binary_path_channel_2
-    if main_config.second_channel_functional and channel_2_path is not None:
+    if main_config.first_channel_functional and main_config.second_channel_functional and channel_2_path is not None:
         timer.reset()
 
         (
@@ -484,3 +490,6 @@ def detect_plane_rois(context: RuntimeContext) -> None:
             message=f"Plane {plane_index} channel 2 ROI detection: complete. Time taken: {elapsed_seconds} seconds.",
             level=LogLevel.SUCCESS,
         )
+
+    # Persists detection results to disk so that ROI statistics and detection images are not lost if extraction fails.
+    context.save_runtime()

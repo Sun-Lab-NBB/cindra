@@ -148,10 +148,10 @@ def apply_oasis_deconvolution(
         # Initializes worker arrays for the current batch.
         end_index = min(start_index + batch_size, roi_count)
         batch_count = end_index - start_index
-        pool_amplitude = np.zeros((batch_count, frame_count), dtype=np.float32)
-        pool_weight = np.zeros((batch_count, frame_count), dtype=np.float32)
-        pool_start_frame = np.zeros((batch_count, frame_count), dtype=np.int32)
-        pool_length = np.zeros((batch_count, frame_count), dtype=np.float32)
+        pool_amplitude = np.empty((batch_count, frame_count), dtype=np.float32)
+        pool_weight = np.empty((batch_count, frame_count), dtype=np.float32)
+        pool_start_frame = np.empty((batch_count, frame_count), dtype=np.int32)
+        pool_length = np.empty((batch_count, frame_count), dtype=np.float32)
 
         # Runs the OASIS algorithm that modifies spike_traces in-place.
         _oasis_matrix(
@@ -194,7 +194,7 @@ def compute_delta_fluorescence(
             'maximin', 'constant', or 'constant_percentile'.
         baseline_window: The size of the sliding window, in seconds, for the 'maximin' baseline method. The minimum
             and maximum filters operate over this window to track slow baseline drifts while ignoring fast transients.
-        baseline_sigma: The standard deviation, in seconds, of the Gaussian filter applied before baseline
+        baseline_sigma: The standard deviation, in frames, of the Gaussian filter applied before baseline
             computation. Used by both 'maximin' and 'constant' methods to smooth the trace before finding minima.
         baseline_percentile: The percentile of trace activity used as baseline for the 'constant_percentile' method.
             Lower values select points near the trace minimum, providing a robust estimate that ignores outliers.
@@ -207,19 +207,24 @@ def compute_delta_fluorescence(
     # prevent Python's native float64 from promoting the entire computation chain to double precision.
     subtracted = roi_fluorescence - np.float32(neuropil_coefficient) * neuropil_fluorescence
 
-    # Converts the baseline window from seconds to frames using the acquisition sampling rate.
+    # Converts the baseline window from seconds to frames using the acquisition sampling rate. Forces the window to be
+    # odd for symmetric min/max filtering.
     window_frames = int(baseline_window * sampling_rate)
+    if window_frames % 2 == 0:
+        window_frames += 1
 
     # Uses the requested method to calculate the baseline for the neuropil-subtracted fluorescence traces.
     if baseline_method == "maximin":
-        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_sigma]).astype(np.float32)
-        baseline = minimum_filter1d(input=baseline, size=window_frames, axis=1)
-        baseline = maximum_filter1d(input=baseline, size=window_frames, axis=1)
+        # Uses truncate=3.0 to match the original suite2p's 3-sigma FIR Gaussian kernel, and mode='nearest'
+        # (replicate edge values) for the min/max filters to match the original's boundary handling.
+        baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_sigma], truncate=3.0).astype(np.float32)
+        baseline = minimum_filter1d(input=baseline, size=window_frames, axis=1, mode="nearest")
+        baseline = maximum_filter1d(input=baseline, size=window_frames, axis=1, mode="nearest")
     elif baseline_method == "constant":
         baseline = gaussian_filter(input=subtracted, sigma=[0.0, baseline_sigma]).astype(np.float32)
         baseline = np.amin(a=baseline)
     elif baseline_method == "constant_percentile":
-        baseline = np.percentile(a=subtracted, q=baseline_percentile, axis=1, keepdims=True)
+        baseline = np.percentile(a=subtracted, q=baseline_percentile, axis=1, keepdims=True).astype(np.float32)
     else:
         message = (
             f"Unable to compute delta fluorescence for spike deconvolution. The baseline computation "

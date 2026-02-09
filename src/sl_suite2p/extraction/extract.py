@@ -26,9 +26,9 @@ if TYPE_CHECKING:
 def _extract_cell_fluorescence(
     output_prototype: NDArray[np.float32],
     data: NDArray[np.float32],
-    flat_cell_masks: NDArray[np.uint32],
+    flat_cell_masks: NDArray[np.int32],
     flat_lambda_weights: NDArray[np.float32],
-    mask_offsets: NDArray[np.uint32],
+    mask_offsets: NDArray[np.int32],
 ) -> NDArray[np.float32]:
     """Extracts cell fluorescence traces for the requested ROIs.
 
@@ -70,9 +70,9 @@ def _extract_cell_fluorescence(
 def _extract_neuropil_fluorescence(
     output_prototype: NDArray[np.float32],
     data: NDArray[np.float32],
-    flat_neuropil_masks: NDArray[np.uint32],
-    mask_offsets: NDArray[np.uint32],
-    neuropil_pixel_count: NDArray[np.uint32],
+    flat_neuropil_masks: NDArray[np.int32],
+    mask_offsets: NDArray[np.int32],
+    neuropil_pixel_count: NDArray[np.int32],
 ) -> NDArray[np.float32]:
     """Extracts neuropil fluorescence traces for the requested ROIs.
 
@@ -206,13 +206,13 @@ def _extract_fluorescence_traces(
 
     # Flattens cell masks and lambda weights into contiguous arrays with offset pointers. This format avoids Numba's
     # tuple size limitations and enables efficient parallel processing.
-    cell_mask_sizes = np.array([len(pixel_indices) for pixel_indices, _ in cell_masks], dtype=np.uint32)
-    cell_mask_offsets = np.zeros(cell_count + 1, dtype=np.uint32)
+    cell_mask_sizes = np.array([len(pixel_indices) for pixel_indices, _ in cell_masks], dtype=np.int32)
+    cell_mask_offsets = np.zeros(cell_count + 1, dtype=np.int32)
     cell_mask_offsets[1:] = np.cumsum(cell_mask_sizes)
 
     total_cell_pixels = int(cell_mask_offsets[-1])
-    flat_cell_masks = np.zeros(total_cell_pixels, dtype=np.uint32)
-    flat_lambda_weights = np.zeros(total_cell_pixels, dtype=np.float32)
+    flat_cell_masks = np.empty(total_cell_pixels, dtype=np.int32)
+    flat_lambda_weights = np.empty(total_cell_pixels, dtype=np.float32)
 
     for mask_index, (pixel_indices, lambda_weights) in enumerate(cell_masks):
         start = cell_mask_offsets[mask_index]
@@ -222,13 +222,13 @@ def _extract_fluorescence_traces(
 
     # Flattens neuropil masks into contiguous arrays with offset pointers if provided.
     if neuropil_masks is not None:
-        neuropil_mask_sizes = np.array([len(indices) for indices in neuropil_masks], dtype=np.uint32)
-        neuropil_mask_offsets = np.zeros(cell_count + 1, dtype=np.uint32)
+        neuropil_mask_sizes = np.array([len(indices) for indices in neuropil_masks], dtype=np.int32)
+        neuropil_mask_offsets = np.zeros(cell_count + 1, dtype=np.int32)
         neuropil_mask_offsets[1:] = np.cumsum(neuropil_mask_sizes)
 
         total_neuropil_pixels = int(neuropil_mask_offsets[-1])
-        flat_neuropil_masks = np.zeros(total_neuropil_pixels, dtype=np.uint32)
-        neuropil_pixel_count = np.zeros(cell_count, dtype=np.uint32)
+        flat_neuropil_masks = np.empty(total_neuropil_pixels, dtype=np.int32)
+        neuropil_pixel_count = np.zeros(cell_count, dtype=np.int32)
 
         for mask_index, indices in enumerate(neuropil_masks):
             start = neuropil_mask_offsets[mask_index]
@@ -459,9 +459,12 @@ def extract_traces(context: RuntimeContext) -> None:
         extraction_data.subtracted_fluorescence = np.zeros_like(extraction_data.cell_fluorescence)
         extraction_data.spikes = np.zeros_like(extraction_data.cell_fluorescence)
 
-    # Processes channel 2 if the recording has two channels.
+    # Processes channel 2 if the recording has two channels. When both hardware channels are functional,
+    # channel_2_data.bin contains independently detectable data and receives functional extraction. When only the
+    # second hardware channel is functional, the import layer swaps it into channel_1_data.bin, so channel_2_data.bin
+    # holds non-functional data and receives structural extraction instead.
     if main_config.two_channels and io_data.registered_binary_path_channel_2 is not None:
-        if main_config.second_channel_functional:
+        if main_config.first_channel_functional and main_config.second_channel_functional:
             # Functional channel 2: creates independent masks from channel 2 ROI statistics.
             _extract_functional_channel_2(context=context, batch_size=batch_size)
         else:
