@@ -183,9 +183,6 @@ class AcquisitionParameters(YamlConfig):
 class Main:
     """Stores the parameters that broadly affect the runtime and performance of the single-day pipeline as a whole."""
 
-    plane_count: int = 1
-    """The number of imaging planes stored as a sequence inside each input TIFF file."""
-
     two_channels: bool = False
     """Determines whether the imaging data contains two channels per plane. When True, the algorithm expects images from
     both channels of the same plane to be saved sequentially (e.g.: plane 1 channel 1, plane 1 channel 2, plane 2
@@ -212,10 +209,6 @@ class Main:
     """The timescale of the sensor in seconds, used for computing the deconvolution kernel. The kernel is fixed to have
     this decay and is not fit to the data. The default value is optimized for GCaMP6f animals recorded with the
     Mesoscope and likely needs to be increased for most other use cases."""
-
-    sampling_rate: float = 10.0014
-    """The data sampling rate per each imaging plane in Hertz. For a 10-plane recording acquired at 30 Hz, the
-    sampling rate per plane would be 3 Hz."""
 
     parallel_workers: int = 20
     """The number of workers used to parallelize certain processing operations. This worker pool is used by numba when
@@ -500,6 +493,11 @@ class SignalExtraction:
     """The classifier probability threshold used to classify ROIs after signal extraction. This is the minimum
     classifier confidence value (that the classified ROI is a cell) for the ROI to be labeled as a cell. ROIs with
     probabilities below this threshold are labeled as non-cells but are still retained in the output data."""
+
+    batch_size: int = 500
+    """The number of frames to process at the same time during fluorescence extraction. This controls memory usage
+    during the extraction step. Larger values may improve throughput on fast storage but increase RAM consumption.
+    This is independent of the registration batch size."""
 
 
 @dataclass

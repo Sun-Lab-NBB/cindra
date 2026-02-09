@@ -21,9 +21,6 @@ if TYPE_CHECKING:
 
     from ..dataclasses import ROIStatistics, RuntimeContext
 
-# The maximum number of frames processed per batch during fluorescence extraction.
-_MAXIMUM_BATCH_SIZE: int = 1000
-
 
 @njit(cache=True, parallel=True)  # type: ignore[untyped-decorator]
 def _extract_cell_fluorescence(
@@ -203,9 +200,6 @@ def _extract_fluorescence_traces(
     cell_count = len(cell_masks)
     pixel_count = height * width
 
-    # Caps the batch size at the maximum allowed value.
-    batch_size = min(batch_size, _MAXIMUM_BATCH_SIZE)
-
     # Pre-allocates the arrays to store the extracted cell and neuropil fluorescence traces.
     fluorescence = np.zeros((cell_count, frame_count), dtype=np.float32)
     neuropil_fluorescence = np.zeros((cell_count, frame_count), dtype=np.float32)
@@ -345,7 +339,7 @@ def extract_traces(context: RuntimeContext) -> None:
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
     frame_height = io_data.frame_height
     frame_width = io_data.frame_width
-    batch_size = context.configuration.registration.batch_size
+    batch_size = extraction_config.batch_size
 
     # Validates that detection has been run and the registered binary path is available.
     if extraction_data.roi_statistics is None:
@@ -438,13 +432,13 @@ def extract_traces(context: RuntimeContext) -> None:
             baseline_window=deconvolution_config.baseline_window,
             baseline_sigma=deconvolution_config.baseline_sigma,
             baseline_percentile=deconvolution_config.baseline_percentile,
-            sampling_rate=main_config.sampling_rate,
+            sampling_rate=io_data.sampling_rate,
         )
         extraction_data.spikes = apply_oasis_deconvolution(
             roi_fluorescence=extraction_data.subtracted_fluorescence,
             batch_size=batch_size,
             time_constant=main_config.tau,
-            sampling_rate=main_config.sampling_rate,
+            sampling_rate=io_data.sampling_rate,
         )
         timing.deconvolution_time = int(timer.elapsed)
         console.echo(
@@ -539,6 +533,7 @@ def _extract_structural_channel_2(
     context.runtime.timing.extraction_time_channel_2 = int(timer.elapsed)
 
     # Computes intensity colocalization between functional channel 1 ROIs and the structural channel 2 image.
+    extraction_config = context.configuration.signal_extraction
     if (
         extraction_data.roi_statistics is not None
         and detection_data.mean_image is not None
@@ -552,6 +547,10 @@ def _extract_structural_channel_2(
                 frame_height=io_data.frame_height,
                 frame_width=io_data.frame_width,
                 colocalization_threshold=main_config.colocalization_threshold,
+                allow_overlap=extraction_config.allow_overlap,
+                cell_probability_percentile=extraction_config.cell_probability_percentile,
+                inner_neuropil_border_radius=extraction_config.inner_neuropil_border_radius,
+                minimum_neuropil_pixels=extraction_config.minimum_neuropil_pixels,
             )
         )
 
@@ -675,13 +674,13 @@ def _extract_functional_channel_2(
             baseline_window=deconvolution_config.baseline_window,
             baseline_sigma=deconvolution_config.baseline_sigma,
             baseline_percentile=deconvolution_config.baseline_percentile,
-            sampling_rate=main_config.sampling_rate,
+            sampling_rate=io_data.sampling_rate,
         )
         extraction_data.spikes_channel_2 = apply_oasis_deconvolution(
             roi_fluorescence=extraction_data.subtracted_fluorescence_channel_2,
             batch_size=batch_size,
             time_constant=main_config.tau,
-            sampling_rate=main_config.sampling_rate,
+            sampling_rate=io_data.sampling_rate,
         )
         timing.deconvolution_time_channel_2 = int(timer.elapsed)
         console.echo(
