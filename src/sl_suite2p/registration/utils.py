@@ -36,9 +36,10 @@ def _mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32
         A tuple of (column_distances, row_distances) arrays with shape (height, width), where each value
         represents the absolute distance from the center along that axis.
     """
-    # Computes absolute distances from center for each axis. For arange(0, n), mean is (n-1)/2.
-    row_center = (height - 1) / 2
-    column_center = (width - 1) / 2
+    # Computes absolute distances from center for each axis. For arange(0, n), mean is (n-1)/2. Casts centers to
+    # float32 to prevent promotion of the entire distance arrays to float64.
+    row_center = np.float32((height - 1) / 2)
+    column_center = np.float32((width - 1) / 2)
     row_distances_1d = np.abs(np.arange(height, dtype=np.float32) - row_center)
     column_distances_1d = np.abs(np.arange(width, dtype=np.float32) - column_center)
 
@@ -240,15 +241,16 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
 
     # Computes where taper begins: 2*sigma pixels inward from the edge. This ensures the sigmoid reaches
     # ~0.12 at the edge (when distance equals half-width).
-    taper_start_row = ((height - 1) / 2) - 2 * sigma
-    taper_start_column = ((width - 1) / 2) - 2 * sigma
+    taper_start_row = np.float32(((height - 1) / 2) - 2 * sigma)
+    taper_start_column = np.float32(((width - 1) / 2) - 2 * sigma)
 
     # Applies sigmoid function: 1.0 at center, 0.5 at taper_start, approaches 0 at edges.
-    row_taper = 1.0 / (1.0 + np.exp((row_distances - taper_start_row) / sigma))
-    col_taper = 1.0 / (1.0 + np.exp((column_distances - taper_start_column) / sigma))
+    sigma_f32 = np.float32(sigma)
+    row_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((row_distances - taper_start_row) / sigma_f32))
+    col_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((column_distances - taper_start_column) / sigma_f32))
 
     # Combines row and column tapers multiplicatively for 2D falloff.
-    taper_mask: NDArray[np.float32] = (row_taper * col_taper).astype(np.float32)
+    taper_mask: NDArray[np.float32] = row_taper * col_taper
     return taper_mask
 
 
@@ -262,7 +264,7 @@ def apply_temporal_smoothing(frames: NDArray[np.float32], sigma: float) -> NDArr
     Returns:
         The temporally smoothed frames with the same shape as input.
     """
-    return gaussian_filter1d(input=frames, sigma=sigma, axis=0)
+    return gaussian_filter1d(input=frames, sigma=sigma, axis=0).astype(np.float32)
 
 
 def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[np.float32]:

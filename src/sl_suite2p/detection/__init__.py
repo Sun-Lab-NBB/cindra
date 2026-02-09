@@ -1,4 +1,4 @@
-"""Provides ROI detection algorithms."""
+"""Provides algorithms for segmenting and describing ROIs from motion-corrected recordings."""
 
 from .detect import detect_plane_rois
 from .detect_rois import extend_roi

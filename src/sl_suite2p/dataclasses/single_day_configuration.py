@@ -526,7 +526,7 @@ class SpikeDeconvolution:
     smoother baselines but may fail to track rapid baseline changes."""
 
     baseline_sigma: float = 10.0
-    """The standard deviation, in seconds, of the Gaussian filter applied before baseline computation. Used by both
+    """The standard deviation, in frames, of the Gaussian filter applied before baseline computation. Used by both
     'maximin' and 'constant' methods to smooth the trace before finding minima. Larger values produce more aggressive
     smoothing."""
 

@@ -97,14 +97,17 @@ class _ROI:
     Notes:
         The class uses a shared class variable for the distance kernel to avoid recomputation across instances. The
         soma mask is cached after first computation to avoid redundant calculations when accessing dependent
-        properties.
+        properties. Distance-based statistics (mean_radius, compactness) are normalized by the cell diameter to make
+        them scale-invariant across different cell sizes and imaging magnifications.
 
     Args:
         data: The ROIStatistics instance to wrap.
+        diameter: The estimated cell diameter in pixels, used to normalize distance-based statistics.
         crop: Determines whether to crop to soma region when computing statistics.
 
     Attributes:
         _data: The underlying ROIStatistics instance.
+        _diameter: The cell diameter used for distance normalization.
         _crop: Determines whether to crop to soma region when computing statistics.
         _cached_soma_mask: Cached soma mask array, computed on first access.
 
@@ -112,10 +115,10 @@ class _ROI:
         TypeError: If the x_pixels, y_pixels, and pixel_weights arrays do not have the same shape.
     """
 
-    _baseline_distances: ClassVar[NDArray[np.float32]] = np.sort(_compute_distance_kernel(radius=30).flatten())
-    """Sorted distance values used for computing baseline_mean_radius."""
+    _baseline_cache: ClassVar[dict[int, NDArray[np.float32]]] = {}
+    """Cache of sorted baseline distances keyed by diameter, avoiding recomputation across instances."""
 
-    def __init__(self, data: ROIStatistics, crop: bool = True) -> None:
+    def __init__(self, data: ROIStatistics, diameter: int, crop: bool = True) -> None:
         if data.x_pixels.shape != data.y_pixels.shape or data.x_pixels.shape != data.pixel_weights.shape:
             message = (
                 "Unable to initialize the ROI class. The x_pixels, y_pixels, and pixel_weights arrays in the input "
@@ -124,6 +127,7 @@ class _ROI:
             console.error(message=message, error=TypeError)
 
         self._data: ROIStatistics = data
+        self._diameter: int = diameter
         self._crop: bool = crop
         self._cached_soma_mask: NDArray[np.bool_] | None = None
 
@@ -217,20 +221,33 @@ class _ROI:
 
     @property
     def mean_radius(self) -> float:
-        """Computes the mean Euclidean distance from ROI pixels to their median center."""
+        """Computes the mean diameter-normalized distance from ROI pixels to their median center."""
         y_pixels = self.y_pixels[self.soma_mask]
         x_pixels = self.x_pixels[self.soma_mask]
-        return float(np.mean(np.hypot(y_pixels - np.median(y_pixels), x_pixels - np.median(x_pixels))))
+        # Normalizes distances by cell diameter for scale-invariance, matching the original suite2p approach.
+        distances = np.hypot(
+            (y_pixels - np.median(y_pixels)) / self._diameter,
+            (x_pixels - np.median(x_pixels)) / self._diameter,
+        )
+        return float(np.mean(distances))
 
     @property
     def baseline_mean_radius(self) -> float:
         """Computes the expected mean radius for a uniformly distributed set of pixels of the same count as the ROI."""
-        return float(np.mean(self._baseline_distances[: self.soma_pixel_count]))
+        # Uses a diameter-dependent kernel. The kernel is computed from a meshgrid spanning 2*diameter in each
+        # direction, with distances normalized by diameter, matching the original suite2p approach.
+        diameter = self._diameter
+        if diameter not in _ROI._baseline_cache:
+            kernel = _compute_distance_kernel(radius=2 * diameter)
+            # Normalizes the kernel distances by diameter to match the distance normalization in mean_radius.
+            _ROI._baseline_cache[diameter] = np.sort((kernel / diameter).flatten())
+        baseline = _ROI._baseline_cache[diameter]
+        return float(np.mean(baseline[: self.soma_pixel_count]))
 
     @property
     def compactness(self) -> float:
         """Computes the ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
-        return self.mean_radius / (1e-10 + self.baseline_mean_radius)
+        return max(1.0, self.mean_radius / (1e-10 + self.baseline_mean_radius))
 
     @property
     def solidity(self) -> float:
@@ -314,8 +331,8 @@ class _ROI:
             eigenvector_1 = np.array([1.0, 0.0], dtype=np.float32)
             eigenvector_2 = np.array([0.0, 1.0], dtype=np.float32)
 
-        # Converts eigenvalues to radii (2 sigma boundary captures ~95% of Gaussian distribution).
-        sigma_multiplier = 2.0
+        # Converts eigenvalues to radii (2.5 sigma boundary captures ~99% of Gaussian distribution).
+        sigma_multiplier = 2.5
         eigenvectors = np.column_stack((eigenvector_1, eigenvector_2))
         radii = sigma_multiplier * np.sqrt(np.maximum(0.0, np.array([eigenvalue_1, eigenvalue_2])))
 
@@ -430,8 +447,8 @@ def compute_roi_statistics(
             exceeding this threshold are removed from the list in-place. Ignored in lightweight mode.
         crop: Determines whether to crop processed ROIs to the soma region before computing statistics.
         lightweight: Determines whether to compute only the minimal statistics needed for preclassification. When True,
-            skips ellipse fitting, solidity, and overlap computations. The aspect, diameter, and
-            maximum_overlap_fraction parameters are ignored.
+            skips ellipse fitting, solidity, and overlap computations. The aspect and maximum_overlap_fraction
+            parameters are ignored. The diameter is still used for distance normalization in compactness.
 
     Raises:
         ValueError: If the input rois list is empty.
@@ -445,14 +462,16 @@ def compute_roi_statistics(
         if not roi.centroid or roi.centroid == [0, 0]:
             roi.centroid = list(compute_median_pixel_position(y_pixels=roi.y_pixels, x_pixels=roi.x_pixels))
 
-    # Wraps each ROIStatistics in an _ROI processing object to compute derived statistics.
-    roi_wrappers = [_ROI(data=roi, crop=crop) for roi in rois]
+    # Resolves the cell diameter for distance normalization. A sensible default is used when no diameter is provided.
+    default_diameter = 10
+    effective_diameter = default_diameter if diameter is None or diameter == 0 else diameter
 
-    # Resolves the cell diameter, aspect correction, and overlap image only when full statistics are needed.
-    # Lightweight mode skips these because ellipse fitting and overlap filtering are not performed.
+    # Wraps each ROIStatistics in an _ROI processing object to compute derived statistics.
+    roi_wrappers = [_ROI(data=roi, diameter=effective_diameter, crop=crop) for roi in rois]
+
+    # Resolves aspect correction and overlap image only when full statistics are needed. Lightweight mode skips these
+    # because ellipse fitting and overlap filtering are not performed.
     if not lightweight:
-        default_diameter = 10
-        effective_diameter = default_diameter if diameter is None or diameter == 0 else diameter
 
         if aspect is not None:
             y_scale, x_scale = int(aspect * effective_diameter), effective_diameter

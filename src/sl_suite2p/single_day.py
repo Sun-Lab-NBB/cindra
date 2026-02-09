@@ -18,7 +18,7 @@ _MINIMUM_PROCESSING_FRAMES: int = 50
 """The minimum number of frames in the processed movie to allow processing."""
 
 _RECOMMENDED_PROCESSING_FRAMES: int = 200
-"""The recommended number of frames in the processed movie."""
+"""The recommended minimum number of frames in the processed movie for the processing to work as expected."""
 
 
 def _initialize_pipeline(configuration: SingleDayConfiguration) -> list[RuntimeContext]:

@@ -1,18 +1,5 @@
-"""This module provides image registration algorithms.
-
-This module unifies two registration approaches: phase correlation-based registration from suite2p (single-day
-frame-to-frame motion correction) and diffeomorphic Demons registration from pirt (multi-day cross-session
-anatomical alignment).
-
-Copyright:
-    Single-day registration code (register.py, rigid.py, nonrigid.py, bidiphase_correction.py, metrics.py, utils.py):
-        Copyright 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-
-    Multi-day registration code (diffeomorphic.py, deformation.py, spline_grid.py, pyramid.py):
-        Original pirt library Copyright 2010-2017 Almar Klein, University of Twente.
-
-    All code modifications and integration:
-        Copyright 2024-2025 Sun Lab, Authored by Ivan Kondratyev (Inkaros).
+"""Provides algorithms for correcting within-recording motion and registering multiple recording sessions to the same
+reference field of view.
 """
 
 from .utils import compute_spatial_taper_mask
