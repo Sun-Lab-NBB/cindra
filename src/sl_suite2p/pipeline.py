@@ -226,8 +226,8 @@ def process_single_day(
         console.error(message=message, error=FileNotFoundError)
 
     # Overrides the 'workers' and 'progress_bars' parameters with the provided values.
-    configuration.main.display_progress_bars = progress_bars
-    configuration.main.parallel_workers = workers
+    configuration.runtime.display_progress_bars = progress_bars
+    configuration.runtime.parallel_workers = workers
 
     # Instantiates the SessionData instance for the processed session.
     session_data = SessionData.load(session_path=session_path)
@@ -293,9 +293,7 @@ def process_single_day(
 
         # Generates all possible base job names including plane-specific PROCESS jobs.
         all_base_job_names: list[str] = [SingleDayJobNames.BINARIZE, SingleDayJobNames.COMBINE]
-        all_base_job_names.extend(
-            f"{SingleDayJobNames.PROCESS}_plane_{plane}" for plane in range(plane_count)
-        )
+        all_base_job_names.extend(f"{SingleDayJobNames.PROCESS}_plane_{plane}" for plane in range(plane_count))
 
         all_job_ids = _generate_job_ids(
             root_path=session_path, data_name=session_name, base_job_names=all_base_job_names
@@ -313,7 +311,10 @@ def process_single_day(
         # Runs the job whose id matches the target job_id.
         job_name = id_to_name[job_id]
         _execute_single_day_job(
-            configuration=configuration, job_name=job_name, job_id=job_id, tracker=tracker,
+            configuration=configuration,
+            job_name=job_name,
+            job_id=job_id,
+            tracker=tracker,
         )
     else:
         # LOCAL mode: Runs BINARIZE first (if requested) to determine the plane count, then expands and runs the
@@ -513,27 +514,30 @@ def process_multi_day(
         console.error(message=message, error=FileNotFoundError)
 
     # Validates that the configuration contains the required session directories.
-    if not config.io.session_directories:
+    if not config.session_io.session_directories:
         message = (
             "Unable to run the multi-day suite2p processing pipeline. The configuration file must specify at least "
-            "two session directories under 'io.session_directories'. The provided configuration has no session "
+            "two session directories under 'session_io.session_directories'. The provided configuration has no session "
             "directories specified."
         )
         console.error(message=message, error=ValueError)
 
     # Validates that the configuration contains a dataset name.
-    if not config.io.dataset_name:
+    if not config.session_io.dataset_name:
         message = (
             "Unable to run the multi-day suite2p processing pipeline. The configuration file must specify a dataset "
-            "name under 'io.dataset_name'. The provided configuration has no dataset name specified."
+            "name under 'session_io.dataset_name'. The provided configuration has no dataset name specified."
         )
         console.error(message=message, error=ValueError)
 
     # Overrides the 'workers' and 'progress_bars' parameters with the provided values.
-    config.main.display_progress_bars = progress_bars
-    config.main.parallel_workers = workers
+    config.runtime.display_progress_bars = progress_bars
+    config.runtime.parallel_workers = workers
 
-    console.echo(f"Processing {len(config.io.session_directories)} sessions for dataset '{config.io.dataset_name}'...")
+    console.echo(
+        f"Processing {len(config.session_io.session_directories)} sessions for dataset "
+        f"'{config.session_io.dataset_name}'..."
+    )
 
     # Converts the dataclass to an 'ops' dictionary instance.
     ops = config.to_ops()

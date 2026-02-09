@@ -226,10 +226,14 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         valid_y_start, valid_y_end = context.runtime.registration.valid_y_range
         valid_x_start, valid_x_end = context.runtime.registration.valid_x_range
         corr_y_range = np.arange(
-            y_offsets[plane_index] + valid_y_start, y_offsets[plane_index] + valid_y_end, dtype=np.int32,
+            y_offsets[plane_index] + valid_y_start,
+            y_offsets[plane_index] + valid_y_end,
+            dtype=np.int32,
         )
         corr_x_range = np.arange(
-            x_offsets[plane_index] + valid_x_start, x_offsets[plane_index] + valid_x_end, dtype=np.int32,
+            x_offsets[plane_index] + valid_x_start,
+            x_offsets[plane_index] + valid_x_end,
+            dtype=np.int32,
         )
         if context.runtime.detection.correlation_map is not None:
             combined_correlation_map[np.ix_(corr_y_range, corr_x_range)] = context.runtime.detection.correlation_map

@@ -233,7 +233,7 @@ def process_plane(configuration: SingleDayConfiguration, plane_index: int) -> No
     console.echo(message=f"Processing plane {plane_index}...", level=LogLevel.INFO)
 
     # Configures the maximum number of cores this function is allowed to use when parallelizing processing steps.
-    numba.set_num_threads(configuration.main.parallel_workers)
+    numba.set_num_threads(configuration.runtime.parallel_workers)
 
     # Ensures that the plane contains enough frames for the processing to work as expected and, if not, either
     # aborts or notifies the user about the unexpected behavior possibility.

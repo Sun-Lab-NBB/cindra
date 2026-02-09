@@ -205,9 +205,7 @@ class BinaryFile:
         """
         # Prevents writes to read-only files.
         if self._read_only:
-            message = (
-                f"Unable to write data to the BinaryFile {self.file_path}. The file was opened in read-only mode."
-            )
+            message = f"Unable to write data to the BinaryFile {self.file_path}. The file was opened in read-only mode."
             console.error(message=message, error=PermissionError)
 
         # Checks and converts data type to int16, if needed. Clips values to the maximum representable int16 value.

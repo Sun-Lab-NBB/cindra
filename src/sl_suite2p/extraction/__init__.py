@@ -1,5 +1,6 @@
 """Provides algorithms for extracting the fluorescence from detected ROIs and determining ROI colocalization in
-multichannel recordings."""
+multichannel recordings.
+"""
 
 from .extract import extract_traces
 

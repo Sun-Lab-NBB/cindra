@@ -1,4 +1,4 @@
-"""Provides user-defined configuration classes for the single-day (within-session) sl-suite2p pipeline."""
+"""Provides user-defined configuration classes for the single-day (within-session) processing pipeline."""
 
 from __future__ import annotations
 
@@ -24,6 +24,27 @@ class BaselineMethod(StrEnum):
 
     CONSTANT_PERCENTILE = "constant_percentile"
     """Uses a low percentile of the trace as a robust constant baseline, ignoring outliers."""
+
+
+@dataclass
+class RuntimeSettings:
+    """Stores runtime behavior settings shared between single-day and multi-day processing pipelines.
+
+    This dataclass contains parameters that control execution behavior rather than data processing logic. Both
+    pipelines use these settings to configure parallel processing and progress reporting.
+    """
+
+    parallel_workers: int = 20
+    """The number of workers used to parallelize certain processing operations. This worker pool is used by numba when
+    it parallelizes certain computations used during registration and ROI processing. There is generally no benefit from
+    increasing this parameter above 20 cores per each processed session or plane. On machines with a high number of
+    cores, it is recommended to keep this value between 10 and 20 cores and to instead parallelize processing sessions
+    and planes. Setting this to -1 or 0 removes worker limits, forcing the pipeline to use all available CPU cores."""
+
+    display_progress_bars: bool = False
+    """Determines whether to display progress bars for certain processing steps. Only enable this option when running
+    all processing steps sequentially. Having this enabled when running multiple sessions or planes in parallel may
+    interfere with properly communicating progress via the terminal."""
 
 
 @dataclass
@@ -181,7 +202,12 @@ class AcquisitionParameters(YamlConfig):
 
 @dataclass
 class Main:
-    """Stores the parameters that broadly affect the runtime and performance of the single-day pipeline as a whole."""
+    """Stores the parameters that broadly affect the single-day pipeline processing behavior.
+
+    Notes:
+        For runtime behavior settings shared with the multi-day pipeline (parallel workers, progress bars), see
+        RuntimeSettings.
+    """
 
     two_channels: bool = False
     """Determines whether the imaging data contains two channels per plane. When True, the algorithm expects images from
@@ -209,18 +235,6 @@ class Main:
     """The timescale of the sensor in seconds, used for computing the deconvolution kernel. The kernel is fixed to have
     this decay and is not fit to the data. The default value is optimized for GCaMP6f animals recorded with the
     Mesoscope and likely needs to be increased for most other use cases."""
-
-    parallel_workers: int = 20
-    """The number of workers used to parallelize certain processing operations. This worker pool is used by numba when
-    it parallelizes certain computations used during registration and ROI processing. There is generally no benefit from
-    increasing this parameter above 20 cores per each processed plane. On machines with a high number of cores, it is
-    recommended to keep this value between 10 and 20 cores and to instead parallelize processing sessions and planes.
-    Setting this to -1 or 0 removes worker limits, forcing the pipeline to use all available CPU cores."""
-
-    display_progress_bars: bool = False
-    """Determines whether to display progress bars for certain processing steps. Only enable this option when running
-    all processing steps sequentially. Having this enabled when running multiple sessions or planes in parallel may
-    interfere with properly communicating progress via the terminal."""
 
     ignored_flyback_planes: list[int] = field(default_factory=list)
     """The list of flyback plane indices to ignore when processing the data. Flyback planes typically contain no valid
@@ -559,7 +573,8 @@ class SingleDayConfiguration(YamlConfig):
         For runtime data (computed by the pipeline), see SingleDayRuntimeData.
     """
 
-    # Define the instances of each nested settings class as fields
+    runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
+    """Stores runtime behavior settings shared with the multi-day pipeline (parallel workers, progress bars)."""
     main: Main = field(default_factory=Main)
     """Stores global parameters that broadly define the suite2p single-day processing configuration."""
     file_io: FileIO = field(default_factory=FileIO)

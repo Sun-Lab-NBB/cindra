@@ -440,7 +440,7 @@ def convert_tiffs_to_binary(config: SingleDayConfiguration) -> list[RuntimeConte
     plane_number = acquisition.plane_number
     channel_number = acquisition.channel_number
     is_mroi = acquisition.is_mroi
-    display_progress = config.main.display_progress_bars
+    display_progress = config.runtime.display_progress_bars
 
     # Determines which channel is functional (used for ROI detection).
     functional_channel_index = 0 if config.main.first_channel_functional else 1
@@ -545,9 +545,7 @@ def convert_tiffs_to_binary(config: SingleDayConfiguration) -> list[RuntimeConte
                     second_channel_index = 1 - functional_channel_index
                     target_position_channel_2 = physical_plane_index * channel_number + second_channel_index
                     first_frame_index_channel_2 = (target_position_channel_2 - interleave_offset) % interleave_stride
-                    channel_2_frame_indices = list(
-                        range(first_frame_index_channel_2, frame_count, interleave_stride)
-                    )
+                    channel_2_frame_indices = list(range(first_frame_index_channel_2, frame_count, interleave_stride))
 
                     if channel_2_frame_indices:
                         channel_2_frames = frames[channel_2_frame_indices]

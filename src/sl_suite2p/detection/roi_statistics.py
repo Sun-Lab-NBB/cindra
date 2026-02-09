@@ -472,7 +472,6 @@ def compute_roi_statistics(
     # Resolves aspect correction and overlap image only when full statistics are needed. Lightweight mode skips these
     # because ellipse fitting and overlap filtering are not performed.
     if not lightweight:
-
         if aspect is not None:
             y_scale, x_scale = int(aspect * effective_diameter), effective_diameter
         else:

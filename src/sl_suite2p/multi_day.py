@@ -17,9 +17,9 @@ from .multiday import (
     export_masks_and_images,
     generate_template_masks,
     backward_transform_masks,
-    extract_unique_components,
 )
 from .dataclasses import MultiDayConfiguration
+from .dataclasses.multi_day_configuration import _extract_unique_components
 from .dataclasses.version import version, python_version
 
 # THe minimum number of sessions required for multi-day processing
@@ -117,7 +117,7 @@ def resolve_multiday_ops(ops: dict[str, Any], db: dict[str, Any]) -> Path:
     # Natural-sorts session directories. The first session after sorting becomes the 'main session' which stores the
     # processing tracker file.
     sessions = natsorted([Path(session) for session in ops["session_directories"]])
-    ops["session_ids"] = extract_unique_components(paths=sessions)
+    ops["session_ids"] = _extract_unique_components(paths=sessions)
 
     # Processes each session and creates multiday output folders under each session's directory.
     multiday_output_paths: list[str] = []
