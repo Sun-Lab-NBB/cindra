@@ -14,6 +14,77 @@ from .multi_day_configuration import MultiDayConfiguration
 from .single_day_configuration import AcquisitionParameters, SingleDayConfiguration
 
 
+def _load_single_day_runtime(plane_directory: Path) -> SingleDayRuntimeData:
+    """Loads a SingleDayRuntimeData instance and corrects a stale output_path if the dataset was relocated.
+
+    When a dataset is moved between machines, the output_path cached in the plane's runtime YAML no longer matches
+    the actual directory. Since ``__post_init__`` uses the cached output_path for array loading, arrays silently fail
+    to load in that case. This function detects the mismatch, overrides output_path to the known-correct plane
+    directory, and re-runs array loading so the returned runtime is fully populated.
+
+    Args:
+        plane_directory: The actual on-disk path to the plane directory (e.g., ``suite2p/plane_0``).
+
+    Returns:
+        A fully-loaded SingleDayRuntimeData instance with arrays resolved against the correct path.
+    """
+    runtime = SingleDayRuntimeData.load(output_path=plane_directory)
+
+    if runtime.output_path != plane_directory:
+        runtime.output_path = plane_directory
+        runtime.registration.load_arrays(plane_directory)
+        runtime.detection.load_arrays(plane_directory)
+        runtime.extraction.load_arrays(plane_directory)
+
+    return runtime
+
+
+def _compute_relocation_prefixes(old_path: Path, new_path: Path) -> tuple[Path, Path]:
+    """Computes the old and new path prefixes for relocating a moved dataset.
+
+    Walks both paths from the end to find the longest common suffix, then returns the diverging prefixes. The
+    assumption is that the entire processed data hierarchy was moved intact, so only the leading prefix changed.
+
+    Args:
+        old_path: The cached path from the serialized YAML data.
+        new_path: The actual resolved path on the current filesystem.
+
+    Returns:
+        A tuple of (old_prefix, new_prefix) that can be used to transform any cached path to its new location.
+    """
+    old_parts = old_path.parts
+    new_parts = new_path.parts
+
+    # Walks from the end to find the longest common suffix.
+    common_suffix_length = 0
+    for old_part, new_part in zip(reversed(old_parts), reversed(new_parts), strict=False):
+        if old_part == new_part:
+            common_suffix_length += 1
+        else:
+            break
+
+    old_prefix = Path(*old_parts[: len(old_parts) - common_suffix_length]) if common_suffix_length > 0 else old_path
+    new_prefix = Path(*new_parts[: len(new_parts) - common_suffix_length]) if common_suffix_length > 0 else new_path
+    return old_prefix, new_prefix
+
+
+def _relocate_runtime_paths(runtime: MultiDayRuntimeData, old_prefix: Path, new_prefix: Path) -> None:
+    """Applies a prefix substitution to all cached paths in a MultiDayRuntimeData instance.
+
+    Args:
+        runtime: The runtime data instance whose paths will be updated in-place.
+        old_prefix: The stale path prefix to replace.
+        new_prefix: The correct path prefix on the current filesystem.
+    """
+    if runtime.output_path is not None:
+        runtime.output_path = new_prefix / runtime.output_path.relative_to(old_prefix)
+    if runtime.io.data_path is not None:
+        runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
+    runtime.io.dataset_output_paths = [
+        new_prefix / path.relative_to(old_prefix) for path in runtime.io.dataset_output_paths
+    ]
+
+
 @dataclass
 class RuntimeContext:
     """Combines configuration, acquisition parameters, and runtime data used in the single-day processing pipeline.
@@ -153,31 +224,6 @@ class RuntimeContext:
 
         runtime = _load_single_day_runtime(plane_directory=plane_path)
         return cls(configuration=config, acquisition=acquisition, runtime=runtime)
-
-
-def _load_single_day_runtime(plane_directory: Path) -> SingleDayRuntimeData:
-    """Loads a SingleDayRuntimeData instance and corrects a stale output_path if the dataset was relocated.
-
-    When a dataset is moved between machines, the output_path cached in the plane's runtime YAML no longer matches
-    the actual directory. Since ``__post_init__`` uses the cached output_path for array loading, arrays silently fail
-    to load in that case. This function detects the mismatch, overrides output_path to the known-correct plane
-    directory, and re-runs array loading so the returned runtime is fully populated.
-
-    Args:
-        plane_directory: The actual on-disk path to the plane directory (e.g., ``suite2p/plane_0``).
-
-    Returns:
-        A fully-loaded SingleDayRuntimeData instance with arrays resolved against the correct path.
-    """
-    runtime = SingleDayRuntimeData.load(output_path=plane_directory)
-
-    if runtime.output_path != plane_directory:
-        runtime.output_path = plane_directory
-        runtime.registration.load_arrays(plane_directory)
-        runtime.detection.load_arrays(plane_directory)
-        runtime.extraction.load_arrays(plane_directory)
-
-    return runtime
 
 
 @dataclass
@@ -351,49 +397,3 @@ class MultiDayRuntimeContext:
 
         runtime = MultiDayRuntimeData.load(output_path=target_path)
         return cls(configuration=configuration, runtime=runtime)
-
-
-def _compute_relocation_prefixes(old_path: Path, new_path: Path) -> tuple[Path, Path]:
-    """Computes the old and new path prefixes for relocating a moved dataset.
-
-    Walks both paths from the end to find the longest common suffix, then returns the diverging prefixes. The
-    assumption is that the entire processed data hierarchy was moved intact, so only the leading prefix changed.
-
-    Args:
-        old_path: The cached path from the serialized YAML data.
-        new_path: The actual resolved path on the current filesystem.
-
-    Returns:
-        A tuple of (old_prefix, new_prefix) that can be used to transform any cached path to its new location.
-    """
-    old_parts = old_path.parts
-    new_parts = new_path.parts
-
-    # Walks from the end to find the longest common suffix.
-    common_suffix_length = 0
-    for old_part, new_part in zip(reversed(old_parts), reversed(new_parts), strict=False):
-        if old_part == new_part:
-            common_suffix_length += 1
-        else:
-            break
-
-    old_prefix = Path(*old_parts[: len(old_parts) - common_suffix_length]) if common_suffix_length > 0 else old_path
-    new_prefix = Path(*new_parts[: len(new_parts) - common_suffix_length]) if common_suffix_length > 0 else new_path
-    return old_prefix, new_prefix
-
-
-def _relocate_runtime_paths(runtime: MultiDayRuntimeData, old_prefix: Path, new_prefix: Path) -> None:
-    """Applies a prefix substitution to all cached paths in a MultiDayRuntimeData instance.
-
-    Args:
-        runtime: The runtime data instance whose paths will be updated in-place.
-        old_prefix: The stale path prefix to replace.
-        new_prefix: The correct path prefix on the current filesystem.
-    """
-    if runtime.output_path is not None:
-        runtime.output_path = new_prefix / runtime.output_path.relative_to(old_prefix)
-    if runtime.io.data_path is not None:
-        runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
-    runtime.io.dataset_output_paths = [
-        new_prefix / path.relative_to(old_prefix) for path in runtime.io.dataset_output_paths
-    ]

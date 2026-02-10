@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from ..dataclasses import ROIStatistics
 
 
-def find_suite2p_directory(session_directory: Path) -> Path:
+def _find_suite2p_directory(session_directory: Path) -> Path:
     """Discovers the suite2p output directory within a session directory tree.
 
     Searches recursively for the combined_metadata.npz file created by the single-day pipeline's combination step.
@@ -82,7 +82,7 @@ def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[Mult
     data_paths: list[Path] = []
     output_paths: list[Path] = []
     for session_directory in session_directories:
-        data_path = find_suite2p_directory(session_directory=session_directory)
+        data_path = _find_suite2p_directory(session_directory=session_directory)
         data_paths.append(data_path)
         output_paths.append(data_path.parent / "multiday" / dataset_name)
 
