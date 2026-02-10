@@ -15,6 +15,7 @@ Conventions for Python code in Sun Lab projects.
 - [Numba Functions](#numba-functions)
 - [Comments](#comments)
 - [Imports](#imports)
+- [File-Level Ordering](#file-level-ordering)
 - [Class Design](#class-design)
 - [Dataclass Conventions](#dataclass-conventions)
 - [I/O Separation](#io-separation)
@@ -626,33 +627,28 @@ if self._speed_axis is not None:
 
 ## Imports
 
-### Organization
+- All imports must be at the **top of the file**. Deferred or inline imports are not allowed.
+- Import sorting and grouping is enforced by **ruff** (isort rules). Do not manually reorder imports; run the linter
+  and let it fix ordering automatically.
+
+### Local Import Rules
+
+All local (within-library) imports must directly import the required names. Importing entire modules is prohibited.
 
 ```python
-"""Module docstring."""
+# Good - import specific names
+from .spline_grid import SplineGrid
+from .deformation import Deformation, zoom, diffuse
 
-from typing import TYPE_CHECKING
-
-import numba
-from numba import prange
-import numpy as np
-from ataraxis_base_utilities import console
-
-if TYPE_CHECKING:
-    from numpy.typing import NDArray
+# Bad - importing the module itself
+from . import spline_grid
+from . import deformation
 ```
-
-Order:
-1. Future imports (if any)
-2. Standard library
-3. `TYPE_CHECKING` import from typing
-4. Third-party imports (alphabetical)
-5. Local imports
-6. `if TYPE_CHECKING:` block for type-only imports
 
 ### Cross-Package vs Within-Package Imports
 
-**Cross-package imports** (importing from another package in the same library) must go through the package's `__init__.py`:
+**Cross-package imports** (importing from another package in the same library) must go through the package's
+`__init__.py`:
 
 ```python
 # Good - imports from the package's __init__.py
@@ -668,15 +664,99 @@ from ..configuration.single_day import RuntimeContext, SingleDayConfiguration
 # Good - direct imports within the same package
 from .spline_grid import SplineGrid
 from .deformation import Deformation, zoom, diffuse
-
-# Unnecessary - going through __init__.py for same-package imports
-from . import SplineGrid  # Only if SplineGrid is exported in __init__.py
 ```
 
 This rule ensures:
 - Cross-package dependencies are tracked through explicit package exports
 - Within-package implementation details remain encapsulated
 - Refactoring a module's internal structure doesn't break other packages
+
+---
+
+## File-Level Ordering
+
+All definitions within a file follow a consistent vertical ordering. The general layout from top to bottom is:
+
+1. **Module docstring**
+2. **Imports**
+3. **Constants** (module-level `_UPPER_SNAKE_CASE` values)
+4. **Enumerations and dataclasses** (type definitions that other code depends on)
+5. **Private functions and classes** (`_` prefixed)
+6. **Public functions and classes** (no prefix)
+
+### Visibility Ordering
+
+Private definitions appear **above** public definitions. Private helpers are implementation details that the public API
+delegates to, so placing them first allows readers to encounter them before the code that calls them.
+
+### Call-Hierarchy Ordering
+
+Within each visibility group, definitions should **loosely follow the order in which they are called** during the
+library's runtime. For example, if the pipeline first registers sessions, then tracks cells, then extracts
+fluorescence, the functions supporting each stage should appear in that same sequence. This makes the file read like a
+narrative of the processing flow rather than an arbitrary list.
+
+When there is no clear call hierarchy (e.g., a module of independent utilities), group definitions **by purpose**.
+All functions related to registration belong together, all functions related to extraction belong together, and so on.
+
+### Enumerations and Dataclasses First
+
+Enumerations and dataclasses define the types that worker functions and classes operate on. They must appear **above**
+the functions and classes that use them so that type definitions are established before the logic that depends on them.
+
+**Exception — dataclass-only modules**: In files whose primary product is the dataclasses themselves (e.g., modules in
+the `dataclasses` package or `sl-shared-assets` data model packages), the order is: enumerations first, then private
+helper functions, then dataclasses at the bottom. This reflects that the dataclasses are the main exports of those
+modules rather than consumers of other definitions in the same file.
+
+### Example Layout
+
+```python
+"""Provides registration utilities for the multi-day pipeline."""
+
+from pathlib import Path
+
+import numpy as np
+
+# The maximum allowed shift during registration, in pixels.
+_MAXIMUM_SHIFT: int = 50
+
+
+class RegistrationMethod(StrEnum):
+    """Defines the supported registration methods."""
+
+    RIGID = "rigid"
+    """Applies rigid (translation-only) registration."""
+    DIFFEOMORPHIC = "diffeomorphic"
+    """Applies diffeomorphic demons registration."""
+
+
+@dataclass
+class RegistrationResult:
+    """Stores the output of a registration operation."""
+
+    shift_y: int = 0
+    """The vertical shift in pixels."""
+    shift_x: int = 0
+    """The horizontal shift in pixels."""
+
+
+def _compute_shift(reference: NDArray[np.float32], target: NDArray[np.float32]) -> tuple[int, int]:
+    """Computes the pixel shift between two images."""
+    ...
+
+
+def _apply_shift(image: NDArray[np.float32], shift_y: int, shift_x: int) -> NDArray[np.float32]:
+    """Applies a translation shift to an image."""
+    ...
+
+
+def register_session(reference: NDArray[np.float32], target: NDArray[np.float32]) -> RegistrationResult:
+    """Registers a target image to a reference image and returns the result."""
+    shift_y, shift_x = _compute_shift(reference=reference, target=target)
+    corrected = _apply_shift(image=target, shift_y=shift_y, shift_x=shift_x)
+    ...
+```
 
 ---
 
@@ -1146,8 +1226,13 @@ Python Style Compliance:
 - [ ] Keyword arguments used for function calls
 - [ ] Error handling uses console.error() from ataraxis_base_utilities
 - [ ] Lines under 120 characters
-- [ ] Imports ordered: standard library, TYPE_CHECKING, third-party, local
+- [ ] All imports at top of file (no deferred or inline imports)
+- [ ] Import sorting delegated to ruff (do not manually reorder)
+- [ ] Local imports use direct name imports (no module imports)
 - [ ] Cross-package imports go through package __init__.py (not submodules)
+- [ ] Private definitions above public definitions in file
+- [ ] Enums and dataclasses above worker functions and classes
+- [ ] Definitions ordered by call hierarchy or grouped by purpose
 - [ ] Inline comments use third person imperative
 - [ ] No heavy section separator blocks (# ====== or # ------)
 - [ ] Numba functions use cache=True
