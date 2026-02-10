@@ -66,8 +66,8 @@ class DiffeomorphicDemonsRegistration:
         self,
         images: list[NDArray[np.float32]],
         speed_factor: float = 3.0,
-        scale_sampling: int = 25,
-        grid_sampling_factor: float = 0.5,
+        scale_sampling: int = 30,
+        grid_sampling_factor: float = 1.0,
         final_scale: float = 1.0,
         final_grid_sampling: float = 16.0,
         smooth_scale: bool = True,
@@ -98,7 +98,7 @@ class DiffeomorphicDemonsRegistration:
 
         # Tracks the runtime state initialized during registration.
         self._pyramids: list[ScaleSpacePyramid] | None = None
-        self._cache: dict[str, tuple] = {}
+        self._cache: dict[str, tuple[tuple[int, int, float], Deformation | NDArray[np.float32]]] = {}
         self._interpolation_order: int = 1
 
     def get_deformation(self, image_index: int) -> Deformation:

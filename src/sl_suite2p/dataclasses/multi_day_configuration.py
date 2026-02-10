@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from enum import StrEnum
 from pathlib import Path
 from functools import cached_property
 from dataclasses import field, dataclass
@@ -12,6 +13,19 @@ from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from .single_day_configuration import RuntimeSettings, SignalExtraction, SpikeDeconvolution
+
+
+class ReferenceImageType(StrEnum):
+    """Defines the supported reference image types for diffeomorphic registration across sessions."""
+
+    MEAN = "mean"
+    """The temporal mean of all registered frames, providing a static view of the imaging field."""
+
+    ENHANCED_MEAN = "enhanced_mean"
+    """The high-pass filtered mean image that enhances cell boundaries for improved registration."""
+
+    MAXIMUM_PROJECTION = "maximum_projection"
+    """The maximum intensity projection across all frames, highlighting active structures."""
 
 
 def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
@@ -66,7 +80,7 @@ def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[st
     return tuple(result)
 
 
-@dataclass()
+@dataclass
 class SessionIO:
     """Stores the parameters that specify input session locations and output directories."""
 
@@ -83,9 +97,7 @@ class SessionIO:
 
     def __post_init__(self) -> None:
         """Converts string paths to Path objects and natural-sorts them after YAML loading."""
-        self.session_directories = natsorted([
-            Path(p) if isinstance(p, str) else p for p in self.session_directories
-        ])
+        self.session_directories = natsorted([Path(p) if isinstance(p, str) else p for p in self.session_directories])
 
     @cached_property
     def session_ids(self) -> tuple[str, ...]:
@@ -101,7 +113,7 @@ class SessionIO:
         self.session_directories = [str(p) for p in self.session_directories]  # type: ignore[misc]
 
 
-@dataclass()
+@dataclass
 class ROISelection:
     """Stores parameters for selecting single-day-detected ROIs to be tracked across multiple sessions (days)."""
 
@@ -112,92 +124,86 @@ class ROISelection:
     maximum_size: int = 1000
     """The maximum allowed ROI size, in pixels. ROIs with a larger pixel size are excluded from processing."""
 
-    mroi_stripe_margin: int = 30
+    mroi_region_margin: int = 30
     """The minimum required distance, in pixels, between the center-point (the median x-coordinate) of the ROI
-    and the MROI stripe border. ROIs that are too close to stripe borders are excluded from processing to avoid
-    ambiguities associated with tracking ROIs that span multiple stripes. This parameter is only used for MROI
-    recordings where stripe borders are automatically computed from the acquisition parameters."""
+    and the MROI region border. ROIs that are too close to region borders are excluded from processing to avoid
+    ambiguities associated with tracking ROIs that span multiple regions. This parameter is only used for MROI
+    recordings where region borders are automatically computed from the acquisition parameters."""
 
 
-@dataclass()
+@dataclass
 class DiffeomorphicRegistration:
     """Stores parameters for diffeomorphic demons registration that aligns sessions from multiple days to the same
     visual (sampling) space.
     """
 
-    image_type: str = "enhanced"
-    """The type of suite2p-generated reference image to use for across-day registration. Supported options are
-    'enhanced', 'mean' and 'max'. This 'template' image is used to calculate the necessary deformation (transformations)
-    to register (align) all sessions to the same visual space."""
+    image_type: ReferenceImageType = ReferenceImageType.ENHANCED_MEAN
+    """The type of suite2p-generated reference image to use for across-day registration. This image is used to
+    calculate the deformation fields that register all sessions to a common visual space."""
 
     grid_sampling_factor: float = 1
-    """Determines to what extent the grid sampling scales with the deformed image scale. Has to be between 0 and 1. By
-    making this value lower than 1, the grid is relatively fine at the the higher scales, allowing for more
-    deformations. This is used when resizing session images as part of the registration process."""
+    """Determines how the B-spline grid spacing scales with image scale during the multi-scale registration process.
+    Must be between 0 and 1. Lower values produce a relatively finer grid at coarser scales, allowing for more
+    detailed deformations at those scales."""
 
     scale_sampling: int = 30
-    """The number of iterations for each level (i.e. between each factor two in scale) to perform when computing the
-    deformations. Values between 20 and 30 are reasonable in most situations, but higher values yield better results in
-    general. The speed of the algorithm scales linearly with this value."""
+    """The number of registration iterations to perform at each scale level of the multi-scale pyramid. Values between
+    20 and 30 are reasonable for most recordings, but higher values yield better alignment at the cost of proportionally
+    longer computation time."""
 
     speed_factor: float = 3
     """The relative force of the deformation transform applied when registering the sessions to the same visual space.
     This is the most important parameter to tune. For most cases, a value between 1 and 5 is reasonable."""
 
 
-@dataclass()
+@dataclass
 class ROITracking:
     """Stores parameters for tracking ROIs across multiple registered sessions (days) using spatial clustering."""
 
-    criterion: str = "distance"
-    """Specifies the criterion for clustering (grouping) ROI masks from different sessions. Currently, the only
-    valid option is 'distance'."""
-
     threshold: float = 0.75
-    """Specifies the threshold for the clustering algorithm. ROI masks will be clustered (grouped) together if their
-    clustering criterion is below this threshold value."""
+    """The Jaccard distance threshold for the hierarchical clustering algorithm. Candidate ROI pairs that pass the
+    maximum_distance pre-filter are compared by spatial overlap (Jaccard distance, 0 = identical, 1 = no overlap) and
+    clustered together as the same ROI if their Jaccard distance is below this value."""
 
     mask_prevalence: int = 50
-    """Specifies the minimum percentage of all registered sessions that must include the clustered ROI mask. ROI masks
-    present in fewer percent of sessions than this value are excluded from processing. This parameter is used to filter
-    out ROIs that are mostly silent or not distinguishable across sessions."""
+    """The minimum percentage of registered sessions that must contain a given ROI for it to be included in the
+    tracked cell set. Clusters with members in fewer sessions than this threshold are discarded."""
 
     pixel_prevalence: int = 50
-    """Specifies the minimum percentage of all registered sessions in which an ROI mask pixel must be present for it to
-    be used to construct the template mask. Pixels present in fewer percent of sessions than this value are not used to
-    define the template masks. Template masks are used to extract the ROI fluorescence from the original (non-deformed)
-    visual space of every session. This parameter is used to isolate the part of the ROI that is stable across
-    sessions, which is required for the extraction step to work correctly (target only the tracked ROI)."""
+    """The minimum percentage of registered sessions in which a pixel must appear for it to be included in the ROI's
+    cross-session template mask. Pixels below this threshold are excluded, so only spatially stable regions of each
+    tracked ROI contribute to the template used for fluorescence extraction across sessions."""
 
     step_sizes: list[int] = field(default_factory=lambda: [200, 200])
-    """Specifies the block size for the ROI clustering (across-session tracking) process, in pixels, in the order of
-    (height, width). To reduce the memory (RAM) overhead, the algorithm divides the deformed (shared) visual space into
-    blocks and then processes one (or more) blocks at a time."""
+    """The block size, in pixels, as (height, width) used to partition the deformed visual space into spatial bins
+    for clustering. Smaller blocks reduce memory usage but increase processing overhead."""
 
     bin_size: int = 50
-    """Specifies the additional length, in pixels, the algorithm is allowed to extend into the neighboring regions when
-    segmenting ROIs into grid bins. Before clustering ROIs across sessions, the algorithms pre-segments them into
-    grid bins using 'step_sizes'. Additionally, it uses +- 'bin_size' to extend into neighboring regions to better
-    cluster the ROIs around grid borders."""
+    """The extension, in pixels, added to each spatial bin boundary in both directions when collecting ROI masks
+    for clustering. This overlap between neighboring bins ensures that ROIs near bin borders are clustered
+    correctly."""
 
     maximum_distance: int = 20
-    """Specifies the maximum distance, in pixels, that can separate masks across multiple sessions. The clustering
-    algorithm will consider ROI masks located at most within this distance from each-other across days as the same
-    ROIs during tracking."""
+    """The maximum centroid distance, in pixels, between two ROI masks for them to be considered a candidate pair.
+    Only pairs that pass this spatial pre-filter proceed to the Jaccard overlap comparison controlled by threshold."""
 
     minimum_size: int = 25
-    """The minimum size of the non-overlapping ROI region, in pixels, that has to be covered by the template
-    mask, for the ROI to be assigned to that template. This is used to determine which template(s) the ROI belongs to
-    (if any), for the purpose of tracking it across sessions."""
+    """The minimum number of non-overlapping pixels a cross-session template mask must contain after removing pixels
+    shared with other templates. Templates below this size are discarded as too small to represent a valid cell."""
 
 
-@dataclass()
+@dataclass
 class MultiDayConfiguration(YamlConfig):
-    """Aggregates the configuration parameters for the multi-day suite2p pipeline.
+    """Aggregates the user-defined configuration parameters for the multi-day suite2p pipeline.
+
+    This class stores all user-configurable parameters that control how the pipeline processes data.
+    These parameters are immutable during processing - the pipeline reads them but does not modify them.
 
     Notes:
         This class is based on the reference implementation here:
         https://github.com/sprustonlab/multiday-suite2p-public.
+
+        For runtime data (computed by the pipeline), see MultiDayRuntimeData.
     """
 
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)

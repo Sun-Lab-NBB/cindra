@@ -161,7 +161,6 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
     bin_size = ops["bin_size"]
     maximum_distance = ops["maximum_distance"]
     threshold = ops["threshold"]
-    criterion = ops["criterion"]
     mask_prevalence = ops["mask_prevalence"]
     pixel_prevalence = ops["pixel_prevalence"]
     minimum_sessions = int(np.ceil((mask_prevalence / 100) * len(data.sessions)))
@@ -291,7 +290,7 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
         # based on their jaccard distance (how much they overlap session-to-session). Again, the idea here is that the
         # same cell would be spatially similar to itself and spatially different from other cells across sessions.
         linkage_matrix = scipy.cluster.hierarchy.complete(jaccard_matrix)
-        clusters = scipy.cluster.hierarchy.fcluster(Z=linkage_matrix, t=threshold, criterion=criterion)
+        clusters = scipy.cluster.hierarchy.fcluster(Z=linkage_matrix, t=threshold, criterion="distance")
 
         # Applies session prevalence filtering. Specifically, this only keeps cells that can be identified across
         # a certain number of sessions. This allows filtering cells that are not active during most sessions or that

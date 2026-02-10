@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 _MINIMUM_KNOTS_FOR_FROZEN_EDGES: int = 6
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always")  # type: ignore[untyped-decorator]
 def compute_cardinal_coefficients(
     interpolation_factor: float,
     coefficients: NDArray[np.float32],
@@ -47,7 +47,7 @@ def compute_cardinal_coefficients(
     coefficients[2] = -2.0 * t_cubed + 3.0 * t_squared - coefficients[0]
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always")  # type: ignore[untyped-decorator]
 def compute_basis_coefficients(
     interpolation_factor: float,
     coefficients: NDArray[np.float32],
@@ -294,7 +294,7 @@ class SplineGrid:
         return True
 
 
-@numba.njit(cache=True, parallel=True)
+@numba.njit(cache=True, parallel=True)  # type: ignore[untyped-decorator]
 def _sample_grid(
     result: NDArray[np.float32],
     grid_sampling: float,
@@ -343,7 +343,7 @@ def _sample_grid(
             result[y, x] = sampled_value
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True)  # type: ignore[untyped-decorator]
 def _fit_knots_to_field(
     grid_sampling: float,
     knots: NDArray[np.float32],

@@ -270,7 +270,7 @@ class FileIO:
 
     ignored_file_names: list[str] = field(default_factory=list)
     """The list of file names to ignore when searching for and loading raw data. Any file whose name exactly matches
-    one of the names in this is excluded from processing even if it has the correct extension and is located inside
+    one of the names in this list is excluded from processing even if it has the correct extension and is located inside
     the input data directory."""
 
     def __post_init__(self) -> None:

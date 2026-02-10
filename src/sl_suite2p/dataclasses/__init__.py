@@ -18,7 +18,7 @@ from .single_day_data import (
     SingleDayRuntimeData,
 )
 from .runtime_contexts import RuntimeContext, MultiDayRuntimeContext
-from .multi_day_configuration import MultiDayConfiguration
+from .multi_day_configuration import ReferenceImageType, MultiDayConfiguration
 from .single_day_configuration import (
     Main,
     FileIO,
@@ -53,6 +53,7 @@ __all__ = [
     "OnePhotonRegistration",
     "ROIDetection",
     "ROIStatistics",
+    "ReferenceImageType",
     "Registration",
     "RegistrationData",
     "RuntimeContext",

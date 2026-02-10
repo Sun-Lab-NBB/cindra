@@ -83,17 +83,17 @@ def import_sessions(ops: dict[str, Any]) -> MultiDayData:
             if single_day_iscell[cell_index, 1] > prob_threshold and mask["pixel_count"] < max_size
         ]  # Loads cell data for all single-day ROIs that satisfy the size and probability thresholds
 
-        # Removes ROIs too close to stripe margins. This step is skipped if the runtime is not configured to filter
-        # cells around borders (if the stripe borders list is empty).
-        if ops["mroi_stripe_borders"]:
-            stripe_margin = ops["stripe_margin"]
+        # Removes ROIs too close to region borders. This step is skipped if the runtime is not configured to filter
+        # cells around borders (if the region borders list is empty).
+        if ops["mroi_region_borders"]:
+            region_margin = ops["region_margin"]
             filtered_cells = [
                 cell
                 for cell in selected_cells
-                if all(abs(cell["centroid"][1] - border) > stripe_margin for border in ops["mroi_stripe_borders"])
+                if all(abs(cell["centroid"][1] - border) > region_margin for border in ops["mroi_region_borders"])
             ]
         else:
-            # Otherwise, all selected cells automatically pass the stripe filtering step.
+            # Otherwise, all selected cells automatically pass the region filtering step.
             filtered_cells = selected_cells
 
         # Uses the 'mean' image to determine the shape (height and width) of the combined session movie.

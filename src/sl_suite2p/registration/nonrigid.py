@@ -28,7 +28,7 @@ _UPSAMPLING_PADDING: int = 3
 _CORRELATION_BATCH_SIZE: int = 64
 
 
-@njit(parallel=True, cache=True)
+@njit(parallel=True, cache=True)  # type: ignore[untyped-decorator]
 def _compute_correlation_snr(
     correlation_data: NDArray[np.float32],
     padding: int,
@@ -83,7 +83,7 @@ def _compute_correlation_snr(
     return snr
 
 
-@njit(cache=True)
+@njit(cache=True)  # type: ignore[untyped-decorator]
 def _apply_bilinear_interpolation(
     source: NDArray[np.float32],
     y_coordinates: NDArray[np.float32],
@@ -132,7 +132,7 @@ def _apply_bilinear_interpolation(
             )
 
 
-@njit(parallel=True, cache=True)
+@njit(parallel=True, cache=True)  # type: ignore[untyped-decorator]
 def _apply_coordinate_shifts(
     frames: NDArray[np.float32],
     y_shift_maps: NDArray[np.float32],
@@ -170,7 +170,7 @@ def _apply_coordinate_shifts(
         )
 
 
-@njit(parallel=True, cache=True)
+@njit(parallel=True, cache=True)  # type: ignore[untyped-decorator]
 def _interpolate_block_shifts(
     y_block_shifts: NDArray[np.float32],
     x_block_shifts: NDArray[np.float32],
@@ -214,7 +214,7 @@ def _interpolate_block_shifts(
         )
 
 
-@njit(parallel=True, cache=True)
+@njit(parallel=True, cache=True)  # type: ignore[untyped-decorator]
 def _extract_upsampling_regions(
     correlation: NDArray[np.float32],
     y_peaks: NDArray[np.int32],
