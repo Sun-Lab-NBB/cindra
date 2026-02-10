@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
 from ..registration import compute_spatial_taper_mask, compute_registration_blocks
@@ -31,7 +31,8 @@ def _fit_and_reconstruct_block(
     """
     # noinspection PyUnresolvedReferences
     model = PCA(n_components=num_components, random_state=0).fit(block)
-    return ((block @ model.components_.T) @ model.components_).astype(np.float32)
+    reconstructed: NDArray[np.float32] = ((block @ model.components_.T) @ model.components_).astype(np.float32)
+    return reconstructed
 
 
 def pca_denoise(

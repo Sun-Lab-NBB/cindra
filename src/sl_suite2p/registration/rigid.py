@@ -61,7 +61,7 @@ def apply_edge_taper(
     Returns:
         The tapered frames with the same shape as input.
     """
-    return apply_mask(frames=frames, mask=taper_mask, offset=mean_offset)
+    return apply_mask(frames=frames, mask=taper_mask, offset=mean_offset)  # type: ignore[no-any-return]
 
 
 def compute_phase_correlation_kernel(

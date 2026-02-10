@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
 from natsort import natsorted
 from ataraxis_base_utilities import console, ensure_directory_exists
 
-from .multi_day_data import MultiDayIOData, MultiDayRuntimeData
+from .multi_day_data import MultiDayRuntimeData, find_suite2p_directory
 from .single_day_data import SingleDayRuntimeData
 from .multi_day_configuration import MultiDayConfiguration
 from .single_day_configuration import AcquisitionParameters, SingleDayConfiguration
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 @dataclass
 class RuntimeContext:
-    """Combines configuration, acquisition parameters, and runtime data used int he single-day processing pipeline.
+    """Combines configuration, acquisition parameters, and runtime data used in the single-day processing pipeline.
 
     Notes:
         This class provides a unified interface for pipeline functions to access user configuration (immutable),
@@ -142,7 +145,7 @@ class RuntimeContext:
 
 @dataclass
 class MultiDayRuntimeContext:
-    """Combines configuration and per-session runtime data for multi-day pipeline functions.
+    """Combines configuration and runtime data used in the multi-day processing pipeline.
 
     Notes:
         This class provides a unified interface for multi-day pipeline functions to access user configuration
@@ -160,8 +163,8 @@ class MultiDayRuntimeContext:
     runtime: MultiDayRuntimeData
     """The per-session runtime data, which is computed and updated by pipeline stages."""
 
-    def save_configuration(self) -> None:
-        """Saves the configuration to the main session's output directory.
+    def save_shared(self) -> None:
+        """Saves the shared configuration to the main session's output directory.
 
         This method saves the immutable configuration to the first session's multiday directory. It should be called
         once at the start of processing.
@@ -199,8 +202,14 @@ class MultiDayRuntimeContext:
         self.runtime.save(output_path=self.runtime.output_path)
 
     def _get_main_session_path(self) -> Path:
-        """Returns the main session's multiday output path (first session after natural sorting)."""
-        return self.configuration.session_io.session_directories[0] / "multiday" / self.configuration.session_io.dataset_name
+        """Returns the main session's multiday output path (first session after natural sorting).
+
+        Discovers the suite2p directory for the main session and places the multiday output as a sibling of the
+        suite2p directory (under the same parent).
+        """
+        main_session_directory = self.configuration.session_io.session_directories[0]
+        suite2p_directory = find_suite2p_directory(session_directory=main_session_directory)
+        return suite2p_directory.parent / "multiday" / self.configuration.session_io.dataset_name
 
     @classmethod
     def load(cls, root_path: Path, session_index: int = -1) -> MultiDayRuntimeContext | list[MultiDayRuntimeContext]:
@@ -232,7 +241,9 @@ class MultiDayRuntimeContext:
 
         configuration = MultiDayConfiguration.load(file_path=config_path)
 
-        # Computes session directories and output paths from configuration.
+        # Resolves session directories and output paths from configuration. The multiday output directory is
+        # a sibling of the suite2p directory (under the same parent), so the suite2p directory must be discovered
+        # for each session.
         session_directories = natsorted(configuration.session_io.session_directories)
         dataset_name = configuration.session_io.dataset_name
 
@@ -241,7 +252,8 @@ class MultiDayRuntimeContext:
             contexts: list[MultiDayRuntimeContext] = []
 
             for session_dir in session_directories:
-                output_path = session_dir / "multiday" / dataset_name
+                suite2p_directory = find_suite2p_directory(session_directory=session_dir)
+                output_path = suite2p_directory.parent / "multiday" / dataset_name
                 runtime_path = output_path / "multiday_runtime_data.yaml"
                 runtime = (
                     MultiDayRuntimeData.load(output_path=output_path)
@@ -261,58 +273,9 @@ class MultiDayRuntimeContext:
             console.error(message=message, error=IndexError)
 
         session_dir = session_directories[session_index]
-        output_path = session_dir / "multiday" / dataset_name
+        suite2p_directory = find_suite2p_directory(session_directory=session_dir)
+        output_path = suite2p_directory.parent / "multiday" / dataset_name
         runtime_path = output_path / "multiday_runtime_data.yaml"
         runtime = MultiDayRuntimeData.load(output_path=output_path) if runtime_path.exists() else MultiDayRuntimeData()
 
         return cls(configuration=configuration, runtime=runtime)
-
-    @classmethod
-    def from_configuration(cls, configuration: MultiDayConfiguration) -> list[MultiDayRuntimeContext]:
-        """Creates MultiDayRuntimeContext instances for all sessions from a configuration object.
-
-        This factory method initializes runtime data for each session by resolving session directories, computing
-        session IDs, and setting up output paths based on the configuration. Use this method to create contexts at
-        the start of multi-day processing.
-
-        Args:
-            configuration: The multi-day configuration object containing session directories and processing
-                parameters.
-
-        Returns:
-            A list of MultiDayRuntimeContext instances, one for each session.
-
-        Raises:
-            RuntimeError: If fewer than two sessions are configured.
-        """
-        # Validates minimum session count.
-        minimum_session_count = 2
-        if len(configuration.session_io.session_directories) < minimum_session_count:
-            message = (
-                f"Unable to create MultiDayRuntimeContext. Expected at least {minimum_session_count} session "
-                f"directories, but only {len(configuration.session_io.session_directories)} were provided."
-            )
-            console.error(message=message, error=RuntimeError)
-
-        # Retrieves pre-sorted session directories and IDs from configuration.
-        session_directories = configuration.session_io.session_directories
-        session_ids = configuration.session_io.session_ids
-
-        # Creates a context for each session.
-        dataset_name = configuration.session_io.dataset_name
-        contexts: list[MultiDayRuntimeContext] = []
-
-        for session_dir, session_id in zip(session_directories, session_ids, strict=True):
-            output_path = session_dir / "multiday" / dataset_name
-
-            io_data = MultiDayIOData(
-                session_id=session_id,
-                session_directory=session_dir,
-                dataset_name=dataset_name,
-            )
-
-            runtime = MultiDayRuntimeData(output_path=output_path, io=io_data)
-
-            contexts.append(cls(configuration=configuration, runtime=runtime))
-
-        return contexts

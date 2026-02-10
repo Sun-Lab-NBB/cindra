@@ -12,11 +12,49 @@ from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from .version import version, python_version
-from .single_day_data import ROIStatistics, ExtractionData, CombinedData
+from .single_day_data import CombinedData, ROIStatistics, ExtractionData
 from .single_day_configuration import AcquisitionParameters
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+
+def find_suite2p_directory(session_directory: Path) -> Path:
+    """Discovers the suite2p output directory within a session directory tree.
+
+    Searches recursively for the combined_metadata.npz file created by the single-day pipeline's combination step.
+    Unlike the single-day pipeline, multi-day session paths are not pre-sanitized, so the suite2p directory may be
+    nested at an arbitrary depth below the session root (e.g., under a processed_data/mesoscope_data/ subdirectory).
+
+    Args:
+        session_directory: The path to the session's root directory.
+
+    Returns:
+        The path to the suite2p output directory that contains the combined_metadata.npz file.
+
+    Raises:
+        FileNotFoundError: If no combined_metadata.npz file is found under the session directory.
+        RuntimeError: If multiple combined_metadata.npz files are found under the session directory.
+    """
+    matches = list(session_directory.rglob("combined_metadata.npz"))
+
+    if len(matches) == 0:
+        message = (
+            f"Unable to locate suite2p output for session {session_directory}. No combined_metadata.npz file was "
+            f"found anywhere in the directory tree. Ensure the single-day pipeline has completed successfully for "
+            f"this recording session before running multi-day processing."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    if len(matches) > 1:
+        message = (
+            f"Unable to locate suite2p output for session {session_directory}. Found {len(matches)} "
+            f"combined_metadata.npz files, but expected exactly one unique match."
+        )
+        console.error(message=message, error=RuntimeError)
+
+    # The combined_metadata.npz file is saved at the suite2p root level by CombinedData.save().
+    return matches[0].parent
 
 
 @dataclass
@@ -28,14 +66,20 @@ class MultiDayIOData:
     path. This ID is used to name output subdirectories and identify the session in logs."""
 
     session_directory: Path | None = None
-    """The path to this session's root suite2p single-day pipeline output directory."""
+    """The path to this session's root data directory. This is the raw session path provided by the user, which may
+    contain the suite2p output at an arbitrary nesting depth."""
+
+    suite2p_directory: Path | None = None
+    """The path to this session's suite2p single-day pipeline output directory, discovered from the session directory
+    by searching for the combined_metadata.npz file. This field is populated during initialization and cached for
+    subsequent use."""
 
     dataset_name: str = ""
     """The name of the multi-day dataset, used to create the output subdirectory structure."""
 
-    mroi_stripe_borders: list[int] = field(default_factory=list)
-    """The x-coordinates of MROI stripe borders, computed from acquisition parameters during initialization. For MROI
-    recordings, these borders mark the boundaries between adjacent imaging ROIs (stripes) in the combined field of view.
+    mroi_region_borders: list[int] = field(default_factory=list)
+    """The x-coordinates of MROI region borders, computed from acquisition parameters during initialization. For MROI
+    recordings, these borders mark the boundaries between adjacent imaging regions in the combined field of view.
     ROIs near these borders are filtered out during cell selection to avoid tracking ambiguities. This field is empty
     for non-MROI recordings."""
 
@@ -43,11 +87,15 @@ class MultiDayIOData:
         """Converts string paths to Path objects after YAML loading."""
         if isinstance(self.session_directory, str):
             self.session_directory = Path(self.session_directory) if self.session_directory else None
+        if isinstance(self.suite2p_directory, str):
+            self.suite2p_directory = Path(self.suite2p_directory) if self.suite2p_directory else None
 
     def prepare_for_saving(self) -> None:
         """Converts Path fields to strings for YAML serialization."""
         if self.session_directory is not None:
             self.session_directory = str(self.session_directory)  # type: ignore[assignment]
+        if self.suite2p_directory is not None:
+            self.suite2p_directory = str(self.suite2p_directory)  # type: ignore[assignment]
 
 
 @dataclass
@@ -277,36 +325,33 @@ class MultiDayRuntimeData(YamlConfig):
     def _load_combined_data(self) -> None:
         """Loads CombinedData from the session's single-day pipeline output directory.
 
+        Discovers the suite2p directory by recursively searching for the combined_metadata.npz file if it has not
+        already been resolved and cached in the I/O data.
+
         Raises:
-            FileNotFoundError: If the combined metadata file does not exist in the session directory.
+            FileNotFoundError: If no combined_metadata.npz file is found under the session directory.
+            RuntimeError: If multiple combined_metadata.npz files are found under the session directory.
         """
         session_directory = self.io.session_directory
         if session_directory is None:
             return
 
-        # Locates the suite2p output directory within the session directory.
-        suite2p_directory = session_directory / "suite2p"
-        metadata_path = suite2p_directory / "combined_metadata.npz"
+        # Discovers the suite2p directory if it has not already been resolved.
+        if self.io.suite2p_directory is None:
+            self.io.suite2p_directory = find_suite2p_directory(session_directory=session_directory)
 
-        if not metadata_path.exists():
-            message = (
-                f"Unable to load combined data for multi-day processing. The combined metadata file does not exist "
-                f"at the expected path: {metadata_path}. Ensure the single-day pipeline has completed successfully "
-                f"for this recording session before running multi-day processing."
-            )
-            console.error(message=message, error=FileNotFoundError)
-
+        suite2p_directory = self.io.suite2p_directory
         self.combined_data = CombinedData.load(root_path=suite2p_directory)
 
-        # Loads acquisition parameters and computes MROI stripe borders if applicable.
+        # Loads acquisition parameters and computes MROI region borders if applicable.
         acquisition_path = suite2p_directory / "acquisition_parameters.yaml"
         if acquisition_path.exists():
             acquisition = AcquisitionParameters.from_yaml(file_path=acquisition_path)
             if acquisition.is_mroi:
-                # Computes stripe borders from ROI x-coordinates. The borders are the x-coordinates where one stripe
-                # ends and another begins, which are all x-coordinates except the minimum (leftmost stripe).
+                # Computes region borders from ROI x-coordinates. The borders are the x-coordinates where one region
+                # ends and another begins, which are all x-coordinates except the minimum (leftmost region).
                 sorted_x = sorted(acquisition.roi_x_coordinates)
-                self.io.mroi_stripe_borders = sorted_x[1:]  # Excludes the leftmost stripe's starting position.
+                self.io.mroi_region_borders = sorted_x[1:]  # Excludes the leftmost region's starting position.
 
     def save(self, output_path: Path) -> None:
         """Saves the runtime data to a YAML file and arrays to .npz/.npy files.

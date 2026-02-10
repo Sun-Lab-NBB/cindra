@@ -61,7 +61,7 @@ class _EllipseData:
     @property
     def area(self) -> float:
         """Returns the area of the ellipse."""
-        return (self.radii[0] * self.radii[1]) ** 0.5 * np.pi
+        return float((self.radii[0] * self.radii[1]) ** 0.5 * np.pi)
 
     @property
     def radius(self) -> float:
@@ -217,7 +217,7 @@ class _ROI:
         if crop_mask.sum() == 0:
             return np.ones(self.y_pixels.size, dtype=np.bool_)
 
-        return crop_mask
+        return crop_mask  # type: ignore[no-any-return]
 
     @property
     def mean_radius(self) -> float:
@@ -537,7 +537,7 @@ def compute_roi_statistics(
         rois[:] = [roi for roi, keep in zip(rois, keep_flags, strict=True) if keep]
 
         # Recomputes overlap masks after removing ROIs, since remaining ROIs may no longer overlap.
-        roi_wrappers = [_ROI(data=roi, crop=crop) for roi in rois]
+        roi_wrappers = [_ROI(data=roi, diameter=effective_diameter, crop=crop) for roi in rois]
         overlap_counts = _ROI.get_overlap_count_image(rois=roi_wrappers, height=frame_height, width=frame_width)
         for wrapper in roi_wrappers:
             wrapper.data.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)

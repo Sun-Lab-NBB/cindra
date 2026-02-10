@@ -126,7 +126,7 @@ def apply_phase_correlation(
     )
 
 
-@vectorize(
+@vectorize(  # type: ignore[untyped-decorator]
     ["float32(float32, float32, float32)"],
     nopython=True,
     target="parallel",

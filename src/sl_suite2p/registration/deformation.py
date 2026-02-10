@@ -71,7 +71,7 @@ def _create_diffusion_kernel(sigma: float) -> NDArray[np.float32]:
     kernel_sum = kernel.sum()
     if kernel_sum == 0:
         return np.array([1.0], dtype=np.float32)
-    return kernel / kernel_sum
+    return (kernel / kernel_sum).astype(np.float32)  # type: ignore[no-any-return]
 
 
 def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np.float32]:
@@ -120,7 +120,7 @@ def _make_samples_absolute(
     return indices_x + delta_x, indices_y + delta_y
 
 
-@numba.njit(parallel=True, cache=True, nogil=True)
+@numba.njit(parallel=True, cache=True, nogil=True)  # type: ignore[untyped-decorator]
 def _warp(
     data: NDArray[np.float32],
     result: NDArray[np.float32],
@@ -296,7 +296,7 @@ def _warp(
                 result[sample_index] = 0.0
 
 
-@numba.njit(parallel=True, cache=True, nogil=True)
+@numba.njit(parallel=True, cache=True, nogil=True)  # type: ignore[untyped-decorator]
 def _project(
     data: NDArray[np.float32],
     result: NDArray[np.float32],
@@ -701,7 +701,7 @@ class Deformation:
         """
         return _make_samples_absolute(delta_x=self._fields[1], delta_y=self._fields[0])
 
-    def apply_deformation(self, data: NDArray, interpolation: int = 3) -> NDArray:
+    def apply_deformation(self, data: NDArray[np.float32], interpolation: int = 3) -> NDArray[np.float32]:
         """Applies this deformation to warp the input data.
 
         Uses backward mapping to sample the source data at locations defined by the deformation field.

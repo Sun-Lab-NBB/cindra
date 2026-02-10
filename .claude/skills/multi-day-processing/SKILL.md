@@ -329,7 +329,7 @@ Summary: 1/2 animals complete | 2/4 sessions extracted | 0 failed
 - [ ] Verified all sessions have single-day processing complete (suite2p/combined/ exists)
 - [ ] Organized sessions by animal/dataset
 - [ ] Configuration file confirmed or created (see Configuration Guidance section)
-- [ ] Asked about dataset name and stripe borders if creating new config
+- [ ] Asked about dataset name and MROI region margin if creating new config
 - [ ] Asked user about CPU core allocation (see Resource Allocation section)
 - [ ] Received user response confirming worker count
 - [ ] Confirmed which sessions to process per animal
@@ -342,7 +342,7 @@ Summary: 1/2 animals complete | 2/4 sessions extracted | 0 failed
 1. **Verify prerequisites** → Ensure all sessions have single-day processing complete
 2. **Organize by animal** → Group sessions by animal/dataset
 3. **Check configuration** → Ask user if they have an existing config (see Configuration Guidance)
-4. **Create config if needed** → Generate default and ask about dataset name + stripe borders
+4. **Create config if needed** → Generate default and ask about dataset name + MROI region margin
 5. **Ask about CPU allocation** → Explain resource model and ask how many cores to use
 6. **Start batch processing** → Call `start_multiday_batch_processing_tool`
 7. **Monitor progress** → Check two-phase progress (discover → extract)
@@ -380,8 +380,8 @@ Before processing, always ask:
 The default configuration works well for GCaMP6f data. Ask these questions:
 
 - **Required**: "What name should identify this multi-day dataset?" (sets `io.dataset_name`)
-- **Optional**: "Are there mesoscope stripe borders to consider for cell filtering? If so, provide the x-coordinates"
-  (sets `cell_selection.mesoscope_stripe_borders`)
+- **Optional**: "Is this an MROI (multi-region) recording? If so, you can adjust the region border margin for cell
+  filtering" (sets `cell_selection.mroi_region_margin`)
 
 ### Pipeline-Set Parameters
 

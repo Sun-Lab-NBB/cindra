@@ -5,7 +5,6 @@ for multi-session registration workflows.
 """
 
 from typing import Any
-from pathlib import Path
 
 from numba import njit, prange
 import numpy as np
@@ -283,5 +282,3 @@ def add_overlap_info(masks: list[dict[str, Any]]) -> list[dict[str, NDArray[np.b
         mask["overlap_mask"] = flat_overlap[start:end]
 
     return masks
-
-
