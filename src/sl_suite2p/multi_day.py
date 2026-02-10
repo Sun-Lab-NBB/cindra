@@ -19,8 +19,8 @@ from .multiday import (
     backward_transform_masks,
 )
 from .dataclasses import MultiDayConfiguration
+from .io.multiday import _extract_unique_components
 from .dataclasses.version import version, python_version
-from .dataclasses.multi_day_configuration import _extract_unique_components
 
 # THe minimum number of sessions required for multi-day processing
 _MINIMUM_SESSION_COUNT = 2

@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import copy
 from enum import StrEnum
-import json
 from pathlib import Path
 from dataclasses import field, dataclass
 
-from ataraxis_base_utilities import console, ensure_directory_exists
+from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 
@@ -105,99 +104,6 @@ class AcquisitionParameters(YamlConfig):
         separate virtual plane for processing.
         """
         return self.roi_number * self.plane_number
-
-    @classmethod
-    def from_json(cls, path: Path) -> AcquisitionParameters:
-        """Loads acquisition parameters from a JSON file.
-
-        Args:
-            path: The path to the JSON file containing acquisition parameters.
-
-        Returns:
-            An AcquisitionParameters instance populated from the JSON file.
-
-        Raises:
-            FileNotFoundError: If the JSON file does not exist.
-            ValueError: If required fields are missing. For single-ROI data, frame_rate, plane_number, and
-                channel_number are required. For MROI data (roi_number > 1), roi_lines, roi_x_coordinates, and
-                roi_y_coordinates are additionally required.
-        """
-        if not path.exists():
-            message = f"Acquisition parameters file not found: {path}"
-            console.error(message=message, error=FileNotFoundError)
-
-        with path.open("r") as f:
-            data = json.load(f)
-
-        # Extracts frame_rate (required).
-        frame_rate = data.get("frame_rate")
-        if frame_rate is None:
-            message = (
-                f"Unable to extract the required field 'frame_rate' from the acquisition parameters file "
-                f"located at {path}."
-            )
-            console.error(message=message, error=ValueError)
-
-        # Extracts plane_number (required).
-        plane_number = data.get("plane_number")
-        if plane_number is None:
-            message = (
-                f"Unable to extract the required field 'plane_number' from the acquisition parameters file "
-                f"located at {path}."
-            )
-            console.error(message=message, error=ValueError)
-
-        # Extracts channel_number (required).
-        channel_number = data.get("channel_number")
-        if channel_number is None:
-            message = (
-                f"Unable to extract the required field 'channel_number' from the acquisition parameters file "
-                f"located at {path}."
-            )
-            console.error(message=message, error=ValueError)
-
-        # Extracts roi_number (defaults to 1 for single-ROI).
-        roi_number = data.get("roi_number", 1)
-
-        # For MROI data (roi_number > 1), validates that all MROI fields are present.
-        if roi_number > 1:
-            roi_lines = data.get("roi_lines")
-            if roi_lines is None:
-                message = (
-                    f"Unable to extract the required field 'roi_lines' from the acquisition parameters file "
-                    f"located at {path}."
-                )
-                console.error(message=message, error=ValueError)
-
-            roi_x_coordinates = data.get("roi_x_coordinates")
-            if roi_x_coordinates is None:
-                message = (
-                    f"Unable to extract the required field 'roi_x_coordinates' from the acquisition parameters "
-                    f"file located at {path}."
-                )
-                console.error(message=message, error=ValueError)
-
-            roi_y_coordinates = data.get("roi_y_coordinates")
-            if roi_y_coordinates is None:
-                message = (
-                    f"Unable to extract the required field 'roi_y_coordinates' from the acquisition parameters "
-                    f"file located at {path}."
-                )
-                console.error(message=message, error=ValueError)
-        else:
-            roi_lines = []
-            roi_x_coordinates = []
-            roi_y_coordinates = []
-
-        return cls(
-            frame_rate=frame_rate,
-            plane_number=plane_number,
-            channel_number=channel_number,
-            roi_number=roi_number,
-            roi_lines=roi_lines,
-            roi_x_coordinates=roi_x_coordinates,
-            roi_y_coordinates=roi_y_coordinates,
-        )
 
 
 @dataclass

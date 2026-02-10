@@ -3,7 +3,6 @@ This pipeline is based on the original implementation found here:
 https://github.com/sprustonlab/multiday-suite2p-public/tree/main.
 """
 
-from .io import import_sessions, export_masks_and_images
 from .gui import show_images_with_masks
 from .process import extract_session_traces
 from .transform import (
@@ -11,16 +10,11 @@ from .transform import (
     generate_template_masks,
     backward_transform_masks,
 )
-from ..dataclasses import Session, MultiDayData
 
 __all__ = [
-    "MultiDayData",
-    "Session",
     "backward_transform_masks",
-    "export_masks_and_images",
     "extract_session_traces",
     "generate_template_masks",
-    "import_sessions",
     "register_sessions",
     "show_images_with_masks",
 ]

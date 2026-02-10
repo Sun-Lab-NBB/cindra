@@ -5,11 +5,10 @@ from __future__ import annotations
 import copy
 from enum import StrEnum
 from pathlib import Path
-from functools import cached_property
 from dataclasses import field, dataclass
 
 from natsort import natsorted
-from ataraxis_base_utilities import console, ensure_directory_exists
+from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from .single_day_configuration import RuntimeSettings, SignalExtraction, SpikeDeconvolution
@@ -26,58 +25,6 @@ class ReferenceImageType(StrEnum):
 
     MAXIMUM_PROJECTION = "maximum_projection"
     """The maximum intensity projection across all frames, highlighting active structures."""
-
-
-def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
-    """Extracts the first component from the end of each input path that uniquely identifies each path globally.
-
-    Notes:
-        This function adapts the multi-day pipeline to directory structures where the unique session identifier appears
-        at different levels of the path hierarchy. For example, given paths like `/data/day1/session` and
-        `/data/day2/session`, the function identifies `day1` and `day2` as the unique components (not `session`, which
-        is shared). This allows users to organize sessions using any naming convention, as long as each path contains
-        at least one unique component somewhere in its hierarchy.
-
-    Args:
-        paths: A list or tuple of Path objects.
-
-    Returns:
-        A tuple of unique components, one for each path, stored in the same order as the input paths.
-
-    Raises:
-        RuntimeError: If one or more paths do not contain unique components.
-    """
-    paths_list = list(paths)
-    result = []
-
-    for path in paths_list:
-        # Gets components from right to left.
-        components = list(path.parts)[::-1]
-        found_unique = False
-
-        for component in components:
-            # Checks if this component appears in any other path.
-            is_unique = True
-
-            for other_path in paths_list:
-                if path == other_path:
-                    continue
-
-                # If the component appears anywhere in the other path, it's not unique.
-                if component in other_path.parts:
-                    is_unique = False
-                    break
-
-            if is_unique:
-                result.append(component)
-                found_unique = True
-                break
-
-        if not found_unique:
-            message = f"No unique component found for path: {path}, which is not allowed."
-            console.error(message=message, error=RuntimeError)
-
-    return tuple(result)
 
 
 @dataclass
@@ -98,15 +45,6 @@ class SessionIO:
     def __post_init__(self) -> None:
         """Converts string paths to Path objects and natural-sorts them after YAML loading."""
         self.session_directories = natsorted([Path(p) if isinstance(p, str) else p for p in self.session_directories])
-
-    @cached_property
-    def session_ids(self) -> tuple[str, ...]:
-        """Returns unique session identifiers extracted from session directory paths.
-
-        Uses the first path component from the end that uniquely identifies each session. The result is cached after
-        first access.
-        """
-        return _extract_unique_components(paths=self.session_directories)
 
     def prepare_for_saving(self) -> None:
         """Converts Path fields to strings for YAML serialization."""
