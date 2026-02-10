@@ -3,6 +3,7 @@
 from .save import combine_planes, compute_plane_offsets
 from .tiff import convert_tiffs_to_binary
 from .binary import BinaryFile, BinaryFileCombined
+from .multiday import resolve_multiday_contexts
 
 __all__ = [
     "BinaryFile",
@@ -10,4 +11,5 @@ __all__ = [
     "combine_planes",
     "compute_plane_offsets",
     "convert_tiffs_to_binary",
+    "resolve_multiday_contexts",
 ]

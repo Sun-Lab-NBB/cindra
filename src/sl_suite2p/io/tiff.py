@@ -1,6 +1,7 @@
 """Provides tools for importing, converting, and saving TIFF imaging data."""
 
 import gc
+import json
 import math
 from typing import TYPE_CHECKING
 
@@ -73,9 +74,103 @@ def _find_acquisition_parameters(data_path: Path) -> tuple[AcquisitionParameters
     console.echo(message=message, level=LogLevel.SUCCESS)
 
     # Loads and validates the acquisition parameters.
-    acquisition = AcquisitionParameters.from_json(parameters_path)
+    acquisition = _load_acquisition_parameters(json_path=parameters_path)
 
     return acquisition, data_directory
+
+
+def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
+    """Loads acquisition parameters from a JSON file and validates all required fields.
+
+    For single-ROI data, frame_rate, plane_number, and channel_number are required. For MROI data (roi_number > 1),
+    roi_lines, roi_x_coordinates, and roi_y_coordinates are additionally required.
+
+    Args:
+        json_path: The path to the JSON file containing acquisition parameters.
+
+    Returns:
+        An AcquisitionParameters instance populated from the JSON file.
+
+    Raises:
+        FileNotFoundError: If the JSON file does not exist.
+        ValueError: If required fields are missing from the JSON data.
+    """
+    if not json_path.exists():
+        message = f"Acquisition parameters file not found: {json_path}"
+        console.error(message=message, error=FileNotFoundError)
+
+    with json_path.open("r") as f:
+        data = json.load(f)
+
+    # Extracts frame_rate (required).
+    frame_rate = data.get("frame_rate")
+    if frame_rate is None:
+        message = (
+            f"Unable to extract the required field 'frame_rate' from the acquisition parameters file "
+            f"located at {json_path}."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Extracts plane_number (required).
+    plane_number = data.get("plane_number")
+    if plane_number is None:
+        message = (
+            f"Unable to extract the required field 'plane_number' from the acquisition parameters file "
+            f"located at {json_path}."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Extracts channel_number (required).
+    channel_number = data.get("channel_number")
+    if channel_number is None:
+        message = (
+            f"Unable to extract the required field 'channel_number' from the acquisition parameters file "
+            f"located at {json_path}."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Extracts roi_number (defaults to 1 for single-ROI).
+    roi_number = data.get("roi_number", 1)
+
+    # For MROI data (roi_number > 1), validates that all MROI fields are present.
+    if roi_number > 1:
+        roi_lines = data.get("roi_lines")
+        if roi_lines is None:
+            message = (
+                f"Unable to extract the required field 'roi_lines' from the acquisition parameters file "
+                f"located at {json_path}."
+            )
+            console.error(message=message, error=ValueError)
+
+        roi_x_coordinates = data.get("roi_x_coordinates")
+        if roi_x_coordinates is None:
+            message = (
+                f"Unable to extract the required field 'roi_x_coordinates' from the acquisition parameters "
+                f"file located at {json_path}."
+            )
+            console.error(message=message, error=ValueError)
+
+        roi_y_coordinates = data.get("roi_y_coordinates")
+        if roi_y_coordinates is None:
+            message = (
+                f"Unable to extract the required field 'roi_y_coordinates' from the acquisition parameters "
+                f"file located at {json_path}."
+            )
+            console.error(message=message, error=ValueError)
+    else:
+        roi_lines = []
+        roi_x_coordinates = []
+        roi_y_coordinates = []
+
+    return AcquisitionParameters(
+        frame_rate=frame_rate,
+        plane_number=plane_number,
+        channel_number=channel_number,
+        roi_number=roi_number,
+        roi_lines=roi_lines,
+        roi_x_coordinates=roi_x_coordinates,
+        roi_y_coordinates=roi_y_coordinates,
+    )
 
 
 def _discover_tiff_files(
