@@ -1,4 +1,4 @@
-"""Provides tools for exporting multiplane data processed by the single-day pipeline as a unified dataset."""
+"""Provides tools for combining multiplane data into unified datasets."""
 
 from __future__ import annotations
 

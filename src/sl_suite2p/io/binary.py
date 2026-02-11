@@ -306,7 +306,7 @@ class BinaryFile:
         """
         # If 'bad_frames' is provided, creates a NumPy array that tracks which frames are good. Otherwise, considers all
         # the frames as good.
-        good_frames = ~bad_frames if bad_frames is not None else np.ones(self.frame_number, dtype=bool)
+        good_frames = ~bad_frames if bad_frames is not None else np.ones(self.frame_number, dtype=np.bool_)
 
         # Resolves the batch size. It is capped either to the total number of good frames or the default maximum batch
         # size, whichever is smaller.
@@ -459,7 +459,7 @@ class BinaryFileCombined:
 
         # Opens BinaryFile instances for requested planes, using the input data.
         self.files: list[BinaryFile] = [
-            BinaryFile(int(height), int(width), file_path)
+            BinaryFile(height=int(height), width=int(width), file_path=file_path)
             for height, width, file_path in zip(self.plane_heights, self.plane_widths, self.file_paths, strict=False)
         ]
 

@@ -15,26 +15,30 @@ from .single_day_configuration import AcquisitionParameters, SingleDayConfigurat
 
 
 def _load_single_day_runtime(plane_directory: Path) -> SingleDayRuntimeData:
-    """Loads a SingleDayRuntimeData instance and corrects a stale output_path if the dataset was relocated.
+    """Loads a SingleDayRuntimeData instance and corrects stale paths if the dataset was relocated.
 
-    When a dataset is moved between machines, the output_path cached in the plane's runtime YAML no longer matches
-    the actual directory. Since ``__post_init__`` uses the cached output_path for array loading, arrays silently fail
-    to load in that case. This function detects the mismatch, overrides output_path to the known-correct plane
-    directory, and re-runs array loading so the returned runtime is fully populated.
+    When a dataset is moved between machines, the paths cached in the plane's runtime YAML no longer match the actual
+    directory structure. This function detects the mismatch by comparing the cached output_path to the known-correct
+    plane directory, computes a prefix substitution, relocates all cached paths and persists the corrected paths to
+    disk.
 
     Args:
         plane_directory: The actual on-disk path to the plane directory (e.g., ``suite2p/plane_0``).
 
     Returns:
-        A fully-loaded SingleDayRuntimeData instance with arrays resolved against the correct path.
+        A fully-loaded SingleDayRuntimeData instance with all paths and arrays resolved against the correct location.
     """
     runtime = SingleDayRuntimeData.load(output_path=plane_directory)
 
-    if runtime.output_path != plane_directory:
-        runtime.output_path = plane_directory
-        runtime.registration.load_arrays(plane_directory)
-        runtime.detection.load_arrays(plane_directory)
-        runtime.extraction.load_arrays(plane_directory)
+    if runtime.output_path is not None and runtime.output_path != plane_directory:
+        old_prefix, new_prefix = _compute_relocation_prefixes(old_path=runtime.output_path, new_path=plane_directory)
+        _relocate_runtime_paths(runtime=runtime, old_prefix=old_prefix, new_prefix=new_prefix)
+
+        # Persists corrected paths so future loads find correct paths without re-relocating.
+        runtime.save(output_path=runtime.output_path)
+
+        # Reloads the runtime from the corrected YAML so that arrays are resolved against the new paths.
+        runtime = SingleDayRuntimeData.load(output_path=plane_directory)
 
     return runtime
 
@@ -68,21 +72,37 @@ def _compute_relocation_prefixes(old_path: Path, new_path: Path) -> tuple[Path, 
     return old_prefix, new_prefix
 
 
-def _relocate_runtime_paths(runtime: MultiDayRuntimeData, old_prefix: Path, new_prefix: Path) -> None:
-    """Applies a prefix substitution to all cached paths in a MultiDayRuntimeData instance.
+def _relocate_runtime_paths(
+    runtime: SingleDayRuntimeData | MultiDayRuntimeData, old_prefix: Path, new_prefix: Path
+) -> None:
+    """Applies a prefix substitution to all cached paths in a runtime data instance.
 
     Args:
-        runtime: The runtime data instance whose paths will be updated in-place.
+        runtime: The runtime data instance whose paths will be updated in-place. Accepts either SingleDayRuntimeData
+            or MultiDayRuntimeData instances.
         old_prefix: The stale path prefix to replace.
         new_prefix: The correct path prefix on the current filesystem.
     """
     if runtime.output_path is not None:
         runtime.output_path = new_prefix / runtime.output_path.relative_to(old_prefix)
-    if runtime.io.data_path is not None:
-        runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
-    runtime.io.dataset_output_paths = [
-        new_prefix / path.relative_to(old_prefix) for path in runtime.io.dataset_output_paths
-    ]
+
+    if isinstance(runtime, SingleDayRuntimeData):
+        if runtime.io.registered_binary_path is not None:
+            runtime.io.registered_binary_path = new_prefix / runtime.io.registered_binary_path.relative_to(old_prefix)
+        if runtime.io.registered_binary_path_channel_2 is not None:
+            runtime.io.registered_binary_path_channel_2 = (
+                new_prefix / runtime.io.registered_binary_path_channel_2.relative_to(old_prefix)
+            )
+        if runtime.io.output_directory is not None:
+            runtime.io.output_directory = new_prefix / runtime.io.output_directory.relative_to(old_prefix)
+        if runtime.io.data_directory is not None:
+            runtime.io.data_directory = new_prefix / runtime.io.data_directory.relative_to(old_prefix)
+    else:
+        if runtime.io.data_path is not None:
+            runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
+        runtime.io.dataset_output_paths = [
+            new_prefix / path.relative_to(old_prefix) for path in runtime.io.dataset_output_paths
+        ]
 
 
 @dataclass
@@ -338,24 +358,35 @@ class MultiDayRuntimeContext:
             console.error(message=message, error=FileNotFoundError)
 
         # Detects whether the dataset was moved by comparing the resolved path to the cached output_path. If they
-        # differ, computes a prefix substitution, relocates and re-saves ALL sessions so future loads find correct
-        # paths, then reloads the entry runtime with arrays resolved against the corrected paths.
-        if entry_runtime.output_path != resolved_output_path:
+        # differ, computes a prefix substitution, relocates and re-saves ALL sessions (both multi-day and underlying
+        # single-day data) so future loads find correct paths.
+        if entry_runtime.output_path is not None and entry_runtime.output_path != resolved_output_path:
             old_prefix, new_prefix = _compute_relocation_prefixes(
                 old_path=entry_runtime.output_path, new_path=resolved_output_path
             )
             _relocate_runtime_paths(runtime=entry_runtime, old_prefix=old_prefix, new_prefix=new_prefix)
             output_paths = entry_runtime.io.dataset_output_paths
 
-            # Persists corrected paths for every session. The entry session has already been relocated in-place
-            # above. Other sessions are loaded (with stale YAML content), relocated, and saved with corrected paths.
+            # Persists corrected paths for every session's multi-day data and underlying single-day data. The entry
+            # session has already been relocated in-place above. Other sessions are loaded (with stale YAML content),
+            # relocated, and saved. Single-day plane data is relocated by calling _load_single_day_runtime() which
+            # detects the path mismatch and persists corrected paths.
             entry_runtime.save(output_path=entry_runtime.output_path)
-            for output_path in output_paths:
-                if output_path == resolved_output_path:
+            if entry_runtime.io.data_path is not None:
+                for plane_dir in entry_runtime.io.data_path.glob("plane_*"):
+                    if plane_dir.is_dir() and (plane_dir / "runtime_data.yaml").exists():
+                        _load_single_day_runtime(plane_directory=plane_dir)
+
+            for session_output_path in output_paths:
+                if session_output_path == resolved_output_path:
                     continue
-                other_runtime = MultiDayRuntimeData.load(output_path=output_path)
+                other_runtime = MultiDayRuntimeData.load(output_path=session_output_path)
                 _relocate_runtime_paths(runtime=other_runtime, old_prefix=old_prefix, new_prefix=new_prefix)
-                other_runtime.save(output_path=other_runtime.output_path)
+                other_runtime.save(output_path=session_output_path)
+                if other_runtime.io.data_path is not None:
+                    for plane_dir in other_runtime.io.data_path.glob("plane_*"):
+                        if plane_dir.is_dir() and (plane_dir / "runtime_data.yaml").exists():
+                            _load_single_day_runtime(plane_directory=plane_dir)
 
             # Reloads the entry runtime from the corrected YAML so that arrays are resolved against the new paths.
             entry_runtime = MultiDayRuntimeData.load(output_path=resolved_output_path)

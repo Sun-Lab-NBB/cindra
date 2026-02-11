@@ -48,9 +48,11 @@ def _initialize_pipeline(configuration: SingleDayConfiguration) -> list[RuntimeC
     if configuration.file_io.save_path is None:
         configuration.file_io.save_path = configuration.file_io.data_path
 
-    # Finds and converts the input data stored as one or more TIFFs to binary format and creates RuntimeContext
-    # instances.
-    contexts = io.convert_tiffs_to_binary(configuration)
+    # Creates RuntimeContext instances for all planes.
+    contexts = io.resolve_single_day_contexts(configuration)
+
+    # Converts TIFF data to binary format.
+    io.convert_tiffs_to_binary(contexts)
 
     # Saves shared configuration and acquisition parameters once (using first plane's context).
     contexts[0].save_shared()
