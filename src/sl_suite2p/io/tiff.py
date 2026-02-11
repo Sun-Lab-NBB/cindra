@@ -1,7 +1,6 @@
 """Provides tools for importing, converting, and saving TIFF imaging data."""
 
 import gc
-import json
 import math
 from typing import TYPE_CHECKING
 
@@ -9,178 +8,32 @@ from tqdm import tqdm
 import numpy as np
 from natsort import natsorted
 from tifffile import TiffFile
-from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
+from ataraxis_base_utilities import LogLevel, console
 
 from .binary import BinaryFile
-from ..dataclasses import (
-    IOData,
-    RuntimeContext,
-    SingleDayRuntimeData,
-    AcquisitionParameters,
-    SingleDayConfiguration,
-)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from numpy.typing import NDArray
 
-# Supported TIFF file extensions.
-_TIFF_EXTENSIONS = ("tif", "tiff", "TIF", "TIFF")
+    from ..dataclasses import RuntimeContext, AcquisitionParameters
 
-# Default name for the acquisition parameters JSON file.
-_ACQUISITION_PARAMETERS_FILENAME = "suite2p_parameters.json"
+# Supported TIFF file extensions.
+_TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
 
 # Determines the minimum number of image dimensions considered 'multidimensional'.
-_MULTIDIMENSIONAL_PROCESSING_THRESHOLD = 3
-
-
-def _find_acquisition_parameters(data_path: Path) -> tuple[AcquisitionParameters, Path]:
-    """Recursively searches for the acquisition parameters JSON file and loads it.
-
-    This function searches the data_path directory and all subdirectories for a file named
-    'suite2p_parameters.json'. Once found, it loads and validates the acquisition parameters.
-
-    Args:
-        data_path: The root directory to search for the acquisition parameters file.
-
-    Returns:
-        A tuple containing the loaded AcquisitionParameters and the path to the directory containing the JSON file.
-        The directory path is used for subsequent non-recursive TIFF discovery.
-
-    Raises:
-        FileNotFoundError: If no acquisition parameters file is found in the data directory or its subdirectories.
-        ValueError: If required fields are missing from the JSON file.
-    """
-    if not data_path.is_dir():
-        message = f"Unable to find acquisition parameters. The data_path is not a directory: {data_path}"
-        console.error(message=message, error=ValueError)
-
-    # Recursively searches for the acquisition parameters file.
-    parameter_files = list(data_path.rglob(_ACQUISITION_PARAMETERS_FILENAME))
-
-    if not parameter_files:
-        message = (
-            f"Unable to find '{_ACQUISITION_PARAMETERS_FILENAME}' in the data directory or its subdirectories: "
-            f"{data_path}. This file is required and must contain acquisition metadata."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Uses the first found file (there should typically be only one).
-    parameters_path = parameter_files[0]
-    data_directory = parameters_path.parent
-
-    message = f"Found acquisition parameters at: {parameters_path}."
-    console.echo(message=message, level=LogLevel.SUCCESS)
-
-    # Loads and validates the acquisition parameters.
-    acquisition = _load_acquisition_parameters(json_path=parameters_path)
-
-    return acquisition, data_directory
-
-
-def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
-    """Loads acquisition parameters from a JSON file and validates all required fields.
-
-    For single-ROI data, frame_rate, plane_number, and channel_number are required. For MROI data (roi_number > 1),
-    roi_lines, roi_x_coordinates, and roi_y_coordinates are additionally required.
-
-    Args:
-        json_path: The path to the JSON file containing acquisition parameters.
-
-    Returns:
-        An AcquisitionParameters instance populated from the JSON file.
-
-    Raises:
-        FileNotFoundError: If the JSON file does not exist.
-        ValueError: If required fields are missing from the JSON data.
-    """
-    if not json_path.exists():
-        message = f"Acquisition parameters file not found: {json_path}"
-        console.error(message=message, error=FileNotFoundError)
-
-    with json_path.open("r") as f:
-        data = json.load(f)
-
-    # Extracts frame_rate (required).
-    frame_rate = data.get("frame_rate")
-    if frame_rate is None:
-        message = (
-            f"Unable to extract the required field 'frame_rate' from the acquisition parameters file "
-            f"located at {json_path}."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Extracts plane_number (required).
-    plane_number = data.get("plane_number")
-    if plane_number is None:
-        message = (
-            f"Unable to extract the required field 'plane_number' from the acquisition parameters file "
-            f"located at {json_path}."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Extracts channel_number (required).
-    channel_number = data.get("channel_number")
-    if channel_number is None:
-        message = (
-            f"Unable to extract the required field 'channel_number' from the acquisition parameters file "
-            f"located at {json_path}."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Extracts roi_number (defaults to 1 for single-ROI).
-    roi_number = data.get("roi_number", 1)
-
-    # For MROI data (roi_number > 1), validates that all MROI fields are present.
-    if roi_number > 1:
-        roi_lines = data.get("roi_lines")
-        if roi_lines is None:
-            message = (
-                f"Unable to extract the required field 'roi_lines' from the acquisition parameters file "
-                f"located at {json_path}."
-            )
-            console.error(message=message, error=ValueError)
-
-        roi_x_coordinates = data.get("roi_x_coordinates")
-        if roi_x_coordinates is None:
-            message = (
-                f"Unable to extract the required field 'roi_x_coordinates' from the acquisition parameters "
-                f"file located at {json_path}."
-            )
-            console.error(message=message, error=ValueError)
-
-        roi_y_coordinates = data.get("roi_y_coordinates")
-        if roi_y_coordinates is None:
-            message = (
-                f"Unable to extract the required field 'roi_y_coordinates' from the acquisition parameters "
-                f"file located at {json_path}."
-            )
-            console.error(message=message, error=ValueError)
-    else:
-        roi_lines = []
-        roi_x_coordinates = []
-        roi_y_coordinates = []
-
-    return AcquisitionParameters(
-        frame_rate=frame_rate,
-        plane_number=plane_number,
-        channel_number=channel_number,
-        roi_number=roi_number,
-        roi_lines=roi_lines,
-        roi_x_coordinates=roi_x_coordinates,
-        roi_y_coordinates=roi_y_coordinates,
-    )
+_MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
 
 
 def _discover_tiff_files(
     data_directory: Path,
     ignored_file_names: tuple[str, ...] = (),
 ) -> list[Path]:
-    """Discovers TIFF files in the specified directory (non-recursive).
+    """Discovers TIFF files in the specified directory.
 
-    This function performs a non-recursive scan of the data_directory for TIFF files. It is designed to be called
-    after _find_acquisition_parameters() to ensure TIFF files and their metadata are co-located.
+    Notes:
+        This function performs a non-recursive scan of the data_directory for files with valid TIFF extension aliases.
 
     Args:
         data_directory: The directory to scan for TIFF files. This should be the same directory that contains the
@@ -214,106 +67,51 @@ def _discover_tiff_files(
     # Sorts files naturally by filename.
     file_paths = natsorted(file_paths)
 
-    message = f"Found {len(file_paths)} TIFF files."
+    message = f"Found {len(file_paths)} valid TIFF files."
     console.echo(message=message, level=LogLevel.INFO)
 
     return file_paths
 
 
-def _initialize_plane_contexts(
-    config: SingleDayConfiguration,
-    acquisition: AcquisitionParameters,
-) -> list[RuntimeContext]:
-    """Creates plane-specific RuntimeContext instances for each imaging plane in the recording.
+def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.int16] | None:
+    """Reads a batch (subset) of frames stored inside the TIFF file wrapped by the input TiffFile instance.
 
-    This function initializes the runtime data structures needed for processing each plane. For standard single-ROI
-    data, one context is created per physical plane. For MROI (Multi-ROI) data, one context is created per virtual
-    plane, where virtual planes are ROI x physical plane combinations.
+    This function loads the requested subset of data into memory.
 
     Args:
-        config: The single-day pipeline configuration containing user-defined processing parameters.
-        acquisition: The acquisition parameters loaded from the input data's JSON file. This describes the recording
-            setup including frame rate, plane count, channel count, and MROI geometry if applicable.
+        tiff: The TiffFile instance that wraps the .tiff file from which to read the data.
+        start_index: Index of the first frame to read.
+        batch_size: Maximum number of frames to read in this batch.
 
     Returns:
-        A list of RuntimeContext instances, one per plane (or virtual plane for MROI data). Each context contains
-        references to the shared configuration, acquisition parameters, and a plane-specific SingleDayRuntimeData
-        instance with IOData fields initialized.
-
-    Raises:
-        ValueError: If the save_path is not configured in the configuration.
+        A 3D NumPy array with shape (frames, height, width) containing the requested frame data, or None if the
+        start_index is beyond the end of the file.
     """
-    # Validates that the save path is configured.
-    save_path_root = config.file_io.save_path
-    if save_path_root is None:
-        message = (
-            "Unable to initialize plane contexts. The save_path must be configured in the FileIO section of the "
-            "configuration, but it is currently None."
-        )
-        console.error(message=message, error=ValueError)
+    tiff_length = len(tiff.pages)
 
-    # Determines the number of contexts to create. For MROI data, creates one context per virtual plane
-    # (ROI x physical plane combination). For single-ROI data, creates one context per physical plane.
-    plane_count = acquisition.virtual_plane_count if acquisition.is_mroi else acquisition.plane_number
+    if start_index >= tiff_length:
+        return None
 
-    # Determines whether the recording uses two channels.
-    has_two_channels = acquisition.channel_number > 1
+    frames_to_read = min(tiff_length - start_index, batch_size)
+    frames = tiff.asarray() if tiff_length == 1 else tiff.asarray(key=range(start_index, start_index + frames_to_read))
 
-    # Derives the per-plane sampling rate from the acquisition frame rate and the number of physical planes.
-    sampling_rate = acquisition.frame_rate / acquisition.plane_number
+    # Adds extra dimension for single-frame TIFFs to ensure 3D array.
+    if len(frames.shape) < _MULTIDIMENSIONAL_PROCESSING_THRESHOLD:
+        frames = np.expand_dims(frames, axis=0)
 
-    # Initializes the list to store RuntimeContext instances for each plane.
-    contexts: list[RuntimeContext] = []
+    # Converts to int16, rescaling where possible. Divides by 2 to shift uint16 (0 to 65535) or int32 values into the
+    # int16 range (-32768 to 32767) without overflow.
+    if frames.dtype.type in {np.uint16, np.int32}:
+        frames = (frames // 2).astype(dtype=np.int16)
+    elif frames.dtype.type != np.int16:
+        frames = frames.astype(dtype=np.int16)
 
-    # Creates a RuntimeContext for each plane.
-    for virtual_plane_index in range(plane_count):
-        # Resolves the output directory for this plane. Always uses 'suite2p' as the subdirectory.
-        plane_output_path = save_path_root / "suite2p" / f"plane_{virtual_plane_index}"
+    # While this should not be possible, ensures that the returned frame number matches the requested number by
+    # truncating any extra frames from the array before returning it to the caller.
+    if frames.shape[0] > frames_to_read:
+        frames = frames[:frames_to_read, :, :]
 
-        # Creates the output directory if it does not exist.
-        ensure_directory_exists(plane_output_path)
-
-        # Initializes the IOData for this plane with binary file paths.
-        io_data = IOData(
-            output_directory=plane_output_path,
-            registered_binary_path=plane_output_path / "channel_1_data.bin",
-            plane_index=virtual_plane_index,
-            sampling_rate=sampling_rate,
-        )
-
-        # Configures second channel binary paths if using two channels.
-        if has_two_channels:
-            io_data.registered_binary_path_channel_2 = plane_output_path / "channel_2_data.bin"
-
-        # Populates MROI-specific fields if processing multi-ROI data.
-        if acquisition.is_mroi:
-            # Computes ROI index and physical plane index from the virtual plane index. Virtual planes are organized
-            # as: ROI 0 plane 0, ROI 0 plane 1, ..., ROI 1 plane 0, ROI 1 plane 1, etc.
-            roi_index = virtual_plane_index // acquisition.plane_number
-            physical_plane_index = virtual_plane_index % acquisition.plane_number
-
-            io_data.mroi_lines = list(acquisition.roi_lines[roi_index])
-            io_data.mroi_y_offset = acquisition.roi_y_coordinates[roi_index]
-            io_data.mroi_x_offset = acquisition.roi_x_coordinates[roi_index]
-            # For MROI, stores the physical plane index (which may differ from virtual plane index).
-            io_data.plane_index = physical_plane_index
-
-        # Creates the SingleDayRuntimeData with the initialized IOData.
-        runtime_data = SingleDayRuntimeData(
-            output_path=plane_output_path,
-            io=io_data,
-        )
-
-        # Creates the RuntimeContext combining the shared configuration, acquisition parameters, and runtime data.
-        context = RuntimeContext(
-            configuration=config,
-            acquisition=acquisition,
-            runtime=runtime_data,
-        )
-
-        contexts.append(context)
-
-    return contexts
+    return frames
 
 
 def _get_frame_dimensions(
@@ -338,7 +136,8 @@ def _get_frame_dimensions(
         ValueError: If the TIFF files are empty or have invalid dimensions.
     """
     # Opens the first TIFF and reads the first frame to get base dimensions.
-    tiff, tiff_length = _open_tiff(tiff_files[0])
+    tiff = TiffFile(tiff_files[0])
+    tiff_length = len(tiff.pages)
     if tiff_length == 0:
         message = f"Unable to determine frame dimensions. The first TIFF file is empty: {tiff_files[0]}"
         console.error(message=message, error=ValueError)
@@ -418,7 +217,9 @@ def _create_binary_files(
                 f"configured in IOData."
             )
             console.error(message=message, error=ValueError)
-        channel_1_binary_files.append(BinaryFile(height, width, registered_path, frames_per_plane))
+        channel_1_binary_files.append(
+            BinaryFile(height=height, width=width, file_path=registered_path, frame_number=frames_per_plane)
+        )
 
         # Creates channel 2 binary file if applicable.
         if has_two_channels:
@@ -429,107 +230,52 @@ def _create_binary_files(
                     f"registered_binary_path_channel_2 is not configured in IOData."
                 )
                 console.error(message=message, error=ValueError)
-            channel_2_binary_files.append(BinaryFile(height, width, registered_path_ch2, frames_per_plane))
+            channel_2_binary_files.append(
+                BinaryFile(height=height, width=width, file_path=registered_path_ch2, frame_number=frames_per_plane)
+            )
 
     return channel_1_binary_files, channel_2_binary_files
 
 
-def _open_tiff(file_path: Path) -> tuple[TiffFile, int]:
-    """Opens a TIFF file and returns the file handle with page count.
-
-    This function is a prerequisite for reading the data stored inside the specified .tiff file. It does not load the
-    data into memory.
-
-    Args:
-        file_path: The absolute path to the .tiff file from which to read the frame data.
-
-    Returns:
-        A tuple containing the TiffFile instance wrapping the specified file and the number of pages (frames) stored
-        inside the file.
-    """
-    tiff = TiffFile(file_path)
-    tiff_length = len(tiff.pages)
-    return tiff, tiff_length
-
-
-def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.int16] | None:
-    """Reads a batch (subset) of frames stored inside the .tiff file wrapped by the input TiffFile instance.
-
-    This function loads the requested subset of data into memory.
-
-    Args:
-        tiff: The TiffFile instance that wraps the .tiff file from which to read the data.
-        start_index: Index of the first frame to read.
-        batch_size: Maximum number of frames to read in this batch.
-
-    Returns:
-        A 3D NumPy array with shape (frames, height, width) containing the requested frame data, or None if the
-        start_index is beyond the end of the file.
-    """
-    tiff_length = len(tiff.pages)
-
-    if start_index >= tiff_length:
-        return None
-
-    frames_to_read = min(tiff_length - start_index, batch_size)
-    frames = tiff.asarray() if tiff_length == 1 else tiff.asarray(key=range(start_index, start_index + frames_to_read))
-
-    # Adds extra dimension for single-frame TIFFs to ensure 3D array.
-    if len(frames.shape) < _MULTIDIMENSIONAL_PROCESSING_THRESHOLD:
-        frames = np.expand_dims(frames, axis=0)
-
-    # Converts to int16, rescaling where possible. Divides by 2 to shift uint16 (0 to 65535) or int32 values into the
-    # int16 range (-32768 to 32767) without overflow.
-    if frames.dtype.type in {np.uint16, np.int32}:
-        frames = (frames // 2).astype(np.int16)
-    elif frames.dtype.type != np.int16:
-        frames = frames.astype(np.int16)
-
-    # While this should not be possible, ensures that the returned frame number matches the requested number by
-    # truncating any extra frames from the array before returning it to the caller.
-    if frames.shape[0] > frames_to_read:
-        frames = frames[:frames_to_read, :, :]
-
-    return frames
-
-
-def convert_tiffs_to_binary(config: SingleDayConfiguration) -> list[RuntimeContext]:
+def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
     """Converts TIFF files to suite2p binary format for all planes.
 
-    This is the main entry point for TIFF to binary conversion. It performs the complete workflow: finds acquisition
-    parameters, discovers TIFF files, initializes plane contexts, and converts the data. The function handles
-    both standard TIFF data and MROI (Multi-ROI) data automatically based on the acquisition parameters loaded from the
-    .JSON file that accompanies valid data directories.
+    This function performs TIFF to binary conversion using pre-initialized RuntimeContext instances. It discovers TIFF
+    files in the data directory, reads them in batches, and writes the converted frames to binary files. The function
+    handles both standard TIFF data and MROI (Multi-ROI) data automatically based on the acquisition parameters stored
+    in the contexts.
+
+    Notes:
+        This function modifies the provided contexts in place, populating frame dimensions, frame counts, and mean
+        images in each context's runtime data.
 
     Args:
-        config: The single-day pipeline configuration. Must have data_path and save_path configured in file_io.
-
-    Returns:
-        A list of RuntimeContext instances, one per plane (or virtual plane for MROI data). Each context contains
-        the configuration, acquisition parameters, and runtime data with frame dimensions, counts, and mean images
-        populated.
+        contexts: A list of RuntimeContext instances created by resolve_single_day_contexts(). Each context must have
+            valid configuration, acquisition parameters, and IOData with binary file paths configured.
 
     Raises:
-        ValueError: If data_path or save_path is not configured.
-        FileNotFoundError: If no acquisition parameters file or TIFF files are found.
+        ValueError: If contexts is empty or data_path is not configured.
+        FileNotFoundError: If no TIFF files are found in the data directory.
     """
-    # Validates that data_path is configured and assigns it to a non-optional variable for type narrowing.
-    if config.file_io.data_path is None:
+    if not contexts:
+        message = "Unable to convert TIFFs to binary. At least one RuntimeContext must be provided."
+        console.error(message=message, error=ValueError)
+
+    # Extracts configuration and acquisition from the first context (shared across all contexts).
+    config = contexts[0].configuration
+    acquisition = contexts[0].acquisition
+
+    # Uses the data directory stored in IOData during context resolution.
+    data_directory = contexts[0].runtime.io.data_directory
+    if data_directory is None:
         message = (
-            "Unable to convert TIFFs to binary. The data_path must be configured in the FileIO section of the "
-            "configuration, but it is currently None."
+            "Unable to convert TIFFs to binary. The data_directory must be set in IOData during context resolution, "
+            "but it is currently None."
         )
         console.error(message=message, error=ValueError)
-    data_path: Path = config.file_io.data_path
-
-    # Finds acquisition parameters and data directory.
-    acquisition, data_directory = _find_acquisition_parameters(data_path)
 
     # Discovers TIFF files in the data directory.
     tiff_files = _discover_tiff_files(data_directory, tuple(config.file_io.ignored_file_names))
-
-    # Initializes plane contexts.
-    contexts = _initialize_plane_contexts(config, acquisition)
 
     # Extracts processing parameters.
     plane_number = acquisition.plane_number
@@ -549,8 +295,7 @@ def convert_tiffs_to_binary(config: SingleDayConfiguration) -> list[RuntimeConte
     # Counts total frames for progress bar and calculates frames per plane.
     total_frames = 0
     for tiff_file in tiff_files:
-        _, tiff_length = _open_tiff(tiff_file)
-        total_frames += tiff_length
+        total_frames += len(TiffFile(tiff_file).pages)
 
     # Calculates the number of frames per plane (accounting for interleaved planes and channels).
     frames_per_plane = total_frames // (plane_number * channel_number)
@@ -580,7 +325,7 @@ def convert_tiffs_to_binary(config: SingleDayConfiguration) -> list[RuntimeConte
 
     # Processes each TIFF file.
     for tiff_file in tiff_files:
-        tiff, _ = _open_tiff(tiff_file)
+        tiff = TiffFile(tiff_file)
         start_index = 0
 
         while True:
@@ -706,5 +451,3 @@ def convert_tiffs_to_binary(config: SingleDayConfiguration) -> list[RuntimeConte
 
     message = f"Converted {total_frames} frames across {len(tiff_files)} TIFF files to binary format."
     console.echo(message=message, level=LogLevel.SUCCESS)
-
-    return contexts

@@ -128,6 +128,10 @@ class IOData:
     plane_index: int | None = None
     """The zero-based index identifying this plane's position in a multi-plane volumetric recording."""
 
+    data_directory: Path | None = None
+    """The absolute path to the directory containing the source TIFF files and acquisition parameters JSON. This path
+    is discovered during context resolution and used during TIFF-to-binary conversion."""
+
     def __post_init__(self) -> None:
         """Converts string paths to Path objects after YAML loading."""
         if isinstance(self.registered_binary_path, str):
@@ -138,6 +142,8 @@ class IOData:
             )
         if isinstance(self.output_directory, str):
             self.output_directory = Path(self.output_directory) if self.output_directory else None
+        if isinstance(self.data_directory, str):
+            self.data_directory = Path(self.data_directory) if self.data_directory else None
 
     def prepare_for_saving(self) -> None:
         """Converts Path fields to strings for YAML serialization."""
@@ -149,6 +155,8 @@ class IOData:
             )
         if self.output_directory is not None:
             self.output_directory = str(self.output_directory)  # type: ignore[assignment]
+        if self.data_directory is not None:
+            self.data_directory = str(self.data_directory)  # type: ignore[assignment]
 
 
 @dataclass
