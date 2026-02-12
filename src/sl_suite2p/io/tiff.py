@@ -1,4 +1,4 @@
-"""Provides tools for importing, converting, and saving TIFF imaging data."""
+"""Provides assets for importing, converting, and saving TIFF imaging data."""
 
 import gc
 import math
@@ -11,6 +11,7 @@ from tifffile import TiffFile
 from ataraxis_base_utilities import LogLevel, console
 
 from .binary import BinaryFile
+from .context import find_data_directory
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -45,6 +46,7 @@ def _discover_tiff_files(
         A list of absolute paths to TIFF files, sorted naturally by filename.
 
     Raises:
+        ValueError: If the data_directory is not a valid directory.
         FileNotFoundError: If no TIFF files are found in the directory.
     """
     if not data_directory.is_dir():
@@ -265,17 +267,22 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
     config = contexts[0].configuration
     acquisition = contexts[0].acquisition
 
-    # Uses the data directory stored in IOData during context resolution.
-    data_directory = contexts[0].runtime.io.data_directory
-    if data_directory is None:
+    # Finds the data directory from the configuration's data_path.
+    data_path = config.file_io.data_path
+    if data_path is None:
         message = (
-            "Unable to convert TIFFs to binary. The data_directory must be set in IOData during context resolution, "
-            "but it is currently None."
+            "Unable to convert TIFFs to binary. The data_path must be configured in the FileIO section of the "
+            "configuration, but it is currently None."
         )
         console.error(message=message, error=ValueError)
 
+    data_directory = find_data_directory(data_path)
+
     # Discovers TIFF files in the data directory.
-    tiff_files = _discover_tiff_files(data_directory, tuple(config.file_io.ignored_file_names))
+    tiff_files = _discover_tiff_files(
+        data_directory=data_directory,
+        ignored_file_names=tuple(config.file_io.ignored_file_names),
+    )
 
     # Extracts processing parameters.
     plane_number = acquisition.plane_number
@@ -301,11 +308,18 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
     frames_per_plane = total_frames // (plane_number * channel_number)
 
     # Pre-scans TIFF files to determine frame dimensions for each plane.
-    frame_heights, frame_widths = _get_frame_dimensions(tiff_files, contexts, acquisition)
+    frame_heights, frame_widths = _get_frame_dimensions(
+        tiff_files=tiff_files,
+        contexts=contexts,
+        acquisition=acquisition,
+    )
 
     # Creates BinaryFile instances for writing.
     channel_1_binaries, channel_2_binaries = _create_binary_files(
-        contexts, frame_heights, frame_widths, frames_per_plane
+        contexts=contexts,
+        frame_heights=frame_heights,
+        frame_widths=frame_widths,
+        frames_per_plane=frames_per_plane,
     )
 
     # Creates progress bar.

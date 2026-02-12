@@ -1,4 +1,4 @@
-"""Provides functions for resolving pipeline runtime contexts from user configuration."""
+"""Provides assets for resolving pipeline runtime contexts from user configuration."""
 
 from __future__ import annotations
 
@@ -23,10 +23,11 @@ from ..dataclasses import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from ..dataclasses import ROIStatistics
-
 # Default name for the acquisition parameters JSON file.
 _ACQUISITION_PARAMETERS_FILENAME: str = "suite2p_parameters.json"
+
+# Maximum number of imaging channels supported by the pipeline.
+_MAXIMUM_CHANNEL_COUNT: int = 2
 
 
 def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
@@ -123,48 +124,26 @@ def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
     )
 
 
-def _find_acquisition_parameters(data_path: Path) -> tuple[AcquisitionParameters, Path]:
-    """Recursively searches for the acquisition parameters JSON file and imports its content as AcquisitionParameters.
-
-    This function searches the data_path directory and all subdirectories for a file named
-    'suite2p_parameters.json'. Once found, it loads and validates the acquisition parameters.
+def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
+    """Finds and loads acquisition parameters from the data directory.
 
     Args:
         data_path: The root directory to search for the acquisition parameters file.
 
     Returns:
-        A tuple containing the loaded AcquisitionParameters and the path to the directory containing the JSON file.
-        The directory path is used for subsequent non-recursive TIFF discovery.
+        The loaded AcquisitionParameters instance.
 
     Raises:
-        FileNotFoundError: If no acquisition parameters file is found in the data directory or its subdirectories.
-        ValueError: If required fields are missing from the JSON file.
+        FileNotFoundError: If no acquisition parameters file is found.
+        ValueError: If the data_path is not a directory, or if required fields are missing from the JSON file.
     """
-    if not data_path.is_dir():
-        message = f"Unable to find acquisition parameters. The data_path is not a directory: {data_path}"
-        console.error(message=message, error=ValueError)
-
-    # Recursively searches for the acquisition parameters file.
-    parameter_files = list(data_path.rglob(_ACQUISITION_PARAMETERS_FILENAME))
-
-    if not parameter_files:
-        message = (
-            f"Unable to find '{_ACQUISITION_PARAMETERS_FILENAME}' in the data directory or its subdirectories: "
-            f"{data_path}. This file is required and must contain acquisition metadata."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Uses the first found file (there should typically be only one).
-    parameters_path = parameter_files[0]
-    data_directory = parameters_path.parent
+    data_directory = find_data_directory(data_path)
+    parameters_path = data_directory / _ACQUISITION_PARAMETERS_FILENAME
 
     message = f"Found acquisition parameters at: {parameters_path}."
     console.echo(message=message, level=LogLevel.SUCCESS)
 
-    # Loads and validates the acquisition parameters.
-    acquisition = _load_acquisition_parameters(json_path=parameters_path)
-
-    return acquisition, data_directory
+    return _load_acquisition_parameters(json_path=parameters_path)
 
 
 def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
@@ -281,81 +260,57 @@ def _compute_mroi_region_borders(data_path: Path) -> list[int]:
     return sorted_x[1:]
 
 
-def _select_session_cells(
-    runtime: MultiDayRuntimeData,
-    configuration: MultiDayConfiguration,
-) -> None:
-    """Selects cells from the single-day pipeline output that meet multi-day tracking criteria.
+def find_data_directory(data_path: Path) -> Path:
+    """Recursively searches for the directory containing the acquisition parameters JSON file.
 
-    Filters ROIs from the combined single-day data using the probability threshold, maximum size, and (for MROI
-    recordings) region border margin specified in the configuration. The filtered cells are stored directly in
-    runtime.extraction.roi_statistics.
-
-    Notes:
-        This step is expected to discard some single-day ROIs because the multi-day pipeline typically uses more
-        stringent cell identification criteria.
+    This function searches the data_path directory and all subdirectories for a file named 'suite2p_parameters.json'
+    and returns the parent directory containing that file. This directory is expected to also contain the TIFF files.
 
     Args:
-        runtime: The per-session runtime data containing the CombinedData instance created by the single-day pipeline
-            for that session. The extraction.roi_statistics field is populated with the filtered cells.
-        configuration: The multi-day pipeline configuration containing ROI selection parameters for the processed
-            pipeline.
+        data_path: The root directory to search for the acquisition parameters file.
+
+    Returns:
+        The path to the directory containing the acquisition parameters JSON file.
 
     Raises:
-        ValueError: If the combined data or its extraction data is not available.
+        FileNotFoundError: If no acquisition parameters file is found in the data directory or its subdirectories.
+        ValueError: If the data_path is not a directory.
     """
-    if runtime.combined_data is None or runtime.combined_data.extraction.roi_statistics is None:
-        message = (
-            f"Unable to select the cells tot rack across days for session {runtime.io.session_id}. The combined "
-            f"single-day data must be loaded before cell selection can be performed."
-        )
+    if not data_path.is_dir():
+        message = f"Unable to find data directory. The data_path is not a directory: {data_path}"
         console.error(message=message, error=ValueError)
 
-    roi_statistics = runtime.combined_data.extraction.roi_statistics
-    cell_classification = runtime.combined_data.extraction.cell_classification
+    parameter_files = list(data_path.rglob(_ACQUISITION_PARAMETERS_FILENAME))
 
-    probability_threshold = configuration.roi_selection.probability_threshold
-    maximum_size = configuration.roi_selection.maximum_size
+    if not parameter_files:
+        message = (
+            f"Unable to find '{_ACQUISITION_PARAMETERS_FILENAME}' in the data directory or its subdirectories: "
+            f"{data_path}. This file is required and must contain acquisition metadata."
+        )
+        console.error(message=message, error=FileNotFoundError)
 
-    # Filters ROIs by classifier probability and pixel count. When cell_classification is available, only ROIs whose
-    # classifier probability exceeds the threshold and whose pixel count is below the maximum size are retained.
-    selected_cells: list[ROIStatistics] = []
-    for index, roi in enumerate(roi_statistics):
-        # Applies the probability threshold filter if classification data is available.
-        if cell_classification is not None and cell_classification[index, 1] <= probability_threshold:
-            continue
-
-        # Applies the maximum size filter.
-        if roi.pixel_count >= maximum_size:
-            continue
-
-        selected_cells.append(roi)
-
-    # Filters ROIs near MROI region borders if applicable.
-    mroi_region_borders = runtime.io.mroi_region_borders
-    if mroi_region_borders:
-        region_margin = configuration.roi_selection.mroi_region_margin
-        selected_cells = [
-            cell
-            for cell in selected_cells
-            if all(abs(cell.centroid[1] - border) > region_margin for border in mroi_region_borders)
-        ]
-
-    runtime.extraction.roi_statistics = selected_cells
+    return parameter_files[0].parent
 
 
-def resolve_single_day_contexts(config: SingleDayConfiguration) -> list[RuntimeContext]:
-    """Creates RuntimeContext instances for all planes without converting TIFF data.
+def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[RuntimeContext]:
+    """Creates RuntimeContext instances for all imaging planes processed by the target single-day pipeline.
 
     This function performs the initial setup for single-day processing: it finds acquisition parameters from the data
-    directory, creates output directories, and initializes RuntimeContext instances with IOData fields populated. It
-    does not perform TIFF to binary conversion, which should be done separately via convert_tiffs_to_binary().
+    directory, creates output directories, and initializes RuntimeContext instances for each of the recording's plains.
 
-    For standard single-ROI data, one context is created per physical plane. For MROI (Multi-ROI) data, one context
-    is created per virtual plane, where virtual planes are ROI x physical plane combinations.
+    Notes:
+        For standard single-ROI data, one context is created per physical plane. For MROI (Multi-ROI) data, one context
+        is created per virtual plane, where virtual planes are ROI x physical plane combinations.
+
+        The configuration and acquisition parameters are always saved to disk, ensuring they reflect the current
+        settings passed to this function.
+
+        When loading previously processed data (e.g., data moved to a different machine), acquisition parameters are
+        loaded from the saved output directory if available, allowing the pipeline to work without raw TIFF data.
 
     Args:
-        config: The single-day pipeline configuration. Must have data_path and save_path configured in file_io.
+        configuration: The single-day pipeline configuration. Must have save_path configured in file_io. The data_path
+            is only required when raw data needs to be processed (rebinarization) or when no processed data exists.
 
     Returns:
         A list of RuntimeContext instances, one per plane (or virtual plane for MROI data). Each context contains
@@ -363,26 +318,39 @@ def resolve_single_day_contexts(config: SingleDayConfiguration) -> list[RuntimeC
         instance with IOData fields initialized.
 
     Raises:
-        ValueError: If data_path or save_path is not configured in the configuration.
+        ValueError: If save_path is not configured, or if the acquisition parameters specify more than 2 channels.
+        FileNotFoundError: If neither processed data nor raw data with acquisition parameters is available.
     """
-    # Validates that data_path is configured.
-    if config.file_io.data_path is None:
+    # Validates that the save path is configured.
+    save_path_root = configuration.file_io.save_path
+    if save_path_root is None:
         message = (
-            "Unable to resolve single-day contexts. The data_path must be configured in the FileIO section of the "
+            "Unable to resolve single-day contexts. The save_path must be configured in the FileIO section of the "
             "configuration, but it is currently None."
         )
         console.error(message=message, error=ValueError)
-    data_path: Path = config.file_io.data_path
 
-    # Finds acquisition parameters and the data directory containing TIFFs.
-    acquisition, data_directory = _find_acquisition_parameters(data_path)
+    # Checks if processed data already exists with saved acquisition parameters.
+    saved_acquisition_path = save_path_root / "suite2p" / "acquisition_parameters.yaml"
+    if saved_acquisition_path.exists():
+        # Loads acquisition parameters from processed output (supports loading moved data without raw TIFFs).
+        acquisition = AcquisitionParameters.from_yaml(file_path=saved_acquisition_path)
+        console.echo(message=f"Loaded acquisition parameters from: {saved_acquisition_path}.", level=LogLevel.INFO)
+    else:
+        # Falls back to finding acquisition parameters from raw data path.
+        if configuration.file_io.data_path is None:
+            message = (
+                "Unable to resolve single-day contexts. No processed data exists at the save_path and data_path is "
+                "not configured. Either provide processed data or configure data_path to point to raw TIFF data."
+            )
+            console.error(message=message, error=ValueError)
+        acquisition = _find_acquisition_parameters(configuration.file_io.data_path)
 
-    # Validates that the save path is configured.
-    save_path_root = config.file_io.save_path
-    if save_path_root is None:
+    # Validates that the channel count does not exceed the maximum supported channel count.
+    if acquisition.channel_number > _MAXIMUM_CHANNEL_COUNT:
         message = (
-            "Unable to initialize plane contexts. The save_path must be configured in the FileIO section of the "
-            "configuration, but it is currently None."
+            f"Unable to resolve single-day contexts. The pipeline supports at most {_MAXIMUM_CHANNEL_COUNT} channels, "
+            f"but the acquisition parameters specify {acquisition.channel_number} channels."
         )
         console.error(message=message, error=ValueError)
 
@@ -404,6 +372,21 @@ def resolve_single_day_contexts(config: SingleDayConfiguration) -> list[RuntimeC
         # Resolves the output directory for this plane. Always uses 'suite2p' as the subdirectory.
         plane_output_path = save_path_root / "suite2p" / f"plane_{virtual_plane_index}"
 
+        # Checks if existing runtime data exists for this plane.
+        runtime_yaml_path = plane_output_path / "runtime_data.yaml"
+        if runtime_yaml_path.exists():
+            # Loads existing runtime data.
+            runtime_data = SingleDayRuntimeData.load(output_path=plane_output_path)
+            console.echo(message=f"Loaded existing runtime data for plane {virtual_plane_index}.", level=LogLevel.INFO)
+
+            context = RuntimeContext(
+                configuration=configuration,
+                acquisition=acquisition,
+                runtime=runtime_data,
+            )
+            contexts.append(context)
+            continue
+
         # Creates the output directory if it does not exist.
         ensure_directory_exists(plane_output_path)
 
@@ -413,7 +396,6 @@ def resolve_single_day_contexts(config: SingleDayConfiguration) -> list[RuntimeC
             registered_binary_path=plane_output_path / "channel_1_data.bin",
             plane_index=virtual_plane_index,
             sampling_rate=sampling_rate,
-            data_directory=data_directory,
         )
 
         # Configures second channel binary paths if using two channels.
@@ -441,64 +423,91 @@ def resolve_single_day_contexts(config: SingleDayConfiguration) -> list[RuntimeC
 
         # Creates the RuntimeContext combining the shared configuration, acquisition parameters, and runtime data.
         context = RuntimeContext(
-            configuration=config,
+            configuration=configuration,
             acquisition=acquisition,
             runtime=runtime_data,
         )
 
         contexts.append(context)
 
+    # Saves shared configuration and acquisition parameters to ensure they are always up to date.
+    contexts[0].save_shared()
+
+    # Saves each runtime to persist the initialized IO data.
+    for context in contexts:
+        context.save_runtime()
+
     return contexts
 
 
 def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[MultiDayRuntimeContext]:
-    """Resolves MultiDayRuntimeContext instances for all sessions in the target multi-day pipeline.
+    """Creates MultiDayRuntimeContext instances for all recording sessions processed by the target multi-day pipeline.
 
-    For each session directory in the configuration, discovers the suite2p output directory, derives the multiday
-    output path, and either loads an existing MultiDayRuntimeData from disk or constructs a new one. New sessions
-    undergo cell selection filtering and output directory creation.
+    This function performs the initial setup for multi-day processing: it discovers suite2p output directories for each
+    session, derives multiday output paths, and initializes MultiDayRuntimeContext instances.
+
+    Notes:
+        Each session directory must contain exactly one suite2p output directory with a combined_metadata.npz file from
+        a completed single-day pipeline run. The function extracts unique session identifiers from the directory paths
+        to distinguish sessions within the dataset.
+
+        The configuration is always saved to disk, ensuring it reflects the current settings passed to this function.
+        Cell selection is performed as a separate step using select_session_cells(), not during context resolution.
 
     Args:
-        configuration: The multi-day pipeline configuration containing session directories and processing parameters.
+        configuration: The multi-day pipeline configuration. Must have session_directories and dataset_name configured
+            in session_io.
 
     Returns:
-        A list of MultiDayRuntimeContext instances, one for each session to be processed.
+        A list of MultiDayRuntimeContext instances, one per session. Each context contains references to the shared
+        configuration and a session-specific MultiDayRuntimeData instance with MultiDayIOData fields initialized.
+
+    Raises:
+        FileNotFoundError: If no combined_metadata.npz file is found in a session directory.
+        RuntimeError: If multiple combined_metadata.npz files are found in a session directory, or if session paths
+            do not contain unique identifying components.
     """
     session_directories = configuration.session_io.session_directories
     session_ids = _extract_unique_components(paths=session_directories)
     dataset_name = configuration.session_io.dataset_name
 
-    # Resolves all suite2p directories (data_paths) and output paths upfront so that the complete
-    # dataset_output_paths list can be stored in every session's IO data.
+    # Resolves all suite2p directories (data_paths), output paths, and CombinedData upfront. Loading CombinedData
+    # here validates that single-day processing completed successfully for all sessions before proceeding.
     data_paths: list[Path] = []
     output_paths: list[Path] = []
+    combined_data_list: list[CombinedData] = []
     for session_directory in session_directories:
         data_path = _find_suite2p_directory(session_directory=session_directory)
         data_paths.append(data_path)
         output_paths.append(data_path.parent / "multiday" / dataset_name)
+        combined_data_list.append(CombinedData.load(root_path=data_path))
 
     contexts: list[MultiDayRuntimeContext] = []
 
     for index, session_id in enumerate(session_ids):
         data_path = data_paths[index]
         output_path = output_paths[index]
-
-        # Loads CombinedData from the single-day pipeline outputs.
-        combined_data = CombinedData.load(root_path=data_path)
+        combined_data = combined_data_list[index]
 
         runtime_path = output_path / "multiday_runtime_data.yaml"
         if runtime_path.exists():
             # Loads existing runtime data (pure deserialization from known output_path).
             runtime = MultiDayRuntimeData.load(output_path=output_path)
+
+            # Updates IO paths to reflect the current configuration's session directories. This handles cases where
+            # session directories have changed or data was moved since the runtime was last saved.
+            runtime.io.data_path = data_path
+            runtime.io.dataset_output_paths = list(output_paths)
+            runtime.io.mroi_region_borders = _compute_mroi_region_borders(data_path=data_path)
+
+            # Injects the pre-loaded CombinedData to ensure it's available regardless of __post_init__ behavior.
             runtime.combined_data = combined_data
 
-            # Updates dataset_output_paths in case sessions were added or paths changed.
-            runtime.io.dataset_output_paths = list(output_paths)
-
-            contexts.append(MultiDayRuntimeContext(configuration=configuration, runtime=runtime))
             console.echo(
                 message=f"Loaded existing multi-day runtime data for session {session_id}.", level=LogLevel.INFO
             )
+
+            contexts.append(MultiDayRuntimeContext(configuration=configuration, runtime=runtime))
             continue
 
         # Constructs new IO data with all discovered paths.
@@ -512,26 +521,19 @@ def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[Mult
         # Computes MROI region borders from acquisition parameters if applicable.
         io_data.mroi_region_borders = _compute_mroi_region_borders(data_path=data_path)
 
-        # Constructs the runtime data with the IO data and output path.
-        runtime = MultiDayRuntimeData(output_path=output_path, io=io_data)
-        runtime.combined_data = combined_data
-
-        # Runs cell selection filtering on the combined single-day data.
-        _select_session_cells(runtime=runtime, configuration=configuration)
+        # Constructs the runtime data with the IO data, output path, and pre-loaded CombinedData.
+        runtime = MultiDayRuntimeData(output_path=output_path, io=io_data, combined_data=combined_data)
 
         # Creates the output directory for this session.
         ensure_directory_exists(output_path)
 
         contexts.append(MultiDayRuntimeContext(configuration=configuration, runtime=runtime))
-        cell_count = len(runtime.extraction.roi_statistics) if runtime.extraction.roi_statistics else 0
         console.echo(
-            message=(
-                f"Initialized multi-day runtime for session {session_id} with {cell_count} preselected cell candidates."
-            ),
+            message=f"Initialized multi-day runtime for session {session_id}.",
             level=LogLevel.SUCCESS,
         )
 
-    # Saves shared configuration once via the first context.
+    # Saves shared configuration once via the first context to ensure it is always up to date.
     contexts[0].save_shared()
 
     # Saves each runtime to persist the fully-resolved IO data (including dataset_output_paths).

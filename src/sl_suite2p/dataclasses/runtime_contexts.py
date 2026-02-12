@@ -95,8 +95,6 @@ def _relocate_runtime_paths(
             )
         if runtime.io.output_directory is not None:
             runtime.io.output_directory = new_prefix / runtime.io.output_directory.relative_to(old_prefix)
-        if runtime.io.data_directory is not None:
-            runtime.io.data_directory = new_prefix / runtime.io.data_directory.relative_to(old_prefix)
     else:
         if runtime.io.data_path is not None:
             runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
@@ -389,6 +387,7 @@ class MultiDayRuntimeContext:
                             _load_single_day_runtime(plane_directory=plane_dir)
 
             # Reloads the entry runtime from the corrected YAML so that arrays are resolved against the new paths.
+            # This will fail if the single-day data is unavailable, as CombinedData is required.
             entry_runtime = MultiDayRuntimeData.load(output_path=resolved_output_path)
             output_paths = entry_runtime.io.dataset_output_paths
 

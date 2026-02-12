@@ -179,6 +179,12 @@ class FileIO:
     one of the names in this list is excluded from processing even if it has the correct extension and is located inside
     the input data directory."""
 
+    repeat_binarization: bool = False
+    """Determines whether to repeat the binarization step when processing. When True, the pipeline re-runs TIFF to
+    binary conversion using the data_path from the current configuration, even if binary files already exist. This
+    allows raw data to be relocated or updated without affecting other pipeline states. When False (default), existing
+    binary files are used if present."""
+
     def __post_init__(self) -> None:
         """Converts string paths to Path objects after YAML loading."""
         if isinstance(self.data_path, str):

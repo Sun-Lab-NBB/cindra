@@ -8,7 +8,7 @@ from pathlib import Path
 from dataclasses import field, dataclass
 
 import numpy as np
-from ataraxis_base_utilities import ensure_directory_exists
+from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from .version import version, python_version
@@ -278,8 +278,26 @@ class MultiDayRuntimeData(YamlConfig):
             self.registration.load_arrays(self.output_path)
             self.extraction.load_arrays(self.output_path)
 
+        # Loads CombinedData from the single-day data path if not already set. Multi-day functionality requires
+        # single-day data to be available, so this raises an error if the data cannot be loaded.
+        if self.combined_data is None and self.io.data_path is not None:
+            combined_metadata_path = self.io.data_path / "combined_metadata.npz"
+            if not combined_metadata_path.exists():
+                message = (
+                    f"Unable to load multi-day runtime data. The single-day combined_metadata.npz file does not exist "
+                    f"at the expected path: {combined_metadata_path}. Multi-day processing requires single-day data to "
+                    f"be available. Ensure the single-day pipeline completed successfully and the data has not been "
+                    f"moved or deleted."
+                )
+                console.error(message=message, error=FileNotFoundError)
+            self.combined_data = CombinedData.load(root_path=self.io.data_path)
+
     def save(self, output_path: Path) -> None:
         """Saves the runtime data to a YAML file and arrays to .npz/.npy files.
+
+        Notes:
+            The combined_data field is NOT saved since it references immutable single-day outputs. It is reloaded
+            from io.data_path during deserialization via __post_init__.
 
         Args:
             output_path: The directory where to save the multiday_runtime_data.yaml file and array files.
@@ -299,7 +317,9 @@ class MultiDayRuntimeData(YamlConfig):
         yaml_copy.io.prepare_for_saving()
         yaml_copy.registration.prepare_for_saving()
         yaml_copy.extraction.prepare_for_saving()
-        yaml_copy.combined_data = None  # Excludes from serialization; loaded from single-day outputs.
+
+        # Excludes combined_data from YAML (it references immutable single-day data and is reloaded on load).
+        yaml_copy.combined_data = None
 
         # Saves the YAML file.
         file_path = output_path / "multiday_runtime_data.yaml"

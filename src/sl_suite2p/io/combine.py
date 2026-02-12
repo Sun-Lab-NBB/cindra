@@ -1,4 +1,4 @@
-"""Provides tools for combining multiplane data into unified datasets."""
+"""Provides assets for combining multiplane data into unified datasets."""
 
 from __future__ import annotations
 
@@ -63,8 +63,8 @@ def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray
     # Handles MROI (Multi-ROI) recordings where each ROI has a known spatial position in the original field of view.
     else:
         # Starts with the MROI offsets, which position each ROI correctly relative to each other.
-        x_displacement = np.array([ctx.runtime.io.mroi_x_offset for ctx in plane_contexts], dtype=np.int32)
-        y_displacement = np.array([ctx.runtime.io.mroi_y_offset for ctx in plane_contexts], dtype=np.int32)
+        x_displacement = np.array([context.runtime.io.mroi_x_offset for context in plane_contexts], dtype=np.int32)
+        y_displacement = np.array([context.runtime.io.mroi_y_offset for context in plane_contexts], dtype=np.int32)
 
         # Checks if multiple virtual planes share the same (x, y) position. This happens when MROI recordings have
         # multiple z-planes per ROI: all z-planes within one ROI share the same spatial position.
@@ -77,8 +77,8 @@ def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray
             # Computes the number of z-planes (total virtual planes divided by unique ROI positions).
             plane_number //= roi_number
 
-            heights_array = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts])
-            widths_array = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts])
+            heights_array = np.array([context.runtime.io.frame_height for context in plane_contexts])
+            widths_array = np.array([context.runtime.io.frame_width for context in plane_contexts])
 
             # Calculates the tile size as the bounding box that contains all ROIs at their MROI positions.
             maximum_height = (y_displacement + heights_array).max()
@@ -225,24 +225,26 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         # Updates correlation map using valid pixel range.
         valid_y_start, valid_y_end = context.runtime.registration.valid_y_range
         valid_x_start, valid_x_end = context.runtime.registration.valid_x_range
-        corr_y_range = np.arange(
+        correlation_y_range = np.arange(
             y_offsets[plane_index] + valid_y_start,
             y_offsets[plane_index] + valid_y_end,
             dtype=np.int32,
         )
-        corr_x_range = np.arange(
+        correlation_x_range = np.arange(
             x_offsets[plane_index] + valid_x_start,
             x_offsets[plane_index] + valid_x_end,
             dtype=np.int32,
         )
         if context.runtime.detection.correlation_map is not None:
-            combined_correlation_map[np.ix_(corr_y_range, corr_x_range)] = context.runtime.detection.correlation_map
+            combined_correlation_map[np.ix_(correlation_y_range, correlation_x_range)] = (
+                context.runtime.detection.correlation_map
+            )
         if (
             second_channel_functional
             and combined_correlation_map_channel_2 is not None
             and context.runtime.detection.correlation_map_channel_2 is not None
         ):
-            combined_correlation_map_channel_2[np.ix_(corr_y_range, corr_x_range)] = (
+            combined_correlation_map_channel_2[np.ix_(correlation_y_range, correlation_x_range)] = (
                 context.runtime.detection.correlation_map_channel_2
             )
 
@@ -252,13 +254,15 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
             and combined_max_projection is not None
             and context.runtime.detection.maximum_projection is not None
         ):
-            combined_max_projection[np.ix_(corr_y_range, corr_x_range)] = context.runtime.detection.maximum_projection
+            combined_max_projection[np.ix_(correlation_y_range, correlation_x_range)] = (
+                context.runtime.detection.maximum_projection
+            )
         if (
             second_channel_functional
             and combined_max_projection_channel_2 is not None
             and context.runtime.detection.maximum_projection_channel_2 is not None
         ):
-            combined_max_projection_channel_2[np.ix_(corr_y_range, corr_x_range)] = (
+            combined_max_projection_channel_2[np.ix_(correlation_y_range, correlation_x_range)] = (
                 context.runtime.detection.maximum_projection_channel_2
             )
 
