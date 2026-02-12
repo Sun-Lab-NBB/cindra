@@ -42,6 +42,12 @@ class SessionIO:
     session's 'multiday' directory (e.g., session/multiday/{dataset_name}/) and to identify the dataset in the
     tracker file."""
 
+    repeat_selection: bool = False
+    """Determines whether to repeat the cell selection step when processing. When True, the pipeline re-runs cell 
+    selection filtering using the current ROI selection parameters, even if selected cells already exist. This allows 
+    updated single-day results or modified selection criteria to be integrated into multi-day processing. When False 
+    (default), existing cell selections are used if present."""
+
     def __post_init__(self) -> None:
         """Converts string paths to Path objects and natural-sorts them after YAML loading."""
         self.session_directories = natsorted([Path(p) if isinstance(p, str) else p for p in self.session_directories])
@@ -175,6 +181,7 @@ class MultiDayConfiguration(YamlConfig):
 
         # Prepares each child dataclass for YAML serialization.
         yaml_copy.session_io.prepare_for_saving()
+        yaml_copy.spike_deconvolution.prepare_for_saving()
 
         yaml_copy.to_yaml(file_path=file_path)
 

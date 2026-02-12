@@ -128,10 +128,6 @@ class IOData:
     plane_index: int | None = None
     """The zero-based index identifying this plane's position in a multi-plane volumetric recording."""
 
-    data_directory: Path | None = None
-    """The absolute path to the directory containing the source TIFF files and acquisition parameters JSON. This path
-    is discovered during context resolution and used during TIFF-to-binary conversion."""
-
     def __post_init__(self) -> None:
         """Converts string paths to Path objects after YAML loading."""
         if isinstance(self.registered_binary_path, str):
@@ -142,8 +138,6 @@ class IOData:
             )
         if isinstance(self.output_directory, str):
             self.output_directory = Path(self.output_directory) if self.output_directory else None
-        if isinstance(self.data_directory, str):
-            self.data_directory = Path(self.data_directory) if self.data_directory else None
 
     def prepare_for_saving(self) -> None:
         """Converts Path fields to strings for YAML serialization."""
@@ -155,8 +149,6 @@ class IOData:
             )
         if self.output_directory is not None:
             self.output_directory = str(self.output_directory)  # type: ignore[assignment]
-        if self.data_directory is not None:
-            self.data_directory = str(self.data_directory)  # type: ignore[assignment]
 
 
 @dataclass
@@ -695,7 +687,7 @@ class ROIStatistics:
         data = np.load(file_path, allow_pickle=False)
 
         pixel_counts = data["pixel_counts"]
-        n_rois = len(pixel_counts)
+        roi_count = len(pixel_counts)
 
         # Computes split indices for variable-length arrays.
         pixel_splits = np.cumsum(pixel_counts)[:-1]
@@ -727,19 +719,19 @@ class ROIStatistics:
         merged_into_roi_index = data["merged_into_roi_index"]
 
         # Loads optional variable-length array fields.
-        soma_mask_list = _load_optional_array_field("soma_mask", n_rois, data, dtype=np.bool_)
-        overlap_mask_list = _load_optional_array_field("overlap_mask", n_rois, data, dtype=np.bool_)
-        neuropil_mask_list = _load_optional_array_field("neuropil_mask", n_rois, data, dtype=np.bool_)
-        raveled_pixels_list = _load_optional_array_field("raveled_pixels", n_rois, data, dtype=np.int32)
-        boundary_y_pixels_list = _load_optional_array_field("boundary_y_pixels", n_rois, data, dtype=np.float32)
-        boundary_x_pixels_list = _load_optional_array_field("boundary_x_pixels", n_rois, data, dtype=np.float32)
-        circle_y_pixels_list = _load_optional_array_field("circle_y_pixels", n_rois, data, dtype=np.float32)
-        circle_x_pixels_list = _load_optional_array_field("circle_x_pixels", n_rois, data, dtype=np.float32)
-        merged_roi_indices_list = _load_optional_array_field("merged_roi_indices", n_rois, data, dtype=np.int32)
+        soma_mask_list = _load_optional_array_field("soma_mask", roi_count, data, dtype=np.bool_)
+        overlap_mask_list = _load_optional_array_field("overlap_mask", roi_count, data, dtype=np.bool_)
+        neuropil_mask_list = _load_optional_array_field("neuropil_mask", roi_count, data, dtype=np.bool_)
+        raveled_pixels_list = _load_optional_array_field("raveled_pixels", roi_count, data, dtype=np.int32)
+        boundary_y_pixels_list = _load_optional_array_field("boundary_y_pixels", roi_count, data, dtype=np.float32)
+        boundary_x_pixels_list = _load_optional_array_field("boundary_x_pixels", roi_count, data, dtype=np.float32)
+        circle_y_pixels_list = _load_optional_array_field("circle_y_pixels", roi_count, data, dtype=np.float32)
+        circle_x_pixels_list = _load_optional_array_field("circle_x_pixels", roi_count, data, dtype=np.float32)
+        merged_roi_indices_list = _load_optional_array_field("merged_roi_indices", roi_count, data, dtype=np.int32)
 
         # Reconstructs ROIStatistics instances.
         roi_list = []
-        for i in range(n_rois):
+        for i in range(roi_count):
             # Converts merged_roi_indices array back to list[int] if present.
             merged_indices = merged_roi_indices_list[i]
             merged_indices_as_list = list(merged_indices.astype(int)) if merged_indices is not None else None

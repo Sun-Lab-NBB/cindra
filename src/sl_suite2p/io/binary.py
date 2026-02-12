@@ -1,4 +1,4 @@
-"""Provides tools for reading and writing image data stored in suite2p binary (.bin) files."""
+"""Provides assets for reading and writing image data stored in suite2p binary (.bin) files."""
 
 from __future__ import annotations
 
