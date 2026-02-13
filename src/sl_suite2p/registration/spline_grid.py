@@ -15,7 +15,120 @@ if TYPE_CHECKING:
 _MINIMUM_KNOTS_FOR_FROZEN_EDGES: int = 6
 
 
-@numba.njit(cache=True, inline="always")  # type: ignore[untyped-decorator]
+@numba.njit(cache=True, parallel=True)
+def _sample_grid(
+    result: NDArray[np.float32],
+    grid_sampling: float,
+    knots: NDArray[np.float32],
+) -> None:
+    """Samples the B-spline grid at all pixels of the underlying image field.
+
+    For each pixel in the result array, computes the B-spline interpolated value from the surrounding 4x4 knot
+    neighborhood and stores it in the result array.
+
+    Args:
+        result: The output array to store sampled deformation values, modified in-place.
+        grid_sampling: The spacing between B-spline control points (knots) in pixels.
+        knots: The 2D array of B-spline knot values.
+    """
+    # Parallelizes the computation over rows to improve performance.
+    for y in prange(result.shape[0]):
+        # Each thread gets its own coefficient arrays.
+        coefficients_y = np.empty((4,), dtype=np.float32)
+        coefficients_x = np.empty((4,), dtype=np.float32)
+
+        for x in range(result.shape[1]):
+            # Computes the reference knot index and interpolation factor for each axis.
+            # The +1 corrects for boundary padding in the knot grid.
+            grid_position_y = y / grid_sampling + 1
+            knot_index_y = int(grid_position_y)
+            interpolation_factor_y = grid_position_y - knot_index_y
+            grid_position_x = x / grid_sampling + 1
+            knot_index_x = int(grid_position_x)
+            interpolation_factor_x = grid_position_x - knot_index_x
+
+            # Computes B-spline basis coefficients at this pixel position.
+            compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
+            compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
+
+            # Accumulates weighted contributions from the 4x4 knot neighborhood.
+            sampled_value = 0.0
+            knot_y = knot_index_y - 1
+            for offset_y in range(4):
+                knot_x = knot_index_x - 1
+                for offset_x in range(4):
+                    sampled_value += coefficients_y[offset_y] * coefficients_x[offset_x] * knots[knot_y, knot_x]
+                    knot_x += 1
+                knot_y += 1
+
+            result[y, x] = sampled_value
+
+
+@numba.njit(cache=True)
+def _fit_knots_to_field(
+    grid_sampling: float,
+    knots: NDArray[np.float32],
+    field: NDArray[np.float32],
+) -> None:
+    """Fits B-spline knots to a deformation field using least-squares (Lee et al.).
+
+    For each pixel, distributes its contribution to the surrounding 4x4 knot neighborhood. After accumulating
+    all contributions, computes final knot values by dividing the accumulated numerator by denominator.
+
+    Args:
+        grid_sampling: The spacing between B-spline control points (knots) in pixels.
+        knots: The 2D knot array to update in-place.
+        field: The 2D deformation field values.
+    """
+    coefficients_y = np.empty((4,), dtype=np.float32)
+    coefficients_x = np.empty((4,), dtype=np.float32)
+
+    numerator = np.zeros_like(knots)
+    denominator = np.zeros_like(knots)
+
+    # Accumulates contributions from each pixel to its surrounding knots.
+    for y in range(field.shape[0]):
+        for x in range(field.shape[1]):
+            field_value = field[y, x]
+
+            # Computes the reference knot index and interpolation factor for each axis.
+            # The +1 corrects for boundary padding in the knot grid.
+            grid_position_y = y / grid_sampling + 1
+            knot_index_y = int(grid_position_y)
+            interpolation_factor_y = grid_position_y - knot_index_y
+            grid_position_x = x / grid_sampling + 1
+            knot_index_x = int(grid_position_x)
+            interpolation_factor_x = grid_position_x - knot_index_x
+
+            # Computes B-spline basis coefficients at this pixel position.
+            compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
+            compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
+
+            # Pre-normalizes the value by the sum of squared basis coefficients.
+            coefficient_sum_squared = 0.0
+            for offset_y in range(4):
+                for offset_x in range(4):
+                    coefficient = coefficients_y[offset_y] * coefficients_x[offset_x]
+                    coefficient_sum_squared += coefficient * coefficient
+            normalized_value = field_value / coefficient_sum_squared
+
+            # Accumulates contributions to each knot in the 4x4 neighborhood.
+            for offset_y in range(4):
+                knot_y = offset_y + knot_index_y - 1
+                for offset_x in range(4):
+                    knot_x = offset_x + knot_index_x - 1
+                    basis_coefficient = coefficients_y[offset_y] * coefficients_x[offset_x]
+                    coefficient_squared = basis_coefficient * basis_coefficient
+                    numerator[knot_y, knot_x] += coefficient_squared * (normalized_value * basis_coefficient)
+                    denominator[knot_y, knot_x] += coefficient_squared
+
+    # Finalizes the knot values by dividing numerator by denominator.
+    for i in range(knots.size):
+        if denominator.flat[i] > 0.0:
+            knots.flat[i] = numerator.flat[i] / denominator.flat[i]
+
+
+@numba.njit(cache=True, inline="always")
 def compute_cardinal_coefficients(
     interpolation_factor: float,
     coefficients: NDArray[np.float32],
@@ -47,7 +160,7 @@ def compute_cardinal_coefficients(
     coefficients[2] = -2.0 * t_cubed + 3.0 * t_squared - coefficients[0]
 
 
-@numba.njit(cache=True, inline="always")  # type: ignore[untyped-decorator]
+@numba.njit(cache=True, inline="always")
 def compute_basis_coefficients(
     interpolation_factor: float,
     coefficients: NDArray[np.float32],
@@ -292,116 +405,3 @@ class SplineGrid:
                 knots[:, -2] = -(knots[:, -3] * coefficients[2] + knots[:, -4] * coefficients[3]) / coefficients[1]
 
         return True
-
-
-@numba.njit(cache=True, parallel=True)  # type: ignore[untyped-decorator]
-def _sample_grid(
-    result: NDArray[np.float32],
-    grid_sampling: float,
-    knots: NDArray[np.float32],
-) -> None:
-    """Samples the B-spline grid at all pixels of the underlying image field.
-
-    For each pixel in the result array, computes the B-spline interpolated value from the surrounding 4x4 knot
-    neighborhood and stores it in the result array.
-
-    Args:
-        result: The output array to store sampled deformation values, modified in-place.
-        grid_sampling: The spacing between B-spline control points (knots) in pixels.
-        knots: The 2D array of B-spline knot values.
-    """
-    # Parallelizes the computation over rows to improve performance.
-    for y in prange(result.shape[0]):
-        # Each thread gets its own coefficient arrays.
-        coefficients_y = np.empty((4,), dtype=np.float32)
-        coefficients_x = np.empty((4,), dtype=np.float32)
-
-        for x in range(result.shape[1]):
-            # Computes the reference knot index and interpolation factor for each axis.
-            # The +1 corrects for boundary padding in the knot grid.
-            grid_position_y = y / grid_sampling + 1
-            knot_index_y = int(grid_position_y)
-            interpolation_factor_y = grid_position_y - knot_index_y
-            grid_position_x = x / grid_sampling + 1
-            knot_index_x = int(grid_position_x)
-            interpolation_factor_x = grid_position_x - knot_index_x
-
-            # Computes B-spline basis coefficients at this pixel position.
-            compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
-            compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
-
-            # Accumulates weighted contributions from the 4x4 knot neighborhood.
-            sampled_value = 0.0
-            knot_y = knot_index_y - 1
-            for offset_y in range(4):
-                knot_x = knot_index_x - 1
-                for offset_x in range(4):
-                    sampled_value += coefficients_y[offset_y] * coefficients_x[offset_x] * knots[knot_y, knot_x]
-                    knot_x += 1
-                knot_y += 1
-
-            result[y, x] = sampled_value
-
-
-@numba.njit(cache=True)  # type: ignore[untyped-decorator]
-def _fit_knots_to_field(
-    grid_sampling: float,
-    knots: NDArray[np.float32],
-    field: NDArray[np.float32],
-) -> None:
-    """Fits B-spline knots to a deformation field using least-squares (Lee et al.).
-
-    For each pixel, distributes its contribution to the surrounding 4x4 knot neighborhood. After accumulating
-    all contributions, computes final knot values by dividing the accumulated numerator by denominator.
-
-    Args:
-        grid_sampling: The spacing between B-spline control points (knots) in pixels.
-        knots: The 2D knot array to update in-place.
-        field: The 2D deformation field values.
-    """
-    coefficients_y = np.empty((4,), dtype=np.float32)
-    coefficients_x = np.empty((4,), dtype=np.float32)
-
-    numerator = np.zeros_like(knots)
-    denominator = np.zeros_like(knots)
-
-    # Accumulates contributions from each pixel to its surrounding knots.
-    for y in range(field.shape[0]):
-        for x in range(field.shape[1]):
-            field_value = field[y, x]
-
-            # Computes the reference knot index and interpolation factor for each axis.
-            # The +1 corrects for boundary padding in the knot grid.
-            grid_position_y = y / grid_sampling + 1
-            knot_index_y = int(grid_position_y)
-            interpolation_factor_y = grid_position_y - knot_index_y
-            grid_position_x = x / grid_sampling + 1
-            knot_index_x = int(grid_position_x)
-            interpolation_factor_x = grid_position_x - knot_index_x
-
-            # Computes B-spline basis coefficients at this pixel position.
-            compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
-            compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
-
-            # Pre-normalizes the value by the sum of squared basis coefficients.
-            coefficient_sum_squared = 0.0
-            for offset_y in range(4):
-                for offset_x in range(4):
-                    coefficient = coefficients_y[offset_y] * coefficients_x[offset_x]
-                    coefficient_sum_squared += coefficient * coefficient
-            normalized_value = field_value / coefficient_sum_squared
-
-            # Accumulates contributions to each knot in the 4x4 neighborhood.
-            for offset_y in range(4):
-                knot_y = offset_y + knot_index_y - 1
-                for offset_x in range(4):
-                    knot_x = offset_x + knot_index_x - 1
-                    basis_coefficient = coefficients_y[offset_y] * coefficients_x[offset_x]
-                    coefficient_squared = basis_coefficient * basis_coefficient
-                    numerator[knot_y, knot_x] += coefficient_squared * (normalized_value * basis_coefficient)
-                    denominator[knot_y, knot_x] += coefficient_squared
-
-    # Finalizes the knot values by dividing numerator by denominator.
-    for i in range(knots.size):
-        if denominator.flat[i] > 0.0:
-            knots.flat[i] = numerator.flat[i] / denominator.flat[i]

@@ -89,6 +89,25 @@ def _compute_gaussian_rbf_weights(
     return np.exp(-(delta_x**2 + delta_y**2) / (2 * sigma**2))
 
 
+@lru_cache(maxsize=5)
+def _get_normalization_weights(height: int, width: int, window: int) -> NDArray[np.float32]:
+    """Computes cached normalization weights for spatial high-pass filtering.
+
+    The weights correct for zero-padding at borders by computing how many valid pixels contribute to each window.
+    Since this only depends on dimensions and window size, results are cached to avoid redundant computation.
+
+    Args:
+        height: The height of the frames or images to be filtered, in pixels.
+        width: The width of the frames or images to be filtered, in pixels.
+        window: The smoothing window size.
+
+    Returns:
+        The normalization weights with shape (height, width).
+    """
+    ones_array = np.ones((1, height, width), dtype=np.float32)
+    return apply_spatial_smoothing(data=ones_array, window=window)
+
+
 def apply_phase_correlation(
     frames: NDArray[np.float32],
     kernel: NDArray[np.complex64],
@@ -126,7 +145,7 @@ def apply_phase_correlation(
     )
 
 
-@vectorize(  # type: ignore[untyped-decorator]
+@vectorize(
     ["float32(float32, float32, float32)"],
     nopython=True,
     target="parallel",
@@ -310,25 +329,6 @@ def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[n
     # Squeezes back to 2D if input was 2D.
     result: NDArray[np.float32] = data_summed.squeeze()
     return result
-
-
-@lru_cache(maxsize=5)
-def _get_normalization_weights(height: int, width: int, window: int) -> NDArray[np.float32]:
-    """Computes cached normalization weights for spatial high-pass filtering.
-
-    The weights correct for zero-padding at borders by computing how many valid pixels contribute to each window.
-    Since this only depends on dimensions and window size, results are cached to avoid redundant computation.
-
-    Args:
-        height: The height of the frames or images to be filtered, in pixels.
-        width: The width of the frames or images to be filtered, in pixels.
-        window: The smoothing window size.
-
-    Returns:
-        The normalization weights with shape (height, width).
-    """
-    ones_array = np.ones((1, height, width), dtype=np.float32)
-    return apply_spatial_smoothing(data=ones_array, window=window)
 
 
 def apply_spatial_high_pass(data: NDArray[np.float32], window: int) -> NDArray[np.float32]:

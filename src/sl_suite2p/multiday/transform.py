@@ -2,118 +2,16 @@
 discover and track a set of cell ROIs across multiple sessions.
 """
 
-import os
 from typing import Any
-from concurrent.futures import ProcessPoolExecutor
 
 from tqdm import tqdm
 import numpy as np
-from ataraxis_time import PrecisionTimer, TimerPrecisions
 from scipy.spatial.distance import pdist, squareform
 from ataraxis_base_utilities import LogLevel, console
 import scipy.cluster.hierarchy
 
-from .utils import deform_masks, add_overlap_info, create_mask_image
-from ..dataclasses import Session, MultiDayData
-from ..registration import DiffeomorphicDemonsRegistration
-
-
-def register_sessions(ops: dict[str, Any], data: MultiDayData) -> MultiDayData:
-    """Registers session reference images and ROI masks to the same visual space using DiffeomorphicDemonsRegistration.
-
-    Args:
-        ops: The dictionary that stores the multi-day registration parameters.
-        data: A MultiDayData instance that stores intermediate pipeline data.
-
-    Returns:
-        The MultiDayData instance updated with the outcome of the registration process.
-    """
-    # Initializes the runtime timer
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-
-    # Extracts the type of reference image to use for the registration process.
-    images = [session.reference_images[ops["image_type"]] for session in data.sessions]
-
-    # Instantiates the DiffeomorphicDemonsRegistration object for the reference images to be registered to each-other.
-    registration = DiffeomorphicDemonsRegistration(
-        images=images,
-        grid_sampling_factor=ops["grid_sampling_factor"],
-        scale_sampling=ops["scale_sampling"],
-        speed_factor=ops["speed_factor"],
-    )
-
-    # Runs the registration process.
-    console.echo(message=f"Computing deformation fields for {ops['image_type']} session images...")
-    timer.reset()
-    registration.register(progress=ops["progress_bars"])
-    console.echo(message=f"Deformation fields: computed. Time taken: {timer.elapsed} seconds.", level=LogLevel.SUCCESS)
-    timer.delay(delay=1, allow_sleep=False, block=False)  # Delays for one second to optimize terminal message order
-
-    # Resolves the number of parallel workers used to apply deformations to session's data.
-    parallel_workers = ops["parallel_workers"]
-    if parallel_workers < 1:
-        parallel_workers = os.cpu_count()
-
-    # Applies the deformation (registration) offsets generated during registration to all reference images of each
-    # session to align them in the deformed visual space. Also applies the deformations to all cell masks to register
-    # all single-day cells to the same visual space.
-    with ProcessPoolExecutor(max_workers=parallel_workers) as executor:
-        # Submits each session to be processed in parallel
-        futures = [
-            executor.submit(_register_session, registration=registration, deform_index=index, session=session)
-            for index, session in enumerate(data.sessions)
-        ]
-
-        # Collects results with the progress bar using list comprehension
-        results = [
-            future.result()
-            for future in tqdm(
-                futures, desc="Applying deformation fields", unit="session", disable=not ops["progress_bars"]
-            )
-        ]
-
-    # Updates the sessions stored inside data with the results of the above pipeline
-    data.sessions = results
-
-    timer.delay(delay=1, allow_sleep=False, block=False)  # Delays for one second to optimize terminal message order
-    # Returns the updated MultiDayData instance
-    return data
-
-
-def _register_session(registration: DiffeomorphicDemonsRegistration, deform_index: int, session: Session) -> Session:
-    """Applies deformation offsets to a single session in parallel.
-
-    This worker function is used by register_sessions to apply the computed deformation field to all reference images
-    and cell masks for a single session.
-
-    Notes:
-        The DiffeomorphicDemonsRegistration class uses backward mapping by default, meaning the returned Deformation
-        object maps coordinates from the target (registered) space back to the source (original) space.
-
-    Args:
-        registration: The DiffeomorphicDemonsRegistration instance containing computed deformations.
-        deform_index: The index of the session in the registration's image list.
-        session: The Session instance to update with deformation data.
-
-    Returns:
-        The Session instance updated with the computed deformation field and transformed images/masks.
-    """
-    session.deform = registration.get_deformation(image_index=deform_index)
-
-    # Uses the deformation field object to transform reference images
-    session.transformed_images = {}
-    for field in ["mean", "enhanced", "max"]:
-        session.transformed_images[field] = np.array(
-            object=session.deform.apply_deformation(session.reference_images[field]), dtype=np.float32, copy=True
-        )
-
-    # Transforms single-day cell data using the deformation offsets to create deformed cell masks.
-    deformed_cells = deform_masks(session.cell_masks, session.deform)
-
-    # Adds the session number (index) to each cell dictionary and sets clustering ID to 0 (unassigned/not clustered)
-    session.deformed_cell_masks = tuple([dict(item, session=deform_index, cluster_id=0) for item in deformed_cells])
-
-    return session
+from .utils import add_overlap_info
+from ..dataclasses import MultiDayData
 
 
 def square_to_condensed(i: int, j: int, n: int) -> int:
@@ -390,74 +288,3 @@ def generate_template_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDay
         session.shared_cell_masks = data.template_cell_masks
 
     return data
-
-
-def backward_transform_masks(ops: dict[str, Any], data: MultiDayData) -> MultiDayData:
-    """Backward-transforms the multi-day template cell masks to the original (unregistered) visual space of each
-    session.
-
-    Args:
-        ops: The dictionary that stores the multi-day registration parameters.
-        data: A MultiDayData instance that stores the template (across-session tracked) cell masks.
-
-    Returns:
-        The MultiDayData instance updated with the outcome of converting template cell masks back to each session's
-        visual space.
-    """
-    # Resolves the number of parallel workers used to apply deformations to session's data.
-    parallel_workers = ops["parallel_workers"]
-    if parallel_workers < 1:
-        parallel_workers = os.cpu_count()
-
-    with ProcessPoolExecutor(max_workers=parallel_workers) as executor:
-        # Submits the backwards transform task for each session in parallel
-        futures = [
-            executor.submit(_backward_transform_session, template_masks=data.template_cell_masks, session=session)
-            for session in data.sessions
-        ]
-
-        # Collects results with the progress bar using list comprehension
-        results = [
-            future.result()
-            for future in tqdm(
-                futures,
-                desc="Transforming template masks to unregistered visual space",
-                unit="session",
-                disable=not ops["progress_bars"],
-            )
-        ]
-
-    # Updates the sessions stored inside data with the results of the above pipeline
-    data.sessions = results
-
-    # Returns the updated MultiDayData instance
-    return data
-
-
-def _backward_transform_session(template_masks: tuple[dict[str, Any], ...], session: Session) -> Session:
-    """Applies backward transformation to template masks for a single session in parallel.
-
-    This worker function uses the inverse of the session's deformation field to transform multi-day template cell
-    masks from the registered (deformed) visual space back to the session's original (unregistered) visual space.
-
-    Args:
-        template_masks: The tuple of template cell mask dictionaries in the registered visual space.
-        session: The Session instance containing the deformation field to invert.
-
-    Returns:
-        The Session instance updated with backward-transformed template cell masks.
-    """
-    # Transform the template cell masks to the original (unregistered) visual space of this session
-    session.template_cell_masks = deform_masks(
-        cell_masks=template_masks,
-        deform=session.deform.inverse(),
-    )
-
-    # This step was performed before visualizing backwards-transformed data in the original multi-day notebook. Since
-    # we have completely refactored the source code and the API, the step is now statically performed here so that the
-    # results can be stored and loaded with other transformed image information stored in the transformed_images.npy
-    # output file.
-    session.transformed_images["lambda_weights"] = create_mask_image(
-        session.template_cell_masks, session.deform.field_shape, field="pixel_weights"
-    )
-    return session

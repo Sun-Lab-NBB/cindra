@@ -25,7 +25,7 @@ def _filter_channel_cells(
     probability_threshold: float,
     maximum_size: int,
     region_margin: int,
-) -> list[ROIStatistics]:
+) -> list[int]:
     """Filters ROIs from a single channel using the multi-day ROI selection criteria.
 
     Applies probability threshold, maximum size, and MROI region border margin filters to select ROIs suitable for
@@ -43,10 +43,10 @@ def _filter_channel_cells(
         region_margin: The minimum distance in pixels between an ROI's centroid and MROI region borders.
 
     Returns:
-        A list of ROIStatistics instances that passed all selection filters.
+        A list of indices into roi_statistics for ROIs that passed all selection filters.
     """
     # Filters ROIs by classifier probability and pixel count.
-    selected_cells: list[ROIStatistics] = []
+    selected_indices: list[int] = []
     for index, roi in enumerate(roi_statistics):
         # Applies the probability threshold filter.
         if cell_classification[index, 0] < probability_threshold:
@@ -56,17 +56,14 @@ def _filter_channel_cells(
         if roi.pixel_count >= maximum_size:
             continue
 
-        selected_cells.append(roi)
+        # Applies MROI region border filter if applicable.
+        if mroi_region_borders:
+            if not all(abs(roi.centroid[1] - border) > region_margin for border in mroi_region_borders):
+                continue
 
-    # Filters ROIs near MROI region borders if applicable.
-    if mroi_region_borders:
-        selected_cells = [
-            cell
-            for cell in selected_cells
-            if all(abs(cell.centroid[1] - border) > region_margin for border in mroi_region_borders)
-        ]
+        selected_indices.append(index)
 
-    return selected_cells
+    return selected_indices
 
 
 def _filter_cells(
@@ -76,8 +73,8 @@ def _filter_cells(
     """Filters ROIs from combined single-day data using the multi-day ROI selection criteria.
 
     Filters ROIs from both channel 1 and channel 2 (if available) using the probability threshold, maximum size, and
-    (for MROI recordings) region border margin specified in the configuration. The filtered cells are stored directly
-    in runtime.extraction.roi_statistics and runtime.extraction.roi_statistics_channel_2.
+    (for MROI recordings) region border margin specified in the configuration. The selected cell indices are stored
+    in runtime.io.selected_cell_indices and runtime.io.selected_cell_indices_channel_2.
 
     Notes:
         This step is expected to discard some single-day ROIs because the multi-day pipeline typically uses more
@@ -85,8 +82,8 @@ def _filter_cells(
         present in the combined data, indicating the recording used two functional channels.
 
     Args:
-        runtime: The per-session runtime data. The extraction.roi_statistics and extraction.roi_statistics_channel_2
-            fields of the input MultiDayRuntimeData instance are populated with the filtered cells in-place.
+        runtime: The per-session runtime data. The io.selected_cell_indices and io.selected_cell_indices_channel_2
+            fields of the input MultiDayRuntimeData instance are populated with the selected indices in-place.
         configuration: The multi-day pipeline configuration containing ROI selection parameters.
 
     Returns:
@@ -125,8 +122,8 @@ def _filter_cells(
     region_margin = configuration.roi_selection.mroi_region_margin
     mroi_region_borders = runtime.io.mroi_region_borders
 
-    # Filters channel 1 cells.
-    runtime.extraction.roi_statistics = _filter_channel_cells(
+    # Filters channel 1 cells and stores indices.
+    runtime.io.selected_cell_indices = _filter_channel_cells(
         roi_statistics=combined_data.extraction.roi_statistics,
         cell_classification=combined_data.extraction.cell_classification,
         mroi_region_borders=mroi_region_borders,
@@ -134,7 +131,7 @@ def _filter_cells(
         maximum_size=maximum_size,
         region_margin=region_margin,
     )
-    channel_1_count = len(runtime.extraction.roi_statistics)
+    channel_1_count = len(runtime.io.selected_cell_indices)
 
     # Filters channel 2 cells if two-functional-channel data is available.
     channel_2_count = 0
@@ -155,9 +152,7 @@ def _filter_cells(
             else probability_threshold
         )
         channel_2_maximum_size = (
-            roi_selection.maximum_size_channel_2
-            if roi_selection.maximum_size_channel_2 is not None
-            else maximum_size
+            roi_selection.maximum_size_channel_2 if roi_selection.maximum_size_channel_2 is not None else maximum_size
         )
         channel_2_region_margin = (
             roi_selection.mroi_region_margin_channel_2
@@ -165,7 +160,7 @@ def _filter_cells(
             else region_margin
         )
 
-        runtime.extraction.roi_statistics_channel_2 = _filter_channel_cells(
+        runtime.io.selected_cell_indices_channel_2 = _filter_channel_cells(
             roi_statistics=combined_data.extraction.roi_statistics_channel_2,
             cell_classification=combined_data.extraction.cell_classification_channel_2,
             mroi_region_borders=mroi_region_borders,
@@ -173,7 +168,7 @@ def _filter_cells(
             maximum_size=channel_2_maximum_size,
             region_margin=channel_2_region_margin,
         )
-        channel_2_count = len(runtime.extraction.roi_statistics_channel_2)
+        channel_2_count = len(runtime.io.selected_cell_indices_channel_2)
 
     return channel_1_count, channel_2_count
 
@@ -183,8 +178,8 @@ def select_session_cells(contexts: list[MultiDayRuntimeContext]) -> None:
 
     This function performs cell selection filtering on each session using the ROI selection parameters from the
     configuration. The CombinedData for each session is accessed from runtime.combined_data (loaded during context
-    resolution), and the filtered results are stored in runtime.extraction.roi_statistics (channel 1) and
-    runtime.extraction.roi_statistics_channel_2 (channel 2, if available).
+    resolution), and the selected cell indices are stored in runtime.io.selected_cell_indices (channel 1) and
+    runtime.io.selected_cell_indices_channel_2 (channel 2, if available).
 
     Notes:
         Selection is an on-demand operation. When repeat_selection is False (default), sessions with existing cell
@@ -214,18 +209,16 @@ def select_session_cells(contexts: list[MultiDayRuntimeContext]) -> None:
 
         # Checks if cell selection already exists and repeat_selection is not enabled. Both channel 1 and channel 2
         # (if applicable) must have existing selections to skip.
-        has_channel_1_selection = runtime.extraction.roi_statistics is not None
+        has_channel_1_selection = len(runtime.io.selected_cell_indices) > 0
         has_channel_2_data = (
             runtime.combined_data is not None and runtime.combined_data.extraction.roi_statistics_channel_2 is not None
         )
-        has_channel_2_selection = runtime.extraction.roi_statistics_channel_2 is not None
+        has_channel_2_selection = len(runtime.io.selected_cell_indices_channel_2) > 0
 
         # Skips if channel 1 has selections AND (no channel 2 data OR channel 2 has selections).
         if has_channel_1_selection and (not has_channel_2_data or has_channel_2_selection) and not repeat_selection:
-            channel_1_count = len(runtime.extraction.roi_statistics) if runtime.extraction.roi_statistics else 0
-            channel_2_count = (
-                len(runtime.extraction.roi_statistics_channel_2) if runtime.extraction.roi_statistics_channel_2 else 0
-            )
+            channel_1_count = len(runtime.io.selected_cell_indices)
+            channel_2_count = len(runtime.io.selected_cell_indices_channel_2)
             if channel_2_count > 0:
                 message = (
                     f"Session {session_id} already has {channel_1_count} channel 1 and {channel_2_count} channel 2 "
@@ -250,5 +243,5 @@ def select_session_cells(contexts: list[MultiDayRuntimeContext]) -> None:
         else:
             console.echo(message=f"Selected {count_message} for session {session_id}.", level=LogLevel.SUCCESS)
 
-        # Saves the updated runtime data with the selected cells.
+        # Saves the updated runtime data with the selected cell indices.
         context.save_runtime()
