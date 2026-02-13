@@ -63,16 +63,32 @@ class ROISelection:
 
     probability_threshold: float = 0.85
     """The minimum required cell probability score assigned to the ROI by the single-day suite2p classifier. ROIs
-    with a lower classifier score are excluded from multi-day processing."""
+    with a lower classifier score are excluded from multi-day processing. This parameter applies to channel 1 ROIs."""
 
     maximum_size: int = 1000
-    """The maximum allowed ROI size, in pixels. ROIs with a larger pixel size are excluded from processing."""
+    """The maximum allowed ROI size, in pixels. ROIs with a larger pixel size are excluded from processing. This
+    parameter applies to channel 1 ROIs."""
 
     mroi_region_margin: int = 30
     """The minimum required distance, in pixels, between the center-point (the median x-coordinate) of the ROI
     and the MROI region border. ROIs that are too close to region borders are excluded from processing to avoid
     ambiguities associated with tracking ROIs that span multiple regions. This parameter is only used for MROI
-    recordings where region borders are automatically computed from the acquisition parameters."""
+    recordings where region borders are automatically computed from the acquisition parameters. This parameter applies
+    to channel 1 ROIs."""
+
+    probability_threshold_channel_2: float | None = None
+    """The minimum required cell probability score for channel 2 ROIs. When set to None (default), channel 2 ROIs use
+    the same probability_threshold as channel 1. Set this to a different value when channel 2 cells have different
+    classification characteristics."""
+
+    maximum_size_channel_2: int | None = None
+    """The maximum allowed ROI size for channel 2, in pixels. When set to None (default), channel 2 ROIs use the same
+    maximum_size as channel 1. Set this to a different value when channel 2 cells have different size
+    characteristics."""
+
+    mroi_region_margin_channel_2: int | None = None
+    """The minimum required distance from MROI region borders for channel 2 ROIs, in pixels. When set to None
+    (default), channel 2 ROIs use the same mroi_region_margin as channel 1."""
 
 
 @dataclass
