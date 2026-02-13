@@ -147,13 +147,31 @@ def _filter_cells(
             )
             console.error(message=message, error=ValueError)
 
+        # Uses channel 2 specific parameters if configured, otherwise falls back to channel 1 parameters.
+        roi_selection = configuration.roi_selection
+        channel_2_probability_threshold = (
+            roi_selection.probability_threshold_channel_2
+            if roi_selection.probability_threshold_channel_2 is not None
+            else probability_threshold
+        )
+        channel_2_maximum_size = (
+            roi_selection.maximum_size_channel_2
+            if roi_selection.maximum_size_channel_2 is not None
+            else maximum_size
+        )
+        channel_2_region_margin = (
+            roi_selection.mroi_region_margin_channel_2
+            if roi_selection.mroi_region_margin_channel_2 is not None
+            else region_margin
+        )
+
         runtime.extraction.roi_statistics_channel_2 = _filter_channel_cells(
             roi_statistics=combined_data.extraction.roi_statistics_channel_2,
             cell_classification=combined_data.extraction.cell_classification_channel_2,
             mroi_region_borders=mroi_region_borders,
-            probability_threshold=probability_threshold,
-            maximum_size=maximum_size,
-            region_margin=region_margin,
+            probability_threshold=channel_2_probability_threshold,
+            maximum_size=channel_2_maximum_size,
+            region_margin=channel_2_region_margin,
         )
         channel_2_count = len(runtime.extraction.roi_statistics_channel_2)
 
