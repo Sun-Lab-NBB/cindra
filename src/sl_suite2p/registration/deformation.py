@@ -71,31 +71,7 @@ def _create_diffusion_kernel(sigma: float) -> NDArray[np.float32]:
     kernel_sum = kernel.sum()
     if kernel_sum == 0:
         return np.array([1.0], dtype=np.float32)
-    return (kernel / kernel_sum).astype(np.float32)  # type: ignore[no-any-return]
-
-
-def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np.float32]:
-    """Filters the input data using the Lindeberg's discrete diffusion kernel.
-
-    Args:
-        data: The data to filter with the kernel.
-        sigma: The smoothing parameter. Can be a single value applied to all dimensions or a list with one value per
-            each data dimension.
-
-    Returns:
-        The diffused data array with the same shape as the input.
-    """
-    # Converts sigma to a list with one value per dimension.
-    sigma_list = [sigma] * data.ndim if isinstance(sigma, float) else list(sigma)
-
-    # Applies 1D diffusion filtering along each dimension.
-    result = data
-    for dimension in range(data.ndim):
-        kernel = _create_diffusion_kernel(sigma_list[dimension])
-        # noinspection PyTypeChecker
-        result = scipy.ndimage.convolve1d(input=result, weights=kernel, axis=dimension, mode="nearest")
-
-    return result
+    return (kernel / kernel_sum).astype(np.float32)
 
 
 def _make_samples_absolute(
@@ -117,10 +93,11 @@ def _make_samples_absolute(
     indices_x = np.arange(width, dtype=np.float32).reshape(1, width)
     indices_y = np.arange(height, dtype=np.float32).reshape(height, 1)
 
+    # noinspection PyTypeChecker
     return indices_x + delta_x, indices_y + delta_y
 
 
-@numba.njit(parallel=True, cache=True, nogil=True)  # type: ignore[untyped-decorator]
+@numba.njit(parallel=True, cache=True)
 def _warp(
     data: NDArray[np.float32],
     result: NDArray[np.float32],
@@ -144,11 +121,8 @@ def _warp(
     height = data.shape[0]
     width = data.shape[1]
 
-    # -------------------------------------------------------------------------
-    # Cubic Cardinal Spline Interpolation (order=3)
-    # Uses a 4x4 neighborhood around each sample point. Cardinal splines pass
-    # through control points exactly, with tension controlling curve tightness.
-    # -------------------------------------------------------------------------
+    # Cubic Cardinal Spline Interpolation (order=3). Uses a 4x4 neighborhood around each sample point. Cardinal
+    # splines pass through control points exactly, with tension controlling curve tightness.
     if order == _CUBIC_INTERPOLATION_ORDER:
         for sample_index in numba.prange(num_samples):
             # Allocates coefficient arrays inside the parallel loop to avoid race conditions.
@@ -227,10 +201,7 @@ def _warp(
             else:
                 result[sample_index] = 0.0
 
-    # -------------------------------------------------------------------------
-    # Bilinear Interpolation (order=1)
-    # Uses a 2x2 neighborhood with linear weights based on fractional position.
-    # -------------------------------------------------------------------------
+    # Bilinear Interpolation (order=1). Uses a 2x2 neighborhood with linear weights based on fractional position.
     elif order == 1:
         for sample_index in numba.prange(num_samples):
             # Decomposes sample coordinates into integer indices and fractional offsets.
@@ -277,10 +248,7 @@ def _warp(
             else:
                 result[sample_index] = 0.0
 
-    # -------------------------------------------------------------------------
-    # Nearest Neighbor Interpolation (order=0)
-    # Rounds to the nearest pixel index without blending.
-    # -------------------------------------------------------------------------
+    # Nearest Neighbor Interpolation (order=0). Rounds to the nearest pixel index without blending.
     else:
         for sample_index in numba.prange(num_samples):
             # Rounds sample coordinates to nearest integer pixel.
@@ -296,7 +264,7 @@ def _warp(
                 result[sample_index] = 0.0
 
 
-@numba.njit(parallel=True, cache=True, nogil=True)  # type: ignore[untyped-decorator]
+@numba.njit(parallel=True, cache=True)
 def _project(
     data: NDArray[np.float32],
     result: NDArray[np.float32],
@@ -321,10 +289,8 @@ def _project(
     # Accumulates weights for normalization after splatting.
     weight_accumulator = np.zeros(data.shape, dtype=np.float32)
 
-    # -------------------------------------------------------------------------
-    # Splatting Loop (sequential to avoid write conflicts)
-    # Each source pixel distributes its value to nearby destination pixels.
-    # -------------------------------------------------------------------------
+    # Splatting loop: each source pixel distributes its value to nearby destination pixels. Runs sequentially to avoid
+    # write conflicts when multiple source pixels contribute to the same destination.
     for source_y in range(height):
         for source_x in range(width):
             target_x = samples_x[source_y, source_x]
@@ -403,10 +369,8 @@ def _project(
                     result[destination_y, destination_x] += source_value * weight
                     weight_accumulator[destination_y, destination_x] += weight
 
-    # -------------------------------------------------------------------------
-    # Normalization Loop (parallel, no write conflicts)
-    # Divides accumulated values by total weights to get final pixel values.
-    # -------------------------------------------------------------------------
+    # Normalization loop: divides accumulated values by total weights. Runs in parallel since each destination pixel
+    # is independent and there are no write conflicts.
     for destination_y in numba.prange(height):
         for destination_x in range(width):
             total_weight = weight_accumulator[destination_y, destination_x]
@@ -447,6 +411,30 @@ def _resize(
         samples_y=samples_y.ravel(),
         order=order,
     )
+    return result
+
+
+def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np.float32]:
+    """Filters the input data using the Lindeberg's discrete diffusion kernel.
+
+    Args:
+        data: The data to filter with the kernel.
+        sigma: The smoothing parameter. Can be a single value applied to all dimensions or a list with one value per
+            each data dimension.
+
+    Returns:
+        The diffused data array with the same shape as the input.
+    """
+    # Converts sigma to a list with one value per dimension.
+    sigma_list = [sigma] * data.ndim if isinstance(sigma, float) else list(sigma)
+
+    # Applies 1D diffusion filtering along each dimension.
+    result = data
+    for dimension in range(data.ndim):
+        kernel = _create_diffusion_kernel(sigma_list[dimension])
+        # noinspection PyTypeChecker
+        result = scipy.ndimage.convolve1d(input=result, weights=kernel, axis=dimension, mode="nearest")
+
     return result
 
 
@@ -637,6 +625,7 @@ class Deformation:
 
         # Warps Y field.
         warped_y = np.empty(samples_x.shape, dtype=np.float32)
+        # noinspection PyTypeChecker
         _warp(
             data=self._fields[0],
             result=warped_y.ravel(),
@@ -648,6 +637,7 @@ class Deformation:
 
         # Warps X field.
         warped_x = np.empty(samples_x.shape, dtype=np.float32)
+        # noinspection PyTypeChecker
         _warp(
             data=self._fields[1],
             result=warped_x.ravel(),
@@ -799,3 +789,39 @@ class Deformation:
             return None
         regularized_y, regularized_x = grid.deformation_fields
         return Deformation(field_y=regularized_y, field_x=regularized_x)
+
+    def crop(
+        self,
+        origin: tuple[int, int],
+        crop_size: tuple[int, int],
+    ) -> tuple[Deformation, tuple[int, int]]:
+        """Creates a cropped view of the deformation field centered on the specified origin.
+
+        This method extracts a local region of the deformation field to reduce memory overhead when applying
+        deformations to small regions such as individual ROI masks. The origin is automatically clamped to ensure
+        the crop stays within valid field bounds. The returned Deformation contains views into the original arrays,
+        not copies.
+
+        Args:
+            origin: The top-left corner of the crop region as (y, x) coordinates.
+            crop_size: The size of the crop region as (height, width).
+
+        Returns:
+            A tuple containing the cropped Deformation instance and the adjusted origin coordinates. The adjusted
+            origin accounts for boundary clamping and can be used to map local coordinates back to global space.
+        """
+        if self.is_identity:
+            return Deformation.identity(height=crop_size[0], width=crop_size[1]), origin
+
+        # Clamps origin to valid bounds in a single pass.
+        field_height, field_width = self._field_shape
+        adjusted_y = max(0, min(origin[0], field_height - crop_size[0]))
+        adjusted_x = max(0, min(origin[1], field_width - crop_size[1]))
+
+        # Extracts views of the cropped fields.
+        end_y = adjusted_y + crop_size[0]
+        end_x = adjusted_x + crop_size[1]
+        cropped_y = self._fields[0][adjusted_y:end_y, adjusted_x:end_x]
+        cropped_x = self._fields[1][adjusted_y:end_y, adjusted_x:end_x]
+
+        return Deformation(field_y=cropped_y, field_x=cropped_x), (adjusted_y, adjusted_x)

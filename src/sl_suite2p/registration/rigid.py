@@ -1,4 +1,4 @@
-"""Provides rigid (translation-only) registration functions for motion correction."""
+"""Provides rigid (translation-only) registration algorithm for motion correction."""
 
 from typing import TYPE_CHECKING
 
@@ -61,7 +61,7 @@ def apply_edge_taper(
     Returns:
         The tapered frames with the same shape as input.
     """
-    return apply_mask(frames=frames, mask=taper_mask, offset=mean_offset)  # type: ignore[no-any-return]
+    return apply_mask(frames=frames, mask=taper_mask, offset=mean_offset)
 
 
 def compute_phase_correlation_kernel(

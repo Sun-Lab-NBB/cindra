@@ -5,6 +5,7 @@ from .multi_day_data import (
     MultiDayIOData,
     MultiDayTimingData,
     MultiDayRuntimeData,
+    MultiDayTrackingData,
     MultiDayRegistrationData,
 )
 from .single_day_data import (
@@ -49,6 +50,7 @@ __all__ = [
     "MultiDayRuntimeContext",
     "MultiDayRuntimeData",
     "MultiDayTimingData",
+    "MultiDayTrackingData",
     "NonRigidRegistration",
     "OnePhotonRegistration",
     "ROIDetection",
