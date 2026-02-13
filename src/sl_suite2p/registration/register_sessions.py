@@ -89,6 +89,10 @@ def _deform_masks(
         # Computes new centroid from transformed coordinates.
         new_centroid = [int(np.median(new_global_y)), int(np.median(new_global_x))]
 
+        # Computes raveled pixel indices for multi-day tracking. The raveled index is y * width + x in the deformed
+        # visual space.
+        raveled_pixels = (new_global_y * frame_width + new_global_x).astype(np.int32)
+
         # Creates the transformed ROIStatistics with coordinate data. Statistics are recomputed below.
         transformed = ROIStatistics(
             y_pixels=new_global_y.astype(np.int32),
@@ -96,6 +100,7 @@ def _deform_masks(
             pixel_weights=new_weights.astype(np.float32),
             centroid=new_centroid,
             footprint=mask.footprint,
+            raveled_pixels=raveled_pixels,
         )
         transformed_masks.append(transformed)
 
