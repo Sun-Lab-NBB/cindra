@@ -427,13 +427,16 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         cell_colocalization=combined_cell_colocalization,
     )
 
-    # Builds and returns the CombinedData instance.
+    # Builds and returns the CombinedData instance. Caches tau and sampling_rate from the first plane's configuration
+    # and runtime data so that the multi-day extraction pipeline can access them without loading single-day contexts.
     combined_data = CombinedData(
         detection=detection,
         extraction=extraction,
         plane_count=len(plane_contexts),
         combined_height=combined_height,
         combined_width=combined_width,
+        tau=plane_contexts[0].configuration.main.tau,
+        sampling_rate=plane_contexts[0].runtime.io.sampling_rate,
     )
 
     console.echo(message="Combined data prepared successfully.", level=LogLevel.SUCCESS)

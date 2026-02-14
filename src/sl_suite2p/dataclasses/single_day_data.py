@@ -1190,6 +1190,14 @@ class CombinedData:
     combined_width: int = 0
     """The width of the combined field of view in pixels."""
 
+    tau: float = 0.0
+    """The timescale of the calcium indicator sensor in seconds, cached from the single-day configuration for use by
+    the multi-day extraction pipeline."""
+
+    sampling_rate: float = 0.0
+    """The per-plane sampling rate in Hertz, cached from the single-day runtime for use by the multi-day extraction
+    pipeline."""
+
     def save(self, root_path: Path) -> None:
         """Saves combined data to the root suite2p directory.
 
@@ -1208,6 +1216,8 @@ class CombinedData:
             plane_count=np.array([self.plane_count], dtype=np.uint8),
             combined_height=np.array([self.combined_height], dtype=np.uint32),
             combined_width=np.array([self.combined_width], dtype=np.uint32),
+            tau=np.array([self.tau], dtype=np.float32),
+            sampling_rate=np.array([self.sampling_rate], dtype=np.float32),
         )
 
         # Saves combined detection and extraction arrays using existing methods.
@@ -1241,6 +1251,10 @@ class CombinedData:
         combined_height = int(metadata["combined_height"][0])
         combined_width = int(metadata["combined_width"][0])
 
+        # Loads tau and sampling_rate.
+        tau = float(metadata["tau"][0])
+        sampling_rate = float(metadata["sampling_rate"][0])
+
         # Loads detection and extraction arrays using existing methods.
         detection = DetectionData()
         detection.load_arrays(root_path)
@@ -1254,6 +1268,8 @@ class CombinedData:
             plane_count=plane_count,
             combined_height=combined_height,
             combined_width=combined_width,
+            tau=tau,
+            sampling_rate=sampling_rate,
         )
 
     def load_results(self, root_path: Path) -> None:
