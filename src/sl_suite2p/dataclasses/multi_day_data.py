@@ -268,6 +268,14 @@ class MultiDayTrackingData:
     """The channel 2 template cell masks in shared visual space coordinates. Only present when tracking channel 2
     cells independently in dual-channel recordings."""
 
+    template_diameter: int = 0
+    """The estimated cell diameter in pixels for channel 1 template masks, derived from the median pixel count of
+    the generated templates. A value of 0 indicates that no templates have been computed yet."""
+
+    template_diameter_channel_2: int = 0
+    """The estimated cell diameter in pixels for channel 2 template masks, derived from the median pixel count of
+    the generated templates. A value of 0 indicates that no templates have been computed yet."""
+
     def prepare_for_saving(self) -> None:
         """Sets all list fields to None for YAML serialization."""
         self.template_masks = None

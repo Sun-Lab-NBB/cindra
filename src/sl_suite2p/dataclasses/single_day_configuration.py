@@ -130,13 +130,6 @@ class Main:
     applicable when two_channels is True. When both first_channel_functional and second_channel_functional are True,
     the pipeline performs independent ROI detection on both channels."""
 
-    colocalization_threshold: float = 0.65
-    """The threshold for determining whether ROIs from one channel correspond to ROIs or signals in the other channel.
-    When one channel is functional and the other is structural, this threshold applies to intensity-based
-    colocalization: ROIs are marked as colocalized if their inside-to-total intensity ratio in the structural channel
-    exceeds this value. When both channels are functional, this threshold applies to spatial colocalization: ROIs are
-    matched if their pixel overlap fraction exceeds this value."""
-
     tau: float = 0.4
     """The timescale of the sensor in seconds, used for computing the deconvolution kernel. The kernel is fixed to have
     this decay and is not fit to the data. The default value is optimized for GCaMP6f animals recorded with the
@@ -424,6 +417,13 @@ class SignalExtraction:
     """The number of frames to process at the same time during fluorescence extraction. This controls memory usage
     during the extraction step. Larger values may improve throughput on fast storage but increase RAM consumption.
     This is independent of the registration batch size."""
+
+    colocalization_threshold: float = 0.65
+    """The threshold for determining whether ROIs from one channel correspond to ROIs or signals in the other channel.
+    When one channel is functional and the other is structural, this threshold applies to intensity-based
+    colocalization: ROIs are marked as colocalized if their inside-to-total intensity ratio in the structural channel
+    exceeds this value. When both channels are functional, this threshold applies to spatial colocalization: ROIs are
+    matched if their pixel overlap fraction exceeds this value."""
 
 
 @dataclass

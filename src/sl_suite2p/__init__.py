@@ -23,7 +23,7 @@ config.THREADING_LAYER = "tbb"
 
 from ataraxis_base_utilities import console
 
-from .multiday import show_images_with_masks
+from .gui.multiday import show_images_with_masks
 from .pipeline import (
     MultiDayJobNames,
     SingleDayJobNames,

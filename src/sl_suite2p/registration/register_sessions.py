@@ -26,6 +26,7 @@ def _deform_masks(
     frame_height: int,
     frame_width: int,
     cell_diameter: int,
+    crop: bool = True,
 ) -> list[ROIStatistics]:
     """Applies the input deformation field to transform ROI mask coordinates and recomputes shape statistics.
 
@@ -44,6 +45,8 @@ def _deform_masks(
         frame_height: The height of the image frame in pixels, needed for statistics computation.
         frame_width: The width of the image frame in pixels, needed for statistics computation.
         cell_diameter: The estimated cell diameter in pixels, used for distance normalization in statistics.
+        crop: Determines whether to crop processed ROIs to the soma region before computing statistics. Should be
+            disabled for template masks that are already consensus masks from cross-session tracking.
 
     Returns:
         A list of new ROIStatistics instances with transformed coordinates and recomputed statistics.
@@ -110,6 +113,7 @@ def _deform_masks(
         frame_height=frame_height,
         frame_width=frame_width,
         diameter=cell_diameter,
+        crop=crop,
     )
 
     return transformed_masks
@@ -240,25 +244,35 @@ def _apply_backward_deformation(context: MultiDayRuntimeContext) -> None:
     )
     inverse_deformation = deformation.inverse()
 
-    # Transforms channel 1 template masks if available.
+    # Transforms channel 1 template masks if available. Uses the template diameter estimated during tracking
+    # rather than the per-session detection diameter, since templates only contain the most stable consensus pixels
+    # and have a different effective size. Falls back to the detection diameter when loading older runtime data that
+    # lacks a stored template diameter.
     if tracking_data.template_masks is not None:
+        template_diameter = tracking_data.template_diameter or detection.cell_diameter
         context.runtime.extraction.roi_statistics = _deform_masks(
             masks=tracking_data.template_masks,
             deformation=inverse_deformation,
             frame_height=frame_height,
             frame_width=frame_width,
-            cell_diameter=detection.cell_diameter,
+            cell_diameter=template_diameter,
+            crop=False,
         )
 
     # Transforms channel 2 template masks if available.
     if tracking_data.template_masks_channel_2 is not None:
-        cell_diameter_channel_2 = detection.cell_diameter_channel_2 or detection.cell_diameter
+        template_diameter_channel_2 = (
+            tracking_data.template_diameter_channel_2
+            or detection.cell_diameter_channel_2
+            or detection.cell_diameter
+        )
         context.runtime.extraction.roi_statistics_channel_2 = _deform_masks(
             masks=tracking_data.template_masks_channel_2,
             deformation=inverse_deformation,
             frame_height=frame_height,
             frame_width=frame_width,
-            cell_diameter=cell_diameter_channel_2,
+            cell_diameter=template_diameter_channel_2,
+            crop=False,
         )
 
 

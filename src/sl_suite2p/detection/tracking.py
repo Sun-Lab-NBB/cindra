@@ -506,6 +506,7 @@ def _track_channel_rois(contexts: list[MultiDayRuntimeContext], channel_2: bool)
     # assessment. The diameter is re-estimated from template pixel counts since templates only include the most
     # stable pixels across sessions, which warps the effective diameter. Soma cropping is disabled since templates
     # are already consensus masks.
+    template_diameter = 0
     if filtered_templates:
         template_diameter = estimate_diameter_from_rois(rois=filtered_templates)
         compute_roi_statistics(
@@ -516,13 +517,15 @@ def _track_channel_rois(contexts: list[MultiDayRuntimeContext], channel_2: bool)
             crop=False,
         )
 
-    # Stores the same template mask list in all session contexts. All sessions share identical templates since
-    # they represent consensus ROIs in the common registered coordinate space.
+    # Stores the same template mask list and the estimated template diameter in all session contexts. All sessions
+    # share identical templates since they represent consensus ROIs in the common registered coordinate space.
     for context in contexts:
         if channel_2:
             context.runtime.tracking.template_masks_channel_2 = filtered_templates
+            context.runtime.tracking.template_diameter_channel_2 = template_diameter
         else:
             context.runtime.tracking.template_masks = filtered_templates
+            context.runtime.tracking.template_diameter = template_diameter
 
 
 def track_rois_across_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
