@@ -10,9 +10,9 @@ from pathlib import Path
 import click
 from ataraxis_base_utilities import LogLevel, console
 
-from .gui import run
-from .pipeline import process_multi_day, process_single_day
-from .dataclasses import (
+from ..gui import run
+from ..pipelines import process_multi_day, process_single_day
+from ..dataclasses import (
     MultiDayConfiguration,
     SingleDayConfiguration,
 )
@@ -53,7 +53,7 @@ def ss2p_mcp(transport: str) -> None:
     The MCP server exposes tools that enable AI agents to discover sessions, execute pipelines,
     monitor processing status, and manage batch operations for both single-day and multi-day workflows.
     """
-    from .mcp import run_server
+    from .mcp_server import run_server
 
     run_server(transport=transport)  # type: ignore[arg-type]
 
@@ -403,8 +403,8 @@ def _parse_db(data_string: str) -> dict[str, Any]:
         data_string: A string that contains the override data to be parsed.
 
     Returns:
-        The parsed data as a dictionary compatible with the 'db' and 'ops' input arguments of the resolve_ops()
-        or resolve_multiday_ops() functions.
+        The parsed data as a dictionary compatible with the 'overrides' input arguments of the process_single_day()
+        or process_multi_day() functions.
 
     Raises:
         ValueError: If the input data_string cannot be parsed as a Python dictionary.

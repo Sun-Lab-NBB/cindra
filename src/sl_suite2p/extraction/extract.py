@@ -10,7 +10,7 @@ from scipy import stats
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
-from ..io import BinaryFile, BinaryFileCombined, compute_plane_offsets
+from ..io import BinaryFile, BinaryFileCombined
 from .masks import create_masks
 from .deconvolve import apply_oasis_deconvolution, compute_delta_fluorescence
 from ..dataclasses import RuntimeContext
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from ..dataclasses import ROIStatistics, SignalExtraction, SpikeDeconvolution, MultiDayRuntimeContext
 
 
-@njit(cache=True, parallel=True)  # type: ignore[untyped-decorator]
+@njit(cache=True, parallel=True)
 def _extract_cell_fluorescence(
     output_prototype: NDArray[np.float32],
     data: NDArray[np.float32],
@@ -69,7 +69,7 @@ def _extract_cell_fluorescence(
     return output_prototype
 
 
-@njit(cache=True, parallel=True)  # type: ignore[untyped-decorator]
+@njit(cache=True, parallel=True)
 def _extract_neuropil_fluorescence(
     output_prototype: NDArray[np.float32],
     data: NDArray[np.float32],
@@ -853,23 +853,12 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
     tau = combined_data.tau
     sampling_rate = combined_data.sampling_rate
 
-    # Loads single-day plane contexts to build BinaryFileCombined.
-    data_path = context.runtime.io.data_path
-    if data_path is None:
-        console.error(
-            message=(
-                f"Unable to extract multi-day traces for session {session_id}. The session data path is not set."
-            ),
-            error=RuntimeError,
-        )
-
-    plane_contexts_result = RuntimeContext.load(root_path=data_path, plane_index=-1)
-    # RuntimeContext.load with plane_index=-1 returns list[RuntimeContext].
-    plane_contexts: list[RuntimeContext] = plane_contexts_result  # type: ignore[assignment]
-
-    y_offsets, x_offsets = compute_plane_offsets(plane_contexts)
-    plane_heights = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts], dtype=np.uint16)
-    plane_widths = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts], dtype=np.uint16)
+    # Reads per-plane geometry and binary paths from combined data, which caches this information from the single-day
+    # pipeline to avoid reloading full single-day contexts.
+    plane_heights = combined_data.plane_heights
+    plane_widths = combined_data.plane_widths
+    y_offsets = combined_data.plane_y_offsets
+    x_offsets = combined_data.plane_x_offsets
 
     # Validates that backward-transformed ROI statistics exist from the discovery phase.
     roi_statistics = extraction_data.roi_statistics
@@ -883,19 +872,8 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
             error=RuntimeError,
         )
 
-    # Gathers channel 1 registered binary paths from each plane context.
-    channel_1_binary_paths: list[Path] = []
-    for plane_context in plane_contexts:
-        binary_path = plane_context.runtime.io.registered_binary_path
-        if binary_path is None:
-            console.error(
-                message=(
-                    f"Unable to extract multi-day traces for session {session_id}. The registered binary file path is "
-                    f"not set for plane {plane_context.runtime.io.plane_index}."
-                ),
-                error=RuntimeError,
-            )
-        channel_1_binary_paths.append(binary_path)
+    # Reads channel 1 registered binary paths from combined data.
+    channel_1_binary_paths: list[Path] = list(combined_data.registered_binary_paths)
 
     # Extracts channel 1 fluorescence, delta-F, and spikes via the generic channel worker.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
@@ -932,19 +910,8 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
     # dual-channel recording where both channels were functional during single-day processing.
     roi_statistics_channel_2 = extraction_data.roi_statistics_channel_2
     if roi_statistics_channel_2 is not None:
-        # Gathers channel 2 registered binary paths from each plane context.
-        channel_2_binary_paths: list[Path] = []
-        for plane_context in plane_contexts:
-            binary_path_channel_2 = plane_context.runtime.io.registered_binary_path_channel_2
-            if binary_path_channel_2 is None:
-                console.error(
-                    message=(
-                        f"Unable to extract multi-day traces for session {session_id}. The registered binary file "
-                        f"path for channel 2 is not set for plane {plane_context.runtime.io.plane_index}."
-                    ),
-                    error=RuntimeError,
-                )
-            channel_2_binary_paths.append(binary_path_channel_2)
+        # Reads channel 2 registered binary paths from combined data.
+        channel_2_binary_paths: list[Path] = list(combined_data.registered_binary_paths_channel_2)  # type: ignore[arg-type]
 
         timer.reset()
 
@@ -990,10 +957,7 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
     total_extraction_time = timing.extraction_time + timing.deconvolution_time
     timing.total_extraction_time = total_extraction_time
     console.echo(
-        message=(
-            f"Session {session_id} multi-day extraction: complete. "
-            f"Total time: {total_extraction_time} seconds."
-        ),
+        message=(f"Session {session_id} multi-day extraction: complete. Total time: {total_extraction_time} seconds."),
         level=LogLevel.SUCCESS,
     )
 

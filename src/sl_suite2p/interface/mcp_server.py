@@ -19,7 +19,7 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from sl_shared_assets import SessionData, SessionTypes
 from mcp.server.fastmcp import FastMCP
 
-from ..pipeline import (
+from ..pipelines import (
     get_session_root,
     process_multi_day,
     process_single_day,

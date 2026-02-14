@@ -6,9 +6,10 @@ from typing import TYPE_CHECKING
 
 from tqdm import tqdm
 import numpy as np
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 from scipy.cluster import hierarchy
 from scipy.spatial.distance import pdist, squareform
-from ataraxis_base_utilities import console
+from ataraxis_base_utilities import LogLevel, console
 
 from ..dataclasses import ROIStatistics
 from .roi_statistics import compute_roi_statistics, estimate_diameter_from_rois
@@ -548,6 +549,8 @@ def track_rois_across_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
     if not contexts:
         return
 
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+
     # Determines which channels have data to process by checking the first context with available registration data.
     has_channel_1 = False
     has_channel_2 = False
@@ -565,3 +568,11 @@ def track_rois_across_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
 
     if has_channel_2:
         _track_channel_rois(contexts=contexts, channel_2=True)
+
+    # Records tracking timing and persists runtime data for each session.
+    tracking_time = int(timer.elapsed)
+    for context in contexts:
+        context.runtime.timing.tracking_time = tracking_time
+        context.save_runtime()
+
+    console.echo(message=f"ROI tracking: complete. Time: {tracking_time} seconds.", level=LogLevel.SUCCESS)

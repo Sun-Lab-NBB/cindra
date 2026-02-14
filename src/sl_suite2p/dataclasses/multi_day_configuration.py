@@ -115,6 +115,11 @@ class DiffeomorphicRegistration:
     """The relative force of the deformation transform applied when registering the sessions to the same visual space.
     This is the most important parameter to tune. For most cases, a value between 1 and 5 is reasonable."""
 
+    repeat_registration: bool = False
+    """Determines whether to repeat diffeomorphic registration when existing registration data is found. When True,
+    the pipeline clears existing deformation fields, transformed images, and deformed cell masks before re-running
+    registration. When False (default), existing registration results are reused if present."""
+
 
 @dataclass
 class ROITracking:

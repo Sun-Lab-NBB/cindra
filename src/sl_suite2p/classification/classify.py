@@ -220,7 +220,7 @@ class Classifier:
         log_probabilities = self._compute_log_probabilities(features=features)
         predictions = self._model.predict_proba(log_probabilities)[:, 1]
 
-        return predictions.astype(np.float32)  # type: ignore[no-any-return]
+        return predictions.astype(np.float32)
 
     def _fit_model(self) -> None:
         """Fits the logistic regression model using the loaded training data."""
