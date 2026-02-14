@@ -13,18 +13,14 @@ from threading import Lock, Thread
 import traceback
 from dataclasses import field, dataclass
 
-import numpy as np
 from natsort import natsorted
 from ataraxis_time import PrecisionTimer, TimerPrecisions
-from sl_shared_assets import SessionData, SessionTypes
 from mcp.server.fastmcp import FastMCP
 
-from ..pipelines import (
-    get_session_root,
-    process_multi_day,
-    process_single_day,
-)
+from ..io import resolve_multiday_contexts
+from ..pipelines import process_multi_day, process_single_day
 from ..dataclasses import (
+    RuntimeContext,
     MultiDayConfiguration,
     SingleDayConfiguration,
 )
@@ -40,9 +36,6 @@ _MAXIMUM_JOB_CORES: int = 30
 
 # Minimum number of sessions required for multi-day processing.
 _MINIMUM_SESSION_COUNT: int = 2
-
-# Session types that contain processable neural imaging data.
-_PROCESSABLE_SESSION_TYPES: frozenset[SessionTypes] = frozenset({SessionTypes.MESOSCOPE_EXPERIMENT})
 
 
 @dataclass
@@ -243,14 +236,14 @@ def _run_binarize_job(session_path: Path, config_path: Path) -> tuple[bool, int,
             progress_bars=False,
         )
 
-        # Loads ops to get plane count.
-        session = SessionData.load(session_path=session_path)
-        ops_path = session.processed_data.mesoscope_data_path / "suite2p" / "ops.npy"
-        if ops_path.exists():
-            ops = np.load(ops_path, allow_pickle=True).item()
-            return True, int(ops.get("nplanes", 0)), None
-
-        return True, 0, None
+        # Loads the configuration to find the save path, then counts planes via RuntimeContext.
+        config = SingleDayConfiguration.from_yaml(file_path=config_path)
+        root_path = config.file_io.save_path / "suite2p"
+        contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
+        if not isinstance(contexts, list):
+            contexts = [contexts]
+        plane_count = len(contexts)
+        return True, plane_count, None
 
     except Exception as error:
         frames = traceback.extract_tb(error.__traceback__)
@@ -529,27 +522,24 @@ def _run_discover_job(config_path: Path, session_paths: list[Path], workers: int
         A tuple containing success status, list of session IDs, and error message if failed.
     """
     try:
-        overrides = {"session_directories": [str(p) for p in session_paths]}
+        # Writes session directories into the configuration file before running the pipeline.
+        configuration = MultiDayConfiguration.from_yaml(file_path=config_path)
+        configuration.session_io.session_directories = list(session_paths)
+        configuration.save(file_path=config_path)
+
         process_multi_day(
             configuration_path=config_path,
             discover=True,
             extract=False,
             workers=workers,
             progress_bars=False,
-            overrides=overrides,
         )
 
-        # Loads ops to get session IDs.
+        # Reloads the configuration and resolves contexts to extract session IDs.
         config = MultiDayConfiguration.from_yaml(file_path=config_path)
-        main_session = sorted(session_paths, key=lambda p: p.name)[0]
-        dataset_name = config.session_io.dataset_name
-        ops_path = main_session / "multiday" / dataset_name / "ops.npy"
-
-        if ops_path.exists():
-            ops = np.load(ops_path, allow_pickle=True).item()
-            return True, list(ops.get("session_ids", [])), None
-
-        return True, [], None
+        contexts = resolve_multiday_contexts(configuration=config)
+        session_ids = [ctx.runtime.io.session_id for ctx in contexts]
+        return True, session_ids, None
 
     except Exception as error:
         frames = traceback.extract_tb(error.__traceback__)
@@ -572,7 +562,11 @@ def _run_extract_job(
         A tuple containing success status and error message if failed.
     """
     try:
-        overrides = {"session_directories": [str(p) for p in session_paths]}
+        # Writes session directories into the configuration file before running the pipeline.
+        configuration = MultiDayConfiguration.from_yaml(file_path=config_path)
+        configuration.session_io.session_directories = list(session_paths)
+        configuration.save(file_path=config_path)
+
         process_multi_day(
             configuration_path=config_path,
             discover=False,
@@ -580,7 +574,6 @@ def _run_extract_job(
             target_session=session_id,
             workers=workers,
             progress_bars=False,
-            overrides=overrides,
         )
         return True, None
 
@@ -788,12 +781,10 @@ def get_single_day_status(session_path: str) -> dict[str, Any]:
 
     suite2p_path = session / "suite2p"
     if not suite2p_path.exists():
-        # Checks processed_data path.
-        try:
-            session_data = SessionData.load(session_path=session)
-            suite2p_path = session_data.processed_data.mesoscope_data_path / "suite2p"
-        except Exception:
-            pass
+        # Searches recursively for the RuntimeContext configuration marker.
+        matches = list(session.rglob("configuration.yaml"))
+        if matches:
+            suite2p_path = matches[0].parent
 
     if not suite2p_path.exists():
         return {
@@ -816,7 +807,7 @@ def get_single_day_status(session_path: str) -> dict[str, Any]:
 
     if combined_path.exists():
         status["combined_files"] = {
-            "ops": (combined_path / "ops.npy").exists(),
+            "combined_metadata": (combined_path / "combined_metadata.npz").exists(),
             "stat": (combined_path / "stat.npy").exists(),
             "F": (combined_path / "F.npy").exists(),
             "Fneu": (combined_path / "Fneu.npy").exists(),
@@ -865,7 +856,7 @@ def get_multi_day_status(session_path: str) -> dict[str, Any]:
     dataset_statuses = {}
     for dataset in datasets:
         dataset_status: dict[str, Any] = {
-            "ops_exists": (dataset / "ops.npy").exists(),
+            "runtime_exists": (dataset / "multiday_runtime_data.yaml").exists(),
             "config_exists": (dataset / "multi_day_ss2p_configuration.yaml").exists(),
             "tracker_exists": (dataset / "multiday_tracker.json").exists(),
             "template_masks_exists": (dataset / "template_cell_masks.npy").exists(),
@@ -878,7 +869,7 @@ def get_multi_day_status(session_path: str) -> dict[str, Any]:
             dataset_status["status"] = "completed"
         elif dataset_status["template_masks_exists"]:
             dataset_status["status"] = "discovery_completed"
-        elif dataset_status["ops_exists"]:
+        elif dataset_status["runtime_exists"]:
             dataset_status["status"] = "initialized"
         else:
             dataset_status["status"] = "unknown"
@@ -898,11 +889,11 @@ def get_multi_day_status(session_path: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def discover_sessions_tool(root_directory: str) -> dict[str, Any]:
-    """Discovers all sessions in a directory tree that may need processing.
+def discover_single_day_sessions_tool(root_directory: str) -> dict[str, Any]:
+    """Discovers sessions containing raw neural imaging data that can be processed by the single-day pipeline.
 
-    Searches for session_data.yaml files to identify session directories. Returns a list of session paths that can be
-    passed to other processing tools.
+    Searches recursively for suite2p_parameters.json files, which mark directories containing raw session data suitable
+    for single-day processing. Returns the parent directory of each match as a session candidate path.
 
     Args:
         root_directory: The absolute path to the root directory to search.
@@ -916,33 +907,66 @@ def discover_sessions_tool(root_directory: str) -> dict[str, Any]:
         return {"error": f"Path is not a directory: {root_directory}"}
 
     session_paths: list[str] = []
-    skipped: list[str] = []
     errors: list[str] = []
 
-    for yaml_file in root_path.rglob("session_data.yaml"):
-        try:
-            session = SessionData.load(session_path=yaml_file.parent)
-
-            # Resolves to the canonical session root path for consistent job ID generation.
-            session_root = get_session_root(session=session)
-
-            # Filters out sessions that don't contain processable neural imaging data.
-            if session.session_type not in _PROCESSABLE_SESSION_TYPES:
-                skipped.append(f"{session_root} ({session.session_type})")
-                continue
-
-            session_paths.append(str(session_root))
-
-        except Exception as error:
-            errors.append(f"{yaml_file.parent}: {error}")
+    try:
+        for marker_file in root_path.rglob("suite2p_parameters.json"):
+            try:
+                session_paths.append(str(marker_file.parent))
+            except Exception as error:
+                errors.append(f"{marker_file.parent}: {error}")
+    except PermissionError as error:
+        errors.append(f"Access denied during search: {error}")
 
     # Sorts paths for consistent output.
     session_paths.sort()
 
     result: dict[str, Any] = {"sessions": session_paths, "count": len(session_paths)}
 
-    if skipped:
-        result["skipped"] = skipped
+    if errors:
+        result["errors"] = errors
+
+    return result
+
+
+@mcp.tool()
+def discover_multi_day_candidates_tool(root_directory: str) -> dict[str, Any]:
+    """Discovers sessions with completed single-day processing that are candidates for multi-day cell tracking.
+
+    Searches recursively for combined_metadata.npz files, which mark completed single-day suite2p outputs. Returns the
+    grandparent directory paths (session root directories containing suite2p output).
+
+    Args:
+        root_directory: The absolute path to the root directory to search.
+    """
+    root_path = Path(root_directory)
+
+    if not root_path.exists():
+        return {"error": f"Directory does not exist: {root_directory}"}
+
+    if not root_path.is_dir():
+        return {"error": f"Path is not a directory: {root_directory}"}
+
+    session_paths: list[str] = []
+    errors: list[str] = []
+
+    try:
+        for marker_file in root_path.rglob("combined_metadata.npz"):
+            try:
+                # The combined_metadata.npz lives in suite2p/combined/; grandparent is the suite2p output root,
+                # and its parent is the session directory.
+                session_root = str(marker_file.parent.parent.parent)
+                if session_root not in session_paths:
+                    session_paths.append(session_root)
+            except Exception as error:
+                errors.append(f"{marker_file}: {error}")
+    except PermissionError as error:
+        errors.append(f"Access denied during search: {error}")
+
+    # Sorts paths for consistent output.
+    session_paths.sort()
+
+    result: dict[str, Any] = {"sessions": session_paths, "count": len(session_paths)}
 
     if errors:
         result["errors"] = errors

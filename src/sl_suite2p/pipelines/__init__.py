@@ -3,7 +3,6 @@
 from .pipeline import (
     MultiDayJobNames,
     SingleDayJobNames,
-    get_session_root,
     process_multi_day,
     process_single_day,
 )
@@ -20,7 +19,6 @@ __all__ = [
     "binarize_recording",
     "discover_multiday_cells",
     "extract_multiday_fluorescence",
-    "get_session_root",
     "process_multi_day",
     "process_plane",
     "process_single_day",
