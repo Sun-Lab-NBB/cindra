@@ -85,8 +85,7 @@ Parameters for filtering which single-day cells are tracked across days.
 |-----------|------|---------|-------------|
 | `probability_threshold` | float | 0.85 | Min classifier probability from single-day. Lower = keep more cells. |
 | `maximum_size` | int | 1000 | Max cell size (pixels). Cells larger are excluded. |
-| `mesoscope_stripe_borders` | list[int] | [] | X-coordinates of stripe boundaries for multi-ROI mesoscope. Empty = skip filtering. |
-| `stripe_margin` | int | 30 | Min distance (pixels) from cell center to stripe border. Cells too close excluded. |
+| `mroi_region_margin` | int | 30 | Min distance (pixels) from cell center to MROI region border. Cells too close excluded. |
 
 ### Cell Selection Guidance
 
@@ -107,8 +106,7 @@ cell_selection:
 **Mesoscope multi-ROI mode** (required if using multiple imaging ROIs):
 ```yaml
 cell_selection:
-  mesoscope_stripe_borders: [512, 1024, 1536]  # X-coords of ROI boundaries
-  stripe_margin: 30  # Exclude cells within 30px of boundaries
+  mroi_region_margin: 30  # Exclude cells within 30px of region boundaries
 ```
 
 ---
@@ -232,7 +230,7 @@ These parameters mirror single-day settings. Typically left at defaults for cons
 | Parameter | When to Change |
 |-----------|----------------|
 | `cell_selection.probability_threshold` | Different quality/quantity tradeoff |
-| `cell_selection.mesoscope_stripe_borders` | Multi-ROI mesoscope mode |
+| `cell_selection.mroi_region_margin` | Multi-ROI mesoscope mode |
 | `registration.speed_factor` | Different amounts of tissue drift |
 | `clustering.mask_prevalence` | Different session-to-session consistency needs |
 
@@ -272,7 +270,7 @@ clustering:
   mask_prevalence: 50
 ```
 
-### Full Configuration with Mesoscope Stripe Filtering
+### Full Configuration with MROI Region Filtering
 
 ```yaml
 main:
@@ -285,8 +283,7 @@ io:
 cell_selection:
   probability_threshold: 0.85
   maximum_size: 1000
-  mesoscope_stripe_borders: [512, 1024, 1536]
-  stripe_margin: 30
+  mroi_region_margin: 30
 
 registration:
   image_type: "enhanced"

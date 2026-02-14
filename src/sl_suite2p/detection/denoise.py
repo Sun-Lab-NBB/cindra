@@ -31,7 +31,8 @@ def _fit_and_reconstruct_block(
     """
     # noinspection PyUnresolvedReferences
     model = PCA(n_components=num_components, random_state=0).fit(block)
-    return ((block @ model.components_.T) @ model.components_).astype(np.float32)
+    reconstructed: NDArray[np.float32] = ((block @ model.components_.T) @ model.components_).astype(np.float32)
+    return reconstructed
 
 
 def pca_denoise(

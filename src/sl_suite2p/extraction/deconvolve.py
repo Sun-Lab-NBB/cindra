@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-@njit(cache=True, parallel=True)  # type: ignore[untyped-decorator]
+@njit(cache=True, parallel=True)
 def _oasis_matrix(
     roi_fluorescence: NDArray[np.float32],
     pool_amplitude: NDArray[np.float32],
@@ -116,58 +116,6 @@ def _oasis_matrix(
             ] - pool_amplitude[roi_index, pool - 1] * np.exp(decay_constant * pool_length[roi_index, pool - 1])
 
 
-def apply_oasis_deconvolution(
-    roi_fluorescence: NDArray[np.float32],
-    batch_size: int,
-    time_constant: float,
-    sampling_rate: float,
-) -> NDArray[np.float32]:
-    """Applies the OASIS spike deconvolution algorithm to baseline-corrected ROI fluorescence traces.
-
-    Notes:
-        The ROIs are processed in batches to limit peak memory usage, as the OASIS algorithm requires four workspace
-        arrays per batch, each with shape (batch_count, frame_count). Within each batch, the Numba-parallelized
-        kernel deconvolves all ROIs concurrently and writes the inferred spike amplitudes directly into the
-        corresponding slice of the output array.
-
-    Args:
-        roi_fluorescence: The baseline-corrected fluorescence traces with shape (roi_count, frame_count).
-        batch_size: The number of ROIs to process per batch.
-        time_constant: The exponential decay time constant of the calcium indicator, in seconds.
-        sampling_rate: The imaging sampling rate for the processed recording plane, in Hz.
-
-    Returns:
-        The deconvolved spike traces with shape (roi_count, frame_count).
-    """
-    roi_count, frame_count = roi_fluorescence.shape
-    roi_fluorescence = np.ascontiguousarray(roi_fluorescence, dtype=np.float32)
-    spike_traces: NDArray[np.float32] = np.zeros((roi_count, frame_count), dtype=np.float32)
-
-    # Runs the OASIS algorithm on all detected ROIs in batches.
-    for start_index in range(0, roi_count, batch_size):
-        # Initializes worker arrays for the current batch.
-        end_index = min(start_index + batch_size, roi_count)
-        batch_count = end_index - start_index
-        pool_amplitude = np.empty((batch_count, frame_count), dtype=np.float32)
-        pool_weight = np.empty((batch_count, frame_count), dtype=np.float32)
-        pool_start_frame = np.empty((batch_count, frame_count), dtype=np.int32)
-        pool_length = np.empty((batch_count, frame_count), dtype=np.float32)
-
-        # Runs the OASIS algorithm that modifies spike_traces in-place.
-        _oasis_matrix(
-            roi_fluorescence=roi_fluorescence[start_index:end_index],
-            pool_amplitude=pool_amplitude,
-            pool_weight=pool_weight,
-            pool_start_frame=pool_start_frame,
-            pool_length=pool_length,
-            spike_trace=spike_traces[start_index:end_index],
-            time_constant=time_constant,
-            sampling_rate=sampling_rate,
-        )
-
-    return spike_traces
-
-
 def compute_delta_fluorescence(
     roi_fluorescence: NDArray[np.float32],
     neuropil_fluorescence: NDArray[np.float32],
@@ -235,3 +183,55 @@ def compute_delta_fluorescence(
     # Subtracts the computed baseline fluorescence from the neuropil-subtracted trace.
     subtracted -= baseline
     return subtracted
+
+
+def apply_oasis_deconvolution(
+    roi_fluorescence: NDArray[np.float32],
+    batch_size: int,
+    time_constant: float,
+    sampling_rate: float,
+) -> NDArray[np.float32]:
+    """Applies the OASIS spike deconvolution algorithm to baseline-corrected ROI fluorescence traces.
+
+    Notes:
+        The ROIs are processed in batches to limit peak memory usage, as the OASIS algorithm requires four workspace
+        arrays per batch, each with shape (batch_count, frame_count). Within each batch, the Numba-parallelized
+        kernel deconvolves all ROIs concurrently and writes the inferred spike amplitudes directly into the
+        corresponding slice of the output array.
+
+    Args:
+        roi_fluorescence: The baseline-corrected fluorescence traces with shape (roi_count, frame_count).
+        batch_size: The number of ROIs to process per batch.
+        time_constant: The exponential decay time constant of the calcium indicator, in seconds.
+        sampling_rate: The imaging sampling rate for the processed recording plane, in Hz.
+
+    Returns:
+        The deconvolved spike traces with shape (roi_count, frame_count).
+    """
+    roi_count, frame_count = roi_fluorescence.shape
+    roi_fluorescence = np.ascontiguousarray(roi_fluorescence, dtype=np.float32)
+    spike_traces: NDArray[np.float32] = np.zeros((roi_count, frame_count), dtype=np.float32)
+
+    # Runs the OASIS algorithm on all detected ROIs in batches.
+    for start_index in range(0, roi_count, batch_size):
+        # Initializes worker arrays for the current batch.
+        end_index = min(start_index + batch_size, roi_count)
+        batch_count = end_index - start_index
+        pool_amplitude = np.empty((batch_count, frame_count), dtype=np.float32)
+        pool_weight = np.empty((batch_count, frame_count), dtype=np.float32)
+        pool_start_frame = np.empty((batch_count, frame_count), dtype=np.int32)
+        pool_length = np.empty((batch_count, frame_count), dtype=np.float32)
+
+        # Runs the OASIS algorithm that modifies spike_traces in-place.
+        _oasis_matrix(
+            roi_fluorescence=roi_fluorescence[start_index:end_index],
+            pool_amplitude=pool_amplitude,
+            pool_weight=pool_weight,
+            pool_start_frame=pool_start_frame,
+            pool_length=pool_length,
+            spike_trace=spike_traces[start_index:end_index],
+            time_constant=time_constant,
+            sampling_rate=sampling_rate,
+        )
+
+    return spike_traces

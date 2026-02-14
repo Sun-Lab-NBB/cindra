@@ -88,7 +88,10 @@ def compute_temporal_standard_deviation(frames: NDArray[np.float32]) -> NDArray[
         Values are clipped to a minimum threshold to avoid division by zero in downstream processing.
     """
     frame_differences = np.diff(frames, axis=0)
-    return np.maximum(_MINIMUM_STANDARD_DEVIATION, np.sqrt((frame_differences**2).sum(axis=0) / frames.shape[0]))
+    result: NDArray[np.float32] = np.maximum(
+        _MINIMUM_STANDARD_DEVIATION, np.sqrt((frame_differences**2).sum(axis=0) / frames.shape[0])
+    )
+    return result
 
 
 def downsample(data: NDArray[np.float32], taper_edge: bool = True) -> NDArray[np.float32]:
@@ -158,4 +161,5 @@ def compute_thresholded_variance(frames: NDArray[np.float32], intensity_threshol
     # Zeros out below-threshold values in a single allocation, then squares in-place to avoid a second temporary.
     thresholded = np.where(frames > intensity_threshold, frames, np.float32(0.0))
     thresholded *= thresholded
-    return np.sqrt(thresholded.sum(axis=0))
+    result: NDArray[np.float32] = np.sqrt(thresholded.sum(axis=0))
+    return result

@@ -1,4 +1,4 @@
-"""Provides nonrigid (piecewise-affine) registration functions for motion correction."""
+"""Provides nonrigid (piecewise-affine) registration algorithm for motion correction."""
 
 from numba import njit, prange  # type: ignore[import-untyped]
 import numpy as np

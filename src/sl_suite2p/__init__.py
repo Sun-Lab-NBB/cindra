@@ -23,22 +23,22 @@ config.THREADING_LAYER = "tbb"
 
 from ataraxis_base_utilities import console
 
-from .multiday import show_images_with_masks
-from .pipeline import (
+from .pipelines import (
     MultiDayJobNames,
     SingleDayJobNames,
-    get_session_root,
-    process_multi_day,
-    process_single_day,
-)
-from .multi_day import (
-    run_s2p_multiday,
-    resolve_multiday_ops,
+    binarize_recording,
     discover_multiday_cells,
     extract_multiday_fluorescence,
+    get_session_root,
+    process_multi_day,
+    process_plane,
+    process_single_day,
+    run_multiday_pipeline,
+    run_single_day_pipeline,
+    save_combined_data,
 )
-from .single_day import process_plane, save_combined_data, run_single_day_pipeline, resolve_processing_contexts
 from .dataclasses import CombinedData, RuntimeContext, MultiDayConfiguration, SingleDayConfiguration
+from .gui.multiday import show_images_with_masks
 
 # Ensures console output is enabled whenever the suite2p library is imported. In sl-suite2p, the 'Console' class is
 # used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal
@@ -53,15 +53,14 @@ __all__ = [
     "RuntimeContext",
     "SingleDayConfiguration",
     "SingleDayJobNames",
+    "binarize_recording",
     "discover_multiday_cells",
     "extract_multiday_fluorescence",
     "get_session_root",
     "process_multi_day",
     "process_plane",
     "process_single_day",
-    "resolve_multiday_ops",
-    "resolve_processing_contexts",
-    "run_s2p_multiday",
+    "run_multiday_pipeline",
     "run_single_day_pipeline",
     "save_combined_data",
     "show_images_with_masks",
