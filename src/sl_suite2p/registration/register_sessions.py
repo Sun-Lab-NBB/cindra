@@ -7,7 +7,8 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
 from tqdm import tqdm
 import numpy as np
-from ataraxis_base_utilities import console
+from ataraxis_time import PrecisionTimer, TimerPrecisions
+from ataraxis_base_utilities import LogLevel, console
 
 from ..detection import compute_roi_statistics
 from .deformation import Deformation
@@ -262,9 +263,7 @@ def _apply_backward_deformation(context: MultiDayRuntimeContext) -> None:
     # Transforms channel 2 template masks if available.
     if tracking_data.template_masks_channel_2 is not None:
         template_diameter_channel_2 = (
-            tracking_data.template_diameter_channel_2
-            or detection.cell_diameter_channel_2
-            or detection.cell_diameter
+            tracking_data.template_diameter_channel_2 or detection.cell_diameter_channel_2 or detection.cell_diameter
         )
         context.runtime.extraction.roi_statistics_channel_2 = _deform_masks(
             masks=tracking_data.template_masks_channel_2,
@@ -288,13 +287,40 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
         deformation field computation, image transformation, and mask deformation. The function modifies the runtime
         data in each context in-place.
 
+        When all sessions already have registration data (deformation fields and deformed cell masks) and
+        repeat_registration is False (default), the function returns early without re-running the expensive
+        diffeomorphic registration. When repeat_registration is True, existing registration data is cleared before
+        re-computing.
+
     Args:
         contexts: The list of MultiDayRuntimeContext instances, one per session. All contexts must share the same
             configuration. Each context's runtime.combined_data must be loaded with single-day detection results.
     """
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+
     configuration = contexts[0].configuration
     registration_config = configuration.diffeomorphic_registration
     runtime_config = configuration.runtime
+
+    # Checks if registration should be skipped (all sessions already registered and not forcing re-registration).
+    all_registered = all(context.runtime.registration.is_registered() for context in contexts)
+    if all_registered and not registration_config.repeat_registration:
+        console.echo(
+            message=(
+                "Multi-day registration: skipped. All sessions are already registered and re-registration is disabled."
+            ),
+            level=LogLevel.INFO,
+        )
+        return
+
+    # Clears existing registration data if re-registering.
+    if all_registered:
+        console.echo(
+            message="Multi-day registration: forced. Clearing existing data and re-running registration.",
+            level=LogLevel.INFO,
+        )
+        for context in contexts:
+            context.runtime.registration.clear()
 
     # Collects reference images from all sessions based on configured image type.
     image_type = registration_config.image_type
@@ -370,6 +396,16 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
                 deformation=registration.get_deformation(image_index=index),
             )
 
+    # Records registration timing and persists runtime data for each session.
+    registration_time = int(timer.elapsed)
+    for context in contexts:
+        context.runtime.timing.registration_time = registration_time
+        context.save_runtime()
+
+    console.echo(
+        message=f"Multi-day registration: complete. Time: {registration_time} seconds.", level=LogLevel.SUCCESS
+    )
+
 
 def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
     """Projects template masks from shared visual space back to each session's original coordinate system.
@@ -383,6 +419,7 @@ def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> Non
             fields stored in runtime.registration from a prior call to register_sessions(), and template masks set
             in runtime.tracking from cell tracking.
     """
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     runtime_config = contexts[0].configuration.runtime
 
     if runtime_config.parallel_workers > 1:
@@ -415,3 +452,13 @@ def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> Non
 
         for context in context_iterator:
             _apply_backward_deformation(context=context)
+
+    # Records backward transform timing and persists runtime data for each session.
+    backward_transform_time = int(timer.elapsed)
+    for context in contexts:
+        context.runtime.timing.backward_transform_time = backward_transform_time
+        context.save_runtime()
+
+    console.echo(
+        message=f"Template projection: complete. Time: {backward_transform_time} seconds.", level=LogLevel.SUCCESS
+    )

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-@njit(cache=True, parallel=True)  # type: ignore[untyped-decorator]
+@njit(cache=True, parallel=True)
 def _oasis_matrix(
     roi_fluorescence: NDArray[np.float32],
     pool_amplitude: NDArray[np.float32],

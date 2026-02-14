@@ -11,6 +11,8 @@ from ataraxis_base_utilities import LogLevel, console
 from ..dataclasses import CombinedData, DetectionData, ROIStatistics, ExtractionData
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from numpy.typing import NDArray
 
     from ..dataclasses import RuntimeContext
@@ -427,8 +429,41 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         cell_colocalization=combined_cell_colocalization,
     )
 
-    # Builds and returns the CombinedData instance. Caches tau and sampling_rate from the first plane's configuration
-    # and runtime data so that the multi-day extraction pipeline can access them without loading single-day contexts.
+    # Gathers registered binary paths for each plane so the multi-day extraction pipeline can construct
+    # BinaryFileCombined without reloading single-day contexts. These paths are guaranteed to be set after
+    # registration completes, so None values indicate a corrupted or incomplete pipeline run.
+    channel_1_paths: list[Path] = []
+    for ctx in plane_contexts:
+        path = ctx.runtime.io.registered_binary_path
+        if path is None:
+            console.error(
+                message=(
+                    f"Unable to combine plane data. The registered binary path is not set for plane "
+                    f"{ctx.runtime.io.plane_index}. Ensure registration completed successfully."
+                ),
+                error=RuntimeError,
+            )
+        channel_1_paths.append(path)
+    registered_binary_paths = tuple(channel_1_paths)
+
+    registered_binary_paths_channel_2: tuple[Path, ...] | None = None
+    if second_channel_functional:
+        channel_2_paths: list[Path] = []
+        for ctx in plane_contexts:
+            path_channel_2 = ctx.runtime.io.registered_binary_path_channel_2
+            if path_channel_2 is None:
+                console.error(
+                    message=(
+                        f"Unable to combine plane data. The registered binary path for channel 2 is not set for "
+                        f"plane {ctx.runtime.io.plane_index}. Ensure registration completed successfully."
+                    ),
+                    error=RuntimeError,
+                )
+            channel_2_paths.append(path_channel_2)
+        registered_binary_paths_channel_2 = tuple(channel_2_paths)
+
+    # Builds and returns the CombinedData instance. Caches per-plane geometry, binary paths, tau, and sampling_rate
+    # from the single-day contexts so that the multi-day extraction pipeline can access them directly.
     combined_data = CombinedData(
         detection=detection,
         extraction=extraction,
@@ -437,6 +472,12 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         combined_width=combined_width,
         tau=plane_contexts[0].configuration.main.tau,
         sampling_rate=plane_contexts[0].runtime.io.sampling_rate,
+        plane_heights=heights,
+        plane_widths=widths,
+        plane_y_offsets=y_offsets,
+        plane_x_offsets=x_offsets,
+        registered_binary_paths=registered_binary_paths,
+        registered_binary_paths_channel_2=registered_binary_paths_channel_2,
     )
 
     console.echo(message="Combined data prepared successfully.", level=LogLevel.SUCCESS)

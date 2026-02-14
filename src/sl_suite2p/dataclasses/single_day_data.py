@@ -1017,6 +1017,9 @@ class TimingData:
     All time durations are stored as integers representing seconds.
     """
 
+    binarization_time: int = 0
+    """The TIFF to binary conversion time in seconds."""
+
     registration_time: int = 0
     """The registration step time in seconds."""
 
@@ -1198,6 +1201,24 @@ class CombinedData:
     """The per-plane sampling rate in Hertz, cached from the single-day runtime for use by the multi-day extraction
     pipeline."""
 
+    plane_heights: NDArray[np.uint16] = field(default_factory=lambda: np.array([], dtype=np.uint16))
+    """Per-plane frame heights in pixels."""
+
+    plane_widths: NDArray[np.uint16] = field(default_factory=lambda: np.array([], dtype=np.uint16))
+    """Per-plane frame widths in pixels."""
+
+    plane_y_offsets: NDArray[np.int32] = field(default_factory=lambda: np.array([], dtype=np.int32))
+    """Per-plane y-axis displacement from compute_plane_offsets(), used to arrange planes in the combined view."""
+
+    plane_x_offsets: NDArray[np.int32] = field(default_factory=lambda: np.array([], dtype=np.int32))
+    """Per-plane x-axis displacement from compute_plane_offsets(), used to arrange planes in the combined view."""
+
+    registered_binary_paths: tuple[Path, ...] = ()
+    """Channel 1 registered binary file paths, one per plane."""
+
+    registered_binary_paths_channel_2: tuple[Path, ...] | None = None
+    """Channel 2 registered binary file paths, one per plane. None when the recording is single-channel."""
+
     def save(self, root_path: Path) -> None:
         """Saves combined data to the root suite2p directory.
 
@@ -1209,16 +1230,39 @@ class CombinedData:
         """
         ensure_directory_exists(root_path)
 
-        # Saves metadata using appropriate unsigned types for counts and dimensions.
-        np.savez(
-            root_path / "combined_metadata.npz",
-            allow_pickle=False,
-            plane_count=np.array([self.plane_count], dtype=np.uint8),
-            combined_height=np.array([self.combined_height], dtype=np.uint32),
-            combined_width=np.array([self.combined_width], dtype=np.uint32),
-            tau=np.array([self.tau], dtype=np.float32),
-            sampling_rate=np.array([self.sampling_rate], dtype=np.float32),
+        # Saves metadata using appropriate unsigned types for counts and dimensions. Binary paths are stored as
+        # strings relative to root_path to allow relocating processed data without breaking path references.
+        relative_binary_paths = np.array(
+            [str(p.relative_to(root_path)) for p in self.registered_binary_paths], dtype=str
         )
+
+        save_kwargs: dict[
+            str,
+            NDArray[np.uint8]
+            | NDArray[np.uint16]
+            | NDArray[np.uint32]
+            | NDArray[np.int32]
+            | NDArray[np.float32]
+            | NDArray[np.str_],
+        ] = {
+            "plane_count": np.array([self.plane_count], dtype=np.uint8),
+            "combined_height": np.array([self.combined_height], dtype=np.uint32),
+            "combined_width": np.array([self.combined_width], dtype=np.uint32),
+            "tau": np.array([self.tau], dtype=np.float32),
+            "sampling_rate": np.array([self.sampling_rate], dtype=np.float32),
+            "plane_heights": self.plane_heights,
+            "plane_widths": self.plane_widths,
+            "plane_y_offsets": self.plane_y_offsets,
+            "plane_x_offsets": self.plane_x_offsets,
+            "registered_binary_paths": relative_binary_paths,
+        }
+
+        if self.registered_binary_paths_channel_2 is not None:
+            save_kwargs["registered_binary_paths_channel_2"] = np.array(
+                [str(p.relative_to(root_path)) for p in self.registered_binary_paths_channel_2], dtype=str
+            )
+
+        np.savez(root_path / "combined_metadata.npz", allow_pickle=False, **save_kwargs)
 
         # Saves combined detection and extraction arrays using existing methods.
         self.detection.save_arrays(root_path)
@@ -1255,6 +1299,29 @@ class CombinedData:
         tau = float(metadata["tau"][0])
         sampling_rate = float(metadata["sampling_rate"][0])
 
+        # Loads per-plane geometry and binary paths. These keys may be absent in metadata files saved before these
+        # fields were added, so defaults are used for backward compatibility.
+        plane_heights: NDArray[np.uint16] = np.array([], dtype=np.uint16)
+        plane_widths: NDArray[np.uint16] = np.array([], dtype=np.uint16)
+        plane_y_offsets: NDArray[np.int32] = np.array([], dtype=np.int32)
+        plane_x_offsets: NDArray[np.int32] = np.array([], dtype=np.int32)
+        registered_binary_paths: tuple[Path, ...] = ()
+        registered_binary_paths_channel_2: tuple[Path, ...] | None = None
+
+        if "plane_heights" in metadata:
+            plane_heights = metadata["plane_heights"].astype(np.uint16)
+            plane_widths = metadata["plane_widths"].astype(np.uint16)
+            plane_y_offsets = metadata["plane_y_offsets"].astype(np.int32)
+            plane_x_offsets = metadata["plane_x_offsets"].astype(np.int32)
+
+        if "registered_binary_paths" in metadata:
+            registered_binary_paths = tuple(root_path / str(p) for p in metadata["registered_binary_paths"])
+
+        if "registered_binary_paths_channel_2" in metadata:
+            registered_binary_paths_channel_2 = tuple(
+                root_path / str(p) for p in metadata["registered_binary_paths_channel_2"]
+            )
+
         # Loads detection and extraction arrays using existing methods.
         detection = DetectionData()
         detection.load_arrays(root_path)
@@ -1270,6 +1337,12 @@ class CombinedData:
             combined_width=combined_width,
             tau=tau,
             sampling_rate=sampling_rate,
+            plane_heights=plane_heights,
+            plane_widths=plane_widths,
+            plane_y_offsets=plane_y_offsets,
+            plane_x_offsets=plane_x_offsets,
+            registered_binary_paths=registered_binary_paths,
+            registered_binary_paths_channel_2=registered_binary_paths_channel_2,
         )
 
     def load_results(self, root_path: Path) -> None:

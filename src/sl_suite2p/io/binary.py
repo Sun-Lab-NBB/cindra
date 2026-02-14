@@ -421,8 +421,8 @@ class BinaryFileCombined:
             plane, relative to the original image from which plane data was extracted.
         plane_x_coordinates: A NumPy array that stores the top-left-corner pixel x-coordinate of each managed
             plane, relative to the original image from which plane data was extracted.
-        file_paths: A list or tuple that stores the absolute paths to the binary files from which to read the plane
-            data.
+        file_paths: A list or tuple that stores the absolute Path objects to the binary files from which to read the
+            plane data.
 
     Attributes:
         height: Stores the combined height of all managed planes.
@@ -446,7 +446,7 @@ class BinaryFileCombined:
         plane_widths: NDArray[np.uint16],
         plane_y_coordinates: NDArray[np.int32],
         plane_x_coordinates: NDArray[np.int32],
-        file_paths: list[str | Path] | tuple[str | Path, ...],
+        file_paths: list[Path] | tuple[Path, ...],
     ) -> None:
         # Initializes class attributes using input arguments.
         self.height: int = height

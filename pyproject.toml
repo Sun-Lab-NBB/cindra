@@ -96,7 +96,7 @@ dev = [
 
 # All interactions with the library are performed via the 'ss2p' CLI command
 [project.scripts]
-ss2p = "sl_suite2p.cli:ss2p"  # Top-level CLI group
+ss2p = "sl_suite2p.interface.cli:ss2p"  # Top-level CLI group
 
 # Specifies files that should not be included in the source-code distribution but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]

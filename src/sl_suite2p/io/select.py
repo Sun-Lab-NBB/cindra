@@ -57,9 +57,10 @@ def _filter_channel_cells(
             continue
 
         # Applies MROI region border filter if applicable.
-        if mroi_region_borders:
-            if not all(abs(roi.centroid[1] - border) > region_margin for border in mroi_region_borders):
-                continue
+        if mroi_region_borders and not all(
+            abs(roi.centroid[1] - border) > region_margin for border in mroi_region_borders
+        ):
+            continue
 
         selected_indices.append(index)
 

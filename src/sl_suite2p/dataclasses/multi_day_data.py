@@ -108,6 +108,27 @@ class MultiDayRegistrationData:
     """The channel 2 cell ROI data after multi-day registration deform offsets have been applied to the spatial
     coordinates of each ROI."""
 
+    def is_registered(self) -> bool:
+        """Checks whether registration data exists.
+
+        Returns:
+            True if the session has been registered (has deformation fields and deformed cell masks), False otherwise.
+        """
+        return self.deform_field_y is not None and self.deformed_cell_masks is not None
+
+    def clear(self) -> None:
+        """Clears all registration data to prepare for re-registration."""
+        self.deform_field_y = None
+        self.deform_field_x = None
+        self.transformed_mean_image = None
+        self.transformed_enhanced_mean_image = None
+        self.transformed_maximum_projection = None
+        self.transformed_mean_image_channel_2 = None
+        self.transformed_enhanced_mean_image_channel_2 = None
+        self.transformed_maximum_projection_channel_2 = None
+        self.deformed_cell_masks = None
+        self.deformed_cell_masks_channel_2 = None
+
     def prepare_for_saving(self) -> None:
         """Sets array fields to None for YAML serialization."""
         self.deform_field_y = None
