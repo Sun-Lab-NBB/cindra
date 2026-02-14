@@ -1,14 +1,13 @@
-"""Provides user-defined configuration classes for the single-day (within-session) sl-suite2p pipeline."""
+"""Provides user-defined configuration classes for the single-day (within-session) processing pipeline."""
 
 from __future__ import annotations
 
 import copy
 from enum import StrEnum
-import json
 from pathlib import Path
 from dataclasses import field, dataclass
 
-from ataraxis_base_utilities import console, ensure_directory_exists
+from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 
@@ -24,6 +23,27 @@ class BaselineMethod(StrEnum):
 
     CONSTANT_PERCENTILE = "constant_percentile"
     """Uses a low percentile of the trace as a robust constant baseline, ignoring outliers."""
+
+
+@dataclass
+class RuntimeSettings:
+    """Stores runtime behavior settings shared between single-day and multi-day processing pipelines.
+
+    This dataclass contains parameters that control execution behavior rather than data processing logic. Both
+    pipelines use these settings to configure parallel processing and progress reporting.
+    """
+
+    parallel_workers: int = 20
+    """The number of workers used to parallelize certain processing operations. This worker pool is used by numba when
+    it parallelizes certain computations used during registration and ROI processing. There is generally no benefit from
+    increasing this parameter above 20 cores per each processed session or plane. On machines with a high number of
+    cores, it is recommended to keep this value between 10 and 20 cores and to instead parallelize processing sessions
+    and planes. Setting this to -1 or 0 removes worker limits, forcing the pipeline to use all available CPU cores."""
+
+    display_progress_bars: bool = False
+    """Determines whether to display progress bars for certain processing steps. Only enable this option when running
+    all processing steps sequentially. Having this enabled when running multiple sessions or planes in parallel may
+    interfere with properly communicating progress via the terminal."""
 
 
 @dataclass
@@ -85,103 +105,15 @@ class AcquisitionParameters(YamlConfig):
         """
         return self.roi_number * self.plane_number
 
-    @classmethod
-    def from_json(cls, path: Path) -> AcquisitionParameters:
-        """Loads acquisition parameters from a JSON file.
-
-        Args:
-            path: The path to the JSON file containing acquisition parameters.
-
-        Returns:
-            An AcquisitionParameters instance populated from the JSON file.
-
-        Raises:
-            FileNotFoundError: If the JSON file does not exist.
-            ValueError: If required fields are missing. For single-ROI data, frame_rate, plane_number, and
-                channel_number are required. For MROI data (roi_number > 1), roi_lines, roi_x_coordinates, and
-                roi_y_coordinates are additionally required.
-        """
-        if not path.exists():
-            message = f"Acquisition parameters file not found: {path}"
-            console.error(message=message, error=FileNotFoundError)
-
-        with path.open("r") as f:
-            data = json.load(f)
-
-        # Extracts frame_rate (required).
-        frame_rate = data.get("frame_rate")
-        if frame_rate is None:
-            message = (
-                f"Unable to extract the required field 'frame_rate' from the acquisition parameters file "
-                f"located at {path}."
-            )
-            console.error(message=message, error=ValueError)
-
-        # Extracts plane_number (required).
-        plane_number = data.get("plane_number")
-        if plane_number is None:
-            message = (
-                f"Unable to extract the required field 'plane_number' from the acquisition parameters file "
-                f"located at {path}."
-            )
-            console.error(message=message, error=ValueError)
-
-        # Extracts channel_number (required).
-        channel_number = data.get("channel_number")
-        if channel_number is None:
-            message = (
-                f"Unable to extract the required field 'channel_number' from the acquisition parameters file "
-                f"located at {path}."
-            )
-            console.error(message=message, error=ValueError)
-
-        # Extracts roi_number (defaults to 1 for single-ROI).
-        roi_number = data.get("roi_number", 1)
-
-        # For MROI data (roi_number > 1), validates that all MROI fields are present.
-        if roi_number > 1:
-            roi_lines = data.get("roi_lines")
-            if roi_lines is None:
-                message = (
-                    f"Unable to extract the required field 'roi_lines' from the acquisition parameters file "
-                    f"located at {path}."
-                )
-                console.error(message=message, error=ValueError)
-
-            roi_x_coordinates = data.get("roi_x_coordinates")
-            if roi_x_coordinates is None:
-                message = (
-                    f"Unable to extract the required field 'roi_x_coordinates' from the acquisition parameters "
-                    f"file located at {path}."
-                )
-                console.error(message=message, error=ValueError)
-
-            roi_y_coordinates = data.get("roi_y_coordinates")
-            if roi_y_coordinates is None:
-                message = (
-                    f"Unable to extract the required field 'roi_y_coordinates' from the acquisition parameters "
-                    f"file located at {path}."
-                )
-                console.error(message=message, error=ValueError)
-        else:
-            roi_lines = []
-            roi_x_coordinates = []
-            roi_y_coordinates = []
-
-        return cls(
-            frame_rate=frame_rate,
-            plane_number=plane_number,
-            channel_number=channel_number,
-            roi_number=roi_number,
-            roi_lines=roi_lines,
-            roi_x_coordinates=roi_x_coordinates,
-            roi_y_coordinates=roi_y_coordinates,
-        )
-
 
 @dataclass
 class Main:
-    """Stores the parameters that broadly affect the runtime and performance of the single-day pipeline as a whole."""
+    """Stores the parameters that broadly affect the single-day pipeline processing behavior.
+
+    Notes:
+        For runtime behavior settings shared with the multi-day pipeline (parallel workers, progress bars), see
+        RuntimeSettings.
+    """
 
     two_channels: bool = False
     """Determines whether the imaging data contains two channels per plane. When True, the algorithm expects images from
@@ -198,29 +130,10 @@ class Main:
     applicable when two_channels is True. When both first_channel_functional and second_channel_functional are True,
     the pipeline performs independent ROI detection on both channels."""
 
-    colocalization_threshold: float = 0.65
-    """The threshold for determining whether ROIs from one channel correspond to ROIs or signals in the other channel.
-    When one channel is functional and the other is structural, this threshold applies to intensity-based
-    colocalization: ROIs are marked as colocalized if their inside-to-total intensity ratio in the structural channel
-    exceeds this value. When both channels are functional, this threshold applies to spatial colocalization: ROIs are
-    matched if their pixel overlap fraction exceeds this value."""
-
     tau: float = 0.4
     """The timescale of the sensor in seconds, used for computing the deconvolution kernel. The kernel is fixed to have
     this decay and is not fit to the data. The default value is optimized for GCaMP6f animals recorded with the
     Mesoscope and likely needs to be increased for most other use cases."""
-
-    parallel_workers: int = 20
-    """The number of workers used to parallelize certain processing operations. This worker pool is used by numba when
-    it parallelizes certain computations used during registration and ROI processing. There is generally no benefit from
-    increasing this parameter above 20 cores per each processed plane. On machines with a high number of cores, it is
-    recommended to keep this value between 10 and 20 cores and to instead parallelize processing sessions and planes.
-    Setting this to -1 or 0 removes worker limits, forcing the pipeline to use all available CPU cores."""
-
-    display_progress_bars: bool = False
-    """Determines whether to display progress bars for certain processing steps. Only enable this option when running
-    all processing steps sequentially. Having this enabled when running multiple sessions or planes in parallel may
-    interfere with properly communicating progress via the terminal."""
 
     ignored_flyback_planes: list[int] = field(default_factory=list)
     """The list of flyback plane indices to ignore when processing the data. Flyback planes typically contain no valid
@@ -256,8 +169,14 @@ class FileIO:
 
     ignored_file_names: list[str] = field(default_factory=list)
     """The list of file names to ignore when searching for and loading raw data. Any file whose name exactly matches
-    one of the names in this is excluded from processing even if it has the correct extension and is located inside
+    one of the names in this list is excluded from processing even if it has the correct extension and is located inside
     the input data directory."""
+
+    repeat_binarization: bool = False
+    """Determines whether to repeat the binarization step when processing. When True, the pipeline re-runs TIFF to
+    binary conversion using the data_path from the current configuration, even if binary files already exist. This
+    allows raw data to be relocated or updated without affecting other pipeline states. When False (default), existing
+    binary files are used if present."""
 
     def __post_init__(self) -> None:
         """Converts string paths to Path objects after YAML loading."""
@@ -499,6 +418,13 @@ class SignalExtraction:
     during the extraction step. Larger values may improve throughput on fast storage but increase RAM consumption.
     This is independent of the registration batch size."""
 
+    colocalization_threshold: float = 0.65
+    """The threshold for determining whether ROIs from one channel correspond to ROIs or signals in the other channel.
+    When one channel is functional and the other is structural, this threshold applies to intensity-based
+    colocalization: ROIs are marked as colocalized if their inside-to-total intensity ratio in the structural channel
+    exceeds this value. When both channels are functional, this threshold applies to spatial colocalization: ROIs are
+    matched if their pixel overlap fraction exceeds this value."""
+
 
 @dataclass
 class SpikeDeconvolution:
@@ -559,7 +485,8 @@ class SingleDayConfiguration(YamlConfig):
         For runtime data (computed by the pipeline), see SingleDayRuntimeData.
     """
 
-    # Define the instances of each nested settings class as fields
+    runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
+    """Stores runtime behavior settings shared with the multi-day pipeline (parallel workers, progress bars)."""
     main: Main = field(default_factory=Main)
     """Stores global parameters that broadly define the suite2p single-day processing configuration."""
     file_io: FileIO = field(default_factory=FileIO)

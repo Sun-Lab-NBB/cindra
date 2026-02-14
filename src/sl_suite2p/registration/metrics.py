@@ -295,7 +295,7 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
     num_components = context.configuration.registration.registration_metric_principal_components
     spatial_smoothing_sigma = context.configuration.registration.spatial_smoothing_sigma
     maximum_shift_fraction = context.configuration.registration.maximum_shift_fraction
-    parallel_workers = context.configuration.main.parallel_workers
+    parallel_workers = context.configuration.runtime.parallel_workers
 
     # Extracts non-rigid registration parameters.
     nonrigid_enabled = context.configuration.non_rigid_registration.enabled

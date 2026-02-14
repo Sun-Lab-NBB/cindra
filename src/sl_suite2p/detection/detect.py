@@ -393,7 +393,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
 
     valid_y_range = registration_data.valid_y_range
     valid_x_range = registration_data.valid_x_range
-    parallel_workers = main_config.parallel_workers
+    parallel_workers = context.configuration.runtime.parallel_workers
 
     # Validates that the registered binary path exists. This is always satisfied when called from the processing
     # pipeline, since registration creates the binary file before detection runs.

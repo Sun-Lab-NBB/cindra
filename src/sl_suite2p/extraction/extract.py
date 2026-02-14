@@ -1,4 +1,4 @@
-"""Provides the fluorescence extraction entry point for the single-day and the multi-day processing pipelines."""
+"""Provides the fluorescence extraction entry points for the single-day and multi-day processing pipelines."""
 
 from __future__ import annotations
 
@@ -10,19 +10,22 @@ from scipy import stats
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
-from ..io import BinaryFile
+from ..io import BinaryFile, BinaryFileCombined
 from .masks import create_masks
 from .deconvolve import apply_oasis_deconvolution, compute_delta_fluorescence
+from ..dataclasses import RuntimeContext
 from .colocalization import compute_spatial_colocalization, compute_intensity_colocalization
 from ..classification import classify
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from numpy.typing import NDArray
 
-    from ..dataclasses import ROIStatistics, RuntimeContext
+    from ..dataclasses import ROIStatistics, SignalExtraction, SpikeDeconvolution, MultiDayRuntimeContext
 
 
-@njit(cache=True, parallel=True)  # type: ignore[untyped-decorator]
+@njit(cache=True, parallel=True)
 def _extract_cell_fluorescence(
     output_prototype: NDArray[np.float32],
     data: NDArray[np.float32],
@@ -66,7 +69,7 @@ def _extract_cell_fluorescence(
     return output_prototype
 
 
-@njit(cache=True, parallel=True)  # type: ignore[untyped-decorator]
+@njit(cache=True, parallel=True)
 def _extract_neuropil_fluorescence(
     output_prototype: NDArray[np.float32],
     data: NDArray[np.float32],
@@ -168,7 +171,7 @@ def _create_and_unpack_masks(
 
 
 def _extract_fluorescence_traces(
-    frames: BinaryFile,
+    frames: BinaryFile | BinaryFileCombined,
     cell_masks: tuple[tuple[NDArray[np.int32], NDArray[np.float32]], ...],
     neuropil_masks: tuple[NDArray[np.int32], ...] | None,
     batch_size: int,
@@ -180,7 +183,8 @@ def _extract_fluorescence_traces(
         If neuropil masks are not provided, the neuropil fluorescence traces are returned as an array of zeroes.
 
     Args:
-        frames: The raw cell activity data (movie) to process.
+        frames: The raw cell activity data (movie) to process. Accepts either a single-plane BinaryFile or a
+            multi-plane BinaryFileCombined instance.
         cell_masks: The cell masks for each ROI, where each element is a tuple of (flattened pixel indices,
             normalized lambda weights).
         neuropil_masks: The neuropil masks for each ROI, or None to skip neuropil extraction.
@@ -195,8 +199,14 @@ def _extract_fluorescence_traces(
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
-    # Extracts processed recording statistics.
-    frame_count, height, width = frames.shape
+    # Resolves frame dimensions from the binary source. BinaryFileCombined stores the combined height and width as
+    # direct attributes, while BinaryFile exposes them through the shape tuple.
+    if isinstance(frames, BinaryFileCombined):
+        frame_count = frames.frame_number
+        height = frames.height
+        width = frames.width
+    else:
+        frame_count, height, width = frames.shape
     cell_count = len(cell_masks)
     pixel_count = height * width
 
@@ -308,7 +318,7 @@ def _update_roi_extraction_statistics(
         roi.standard_deviation = float(standard_deviation_value)
 
 
-def extract_traces(context: RuntimeContext) -> None:
+def _extract_single_day(context: RuntimeContext) -> None:
     """Extracts fluorescence traces, classifies ROIs, and deconvolves spikes from registered binary data.
 
     Notes:
@@ -498,7 +508,6 @@ def _extract_structural_channel_2(
     io_data = context.runtime.io
     detection_data = context.runtime.detection
     extraction_data = context.runtime.extraction
-    main_config = context.configuration.main
 
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
     channel_2_path = io_data.registered_binary_path_channel_2
@@ -549,7 +558,7 @@ def _extract_structural_channel_2(
                 structural_mean_image=detection_data.mean_image_channel_2,
                 frame_height=io_data.frame_height,
                 frame_width=io_data.frame_width,
-                colocalization_threshold=main_config.colocalization_threshold,
+                colocalization_threshold=extraction_config.colocalization_threshold,
                 allow_overlap=extraction_config.allow_overlap,
                 cell_probability_percentile=extraction_config.cell_probability_percentile,
                 inner_neuropil_border_radius=extraction_config.inner_neuropil_border_radius,
@@ -711,6 +720,263 @@ def _extract_functional_channel_2(
             rois_channel_2=roi_statistics_channel_2,
             frame_height=frame_height,
             frame_width=frame_width,
-            colocalization_threshold=main_config.colocalization_threshold,
+            colocalization_threshold=extraction_config.colocalization_threshold,
         )
         extraction_data.cell_colocalization = channel_1_to_2
+
+
+def _extract_multiday_channel(
+    frames: BinaryFileCombined,
+    roi_statistics: list[ROIStatistics],
+    extraction_config: SignalExtraction,
+    deconvolution_config: SpikeDeconvolution,
+    channel_label: str,
+    tau: float,
+    sampling_rate: float,
+) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
+    """Extracts fluorescence, computes delta-F, and deconvolves spikes for one channel of a multi-day session.
+
+    Notes:
+        This is the generic multi-day channel worker used by both channel 1 and channel 2. It always uses
+        ``allow_overlap=True`` since multi-day template masks are spatially distinct by construction. No
+        reclassification is performed because tracked ROIs are already known cells.
+
+    Args:
+        frames: The combined multi-plane binary data source for the channel being processed.
+        roi_statistics: The backward-transformed ROI statistics for the channel.
+        extraction_config: The signal extraction configuration parameters.
+        deconvolution_config: The spike deconvolution configuration parameters.
+        channel_label: A descriptive label for the channel being processed, used in log messages.
+        tau: The timescale of the calcium indicator sensor in seconds.
+        sampling_rate: The per-plane sampling rate in Hertz.
+
+    Returns:
+        A tuple of four arrays: cell fluorescence, neuropil fluorescence, neuropil-subtracted fluorescence, and
+        deconvolved spikes. Each has shape (roi_count, frame_count). If spike extraction is disabled, the subtracted
+        fluorescence and spikes arrays are filled with zeroes.
+    """
+    # Creates cell and neuropil masks from backward-transformed tracked ROI statistics.
+    cell_masks, neuropil_masks = _create_and_unpack_masks(
+        roi_statistics=roi_statistics,
+        frame_height=frames.height,
+        frame_width=frames.width,
+        extract_neuropil=extraction_config.extract_neuropil,
+        allow_overlap=True,
+        cell_probability_percentile=extraction_config.cell_probability_percentile,
+        inner_neuropil_border_radius=extraction_config.inner_neuropil_border_radius,
+        minimum_neuropil_pixels=extraction_config.minimum_neuropil_pixels,
+        channel_label=channel_label,
+    )
+
+    # Extracts fluorescence traces from the combined multi-plane binary.
+    cell_fluorescence, neuropil_fluorescence = _extract_fluorescence_traces(
+        frames=frames,
+        cell_masks=cell_masks,
+        neuropil_masks=neuropil_masks,
+        batch_size=extraction_config.batch_size,
+        channel_label=channel_label,
+    )
+
+    # Computes delta fluorescence and spike deconvolution.
+    if deconvolution_config.extract_spikes:
+        subtracted_fluorescence = compute_delta_fluorescence(
+            roi_fluorescence=cell_fluorescence,
+            neuropil_fluorescence=neuropil_fluorescence,
+            neuropil_coefficient=deconvolution_config.neuropil_coefficient,
+            baseline_method=str(deconvolution_config.baseline_method),
+            baseline_window=deconvolution_config.baseline_window,
+            baseline_sigma=deconvolution_config.baseline_sigma,
+            baseline_percentile=deconvolution_config.baseline_percentile,
+            sampling_rate=sampling_rate,
+        )
+        spikes = apply_oasis_deconvolution(
+            roi_fluorescence=subtracted_fluorescence,
+            batch_size=extraction_config.batch_size,
+            time_constant=tau,
+            sampling_rate=sampling_rate,
+        )
+        console.echo(
+            message=f"{channel_label.capitalize()} spike deconvolution: complete.",
+            level=LogLevel.SUCCESS,
+        )
+    else:
+        console.echo(
+            message=(
+                f"Skipping {channel_label} spike deconvolution, as the 'extract_spikes' configuration parameter is "
+                f"set to False."
+            ),
+            level=LogLevel.WARNING,
+        )
+        subtracted_fluorescence = np.zeros_like(cell_fluorescence)
+        spikes = np.zeros_like(cell_fluorescence)
+
+    return cell_fluorescence, neuropil_fluorescence, subtracted_fluorescence, spikes
+
+
+def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
+    """Extracts fluorescence traces from cells tracked across multiple sessions for a single session.
+
+    Notes:
+        This function expects that the multi-day discovery phase has already been completed, meaning
+        backward-transformed ROI statistics are available in the session's extraction data. Tracked ROIs are always
+        extracted with ``allow_overlap=True`` since multi-day template masks are spatially distinct by construction.
+        No reclassification is performed because tracked ROIs are already known cells.
+
+    Args:
+        context: The MultiDayRuntimeContext for the session being processed. Modified in-place to store extraction
+            outputs including fluorescence traces, delta fluorescence, deconvolved spikes, and colocalization data.
+
+    Raises:
+        RuntimeError: If backward-transformed ROI statistics are not available, if the combined data is not loaded,
+            or if required binary paths are missing from the single-day plane contexts.
+    """
+    # Resolves configuration and runtime references.
+    extraction_config = context.configuration.signal_extraction
+    deconvolution_config = context.configuration.spike_deconvolution
+    extraction_data = context.runtime.extraction
+    combined_data = context.runtime.combined_data
+    session_id = context.runtime.io.session_id
+
+    # Validates that combined data is available.
+    if combined_data is None:
+        console.error(
+            message=(
+                f"Unable to extract multi-day traces for session {session_id}. The combined single-day data is not "
+                f"loaded. Ensure the single-day pipeline completed successfully and the data has not been moved or "
+                f"deleted."
+            ),
+            error=RuntimeError,
+        )
+
+    frame_height = combined_data.combined_height
+    frame_width = combined_data.combined_width
+    tau = combined_data.tau
+    sampling_rate = combined_data.sampling_rate
+
+    # Reads per-plane geometry and binary paths from combined data, which caches this information from the single-day
+    # pipeline to avoid reloading full single-day contexts.
+    plane_heights = combined_data.plane_heights
+    plane_widths = combined_data.plane_widths
+    y_offsets = combined_data.plane_y_offsets
+    x_offsets = combined_data.plane_x_offsets
+
+    # Validates that backward-transformed ROI statistics exist from the discovery phase.
+    roi_statistics = extraction_data.roi_statistics
+    if roi_statistics is None:
+        console.error(
+            message=(
+                f"Unable to extract multi-day traces for session {session_id}. Backward-transformed ROI statistics "
+                f"are not available. Ensure the multi-day discovery phase (registration, tracking, backward "
+                f"transform) has been completed before running extraction."
+            ),
+            error=RuntimeError,
+        )
+
+    # Reads channel 1 registered binary paths from combined data.
+    channel_1_binary_paths: list[Path] = list(combined_data.registered_binary_paths)
+
+    # Extracts channel 1 fluorescence, delta-F, and spikes via the generic channel worker.
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
+
+    with BinaryFileCombined(
+        height=frame_height,
+        width=frame_width,
+        plane_heights=plane_heights,
+        plane_widths=plane_widths,
+        plane_y_coordinates=y_offsets,
+        plane_x_coordinates=x_offsets,
+        file_paths=channel_1_binary_paths,
+    ) as binary:
+        (
+            extraction_data.cell_fluorescence,
+            extraction_data.neuropil_fluorescence,
+            extraction_data.subtracted_fluorescence,
+            extraction_data.spikes,
+        ) = _extract_multiday_channel(
+            frames=binary,
+            roi_statistics=roi_statistics,
+            extraction_config=extraction_config,
+            deconvolution_config=deconvolution_config,
+            channel_label=f"session {session_id} channel 1",
+            tau=tau,
+            sampling_rate=sampling_rate,
+        )
+
+    timing = context.runtime.timing
+    timing.extraction_time = int(timer.elapsed)
+
+    # Processes channel 2 if backward-transformed channel 2 tracked ROI statistics are available. This indicates a
+    # dual-channel recording where both channels were functional during single-day processing.
+    roi_statistics_channel_2 = extraction_data.roi_statistics_channel_2
+    if roi_statistics_channel_2 is not None:
+        # Reads channel 2 registered binary paths from combined data.
+        channel_2_binary_paths: list[Path] = list(combined_data.registered_binary_paths_channel_2)  # type: ignore[arg-type]
+
+        timer.reset()
+
+        with BinaryFileCombined(
+            height=frame_height,
+            width=frame_width,
+            plane_heights=plane_heights,
+            plane_widths=plane_widths,
+            plane_y_coordinates=y_offsets,
+            plane_x_coordinates=x_offsets,
+            file_paths=channel_2_binary_paths,
+        ) as binary_channel_2:
+            (
+                extraction_data.cell_fluorescence_channel_2,
+                extraction_data.neuropil_fluorescence_channel_2,
+                extraction_data.subtracted_fluorescence_channel_2,
+                extraction_data.spikes_channel_2,
+            ) = _extract_multiday_channel(
+                frames=binary_channel_2,
+                roi_statistics=roi_statistics_channel_2,
+                extraction_config=extraction_config,
+                deconvolution_config=deconvolution_config,
+                channel_label=f"session {session_id} channel 2",
+                tau=tau,
+                sampling_rate=sampling_rate,
+            )
+
+        timing.extraction_time += int(timer.elapsed)
+
+        # Computes spatial colocalization between channel 1 and channel 2 tracked ROIs.
+        channel_1_to_2, _channel_2_to_1 = compute_spatial_colocalization(
+            rois_channel_1=roi_statistics,
+            rois_channel_2=roi_statistics_channel_2,
+            frame_height=frame_height,
+            frame_width=frame_width,
+            colocalization_threshold=extraction_config.colocalization_threshold,
+        )
+        extraction_data.cell_colocalization = channel_1_to_2
+
+    # Saves updated runtime data to disk.
+    context.save_runtime()
+
+    total_extraction_time = timing.extraction_time + timing.deconvolution_time
+    timing.total_extraction_time = total_extraction_time
+    console.echo(
+        message=(f"Session {session_id} multi-day extraction: complete. Total time: {total_extraction_time} seconds."),
+        level=LogLevel.SUCCESS,
+    )
+
+
+def extract_traces(context: RuntimeContext | MultiDayRuntimeContext) -> None:
+    """Extracts fluorescence traces, classifies ROIs, and deconvolves spikes from registered binary data.
+
+    Notes:
+        This is the unified extraction entry point for both single-day and multi-day pipelines. It dispatches to the
+        appropriate internal handler based on the runtime context type. For single-day contexts, the full extraction
+        pipeline runs including classification and interleaved extraction statistics. For multi-day contexts,
+        backward-transformed tracked ROI masks are used without reclassification.
+
+    Args:
+        context: The runtime context for the session being processed. Accepts either a single-day RuntimeContext or a
+            multi-day MultiDayRuntimeContext. Modified in-place to store extraction outputs including fluorescence
+            traces, deconvolved spikes, and colocalization data.
+    """
+    if isinstance(context, RuntimeContext):
+        _extract_single_day(context=context)
+    else:
+        _extract_multi_day(context=context)

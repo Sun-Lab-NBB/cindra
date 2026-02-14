@@ -1,4 +1,4 @@
-"""Provides tools for exporting multiplane data processed by the single-day pipeline as a unified dataset."""
+"""Provides assets for combining multiplane data into unified datasets."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from ataraxis_base_utilities import LogLevel, console
 from ..dataclasses import CombinedData, DetectionData, ROIStatistics, ExtractionData
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from numpy.typing import NDArray
 
     from ..dataclasses import RuntimeContext
@@ -63,8 +65,8 @@ def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray
     # Handles MROI (Multi-ROI) recordings where each ROI has a known spatial position in the original field of view.
     else:
         # Starts with the MROI offsets, which position each ROI correctly relative to each other.
-        x_displacement = np.array([ctx.runtime.io.mroi_x_offset for ctx in plane_contexts], dtype=np.int32)
-        y_displacement = np.array([ctx.runtime.io.mroi_y_offset for ctx in plane_contexts], dtype=np.int32)
+        x_displacement = np.array([context.runtime.io.mroi_x_offset for context in plane_contexts], dtype=np.int32)
+        y_displacement = np.array([context.runtime.io.mroi_y_offset for context in plane_contexts], dtype=np.int32)
 
         # Checks if multiple virtual planes share the same (x, y) position. This happens when MROI recordings have
         # multiple z-planes per ROI: all z-planes within one ROI share the same spatial position.
@@ -77,8 +79,8 @@ def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray
             # Computes the number of z-planes (total virtual planes divided by unique ROI positions).
             plane_number //= roi_number
 
-            heights_array = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts])
-            widths_array = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts])
+            heights_array = np.array([context.runtime.io.frame_height for context in plane_contexts])
+            widths_array = np.array([context.runtime.io.frame_width for context in plane_contexts])
 
             # Calculates the tile size as the bounding box that contains all ROIs at their MROI positions.
             maximum_height = (y_displacement + heights_array).max()
@@ -225,20 +227,26 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         # Updates correlation map using valid pixel range.
         valid_y_start, valid_y_end = context.runtime.registration.valid_y_range
         valid_x_start, valid_x_end = context.runtime.registration.valid_x_range
-        corr_y_range = np.arange(
-            y_offsets[plane_index] + valid_y_start, y_offsets[plane_index] + valid_y_end, dtype=np.int32,
+        correlation_y_range = np.arange(
+            y_offsets[plane_index] + valid_y_start,
+            y_offsets[plane_index] + valid_y_end,
+            dtype=np.int32,
         )
-        corr_x_range = np.arange(
-            x_offsets[plane_index] + valid_x_start, x_offsets[plane_index] + valid_x_end, dtype=np.int32,
+        correlation_x_range = np.arange(
+            x_offsets[plane_index] + valid_x_start,
+            x_offsets[plane_index] + valid_x_end,
+            dtype=np.int32,
         )
         if context.runtime.detection.correlation_map is not None:
-            combined_correlation_map[np.ix_(corr_y_range, corr_x_range)] = context.runtime.detection.correlation_map
+            combined_correlation_map[np.ix_(correlation_y_range, correlation_x_range)] = (
+                context.runtime.detection.correlation_map
+            )
         if (
             second_channel_functional
             and combined_correlation_map_channel_2 is not None
             and context.runtime.detection.correlation_map_channel_2 is not None
         ):
-            combined_correlation_map_channel_2[np.ix_(corr_y_range, corr_x_range)] = (
+            combined_correlation_map_channel_2[np.ix_(correlation_y_range, correlation_x_range)] = (
                 context.runtime.detection.correlation_map_channel_2
             )
 
@@ -248,13 +256,15 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
             and combined_max_projection is not None
             and context.runtime.detection.maximum_projection is not None
         ):
-            combined_max_projection[np.ix_(corr_y_range, corr_x_range)] = context.runtime.detection.maximum_projection
+            combined_max_projection[np.ix_(correlation_y_range, correlation_x_range)] = (
+                context.runtime.detection.maximum_projection
+            )
         if (
             second_channel_functional
             and combined_max_projection_channel_2 is not None
             and context.runtime.detection.maximum_projection_channel_2 is not None
         ):
-            combined_max_projection_channel_2[np.ix_(corr_y_range, corr_x_range)] = (
+            combined_max_projection_channel_2[np.ix_(correlation_y_range, correlation_x_range)] = (
                 context.runtime.detection.maximum_projection_channel_2
             )
 
@@ -419,13 +429,55 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         cell_colocalization=combined_cell_colocalization,
     )
 
-    # Builds and returns the CombinedData instance.
+    # Gathers registered binary paths for each plane so the multi-day extraction pipeline can construct
+    # BinaryFileCombined without reloading single-day contexts. These paths are guaranteed to be set after
+    # registration completes, so None values indicate a corrupted or incomplete pipeline run.
+    channel_1_paths: list[Path] = []
+    for ctx in plane_contexts:
+        path = ctx.runtime.io.registered_binary_path
+        if path is None:
+            console.error(
+                message=(
+                    f"Unable to combine plane data. The registered binary path is not set for plane "
+                    f"{ctx.runtime.io.plane_index}. Ensure registration completed successfully."
+                ),
+                error=RuntimeError,
+            )
+        channel_1_paths.append(path)
+    registered_binary_paths = tuple(channel_1_paths)
+
+    registered_binary_paths_channel_2: tuple[Path, ...] | None = None
+    if second_channel_functional:
+        channel_2_paths: list[Path] = []
+        for ctx in plane_contexts:
+            path_channel_2 = ctx.runtime.io.registered_binary_path_channel_2
+            if path_channel_2 is None:
+                console.error(
+                    message=(
+                        f"Unable to combine plane data. The registered binary path for channel 2 is not set for "
+                        f"plane {ctx.runtime.io.plane_index}. Ensure registration completed successfully."
+                    ),
+                    error=RuntimeError,
+                )
+            channel_2_paths.append(path_channel_2)
+        registered_binary_paths_channel_2 = tuple(channel_2_paths)
+
+    # Builds and returns the CombinedData instance. Caches per-plane geometry, binary paths, tau, and sampling_rate
+    # from the single-day contexts so that the multi-day extraction pipeline can access them directly.
     combined_data = CombinedData(
         detection=detection,
         extraction=extraction,
         plane_count=len(plane_contexts),
         combined_height=combined_height,
         combined_width=combined_width,
+        tau=plane_contexts[0].configuration.main.tau,
+        sampling_rate=plane_contexts[0].runtime.io.sampling_rate,
+        plane_heights=heights,
+        plane_widths=widths,
+        plane_y_offsets=y_offsets,
+        plane_x_offsets=x_offsets,
+        registered_binary_paths=registered_binary_paths,
+        registered_binary_paths_channel_2=registered_binary_paths_channel_2,
     )
 
     console.echo(message="Combined data prepared successfully.", level=LogLevel.SUCCESS)

@@ -1,4 +1,4 @@
-"""Provides rigid (translation-only) registration functions for motion correction."""
+"""Provides rigid (translation-only) registration algorithm for motion correction."""
 
 from typing import TYPE_CHECKING
 

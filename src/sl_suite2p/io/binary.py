@@ -1,4 +1,4 @@
-"""Provides tools for reading and writing image data stored in suite2p binary (.bin) files."""
+"""Provides assets for reading and writing image data stored in suite2p binary (.bin) files."""
 
 from __future__ import annotations
 
@@ -205,9 +205,7 @@ class BinaryFile:
         """
         # Prevents writes to read-only files.
         if self._read_only:
-            message = (
-                f"Unable to write data to the BinaryFile {self.file_path}. The file was opened in read-only mode."
-            )
+            message = f"Unable to write data to the BinaryFile {self.file_path}. The file was opened in read-only mode."
             console.error(message=message, error=PermissionError)
 
         # Checks and converts data type to int16, if needed. Clips values to the maximum representable int16 value.
@@ -308,7 +306,7 @@ class BinaryFile:
         """
         # If 'bad_frames' is provided, creates a NumPy array that tracks which frames are good. Otherwise, considers all
         # the frames as good.
-        good_frames = ~bad_frames if bad_frames is not None else np.ones(self.frame_number, dtype=bool)
+        good_frames = ~bad_frames if bad_frames is not None else np.ones(self.frame_number, dtype=np.bool_)
 
         # Resolves the batch size. It is capped either to the total number of good frames or the default maximum batch
         # size, whichever is smaller.
@@ -423,8 +421,8 @@ class BinaryFileCombined:
             plane, relative to the original image from which plane data was extracted.
         plane_x_coordinates: A NumPy array that stores the top-left-corner pixel x-coordinate of each managed
             plane, relative to the original image from which plane data was extracted.
-        file_paths: A list or tuple that stores the absolute paths to the binary files from which to read the plane
-            data.
+        file_paths: A list or tuple that stores the absolute Path objects to the binary files from which to read the
+            plane data.
 
     Attributes:
         height: Stores the combined height of all managed planes.
@@ -448,7 +446,7 @@ class BinaryFileCombined:
         plane_widths: NDArray[np.uint16],
         plane_y_coordinates: NDArray[np.int32],
         plane_x_coordinates: NDArray[np.int32],
-        file_paths: list[str | Path] | tuple[str | Path, ...],
+        file_paths: list[Path] | tuple[Path, ...],
     ) -> None:
         # Initializes class attributes using input arguments.
         self.height: int = height
@@ -461,7 +459,7 @@ class BinaryFileCombined:
 
         # Opens BinaryFile instances for requested planes, using the input data.
         self.files: list[BinaryFile] = [
-            BinaryFile(int(height), int(width), file_path)
+            BinaryFile(height=int(height), width=int(width), file_path=file_path)
             for height, width, file_path in zip(self.plane_heights, self.plane_widths, self.file_paths, strict=False)
         ]
 

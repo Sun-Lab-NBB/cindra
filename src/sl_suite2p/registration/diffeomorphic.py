@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from tqdm import tqdm
 import numpy as np
 import scipy.ndimage
+from ataraxis_base_utilities import console
 
 from .pyramid import ScaleSpacePyramid
 from .deformation import Deformation
@@ -66,8 +67,8 @@ class DiffeomorphicDemonsRegistration:
         self,
         images: list[NDArray[np.float32]],
         speed_factor: float = 3.0,
-        scale_sampling: int = 25,
-        grid_sampling_factor: float = 0.5,
+        scale_sampling: int = 30,
+        grid_sampling_factor: float = 1.0,
         final_scale: float = 1.0,
         final_grid_sampling: float = 16.0,
         smooth_scale: bool = True,
@@ -79,7 +80,7 @@ class DiffeomorphicDemonsRegistration:
         # Ensures that the input images use the fp32 precision, consistent with the rest of the sl-suite2p codebase.
         self._images: list[NDArray[np.float32]] = []
         for image in images:
-            converted_image = image.astype(np.float32) if image.dtype not in [np.float32, np.float64] else image
+            converted_image = image if image.dtype == np.float32 else image.astype(np.float32)
             self._images.append(converted_image)
 
         # Caches registration parameters to class attributes.
@@ -98,7 +99,7 @@ class DiffeomorphicDemonsRegistration:
 
         # Tracks the runtime state initialized during registration.
         self._pyramids: list[ScaleSpacePyramid] | None = None
-        self._cache: dict[str, tuple] = {}
+        self._cache: dict[str, tuple[tuple[int, int, float], Deformation | NDArray[np.float32]]] = {}
         self._interpolation_order: int = 1
 
     def get_deformation(self, image_index: int) -> Deformation:
@@ -146,7 +147,10 @@ class DiffeomorphicDemonsRegistration:
 
         # Main registration loop: processes scales from coarse to fine.
         with tqdm(
-            total=total_iterations, desc="Registering images", disable=not progress, unit="iteration"
+            total=total_iterations,
+            desc="Registering sessions to a shared visual space",
+            disable=not progress,
+            unit="iteration",
         ) as progress_bar:
             for level in reversed(range(scale_level_count)):
                 # Computes the scale at the current level.
@@ -355,7 +359,7 @@ class DiffeomorphicDemonsRegistration:
         # Validates that pyramids have been initialized (should always be true when this method is called).
         if self._pyramids is None:
             message = "Cannot retrieve image: pyramids have not been initialized. Call register() first."
-            raise RuntimeError(message)
+            console.error(message=message, error=RuntimeError)
 
         # noinspection PyUnresolvedReferences
         image = self._pyramids[image_index].get_scale(scale=scale)

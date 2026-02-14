@@ -15,23 +15,6 @@ if TYPE_CHECKING:
     from ..dataclasses import ROIStatistics
 
 
-def _compute_distance_kernel(radius: int) -> NDArray[np.float32]:
-    """Computes a 2D array of Euclidean distances from the center point.
-
-    This function generates a reference distance distribution used to compute the baseline mean R-squared value for ROI
-    compactness calculations.
-
-    Args:
-        radius: The radius of the kernel in pixels.
-
-    Returns:
-        An array of shape (2*radius+1, 2*radius+1) containing Euclidean distances from the center pixel.
-    """
-    offsets = np.arange(start=-radius, stop=radius + 1, dtype=np.float32)
-    y_grid, x_grid = np.meshgrid(offsets, offsets)
-    return np.hypot(y_grid, x_grid)
-
-
 @dataclass(frozen=True)
 class _EllipseData:
     """Defines an ellipse fitted to the ROI's pixels via weighted covariance analysis.
@@ -61,7 +44,7 @@ class _EllipseData:
     @property
     def area(self) -> float:
         """Returns the area of the ellipse."""
-        return (self.radii[0] * self.radii[1]) ** 0.5 * np.pi
+        return float((self.radii[0] * self.radii[1]) ** 0.5 * np.pi)
 
     @property
     def radius(self) -> float:
@@ -75,20 +58,21 @@ class _EllipseData:
         return 2 * major / (major + minor + 0.01)
 
 
-def compute_median_pixel_position(y_pixels: NDArray[np.int32], x_pixels: NDArray[np.int32]) -> tuple[int, int]:
-    """Computes the ROI centroid as the x and y coordinates of the pixel closest to the coordinate-wise median.
+def _compute_distance_kernel(radius: int) -> NDArray[np.float32]:
+    """Computes a 2D array of Euclidean distances from the center point.
+
+    This function generates a reference distance distribution used to compute the baseline mean R-squared value for ROI
+    compactness calculations.
 
     Args:
-        y_pixels: The y-coordinates of the ROI's pixels.
-        x_pixels: The x-coordinates of the ROI's pixels.
+        radius: The radius of the kernel in pixels.
 
     Returns:
-        The (y, x) coordinates of the pixel closest to the median position.
+        An array of shape (2*radius+1, 2*radius+1) containing Euclidean distances from the center pixel.
     """
-    y_median = np.median(y_pixels)
-    x_median = np.median(x_pixels)
-    min_index = np.argmin(np.square(x_pixels - x_median) + np.square(y_pixels - y_median))
-    return int(y_pixels[min_index]), int(x_pixels[min_index])
+    offsets = np.arange(start=-radius, stop=radius + 1, dtype=np.float32)
+    y_grid, x_grid = np.meshgrid(offsets, offsets)
+    return np.hypot(y_grid, x_grid)
 
 
 class _ROI:
@@ -416,6 +400,54 @@ class _ROI:
         return keep_flags[::-1]
 
 
+def estimate_diameter_from_rois(rois: list[ROIStatistics], default_diameter: int = 10) -> int:
+    """Estimates the cell diameter from the pixel counts of a list of ROIs.
+
+    This function computes the median pixel count across all ROIs and derives an equivalent circular diameter. This is
+    useful when the original cell diameter is unavailable or when ROI geometry has been transformed (e.g., after
+    diffeomorphic registration or template mask generation).
+
+    Args:
+        rois: The list of ROIStatistics instances to analyze.
+        default_diameter: The fallback diameter to return if the ROI list is empty or all ROIs have zero pixels.
+
+    Returns:
+        The estimated cell diameter in pixels, computed as the diameter of a circle with area equal to the median
+        ROI pixel count.
+    """
+    if not rois:
+        return default_diameter
+
+    # Collects pixel counts from all ROIs. Uses the y_pixels array length as the authoritative pixel count.
+    pixel_counts = np.array([len(roi.y_pixels) for roi in rois], dtype=np.float32)
+
+    if len(pixel_counts) == 0 or np.median(pixel_counts) == 0:
+        return default_diameter
+
+    # Computes the diameter of a circle with area equal to the median pixel count: area = π * r², so
+    # r = sqrt(area / π) and diameter = 2 * r = 2 * sqrt(median_pixels / π).
+    median_pixels = np.median(pixel_counts)
+    estimated_diameter = int(2 * np.sqrt(median_pixels / np.pi))
+
+    return max(estimated_diameter, 1)
+
+
+def compute_median_pixel_position(y_pixels: NDArray[np.int32], x_pixels: NDArray[np.int32]) -> tuple[int, int]:
+    """Computes the ROI centroid as the x and y coordinates of the pixel closest to the coordinate-wise median.
+
+    Args:
+        y_pixels: The y-coordinates of the ROI's pixels.
+        x_pixels: The x-coordinates of the ROI's pixels.
+
+    Returns:
+        The (y, x) coordinates of the pixel closest to the median position.
+    """
+    y_median = np.median(y_pixels)
+    x_median = np.median(x_pixels)
+    min_index = np.argmin(np.square(x_pixels - x_median) + np.square(y_pixels - y_median))
+    return int(y_pixels[min_index]), int(x_pixels[min_index])
+
+
 def compute_roi_statistics(
     rois: list[ROIStatistics],
     frame_height: int,
@@ -472,7 +504,6 @@ def compute_roi_statistics(
     # Resolves aspect correction and overlap image only when full statistics are needed. Lightweight mode skips these
     # because ellipse fitting and overlap filtering are not performed.
     if not lightweight:
-
         if aspect is not None:
             y_scale, x_scale = int(aspect * effective_diameter), effective_diameter
         else:
@@ -538,7 +569,7 @@ def compute_roi_statistics(
         rois[:] = [roi for roi, keep in zip(rois, keep_flags, strict=True) if keep]
 
         # Recomputes overlap masks after removing ROIs, since remaining ROIs may no longer overlap.
-        roi_wrappers = [_ROI(data=roi, crop=crop) for roi in rois]
+        roi_wrappers = [_ROI(data=roi, diameter=effective_diameter, crop=crop) for roi in rois]
         overlap_counts = _ROI.get_overlap_count_image(rois=roi_wrappers, height=frame_height, width=frame_width)
         for wrapper in roi_wrappers:
             wrapper.data.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)

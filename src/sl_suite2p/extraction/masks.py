@@ -24,6 +24,52 @@ _MAXIMUM_NEUROPIL_EXPANSION_ITERATIONS: int = 100
 _RADIUS_TO_NEIGHBORHOOD_SCALE: int = 5
 
 
+def _create_roi_pixels(
+    roi_statistics: list[ROIStatistics],
+    height: int,
+    width: int,
+    cell_probability_percentile: int,
+) -> NDArray[np.bool_]:
+    """Creates a binary mask identifying all pixels that belong to any detected ROI.
+
+    Args:
+        roi_statistics: The ROI statistics for each ROI to be processed.
+        height: The height of the imaged area in pixels.
+        width: The width of the imaged area in pixels.
+        cell_probability_percentile: The percentile threshold for considering a pixel as belonging to a cell ROI
+            object, based on the lambda weight associated with the pixel.
+
+    Returns:
+        The created binary mask image.
+    """
+    cell_likelihood_map = np.zeros((height, width), dtype=np.float32)
+
+    for roi in roi_statistics:
+        # Ensures that the cell likelihood is measured using positive numbers only for the percentile filter below.
+        cell_likelihood_map[roi.y_pixels, roi.x_pixels] = np.maximum(
+            cell_likelihood_map[roi.y_pixels, roi.x_pixels], roi.pixel_weights
+        )
+
+    # Computes the median cell radius to determine the local neighborhood size for percentile filtering.
+    median_radius = np.median(np.array([roi.radius for roi in roi_statistics]))
+
+    # Selects ROI pixels based on the specified percentile threshold if additional likelihood filtering is enabled.
+    if cell_probability_percentile > 0:
+        # Selects pixels as 'ROI' if their likelihood is greater than or equal to the specified percentile filter.
+        neighborhood_size = int(median_radius * _RADIUS_TO_NEIGHBORHOOD_SCALE)
+        cell_threshold_filter = percentile_filter(
+            input=cell_likelihood_map,
+            percentile=cell_probability_percentile,
+            size=neighborhood_size,
+        ).astype(np.float32)
+        pixel_mask = (cell_likelihood_map > 0.0) & (cell_likelihood_map >= cell_threshold_filter)
+    else:
+        # Selects all pixels with a weight greater than zero.
+        pixel_mask = cell_likelihood_map > 0.0
+
+    return pixel_mask
+
+
 def _create_roi_masks(
     roi_statistics: list[ROIStatistics],
     width: int,
@@ -169,52 +215,6 @@ def _create_neuropil_masks(
         neuropil_masks.append(np.flatnonzero(neuropil_mask).astype(np.int32))
 
     return tuple(neuropil_masks)
-
-
-def _create_roi_pixels(
-    roi_statistics: list[ROIStatistics],
-    height: int,
-    width: int,
-    cell_probability_percentile: int,
-) -> NDArray[np.bool_]:
-    """Creates a binary mask identifying all pixels that belong to any detected ROI.
-
-    Args:
-        roi_statistics: The ROI statistics for each ROI to be processed.
-        height: The height of the imaged area in pixels.
-        width: The width of the imaged area in pixels.
-        cell_probability_percentile: The percentile threshold for considering a pixel as belonging to a cell ROI
-            object, based on the lambda weight associated with the pixel.
-
-    Returns:
-        The created binary mask image.
-    """
-    cell_likelihood_map = np.zeros((height, width), dtype=np.float32)
-
-    for roi in roi_statistics:
-        # Ensures that the cell likelihood is measured using positive numbers only for the percentile filter below.
-        cell_likelihood_map[roi.y_pixels, roi.x_pixels] = np.maximum(
-            cell_likelihood_map[roi.y_pixels, roi.x_pixels], roi.pixel_weights
-        )
-
-    # Computes the median cell radius to determine the local neighborhood size for percentile filtering.
-    median_radius = np.median(np.array([roi.radius for roi in roi_statistics]))
-
-    # Selects ROI pixels based on the specified percentile threshold if additional likelihood filtering is enabled.
-    if cell_probability_percentile > 0:
-        # Selects pixels as 'ROI' if their likelihood is greater than or equal to the specified percentile filter.
-        neighborhood_size = int(median_radius * _RADIUS_TO_NEIGHBORHOOD_SCALE)
-        cell_threshold_filter = percentile_filter(
-            input=cell_likelihood_map,
-            percentile=cell_probability_percentile,
-            size=neighborhood_size,
-        ).astype(np.float32)
-        pixel_mask = (cell_likelihood_map > 0.0) & (cell_likelihood_map >= cell_threshold_filter)
-    else:
-        # Selects all pixels with a weight greater than zero.
-        pixel_mask = cell_likelihood_map > 0.0
-
-    return pixel_mask
 
 
 def create_masks(

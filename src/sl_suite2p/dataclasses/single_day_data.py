@@ -1,4 +1,4 @@
-"""Provides runtime data classes for the single-day (within-session) sl-suite2p pipeline."""
+"""Provides runtime data classes for the single-day (within-session) processing pipeline."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def _load_optional_array_field(
 
 @dataclass
 class IOData:
-    """Stores runtime data from the IO/binarization stage."""
+    """Stores the Input / Output runtime data for all stages of the single-day processing pipeline."""
 
     frame_height: int = 0
     """The height of each frame in pixels (Y dimension of the imaging field of view)."""
@@ -329,7 +329,7 @@ class RegistrationData:
 
 @dataclass
 class DetectionData:
-    """Stores runtime data from the detection/extraction stage."""
+    """Stores runtime data from the detection stage."""
 
     cell_diameter: int = 0
     """The estimated cell diameter in pixels, automatically computed from the spatial scale during detection."""
@@ -687,7 +687,7 @@ class ROIStatistics:
         data = np.load(file_path, allow_pickle=False)
 
         pixel_counts = data["pixel_counts"]
-        n_rois = len(pixel_counts)
+        roi_count = len(pixel_counts)
 
         # Computes split indices for variable-length arrays.
         pixel_splits = np.cumsum(pixel_counts)[:-1]
@@ -719,19 +719,19 @@ class ROIStatistics:
         merged_into_roi_index = data["merged_into_roi_index"]
 
         # Loads optional variable-length array fields.
-        soma_mask_list = _load_optional_array_field("soma_mask", n_rois, data, dtype=np.bool_)
-        overlap_mask_list = _load_optional_array_field("overlap_mask", n_rois, data, dtype=np.bool_)
-        neuropil_mask_list = _load_optional_array_field("neuropil_mask", n_rois, data, dtype=np.bool_)
-        raveled_pixels_list = _load_optional_array_field("raveled_pixels", n_rois, data, dtype=np.int32)
-        boundary_y_pixels_list = _load_optional_array_field("boundary_y_pixels", n_rois, data, dtype=np.float32)
-        boundary_x_pixels_list = _load_optional_array_field("boundary_x_pixels", n_rois, data, dtype=np.float32)
-        circle_y_pixels_list = _load_optional_array_field("circle_y_pixels", n_rois, data, dtype=np.float32)
-        circle_x_pixels_list = _load_optional_array_field("circle_x_pixels", n_rois, data, dtype=np.float32)
-        merged_roi_indices_list = _load_optional_array_field("merged_roi_indices", n_rois, data, dtype=np.int32)
+        soma_mask_list = _load_optional_array_field("soma_mask", roi_count, data, dtype=np.bool_)
+        overlap_mask_list = _load_optional_array_field("overlap_mask", roi_count, data, dtype=np.bool_)
+        neuropil_mask_list = _load_optional_array_field("neuropil_mask", roi_count, data, dtype=np.bool_)
+        raveled_pixels_list = _load_optional_array_field("raveled_pixels", roi_count, data, dtype=np.int32)
+        boundary_y_pixels_list = _load_optional_array_field("boundary_y_pixels", roi_count, data, dtype=np.float32)
+        boundary_x_pixels_list = _load_optional_array_field("boundary_x_pixels", roi_count, data, dtype=np.float32)
+        circle_y_pixels_list = _load_optional_array_field("circle_y_pixels", roi_count, data, dtype=np.float32)
+        circle_x_pixels_list = _load_optional_array_field("circle_x_pixels", roi_count, data, dtype=np.float32)
+        merged_roi_indices_list = _load_optional_array_field("merged_roi_indices", roi_count, data, dtype=np.int32)
 
         # Reconstructs ROIStatistics instances.
         roi_list = []
-        for i in range(n_rois):
+        for i in range(roi_count):
             # Converts merged_roi_indices array back to list[int] if present.
             merged_indices = merged_roi_indices_list[i]
             merged_indices_as_list = list(merged_indices.astype(int)) if merged_indices is not None else None
@@ -778,13 +778,7 @@ class ROIStatistics:
 
 @dataclass
 class ExtractionData:
-    """Stores runtime data from the signal extraction and classification stages.
-
-    This dataclass stores ROI statistics, fluorescence traces, deconvolved spikes, and cell classification results.
-    When both channels are functional (independent ROI detection on each channel), channel 2 data is stored in the
-    corresponding _channel_2 fields. The cell_colocalization field stores results indicating whether channel 1 ROIs
-    are also present in channel 2.
-    """
+    """Stores runtime data from the extraction stage."""
 
     # Channel 1 extraction data.
     roi_statistics: list[ROIStatistics] | None = None
@@ -921,7 +915,12 @@ class ExtractionData:
             )
 
     def load_arrays(self, output_path: Path) -> None:
-        """Loads extraction arrays from .npy files and ROI statistics from .npz files into this instance.
+        """Loads ROI statistics from disk.
+
+        This method loads only ROI statistics, which are the only extraction data needed during pipeline processing
+        (specifically for multi-day cell tracking). Fluorescence traces, classification results, and colocalization
+        data are not loaded because they are never needed during pipeline execution and consume significant memory.
+        Use load_results() to load all result arrays when needed for analysis or visualization.
 
         Args:
             output_path: The directory containing the extraction data files.
@@ -931,7 +930,23 @@ class ExtractionData:
         if self.roi_statistics is None and roi_stats_path.exists():
             self.roi_statistics = ROIStatistics.load_list(roi_stats_path)
 
-        # Channel 1 trace arrays.
+        # Channel 2 ROI statistics.
+        roi_stats_channel_2_path = output_path / "roi_statistics_channel_2.npz"
+        if self.roi_statistics_channel_2 is None and roi_stats_channel_2_path.exists():
+            self.roi_statistics_channel_2 = ROIStatistics.load_list(roi_stats_channel_2_path)
+
+    def load_results(self, output_path: Path) -> None:
+        """Loads all extraction result arrays from disk.
+
+        This method loads fluorescence traces, classification results, and colocalization data. These arrays are
+        not loaded by load_arrays() because they are never needed during pipeline processing (they are created
+        and saved but never re-loaded) and they consume significant memory. Call this method when result data
+        is needed for analysis or visualization.
+
+        Args:
+            output_path: The directory containing the result .npy files.
+        """
+        # Channel 1 traces.
         cell_fluorescence_path = output_path / "cell_fluorescence.npy"
         if self.cell_fluorescence is None and cell_fluorescence_path.exists():
             self.cell_fluorescence = np.load(cell_fluorescence_path, allow_pickle=False).astype(np.float32)
@@ -948,16 +963,12 @@ class ExtractionData:
         if self.spikes is None and spikes_path.exists():
             self.spikes = np.load(spikes_path, allow_pickle=False).astype(np.float32)
 
+        # Channel 1 classification.
         cell_classification_path = output_path / "cell_classification.npy"
         if self.cell_classification is None and cell_classification_path.exists():
             self.cell_classification = np.load(cell_classification_path, allow_pickle=False).astype(np.float32)
 
-        # Channel 2 ROI statistics.
-        roi_stats_channel_2_path = output_path / "roi_statistics_channel_2.npz"
-        if self.roi_statistics_channel_2 is None and roi_stats_channel_2_path.exists():
-            self.roi_statistics_channel_2 = ROIStatistics.load_list(roi_stats_channel_2_path)
-
-        # Channel 2 trace arrays.
+        # Channel 2 traces.
         cell_fluorescence_channel_2_path = output_path / "cell_fluorescence_channel_2.npy"
         if self.cell_fluorescence_channel_2 is None and cell_fluorescence_channel_2_path.exists():
             self.cell_fluorescence_channel_2 = np.load(cell_fluorescence_channel_2_path, allow_pickle=False).astype(
@@ -980,6 +991,7 @@ class ExtractionData:
         if self.spikes_channel_2 is None and spikes_channel_2_path.exists():
             self.spikes_channel_2 = np.load(spikes_channel_2_path, allow_pickle=False).astype(np.float32)
 
+        # Channel 2 classification.
         cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
             self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, allow_pickle=False).astype(
@@ -999,109 +1011,14 @@ class ExtractionData:
 
 
 @dataclass
-class CombinedData:
-    """Stores combined multi-plane detection and extraction data.
-
-    This class provides a container for the results of combining processed data from multiple imaging planes
-    into a unified dataset. It holds DetectionData (combined images) and ExtractionData (combined ROI statistics,
-    fluorescence traces, and classification results) along with metadata about the combined field of view.
-
-    Notes:
-        Combined data is saved to the root suite2p directory alongside configuration.yaml and
-        acquisition_parameters.yaml. The same filenames are used as per-plane data, but stored at the root
-        level rather than in plane subdirectories.
-    """
-
-    detection: DetectionData
-    """The combined detection data including mean images, correlation maps, and maximum projections for both
-    channels."""
-
-    extraction: ExtractionData
-    """The combined extraction data including ROI statistics, fluorescence traces, and classification results for
-    both channels."""
-
-    plane_count: int = 0
-    """The number of planes that were combined."""
-
-    combined_height: int = 0
-    """The height of the combined field of view in pixels."""
-
-    combined_width: int = 0
-    """The width of the combined field of view in pixels."""
-
-    def save(self, root_path: Path) -> None:
-        """Saves combined data to the root suite2p directory.
-
-        This method saves all combined detection and extraction arrays to the root suite2p directory. Metadata
-        (plane count, dimensions) is saved to combined_metadata.npz.
-
-        Args:
-            root_path: The root suite2p output directory containing configuration.yaml.
-        """
-        ensure_directory_exists(root_path)
-
-        # Saves metadata using appropriate unsigned types for counts and dimensions.
-        np.savez(
-            root_path / "combined_metadata.npz",
-            allow_pickle=False,
-            plane_count=np.array([self.plane_count], dtype=np.uint8),
-            combined_height=np.array([self.combined_height], dtype=np.uint32),
-            combined_width=np.array([self.combined_width], dtype=np.uint32),
-        )
-
-        # Saves combined detection and extraction arrays using existing methods.
-        self.detection.save_arrays(root_path)
-        self.extraction.save_arrays(root_path)
-
-    @classmethod
-    def load(cls, root_path: Path) -> CombinedData:
-        """Loads combined data from the root suite2p directory.
-
-        Args:
-            root_path: The root suite2p output directory containing combined_metadata.npz.
-
-        Returns:
-            A CombinedData instance with all combined arrays loaded.
-
-        Raises:
-            FileNotFoundError: If the combined metadata file does not exist.
-        """
-        metadata_path = root_path / "combined_metadata.npz"
-        if not metadata_path.exists():
-            message = (
-                f"Unable to load combined data. The combined metadata file does not exist at the specified path: "
-                f"{metadata_path}."
-            )
-            console.error(message=message, error=FileNotFoundError)
-
-        # Loads metadata.
-        metadata = np.load(metadata_path, allow_pickle=False)
-        plane_count = int(metadata["plane_count"][0])
-        combined_height = int(metadata["combined_height"][0])
-        combined_width = int(metadata["combined_width"][0])
-
-        # Loads detection and extraction arrays using existing methods.
-        detection = DetectionData()
-        detection.load_arrays(root_path)
-
-        extraction = ExtractionData()
-        extraction.load_arrays(root_path)
-
-        return cls(
-            detection=detection,
-            extraction=extraction,
-            plane_count=plane_count,
-            combined_height=combined_height,
-            combined_width=combined_width,
-        )
-
-
-@dataclass
 class TimingData:
-    """Stores pipeline timing information.
+    """Stores pipeline timing and version data.
 
     All time durations are stored as integers representing seconds.
     """
+
+    binarization_time: int = 0
+    """The TIFF to binary conversion time in seconds."""
 
     registration_time: int = 0
     """The registration step time in seconds."""
@@ -1151,16 +1068,7 @@ class TimingData:
 
 @dataclass
 class SingleDayRuntimeData(YamlConfig):
-    """Aggregates all runtime data for a single plane.
-
-    This class combines IO, registration, detection, and timing data into a single structure.
-
-    Notes:
-        NumPy arrays (images, registration offsets) are saved as separate .npy files in the output directory and
-        loaded into memory during initialization via __post_init__. Path fields are converted to strings when saving
-        to YAML and restored to Path objects when loading. When save() is called, all arrays are written to .npy files
-        and their fields are set to None in the YAML representation.
-    """
+    """Aggregates all runtime data for a single plane."""
 
     output_path: Path | None = None
     """The path to the directory where runtime data and .npy files are stored."""
@@ -1242,3 +1150,210 @@ class SingleDayRuntimeData(YamlConfig):
         """
         file_path = output_path / "runtime_data.yaml"
         return cls.from_yaml(file_path=file_path)
+
+    def load_results(self) -> None:
+        """Loads all extraction result arrays for this plane.
+
+        This method loads fluorescence traces, classification results, and colocalization data. These arrays
+        are not loaded automatically because they are never needed during pipeline processing and consume
+        significant memory. Call this method when result data is needed for analysis or visualization.
+        """
+        if self.output_path is not None:
+            self.extraction.load_results(self.output_path)
+
+
+@dataclass
+class CombinedData:
+    """Stores combined multi-plane detection and extraction data.
+
+    This class provides a container for the results of combining processed data from multiple imaging planes
+    into a unified dataset. It holds DetectionData (combined images) and ExtractionData (combined ROI statistics,
+    fluorescence traces, and classification results) along with metadata about the combined field of view.
+
+    Notes:
+        Combined data is saved to the root suite2p directory alongside configuration.yaml and
+        acquisition_parameters.yaml. The same filenames are used as per-plane data, but stored at the root
+        level rather than in plane subdirectories.
+    """
+
+    detection: DetectionData
+    """The combined detection data including mean images, correlation maps, and maximum projections for both
+    channels."""
+
+    extraction: ExtractionData
+    """The combined extraction data including ROI statistics, fluorescence traces, and classification results for
+    both channels."""
+
+    plane_count: int = 0
+    """The number of planes that were combined."""
+
+    combined_height: int = 0
+    """The height of the combined field of view in pixels."""
+
+    combined_width: int = 0
+    """The width of the combined field of view in pixels."""
+
+    tau: float = 0.0
+    """The timescale of the calcium indicator sensor in seconds, cached from the single-day configuration for use by
+    the multi-day extraction pipeline."""
+
+    sampling_rate: float = 0.0
+    """The per-plane sampling rate in Hertz, cached from the single-day runtime for use by the multi-day extraction
+    pipeline."""
+
+    plane_heights: NDArray[np.uint16] = field(default_factory=lambda: np.array([], dtype=np.uint16))
+    """Per-plane frame heights in pixels."""
+
+    plane_widths: NDArray[np.uint16] = field(default_factory=lambda: np.array([], dtype=np.uint16))
+    """Per-plane frame widths in pixels."""
+
+    plane_y_offsets: NDArray[np.int32] = field(default_factory=lambda: np.array([], dtype=np.int32))
+    """Per-plane y-axis displacement from compute_plane_offsets(), used to arrange planes in the combined view."""
+
+    plane_x_offsets: NDArray[np.int32] = field(default_factory=lambda: np.array([], dtype=np.int32))
+    """Per-plane x-axis displacement from compute_plane_offsets(), used to arrange planes in the combined view."""
+
+    registered_binary_paths: tuple[Path, ...] = ()
+    """Channel 1 registered binary file paths, one per plane."""
+
+    registered_binary_paths_channel_2: tuple[Path, ...] | None = None
+    """Channel 2 registered binary file paths, one per plane. None when the recording is single-channel."""
+
+    def save(self, root_path: Path) -> None:
+        """Saves combined data to the root suite2p directory.
+
+        This method saves all combined detection and extraction arrays to the root suite2p directory. Metadata
+        (plane count, dimensions) is saved to combined_metadata.npz.
+
+        Args:
+            root_path: The root suite2p output directory containing configuration.yaml.
+        """
+        ensure_directory_exists(root_path)
+
+        # Saves metadata using appropriate unsigned types for counts and dimensions. Binary paths are stored as
+        # strings relative to root_path to allow relocating processed data without breaking path references.
+        relative_binary_paths = np.array(
+            [str(p.relative_to(root_path)) for p in self.registered_binary_paths], dtype=str
+        )
+
+        save_kwargs: dict[
+            str,
+            NDArray[np.uint8]
+            | NDArray[np.uint16]
+            | NDArray[np.uint32]
+            | NDArray[np.int32]
+            | NDArray[np.float32]
+            | NDArray[np.str_],
+        ] = {
+            "plane_count": np.array([self.plane_count], dtype=np.uint8),
+            "combined_height": np.array([self.combined_height], dtype=np.uint32),
+            "combined_width": np.array([self.combined_width], dtype=np.uint32),
+            "tau": np.array([self.tau], dtype=np.float32),
+            "sampling_rate": np.array([self.sampling_rate], dtype=np.float32),
+            "plane_heights": self.plane_heights,
+            "plane_widths": self.plane_widths,
+            "plane_y_offsets": self.plane_y_offsets,
+            "plane_x_offsets": self.plane_x_offsets,
+            "registered_binary_paths": relative_binary_paths,
+        }
+
+        if self.registered_binary_paths_channel_2 is not None:
+            save_kwargs["registered_binary_paths_channel_2"] = np.array(
+                [str(p.relative_to(root_path)) for p in self.registered_binary_paths_channel_2], dtype=str
+            )
+
+        np.savez(root_path / "combined_metadata.npz", allow_pickle=False, **save_kwargs)
+
+        # Saves combined detection and extraction arrays using existing methods.
+        self.detection.save_arrays(root_path)
+        self.extraction.save_arrays(root_path)
+
+    @classmethod
+    def load(cls, root_path: Path) -> CombinedData:
+        """Loads combined data from the root suite2p directory.
+
+        Args:
+            root_path: The root suite2p output directory containing combined_metadata.npz.
+
+        Returns:
+            A CombinedData instance with all combined arrays loaded.
+
+        Raises:
+            FileNotFoundError: If the combined metadata file does not exist.
+        """
+        metadata_path = root_path / "combined_metadata.npz"
+        if not metadata_path.exists():
+            message = (
+                f"Unable to load combined data. The combined metadata file does not exist at the specified path: "
+                f"{metadata_path}."
+            )
+            console.error(message=message, error=FileNotFoundError)
+
+        # Loads metadata.
+        metadata = np.load(metadata_path, allow_pickle=False)
+        plane_count = int(metadata["plane_count"][0])
+        combined_height = int(metadata["combined_height"][0])
+        combined_width = int(metadata["combined_width"][0])
+
+        # Loads tau and sampling_rate.
+        tau = float(metadata["tau"][0])
+        sampling_rate = float(metadata["sampling_rate"][0])
+
+        # Loads per-plane geometry and binary paths. These keys may be absent in metadata files saved before these
+        # fields were added, so defaults are used for backward compatibility.
+        plane_heights: NDArray[np.uint16] = np.array([], dtype=np.uint16)
+        plane_widths: NDArray[np.uint16] = np.array([], dtype=np.uint16)
+        plane_y_offsets: NDArray[np.int32] = np.array([], dtype=np.int32)
+        plane_x_offsets: NDArray[np.int32] = np.array([], dtype=np.int32)
+        registered_binary_paths: tuple[Path, ...] = ()
+        registered_binary_paths_channel_2: tuple[Path, ...] | None = None
+
+        if "plane_heights" in metadata:
+            plane_heights = metadata["plane_heights"].astype(np.uint16)
+            plane_widths = metadata["plane_widths"].astype(np.uint16)
+            plane_y_offsets = metadata["plane_y_offsets"].astype(np.int32)
+            plane_x_offsets = metadata["plane_x_offsets"].astype(np.int32)
+
+        if "registered_binary_paths" in metadata:
+            registered_binary_paths = tuple(root_path / str(p) for p in metadata["registered_binary_paths"])
+
+        if "registered_binary_paths_channel_2" in metadata:
+            registered_binary_paths_channel_2 = tuple(
+                root_path / str(p) for p in metadata["registered_binary_paths_channel_2"]
+            )
+
+        # Loads detection and extraction arrays using existing methods.
+        detection = DetectionData()
+        detection.load_arrays(root_path)
+
+        extraction = ExtractionData()
+        extraction.load_arrays(root_path)
+
+        return cls(
+            detection=detection,
+            extraction=extraction,
+            plane_count=plane_count,
+            combined_height=combined_height,
+            combined_width=combined_width,
+            tau=tau,
+            sampling_rate=sampling_rate,
+            plane_heights=plane_heights,
+            plane_widths=plane_widths,
+            plane_y_offsets=plane_y_offsets,
+            plane_x_offsets=plane_x_offsets,
+            registered_binary_paths=registered_binary_paths,
+            registered_binary_paths_channel_2=registered_binary_paths_channel_2,
+        )
+
+    def load_results(self, root_path: Path) -> None:
+        """Loads all extraction result arrays for analysis.
+
+        This method loads fluorescence traces, classification results, and colocalization data. These arrays
+        are not loaded by the load() classmethod because they are never needed during pipeline processing
+        and consume significant memory. Call this method when result data is needed for post-processing
+        analysis or visualization.
+
+        Args:
+            root_path: The root suite2p output directory containing the result .npy files.
+        """
+        self.extraction.load_results(root_path)
