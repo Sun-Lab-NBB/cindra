@@ -137,7 +137,7 @@ def load_data(parent, keys, trainfiles):
             try:
                 iscells = np.load(fname)
                 ncells = iscells.shape[0]
-            except (ValueError, OSError, RuntimeError, TypeError, NameError):
+            except ValueError, OSError, RuntimeError, TypeError, NameError:
                 console.echo(message=f"  {fname}: not a numpy array of booleans", level=LogLevel.WARNING)
                 badfile = True
             if not badfile:
@@ -147,7 +147,7 @@ def load_data(parent, keys, trainfiles):
                     stat = np.load(basename + "/stat.npy", allow_pickle=True)
                     ypix = stat[0]["y_pixels"]
                     lstat = len(stat)
-                except (IndexError, KeyError, OSError, RuntimeError, TypeError, NameError):
+                except IndexError, KeyError, OSError, RuntimeError, TypeError, NameError:
                     console.echo(message=f"  {basename}: incorrect or missing stat.npy file", level=LogLevel.WARNING)
                 if lstat != ncells:
                     console.echo(
@@ -217,7 +217,7 @@ def save(parent, train_stats, train_iscell, keys):
         try:
             save_model(name, train_stats, train_iscell, keys)
             saved = True
-        except (OSError, RuntimeError, TypeError, NameError, FileNotFoundError):
+        except OSError, RuntimeError, TypeError, NameError, FileNotFoundError:
             console.echo(message="Failed to save classifier: incorrect filename.", level=LogLevel.ERROR)
     return name, saved
 
@@ -230,7 +230,7 @@ def save_list(parent):
                 for f in parent.trainfiles:
                     fid.write(f)
                     fid.write("\n")
-        except (ValueError, OSError, RuntimeError, TypeError, NameError, FileNotFoundError):
+        except ValueError, OSError, RuntimeError, TypeError, NameError, FileNotFoundError:
             console.echo(message="Failed to save list: incorrect filename.", level=LogLevel.ERROR)
 
 
@@ -252,7 +252,7 @@ def disable(parent):
 ### custom QDialog which makes a list of items you can include/exclude
 class ListChooser(QDialog):
     def __init__(self, Text, parent=None):
-        super(ListChooser, self).__init__(parent)
+        super().__init__(parent)
         self.setGeometry(300, 300, 500, 320)
         self.setWindowTitle(Text)
         self.win = QWidget(self)
@@ -298,7 +298,7 @@ class ListChooser(QDialog):
                         self.list.addItem(name[0])
                 if badfile:
                     QMessageBox.information(self, "iscell.npy should be 0/1")
-            except (OSError, RuntimeError, TypeError, NameError):
+            except OSError, RuntimeError, TypeError, NameError:
                 QMessageBox.information(self, "iscell.npy should be 0/1")
         else:
             QMessageBox.information(self, "iscell.npy should be 0/1")
@@ -313,7 +313,7 @@ class ListChooser(QDialog):
                 files = files.splitlines()
                 for f in files:
                     self.list.addItem(f)
-            except (OSError, RuntimeError, TypeError, NameError):
+            except OSError, RuntimeError, TypeError, NameError:
                 QMessageBox.information(self, "not a text file")
                 console.echo(message="Failed to load text file: invalid file format.", level=LogLevel.ERROR)
 

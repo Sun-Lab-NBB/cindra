@@ -211,7 +211,7 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
         console.error(message=message, error=ValueError)
 
     # Combines all planes into a unified dataset.
-    combined_data = combine_planes(contexts=contexts)
+    combined_data = combine_planes(plane_contexts=contexts)
 
     # Saves the combined data to the root suite2p directory.
     combined_data.save(root_path / "suite2p")

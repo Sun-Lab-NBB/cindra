@@ -5,9 +5,12 @@ import sys
 from importlib_metadata import metadata as _metadata
 
 _package_metadata = _metadata("sl-suite2p")
+
+# The sl-suite2p library version string, resolved from package metadata at import time.
 if _package_metadata is None:
     version: str = "unknown"
 else:
     version = _package_metadata["version"]
 
+# The Python interpreter version string in major.minor.micro format.
 python_version: str = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"

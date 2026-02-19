@@ -34,6 +34,175 @@ _MAXIMUM_HEIGHT_FOR_LARGE_SAMPLE: int = 700
 _MAXIMUM_WIDTH_FOR_LARGE_SAMPLE: int = 700
 
 
+def compute_pc_metrics(context: RuntimeContext) -> None:
+    """Computes registration quality metrics using principal component analysis.
+
+    Evaluates registration quality by computing principal components of the registered frames and measuring how well
+    frames at opposite ends of each PC align. If registration is successful, PC-based groupings should show minimal
+    spatial displacement. Large displacements indicate residual motion or registration artifacts.
+
+    Notes:
+        This function processes frames from a single processing plane at a time. For multi-plane recordings, call this
+        function separately for each plane's RuntimeContext.
+
+        The function reads frames from the registered binary file, subsamples them to reduce memory overhead, and
+        computes PCA-based metrics. The subsampling selects evenly-spaced frames across the recording to maintain
+        statistical representativeness while limiting memory usage.
+
+        The computed metrics are stored in context.runtime.registration. The principal_component_extreme_images field
+        contains mean images from low and high PC projections. The principal_component_projections field contains PC
+        projection values for each sampled frame. The principal_component_shift_metrics field contains registration
+        shift metrics computed by aligning PC extremes.
+
+    Args:
+        context: The runtime context containing pipeline configuration and runtime data for the current plane. Modified
+            in-place to store the computed metrics.
+
+    Raises:
+        FileNotFoundError: If the registered binary file does not exist at the specified path.
+        ValueError: If the registered binary path is not set in the runtime context.
+    """
+    # Extracts IO parameters from runtime context.
+    registered_binary_path = context.runtime.io.registered_binary_path
+    if registered_binary_path is None:
+        message = (
+            "Unable to compute the registration quality metrics. The input RuntimeContext instance does not contain "
+            "the path to the plane's registered binary file."
+        )
+        console.error(message=message, error=ValueError)
+
+    if not registered_binary_path.exists():
+        message = (
+            f"Unable to compute the registration quality metrics. The registered binary file does not exist at the "
+            f"specified path: {registered_binary_path}."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    frame_height = context.runtime.io.frame_height
+    frame_width = context.runtime.io.frame_width
+    frame_count = context.runtime.io.frame_count
+    plane_index = context.runtime.io.plane_index
+
+    # Extracts valid pixel ranges from registration data.
+    valid_y_range = context.runtime.registration.valid_y_range
+    valid_x_range = context.runtime.registration.valid_x_range
+
+    # Extracts registration configuration parameters.
+    num_components = context.configuration.registration.registration_metric_principal_components
+    spatial_smoothing_sigma = context.configuration.registration.spatial_smoothing_sigma
+    maximum_shift_fraction = context.configuration.registration.maximum_shift_fraction
+    parallel_workers = context.configuration.runtime.parallel_workers
+
+    # Extracts non-rigid registration parameters.
+    nonrigid_enabled = context.configuration.non_rigid_registration.enabled
+    block_size_list = context.configuration.non_rigid_registration.block_size
+    block_size = (block_size_list[0], block_size_list[1])
+    snr_threshold = context.configuration.non_rigid_registration.signal_to_noise_threshold
+    maximum_nonrigid_shift = context.configuration.non_rigid_registration.maximum_block_shift
+
+    # Extracts one-photon registration parameters.
+    one_photon_mode = context.configuration.one_photon_registration.enabled
+    pre_smoothing_sigma = context.configuration.one_photon_registration.pre_smoothing_sigma
+    spatial_highpass_window = context.configuration.one_photon_registration.spatial_highpass_window
+    edge_taper_pixels = context.configuration.one_photon_registration.edge_taper_pixels
+
+    # Extracts registration state from runtime data.
+    bidirectional_phase_offset = context.runtime.registration.bidirectional_phase_offset
+    bidirectional_corrected = context.runtime.registration.bidirectional_phase_corrected
+
+    # Computes edge taper slope based on imaging mode.
+    edge_taper_slope = edge_taper_pixels if one_photon_mode else 3.0 * spatial_smoothing_sigma
+
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+
+    console.echo(
+        message=(
+            f"Computing {num_components} Principal Components (PCs) for plane {plane_index} to assess registration "
+            f"quality..."
+        ),
+        level=LogLevel.INFO,
+    )
+    timer.reset()
+
+    # Determines the number of frames to sample based on recording dimensions. Uses fewer samples for larger
+    # recordings or recordings with many frames to manage memory usage.
+    use_small_sample = (
+        frame_count < _MAXIMUM_SAMPLE_COUNT
+        or frame_height > _MAXIMUM_HEIGHT_FOR_LARGE_SAMPLE
+        or frame_width > _MAXIMUM_WIDTH_FOR_LARGE_SAMPLE
+    )
+    sample_count = min(
+        _MINIMUM_SAMPLE_COUNT if use_small_sample else _MAXIMUM_SAMPLE_COUNT,
+        frame_count,
+    )
+
+    # Reads and subsamples frames from the registered binary file.
+    with BinaryFile(height=frame_height, width=frame_width, file_path=registered_binary_path) as binary_file:
+        frames = binary_file.subsample_movie(
+            sample_count=sample_count,
+            y_range=(valid_y_range[0], valid_y_range[1]),
+            x_range=(valid_x_range[0], valid_x_range[1]),
+        )
+
+    # Determines the extreme images for each requested PC and averages them into representative low / high projection
+    # images.
+    num_extreme_frames = min(300, frames.shape[0] // 2)
+    pc_low, pc_high, principal_component_projections = _compute_pc_extremes(
+        frames=frames,
+        num_extreme_frames=num_extreme_frames,
+        num_components=num_components,
+    )
+
+    console.echo(
+        message=f"Plane {plane_index} Principal Component images: computed. Time taken: {timer.elapsed} seconds.",
+        level=LogLevel.SUCCESS,
+    )
+
+    # Stores PC extreme images in the runtime context. Stacks low and high projections along axis 0.
+    principal_component_extreme_images = np.stack((pc_low, pc_high), axis=0)
+
+    console.echo(
+        message=(
+            f"Registering top and bottom projection images of each Principal Component for plane {plane_index} to "
+            f"each-other..."
+        ),
+        level=LogLevel.INFO,
+    )
+    timer.reset()
+
+    # Computes registration metrics by aligning PC extremes.
+    principal_component_shift_metrics = _register_pc_extremes(
+        pc_low=pc_low,
+        pc_high=pc_high,
+        spatial_highpass_window=spatial_highpass_window,
+        pre_smoothing_window=int(pre_smoothing_sigma) if pre_smoothing_sigma > 0 else None,
+        bidirectional_corrected=bidirectional_corrected,
+        smoothing_sigma=spatial_smoothing_sigma,
+        block_size=block_size,
+        maximum_shift_fraction=maximum_shift_fraction,
+        maximum_nonrigid_shift=maximum_nonrigid_shift,
+        one_photon_mode=one_photon_mode,
+        snr_threshold=snr_threshold,
+        nonrigid_enabled=nonrigid_enabled,
+        bidirectional_phase_offset=bidirectional_phase_offset,
+        edge_taper_slope=edge_taper_slope,
+        workers=parallel_workers,
+    )
+
+    console.echo(
+        message=(
+            f"Plane {plane_index} Principal Component projection image registration: complete. Time taken: "
+            f"{timer.elapsed} seconds."
+        ),
+        level=LogLevel.SUCCESS,
+    )
+
+    # Stores the computed metrics in the runtime context.
+    context.runtime.registration.principal_component_extreme_images = principal_component_extreme_images
+    context.runtime.registration.principal_component_projections = principal_component_projections
+    context.runtime.registration.principal_component_shift_metrics = principal_component_shift_metrics
+
+
 def _compute_pc_extremes(
     frames: NDArray[np.float32],
     num_extreme_frames: int,
@@ -236,172 +405,3 @@ def _register_pc_extremes(
             metrics[component_index, 2] = float(np.amax(nonrigid_magnitudes))
 
     return metrics
-
-
-def compute_pc_metrics(context: RuntimeContext) -> None:
-    """Computes registration quality metrics using principal component analysis.
-
-    Evaluates registration quality by computing principal components of the registered frames and measuring how well
-    frames at opposite ends of each PC align. If registration is successful, PC-based groupings should show minimal
-    spatial displacement. Large displacements indicate residual motion or registration artifacts.
-
-    Notes:
-        This function processes frames from a single processing plane at a time. For multi-plane recordings, call this
-        function separately for each plane's RuntimeContext.
-
-        The function reads frames from the registered binary file, subsamples them to reduce memory overhead, and
-        computes PCA-based metrics. The subsampling selects evenly-spaced frames across the recording to maintain
-        statistical representativeness while limiting memory usage.
-
-        The computed metrics are stored in context.runtime.registration. The principal_component_extreme_images field
-        contains mean images from low and high PC projections. The principal_component_projections field contains PC
-        projection values for each sampled frame. The principal_component_shift_metrics field contains registration
-        shift metrics computed by aligning PC extremes.
-
-    Args:
-        context: The runtime context containing pipeline configuration and runtime data for the current plane. Modified
-            in-place to store the computed metrics.
-
-    Raises:
-        FileNotFoundError: If the registered binary file does not exist at the specified path.
-        ValueError: If the registered binary path is not set in the runtime context.
-    """
-    # Extracts IO parameters from runtime context.
-    registered_binary_path = context.runtime.io.registered_binary_path
-    if registered_binary_path is None:
-        message = (
-            "Unable to compute the registration quality metrics. The input RuntimeContext instance does not contain "
-            "the path to the plane's registered binary file."
-        )
-        console.error(message=message, error=ValueError)
-
-    if not registered_binary_path.exists():
-        message = (
-            f"Unable to compute the registration quality metrics. The registered binary file does not exist at the "
-            f"specified path: {registered_binary_path}."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    frame_height = context.runtime.io.frame_height
-    frame_width = context.runtime.io.frame_width
-    frame_count = context.runtime.io.frame_count
-    plane_index = context.runtime.io.plane_index
-
-    # Extracts valid pixel ranges from registration data.
-    valid_y_range = context.runtime.registration.valid_y_range
-    valid_x_range = context.runtime.registration.valid_x_range
-
-    # Extracts registration configuration parameters.
-    num_components = context.configuration.registration.registration_metric_principal_components
-    spatial_smoothing_sigma = context.configuration.registration.spatial_smoothing_sigma
-    maximum_shift_fraction = context.configuration.registration.maximum_shift_fraction
-    parallel_workers = context.configuration.runtime.parallel_workers
-
-    # Extracts non-rigid registration parameters.
-    nonrigid_enabled = context.configuration.non_rigid_registration.enabled
-    block_size_list = context.configuration.non_rigid_registration.block_size
-    block_size = (block_size_list[0], block_size_list[1])
-    snr_threshold = context.configuration.non_rigid_registration.signal_to_noise_threshold
-    maximum_nonrigid_shift = context.configuration.non_rigid_registration.maximum_block_shift
-
-    # Extracts one-photon registration parameters.
-    one_photon_mode = context.configuration.one_photon_registration.enabled
-    pre_smoothing_sigma = context.configuration.one_photon_registration.pre_smoothing_sigma
-    spatial_highpass_window = context.configuration.one_photon_registration.spatial_highpass_window
-    edge_taper_pixels = context.configuration.one_photon_registration.edge_taper_pixels
-
-    # Extracts registration state from runtime data.
-    bidirectional_phase_offset = context.runtime.registration.bidirectional_phase_offset
-    bidirectional_corrected = context.runtime.registration.bidirectional_phase_corrected
-
-    # Computes edge taper slope based on imaging mode.
-    edge_taper_slope = edge_taper_pixels if one_photon_mode else 3.0 * spatial_smoothing_sigma
-
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-
-    console.echo(
-        message=(
-            f"Computing {num_components} Principal Components (PCs) for plane {plane_index} to assess registration "
-            f"quality..."
-        ),
-        level=LogLevel.INFO,
-    )
-    timer.reset()
-
-    # Determines the number of frames to sample based on recording dimensions. Uses fewer samples for larger
-    # recordings or recordings with many frames to manage memory usage.
-    use_small_sample = (
-        frame_count < _MAXIMUM_SAMPLE_COUNT
-        or frame_height > _MAXIMUM_HEIGHT_FOR_LARGE_SAMPLE
-        or frame_width > _MAXIMUM_WIDTH_FOR_LARGE_SAMPLE
-    )
-    sample_count = min(
-        _MINIMUM_SAMPLE_COUNT if use_small_sample else _MAXIMUM_SAMPLE_COUNT,
-        frame_count,
-    )
-
-    # Reads and subsamples frames from the registered binary file.
-    with BinaryFile(height=frame_height, width=frame_width, file_path=registered_binary_path) as binary_file:
-        frames = binary_file.subsample_movie(
-            sample_count=sample_count,
-            y_range=(valid_y_range[0], valid_y_range[1]),
-            x_range=(valid_x_range[0], valid_x_range[1]),
-        )
-
-    # Determines the extreme images for each requested PC and averages them into representative low / high projection
-    # images.
-    num_extreme_frames = min(300, frames.shape[0] // 2)
-    pc_low, pc_high, principal_component_projections = _compute_pc_extremes(
-        frames=frames,
-        num_extreme_frames=num_extreme_frames,
-        num_components=num_components,
-    )
-
-    console.echo(
-        message=f"Plane {plane_index} Principal Component images: computed. Time taken: {timer.elapsed} seconds.",
-        level=LogLevel.SUCCESS,
-    )
-
-    # Stores PC extreme images in the runtime context. Stacks low and high projections along axis 0.
-    principal_component_extreme_images = np.stack((pc_low, pc_high), axis=0)
-
-    console.echo(
-        message=(
-            f"Registering top and bottom projection images of each Principal Component for plane {plane_index} to "
-            f"each-other..."
-        ),
-        level=LogLevel.INFO,
-    )
-    timer.reset()
-
-    # Computes registration metrics by aligning PC extremes.
-    principal_component_shift_metrics = _register_pc_extremes(
-        pc_low=pc_low,
-        pc_high=pc_high,
-        spatial_highpass_window=spatial_highpass_window,
-        pre_smoothing_window=int(pre_smoothing_sigma) if pre_smoothing_sigma > 0 else None,
-        bidirectional_corrected=bidirectional_corrected,
-        smoothing_sigma=spatial_smoothing_sigma,
-        block_size=block_size,
-        maximum_shift_fraction=maximum_shift_fraction,
-        maximum_nonrigid_shift=maximum_nonrigid_shift,
-        one_photon_mode=one_photon_mode,
-        snr_threshold=snr_threshold,
-        nonrigid_enabled=nonrigid_enabled,
-        bidirectional_phase_offset=bidirectional_phase_offset,
-        edge_taper_slope=edge_taper_slope,
-        workers=parallel_workers,
-    )
-
-    console.echo(
-        message=(
-            f"Plane {plane_index} Principal Component projection image registration: complete. Time taken: "
-            f"{timer.elapsed} seconds."
-        ),
-        level=LogLevel.SUCCESS,
-    )
-
-    # Stores the computed metrics in the runtime context.
-    context.runtime.registration.principal_component_extreme_images = principal_component_extreme_images
-    context.runtime.registration.principal_component_projections = principal_component_projections
-    context.runtime.registration.principal_component_shift_metrics = principal_component_shift_metrics

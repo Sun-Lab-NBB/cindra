@@ -33,21 +33,6 @@ _GRID_NODE_COUNT: int = 100
 _LOG_EPSILON: float = 1e-6
 
 
-def _resolve_classifier_path(custom_classifier_path: Path | None = None) -> Path:
-    """Resolves the classifier file path based on configuration settings.
-
-    Args:
-        custom_classifier_path: An optional path to a custom classifier file. If provided, this path is returned.
-            Otherwise, the path to the built-in classifier file bundled with the sl-suite2p release is returned.
-
-    Returns:
-        The resolved path to the classifier .npz file.
-    """
-    if custom_classifier_path is not None:
-        return custom_classifier_path
-    return _BUILTIN_CLASSIFIER_PATH.resolve()
-
-
 class Classifier:
     """Provides logistic regression-based classification for identifying cell ROIs.
 
@@ -319,7 +304,7 @@ class Classifier:
         Raises:
             ValueError: If the input roi_statistics list is empty.
         """
-        if len(roi_statistics) == 0:
+        if not roi_statistics:
             message = "Unable to classify ROIs. The input roi_statistics list is empty."
             console.error(message=message, error=ValueError)
 
@@ -359,7 +344,7 @@ def classify(
     Raises:
         ValueError: If the input roi_statistics list is empty.
     """
-    if len(roi_statistics) == 0:
+    if not roi_statistics:
         message = (
             "Unable to classify ROIs. No ROIs appear to have been detected. Classification requires detection to "
             "discover at least one valid ROI candidate."
@@ -367,7 +352,7 @@ def classify(
         console.error(message=message, error=ValueError)
 
     # Resolves the classifier dataset to use for training the model.
-    classifier_path = _resolve_classifier_path(custom_classifier_path=custom_classifier_path)
+    classifier_path = custom_classifier_path if custom_classifier_path is not None else _BUILTIN_CLASSIFIER_PATH
 
     # Selects the feature set based on the classification mode. Preclassification uses only morphological features
     # available during detection, while full classification includes skewness from extracted fluorescence.

@@ -28,283 +28,6 @@ _UPSAMPLING_PADDING: int = 3
 _CORRELATION_BATCH_SIZE: int = 64
 
 
-@njit(parallel=True, cache=True)
-def _compute_correlation_snr(
-    correlation_data: NDArray[np.float32],
-    padding: int,
-) -> NDArray[np.float32]:
-    """Computes signal-to-noise ratio of phase correlation peaks.
-
-    Estimates the SNR by comparing the maximum correlation value to the maximum value outside a
-    padding region around the peak. Low SNR indicates unreliable shift estimates that may benefit
-    from additional smoothing.
-
-    Args:
-        correlation_data: The correlation data with shape (num_frames, window_height, window_width).
-        padding: The padding width, in pixels, to exclude around the peak when computing noise.
-
-    Returns:
-        The SNR values with shape (num_frames,) representing the ratio of peak signal to background.
-    """
-    # Unpacks the input data for efficient processing below.
-    num_frames = correlation_data.shape[0]
-    window_height = correlation_data.shape[1]
-    window_width = correlation_data.shape[2]
-    snr = np.empty(num_frames, dtype=np.float32)
-
-    # Parallelizes processing over frames.
-    for frame_index in prange(num_frames):
-        # Finds peak value and location in central region (excluding padding).
-        peak_value = np.float32(-np.inf)
-        peak_y = 0
-        peak_x = 0
-        for y in range(padding, window_height - padding):
-            for x in range(padding, window_width - padding):
-                value = correlation_data[frame_index, y, x]
-                if value > peak_value:
-                    peak_value = value
-                    peak_y = y - padding
-                    peak_x = x - padding
-
-        # Finds the maximum value outside the peak region.
-        background_value = np.float32(-np.inf)
-        mask_y_end = peak_y + 2 * padding
-        mask_x_end = peak_x + 2 * padding
-        for y in range(window_height):
-            for x in range(window_width):
-                if peak_y <= y < mask_y_end and peak_x <= x < mask_x_end:
-                    continue
-                value = correlation_data[frame_index, y, x]
-                background_value = max(background_value, value)
-
-        # Ensures positivity for outlier cases with very low background.
-        snr[frame_index] = peak_value / max(background_value, _SNR_EPSILON)  # type: ignore[operator]
-
-    return snr
-
-
-@njit(cache=True)
-def _apply_bilinear_interpolation(
-    source: NDArray[np.float32],
-    y_coordinates: NDArray[np.float32],
-    x_coordinates: NDArray[np.float32],
-    output: NDArray[np.float32],
-) -> None:
-    """Applies in-place bilinear interpolation to transform an image.
-
-    Maps pixel values from the source image to new locations specified by the coordinate arrays
-    using bilinear interpolation. Coordinates outside the image bounds are clamped to the nearest
-    edge pixel.
-
-    Args:
-        source: The source image with shape (height, width).
-        y_coordinates: The target y-coordinates with shape (height, width).
-        x_coordinates: The target x-coordinates with shape (height, width).
-        output: The output array with shape (height, width) where interpolated values are stored.
-    """
-    height, width = source.shape
-    out_height, out_width = output.shape
-
-    for row in range(out_height):
-        for col in range(out_width):
-            # Extracts the floating-point coordinates for the current output pixel.
-            y_coordinate = y_coordinates[row, col]
-            x_coordinate = x_coordinates[row, col]
-
-            # Separates coordinates into integer (floor) and fractional components.
-            y0 = int(y_coordinate)
-            x0 = int(x_coordinate)
-            y_fraction = y_coordinate - y0
-            x_fraction = x_coordinate - x0
-
-            # Clamps the four neighbor indices to valid source image bounds.
-            y0 = min(height - 1, max(0, y0))
-            x0 = min(width - 1, max(0, x0))
-            y1 = min(height - 1, y0 + 1)
-            x1 = min(width - 1, x0 + 1)
-
-            # Computes the weighted average of the four neighboring pixels.
-            output[row, col] = (
-                source[y0, x0] * (1 - y_fraction) * (1 - x_fraction)
-                + source[y0, x1] * (1 - y_fraction) * x_fraction
-                + source[y1, x0] * y_fraction * (1 - x_fraction)
-                + source[y1, x1] * y_fraction * x_fraction
-            )
-
-
-@njit(parallel=True, cache=True)
-def _apply_coordinate_shifts(
-    frames: NDArray[np.float32],
-    y_shift_maps: NDArray[np.float32],
-    x_shift_maps: NDArray[np.float32],
-    y_grid: NDArray[np.float32],
-    x_grid: NDArray[np.float32],
-    output: NDArray[np.float32],
-) -> None:
-    """Applies per-pixel coordinate shifts to a batch of frames.
-
-    Transforms each frame by adding the shift maps to the base coordinate grids and applying
-    bilinear interpolation. This is the core operation for nonrigid motion correction that shifts all frames to align
-    them to the reference image.
-
-    Args:
-        frames: The input frame data with shape (num_frames, height, width) to be transformed.
-        y_shift_maps: The per-pixel vertical shifts with shape (num_frames, height, width). Positive values shift
-            content upward (sample from lower y-coordinates).
-        x_shift_maps: The per-pixel horizontal shifts with shape (num_frames, height, width). Positive values shift
-            content leftward (sample from lower x-coordinates).
-        y_grid: The base y-coordinate grid with shape (height, width) containing row indices (0 to height-1). Combined
-            with y_shift_maps to determine source sampling locations.
-        x_grid: The base x-coordinate grid with shape (height, width) containing column indices (0 to width-1).
-            Combined with x_shift_maps to determine source sampling locations.
-        output: The pre-allocated output array with shape (num_frames, height, width) where transformed frames are
-            stored.
-    """
-    # Parallelizes processing over frames.
-    for frame_index in prange(frames.shape[0]):
-        _apply_bilinear_interpolation(
-            source=frames[frame_index],
-            y_coordinates=y_grid + y_shift_maps[frame_index],
-            x_coordinates=x_grid + x_shift_maps[frame_index],
-            output=output[frame_index],
-        )
-
-
-@njit(parallel=True, cache=True)
-def _interpolate_block_shifts(
-    y_block_shifts: NDArray[np.float32],
-    x_block_shifts: NDArray[np.float32],
-    y_grid: NDArray[np.float32],
-    x_grid: NDArray[np.float32],
-    y_shift_maps: NDArray[np.float32],
-    x_shift_maps: NDArray[np.float32],
-) -> None:
-    """Interpolates block-level shifts to pixel-level shift maps.
-
-    Converts the sparse block shift values to dense per-pixel shift maps using bilinear
-    interpolation. This enables smooth transitions between adjacent blocks.
-
-    Args:
-        y_block_shifts: The vertical shifts computed for each block with shape (num_frames, y_blocks, x_blocks). Each
-            value represents the estimated y-displacement for that block region.
-        x_block_shifts: The horizontal shifts computed for each block with shape (num_frames, y_blocks, x_blocks). Each
-            value represents the estimated x-displacement for that block region.
-        y_grid: The interpolation grid for y with shape (height, width) containing normalized block coordinates that
-            map each pixel to its position in block space.
-        x_grid: The interpolation grid for x with shape (height, width) containing normalized block coordinates that
-            map each pixel to its position in block space.
-        y_shift_maps: The pre-allocated output array with shape (num_frames, height, width) where interpolated
-            per-pixel y-shifts are stored.
-        x_shift_maps: The pre-allocated output array with shape (num_frames, height, width) where interpolated
-            per-pixel x-shifts are stored.
-    """
-    # Parallelizes processing over frames.
-    for frame_index in prange(y_block_shifts.shape[0]):
-        _apply_bilinear_interpolation(
-            source=y_block_shifts[frame_index],
-            y_coordinates=y_grid,
-            x_coordinates=x_grid,
-            output=y_shift_maps[frame_index],
-        )
-        _apply_bilinear_interpolation(
-            source=x_block_shifts[frame_index],
-            y_coordinates=y_grid,
-            x_coordinates=x_grid,
-            output=x_shift_maps[frame_index],
-        )
-
-
-@njit(parallel=True, cache=True)
-def _extract_upsampling_regions(
-    correlation: NDArray[np.float32],
-    y_peaks: NDArray[np.int32],
-    x_peaks: NDArray[np.int32],
-    region_size: int,
-    output: NDArray[np.float32],
-) -> None:
-    """Extracts upsampling regions around peak locations for all blocks and frames.
-
-    Copies a region of size (region_size, region_size) centered at each peak location from the
-    correlation data. Parallelizes over all (block, frame) pairs for efficiency.
-
-    Args:
-        correlation: The correlation data with shape (num_blocks, num_frames, window_height, window_width).
-        y_peaks: The y-coordinates of peaks with shape (num_blocks, num_frames).
-        x_peaks: The x-coordinates of peaks with shape (num_blocks, num_frames).
-        region_size: The size of the square region to extract around each peak.
-        output: The pre-allocated output array with shape (num_blocks, num_frames, region_size, region_size).
-    """
-    num_blocks = y_peaks.shape[0]
-    num_frames = y_peaks.shape[1]
-
-    for index in prange(num_blocks * num_frames):
-        block_index = index // num_frames
-        frame_index = index % num_frames
-        y = y_peaks[block_index, frame_index]
-        x = x_peaks[block_index, frame_index]
-
-        # Copies the region around the peak to the output array.
-        for row in range(region_size):
-            for col in range(region_size):
-                output[block_index, frame_index, row, col] = correlation[block_index, frame_index, y + row, x + col]
-
-
-def _upsample_block_shifts(
-    width: int,
-    height: int,
-    block_counts: tuple[int, int],
-    x_blocks: list[NDArray[np.int32]],
-    y_blocks: list[NDArray[np.int32]],
-    y_block_shifts: NDArray[np.float32],
-    x_block_shifts: NDArray[np.float32],
-) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-    """Upsamples block-level shifts to dense per-pixel shift maps.
-
-    Converts the sparse block shift estimates to full-resolution shift maps for applying
-    nonrigid corrections. Uses bilinear interpolation to create smooth transitions between blocks.
-
-    Args:
-        width: The imaging field width, in pixels.
-        height: The imaging field height, in pixels.
-        block_counts: The number of blocks as (y_count, x_count).
-        x_blocks: The list of x-coordinate ranges for each block.
-        y_blocks: The list of y-coordinate ranges for each block.
-        y_block_shifts: The y-shifts per block with shape (num_frames, num_blocks).
-        x_block_shifts: The x-shifts per block with shape (num_frames, num_blocks).
-
-    Returns:
-        A tuple of (y_shift_maps, x_shift_maps) arrays with shape (num_frames, height, width)
-        containing per-pixel shift values.
-    """
-    # Recovers the block center coordinates from the block boundary arrays.
-    y_centers = np.array(y_blocks[:: block_counts[1]], dtype=np.float32).mean(axis=1)
-    x_centers = np.array(x_blocks[: block_counts[1]], dtype=np.float32).mean(axis=1)
-
-    # Creates interpolation grids mapping pixel positions to block indices.
-    y_indices = np.interp(np.arange(height), y_centers, np.arange(y_centers.size)).astype(np.float32)
-    x_indices = np.interp(np.arange(width), x_centers, np.arange(x_centers.size)).astype(np.float32)
-    x_grid, y_grid = np.meshgrid(x_indices, y_indices)
-
-    # Reshapes block shifts from flat to grid format.
-    num_frames = y_block_shifts.shape[0]
-    y_block_shifts = y_block_shifts.reshape(num_frames, block_counts[0], block_counts[1])
-    x_block_shifts = x_block_shifts.reshape(num_frames, block_counts[0], block_counts[1])
-
-    # Interpolates to full resolution.
-    y_shift_maps = np.empty((num_frames, height, width), dtype=np.float32)
-    x_shift_maps = np.empty((num_frames, height, width), dtype=np.float32)
-    _interpolate_block_shifts(
-        y_block_shifts=y_block_shifts,
-        x_block_shifts=x_block_shifts,
-        y_grid=y_grid,
-        x_grid=x_grid,
-        y_shift_maps=y_shift_maps,
-        x_shift_maps=x_shift_maps,
-    )
-
-    return y_shift_maps, x_shift_maps
-
-
 def compute_registration_blocks(
     height: int,
     width: int,
@@ -639,3 +362,280 @@ def apply_nonrigid_correction(
     )
 
     return output
+
+
+@njit(parallel=True, cache=True)
+def _compute_correlation_snr(
+    correlation_data: NDArray[np.float32],
+    padding: int,
+) -> NDArray[np.float32]:
+    """Computes signal-to-noise ratio of phase correlation peaks.
+
+    Estimates the SNR by comparing the maximum correlation value to the maximum value outside a
+    padding region around the peak. Low SNR indicates unreliable shift estimates that may benefit
+    from additional smoothing.
+
+    Args:
+        correlation_data: The correlation data with shape (num_frames, window_height, window_width).
+        padding: The padding width, in pixels, to exclude around the peak when computing noise.
+
+    Returns:
+        The SNR values with shape (num_frames,) representing the ratio of peak signal to background.
+    """
+    # Unpacks the input data for efficient processing below.
+    num_frames = correlation_data.shape[0]
+    window_height = correlation_data.shape[1]
+    window_width = correlation_data.shape[2]
+    snr = np.empty(num_frames, dtype=np.float32)
+
+    # Parallelizes processing over frames.
+    for frame_index in prange(num_frames):
+        # Finds peak value and location in central region (excluding padding).
+        peak_value = np.float32(-np.inf)
+        peak_y = 0
+        peak_x = 0
+        for y in range(padding, window_height - padding):
+            for x in range(padding, window_width - padding):
+                value = correlation_data[frame_index, y, x]
+                if value > peak_value:
+                    peak_value = value
+                    peak_y = y - padding
+                    peak_x = x - padding
+
+        # Finds the maximum value outside the peak region.
+        background_value = np.float32(-np.inf)
+        mask_y_end = peak_y + 2 * padding
+        mask_x_end = peak_x + 2 * padding
+        for y in range(window_height):
+            for x in range(window_width):
+                if peak_y <= y < mask_y_end and peak_x <= x < mask_x_end:
+                    continue
+                value = correlation_data[frame_index, y, x]
+                background_value = max(background_value, value)
+
+        # Ensures positivity for outlier cases with very low background.
+        snr[frame_index] = peak_value / max(background_value, _SNR_EPSILON)  # type: ignore[operator]
+
+    return snr
+
+
+@njit(cache=True)
+def _apply_bilinear_interpolation(
+    source: NDArray[np.float32],
+    y_coordinates: NDArray[np.float32],
+    x_coordinates: NDArray[np.float32],
+    output: NDArray[np.float32],
+) -> None:
+    """Applies in-place bilinear interpolation to transform an image.
+
+    Maps pixel values from the source image to new locations specified by the coordinate arrays
+    using bilinear interpolation. Coordinates outside the image bounds are clamped to the nearest
+    edge pixel.
+
+    Args:
+        source: The source image with shape (height, width).
+        y_coordinates: The target y-coordinates with shape (height, width).
+        x_coordinates: The target x-coordinates with shape (height, width).
+        output: The output array with shape (height, width) where interpolated values are stored.
+    """
+    height, width = source.shape
+    out_height, out_width = output.shape
+
+    for row in range(out_height):
+        for col in range(out_width):
+            # Extracts the floating-point coordinates for the current output pixel.
+            y_coordinate = y_coordinates[row, col]
+            x_coordinate = x_coordinates[row, col]
+
+            # Separates coordinates into integer (floor) and fractional components.
+            y0 = int(y_coordinate)
+            x0 = int(x_coordinate)
+            y_fraction = y_coordinate - y0
+            x_fraction = x_coordinate - x0
+
+            # Clamps the four neighbor indices to valid source image bounds.
+            y0 = min(height - 1, max(0, y0))
+            x0 = min(width - 1, max(0, x0))
+            y1 = min(height - 1, y0 + 1)
+            x1 = min(width - 1, x0 + 1)
+
+            # Computes the weighted average of the four neighboring pixels.
+            output[row, col] = (
+                source[y0, x0] * (1 - y_fraction) * (1 - x_fraction)
+                + source[y0, x1] * (1 - y_fraction) * x_fraction
+                + source[y1, x0] * y_fraction * (1 - x_fraction)
+                + source[y1, x1] * y_fraction * x_fraction
+            )
+
+
+@njit(parallel=True, cache=True)
+def _apply_coordinate_shifts(
+    frames: NDArray[np.float32],
+    y_shift_maps: NDArray[np.float32],
+    x_shift_maps: NDArray[np.float32],
+    y_grid: NDArray[np.float32],
+    x_grid: NDArray[np.float32],
+    output: NDArray[np.float32],
+) -> None:
+    """Applies per-pixel coordinate shifts to a batch of frames.
+
+    Transforms each frame by adding the shift maps to the base coordinate grids and applying
+    bilinear interpolation. This is the core operation for nonrigid motion correction that shifts all frames to align
+    them to the reference image.
+
+    Args:
+        frames: The input frame data with shape (num_frames, height, width) to be transformed.
+        y_shift_maps: The per-pixel vertical shifts with shape (num_frames, height, width). Positive values shift
+            content upward (sample from lower y-coordinates).
+        x_shift_maps: The per-pixel horizontal shifts with shape (num_frames, height, width). Positive values shift
+            content leftward (sample from lower x-coordinates).
+        y_grid: The base y-coordinate grid with shape (height, width) containing row indices (0 to height-1). Combined
+            with y_shift_maps to determine source sampling locations.
+        x_grid: The base x-coordinate grid with shape (height, width) containing column indices (0 to width-1).
+            Combined with x_shift_maps to determine source sampling locations.
+        output: The pre-allocated output array with shape (num_frames, height, width) where transformed frames are
+            stored.
+    """
+    # Parallelizes processing over frames.
+    for frame_index in prange(frames.shape[0]):
+        _apply_bilinear_interpolation(
+            source=frames[frame_index],
+            y_coordinates=y_grid + y_shift_maps[frame_index],
+            x_coordinates=x_grid + x_shift_maps[frame_index],
+            output=output[frame_index],
+        )
+
+
+@njit(parallel=True, cache=True)
+def _interpolate_block_shifts(
+    y_block_shifts: NDArray[np.float32],
+    x_block_shifts: NDArray[np.float32],
+    y_grid: NDArray[np.float32],
+    x_grid: NDArray[np.float32],
+    y_shift_maps: NDArray[np.float32],
+    x_shift_maps: NDArray[np.float32],
+) -> None:
+    """Interpolates block-level shifts to pixel-level shift maps.
+
+    Converts the sparse block shift values to dense per-pixel shift maps using bilinear
+    interpolation. This enables smooth transitions between adjacent blocks.
+
+    Args:
+        y_block_shifts: The vertical shifts computed for each block with shape (num_frames, y_blocks, x_blocks). Each
+            value represents the estimated y-displacement for that block region.
+        x_block_shifts: The horizontal shifts computed for each block with shape (num_frames, y_blocks, x_blocks). Each
+            value represents the estimated x-displacement for that block region.
+        y_grid: The interpolation grid for y with shape (height, width) containing normalized block coordinates that
+            map each pixel to its position in block space.
+        x_grid: The interpolation grid for x with shape (height, width) containing normalized block coordinates that
+            map each pixel to its position in block space.
+        y_shift_maps: The pre-allocated output array with shape (num_frames, height, width) where interpolated
+            per-pixel y-shifts are stored.
+        x_shift_maps: The pre-allocated output array with shape (num_frames, height, width) where interpolated
+            per-pixel x-shifts are stored.
+    """
+    # Parallelizes processing over frames.
+    for frame_index in prange(y_block_shifts.shape[0]):
+        _apply_bilinear_interpolation(
+            source=y_block_shifts[frame_index],
+            y_coordinates=y_grid,
+            x_coordinates=x_grid,
+            output=y_shift_maps[frame_index],
+        )
+        _apply_bilinear_interpolation(
+            source=x_block_shifts[frame_index],
+            y_coordinates=y_grid,
+            x_coordinates=x_grid,
+            output=x_shift_maps[frame_index],
+        )
+
+
+@njit(parallel=True, cache=True)
+def _extract_upsampling_regions(
+    correlation: NDArray[np.float32],
+    y_peaks: NDArray[np.int32],
+    x_peaks: NDArray[np.int32],
+    region_size: int,
+    output: NDArray[np.float32],
+) -> None:
+    """Extracts upsampling regions around peak locations for all blocks and frames.
+
+    Copies a region of size (region_size, region_size) centered at each peak location from the
+    correlation data. Parallelizes over all (block, frame) pairs for efficiency.
+
+    Args:
+        correlation: The correlation data with shape (num_blocks, num_frames, window_height, window_width).
+        y_peaks: The y-coordinates of peaks with shape (num_blocks, num_frames).
+        x_peaks: The x-coordinates of peaks with shape (num_blocks, num_frames).
+        region_size: The size of the square region to extract around each peak.
+        output: The pre-allocated output array with shape (num_blocks, num_frames, region_size, region_size).
+    """
+    num_blocks = y_peaks.shape[0]
+    num_frames = y_peaks.shape[1]
+
+    for index in prange(num_blocks * num_frames):
+        block_index = index // num_frames
+        frame_index = index % num_frames
+        y = y_peaks[block_index, frame_index]
+        x = x_peaks[block_index, frame_index]
+
+        # Copies the region around the peak to the output array.
+        for row in range(region_size):
+            for col in range(region_size):
+                output[block_index, frame_index, row, col] = correlation[block_index, frame_index, y + row, x + col]
+
+
+def _upsample_block_shifts(
+    width: int,
+    height: int,
+    block_counts: tuple[int, int],
+    x_blocks: list[NDArray[np.int32]],
+    y_blocks: list[NDArray[np.int32]],
+    y_block_shifts: NDArray[np.float32],
+    x_block_shifts: NDArray[np.float32],
+) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+    """Upsamples block-level shifts to dense per-pixel shift maps.
+
+    Converts the sparse block shift estimates to full-resolution shift maps for applying
+    nonrigid corrections. Uses bilinear interpolation to create smooth transitions between blocks.
+
+    Args:
+        width: The imaging field width, in pixels.
+        height: The imaging field height, in pixels.
+        block_counts: The number of blocks as (y_count, x_count).
+        x_blocks: The list of x-coordinate ranges for each block.
+        y_blocks: The list of y-coordinate ranges for each block.
+        y_block_shifts: The y-shifts per block with shape (num_frames, num_blocks).
+        x_block_shifts: The x-shifts per block with shape (num_frames, num_blocks).
+
+    Returns:
+        A tuple of (y_shift_maps, x_shift_maps) arrays with shape (num_frames, height, width)
+        containing per-pixel shift values.
+    """
+    # Recovers the block center coordinates from the block boundary arrays.
+    y_centers = np.array(y_blocks[:: block_counts[1]], dtype=np.float32).mean(axis=1)
+    x_centers = np.array(x_blocks[: block_counts[1]], dtype=np.float32).mean(axis=1)
+
+    # Creates interpolation grids mapping pixel positions to block indices.
+    y_indices = np.interp(np.arange(height), y_centers, np.arange(y_centers.size)).astype(np.float32)
+    x_indices = np.interp(np.arange(width), x_centers, np.arange(x_centers.size)).astype(np.float32)
+    x_grid, y_grid = np.meshgrid(x_indices, y_indices)
+
+    # Reshapes block shifts from flat to grid format.
+    num_frames = y_block_shifts.shape[0]
+    y_block_shifts = y_block_shifts.reshape(num_frames, block_counts[0], block_counts[1])
+    x_block_shifts = x_block_shifts.reshape(num_frames, block_counts[0], block_counts[1])
+
+    # Interpolates to full resolution.
+    y_shift_maps = np.empty((num_frames, height, width), dtype=np.float32)
+    x_shift_maps = np.empty((num_frames, height, width), dtype=np.float32)
+    _interpolate_block_shifts(
+        y_block_shifts=y_block_shifts,
+        x_block_shifts=x_block_shifts,
+        y_grid=y_grid,
+        x_grid=x_grid,
+        y_shift_maps=y_shift_maps,
+        x_shift_maps=x_shift_maps,
+    )
+
+    return y_shift_maps, x_shift_maps

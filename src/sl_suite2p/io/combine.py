@@ -119,15 +119,15 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         ValueError: If no valid planes with ROI statistics are found.
     """
     # Extracts plane directories from the RuntimeContext instances.
-    plane_directories = [ctx.runtime.io.output_directory for ctx in plane_contexts]
+    plane_directories = [context.runtime.io.output_directory for context in plane_contexts]
 
     # Computes the y-axis and x-axis displacement for each plane. These displacement values are used to arrange
     # individual planes back into the original recording movie.
     y_offsets, x_offsets = compute_plane_offsets(plane_contexts)
 
     # Queries the height and width for each plane.
-    heights = np.array([ctx.runtime.io.frame_height for ctx in plane_contexts], dtype=np.uint16)
-    widths = np.array([ctx.runtime.io.frame_width for ctx in plane_contexts], dtype=np.uint16)
+    heights = np.array([context.runtime.io.frame_height for context in plane_contexts], dtype=np.uint16)
+    widths = np.array([context.runtime.io.frame_width for context in plane_contexts], dtype=np.uint16)
 
     # Calculates the overall height and width of the entire recording plane after accounting for plane displacement.
     combined_height = int(np.amax(y_offsets + heights))
@@ -146,7 +146,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     combined_correlation_map = np.zeros((combined_height, combined_width), dtype=np.float32)
 
     # Checks if maximum projection images are available in any plane.
-    has_max_projection = any(ctx.runtime.detection.maximum_projection is not None for ctx in plane_contexts)
+    has_max_projection = any(context.runtime.detection.maximum_projection is not None for context in plane_contexts)
     combined_max_projection: NDArray[np.float32] | None = None
     if has_max_projection:
         combined_max_projection = np.zeros((combined_height, combined_width), dtype=np.float32)
@@ -166,14 +166,14 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
     # Logs the combining operation.
     channel_count = 2 if has_two_channels else 1
-    directory_names = [d.name for d in plane_directories if d is not None]
+    directory_names = [directory.name for directory in plane_directories if directory is not None]
     console.echo(
         message=f"Combining processed data for {channel_count} channel(s) from {directory_names}...",
         level=LogLevel.INFO,
     )
 
     # Finds the maximum number of frames across all planes.
-    max_frame_count = max(ctx.runtime.io.frame_count for ctx in plane_contexts)
+    max_frame_count = max(context.runtime.io.frame_count for context in plane_contexts)
 
     # Initializes lists to accumulate combined data across planes.
     combined_roi_stats: list[ROIStatistics] = []
@@ -414,13 +414,13 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
     # Builds the ExtractionData instance with combined extraction data.
     extraction = ExtractionData(
-        roi_statistics=combined_roi_stats if combined_roi_stats else None,
+        roi_statistics=combined_roi_stats or None,
         cell_fluorescence=combined_cell_fluorescence,
         neuropil_fluorescence=combined_neuropil_fluorescence,
         subtracted_fluorescence=combined_subtracted_fluorescence,
         spikes=combined_spikes,
         cell_classification=combined_cell_classification,
-        roi_statistics_channel_2=combined_roi_stats_channel_2 if combined_roi_stats_channel_2 else None,
+        roi_statistics_channel_2=combined_roi_stats_channel_2 or None,
         cell_fluorescence_channel_2=combined_cell_fluorescence_channel_2,
         neuropil_fluorescence_channel_2=combined_neuropil_fluorescence_channel_2,
         subtracted_fluorescence_channel_2=combined_subtracted_fluorescence_channel_2,
@@ -433,13 +433,13 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     # BinaryFileCombined without reloading single-day contexts. These paths are guaranteed to be set after
     # registration completes, so None values indicate a corrupted or incomplete pipeline run.
     channel_1_paths: list[Path] = []
-    for ctx in plane_contexts:
-        path = ctx.runtime.io.registered_binary_path
+    for context in plane_contexts:
+        path = context.runtime.io.registered_binary_path
         if path is None:
             console.error(
                 message=(
                     f"Unable to combine plane data. The registered binary path is not set for plane "
-                    f"{ctx.runtime.io.plane_index}. Ensure registration completed successfully."
+                    f"{context.runtime.io.plane_index}. Ensure registration completed successfully."
                 ),
                 error=RuntimeError,
             )
@@ -449,13 +449,13 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     registered_binary_paths_channel_2: tuple[Path, ...] | None = None
     if second_channel_functional:
         channel_2_paths: list[Path] = []
-        for ctx in plane_contexts:
-            path_channel_2 = ctx.runtime.io.registered_binary_path_channel_2
+        for context in plane_contexts:
+            path_channel_2 = context.runtime.io.registered_binary_path_channel_2
             if path_channel_2 is None:
                 console.error(
                     message=(
                         f"Unable to combine plane data. The registered binary path for channel 2 is not set for "
-                        f"plane {ctx.runtime.io.plane_index}. Ensure registration completed successfully."
+                        f"plane {context.runtime.io.plane_index}. Ensure registration completed successfully."
                     ),
                     error=RuntimeError,
                 )
