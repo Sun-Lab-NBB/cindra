@@ -216,11 +216,10 @@ def _get_plane_key(session_path: Path, plane_index: int) -> str:
     return f"{session_path}|plane_{plane_index}"
 
 
-def _run_binarize_job(session_path: Path, config_path: Path) -> tuple[bool, int, str | None]:
+def _run_binarize_job(config_path: Path) -> tuple[bool, int, str | None]:
     """Runs the binarize phase for a single session.
 
     Args:
-        session_path: The path to the session directory.
         config_path: The path to the configuration file.
 
     Returns:
@@ -229,7 +228,6 @@ def _run_binarize_job(session_path: Path, config_path: Path) -> tuple[bool, int,
     try:
         process_single_day(
             configuration_path=config_path,
-            session_path=session_path,
             binarize=True,
             process=False,
             combine=False,
@@ -251,11 +249,10 @@ def _run_binarize_job(session_path: Path, config_path: Path) -> tuple[bool, int,
         return False, 0, f"{type(error).__name__}: {error} ({location})"
 
 
-def _run_process_job(session_path: Path, config_path: Path, plane_index: int, workers: int) -> tuple[bool, str | None]:
+def _run_process_job(config_path: Path, plane_index: int, workers: int) -> tuple[bool, str | None]:
     """Runs the process phase for a single plane.
 
     Args:
-        session_path: The path to the session directory.
         config_path: The path to the configuration file.
         plane_index: The plane index to process.
         workers: The number of workers to use.
@@ -266,7 +263,6 @@ def _run_process_job(session_path: Path, config_path: Path, plane_index: int, wo
     try:
         process_single_day(
             configuration_path=config_path,
-            session_path=session_path,
             binarize=False,
             process=True,
             combine=False,
@@ -282,11 +278,10 @@ def _run_process_job(session_path: Path, config_path: Path, plane_index: int, wo
         return False, f"{type(error).__name__}: {error} ({location})"
 
 
-def _run_combine_job(session_path: Path, config_path: Path) -> tuple[bool, str | None]:
+def _run_combine_job(config_path: Path) -> tuple[bool, str | None]:
     """Runs the combine phase for a single session.
 
     Args:
-        session_path: The path to the session directory.
         config_path: The path to the configuration file.
 
     Returns:
@@ -295,7 +290,6 @@ def _run_combine_job(session_path: Path, config_path: Path) -> tuple[bool, str |
     try:
         process_single_day(
             configuration_path=config_path,
-            session_path=session_path,
             binarize=False,
             process=False,
             combine=True,
@@ -322,7 +316,7 @@ def _binarize_worker(session_path: Path, config_path: Path) -> None:
     error: str | None = None
 
     try:
-        success, plane_count, error = _run_binarize_job(session_path=session_path, config_path=config_path)
+        success, plane_count, error = _run_binarize_job(config_path=config_path)
     except Exception as e:
         frames = traceback.extract_tb(e.__traceback__)
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
@@ -355,9 +349,7 @@ def _process_worker(session_path: Path, config_path: Path, plane_index: int, wor
     error: str | None = None
 
     try:
-        success, error = _run_process_job(
-            session_path=session_path, config_path=config_path, plane_index=plane_index, workers=workers
-        )
+        success, error = _run_process_job(config_path=config_path, plane_index=plane_index, workers=workers)
     except Exception as e:
         frames = traceback.extract_tb(e.__traceback__)
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
@@ -388,7 +380,7 @@ def _combine_worker(session_path: Path, config_path: Path) -> None:
     error: str | None = None
 
     try:
-        success, error = _run_combine_job(session_path=session_path, config_path=config_path)
+        success, error = _run_combine_job(config_path=config_path)
     except Exception as e:
         frames = traceback.extract_tb(e.__traceback__)
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
