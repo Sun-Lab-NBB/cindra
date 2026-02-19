@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
 from ..registration import compute_spatial_taper_mask, compute_registration_blocks

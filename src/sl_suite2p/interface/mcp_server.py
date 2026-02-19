@@ -200,6 +200,8 @@ def _run_binarize_job(config_path: Path) -> tuple[bool, int, str | None]:
 
         # Loads the configuration to find the save path, then counts planes via RuntimeContext.
         config = SingleDayConfiguration.from_yaml(file_path=config_path)
+        if config.file_io.save_path is None:
+            return False, 0, "Configuration error: file_io.save_path is None."
         root_path = config.file_io.save_path / "suite2p"
         contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
         if not isinstance(contexts, list):
