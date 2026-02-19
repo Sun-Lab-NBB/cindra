@@ -16,13 +16,10 @@ Complete parameter reference for the single-day (within-session) sl-suite2p proc
 The single-day pipeline uses `SingleDayConfiguration`, a dataclass with 11 nested sections. Default values are
 optimized for GCaMP6f data from 2-Photon Random Access Mesoscope (2P-RAM).
 
-### Parameter Resolution Order
+### Parameter Resolution
 
-Parameters are resolved with the following precedence (highest to lowest):
-
-1. **Runtime overrides** (`db` dictionary) - Passed programmatically
-2. **User configuration** (`ops` from YAML file) - Loaded from config file
-3. **Defaults** (`generate_default_ops()`) - Built-in defaults
+All parameters are specified in the `SingleDayConfiguration` YAML file. The pipeline loads the fully resolved
+configuration directly from the file without any runtime overrides.
 
 Additionally, **mesoscope processing automatically overwrites** certain parameters from `suite2p_parameters.json`.
 

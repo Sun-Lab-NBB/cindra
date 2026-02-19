@@ -23,13 +23,10 @@ Before multi-day processing:
 - Single-day processing must have used `output.combined: true`
 - Single-day processing must have used `file_io.delete_bin: false`
 
-### Parameter Resolution Order
+### Parameter Resolution
 
-Parameters are resolved with the following precedence (highest to lowest):
-
-1. **Runtime overrides** (`db` dictionary) - Passed programmatically
-2. **User configuration** (`ops` from YAML file) - Loaded from config file
-3. **Defaults** (`generate_default_multiday_ops()`) - Built-in defaults
+All parameters are specified in the `MultiDayConfiguration` YAML file. The pipeline loads the fully resolved
+configuration directly from the file without any runtime overrides.
 
 ---
 

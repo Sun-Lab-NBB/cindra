@@ -2,7 +2,7 @@
 
 import numba  # type: ignore[import-untyped]
 from ataraxis_time import PrecisionTimer, TimerPrecisions, get_timestamp
-from ataraxis_base_utilities import LogLevel, console
+from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
 
 from ..io import combine_planes, convert_tiffs_to_binary, resolve_single_day_contexts
 from ..detection import detect_plane_rois
@@ -81,10 +81,10 @@ def binarize_recording(configuration: SingleDayConfiguration) -> None:
     timer.reset()
 
     # Creates RuntimeContext instances for all planes.
-    contexts = resolve_single_day_contexts(configuration)
+    contexts = resolve_single_day_contexts(configuration=configuration)
 
     # Converts TIFF data to binary format.
-    convert_tiffs_to_binary(contexts)
+    convert_tiffs_to_binary(contexts=contexts)
 
     # Saves shared configuration and acquisition parameters once (using first plane's context).
     contexts[0].save_shared()
@@ -135,8 +135,8 @@ def process_plane(configuration: SingleDayConfiguration, plane_index: int) -> No
 
     console.echo(message=f"Processing plane {plane_index}...", level=LogLevel.INFO)
 
-    # Configures the maximum number of cores this function is allowed to use when parallelizing processing steps.
-    numba.set_num_threads(configuration.runtime.parallel_workers)
+    # Resolves the configured worker count and configures the maximum number of numba threads for parallelization.
+    numba.set_num_threads(resolve_worker_count(requested_workers=configuration.runtime.parallel_workers))
 
     # Validates the frame count meets minimum processing requirements.
     frame_count = context.runtime.io.frame_count
@@ -211,51 +211,8 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
         console.error(message=message, error=ValueError)
 
     # Combines all planes into a unified dataset.
-    combined_data = combine_planes(contexts)
+    combined_data = combine_planes(contexts=contexts)
 
     # Saves the combined data to the root suite2p directory.
     combined_data.save(root_path / "suite2p")
     console.echo(message=f"Combined data saved to: {root_path / 'suite2p'}", level=LogLevel.SUCCESS)
-
-
-def run_single_day_pipeline(configuration: SingleDayConfiguration) -> None:
-    """Executes the complete single-day processing pipeline.
-
-    This function sequentially runs all phases of the single-day pipeline: binarization, per-plane processing, and
-    data combination. It serves as the high-level entry point for running the entire single-day pipeline in a single
-    call.
-
-    Args:
-        configuration: The single-day pipeline configuration.
-    """
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-    timer.reset()
-
-    console.echo(message="Initializing single-day processing runtime...", level=LogLevel.INFO)
-
-    # Runs the binarization phase: TIFF to binary conversion and context initialization.
-    binarize_recording(configuration=configuration)
-
-    # Validates that save_path is configured (guaranteed by binarize_recording, but required for type narrowing).
-    if configuration.file_io.save_path is None:
-        message = (
-            "Unable to run the single-day pipeline. The save_path must be configured in the FileIO section of the "
-            "configuration, but it is currently None."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Reloads contexts from disk to determine the number of planes after binarization.
-    root_path = configuration.file_io.save_path / "suite2p"
-    contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
-    if not isinstance(contexts, list):
-        contexts = [contexts]
-
-    # Processes each plane sequentially.
-    for plane_index in range(len(contexts)):
-        process_plane(configuration=configuration, plane_index=plane_index)
-
-    # Combines all planes into a unified dataset and saves to disk.
-    save_combined_data(contexts)
-
-    message = f"Single-day processing runtime: Complete. Total time: {timer.elapsed} seconds."
-    console.echo(message=message, level=LogLevel.SUCCESS)

@@ -3,22 +3,18 @@ with the sl-suite2p library. The CLIs from this module provide a complete termin
 pipelines supported by the sl-suite2p library.
 """
 
-import ast
-from typing import Any
 from pathlib import Path
 
 import click
 from ataraxis_base_utilities import LogLevel, console
 
 from ..gui import run
-from ..pipelines import process_multi_day, process_single_day
-from ..dataclasses import (
-    MultiDayConfiguration,
-    SingleDayConfiguration,
-)
+from ..pipelines import run_multi_day_pipeline, run_single_day_pipeline
+from .mcp_server import run_server
+from ..dataclasses import MultiDayConfiguration, SingleDayConfiguration
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
-CONTEXT_SETTINGS = dict(max_content_width=120)
+CONTEXT_SETTINGS = {"max_content_width": 120}
 
 
 @click.group("ss2p", context_settings=CONTEXT_SETTINGS)
@@ -53,8 +49,6 @@ def ss2p_mcp(transport: str) -> None:
     The MCP server exposes tools that enable AI agents to discover sessions, execute pipelines,
     monitor processing status, and manage batch operations for both single-day and multi-day workflows.
     """
-    from .mcp_server import run_server
-
     run_server(transport=transport)  # type: ignore[arg-type]
 
 
@@ -75,7 +69,7 @@ def ss2p_mcp(transport: str) -> None:
     help="The name to use for the generated configuration file.",
 )
 @click.pass_context
-def ss2p_config(ctx: Any, output_directory: Path, name: str) -> None:
+def ss2p_config(ctx: click.Context, output_directory: Path, name: str) -> None:
     """Generates the single-day or the multi-day processing pipeline configuration file.
 
     Commands from this group generate the configuration files which are used to run sl-suite2p processing pipelines.
@@ -90,7 +84,7 @@ def ss2p_config(ctx: Any, output_directory: Path, name: str) -> None:
 # noinspection PyUnresolvedReferences
 @ss2p_config.command("single-day")
 @click.pass_context
-def ss2p_sd_config(ctx: Any) -> None:
+def ss2p_sd_config(ctx: click.Context) -> None:
     """Generates the single-day sl-suite2p processing pipeline configuration file."""
     # Unpacks the shared parameters
     file_path = Path(ctx.obj["file_path"])
@@ -117,7 +111,7 @@ def ss2p_sd_config(ctx: Any) -> None:
 # noinspection PyUnresolvedReferences
 @ss2p_config.command("multi-day")
 @click.pass_context
-def ss2p_md_config(ctx: Any) -> None:
+def ss2p_md_config(ctx: click.Context) -> None:
     """Generates the multi-day sl-suite2p processing pipeline configuration file."""
     # Unpacks the shared parameters
     file_path = Path(ctx.obj["file_path"])
@@ -152,17 +146,6 @@ def ss2p_md_config(ctx: Any) -> None:
     ),
 )
 @click.option(
-    "-o",
-    "--overrides",
-    type=str,
-    default="{}",
-    help=(
-        "Additional processing parameters used to augment or override the parameters loaded from the configuration "
-        "file. The input parameters have to be provided as a dictionary-formatted string, e.g.: "
-        "{parallel_workers: 5, progress_bars: False}"
-    ),
-)
-@click.option(
     "-w",
     "--workers",
     type=int,
@@ -183,14 +166,13 @@ def ss2p_md_config(ctx: Any) -> None:
 )
 @click.pass_context
 def ss2p_run(
-    ctx: Any,
+    ctx: click.Context,
     input_path: Path,
-    overrides: str,
     workers: int,
     progress_bars: bool,
 ) -> None:
     """Runs the single-day or multi-day sl-suite2p processing pipeline."""
-    # Ensures the input configuration file is valid
+    # Ensures the input configuration file is valid.
     if input_path.suffix != ".yaml":
         message = (
             f"Unable to run the requested suite2p processing pipeline. Expected the configuration file to end with a "
@@ -200,20 +182,12 @@ def ss2p_run(
 
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = input_path
-    ctx.obj["overrides"] = overrides
     ctx.obj["workers"] = workers
     ctx.obj["progress_bars"] = progress_bars
 
 
 # noinspection PyUnresolvedReferences
 @ss2p_run.command("single-day")
-@click.option(
-    "-sp",
-    "--session-path",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
-    help="The absolute path to the root data directory of the session to process.",
-)
 @click.option(
     "-id",
     "--job-id",
@@ -270,8 +244,7 @@ def ss2p_run(
 )
 @click.pass_context
 def run_sd_pipeline(
-    ctx: Any,
-    session_path: Path,
+    ctx: click.Context,
     job_id: str | None,
     binarize: bool,
     process: bool,
@@ -283,15 +256,9 @@ def run_sd_pipeline(
     config_path = ctx.obj["config_path"]
     progress_bars = ctx.obj["progress_bars"]
     workers = ctx.obj["workers"]
-    overrides = ctx.obj["overrides"]
 
-    # Parses the override parameters as a dictionary.
-    db = _parse_db(overrides)
-
-    # Calls the unified pipeline API.
-    process_single_day(
+    run_single_day_pipeline(
         configuration_path=config_path,
-        session_path=session_path,
         job_id=job_id,
         binarize=binarize,
         process=process,
@@ -299,7 +266,6 @@ def run_sd_pipeline(
         target_plane=target,
         workers=workers,
         progress_bars=progress_bars,
-        overrides=db,
     )
 
 
@@ -362,7 +328,7 @@ def run_sd_pipeline(
 )
 @click.pass_context
 def run_md_pipeline(
-    ctx: Any,
+    ctx: click.Context,
     session_paths: tuple[Path, ...],
     job_id: str | None,
     discover: bool,
@@ -371,19 +337,16 @@ def run_md_pipeline(
 ) -> None:
     """Runs the requested multi-day pipeline step(s)."""
     # Extracts shared configuration parameters passed as the context dictionary.
-    config_path = ctx.obj["config_path"]
+    config_path: Path = ctx.obj["config_path"]
     progress_bars = ctx.obj["progress_bars"]
     workers = ctx.obj["workers"]
-    overrides = ctx.obj["overrides"]
 
-    # Parses the override parameters as a dictionary.
-    db = _parse_db(overrides)
+    # Writes session directories from the CLI into the configuration file before running the pipeline.
+    configuration = MultiDayConfiguration.from_yaml(file_path=config_path)
+    configuration.session_io.session_directories = list(session_paths)
+    configuration.save(file_path=config_path)
 
-    # Adds session directories from CLI to overrides, which will override any config file values.
-    db["session_directories"] = [str(path) for path in session_paths]
-
-    # Calls the unified pipeline API.
-    process_multi_day(
+    run_multi_day_pipeline(
         configuration_path=config_path,
         job_id=job_id,
         discover=discover,
@@ -391,48 +354,4 @@ def run_md_pipeline(
         target_session=target,
         workers=workers,
         progress_bars=progress_bars,
-        overrides=db,
     )
-
-
-def _parse_db(data_string: str) -> dict[str, Any]:
-    """Parses the value passed to the --overrides (-o) argument of the 'run' 'ss2p' CLI group function as a Python
-    dictionary.
-
-    Args:
-        data_string: A string that contains the override data to be parsed.
-
-    Returns:
-        The parsed data as a dictionary compatible with the 'overrides' input arguments of the process_single_day()
-        or process_multi_day() functions.
-
-    Raises:
-        ValueError: If the input data_string cannot be parsed as a Python dictionary.
-    """
-
-    def _ensure_dict(value: Any) -> None:
-        """This worker function ensures that the input value is a dictionary."""
-        if not isinstance(value, dict):
-            raise TypeError
-
-    # If the user provided no overrides, returns an empty 'db' dictionary.
-    if data_string == "{}":
-        return {}
-
-    try:
-        # Parses the string as a Python literal
-        parsed = ast.literal_eval(data_string)
-
-        # Ensures the parsed result is a dictionary. If not, propagates the error to be evaluated by the 'try' block
-        _ensure_dict(ast.literal_eval(data_string))
-
-    except (SyntaxError, TypeError):
-        message = (
-            "Unable to parse the input 'overrides' argument as a python dictionary. Ensure the value of the "
-            "--overrides (-o) argument is formatted like a python dictionary, "
-            "e.g.: '{'key1': value1, 'key2': 'value2'}'"
-        )
-        console.error(message=message, error=TypeError)
-    else:
-        # Otherwise, returns the parsed dictionary
-        return parsed
