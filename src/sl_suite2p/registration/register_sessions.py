@@ -18,6 +18,179 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
+def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
+    """Registers multiple session reference images to a common visual space using diffeomorphic demons registration.
+
+    This function computes deformation fields that align all sessions to a shared coordinate system, then applies
+    those deformations to transform reference images and cell masks. The deformation fields and transformed data
+    are stored in each session's runtime registration data.
+
+    Notes:
+        This is the entry point for multi-day registration. It orchestrates the full registration workflow including
+        deformation field computation, image transformation, and mask deformation. The function modifies the runtime
+        data in each context in-place.
+
+        When all sessions already have registration data (deformation fields and deformed cell masks) and
+        repeat_registration is False (default), the function returns early without re-running the expensive
+        diffeomorphic registration. When repeat_registration is True, existing registration data is cleared before
+        re-computing.
+
+    Args:
+        contexts: The list of MultiDayRuntimeContext instances, one per session. All contexts must share the same
+            configuration. Each context's runtime.combined_data must be loaded with single-day detection results.
+    """
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+
+    configuration = contexts[0].configuration
+    registration_config = configuration.diffeomorphic_registration
+    runtime_config = configuration.runtime
+
+    # Checks if registration should be skipped (all sessions already registered and not forcing re-registration).
+    all_registered = all(context.runtime.registration.is_registered() for context in contexts)
+    if all_registered and not registration_config.repeat_registration:
+        console.echo(
+            message=(
+                "Multi-day registration: skipped. All sessions are already registered and re-registration is disabled."
+            ),
+            level=LogLevel.INFO,
+        )
+        return
+
+    # Clears existing registration data if re-registering.
+    if all_registered:
+        console.echo(
+            message="Multi-day registration: forced. Clearing existing data and re-running registration.",
+            level=LogLevel.INFO,
+        )
+        for context in contexts:
+            context.runtime.registration.clear()
+
+    # Collects reference images from all sessions based on configured image type.
+    image_type = registration_config.image_type
+    reference_images: list[NDArray[np.float32]] = []
+    for context in contexts:
+        combined_data = context.runtime.combined_data
+        if combined_data is None:
+            message = (
+                f"Unable to register session '{context.runtime.io.session_id}' to shared visual space. The session's "
+                f"combined_data must be loaded before registration."
+            )
+            console.error(message=message, error=ValueError)
+        detection = combined_data.detection
+        if image_type == ReferenceImageType.MEAN:
+            image = detection.mean_image
+        elif image_type == ReferenceImageType.ENHANCED_MEAN:
+            image = detection.enhanced_mean_image
+        else:
+            image = detection.maximum_projection
+        if image is None:
+            message = (
+                f"Unable to register session '{context.runtime.io.session_id}' to shared visual space. The required "
+                f"reference image ({image_type.value}) is not available in combined_data."
+            )
+            console.error(message=message, error=ValueError)
+        reference_images.append(image.astype(np.float32))
+
+    # Performs groupwise diffeomorphic registration.
+    registration = DiffeomorphicDemonsRegistration(
+        images=reference_images,
+        grid_sampling_factor=registration_config.grid_sampling_factor,
+        scale_sampling=registration_config.scale_sampling,
+        speed_factor=registration_config.speed_factor,
+    )
+    registration.register(progress=runtime_config.display_progress_bars)
+
+    # Applies deformation fields to each session in parallel.
+    if runtime_config.parallel_workers > 1:
+        with ThreadPoolExecutor(max_workers=runtime_config.parallel_workers) as executor:
+            futures = {
+                executor.submit(
+                    _apply_forward_deformation,
+                    context=context,
+                    deformation=registration.get_deformation(image_index=index),
+                ): index
+                for index, context in enumerate(contexts)
+            }
+
+            for future in console.track(
+                as_completed(futures),
+                description="Transforming session ROIs to a shared visual space",
+                total=len(futures),
+                unit="session",
+            ):
+                future.result()
+    else:
+        for index, context in console.track(
+            enumerate(contexts),
+            description="Transforming session ROIs to a shared visual space",
+            total=len(contexts),
+            unit="session",
+        ):
+            _apply_forward_deformation(
+                context=context,
+                deformation=registration.get_deformation(image_index=index),
+            )
+
+    # Records registration timing and persists runtime data for each session.
+    registration_time = int(timer.elapsed)
+    for context in contexts:
+        context.runtime.timing.registration_time = registration_time
+        context.save_runtime()
+
+    console.echo(
+        message=f"Multi-day registration: complete. Time: {registration_time} seconds.", level=LogLevel.SUCCESS
+    )
+
+
+def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
+    """Projects template masks from shared visual space back to each session's original coordinate system.
+
+    After cell tracking produces template masks in the shared deformed space, this function applies the inverse
+    deformation to map those masks back to each session's native coordinates. This enables fluorescence extraction
+    using the original registered binary data.
+
+    Args:
+        contexts: The list of MultiDayRuntimeContext instances, one per session. Each context must have deformation
+            fields stored in runtime.registration from a prior call to register_sessions(), and template masks set
+            in runtime.tracking from cell tracking.
+    """
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    runtime_config = contexts[0].configuration.runtime
+
+    if runtime_config.parallel_workers > 1:
+        with ThreadPoolExecutor(max_workers=runtime_config.parallel_workers) as executor:
+            futures = {
+                executor.submit(_apply_backward_deformation, context=context): index
+                for index, context in enumerate(contexts)
+            }
+
+            for future in console.track(
+                as_completed(futures),
+                description="Projecting tracked ROIs to individual session's visual space",
+                total=len(futures),
+                unit="session",
+            ):
+                future.result()
+    else:
+        for context in console.track(
+            contexts,
+            description="Projecting tracked ROIs to individual session's visual space",
+            total=len(contexts),
+            unit="session",
+        ):
+            _apply_backward_deformation(context=context)
+
+    # Records backward transform timing and persists runtime data for each session.
+    backward_transform_time = int(timer.elapsed)
+    for context in contexts:
+        context.runtime.timing.backward_transform_time = backward_transform_time
+        context.save_runtime()
+
+    console.echo(
+        message=f"Template projection: complete. Time: {backward_transform_time} seconds.", level=LogLevel.SUCCESS
+    )
+
+
 def _deform_masks(
     masks: list[ROIStatistics],
     deformation: Deformation,
@@ -270,176 +443,3 @@ def _apply_backward_deformation(context: MultiDayRuntimeContext) -> None:
             cell_diameter=template_diameter_channel_2,
             crop=False,
         )
-
-
-def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
-    """Registers multiple session reference images to a common visual space using diffeomorphic demons registration.
-
-    This function computes deformation fields that align all sessions to a shared coordinate system, then applies
-    those deformations to transform reference images and cell masks. The deformation fields and transformed data
-    are stored in each session's runtime registration data.
-
-    Notes:
-        This is the entry point for multi-day registration. It orchestrates the full registration workflow including
-        deformation field computation, image transformation, and mask deformation. The function modifies the runtime
-        data in each context in-place.
-
-        When all sessions already have registration data (deformation fields and deformed cell masks) and
-        repeat_registration is False (default), the function returns early without re-running the expensive
-        diffeomorphic registration. When repeat_registration is True, existing registration data is cleared before
-        re-computing.
-
-    Args:
-        contexts: The list of MultiDayRuntimeContext instances, one per session. All contexts must share the same
-            configuration. Each context's runtime.combined_data must be loaded with single-day detection results.
-    """
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-
-    configuration = contexts[0].configuration
-    registration_config = configuration.diffeomorphic_registration
-    runtime_config = configuration.runtime
-
-    # Checks if registration should be skipped (all sessions already registered and not forcing re-registration).
-    all_registered = all(context.runtime.registration.is_registered() for context in contexts)
-    if all_registered and not registration_config.repeat_registration:
-        console.echo(
-            message=(
-                "Multi-day registration: skipped. All sessions are already registered and re-registration is disabled."
-            ),
-            level=LogLevel.INFO,
-        )
-        return
-
-    # Clears existing registration data if re-registering.
-    if all_registered:
-        console.echo(
-            message="Multi-day registration: forced. Clearing existing data and re-running registration.",
-            level=LogLevel.INFO,
-        )
-        for context in contexts:
-            context.runtime.registration.clear()
-
-    # Collects reference images from all sessions based on configured image type.
-    image_type = registration_config.image_type
-    reference_images: list[NDArray[np.float32]] = []
-    for context in contexts:
-        combined_data = context.runtime.combined_data
-        if combined_data is None:
-            message = (
-                f"Unable to register session '{context.runtime.io.session_id}' to shared visual space. The session's "
-                f"combined_data must be loaded before registration."
-            )
-            console.error(message=message, error=ValueError)
-        detection = combined_data.detection
-        if image_type == ReferenceImageType.MEAN:
-            image = detection.mean_image
-        elif image_type == ReferenceImageType.ENHANCED_MEAN:
-            image = detection.enhanced_mean_image
-        else:
-            image = detection.maximum_projection
-        if image is None:
-            message = (
-                f"Unable to register session '{context.runtime.io.session_id}' to shared visual space. The required "
-                f"reference image ({image_type.value}) is not available in combined_data."
-            )
-            console.error(message=message, error=ValueError)
-        reference_images.append(image.astype(np.float32))
-
-    # Performs groupwise diffeomorphic registration.
-    registration = DiffeomorphicDemonsRegistration(
-        images=reference_images,
-        grid_sampling_factor=registration_config.grid_sampling_factor,
-        scale_sampling=registration_config.scale_sampling,
-        speed_factor=registration_config.speed_factor,
-    )
-    registration.register(progress=runtime_config.display_progress_bars)
-
-    # Applies deformation fields to each session in parallel.
-    if runtime_config.parallel_workers > 1:
-        with ThreadPoolExecutor(max_workers=runtime_config.parallel_workers) as executor:
-            futures = {
-                executor.submit(
-                    _apply_forward_deformation,
-                    context=context,
-                    deformation=registration.get_deformation(image_index=index),
-                ): index
-                for index, context in enumerate(contexts)
-            }
-
-            for future in console.track(
-                as_completed(futures),
-                description="Transforming session ROIs to a shared visual space",
-                total=len(futures),
-                unit="session",
-            ):
-                future.result()
-    else:
-        for index, context in console.track(
-            enumerate(contexts),
-            description="Transforming session ROIs to a shared visual space",
-            total=len(contexts),
-            unit="session",
-        ):
-            _apply_forward_deformation(
-                context=context,
-                deformation=registration.get_deformation(image_index=index),
-            )
-
-    # Records registration timing and persists runtime data for each session.
-    registration_time = int(timer.elapsed)
-    for context in contexts:
-        context.runtime.timing.registration_time = registration_time
-        context.save_runtime()
-
-    console.echo(
-        message=f"Multi-day registration: complete. Time: {registration_time} seconds.", level=LogLevel.SUCCESS
-    )
-
-
-def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
-    """Projects template masks from shared visual space back to each session's original coordinate system.
-
-    After cell tracking produces template masks in the shared deformed space, this function applies the inverse
-    deformation to map those masks back to each session's native coordinates. This enables fluorescence extraction
-    using the original registered binary data.
-
-    Args:
-        contexts: The list of MultiDayRuntimeContext instances, one per session. Each context must have deformation
-            fields stored in runtime.registration from a prior call to register_sessions(), and template masks set
-            in runtime.tracking from cell tracking.
-    """
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-    runtime_config = contexts[0].configuration.runtime
-
-    if runtime_config.parallel_workers > 1:
-        with ThreadPoolExecutor(max_workers=runtime_config.parallel_workers) as executor:
-            futures = {
-                executor.submit(_apply_backward_deformation, context=context): index
-                for index, context in enumerate(contexts)
-            }
-
-            for future in console.track(
-                as_completed(futures),
-                description="Projecting tracked ROIs to individual session's visual space",
-                total=len(futures),
-                unit="session",
-            ):
-                future.result()
-    else:
-        for context in console.track(
-            contexts,
-            description="Projecting tracked ROIs to individual session's visual space",
-            total=len(contexts),
-            unit="session",
-        ):
-            _apply_backward_deformation(context=context)
-
-    # Records backward transform timing and persists runtime data for each session.
-    backward_transform_time = int(timer.elapsed)
-    for context in contexts:
-        context.runtime.timing.backward_transform_time = backward_transform_time
-        context.save_runtime()
-
-    console.echo(
-        message=f"Template projection: complete. Time: {backward_transform_time} seconds.", level=LogLevel.SUCCESS
-    )
