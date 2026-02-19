@@ -23,7 +23,7 @@ class TraceBox(pg.PlotItem):
         name=None,
         invertX=False,
     ):
-        super(TraceBox, self).__init__()
+        super().__init__()
         self.parent = parent
 
     def mouseDoubleClickEvent(self, ev):
@@ -49,7 +49,7 @@ class ViewBox(pg.ViewBox):
     ):
         # pg.ViewBox.__init__(self, border, lockAspect, enableMouse,
         # invertY, enableMenu, name, invertX)
-        super(ViewBox, self).__init__()
+        super().__init__()
         self.border = fn.mkPen(border)
         if enableMenu:
             self.menu = ViewBoxMenu(self)

@@ -60,7 +60,7 @@ class RangeSlider(QSlider):
     """
 
     def __init__(self, parent=None, *args):
-        super(RangeSlider, self).__init__(*args)
+        super().__init__(*args)
 
         self._low = self.minimum()
         self._high = self.maximum()
@@ -216,7 +216,7 @@ class RangeSlider(QSlider):
 
 class SatSlider(RangeSlider):
     def __init__(self, parent=None):
-        super(SatSlider, self).__init__(parent)
+        super().__init__(parent)
         self.parent = parent
         self.setMinimum(0)
         self.setMaximum(100)
@@ -270,7 +270,7 @@ class Slider(QSlider):
 ### custom QDialog which allows user to fill in ops and run suite2p!
 class VisWindow(QMainWindow):
     def __init__(self, parent=None):
-        super(VisWindow, self).__init__(parent)
+        super().__init__(parent)
         self.parent = parent
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.setGeometry(70, 70, 1100, 900)

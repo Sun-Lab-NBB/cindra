@@ -17,7 +17,7 @@ from . import io, masks, menus, merge, views, traces, buttons, classgui, graphic
 
 class MainWindow(QMainWindow):
     def __init__(self, statfile=None):
-        super(MainWindow, self).__init__()
+        super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
 
         self.setGeometry(50, 50, 1500, 800)

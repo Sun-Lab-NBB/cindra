@@ -16,25 +16,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-def _fit_and_reconstruct_block(
-    block: NDArray[np.float32],
-    num_components: int,
-) -> NDArray[np.float32]:
-    """Fits a PCA model to a single spatial block and returns the low-rank reconstruction.
-
-    Args:
-        block: The centered block data with shape (num_frames, num_pixels).
-        num_components: The number of PCA components to retain.
-
-    Returns:
-        The reconstructed block data with shape (num_frames, num_pixels).
-    """
-    # noinspection PyUnresolvedReferences
-    model = PCA(n_components=num_components, random_state=0).fit(block)
-    reconstructed: NDArray[np.float32] = ((block @ model.components_.T) @ model.components_).astype(np.float32)
-    return reconstructed
-
-
 def pca_denoise(
     frames: NDArray[np.float32],
     block_size: tuple[int, int],
@@ -103,6 +84,7 @@ def pca_denoise(
             reconstructed_blocks = [future.result() for future in futures]
 
     # Accumulates the tapered reconstructions sequentially to avoid write conflicts on overlapping block regions.
+    # noinspection PyUnboundLocalVariable
     for (y_slice, x_slice), block_recon in zip(block_slices, reconstructed_blocks, strict=True):
         reconstruction[:, y_slice, x_slice] += block_recon.reshape(num_frames, block_height, block_width) * taper_mask
         normalization[y_slice, x_slice] += taper_mask
@@ -116,3 +98,22 @@ def pca_denoise(
 
     message = f"PCA denoising of binned movie: complete. Time taken: {timer.elapsed} seconds."
     console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def _fit_and_reconstruct_block(
+    block: NDArray[np.float32],
+    num_components: int,
+) -> NDArray[np.float32]:
+    """Fits a PCA model to a single spatial block and returns the low-rank reconstruction.
+
+    Args:
+        block: The centered block data with shape (num_frames, num_pixels).
+        num_components: The number of PCA components to retain.
+
+    Returns:
+        The reconstructed block data with shape (num_frames, num_pixels).
+    """
+    model = PCA(n_components=num_components, random_state=0).fit(block)
+    # noinspection PyUnresolvedReferences
+    reconstructed: NDArray[np.float32] = ((block @ model.components_.T) @ model.components_).astype(np.float32)
+    return reconstructed

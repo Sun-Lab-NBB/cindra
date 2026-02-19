@@ -32,7 +32,7 @@ from ..dataclasses import generate_default_ops
 
 class TextChooser(QDialog):
     def __init__(self, parent=None):
-        super(TextChooser, self).__init__(parent)
+        super().__init__(parent)
         self.setGeometry(300, 300, 180, 100)
         self.setWindowTitle("h5 key")
         self.win = QWidget(self)
@@ -53,7 +53,7 @@ class TextChooser(QDialog):
 ### custom QDialog which allows user to fill in ops and run suite2p!
 class RunWindow(QDialog):
     def __init__(self, parent=None):
-        super(RunWindow, self).__init__(parent)
+        super().__init__(parent)
         self.setGeometry(10, 10, 1500, 900)
         self.setWindowTitle("Choose run options (hold mouse over parameters to see descriptions)")
         self.parent = parent
@@ -646,7 +646,7 @@ class RunWindow(QDialog):
 
 class LineEdit(QLineEdit):
     def __init__(self, k, key, parent=None):
-        super(LineEdit, self).__init__(parent)
+        super().__init__(parent)
         self.key = key
         # self.textEdited.connect(lambda: self.edit_changed(parent.ops, k))
 
@@ -701,7 +701,7 @@ class LineEdit(QLineEdit):
 
 class OpsButton(QPushButton):
     def __init__(self, bid, Text, parent=None):
-        super(OpsButton, self).__init__(parent)
+        super().__init__(parent)
         self.setText(Text)
         self.clicked.connect(lambda: self.press(parent, bid))
         self.show()

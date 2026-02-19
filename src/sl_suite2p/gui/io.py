@@ -213,7 +213,7 @@ def load_files(name):
     try:
         stat = np.load(name, allow_pickle=True)
         ypix = stat[0]["y_pixels"]
-    except (ValueError, KeyError, OSError, RuntimeError, TypeError, NameError):
+    except ValueError, KeyError, OSError, RuntimeError, TypeError, NameError:
         console.echo(message="ERROR: this is not a stat.npy file (needs stat[n]['ypix'])", level=LogLevel.ERROR)
         stat = None
     goodfolder = False
@@ -223,24 +223,24 @@ def load_files(name):
         try:
             Fcell = np.load(basename + "/F.npy")
             Fneu = np.load(basename + "/Fneu.npy")
-        except (ValueError, OSError, RuntimeError, TypeError, NameError):
+        except ValueError, OSError, RuntimeError, TypeError, NameError:
             console.echo(message="ERROR: no fluorescence traces in this folder (F.npy/Fneu.npy)", level=LogLevel.ERROR)
             goodfolder = False
         try:
             Spks = np.load(basename + "/spks.npy")
-        except (ValueError, OSError, RuntimeError, TypeError, NameError):
+        except ValueError, OSError, RuntimeError, TypeError, NameError:
             console.echo(message="No spike deconvolved traces in this folder (spks.npy)", level=LogLevel.WARNING)
             goodfolder = False
         try:
             ops = np.load(basename + "/ops.npy", allow_pickle=True).item()
-        except (ValueError, OSError, RuntimeError, TypeError, NameError):
+        except ValueError, OSError, RuntimeError, TypeError, NameError:
             console.echo(message="ERROR: there is no ops file in this folder (ops.npy)", level=LogLevel.ERROR)
             goodfolder = False
         try:
             iscell = np.load(basename + "/iscell.npy")
             probcell = iscell[:, 1]
             iscell = iscell[:, 0].astype("bool")
-        except (ValueError, OSError, RuntimeError, TypeError, NameError):
+        except ValueError, OSError, RuntimeError, TypeError, NameError:
             console.echo(message="No manual labels found (iscell.npy)", level=LogLevel.WARNING)
             if goodfolder:
                 NN = Fcell.shape[0]
@@ -251,7 +251,7 @@ def load_files(name):
             probredcell = redcell[:, 1].copy()
             redcell = redcell[:, 0].astype("bool")
             hasred = True
-        except (ValueError, OSError, RuntimeError, TypeError, NameError):
+        except ValueError, OSError, RuntimeError, TypeError, NameError:
             console.echo(message="No channel 2 labels found (redcell.npy)", level=LogLevel.WARNING)
             hasred = False
             if goodfolder:
@@ -329,7 +329,7 @@ def load_behavior(parent):
         elif beh.shape[0] == parent.Fcell.shape[1]:
             parent.bloaded = True
             beh_time = np.arange(0, parent.Fcell.shape[1])
-    except (ValueError, KeyError, OSError, RuntimeError, TypeError, NameError):
+    except ValueError, KeyError, OSError, RuntimeError, TypeError, NameError:
         console.echo(message="ERROR: this is not a 1D array with length of data", level=LogLevel.ERROR)
     if parent.bloaded:
         beh -= beh.min()
@@ -426,7 +426,7 @@ def load_custom_mask(parent):
             parent.colorbtns.button(b).setEnabled(True)
             parent.colorbtns.button(b).setStyleSheet(parent.styleUnpressed)
             cloaded = True
-    except (ValueError, KeyError, OSError, RuntimeError, TypeError, NameError):
+    except ValueError, KeyError, OSError, RuntimeError, TypeError, NameError:
         console.echo(message="ERROR: this is not a 1D array with length of data", level=LogLevel.ERROR)
     if cloaded:
         parent.custom_mask = mask
