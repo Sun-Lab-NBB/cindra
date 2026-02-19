@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tqdm import tqdm
 import numpy as np
 import scipy.ndimage
 from ataraxis_base_utilities import console
@@ -121,7 +120,7 @@ class DiffeomorphicDemonsRegistration:
         Iteratively computes deformations from coarse to fine scales, updating the groupwise alignment at each step.
 
         Args:
-            progress: Determines whether to use a tqdm progress bar to report the registration progress.
+            progress: Determines whether to display a progress bar to report the registration progress.
         """
         self._interpolation_order = 1  # Initializes the interpolation order to 1
 
@@ -145,34 +144,47 @@ class DiffeomorphicDemonsRegistration:
         else:
             total_iterations = scale_level_count * self._scale_sampling
 
-        # Main registration loop: processes scales from coarse to fine.
-        with tqdm(
-            total=total_iterations,
-            desc="Registering sessions to a shared visual space",
-            disable=not progress,
-            unit="iteration",
-        ) as progress_bar:
-            for level in reversed(range(scale_level_count)):
-                # Computes the scale at the current level.
-                scale = self._final_scale * 2**level
-                if self._smooth_scale:
-                    scale *= 2 * iteration_factor
+        # Saves and restores the console's progress state to honor the progress parameter without affecting the global
+        # state set by the pipeline entry point.
+        previous_state = console.progress_enabled
+        if progress:
+            console.enable_progress()
+        else:
+            console.disable_progress()
 
-                for iteration in range(1, self._scale_sampling + 1):
-                    # Skips the coarsest level when using smooth scaling.
-                    if self._smooth_scale and level >= scale_level_count - 1:
-                        continue
-
-                    # Switches to cubic interpolation for final iterations at finest scale.
-                    if level == 0 and iteration > 0.75 * self._scale_sampling:
-                        self._interpolation_order = 3
-
-                    self._perform_iteration(level=level, iteration=iteration, scale=scale)
-                    progress_bar.update(1)
-
-                    # Smoothly decreases scale within each level.
+        try:
+            # Main registration loop: processes scales from coarse to fine.
+            with console.progress(
+                total=total_iterations,
+                description="Registering sessions to a shared visual space",
+                unit="iteration",
+            ) as progress_bar:
+                for level in reversed(range(scale_level_count)):
+                    # Computes the scale at the current level.
+                    scale = self._final_scale * 2**level
                     if self._smooth_scale:
-                        scale = max(self._final_scale, scale * iteration_factor)
+                        scale *= 2 * iteration_factor
+
+                    for iteration in range(1, self._scale_sampling + 1):
+                        # Skips the coarsest level when using smooth scaling.
+                        if self._smooth_scale and level >= scale_level_count - 1:
+                            continue
+
+                        # Switches to cubic interpolation for final iterations at finest scale.
+                        if level == 0 and iteration > 0.75 * self._scale_sampling:
+                            self._interpolation_order = 3
+
+                        self._perform_iteration(level=level, iteration=iteration, scale=scale)
+                        progress_bar.update(1)
+
+                        # Smoothly decreases scale within each level.
+                        if self._smooth_scale:
+                            scale = max(self._final_scale, scale * iteration_factor)
+        finally:
+            if previous_state:
+                console.enable_progress()
+            else:
+                console.disable_progress()
 
     def _perform_iteration(self, level: int, iteration: int, scale: float) -> None:
         """Performs one iteration of registration at the specified scale.

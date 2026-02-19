@@ -21,24 +21,16 @@ from numba import config
 
 config.THREADING_LAYER = "tbb"
 
-from ataraxis_base_utilities import console
+from ataraxis_base_utilities import console  # noqa: E402
 
-from .pipelines import (
+from .pipelines import (  # noqa: E402
     MultiDayJobNames,
     SingleDayJobNames,
-    binarize_recording,
-    discover_multiday_cells,
-    extract_multiday_fluorescence,
-    get_session_root,
-    process_multi_day,
-    process_plane,
-    process_single_day,
-    run_multiday_pipeline,
+    run_multi_day_pipeline,
     run_single_day_pipeline,
-    save_combined_data,
 )
-from .dataclasses import CombinedData, RuntimeContext, MultiDayConfiguration, SingleDayConfiguration
-from .gui.multiday import show_images_with_masks
+from .dataclasses import CombinedData, RuntimeContext, MultiDayConfiguration, SingleDayConfiguration  # noqa: E402
+from .gui.multiday import show_images_with_masks  # noqa: E402
 
 # Ensures console output is enabled whenever the suite2p library is imported. In sl-suite2p, the 'Console' class is
 # used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal
@@ -53,15 +45,7 @@ __all__ = [
     "RuntimeContext",
     "SingleDayConfiguration",
     "SingleDayJobNames",
-    "binarize_recording",
-    "discover_multiday_cells",
-    "extract_multiday_fluorescence",
-    "get_session_root",
-    "process_multi_day",
-    "process_plane",
-    "process_single_day",
-    "run_multiday_pipeline",
+    "run_multi_day_pipeline",
     "run_single_day_pipeline",
-    "save_combined_data",
     "show_images_with_masks",
 ]

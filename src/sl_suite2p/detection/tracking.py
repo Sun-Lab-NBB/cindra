@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tqdm import tqdm
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from scipy.cluster import hierarchy
@@ -362,7 +361,6 @@ def _track_channel_rois(contexts: list[MultiDayRuntimeContext], channel_2: bool)
     """
     # Extracts tracking configuration parameters. All contexts share the same configuration, so the first is used.
     config = contexts[0].configuration.roi_tracking
-    show_progress = contexts[0].configuration.runtime.display_progress_bars
 
     # Spatial binning parameters control how the image is partitioned for parallel-friendly processing.
     step_y = config.step_sizes[0]
@@ -420,11 +418,10 @@ def _track_channel_rois(contexts: list[MultiDayRuntimeContext], channel_2: bool)
     cluster_counter = 0
 
     # Processes each spatial bin independently. Sorting ensures deterministic ordering across runs.
-    for grid_pos in tqdm(
+    for grid_pos in console.track(
         sorted(grid_positions),
-        desc=f"Tracking {'channel 2' if channel_2 else 'channel 1'} ROIs across sessions",
+        description=f"Tracking {'channel 2' if channel_2 else 'channel 1'} ROIs across sessions",
         unit="bins",
-        disable=not show_progress,
     ):
         # Converts grid indices back to pixel coordinates for boundary calculations.
         grid_y, grid_x = grid_pos
