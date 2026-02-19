@@ -17,7 +17,7 @@ For documentation and additional information, see the sl-suite2p repository: htt
 
 # Configures numba threading layer for parallel execution across all modules. This must be set before any numba
 # functions are compiled, hence it appears before other imports.
-from numba import config
+from numba import config  # type: ignore[import-untyped]
 
 config.THREADING_LAYER = "tbb"
 
