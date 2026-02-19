@@ -33,7 +33,7 @@ from ..io.save import compute_plane_offsets
 
 class BinaryPlayer(QMainWindow):
     def __init__(self, parent=None):
-        super(BinaryPlayer, self).__init__(parent)
+        super().__init__(parent)
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.setGeometry(70, 70, 1070, 1070)
         self.setWindowTitle("View registered binary")
@@ -893,7 +893,7 @@ def subsample_frames(ops, nsamps, reg_loc):
 
 class PCViewer(QMainWindow):
     def __init__(self, parent=None):
-        super(PCViewer, self).__init__(parent)
+        super().__init__(parent)
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.setGeometry(70, 70, 1300, 800)
         self.setWindowTitle("Metrics for registration")

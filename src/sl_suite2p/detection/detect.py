@@ -41,6 +41,159 @@ _VARIANCE_EPSILON: float = 1e-10
 # Default cell diameter in pixels, used when the estimated diameter is zero or negative.
 _DEFAULT_CELL_DIAMETER: int = 12
 
+# Type alias for the _detect_channel return signature containing mean image, enhanced mean image, maximum projection,
+# correlation map, cell diameter, and ROI statistics.
+type _ChannelDetectionResult = tuple[
+    NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int, list[ROIStatistics]
+]
+
+
+def detect_plane_rois(context: RuntimeContext) -> None:
+    """Detects ROIs from registered binary data and updates the runtime context in-place.
+
+    Notes:
+        This function orchestrates the full detection pipeline for one or both functional channels. When both channels
+        are functional (independent ROI detection), the pipeline runs independently on each channel since different
+        cell populations may have different soma sizes and spatial scales. Results are written into
+        context.runtime.detection, context.runtime.extraction, and context.runtime.timing.
+
+    Args:
+        context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
+            in-place to store detection outputs including ROI statistics, image projections, and timing data.
+
+    Raises:
+        ValueError: If no ROIs are detected on either channel.
+    """
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+
+    # Extracts configuration.
+    detection_config = context.configuration.roi_detection
+    main_config = context.configuration.main
+    nonrigid_block_size = context.configuration.non_rigid_registration.block_size
+    custom_classifier_path = main_config.custom_classifier_path
+
+    # Extracts runtime data.
+    io_data = context.runtime.io
+    registration_data = context.runtime.registration
+    detection_data = context.runtime.detection
+
+    plane_index = io_data.plane_index if io_data.plane_index is not None else 0
+    frame_height = io_data.frame_height
+    frame_width = io_data.frame_width
+
+    # Computes the bin size for temporal averaging. The bin size is the maximum of 1, the ratio of total frames to the
+    # maximum number of binned frames, and the number of frames per sensor time constant.
+    bin_size = int(
+        max(
+            1,
+            io_data.frame_count // detection_config.maximum_binned_frames,
+            np.round(main_config.tau * io_data.sampling_rate),
+        )
+    )
+
+    valid_y_range = registration_data.valid_y_range
+    valid_x_range = registration_data.valid_x_range
+    parallel_workers = context.configuration.runtime.parallel_workers
+
+    # Validates that the registered binary path exists. This is always satisfied when called from the processing
+    # pipeline, since registration creates the binary file before detection runs.
+    channel_1_path = io_data.registered_binary_path
+    if channel_1_path is None:
+        console.error(
+            message="Unable to run ROI detection: registered binary file path is not set for channel 1.",
+            error=RuntimeError,
+        )
+
+    # Runs channel 1 detection.
+    mean_image, enhanced_mean_image, maximum_projection, correlation_map, cell_diameter, roi_statistics = (
+        _detect_channel(
+            binary_path=channel_1_path,
+            frame_height=frame_height,
+            frame_width=frame_width,
+            frame_count=io_data.frame_count,
+            bin_size=bin_size,
+            valid_y_range=valid_y_range,
+            valid_x_range=valid_x_range,
+            bad_frames=registration_data.bad_frames,
+            detection_config=detection_config,
+            nonrigid_block_size=nonrigid_block_size,
+            parallel_workers=parallel_workers,
+            custom_classifier_path=custom_classifier_path,
+            plane_index=plane_index,
+            channel_label="channel 1",
+        )
+    )
+
+    # Computes the aggregate aspect ratio as the median across all detected ROIs.
+    aspect_ratios = np.array([roi.aspect_ratio for roi in roi_statistics], dtype=np.float32)
+    detection_data.aspect_ratio = float(np.median(aspect_ratios)) if len(aspect_ratios) > 0 else 0.0
+
+    # Stores channel 1 detection results.
+    detection_data.mean_image = mean_image
+    detection_data.enhanced_mean_image = enhanced_mean_image
+    detection_data.maximum_projection = maximum_projection
+    detection_data.correlation_map = correlation_map
+    detection_data.cell_diameter = cell_diameter
+    context.runtime.extraction.roi_statistics = roi_statistics
+
+    # Records channel 1 detection time.
+    elapsed_seconds = int(timer.elapsed)
+    context.runtime.timing.detection_time = elapsed_seconds
+    console.echo(
+        message=f"Plane {plane_index} channel 1 ROI detection: complete. Time taken: {elapsed_seconds} seconds.",
+        level=LogLevel.SUCCESS,
+    )
+
+    # Runs channel 2 detection only when both hardware channels are functional, meaning channel_2_data.bin contains
+    # independently detectable functional data. When only the second hardware channel is functional, the import layer
+    # swaps it into channel_1_data.bin, so channel_2_data.bin holds non-functional data and must not be detected.
+    channel_2_path = io_data.registered_binary_path_channel_2
+    if main_config.first_channel_functional and main_config.second_channel_functional and channel_2_path is not None:
+        timer.reset()
+
+        (
+            mean_image_channel_2,
+            enhanced_mean_image_channel_2,
+            maximum_projection_channel_2,
+            correlation_map_channel_2,
+            cell_diameter_channel_2,
+            roi_statistics_channel_2,
+        ) = _detect_channel(
+            binary_path=channel_2_path,
+            frame_height=frame_height,
+            frame_width=frame_width,
+            frame_count=io_data.frame_count,
+            bin_size=bin_size,
+            valid_y_range=valid_y_range,
+            valid_x_range=valid_x_range,
+            bad_frames=registration_data.bad_frames,
+            detection_config=detection_config,
+            nonrigid_block_size=nonrigid_block_size,
+            parallel_workers=parallel_workers,
+            custom_classifier_path=custom_classifier_path,
+            plane_index=plane_index,
+            channel_label="channel 2",
+        )
+
+        # Stores channel 2 detection results.
+        detection_data.mean_image_channel_2 = mean_image_channel_2
+        detection_data.enhanced_mean_image_channel_2 = enhanced_mean_image_channel_2
+        detection_data.maximum_projection_channel_2 = maximum_projection_channel_2
+        detection_data.correlation_map_channel_2 = correlation_map_channel_2
+        detection_data.cell_diameter_channel_2 = cell_diameter_channel_2
+        context.runtime.extraction.roi_statistics_channel_2 = roi_statistics_channel_2
+
+        # Records channel 2 detection time.
+        elapsed_seconds = int(timer.elapsed)
+        context.runtime.timing.detection_time_channel_2 = elapsed_seconds
+        console.echo(
+            message=f"Plane {plane_index} channel 2 ROI detection: complete. Time taken: {elapsed_seconds} seconds.",
+            level=LogLevel.SUCCESS,
+        )
+
+    # Persists detection results to disk so that ROI statistics and detection images are not lost if extraction fails.
+    context.save_runtime()
+
 
 def _create_enhanced_mean_image(
     mean_image: NDArray[np.float32],
@@ -139,7 +292,7 @@ def _apply_preclassification(
     Returns:
         The filtered list of ROIStatistics instances that passed the preclassification threshold.
     """
-    # Computes only the minimal statistics (compactness and normalized_pixel_count) needed by the preclassifier,
+    # Computes only the minimal statistics (compactness and normalized_pixel_count) needed by the pre-classifier,
     # skipping the expensive ellipse fitting, convex hull, and overlap computations.
     compute_roi_statistics(
         rois=roi_statistics,
@@ -185,9 +338,7 @@ def _detect_channel(
     custom_classifier_path: Path | None,
     plane_index: int,
     channel_label: str,
-) -> tuple[
-    NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int, list[ROIStatistics]
-]:
+) -> _ChannelDetectionResult:
     """Runs the full detection pipeline for a single imaging channel.
 
     Notes:
@@ -346,150 +497,3 @@ def _detect_channel(
     console.echo(message=message, level=LogLevel.SUCCESS)
 
     return mean_image, enhanced_mean_image, maximum_projection, correlation_map, cell_diameter, roi_statistics
-
-
-def detect_plane_rois(context: RuntimeContext) -> None:
-    """Detects ROIs from registered binary data and updates the runtime context in-place.
-
-    Notes:
-        This function orchestrates the full detection pipeline for one or both functional channels. When both channels
-        are functional (independent ROI detection), the pipeline runs independently on each channel since different
-        cell populations may have different soma sizes and spatial scales. Results are written into
-        context.runtime.detection, context.runtime.extraction, and context.runtime.timing.
-
-    Args:
-        context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
-            in-place to store detection outputs including ROI statistics, image projections, and timing data.
-
-    Raises:
-        ValueError: If no ROIs are detected on either channel.
-    """
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-
-    # Extracts configuration.
-    detection_config = context.configuration.roi_detection
-    main_config = context.configuration.main
-    nonrigid_block_size = context.configuration.non_rigid_registration.block_size
-    custom_classifier_path = main_config.custom_classifier_path
-
-    # Extracts runtime data.
-    io_data = context.runtime.io
-    registration_data = context.runtime.registration
-    detection_data = context.runtime.detection
-
-    plane_index = io_data.plane_index if io_data.plane_index is not None else 0
-    frame_height = io_data.frame_height
-    frame_width = io_data.frame_width
-
-    # Computes the bin size for temporal averaging. The bin size is the maximum of 1, the ratio of total frames to the
-    # maximum number of binned frames, and the number of frames per sensor time constant.
-    bin_size = int(
-        max(
-            1,
-            io_data.frame_count // detection_config.maximum_binned_frames,
-            np.round(main_config.tau * io_data.sampling_rate),
-        )
-    )
-
-    valid_y_range = registration_data.valid_y_range
-    valid_x_range = registration_data.valid_x_range
-    parallel_workers = context.configuration.runtime.parallel_workers
-
-    # Validates that the registered binary path exists. This is always satisfied when called from the processing
-    # pipeline, since registration creates the binary file before detection runs.
-    channel_1_path = io_data.registered_binary_path
-    if channel_1_path is None:
-        console.error(
-            message="Unable to run ROI detection: registered binary file path is not set for channel 1.",
-            error=RuntimeError,
-        )
-
-    # Runs channel 1 detection.
-    mean_image, enhanced_mean_image, maximum_projection, correlation_map, cell_diameter, roi_statistics = (
-        _detect_channel(
-            binary_path=channel_1_path,
-            frame_height=frame_height,
-            frame_width=frame_width,
-            frame_count=io_data.frame_count,
-            bin_size=bin_size,
-            valid_y_range=valid_y_range,
-            valid_x_range=valid_x_range,
-            bad_frames=registration_data.bad_frames,
-            detection_config=detection_config,
-            nonrigid_block_size=nonrigid_block_size,
-            parallel_workers=parallel_workers,
-            custom_classifier_path=custom_classifier_path,
-            plane_index=plane_index,
-            channel_label="channel 1",
-        )
-    )
-
-    # Computes the aggregate aspect ratio as the median across all detected ROIs.
-    aspect_ratios = np.array([roi.aspect_ratio for roi in roi_statistics], dtype=np.float32)
-    detection_data.aspect_ratio = float(np.median(aspect_ratios)) if len(aspect_ratios) > 0 else 0.0
-
-    # Stores channel 1 detection results.
-    detection_data.mean_image = mean_image
-    detection_data.enhanced_mean_image = enhanced_mean_image
-    detection_data.maximum_projection = maximum_projection
-    detection_data.correlation_map = correlation_map
-    detection_data.cell_diameter = cell_diameter
-    context.runtime.extraction.roi_statistics = roi_statistics
-
-    # Records channel 1 detection time.
-    elapsed_seconds = int(timer.elapsed)
-    context.runtime.timing.detection_time = elapsed_seconds
-    console.echo(
-        message=f"Plane {plane_index} channel 1 ROI detection: complete. Time taken: {elapsed_seconds} seconds.",
-        level=LogLevel.SUCCESS,
-    )
-
-    # Runs channel 2 detection only when both hardware channels are functional, meaning channel_2_data.bin contains
-    # independently detectable functional data. When only the second hardware channel is functional, the import layer
-    # swaps it into channel_1_data.bin, so channel_2_data.bin holds non-functional data and must not be detected.
-    channel_2_path = io_data.registered_binary_path_channel_2
-    if main_config.first_channel_functional and main_config.second_channel_functional and channel_2_path is not None:
-        timer.reset()
-
-        (
-            mean_image_channel_2,
-            enhanced_mean_image_channel_2,
-            maximum_projection_channel_2,
-            correlation_map_channel_2,
-            cell_diameter_channel_2,
-            roi_statistics_channel_2,
-        ) = _detect_channel(
-            binary_path=channel_2_path,
-            frame_height=frame_height,
-            frame_width=frame_width,
-            frame_count=io_data.frame_count,
-            bin_size=bin_size,
-            valid_y_range=valid_y_range,
-            valid_x_range=valid_x_range,
-            bad_frames=registration_data.bad_frames,
-            detection_config=detection_config,
-            nonrigid_block_size=nonrigid_block_size,
-            parallel_workers=parallel_workers,
-            custom_classifier_path=custom_classifier_path,
-            plane_index=plane_index,
-            channel_label="channel 2",
-        )
-
-        # Stores channel 2 detection results.
-        detection_data.mean_image_channel_2 = mean_image_channel_2
-        detection_data.enhanced_mean_image_channel_2 = enhanced_mean_image_channel_2
-        detection_data.maximum_projection_channel_2 = maximum_projection_channel_2
-        detection_data.correlation_map_channel_2 = correlation_map_channel_2
-        detection_data.cell_diameter_channel_2 = cell_diameter_channel_2
-        context.runtime.extraction.roi_statistics_channel_2 = roi_statistics_channel_2
-
-        # Records channel 2 detection time.
-        elapsed_seconds = int(timer.elapsed)
-        context.runtime.timing.detection_time_channel_2 = elapsed_seconds
-        console.echo(
-            message=f"Plane {plane_index} channel 2 ROI detection: complete. Time taken: {elapsed_seconds} seconds.",
-            level=LogLevel.SUCCESS,
-        )
-
-    # Persists detection results to disk so that ROI statistics and detection images are not lost if extraction fails.
-    context.save_runtime()

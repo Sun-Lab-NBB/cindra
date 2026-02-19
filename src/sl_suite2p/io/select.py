@@ -18,6 +18,80 @@ if TYPE_CHECKING:
     )
 
 
+def select_session_cells(contexts: list[MultiDayRuntimeContext]) -> None:
+    """Selects cells from single-day pipeline outputs that meet multi-day tracking criteria.
+
+    This function performs cell selection filtering on each session using the ROI selection parameters from the
+    configuration. The CombinedData for each session is accessed from runtime.combined_data (loaded during context
+    resolution), and the selected cell indices are stored in runtime.io.selected_cell_indices (channel 1) and
+    runtime.io.selected_cell_indices_channel_2 (channel 2, if available).
+
+    Notes:
+        Selection is an on-demand operation. When repeat_selection is False (default), sessions with existing cell
+        selections are skipped. When repeat_selection is True, selection is re-run for all sessions even if selections
+        already exist.
+
+        For recordings with two functional channels, both channels are filtered independently using the same selection
+        criteria. The output messages report cell counts for both channels when channel 2 data is present.
+
+    Args:
+        contexts: The list of MultiDayRuntimeContext instances to process. Each context must have combined_data
+            available in its runtime (set during context resolution).
+
+    Raises:
+        ValueError: If combined_data is not available in the runtime, does not contain ROI statistics, or does not
+            contain classification results.
+    """
+    if not contexts:
+        return
+
+    configuration = contexts[0].configuration
+    repeat_selection = configuration.session_io.repeat_selection
+
+    for context in contexts:
+        runtime = context.runtime
+        session_id = runtime.io.session_id
+
+        # Checks if cell selection already exists and repeat_selection is not enabled. Both channel 1 and channel 2
+        # (if applicable) must have existing selections to skip.
+        has_channel_1_selection = len(runtime.io.selected_cell_indices) > 0
+        has_channel_2_data = (
+            runtime.combined_data is not None and runtime.combined_data.extraction.roi_statistics_channel_2 is not None
+        )
+        has_channel_2_selection = len(runtime.io.selected_cell_indices_channel_2) > 0
+
+        # Skips if channel 1 has selections AND (no channel 2 data OR channel 2 has selections).
+        if has_channel_1_selection and (not has_channel_2_data or has_channel_2_selection) and not repeat_selection:
+            channel_1_count = len(runtime.io.selected_cell_indices)
+            channel_2_count = len(runtime.io.selected_cell_indices_channel_2)
+            if channel_2_count > 0:
+                message = (
+                    f"Session {session_id} already has {channel_1_count} channel 1 and {channel_2_count} channel 2 "
+                    f"selected cells. Skipping cell selection."
+                )
+            else:
+                message = f"Session {session_id} already has {channel_1_count} selected cells. Skipping cell selection."
+            console.echo(message=message, level=LogLevel.INFO)
+            continue
+
+        # Performs cell selection filtering for both channels.
+        channel_1_count, channel_2_count = _filter_cells(runtime=runtime, configuration=configuration)
+
+        # Formats output message based on whether channel 2 data is present.
+        if channel_2_count > 0:
+            count_message = f"{channel_1_count} channel 1 and {channel_2_count} channel 2 cell candidates"
+        else:
+            count_message = f"{channel_1_count} cell candidates"
+
+        if repeat_selection:
+            console.echo(message=f"Re-selected {count_message} for session {session_id}.", level=LogLevel.INFO)
+        else:
+            console.echo(message=f"Selected {count_message} for session {session_id}.", level=LogLevel.SUCCESS)
+
+        # Saves the updated runtime data with the selected cell indices.
+        context.save_runtime()
+
+
 def _filter_channel_cells(
     roi_statistics: list[ROIStatistics],
     cell_classification: NDArray[np.float32],
@@ -172,77 +246,3 @@ def _filter_cells(
         channel_2_count = len(runtime.io.selected_cell_indices_channel_2)
 
     return channel_1_count, channel_2_count
-
-
-def select_session_cells(contexts: list[MultiDayRuntimeContext]) -> None:
-    """Selects cells from single-day pipeline outputs that meet multi-day tracking criteria.
-
-    This function performs cell selection filtering on each session using the ROI selection parameters from the
-    configuration. The CombinedData for each session is accessed from runtime.combined_data (loaded during context
-    resolution), and the selected cell indices are stored in runtime.io.selected_cell_indices (channel 1) and
-    runtime.io.selected_cell_indices_channel_2 (channel 2, if available).
-
-    Notes:
-        Selection is an on-demand operation. When repeat_selection is False (default), sessions with existing cell
-        selections are skipped. When repeat_selection is True, selection is re-run for all sessions even if selections
-        already exist.
-
-        For recordings with two functional channels, both channels are filtered independently using the same selection
-        criteria. The output messages report cell counts for both channels when channel 2 data is present.
-
-    Args:
-        contexts: The list of MultiDayRuntimeContext instances to process. Each context must have combined_data
-            available in its runtime (set during context resolution).
-
-    Raises:
-        ValueError: If combined_data is not available in the runtime, does not contain ROI statistics, or does not
-            contain classification results.
-    """
-    if not contexts:
-        return
-
-    configuration = contexts[0].configuration
-    repeat_selection = configuration.session_io.repeat_selection
-
-    for context in contexts:
-        runtime = context.runtime
-        session_id = runtime.io.session_id
-
-        # Checks if cell selection already exists and repeat_selection is not enabled. Both channel 1 and channel 2
-        # (if applicable) must have existing selections to skip.
-        has_channel_1_selection = len(runtime.io.selected_cell_indices) > 0
-        has_channel_2_data = (
-            runtime.combined_data is not None and runtime.combined_data.extraction.roi_statistics_channel_2 is not None
-        )
-        has_channel_2_selection = len(runtime.io.selected_cell_indices_channel_2) > 0
-
-        # Skips if channel 1 has selections AND (no channel 2 data OR channel 2 has selections).
-        if has_channel_1_selection and (not has_channel_2_data or has_channel_2_selection) and not repeat_selection:
-            channel_1_count = len(runtime.io.selected_cell_indices)
-            channel_2_count = len(runtime.io.selected_cell_indices_channel_2)
-            if channel_2_count > 0:
-                message = (
-                    f"Session {session_id} already has {channel_1_count} channel 1 and {channel_2_count} channel 2 "
-                    f"selected cells. Skipping cell selection."
-                )
-            else:
-                message = f"Session {session_id} already has {channel_1_count} selected cells. Skipping cell selection."
-            console.echo(message=message, level=LogLevel.INFO)
-            continue
-
-        # Performs cell selection filtering for both channels.
-        channel_1_count, channel_2_count = _filter_cells(runtime=runtime, configuration=configuration)
-
-        # Formats output message based on whether channel 2 data is present.
-        if channel_2_count > 0:
-            count_message = f"{channel_1_count} channel 1 and {channel_2_count} channel 2 cell candidates"
-        else:
-            count_message = f"{channel_1_count} cell candidates"
-
-        if repeat_selection:
-            console.echo(message=f"Re-selected {count_message} for session {session_id}.", level=LogLevel.INFO)
-        else:
-            console.echo(message=f"Selected {count_message} for session {session_id}.", level=LogLevel.SUCCESS)
-
-        # Saves the updated runtime data with the selected cell indices.
-        context.save_runtime()

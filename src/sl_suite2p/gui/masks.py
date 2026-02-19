@@ -593,7 +593,7 @@ def istat_transform(istat, colormap="hsv"):
 # button group is exclusive (at least one color is always chosen)
 class ColorButton(QPushButton):
     def __init__(self, bid, Text, parent=None):
-        super(ColorButton, self).__init__(parent)
+        super().__init__(parent)
         self.setText(Text)
         self.setCheckable(True)
         self.setStyleSheet(parent.styleInactive)

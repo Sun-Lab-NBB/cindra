@@ -39,6 +39,9 @@ _MINIMUM_REGISTRATION_METRIC_FRAMES: int = 1500
 # Threshold fraction of bad frames above which registration is considered failed.
 _BAD_FRAME_FRACTION_THRESHOLD: float = 0.5
 
+# Maximum median filter window size for offset time series smoothing.
+_MAXIMUM_MEDIAN_FILTER_WINDOW: int = 101
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
@@ -49,6 +52,182 @@ if TYPE_CHECKING:
     RegistrationBlocks = tuple[
         list[NDArray[np.int32]], list[NDArray[np.int32]], tuple[int, int], tuple[int, int], NDArray[np.float32]
     ]
+
+
+def register_plane(context: RuntimeContext) -> None:
+    """Registers (motion-corrects) all frames for a single imaging plane specified by the input runtime context.
+
+    This function is the primary entry point for frame registration. It computes registration offsets from the alignment
+    channel (determined by config.registration.align_by_first_channel), then applies those offsets to both channels.
+    If two-step registration is enabled, a refinement pass is performed using the mean of registered frames as the
+    reference.
+
+    All configuration is read from context.configuration, file paths from context.runtime.io, and results are stored in
+    context.runtime.registration, context.runtime.detection, and context.runtime.timing.
+
+    Args:
+        context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
+            in-place to store registration outputs including reference image, offsets, mean images, and timing data.
+    """
+    config = context.configuration
+    io_data = context.runtime.io
+    registration_data = context.runtime.registration
+    plane_index = io_data.plane_index if io_data.plane_index is not None else 0
+
+    # Checks if registration should be skipped (already registered and not forcing re-registration).
+    if registration_data.is_registered() and not config.registration.repeat_registration:
+        console.echo(
+            message=(
+                f"Plane {plane_index} registration: skipped. The plane is already registered and re-registration is "
+                f"disabled."
+            ),
+            level=LogLevel.INFO,
+        )
+        return
+
+    # Clears existing registration data if re-registering.
+    if registration_data.is_registered():
+        console.echo(
+            message=(
+                f"Plane {plane_index} registration: forced. Clearing existing data and re-running the registration."
+            ),
+            level=LogLevel.INFO,
+        )
+        registration_data.clear()
+
+    # Determines channel configuration.
+    has_second_channel = io_data.registered_binary_path_channel_2 is not None
+
+    if has_second_channel:
+        alignment_channel = "channel 1" if config.registration.align_by_first_channel else "channel 2"
+        console.echo(
+            message=f"Registering plane {plane_index} (two channels, aligning by {alignment_channel})...",
+            level=LogLevel.INFO,
+        )
+    else:
+        console.echo(message=f"Registering plane {plane_index} (single channel)...", level=LogLevel.INFO)
+
+    # Starts timing for first registration step.
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+
+    # Computes registration offsets from the alignment channel and applies them.
+    _register_alignment_channel(context)
+
+    # Applies the same registration offsets to the secondary channel if present.
+    if has_second_channel:
+        _register_secondary_channel(context)
+
+    # Records first registration step timing.
+    context.runtime.timing.registration_time = timer.elapsed
+    console.echo(
+        message=f"Plane {plane_index} registration step 1: complete. Time taken: {timer.elapsed} seconds.",
+        level=LogLevel.SUCCESS,
+    )
+
+    # Performs two-step registration refinement if enabled. The second step re-registers the already-registered frames
+    # using a new reference computed from the first-step results, which improves alignment for noisy data.
+    if config.registration.two_step_registration:
+        console.echo(message=f"Running plane {plane_index} two-step registration refinement...", level=LogLevel.INFO)
+        timer.reset()
+
+        # Re-runs registration (computes new reference from already-registered frames).
+        _register_alignment_channel(context)
+
+        # Re-applies shifts to the secondary channel if present.
+        if has_second_channel:
+            _register_secondary_channel(context)
+
+        # Records two-step registration timing.
+        context.runtime.timing.two_step_registration_time = int(timer.elapsed)
+        console.echo(
+            message=f"Plane {plane_index} registration step 2: complete. Time taken: {timer.elapsed} seconds.",
+            level=LogLevel.SUCCESS,
+        )
+
+    # Loads bad frames from file if present.
+    num_frames = io_data.frame_count
+    bad_frames = np.zeros(num_frames, dtype=np.bool_)
+    data_path = config.file_io.data_path
+    if data_path is not None:
+        bad_frames_file = data_path / "bad_frames.npy"
+        if bad_frames_file.exists():
+            console.echo(
+                message=f"Plane {plane_index} bad frames file: exists. Path: {bad_frames_file}.",
+                level=LogLevel.WARNING,
+            )
+            bad_frame_indices = np.load(bad_frames_file)
+            bad_frame_indices = bad_frame_indices.flatten().astype(int)
+            bad_frames[bad_frame_indices] = True
+            console.echo(
+                message=f"Plane {plane_index} bad frames count: {bad_frames.sum()}.",
+                level=LogLevel.WARNING,
+            )
+
+    # Computes valid region from registration shifts.
+    registration_data = context.runtime.registration
+    height, width = io_data.frame_height, io_data.frame_width
+
+    # Extracts offsets for crop computation. Fallback assignments are for type checker only; these are always present
+    # after _register_alignment_channel. Uses np.empty to avoid initialization overhead.
+    y_offsets = (
+        registration_data.rigid_y_offsets
+        if registration_data.rigid_y_offsets is not None
+        else np.empty(1, dtype=np.int32)
+    )
+    x_offsets = (
+        registration_data.rigid_x_offsets
+        if registration_data.rigid_x_offsets is not None
+        else np.empty(1, dtype=np.int32)
+    )
+    correlations = (
+        registration_data.rigid_correlations
+        if registration_data.rigid_correlations is not None
+        else np.empty(1, dtype=np.float32)
+    )
+
+    computed_bad_frames, valid_y_range, valid_x_range = _compute_crop(
+        x_offsets=x_offsets,
+        y_offsets=y_offsets,
+        correlations=correlations,
+        bad_frame_threshold=config.registration.bad_frame_threshold,
+        bad_frames=bad_frames,
+        maximum_shift_fraction=config.registration.maximum_shift_fraction,
+        frame_height=height,
+        frame_width=width,
+    )
+
+    # Stores valid ranges and bad frames in context.
+    registration_data.valid_y_range = valid_y_range
+    registration_data.valid_x_range = valid_x_range
+    registration_data.bad_frames = computed_bad_frames
+
+    # Persists registration results to disk before the optional metrics computation step, so that registration offsets
+    # and valid ranges are not lost if the metrics computation fails.
+    context.save_runtime()
+
+    # Computes registration quality metrics if enabled and recording has enough frames.
+    num_principal_components = config.registration.registration_metric_principal_components
+    if num_principal_components > 0 and num_frames >= _MINIMUM_REGISTRATION_METRIC_FRAMES:
+        timer.reset()
+        compute_pc_metrics(context)
+        context.runtime.timing.registration_metrics_time = int(timer.elapsed)
+        console.echo(
+            message=(
+                f"Plane {plane_index} registration metrics processing: complete. Time taken: {timer.elapsed} seconds."
+            ),
+            level=LogLevel.SUCCESS,
+        )
+    elif num_principal_components > 0:
+        console.echo(
+            message=(
+                f"Skipping plane {plane_index} registration quality metrics computation. Recording has {num_frames} "
+                f"frames, but at least {_MINIMUM_REGISTRATION_METRIC_FRAMES} are required."
+            ),
+            level=LogLevel.INFO,
+        )
+
+    # Persists the final registration state (including metrics if computed) to disk.
+    context.save_runtime()
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,9 +307,9 @@ def _compute_crop(
         A tuple containing the updated bad_frames boolean array with outliers marked, the valid y-range as
         [y_min, y_max] defining usable rows, and the valid x-range as [x_min, x_max] defining usable columns.
     """
-    # Computes median filter window: largest odd number up to array length, capped at 101.
+    # Computes median filter window: largest odd number up to array length, capped at maximum.
     # This extracts a smooth baseline trend from the offset time series.
-    filter_window = min((len(y_offsets) // 2) * 2 - 1, 101)
+    filter_window = min((len(y_offsets) // 2) * 2 - 1, _MAXIMUM_MEDIAN_FILTER_WINDOW)
 
     # Subtracts baseline to isolate high-frequency deviations (sudden jumps indicate bad frames). Casts the medfilt
     # output to float32 to prevent float64 promotion of the entire downstream chain.
@@ -218,7 +397,7 @@ def _pick_initial_reference(frames: NDArray[np.float32], top_correlations: int =
     top_indices = np.argpartition(correlation_matrix[seed_index, :], kth=-top_correlations)[-top_correlations:]
     reference_image = np.mean(frames_flat[top_indices, :], axis=0)
 
-    return np.reshape(reference_image, newshape=(height, width))
+    return np.reshape(reference_image, shape=(int(height), int(width)))
 
 
 def _compute_reference(
@@ -929,179 +1108,3 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
         context.runtime.detection.mean_image_channel_2 = mean_image
     else:
         context.runtime.detection.mean_image = mean_image
-
-
-def register_plane(context: RuntimeContext) -> None:
-    """Registers (motion-corrects) all frames for a single imaging plane specified by the input runtime context.
-
-    This function is the primary entry point for frame registration. It computes registration offsets from the alignment
-    channel (determined by config.registration.align_by_first_channel), then applies those offsets to both channels.
-    If two-step registration is enabled, a refinement pass is performed using the mean of registered frames as the
-    reference.
-
-    All configuration is read from context.configuration, file paths from context.runtime.io, and results are stored in
-    context.runtime.registration, context.runtime.detection, and context.runtime.timing.
-
-    Args:
-        context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
-            in-place to store registration outputs including reference image, offsets, mean images, and timing data.
-    """
-    config = context.configuration
-    io_data = context.runtime.io
-    registration_data = context.runtime.registration
-    plane_index = io_data.plane_index if io_data.plane_index is not None else 0
-
-    # Checks if registration should be skipped (already registered and not forcing re-registration).
-    if registration_data.is_registered() and not config.registration.repeat_registration:
-        console.echo(
-            message=(
-                f"Plane {plane_index} registration: skipped. The plane is already registered and re-registration is "
-                f"disabled."
-            ),
-            level=LogLevel.INFO,
-        )
-        return
-
-    # Clears existing registration data if re-registering.
-    if registration_data.is_registered():
-        console.echo(
-            message=(
-                f"Plane {plane_index} registration: forced. Clearing existing data and re-running the registration."
-            ),
-            level=LogLevel.INFO,
-        )
-        registration_data.clear()
-
-    # Determines channel configuration.
-    has_second_channel = io_data.registered_binary_path_channel_2 is not None
-
-    if has_second_channel:
-        alignment_channel = "channel 1" if config.registration.align_by_first_channel else "channel 2"
-        console.echo(
-            message=f"Registering plane {plane_index} (two channels, aligning by {alignment_channel})...",
-            level=LogLevel.INFO,
-        )
-    else:
-        console.echo(message=f"Registering plane {plane_index} (single channel)...", level=LogLevel.INFO)
-
-    # Starts timing for first registration step.
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-
-    # Computes registration offsets from the alignment channel and applies them.
-    _register_alignment_channel(context)
-
-    # Applies the same registration offsets to the secondary channel if present.
-    if has_second_channel:
-        _register_secondary_channel(context)
-
-    # Records first registration step timing.
-    context.runtime.timing.registration_time = timer.elapsed
-    console.echo(
-        message=f"Plane {plane_index} registration step 1: complete. Time taken: {timer.elapsed} seconds.",
-        level=LogLevel.SUCCESS,
-    )
-
-    # Performs two-step registration refinement if enabled. The second step re-registers the already-registered frames
-    # using a new reference computed from the first-step results, which improves alignment for noisy data.
-    if config.registration.two_step_registration:
-        console.echo(message=f"Running plane {plane_index} two-step registration refinement...", level=LogLevel.INFO)
-        timer.reset()
-
-        # Re-runs registration (computes new reference from already-registered frames).
-        _register_alignment_channel(context)
-
-        # Re-applies shifts to the secondary channel if present.
-        if has_second_channel:
-            _register_secondary_channel(context)
-
-        # Records two-step registration timing.
-        context.runtime.timing.two_step_registration_time = int(timer.elapsed)
-        console.echo(
-            message=f"Plane {plane_index} registration step 2: complete. Time taken: {timer.elapsed} seconds.",
-            level=LogLevel.SUCCESS,
-        )
-
-    # Loads bad frames from file if present.
-    num_frames = io_data.frame_count
-    bad_frames = np.zeros(num_frames, dtype=np.bool_)
-    data_path = config.file_io.data_path
-    if data_path is not None:
-        bad_frames_file = data_path / "bad_frames.npy"
-        if bad_frames_file.exists():
-            console.echo(
-                message=f"Plane {plane_index} bad frames file: exists. Path: {bad_frames_file}.",
-                level=LogLevel.WARNING,
-            )
-            bad_frame_indices = np.load(bad_frames_file)
-            bad_frame_indices = bad_frame_indices.flatten().astype(int)
-            bad_frames[bad_frame_indices] = True
-            console.echo(
-                message=f"Plane {plane_index} bad frames count: {bad_frames.sum()}.",
-                level=LogLevel.WARNING,
-            )
-
-    # Computes valid region from registration shifts.
-    registration_data = context.runtime.registration
-    height, width = io_data.frame_height, io_data.frame_width
-
-    # Extracts offsets for crop computation. Fallback assignments are for type checker only; these are always present
-    # after _register_alignment_channel. Uses np.empty to avoid initialization overhead.
-    y_offsets = (
-        registration_data.rigid_y_offsets
-        if registration_data.rigid_y_offsets is not None
-        else np.empty(1, dtype=np.int32)
-    )
-    x_offsets = (
-        registration_data.rigid_x_offsets
-        if registration_data.rigid_x_offsets is not None
-        else np.empty(1, dtype=np.int32)
-    )
-    correlations = (
-        registration_data.rigid_correlations
-        if registration_data.rigid_correlations is not None
-        else np.empty(1, dtype=np.float32)
-    )
-
-    computed_bad_frames, valid_y_range, valid_x_range = _compute_crop(
-        x_offsets=x_offsets,
-        y_offsets=y_offsets,
-        correlations=correlations,
-        bad_frame_threshold=config.registration.bad_frame_threshold,
-        bad_frames=bad_frames,
-        maximum_shift_fraction=config.registration.maximum_shift_fraction,
-        frame_height=height,
-        frame_width=width,
-    )
-
-    # Stores valid ranges and bad frames in context.
-    registration_data.valid_y_range = valid_y_range
-    registration_data.valid_x_range = valid_x_range
-    registration_data.bad_frames = computed_bad_frames
-
-    # Persists registration results to disk before the optional metrics computation step, so that registration offsets
-    # and valid ranges are not lost if the metrics computation fails.
-    context.save_runtime()
-
-    # Computes registration quality metrics if enabled and recording has enough frames.
-    num_principal_components = config.registration.registration_metric_principal_components
-    if num_principal_components > 0 and num_frames >= _MINIMUM_REGISTRATION_METRIC_FRAMES:
-        timer.reset()
-        compute_pc_metrics(context)
-        context.runtime.timing.registration_metrics_time = int(timer.elapsed)
-        console.echo(
-            message=(
-                f"Plane {plane_index} registration metrics processing: complete. Time taken: {timer.elapsed} seconds."
-            ),
-            level=LogLevel.SUCCESS,
-        )
-    elif num_principal_components > 0:
-        console.echo(
-            message=(
-                f"Skipping plane {plane_index} registration quality metrics computation. Recording has {num_frames} "
-                f"frames, but at least {_MINIMUM_REGISTRATION_METRIC_FRAMES} are required."
-            ),
-            level=LogLevel.INFO,
-        )
-
-    # Persists the final registration state (including metrics if computed) to disk.
-    context.save_runtime()
