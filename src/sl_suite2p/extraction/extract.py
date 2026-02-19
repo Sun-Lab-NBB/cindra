@@ -25,6 +25,26 @@ if TYPE_CHECKING:
     from ..dataclasses import ROIStatistics, SignalExtraction, SpikeDeconvolution, MultiDayRuntimeContext
 
 
+def extract_traces(context: RuntimeContext | MultiDayRuntimeContext) -> None:
+    """Extracts fluorescence traces, classifies ROIs, and deconvolves spikes from registered binary data.
+
+    Notes:
+        This is the unified extraction entry point for both single-day and multi-day pipelines. It dispatches to the
+        appropriate internal handler based on the runtime context type. For single-day contexts, the full extraction
+        pipeline runs including classification and interleaved extraction statistics. For multi-day contexts,
+        backward-transformed tracked ROI masks are used without reclassification.
+
+    Args:
+        context: The runtime context for the session being processed. Accepts either a single-day RuntimeContext or a
+            multi-day MultiDayRuntimeContext. Modified in-place to store extraction outputs including fluorescence
+            traces, deconvolved spikes, and colocalization data.
+    """
+    if isinstance(context, RuntimeContext):
+        _extract_single_day(context=context)
+    else:
+        _extract_multi_day(context=context)
+
+
 @njit(cache=True, parallel=True)
 def _extract_cell_fluorescence(
     output_prototype: NDArray[np.float32],
@@ -231,6 +251,10 @@ def _extract_fluorescence_traces(
         flat_lambda_weights[start:end] = lambda_weights
 
     # Flattens neuropil masks into contiguous arrays with offset pointers if provided.
+    flat_neuropil_masks: NDArray[np.int32] | None = None
+    neuropil_mask_offsets: NDArray[np.int32] | None = None
+    neuropil_pixel_count: NDArray[np.int32] | None = None
+
     if neuropil_masks is not None:
         neuropil_mask_sizes = np.array([len(indices) for indices in neuropil_masks], dtype=np.int32)
         neuropil_mask_offsets = np.zeros(cell_count + 1, dtype=np.int32)
@@ -275,7 +299,6 @@ def _extract_fluorescence_traces(
 
         # If neuropil masks are provided, extracts the neuropil fluorescence from the current batch.
         if neuropil_masks is not None:
-            # noinspection PyUnboundLocalVariable
             neuropil_fluorescence[:, batch_slice] = _extract_neuropil_fluorescence(
                 output_prototype=output_prototype,
                 data=batch_pixels,
@@ -960,23 +983,3 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
         message=(f"Session {session_id} multi-day extraction: complete. Total time: {total_extraction_time} seconds."),
         level=LogLevel.SUCCESS,
     )
-
-
-def extract_traces(context: RuntimeContext | MultiDayRuntimeContext) -> None:
-    """Extracts fluorescence traces, classifies ROIs, and deconvolves spikes from registered binary data.
-
-    Notes:
-        This is the unified extraction entry point for both single-day and multi-day pipelines. It dispatches to the
-        appropriate internal handler based on the runtime context type. For single-day contexts, the full extraction
-        pipeline runs including classification and interleaved extraction statistics. For multi-day contexts,
-        backward-transformed tracked ROI masks are used without reclassification.
-
-    Args:
-        context: The runtime context for the session being processed. Accepts either a single-day RuntimeContext or a
-            multi-day MultiDayRuntimeContext. Modified in-place to store extraction outputs including fluorescence
-            traces, deconvolved spikes, and colocalization data.
-    """
-    if isinstance(context, RuntimeContext):
-        _extract_single_day(context=context)
-    else:
-        _extract_multi_day(context=context)

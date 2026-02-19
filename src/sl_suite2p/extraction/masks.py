@@ -24,6 +24,66 @@ _MAXIMUM_NEUROPIL_EXPANSION_ITERATIONS: int = 100
 _RADIUS_TO_NEIGHBORHOOD_SCALE: int = 5
 
 
+def create_masks(
+    roi_statistics: list[ROIStatistics],
+    height: int,
+    width: int,
+    neuropil: bool,
+    include_overlap: bool,
+    cell_probability_percentile: int = 50,
+    inner_neuropil_border_radius: int = 2,
+    minimum_neuropil_pixels: int = 350,
+) -> tuple[tuple[NDArray[np.int32], NDArray[np.float32], NDArray[np.int32] | None], ...]:
+    """Creates pixel masks for the ROI and the surrounding neuropil region of each detected ROI.
+
+    Notes:
+        The 'ROI masks' include both the flattened ROI mask pixel indices and the lambda weights associated with
+        each mask pixel (the lambda weight masks). The neuropil region pixels are selected based on having
+        sub-threshold lambda weights which are assumed to be 0. Therefore, the neuropil masks only include the
+        flattened mask pixel indices.
+
+    Args:
+        roi_statistics: The ROI statistics for each ROI to be processed.
+        height: The height of the imaged area in pixels.
+        width: The width of the imaged area in pixels.
+        neuropil: Determines whether to create the masks for the surrounding neuropil region for each ROI.
+        include_overlap: Determines whether to include overlapping ROI pixels in the created ROI masks.
+        cell_probability_percentile: The percentile threshold for classifying pixels as belonging to a cell versus
+            neuropil.
+        inner_neuropil_border_radius: The width, in pixels, of the exclusion zone between the cell ROI and its
+            neuropil mask.
+        minimum_neuropil_pixels: The minimum number of pixels required for each neuropil mask.
+
+    Returns:
+        A tuple of per-ROI mask data. Each element contains the flattened ROI pixel indices, the corresponding
+        normalized lambda weights, and the flattened neuropil pixel indices (or None if neuropil processing is
+        disabled).
+    """
+    roi_masks = _create_roi_masks(
+        roi_statistics=roi_statistics,
+        width=width,
+        include_overlap=include_overlap,
+    )
+
+    # Combines ROI masks with None neuropil placeholders if neuropil processing is disabled.
+    if not neuropil:
+        return tuple((indices, weights, None) for indices, weights in roi_masks)
+
+    neuropil_masks = _create_neuropil_masks(
+        roi_statistics=roi_statistics,
+        height=height,
+        width=width,
+        cell_probability_percentile=cell_probability_percentile,
+        inner_neuropil_border_radius=inner_neuropil_border_radius,
+        minimum_neuropil_size=minimum_neuropil_pixels,
+    )
+
+    return tuple(
+        (indices, weights, neuropil_indices)
+        for (indices, weights), neuropil_indices in zip(roi_masks, neuropil_masks, strict=True)
+    )
+
+
 def _create_roi_pixels(
     roi_statistics: list[ROIStatistics],
     height: int,
@@ -148,8 +208,7 @@ def _create_neuropil_masks(
     if not recompute and all(roi.neuropil_mask is not None for roi in roi_statistics):
         cached_masks: list[NDArray[np.int32]] = []
         for roi in roi_statistics:
-            # Skips ROIs without cached masks. This branch is unreachable due to the all() guard above, but
-            # satisfies mypy's type narrowing.
+            # Unreachable due to the all() guard; included for type narrowing.
             if roi.neuropil_mask is None:
                 continue
             cached_masks.append(np.flatnonzero(roi.neuropil_mask).astype(np.int32))
@@ -215,63 +274,3 @@ def _create_neuropil_masks(
         neuropil_masks.append(np.flatnonzero(neuropil_mask).astype(np.int32))
 
     return tuple(neuropil_masks)
-
-
-def create_masks(
-    roi_statistics: list[ROIStatistics],
-    height: int,
-    width: int,
-    neuropil: bool,
-    include_overlap: bool,
-    cell_probability_percentile: int = 50,
-    inner_neuropil_border_radius: int = 2,
-    minimum_neuropil_pixels: int = 350,
-) -> tuple[tuple[NDArray[np.int32], NDArray[np.float32], NDArray[np.int32] | None], ...]:
-    """Creates pixel masks for the ROI and the surrounding neuropil region of each detected ROI.
-
-    Notes:
-        The 'ROI masks' include both the flattened ROI mask pixel indices and the lambda weights associated with
-        each mask pixel (the lambda weight masks). The neuropil region pixels are selected based on having
-        sub-threshold lambda weights which are assumed to be 0. Therefore, the neuropil masks only include the
-        flattened mask pixel indices.
-
-    Args:
-        roi_statistics: The ROI statistics for each ROI to be processed.
-        height: The height of the imaged area in pixels.
-        width: The width of the imaged area in pixels.
-        neuropil: Determines whether to create the masks for the surrounding neuropil region for each ROI.
-        include_overlap: Determines whether to include overlapping ROI pixels in the created ROI masks.
-        cell_probability_percentile: The percentile threshold for classifying pixels as belonging to a cell versus
-            neuropil.
-        inner_neuropil_border_radius: The width, in pixels, of the exclusion zone between the cell ROI and its
-            neuropil mask.
-        minimum_neuropil_pixels: The minimum number of pixels required for each neuropil mask.
-
-    Returns:
-        A tuple of per-ROI mask data. Each element contains the flattened ROI pixel indices, the corresponding
-        normalized lambda weights, and the flattened neuropil pixel indices (or None if neuropil processing is
-        disabled).
-    """
-    roi_masks = _create_roi_masks(
-        roi_statistics=roi_statistics,
-        width=width,
-        include_overlap=include_overlap,
-    )
-
-    # Combines ROI masks with None neuropil placeholders if neuropil processing is disabled.
-    if not neuropil:
-        return tuple((indices, weights, None) for indices, weights in roi_masks)
-
-    neuropil_masks = _create_neuropil_masks(
-        roi_statistics=roi_statistics,
-        height=height,
-        width=width,
-        cell_probability_percentile=cell_probability_percentile,
-        inner_neuropil_border_radius=inner_neuropil_border_radius,
-        minimum_neuropil_size=minimum_neuropil_pixels,
-    )
-
-    return tuple(
-        (indices, weights, neuropil_indices)
-        for (indices, weights), neuropil_indices in zip(roi_masks, neuropil_masks, strict=True)
-    )
