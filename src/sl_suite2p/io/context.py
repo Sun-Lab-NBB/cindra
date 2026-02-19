@@ -30,236 +30,6 @@ _ACQUISITION_PARAMETERS_FILENAME: str = "suite2p_parameters.json"
 _MAXIMUM_CHANNEL_COUNT: int = 2
 
 
-def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
-    """Loads acquisition parameters from a JSON file and validates all required fields.
-
-    For single-ROI data, frame_rate, plane_number, and channel_number are required. For MROI data (roi_number > 1),
-    roi_lines, roi_x_coordinates, and roi_y_coordinates are additionally required.
-
-    Args:
-        json_path: The path to the JSON file containing acquisition parameters.
-
-    Returns:
-        An AcquisitionParameters instance populated from the JSON file.
-
-    Raises:
-        FileNotFoundError: If the JSON file does not exist.
-        ValueError: If required fields are missing from the JSON data.
-    """
-    if not json_path.exists():
-        message = f"Acquisition parameters file not found: {json_path}"
-        console.error(message=message, error=FileNotFoundError)
-
-    with json_path.open("r") as file:
-        data = json.load(file)
-
-    # Extracts frame_rate (required).
-    frame_rate = data.get("frame_rate")
-    if frame_rate is None:
-        message = (
-            f"Unable to extract the required field 'frame_rate' from the acquisition parameters file "
-            f"located at {json_path}."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Extracts plane_number (required).
-    plane_number = data.get("plane_number")
-    if plane_number is None:
-        message = (
-            f"Unable to extract the required field 'plane_number' from the acquisition parameters file "
-            f"located at {json_path}."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Extracts channel_number (required).
-    channel_number = data.get("channel_number")
-    if channel_number is None:
-        message = (
-            f"Unable to extract the required field 'channel_number' from the acquisition parameters file "
-            f"located at {json_path}."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Extracts roi_number (defaults to 1 for single-ROI).
-    roi_number = data.get("roi_number", 1)
-
-    # For MROI data (roi_number > 1), validates that all MROI fields are present.
-    if roi_number > 1:
-        roi_lines = data.get("roi_lines")
-        if roi_lines is None:
-            message = (
-                f"Unable to extract the required field 'roi_lines' from the acquisition parameters file "
-                f"located at {json_path}."
-            )
-            console.error(message=message, error=ValueError)
-
-        roi_x_coordinates = data.get("roi_x_coordinates")
-        if roi_x_coordinates is None:
-            message = (
-                f"Unable to extract the required field 'roi_x_coordinates' from the acquisition parameters "
-                f"file located at {json_path}."
-            )
-            console.error(message=message, error=ValueError)
-
-        roi_y_coordinates = data.get("roi_y_coordinates")
-        if roi_y_coordinates is None:
-            message = (
-                f"Unable to extract the required field 'roi_y_coordinates' from the acquisition parameters "
-                f"file located at {json_path}."
-            )
-            console.error(message=message, error=ValueError)
-    else:
-        roi_lines = []
-        roi_x_coordinates = []
-        roi_y_coordinates = []
-
-    return AcquisitionParameters(
-        frame_rate=frame_rate,
-        plane_number=plane_number,
-        channel_number=channel_number,
-        roi_number=roi_number,
-        roi_lines=roi_lines,
-        roi_x_coordinates=roi_x_coordinates,
-        roi_y_coordinates=roi_y_coordinates,
-    )
-
-
-def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
-    """Finds and loads acquisition parameters from the data directory.
-
-    Args:
-        data_path: The root directory to search for the acquisition parameters file.
-
-    Returns:
-        The loaded AcquisitionParameters instance.
-
-    Raises:
-        FileNotFoundError: If no acquisition parameters file is found.
-        ValueError: If the data_path is not a directory, or if required fields are missing from the JSON file.
-    """
-    data_directory = find_data_directory(data_path)
-    parameters_path = data_directory / _ACQUISITION_PARAMETERS_FILENAME
-
-    message = f"Found acquisition parameters at: {parameters_path}."
-    console.echo(message=message, level=LogLevel.SUCCESS)
-
-    return _load_acquisition_parameters(json_path=parameters_path)
-
-
-def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
-    """Extracts the first component from the end of each input path that uniquely identifies each path globally.
-
-    Notes:
-        This function adapts the multi-day pipeline to directory structures where the unique session identifier appears
-        at different levels of the path hierarchy. For example, given paths like ``/data/day1/session`` and
-        ``/data/day2/session``, the function identifies ``day1`` and ``day2`` as the unique components (not ``session``,
-        which is shared). This allows users to organize sessions using any naming convention, as long as each path
-        contains at least one unique component somewhere in its hierarchy.
-
-    Args:
-        paths: A list or tuple of Path objects.
-
-    Returns:
-        A tuple of unique components, one for each path, stored in the same order as the input paths.
-
-    Raises:
-        RuntimeError: If one or more paths do not contain unique components.
-    """
-    paths_list = list(paths)
-    result = []
-
-    for path in paths_list:
-        # Gets components from right to left.
-        components = list(path.parts)[::-1]
-        found_unique = False
-
-        for component in components:
-            # Checks if this component appears in any other path.
-            is_unique = True
-
-            for other_path in paths_list:
-                if path == other_path:
-                    continue
-
-                # If the component appears anywhere in the other path, it is not unique.
-                if component in other_path.parts:
-                    is_unique = False
-                    break
-
-            if is_unique:
-                result.append(component)
-                found_unique = True
-                break
-
-        if not found_unique:
-            message = f"No unique component found for path: {path}, which is not allowed."
-            console.error(message=message, error=RuntimeError)
-
-    return tuple(result)
-
-
-def _find_suite2p_directory(session_directory: Path) -> Path:
-    """Discovers the suite2p output directory within a session directory tree.
-
-    Searches recursively for the combined_metadata.npz file created by the single-day pipeline's combination step.
-    Since multi-day session paths are not pre-sanitized, the suite2p directory may be
-    nested at an arbitrary depth below the session root (e.g., under a processed_data/mesoscope_data/ subdirectory).
-
-    Args:
-        session_directory: The path to the session's root directory.
-
-    Returns:
-        The path to the suite2p output directory that contains the combined_metadata.npz file.
-
-    Raises:
-        FileNotFoundError: If no combined_metadata.npz file is found under the session directory.
-        RuntimeError: If multiple combined_metadata.npz files are found under the session directory.
-    """
-    matches = list(session_directory.rglob("combined_metadata.npz"))
-
-    if len(matches) == 0:
-        message = (
-            f"Unable to locate suite2p output for session {session_directory}. No combined_metadata.npz file was "
-            f"found anywhere in the directory tree. Ensure the single-day pipeline has completed successfully for "
-            f"this recording session before running multi-day processing."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    if len(matches) > 1:
-        message = (
-            f"Unable to locate suite2p output for session {session_directory}. Found {len(matches)} "
-            f"combined_metadata.npz files, but expected exactly one unique match."
-        )
-        console.error(message=message, error=RuntimeError)
-
-    # The combined_metadata.npz file is saved at the suite2p root level by CombinedData.save().
-    return matches[0].parent
-
-
-def _compute_mroi_region_borders(data_path: Path) -> list[int]:
-    """Computes MROI region border x-coordinates from the acquisition parameters.
-
-    For MROI recordings, the borders are the x-coordinates where one imaging region ends and another begins, computed
-    from the sorted ROI x-coordinates (excluding the leftmost region's starting position). For non-MROI recordings,
-    returns an empty list.
-
-    Args:
-        data_path: The path to the suite2p output directory containing acquisition_parameters.yaml.
-
-    Returns:
-        A list of border x-coordinates for MROI recordings, or an empty list for non-MROI recordings.
-    """
-    acquisition_path = data_path / "acquisition_parameters.yaml"
-    acquisition = AcquisitionParameters.from_yaml(file_path=acquisition_path)
-    if not acquisition.is_mroi:
-        return []
-
-    # Computes region borders from ROI x-coordinates. The borders are the x-coordinates where one region ends and
-    # another begins, which are all x-coordinates except the minimum (leftmost region).
-    sorted_x = sorted(acquisition.roi_x_coordinates)
-    return sorted_x[1:]
-
-
 def find_data_directory(data_path: Path) -> Path:
     """Recursively searches for the directory containing the acquisition parameters JSON file.
 
@@ -500,7 +270,7 @@ def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[Mult
             runtime.io.dataset_output_paths = list(output_paths)
             runtime.io.mroi_region_borders = _compute_mroi_region_borders(data_path=data_path)
 
-            # Injects the pre-loaded CombinedData to ensure it's available regardless of __post_init__ behavior.
+            # Injects the preloaded CombinedData to ensure it's available regardless of __post_init__ behavior.
             runtime.combined_data = combined_data
 
             console.echo(
@@ -521,7 +291,7 @@ def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[Mult
         # Computes MROI region borders from acquisition parameters if applicable.
         io_data.mroi_region_borders = _compute_mroi_region_borders(data_path=data_path)
 
-        # Constructs the runtime data with the IO data, output path, and pre-loaded CombinedData.
+        # Constructs the runtime data with the IO data, output path, and preloaded CombinedData.
         runtime = MultiDayRuntimeData(output_path=output_path, io=io_data, combined_data=combined_data)
 
         # Creates the output directory for this session.
@@ -541,3 +311,233 @@ def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[Mult
         context.save_runtime()
 
     return contexts
+
+
+def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
+    """Loads acquisition parameters from a JSON file and validates all required fields.
+
+    For single-ROI data, frame_rate, plane_number, and channel_number are required. For MROI data (roi_number > 1),
+    roi_lines, roi_x_coordinates, and roi_y_coordinates are additionally required.
+
+    Args:
+        json_path: The path to the JSON file containing acquisition parameters.
+
+    Returns:
+        An AcquisitionParameters instance populated from the JSON file.
+
+    Raises:
+        FileNotFoundError: If the JSON file does not exist.
+        ValueError: If required fields are missing from the JSON data.
+    """
+    if not json_path.exists():
+        message = f"Acquisition parameters file not found: {json_path}"
+        console.error(message=message, error=FileNotFoundError)
+
+    with json_path.open("r") as file:
+        data = json.load(file)
+
+    # Extracts frame_rate (required).
+    frame_rate = data.get("frame_rate")
+    if frame_rate is None:
+        message = (
+            f"Unable to extract the required field 'frame_rate' from the acquisition parameters file "
+            f"located at {json_path}."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Extracts plane_number (required).
+    plane_number = data.get("plane_number")
+    if plane_number is None:
+        message = (
+            f"Unable to extract the required field 'plane_number' from the acquisition parameters file "
+            f"located at {json_path}."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Extracts channel_number (required).
+    channel_number = data.get("channel_number")
+    if channel_number is None:
+        message = (
+            f"Unable to extract the required field 'channel_number' from the acquisition parameters file "
+            f"located at {json_path}."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Extracts roi_number (defaults to 1 for single-ROI).
+    roi_number = data.get("roi_number", 1)
+
+    # For MROI data (roi_number > 1), validates that all MROI fields are present.
+    if roi_number > 1:
+        roi_lines = data.get("roi_lines")
+        if roi_lines is None:
+            message = (
+                f"Unable to extract the required field 'roi_lines' from the acquisition parameters file "
+                f"located at {json_path}."
+            )
+            console.error(message=message, error=ValueError)
+
+        roi_x_coordinates = data.get("roi_x_coordinates")
+        if roi_x_coordinates is None:
+            message = (
+                f"Unable to extract the required field 'roi_x_coordinates' from the acquisition parameters "
+                f"file located at {json_path}."
+            )
+            console.error(message=message, error=ValueError)
+
+        roi_y_coordinates = data.get("roi_y_coordinates")
+        if roi_y_coordinates is None:
+            message = (
+                f"Unable to extract the required field 'roi_y_coordinates' from the acquisition parameters "
+                f"file located at {json_path}."
+            )
+            console.error(message=message, error=ValueError)
+    else:
+        roi_lines = []
+        roi_x_coordinates = []
+        roi_y_coordinates = []
+
+    return AcquisitionParameters(
+        frame_rate=frame_rate,
+        plane_number=plane_number,
+        channel_number=channel_number,
+        roi_number=roi_number,
+        roi_lines=roi_lines,
+        roi_x_coordinates=roi_x_coordinates,
+        roi_y_coordinates=roi_y_coordinates,
+    )
+
+
+def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
+    """Finds and loads acquisition parameters from the data directory.
+
+    Args:
+        data_path: The root directory to search for the acquisition parameters file.
+
+    Returns:
+        The loaded AcquisitionParameters instance.
+
+    Raises:
+        FileNotFoundError: If no acquisition parameters file is found.
+        ValueError: If the data_path is not a directory, or if required fields are missing from the JSON file.
+    """
+    data_directory = find_data_directory(data_path)
+    parameters_path = data_directory / _ACQUISITION_PARAMETERS_FILENAME
+
+    message = f"Found acquisition parameters at: {parameters_path}."
+    console.echo(message=message, level=LogLevel.SUCCESS)
+
+    return _load_acquisition_parameters(json_path=parameters_path)
+
+
+def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
+    """Extracts the first component from the end of each input path that uniquely identifies each path globally.
+
+    Notes:
+        This function adapts the multi-day pipeline to directory structures where the unique session identifier appears
+        at different levels of the path hierarchy. For example, given paths like ``/data/day1/session`` and
+        ``/data/day2/session``, the function identifies ``day1`` and ``day2`` as the unique components (not ``session``,
+        which is shared). This allows users to organize sessions using any naming convention, as long as each path
+        contains at least one unique component somewhere in its hierarchy.
+
+    Args:
+        paths: A list or tuple of Path objects.
+
+    Returns:
+        A tuple of unique components, one for each path, stored in the same order as the input paths.
+
+    Raises:
+        RuntimeError: If one or more paths do not contain unique components.
+    """
+    paths_list = list(paths)
+    unique_components: list[str] = []
+
+    for path in paths_list:
+        # Gets components from right to left.
+        components = list(path.parts)[::-1]
+        found_unique = False
+
+        for component in components:
+            # Checks if this component appears in any other path.
+            is_unique = True
+
+            for other_path in paths_list:
+                if path == other_path:
+                    continue
+
+                # If the component appears anywhere in the other path, it is not unique.
+                if component in other_path.parts:
+                    is_unique = False
+                    break
+
+            if is_unique:
+                unique_components.append(component)
+                found_unique = True
+                break
+
+        if not found_unique:
+            message = f"No unique component found for path: {path}, which is not allowed."
+            console.error(message=message, error=RuntimeError)
+
+    return tuple(unique_components)
+
+
+def _find_suite2p_directory(session_directory: Path) -> Path:
+    """Discovers the suite2p output directory within a session directory tree.
+
+    Searches recursively for the combined_metadata.npz file created by the single-day pipeline's combination step.
+    Since multi-day session paths are not pre-sanitized, the suite2p directory may be
+    nested at an arbitrary depth below the session root (e.g., under a processed_data/mesoscope_data/ subdirectory).
+
+    Args:
+        session_directory: The path to the session's root directory.
+
+    Returns:
+        The path to the suite2p output directory that contains the combined_metadata.npz file.
+
+    Raises:
+        FileNotFoundError: If no combined_metadata.npz file is found under the session directory.
+        RuntimeError: If multiple combined_metadata.npz files are found under the session directory.
+    """
+    matches = list(session_directory.rglob("combined_metadata.npz"))
+
+    if not matches:
+        message = (
+            f"Unable to locate suite2p output for session {session_directory}. No combined_metadata.npz file was "
+            f"found anywhere in the directory tree. Ensure the single-day pipeline has completed successfully for "
+            f"this recording session before running multi-day processing."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    if len(matches) > 1:
+        message = (
+            f"Unable to locate suite2p output for session {session_directory}. Found {len(matches)} "
+            f"combined_metadata.npz files, but expected exactly one unique match."
+        )
+        console.error(message=message, error=RuntimeError)
+
+    # The combined_metadata.npz file is saved at the suite2p root level by CombinedData.save().
+    return matches[0].parent
+
+
+def _compute_mroi_region_borders(data_path: Path) -> list[int]:
+    """Computes MROI region border x-coordinates from the acquisition parameters.
+
+    For MROI recordings, the borders are the x-coordinates where one imaging region ends and another begins, computed
+    from the sorted ROI x-coordinates (excluding the leftmost region's starting position). For non-MROI recordings,
+    returns an empty list.
+
+    Args:
+        data_path: The path to the suite2p output directory containing acquisition_parameters.yaml.
+
+    Returns:
+        A list of border x-coordinates for MROI recordings, or an empty list for non-MROI recordings.
+    """
+    acquisition_path = data_path / "acquisition_parameters.yaml"
+    acquisition = AcquisitionParameters.from_yaml(file_path=acquisition_path)
+    if not acquisition.is_mroi:
+        return []
+
+    # Computes region borders from ROI x-coordinates. The borders are the x-coordinates where one region ends and
+    # another begins, which are all x-coordinates except the minimum (leftmost region).
+    sorted_x = sorted(acquisition.roi_x_coordinates)
+    return sorted_x[1:]

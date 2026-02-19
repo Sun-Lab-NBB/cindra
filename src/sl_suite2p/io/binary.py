@@ -169,7 +169,7 @@ class BinaryFile:
     @property
     def size(self) -> np.int64:
         """Returns the total number of pixels (values) stored inside the file."""
-        return np.prod(np.array(self.shape).astype(np.int64))
+        return np.prod(np.array(self.shape).astype(dtype=np.int64))
 
     def close(self) -> None:
         """Closes the memory-mapped file view."""
@@ -210,7 +210,7 @@ class BinaryFile:
 
         # Checks and converts data type to int16, if needed. Clips values to the maximum representable int16 value.
         if data.dtype != "int16":
-            data = np.minimum(data, _INT16_MAX_VALUE).astype("int16")
+            data = np.minimum(data, _INT16_MAX_VALUE).astype(dtype="int16")
 
         # Writes data to the memory-mapped file.
         self.file[indices] = data
@@ -260,7 +260,7 @@ class BinaryFile:
         actual_samples = min(sample_count, self.frame_number)
 
         # Computes evenly-spaced indices across the recording.
-        indices = np.linspace(0, self.frame_number - 1, actual_samples).astype(np.intp)
+        indices = np.linspace(start=0, stop=self.frame_number - 1, num=actual_samples).astype(dtype=np.intp)
 
         # Reads the subsampled frames.
         movie = self.file[indices]
@@ -269,7 +269,7 @@ class BinaryFile:
         if y_range is not None and x_range is not None:
             movie = movie[:, y_range[0] : y_range[1], x_range[0] : x_range[1]]
 
-        return movie.astype(np.float32)
+        return movie.astype(dtype=np.float32)
 
     # noinspection PyTypeHints
     def bin_movie(
@@ -341,12 +341,12 @@ class BinaryFile:
 
                 # Reshapes movie data into bins and computes the mean for each bin. Also casts the data to float32
                 # (from int16) type.
-                binned_movie = movie.reshape(-1, bin_size, height, width).astype(np.float32).mean(axis=1)
+                binned_movie = movie.reshape(-1, bin_size, height, width).astype(dtype=np.float32).mean(axis=1)
                 batches.extend(binned_movie)
             elif data.shape[0] > 0:
                 # Batch has fewer frames than bin_size (likely due to many bad frames). Averages the batch into a single
                 # bin to preserve data.
-                batches.append(data.astype(np.float32).mean(axis=0))
+                batches.append(data.astype(dtype=np.float32).mean(axis=0))
 
         # Stacks and returns the batches as a single NumPy array representing the binned movie.
         return np.stack(batches)
@@ -397,7 +397,7 @@ class BinaryFile:
             # For each selected frame, extracts and crops the frame based on y_range and x_range. After extracting and
             # cropping, writes the frame to the file.
             for index in range(frame_start, frame_stop):
-                current_frame = self.file[index, y_range, x_range].astype(np.int16)
+                current_frame = self.file[index, y_range, x_range].astype(dtype=np.int16)
                 file.write(current_frame, contiguous=True)
 
         message = f"BigTiff: Saved as {file_name} file."
