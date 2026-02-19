@@ -146,9 +146,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     combined_correlation_map = np.zeros((combined_height, combined_width), dtype=np.float32)
 
     # Checks if maximum projection images are available in any plane.
-    has_max_projection = any(
-        context.runtime.detection.maximum_projection is not None for context in plane_contexts
-    )
+    has_max_projection = any(context.runtime.detection.maximum_projection is not None for context in plane_contexts)
     combined_max_projection: NDArray[np.float32] | None = None
     if has_max_projection:
         combined_max_projection = np.zeros((combined_height, combined_width), dtype=np.float32)

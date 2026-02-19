@@ -150,7 +150,7 @@ class ViewButton(QPushButton):
     """
 
     def __init__(self, bid, Text, parent=None):
-        super(ViewButton, self).__init__(parent)
+        super().__init__(parent)
         self.setText(Text)
         self.setCheckable(True)
         self.setStyleSheet(parent.styleInactive)
@@ -183,7 +183,7 @@ class RangeSlider(QSlider):
     """
 
     def __init__(self, parent=None, *args):
-        super(RangeSlider, self).__init__(*args)
+        super().__init__(*args)
 
         self._low = self.minimum()
         self._high = self.maximum()

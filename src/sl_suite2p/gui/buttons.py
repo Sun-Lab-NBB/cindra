@@ -82,7 +82,7 @@ class QuadButton(QPushButton):
     """
 
     def __init__(self, bid, Text, parent=None):
-        super(QuadButton, self).__init__(parent)
+        super().__init__(parent)
         self.setText(Text)
         self.setCheckable(True)
         self.setStyleSheet(parent.styleInactive)
@@ -116,7 +116,7 @@ class SizeButton(QPushButton):
     """buttons to make trace box bigger or smaller"""
 
     def __init__(self, bid, Text, parent=None):
-        super(SizeButton, self).__init__(parent)
+        super().__init__(parent)
         self.setText(Text)
         self.setCheckable(True)
         self.setStyleSheet(parent.styleInactive)
@@ -169,7 +169,7 @@ class TopButton(QPushButton):
     """selection of top neurons"""
 
     def __init__(self, bid, parent=None):
-        super(TopButton, self).__init__(parent)
+        super().__init__(parent)
         text = [" draw selection", " select top n", " select bottom n"]
         self.bid = bid
         self.setText(text[bid])

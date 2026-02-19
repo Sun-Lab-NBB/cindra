@@ -197,7 +197,7 @@ def merge_activity_masks(parent):
 
 class MergeWindow(QDialog):
     def __init__(self, parent=None):
-        super(MergeWindow, self).__init__(parent)
+        super().__init__(parent)
         self.setGeometry(700, 300, 700, 700)
         self.setWindowTitle("Choose merge options")
         self.cwidget = QWidget(self)
@@ -351,7 +351,7 @@ class MergeWindow(QDialog):
 
 class LineEdit(QLineEdit):
     def __init__(self, key, parent=None):
-        super(LineEdit, self).__init__(parent)
+        super().__init__(parent)
         self.key = key
         # self.textEdited.connect(lambda: self.edit_changed(parent.ops, k))
 

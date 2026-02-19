@@ -17,45 +17,6 @@ _MINIMUM_STANDARD_DEVIATION: float = 1e-10
 _GAUSSIAN_KERNEL_THRESHOLD: int = 10
 
 
-def _apply_gaussian_high_pass(frames: NDArray[np.float32], kernel_size: int) -> None:
-    """Applies a high-pass filter to the input frames in-place using a Gaussian kernel.
-
-    Args:
-        frames: The input frame array with shape (num_frames, height, width). Modified in-place.
-        kernel_size: The Gaussian kernel size in frames.
-    """
-    frames -= gaussian_filter(input=frames, sigma=[kernel_size, 0, 0])
-
-
-def _apply_rolling_mean_high_pass(frames: NDArray[np.float32], kernel_size: int) -> None:
-    """Applies a high-pass filter to the input frames in-place using a non-overlapping rolling mean kernel.
-
-    Notes:
-        This method is more efficient than Gaussian filtering for large kernel sizes. The filter subtracts the mean
-        of each non-overlapping temporal window from all frames within that window.
-
-    Args:
-        frames: The input frame array with shape (num_frames, height, width). Modified in-place.
-        kernel_size: The rolling window size in frames.
-    """
-    # Determines the number of complete windows based on the frame count.
-    num_frames, height, width = frames.shape
-    num_complete_windows = num_frames // kernel_size
-
-    # Reshapes to (num_windows, kernel_size, height, width). This creates a view, not a copy.
-    if num_complete_windows > 0:
-        # Applies the filter to all windows at once.
-        complete = frames[: num_complete_windows * kernel_size].reshape(
-            num_complete_windows, kernel_size, height, width
-        )
-        complete -= complete.mean(axis=1, keepdims=True)
-
-    # Handles remaining frames that don't fill a complete window.
-    remainder = num_frames % kernel_size
-    if remainder > 0:
-        frames[-remainder:] -= frames[-remainder:].mean(axis=0)
-
-
 def apply_temporal_high_pass_filter(frames: NDArray[np.float32], kernel_size: int) -> None:
     """Applies a temporal high-pass filter to the frames in-place, automatically selecting the optimal algorithm.
 
@@ -163,3 +124,42 @@ def compute_thresholded_variance(frames: NDArray[np.float32], intensity_threshol
     thresholded *= thresholded
     result: NDArray[np.float32] = np.sqrt(thresholded.sum(axis=0))
     return result
+
+
+def _apply_gaussian_high_pass(frames: NDArray[np.float32], kernel_size: int) -> None:
+    """Applies a high-pass filter to the input frames in-place using a Gaussian kernel.
+
+    Args:
+        frames: The input frame array with shape (num_frames, height, width). Modified in-place.
+        kernel_size: The Gaussian kernel size in frames.
+    """
+    frames -= gaussian_filter(input=frames, sigma=[kernel_size, 0, 0])
+
+
+def _apply_rolling_mean_high_pass(frames: NDArray[np.float32], kernel_size: int) -> None:
+    """Applies a high-pass filter to the input frames in-place using a non-overlapping rolling mean kernel.
+
+    Notes:
+        This method is more efficient than Gaussian filtering for large kernel sizes. The filter subtracts the mean
+        of each non-overlapping temporal window from all frames within that window.
+
+    Args:
+        frames: The input frame array with shape (num_frames, height, width). Modified in-place.
+        kernel_size: The rolling window size in frames.
+    """
+    # Determines the number of complete windows based on the frame count.
+    num_frames, height, width = frames.shape
+    num_complete_windows = num_frames // kernel_size
+
+    # Reshapes to (num_windows, kernel_size, height, width). This creates a view, not a copy.
+    if num_complete_windows > 0:
+        # Applies the filter to all windows at once.
+        complete = frames[: num_complete_windows * kernel_size].reshape(
+            num_complete_windows, kernel_size, height, width
+        )
+        complete -= complete.mean(axis=1, keepdims=True)
+
+    # Handles remaining frames that don't fill a complete window.
+    remainder = num_frames % kernel_size
+    if remainder > 0:
+        frames[-remainder:] -= frames[-remainder:].mean(axis=0)

@@ -105,7 +105,7 @@ def masks_and_traces(ops, stat_manual, stat_orig):
 
 class ViewButton(QPushButton):
     def __init__(self, bid, Text, parent=None):
-        super(ViewButton, self).__init__(parent)
+        super().__init__(parent)
         self.setText(Text)
         self.setCheckable(True)
         self.setStyleSheet(parent.styleUnpressed)
@@ -128,7 +128,7 @@ class ViewButton(QPushButton):
 
 class ROIDraw(QMainWindow):
     def __init__(self, parent):
-        super(ROIDraw, self).__init__(parent)
+        super().__init__(parent)
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.parent = parent
         self.setGeometry(70, 70, 1400, 800)

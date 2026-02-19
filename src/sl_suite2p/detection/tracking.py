@@ -21,6 +21,55 @@ if TYPE_CHECKING:
 _DEFAULT_JACCARD_DISTANCE: float = 10000.0
 
 
+def track_rois_across_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
+    """Tracks ROIs across multiple sessions using Jaccard distance-based hierarchical clustering.
+
+    This function clusters ROI masks from multiple sessions based on spatial overlap in the shared deformed visual
+    space. ROIs that consistently appear in the same location across sessions are grouped together, and a template
+    mask is created for each cluster representing the consensus ROI. When dual-channel data is present, each channel
+    is processed independently.
+
+    Notes:
+        This function modifies the input contexts in-place, updating each context's ``runtime.tracking.template_masks``
+        (and ``template_masks_channel_2`` for dual-channel recordings) with the generated template ROIs.
+
+    Args:
+        contexts: The list of MultiDayRuntimeContext instances, one per session. Each context must have completed
+            diffeomorphic registration with deformed ROI masks available in
+            ``runtime.registration.deformed_cell_masks`` (and optionally ``deformed_cell_masks_channel_2``).
+    """
+    if not contexts:
+        return
+
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+
+    # Determines which channels have data to process by checking the first context with available registration data.
+    has_channel_1 = False
+    has_channel_2 = False
+    for context in contexts:
+        if context.runtime.registration.deformed_cell_masks is not None:
+            has_channel_1 = True
+        if context.runtime.registration.deformed_cell_masks_channel_2 is not None:
+            has_channel_2 = True
+        if has_channel_1 or has_channel_2:
+            break
+
+    # Processes each channel that has available data.
+    if has_channel_1:
+        _track_channel_rois(contexts=contexts, channel_2=False)
+
+    if has_channel_2:
+        _track_channel_rois(contexts=contexts, channel_2=True)
+
+    # Records tracking timing and persists runtime data for each session.
+    tracking_time = int(timer.elapsed)
+    for context in contexts:
+        context.runtime.timing.tracking_time = tracking_time
+        context.save_runtime()
+
+    console.echo(message=f"ROI tracking: complete. Time: {tracking_time} seconds.", level=LogLevel.SUCCESS)
+
+
 def _compute_overlap(rois: list[ROIStatistics]) -> None:
     """Computes overlapping pixels across ROIs and updates each ROI's overlap_mask field in-place.
 
@@ -524,52 +573,3 @@ def _track_channel_rois(contexts: list[MultiDayRuntimeContext], channel_2: bool)
         else:
             context.runtime.tracking.template_masks = filtered_templates
             context.runtime.tracking.template_diameter = template_diameter
-
-
-def track_rois_across_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
-    """Tracks ROIs across multiple sessions using Jaccard distance-based hierarchical clustering.
-
-    This function clusters ROI masks from multiple sessions based on spatial overlap in the shared deformed visual
-    space. ROIs that consistently appear in the same location across sessions are grouped together, and a template
-    mask is created for each cluster representing the consensus ROI. When dual-channel data is present, each channel
-    is processed independently.
-
-    Notes:
-        This function modifies the input contexts in-place, updating each context's ``runtime.tracking.template_masks``
-        (and ``template_masks_channel_2`` for dual-channel recordings) with the generated template ROIs.
-
-    Args:
-        contexts: The list of MultiDayRuntimeContext instances, one per session. Each context must have completed
-            diffeomorphic registration with deformed ROI masks available in
-            ``runtime.registration.deformed_cell_masks`` (and optionally ``deformed_cell_masks_channel_2``).
-    """
-    if not contexts:
-        return
-
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-
-    # Determines which channels have data to process by checking the first context with available registration data.
-    has_channel_1 = False
-    has_channel_2 = False
-    for context in contexts:
-        if context.runtime.registration.deformed_cell_masks is not None:
-            has_channel_1 = True
-        if context.runtime.registration.deformed_cell_masks_channel_2 is not None:
-            has_channel_2 = True
-        if has_channel_1 or has_channel_2:
-            break
-
-    # Processes each channel that has available data.
-    if has_channel_1:
-        _track_channel_rois(contexts=contexts, channel_2=False)
-
-    if has_channel_2:
-        _track_channel_rois(contexts=contexts, channel_2=True)
-
-    # Records tracking timing and persists runtime data for each session.
-    tracking_time = int(timer.elapsed)
-    for context in contexts:
-        context.runtime.timing.tracking_time = tracking_time
-        context.save_runtime()
-
-    console.echo(message=f"ROI tracking: complete. Time: {tracking_time} seconds.", level=LogLevel.SUCCESS)
