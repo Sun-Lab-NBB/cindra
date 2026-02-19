@@ -6,7 +6,6 @@ single-day and multi-day suite2p processing workflows.
 
 from __future__ import annotations
 
-from os import cpu_count
 from typing import Any, Literal
 from pathlib import Path
 from threading import Lock, Thread
@@ -16,9 +15,10 @@ from dataclasses import field, dataclass
 from natsort import natsorted
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from mcp.server.fastmcp import FastMCP
+from ataraxis_base_utilities import resolve_worker_count, resolve_parallel_job_capacity
 
 from ..io import resolve_multiday_contexts
-from ..pipelines import process_multi_day, process_single_day
+from ..pipelines import run_multi_day_pipeline, run_single_day_pipeline
 from ..dataclasses import (
     RuntimeContext,
     MultiDayConfiguration,
@@ -155,42 +155,6 @@ _single_day_batch_state: _SingleDayBatchState | None = None
 _multi_day_batch_state: _MultiDayBatchState | None = None
 
 
-def _calculate_workers(requested_workers: int, max_workers: int = _MAXIMUM_JOB_CORES) -> int:
-    """Calculates the number of CPU cores to allocate for a processing job.
-
-    Args:
-        requested_workers: The user-requested worker count. Set to -1 or less for automatic allocation.
-        max_workers: The maximum number of workers to allocate.
-
-    Returns:
-        The number of CPU cores to use for the job.
-    """
-    if requested_workers > 0:
-        return min(requested_workers, max_workers)
-
-    available_cores = cpu_count()
-    if available_cores is None:
-        return _RESERVED_CORES
-
-    return min(max(1, available_cores - _RESERVED_CORES), max_workers)
-
-
-def _calculate_max_parallel(workers_per_job: int) -> int:
-    """Calculates the maximum number of jobs that can run in parallel.
-
-    Args:
-        workers_per_job: The number of CPU cores allocated per job.
-
-    Returns:
-        The maximum number of parallel jobs.
-    """
-    available_cores = cpu_count()
-    if available_cores is None:
-        return 1
-
-    return max(1, available_cores // workers_per_job)
-
-
 def _get_session_key(session_path: Path) -> str:
     """Generates a unique key for a session path.
 
@@ -226,7 +190,7 @@ def _run_binarize_job(config_path: Path) -> tuple[bool, int, str | None]:
         A tuple containing success status, plane count (0 if failed), and error message if failed.
     """
     try:
-        process_single_day(
+        run_single_day_pipeline(
             configuration_path=config_path,
             binarize=True,
             process=False,
@@ -241,12 +205,14 @@ def _run_binarize_job(config_path: Path) -> tuple[bool, int, str | None]:
         if not isinstance(contexts, list):
             contexts = [contexts]
         plane_count = len(contexts)
-        return True, plane_count, None
 
     except Exception as error:
         frames = traceback.extract_tb(error.__traceback__)
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
         return False, 0, f"{type(error).__name__}: {error} ({location})"
+
+    else:
+        return True, plane_count, None
 
 
 def _run_process_job(config_path: Path, plane_index: int, workers: int) -> tuple[bool, str | None]:
@@ -261,7 +227,7 @@ def _run_process_job(config_path: Path, plane_index: int, workers: int) -> tuple
         A tuple containing success status and error message if failed.
     """
     try:
-        process_single_day(
+        run_single_day_pipeline(
             configuration_path=config_path,
             binarize=False,
             process=True,
@@ -270,12 +236,14 @@ def _run_process_job(config_path: Path, plane_index: int, workers: int) -> tuple
             workers=workers,
             progress_bars=False,
         )
-        return True, None
 
     except Exception as error:
         frames = traceback.extract_tb(error.__traceback__)
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
         return False, f"{type(error).__name__}: {error} ({location})"
+
+    else:
+        return True, None
 
 
 def _run_combine_job(config_path: Path) -> tuple[bool, str | None]:
@@ -288,19 +256,21 @@ def _run_combine_job(config_path: Path) -> tuple[bool, str | None]:
         A tuple containing success status and error message if failed.
     """
     try:
-        process_single_day(
+        run_single_day_pipeline(
             configuration_path=config_path,
             binarize=False,
             process=False,
             combine=True,
             progress_bars=False,
         )
-        return True, None
 
     except Exception as error:
         frames = traceback.extract_tb(error.__traceback__)
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
         return False, f"{type(error).__name__}: {error} ({location})"
+
+    else:
+        return True, None
 
 
 def _binarize_worker(session_path: Path, config_path: Path) -> None:
@@ -519,7 +489,7 @@ def _run_discover_job(config_path: Path, session_paths: list[Path], workers: int
         configuration.session_io.session_directories = list(session_paths)
         configuration.save(file_path=config_path)
 
-        process_multi_day(
+        run_multi_day_pipeline(
             configuration_path=config_path,
             discover=True,
             extract=False,
@@ -531,12 +501,14 @@ def _run_discover_job(config_path: Path, session_paths: list[Path], workers: int
         config = MultiDayConfiguration.from_yaml(file_path=config_path)
         contexts = resolve_multiday_contexts(configuration=config)
         session_ids = [ctx.runtime.io.session_id for ctx in contexts]
-        return True, session_ids, None
 
     except Exception as error:
         frames = traceback.extract_tb(error.__traceback__)
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
         return False, [], f"{type(error).__name__}: {error} ({location})"
+
+    else:
+        return True, session_ids, None
 
 
 def _run_extract_job(
@@ -559,7 +531,7 @@ def _run_extract_job(
         configuration.session_io.session_directories = list(session_paths)
         configuration.save(file_path=config_path)
 
-        process_multi_day(
+        run_multi_day_pipeline(
             configuration_path=config_path,
             discover=False,
             extract=True,
@@ -567,12 +539,14 @@ def _run_extract_job(
             workers=workers,
             progress_bars=False,
         )
-        return True, None
 
     except Exception as error:
         frames = traceback.extract_tb(error.__traceback__)
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
         return False, f"{type(error).__name__}: {error} ({location})"
+
+    else:
+        return True, None
 
 
 def _discover_worker(animal_key: str, config_path: Path, session_paths: list[Path], workers: int) -> None:
@@ -1032,8 +1006,14 @@ def start_batch_processing_tool(
                 }
 
     # Calculates resource allocation.
-    actual_workers = _calculate_workers(requested_workers=workers_per_plane)
-    actual_max_parallel = max_parallel_planes if max_parallel_planes > 0 else _calculate_max_parallel(actual_workers)
+    actual_workers = min(
+        resolve_worker_count(requested_workers=workers_per_plane, reserved_cores=_RESERVED_CORES), _MAXIMUM_JOB_CORES
+    )
+    actual_max_parallel = (
+        max_parallel_planes
+        if max_parallel_planes > 0
+        else resolve_parallel_job_capacity(workers_per_job=actual_workers)
+    )
 
     # Initializes batch state.
     _single_day_batch_state = _SingleDayBatchState(
@@ -1327,10 +1307,15 @@ def start_multiday_batch_processing_tool(
                 }
 
     # Calculates resource allocation.
-    actual_workers_discover = min(workers_per_discover, _MAXIMUM_JOB_CORES)
-    actual_workers_extract = _calculate_workers(requested_workers=workers_per_extract)
-    max_parallel_discovers = _calculate_max_parallel(actual_workers_discover)
-    max_parallel_extracts = _calculate_max_parallel(actual_workers_extract)
+    actual_workers_discover = min(
+        resolve_worker_count(requested_workers=workers_per_discover, reserved_cores=_RESERVED_CORES),
+        _MAXIMUM_JOB_CORES,
+    )
+    actual_workers_extract = min(
+        resolve_worker_count(requested_workers=workers_per_extract, reserved_cores=_RESERVED_CORES), _MAXIMUM_JOB_CORES
+    )
+    max_parallel_discovers = resolve_parallel_job_capacity(workers_per_job=actual_workers_discover)
+    max_parallel_extracts = resolve_parallel_job_capacity(workers_per_job=actual_workers_extract)
 
     # Initializes batch state.
     _multi_day_batch_state = _MultiDayBatchState(
@@ -1394,7 +1379,7 @@ def get_multiday_batch_processing_status_tool() -> dict[str, Any]:
             try:
                 config = MultiDayConfiguration.from_yaml(file_path=config_path)
                 animal_keys_ordered.append(config.session_io.dataset_name)
-            except Exception:
+            except Exception:  # noqa: S112
                 continue
 
         for animal_key in animal_keys_ordered:

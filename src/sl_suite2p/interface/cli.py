@@ -9,11 +9,12 @@ import click
 from ataraxis_base_utilities import LogLevel, console
 
 from ..gui import run
-from ..pipelines import process_multi_day, process_single_day
+from ..pipelines import run_multi_day_pipeline, run_single_day_pipeline
+from .mcp_server import run_server
 from ..dataclasses import MultiDayConfiguration, SingleDayConfiguration
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
-CONTEXT_SETTINGS = dict(max_content_width=120)
+CONTEXT_SETTINGS = {"max_content_width": 120}
 
 
 @click.group("ss2p", context_settings=CONTEXT_SETTINGS)
@@ -48,8 +49,6 @@ def ss2p_mcp(transport: str) -> None:
     The MCP server exposes tools that enable AI agents to discover sessions, execute pipelines,
     monitor processing status, and manage batch operations for both single-day and multi-day workflows.
     """
-    from .mcp_server import run_server
-
     run_server(transport=transport)  # type: ignore[arg-type]
 
 
@@ -258,7 +257,7 @@ def run_sd_pipeline(
     progress_bars = ctx.obj["progress_bars"]
     workers = ctx.obj["workers"]
 
-    process_single_day(
+    run_single_day_pipeline(
         configuration_path=config_path,
         job_id=job_id,
         binarize=binarize,
@@ -347,7 +346,7 @@ def run_md_pipeline(
     configuration.session_io.session_directories = list(session_paths)
     configuration.save(file_path=config_path)
 
-    process_multi_day(
+    run_multi_day_pipeline(
         configuration_path=config_path,
         job_id=job_id,
         discover=discover,

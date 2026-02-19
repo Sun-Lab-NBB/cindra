@@ -113,33 +113,3 @@ def extract_multiday_fluorescence(configuration: MultiDayConfiguration, session_
     # Delegates to the unified extraction entry point, which dispatches to _extract_multi_day internally. The
     # extraction function handles fluorescence extraction, deconvolution, timing, and runtime saving.
     extract_traces(context=target_context)
-
-
-def run_multiday_pipeline(configuration: MultiDayConfiguration) -> None:
-    """Executes the complete multi-day processing pipeline.
-
-    This function sequentially runs both phases of the multi-day pipeline: cell discovery followed by fluorescence
-    trace extraction for each session. It serves as the high-level entry point for running the entire multi-day
-    pipeline in a single call.
-
-    Args:
-        configuration: The multi-day pipeline configuration with session_directories and dataset_name configured
-            in session_io.
-    """
-    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-
-    console.echo(message="Initializing multi-day processing runtime...", level=LogLevel.INFO)
-
-    # Runs the discovery phase: context resolution, cell selection, registration, tracking, backward projection.
-    discover_multiday_cells(configuration=configuration)
-
-    # Reloads contexts to extract session IDs for the extraction phase.
-    contexts = resolve_multiday_contexts(configuration=configuration)
-
-    # Extracts fluorescence for each session sequentially.
-    for context in contexts:
-        extract_multiday_fluorescence(configuration=configuration, session_id=context.runtime.io.session_id)
-
-    console.echo(
-        message=f"Multi-day processing runtime: complete. Total time: {timer.elapsed} seconds.", level=LogLevel.SUCCESS
-    )

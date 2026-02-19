@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from tqdm import tqdm
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
@@ -16,8 +15,6 @@ from ..dataclasses import ROIStatistics, ReferenceImageType, MultiDayRuntimeCont
 from .diffeomorphic import DiffeomorphicDemonsRegistration
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from numpy.typing import NDArray
 
 
@@ -369,28 +366,20 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
                 for index, context in enumerate(contexts)
             }
 
-            future_iterator: Iterable[Future[None]] = as_completed(futures)
-            if runtime_config.display_progress_bars:
-                future_iterator = tqdm(
-                    future_iterator,
-                    total=len(futures),
-                    desc="Transforming session ROIs to a shared visual space",
-                    unit="session",
-                )
-
-            for future in future_iterator:
+            for future in console.track(
+                as_completed(futures),
+                description="Transforming session ROIs to a shared visual space",
+                total=len(futures),
+                unit="session",
+            ):
                 future.result()
     else:
-        context_iterator: Iterable[tuple[int, MultiDayRuntimeContext]] = enumerate(contexts)
-        if runtime_config.display_progress_bars:
-            context_iterator = tqdm(
-                context_iterator,
-                total=len(contexts),
-                desc="Transforming session ROIs to a shared visual space",
-                unit="session",
-            )
-
-        for index, context in context_iterator:
+        for index, context in console.track(
+            enumerate(contexts),
+            description="Transforming session ROIs to a shared visual space",
+            total=len(contexts),
+            unit="session",
+        ):
             _apply_forward_deformation(
                 context=context,
                 deformation=registration.get_deformation(image_index=index),
@@ -429,28 +418,20 @@ def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> Non
                 for index, context in enumerate(contexts)
             }
 
-            future_iterator: Iterable[Future[None]] = as_completed(futures)
-            if runtime_config.display_progress_bars:
-                future_iterator = tqdm(
-                    future_iterator,
-                    total=len(futures),
-                    desc="Projecting tracked ROIs to individual session's visual space",
-                    unit="session",
-                )
-
-            for future in future_iterator:
+            for future in console.track(
+                as_completed(futures),
+                description="Projecting tracked ROIs to individual session's visual space",
+                total=len(futures),
+                unit="session",
+            ):
                 future.result()
     else:
-        context_iterator: Iterable[MultiDayRuntimeContext] = contexts
-        if runtime_config.display_progress_bars:
-            context_iterator = tqdm(
-                context_iterator,
-                total=len(contexts),
-                desc="Projecting tracked ROIs to individual session's visual space",
-                unit="session",
-            )
-
-        for context in context_iterator:
+        for context in console.track(
+            contexts,
+            description="Projecting tracked ROIs to individual session's visual space",
+            total=len(contexts),
+            unit="session",
+        ):
             _apply_backward_deformation(context=context)
 
     # Records backward transform timing and persists runtime data for each session.
