@@ -190,13 +190,6 @@ def ss2p_run(
 # noinspection PyUnresolvedReferences
 @ss2p_run.command("single-day")
 @click.option(
-    "-sp",
-    "--session-path",
-    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    required=True,
-    help="The absolute path to the root data directory of the session to process.",
-)
-@click.option(
     "-id",
     "--job-id",
     type=str,
@@ -253,7 +246,6 @@ def ss2p_run(
 @click.pass_context
 def run_sd_pipeline(
     ctx: click.Context,
-    session_path: Path,
     job_id: str | None,
     binarize: bool,
     process: bool,
@@ -268,7 +260,6 @@ def run_sd_pipeline(
 
     process_single_day(
         configuration_path=config_path,
-        session_path=session_path,
         job_id=job_id,
         binarize=binarize,
         process=process,
