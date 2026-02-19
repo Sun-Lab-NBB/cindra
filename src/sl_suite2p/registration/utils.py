@@ -22,92 +22,6 @@ if TYPE_CHECKING:
 NORMALIZATION_EPSILON: float = 1e-5
 
 
-def _mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-    """Creates a mean-centered distance meshgrid of the specified dimensions.
-
-    Each coordinate value represents the absolute distance from the center of that axis. Used internally
-    for creating spatial taper masks and Gaussian frequency filters.
-
-    Args:
-        height: The height of the frames or images to generate the meshgrid for, in pixels.
-        width: The width of the frames or images to generate the meshgrid for, in pixels.
-
-    Returns:
-        A tuple of (column_distances, row_distances) arrays with shape (height, width), where each value
-        represents the absolute distance from the center along that axis.
-    """
-    # Computes absolute distances from center for each axis. For arange(0, n), mean is (n-1)/2. Casts centers to
-    # float32 to prevent promotion of the entire distance arrays to float64.
-    row_center = np.float32((height - 1) / 2)
-    column_center = np.float32((width - 1) / 2)
-    row_distances_1d = np.abs(np.arange(height, dtype=np.float32) - row_center)
-    column_distances_1d = np.abs(np.arange(width, dtype=np.float32) - column_center)
-
-    # Expands 1D distances into 2D grids. Meshgrid returns (column-varying, row-varying) arrays.
-    column_distances, row_distances = np.meshgrid(column_distances_1d, row_distances_1d)
-
-    return column_distances, row_distances
-
-
-def _compute_gaussian_rbf_weights(
-    source_coordinates: NDArray[np.float64],
-    target_coordinates: NDArray[np.float64],
-    sigma: float = 0.85,
-) -> NDArray[np.float64]:
-    """Computes Gaussian radial basis function weights between 2D point grids.
-
-    Creates 2D point grids from the Cartesian product of each 1D coordinate array with itself, then computes
-    pairwise Gaussian weights between all source and target grid points, which is used for RBF interpolation.
-
-    Notes:
-        Radial Basis Function (RBF) interpolation uses basis functions that depend only on the distance from a
-        center point. The Gaussian RBF, exp(-r^2 / 2*sigma^2), produces smooth interpolations where each source point
-        contributes to the output based on its distance from the target. The interpolation weights are computed
-        as inv(K(source, source)) @ K(source, target), where K is the Gaussian kernel matrix.
-
-    Args:
-        source_coordinates: The 1D array of source coordinates. The 2D source grid has n² points where n is
-            the array length.
-        target_coordinates: The 1D array of target coordinates. The 2D target grid has m² points where m is
-            the array length.
-        sigma: The Gaussian kernel bandwidth controlling interpolation smoothness. Smaller values produce
-            sharper interpolation, larger values produce smoother results.
-
-    Returns:
-        The Gaussian RBF weight matrix with shape (n², m²). Float64 precision is used because this matrix
-        is inverted during RBF interpolation, and matrix inversion is numerically sensitive.
-    """
-    # Creates 2D grids from Cartesian product of coordinates with themselves.
-    source_grid_x, source_grid_y = np.meshgrid(source_coordinates, source_coordinates)
-    target_grid_x, target_grid_y = np.meshgrid(target_coordinates, target_coordinates)
-
-    # Flattens grids and computes pairwise coordinate differences between all source and target points.
-    delta_x = source_grid_x.reshape(-1, 1) - target_grid_x.reshape(1, -1)
-    delta_y = source_grid_y.reshape(-1, 1) - target_grid_y.reshape(1, -1)
-
-    # Computes Gaussian weights based on squared Euclidean distance.
-    return np.exp(-(delta_x**2 + delta_y**2) / (2 * sigma**2))
-
-
-@lru_cache(maxsize=5)
-def _get_normalization_weights(height: int, width: int, window: int) -> NDArray[np.float32]:
-    """Computes cached normalization weights for spatial high-pass filtering.
-
-    The weights correct for zero-padding at borders by computing how many valid pixels contribute to each window.
-    Since this only depends on dimensions and window size, results are cached to avoid redundant computation.
-
-    Args:
-        height: The height of the frames or images to be filtered, in pixels.
-        width: The width of the frames or images to be filtered, in pixels.
-        window: The smoothing window size.
-
-    Returns:
-        The normalization weights with shape (height, width).
-    """
-    ones_array = np.ones((1, height, width), dtype=np.float32)
-    return apply_spatial_smoothing(data=ones_array, window=window)
-
-
 def apply_phase_correlation(
     frames: NDArray[np.float32],
     kernel: NDArray[np.complex64],
@@ -441,3 +355,89 @@ def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray
 
     # Casts to float32 since precision is no longer critical after inversion.
     return kernel_matrix.astype(np.float32), num_upsampled
+
+
+def _mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+    """Creates a mean-centered distance meshgrid of the specified dimensions.
+
+    Each coordinate value represents the absolute distance from the center of that axis. Used internally
+    for creating spatial taper masks and Gaussian frequency filters.
+
+    Args:
+        height: The height of the frames or images to generate the meshgrid for, in pixels.
+        width: The width of the frames or images to generate the meshgrid for, in pixels.
+
+    Returns:
+        A tuple of (column_distances, row_distances) arrays with shape (height, width), where each value
+        represents the absolute distance from the center along that axis.
+    """
+    # Computes absolute distances from center for each axis. For arange(0, n), mean is (n-1)/2. Casts centers to
+    # float32 to prevent promotion of the entire distance arrays to float64.
+    row_center = np.float32((height - 1) / 2)
+    column_center = np.float32((width - 1) / 2)
+    row_distances_1d = np.abs(np.arange(height, dtype=np.float32) - row_center)
+    column_distances_1d = np.abs(np.arange(width, dtype=np.float32) - column_center)
+
+    # Expands 1D distances into 2D grids. Meshgrid returns (column-varying, row-varying) arrays.
+    column_distances, row_distances = np.meshgrid(column_distances_1d, row_distances_1d)
+
+    return column_distances, row_distances
+
+
+def _compute_gaussian_rbf_weights(
+    source_coordinates: NDArray[np.float64],
+    target_coordinates: NDArray[np.float64],
+    sigma: float = 0.85,
+) -> NDArray[np.float64]:
+    """Computes Gaussian radial basis function weights between 2D point grids.
+
+    Creates 2D point grids from the Cartesian product of each 1D coordinate array with itself, then computes
+    pairwise Gaussian weights between all source and target grid points, which is used for RBF interpolation.
+
+    Notes:
+        Radial Basis Function (RBF) interpolation uses basis functions that depend only on the distance from a
+        center point. The Gaussian RBF, exp(-r^2 / 2*sigma^2), produces smooth interpolations where each source point
+        contributes to the output based on its distance from the target. The interpolation weights are computed
+        as inv(K(source, source)) @ K(source, target), where K is the Gaussian kernel matrix.
+
+    Args:
+        source_coordinates: The 1D array of source coordinates. The 2D source grid has n² points where n is
+            the array length.
+        target_coordinates: The 1D array of target coordinates. The 2D target grid has m² points where m is
+            the array length.
+        sigma: The Gaussian kernel bandwidth controlling interpolation smoothness. Smaller values produce
+            sharper interpolation, larger values produce smoother results.
+
+    Returns:
+        The Gaussian RBF weight matrix with shape (n², m²). Float64 precision is used because this matrix
+        is inverted during RBF interpolation, and matrix inversion is numerically sensitive.
+    """
+    # Creates 2D grids from Cartesian product of coordinates with themselves.
+    source_grid_x, source_grid_y = np.meshgrid(source_coordinates, source_coordinates)
+    target_grid_x, target_grid_y = np.meshgrid(target_coordinates, target_coordinates)
+
+    # Flattens grids and computes pairwise coordinate differences between all source and target points.
+    delta_x = source_grid_x.reshape(-1, 1) - target_grid_x.reshape(1, -1)
+    delta_y = source_grid_y.reshape(-1, 1) - target_grid_y.reshape(1, -1)
+
+    # Computes Gaussian weights based on squared Euclidean distance.
+    return np.exp(-(delta_x**2 + delta_y**2) / (2 * sigma**2))
+
+
+@lru_cache(maxsize=5)
+def _get_normalization_weights(height: int, width: int, window: int) -> NDArray[np.float32]:
+    """Computes cached normalization weights for spatial high-pass filtering.
+
+    The weights correct for zero-padding at borders by computing how many valid pixels contribute to each window.
+    Since this only depends on dimensions and window size, results are cached to avoid redundant computation.
+
+    Args:
+        height: The height of the frames or images to be filtered, in pixels.
+        width: The width of the frames or images to be filtered, in pixels.
+        window: The smoothing window size.
+
+    Returns:
+        The normalization weights with shape (height, width).
+    """
+    ones_array = np.ones((1, height, width), dtype=np.float32)
+    return apply_spatial_smoothing(data=ones_array, window=window)
