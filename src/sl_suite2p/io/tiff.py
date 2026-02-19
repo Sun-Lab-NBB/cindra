@@ -4,7 +4,6 @@ import gc
 import math
 from typing import TYPE_CHECKING
 
-from tqdm import tqdm
 import numpy as np
 from natsort import natsorted
 from tifffile import TiffFile
@@ -288,7 +287,6 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
     plane_number = acquisition.plane_number
     channel_number = acquisition.channel_number
     is_mroi = acquisition.is_mroi
-    display_progress = config.runtime.display_progress_bars
 
     # Determines which channel is functional (used for ROI detection).
     functional_channel_index = 0 if config.main.first_channel_functional else 1
@@ -324,7 +322,6 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
 
     # Creates progress bar.
     description = "Converting MROI frames to binary" if is_mroi else "Converting frames to binary"
-    pbar = tqdm(total=total_frames, desc=description, unit="frames", disable=not display_progress)
 
     # Initializes mean image accumulators, frame counters, and write indices for each context.
     mean_images: list[NDArray[np.float32] | None] = [None] * len(contexts)
@@ -338,99 +335,102 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
     interleave_offset: int = 0
 
     # Processes each TIFF file.
-    for tiff_file in tiff_files:
-        tiff = TiffFile(tiff_file)
-        start_index = 0
+    with console.progress(total=total_frames, description=description, unit="frames") as progress_bar:
+        for tiff_file in tiff_files:
+            tiff = TiffFile(tiff_file)
+            start_index = 0
 
-        while True:
-            frames = _read_tiff(tiff=tiff, start_index=start_index, batch_size=batch_size)
-            if frames is None:
-                break
+            while True:
+                frames = _read_tiff(tiff=tiff, start_index=start_index, batch_size=batch_size)
+                if frames is None:
+                    break
 
-            frame_count = frames.shape[0]
-            pbar.update(frame_count)
+                frame_count = frames.shape[0]
+                progress_bar.update(frame_count)
 
-            # Processes each context (plane or virtual plane).
-            for context_index, context in enumerate(contexts):
-                io_data = context.runtime.io
+                # Processes each context (plane or virtual plane).
+                for context_index, context in enumerate(contexts):
+                    io_data = context.runtime.io
 
-                # Determines the physical plane index for frame extraction.
-                if is_mroi:
-                    physical_plane_index = io_data.plane_index if io_data.plane_index is not None else 0
-                    roi_lines = io_data.mroi_lines
-                else:
-                    physical_plane_index = context_index % plane_number
-                    roi_lines = []
+                    # Determines the physical plane index for frame extraction.
+                    if is_mroi:
+                        physical_plane_index = io_data.plane_index if io_data.plane_index is not None else 0
+                        roi_lines = io_data.mroi_lines
+                    else:
+                        physical_plane_index = context_index % plane_number
+                        roi_lines = []
 
-                # Generates frame indices for this plane's functional channel, accounting for the interleave
-                # offset from previous files.
-                target_position = physical_plane_index * channel_number + functional_channel_index
-                first_frame_index = (target_position - interleave_offset) % interleave_stride
-                frame_indices = list(range(first_frame_index, frame_count, interleave_stride))
+                    # Generates frame indices for this plane's functional channel, accounting for the interleave
+                    # offset from previous files.
+                    target_position = physical_plane_index * channel_number + functional_channel_index
+                    first_frame_index = (target_position - interleave_offset) % interleave_stride
+                    frame_indices = list(range(first_frame_index, frame_count, interleave_stride))
 
-                if not frame_indices:
-                    continue
+                    if not frame_indices:
+                        continue
 
-                plane_frames = frames[frame_indices]
+                    plane_frames = frames[frame_indices]
 
-                # For MROI data, slices frames to extract only the ROI lines.
-                if is_mroi and len(roi_lines) > 0:
-                    line_start = roi_lines[0]
-                    line_end = roi_lines[-1] + 1
-                    plane_frames = plane_frames[:, line_start:line_end, :]
+                    # For MROI data, slices frames to extract only the ROI lines.
+                    if is_mroi and len(roi_lines) > 0:
+                        line_start = roi_lines[0]
+                        line_end = roi_lines[-1] + 1
+                        plane_frames = plane_frames[:, line_start:line_end, :]
 
-                # Initializes mean image accumulator on first batch.
-                if mean_images[context_index] is None:
-                    mean_images[context_index] = np.zeros(
-                        (plane_frames.shape[1], plane_frames.shape[2]), dtype=np.float32
-                    )
-
-                # Writes frames to binary file using indexed assignment.
-                batch_frame_count = plane_frames.shape[0]
-                write_start = write_indices[context_index]
-                channel_1_binaries[context_index][write_start : write_start + batch_frame_count] = plane_frames
-                write_indices[context_index] += batch_frame_count
-
-                mean_images[context_index] += plane_frames.sum(axis=0, dtype=np.float32)
-                frame_counts[context_index] += batch_frame_count
-
-                # Processes channel 2 if applicable.
-                if channel_number > 1:
-                    second_channel_index = 1 - functional_channel_index
-                    target_position_channel_2 = physical_plane_index * channel_number + second_channel_index
-                    first_frame_index_channel_2 = (target_position_channel_2 - interleave_offset) % interleave_stride
-                    channel_2_frame_indices = list(range(first_frame_index_channel_2, frame_count, interleave_stride))
-
-                    if channel_2_frame_indices:
-                        channel_2_frames = frames[channel_2_frame_indices]
-
-                        if is_mroi and len(roi_lines) > 0:
-                            line_start = roi_lines[0]
-                            line_end = roi_lines[-1] + 1
-                            channel_2_frames = channel_2_frames[:, line_start:line_end, :]
-
-                        if mean_images_channel_2[context_index] is None:
-                            mean_images_channel_2[context_index] = np.zeros(
-                                (channel_2_frames.shape[1], channel_2_frames.shape[2]), dtype=np.float32
-                            )
-
-                        # Writes channel 2 frames to binary file using indexed assignment.
-                        # Note: write_indices is shared between channels since they have the same frame count.
-                        ch2_batch_count = channel_2_frames.shape[0]
-                        ch2_write_start = write_indices[context_index] - batch_frame_count
-                        channel_2_binaries[context_index][ch2_write_start : ch2_write_start + ch2_batch_count] = (
-                            channel_2_frames
+                    # Initializes mean image accumulator on first batch.
+                    if mean_images[context_index] is None:
+                        mean_images[context_index] = np.zeros(
+                            (plane_frames.shape[1], plane_frames.shape[2]), dtype=np.float32
                         )
-                        mean_images_channel_2[context_index] += channel_2_frames.sum(axis=0, dtype=np.float32)
 
-            start_index += frame_count
+                    # Writes frames to binary file using indexed assignment.
+                    batch_frame_count = plane_frames.shape[0]
+                    write_start = write_indices[context_index]
+                    channel_1_binaries[context_index][write_start : write_start + batch_frame_count] = plane_frames
+                    write_indices[context_index] += batch_frame_count
 
-        # Updates the interleave offset for the next file based on the total frames in this file.
-        interleave_offset = (interleave_offset + start_index) % interleave_stride
+                    mean_images[context_index] += plane_frames.sum(axis=0, dtype=np.float32)
+                    frame_counts[context_index] += batch_frame_count
 
-        gc.collect()
+                    # Processes channel 2 if applicable.
+                    if channel_number > 1:
+                        second_channel_index = 1 - functional_channel_index
+                        target_position_channel_2 = physical_plane_index * channel_number + second_channel_index
+                        first_frame_index_channel_2 = (
+                            target_position_channel_2 - interleave_offset
+                        ) % interleave_stride
+                        channel_2_frame_indices = list(
+                            range(first_frame_index_channel_2, frame_count, interleave_stride)
+                        )
 
-    pbar.close()
+                        if channel_2_frame_indices:
+                            channel_2_frames = frames[channel_2_frame_indices]
+
+                            if is_mroi and len(roi_lines) > 0:
+                                line_start = roi_lines[0]
+                                line_end = roi_lines[-1] + 1
+                                channel_2_frames = channel_2_frames[:, line_start:line_end, :]
+
+                            if mean_images_channel_2[context_index] is None:
+                                mean_images_channel_2[context_index] = np.zeros(
+                                    (channel_2_frames.shape[1], channel_2_frames.shape[2]), dtype=np.float32
+                                )
+
+                            # Writes channel 2 frames to binary file using indexed assignment.
+                            # Note: write_indices is shared between channels since they have the same frame count.
+                            ch2_batch_count = channel_2_frames.shape[0]
+                            ch2_write_start = write_indices[context_index] - batch_frame_count
+                            channel_2_binaries[context_index][ch2_write_start : ch2_write_start + ch2_batch_count] = (
+                                channel_2_frames
+                            )
+                            mean_images_channel_2[context_index] += channel_2_frames.sum(axis=0, dtype=np.float32)
+
+                start_index += frame_count
+
+            # Updates the interleave offset for the next file based on the total frames in this file.
+            interleave_offset = (interleave_offset + start_index) % interleave_stride
+
+            gc.collect()
 
     # Closes binary files and updates runtime data in each context.
     for context_index, context in enumerate(contexts):

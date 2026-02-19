@@ -103,7 +103,6 @@ dev = [
     "ataraxis-automation>=8,<9",
 
     # Types
-    "types-tqdm>=4,<5",
     "scipy-stubs>=1,<2",
 ]
 
