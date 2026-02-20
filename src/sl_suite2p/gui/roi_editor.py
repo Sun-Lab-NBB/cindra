@@ -134,7 +134,9 @@ def _extract_masks_and_traces(
     )
 
     cell_fluorescence, neuropil_fluorescence, channel_2_fluorescence, channel_2_neuropil = extract_traces_from_masks(
-        ops, manual_cell_masks, manual_neuropil_masks,
+        ops,
+        manual_cell_masks,
+        manual_neuropil_masks,
     )
 
     # Computes activity statistics for classifier compatibility.
@@ -183,8 +185,13 @@ def _extract_masks_and_traces(
     )
 
     return (
-        cell_fluorescence, neuropil_fluorescence, channel_2_fluorescence,
-        channel_2_neuropil, spikes, ops, manual_stat,
+        cell_fluorescence,
+        neuropil_fluorescence,
+        channel_2_fluorescence,
+        channel_2_neuropil,
+        spikes,
+        ops,
+        manual_stat,
     )
 
 
@@ -220,7 +227,11 @@ class ROIDraw(QMainWindow):
         self._trace_plot.scene().sigMouseMoved.connect(self._mouse_moved)
 
         self._image_view = self._plot_widget.addViewBox(
-            name="plot1", lockAspect=True, row=0, col=0, invertY=True,
+            name="plot1",
+            lockAspect=True,
+            row=0,
+            col=0,
+            invertY=True,
         )
         self._image_item = pg.ImageItem()
         self._image_view.addItem(self._image_item)
@@ -275,7 +286,10 @@ class ROIDraw(QMainWindow):
 
         # View selection buttons for switching reference images.
         self._view_names = [
-            "W: mean img", "E: mean img (enhanced)", "R: correlation map", "T: max projection",
+            "W: mean img",
+            "E: mean img (enhanced)",
+            "R: correlation map",
+            "T: max projection",
         ]
         self._view_buttons = QButtonGroup(self)
         for button_index, name in enumerate(self._view_names):
@@ -306,7 +320,7 @@ class ROIDraw(QMainWindow):
         self._channel_2_neuropil: NDArray | None = None
         self._spikes: NDArray | None = None
         self._new_stat: list[dict] | None = None
-        self._time_range: NDArray | None = None
+        self._frame_indices: NDArray | None = None
         self._y_minimum: float = 0.0
         self._y_maximum: float = 0.0
 
@@ -349,8 +363,10 @@ class ROIDraw(QMainWindow):
             stat_all.append(self._parent.stat[index])
         np.save(base_path / "stat.npy", stat_all)
         existing_classification = np.concatenate(
-            (self._parent.cell_classification[:, np.newaxis],
-             self._parent.cell_classification_probabilities[:, np.newaxis]),
+            (
+                self._parent.cell_classification[:, np.newaxis],
+                self._parent.cell_classification_probabilities[:, np.newaxis],
+            ),
             axis=1,
         )
 
@@ -360,10 +376,12 @@ class ROIDraw(QMainWindow):
 
         # Saves fluorescence traces.
         combined_cell_fluorescence = np.concatenate(
-            (self._cell_fluorescence, self._parent.Fcell), axis=0,
+            (self._cell_fluorescence, self._parent.Fcell),
+            axis=0,
         )
         combined_neuropil = np.concatenate(
-            (self._neuropil_fluorescence, self._parent.Fneu), axis=0,
+            (self._neuropil_fluorescence, self._parent.Fneu),
+            axis=0,
         )
         combined_spikes = np.concatenate((self._spikes, self._parent.Spks), axis=0)
         np.save(base_path / "F.npy", combined_cell_fluorescence)
@@ -375,10 +393,12 @@ class ROIDraw(QMainWindow):
             channel_2_neuropil = np.load(base_path / "Fneu_chan2.npy")
             red_original = np.load(base_path / "cell_colocalization.npy")
             channel_2_fluorescence = np.concatenate(
-                (self._channel_2_fluorescence, channel_2_fluorescence), axis=0,
+                (self._channel_2_fluorescence, channel_2_fluorescence),
+                axis=0,
             )
             channel_2_neuropil = np.concatenate(
-                (self._channel_2_neuropil, channel_2_neuropil), axis=0,
+                (self._channel_2_neuropil, channel_2_neuropil),
+                axis=0,
             )
             new_colocalization = np.zeros((self._roi_count, 2))
             new_colocalization = np.concatenate((new_colocalization, red_original), axis=0)
@@ -406,10 +426,12 @@ class ROIDraw(QMainWindow):
         """
         masked_images = np.zeros((self._frame_height, self._frame_width, 3, _VIEW_COUNT))
         valid_y = slice(
-            self._parent.ops["valid_y_range"][0], self._parent.ops["valid_y_range"][1],
+            self._parent.ops["valid_y_range"][0],
+            self._parent.ops["valid_y_range"][1],
         )
         valid_x = slice(
-            self._parent.ops["valid_x_range"][0], self._parent.ops["valid_x_range"][1],
+            self._parent.ops["valid_x_range"][0],
+            self._parent.ops["valid_x_range"][1],
         )
 
         for view_index in range(_VIEW_COUNT):
@@ -522,19 +544,21 @@ class ROIDraw(QMainWindow):
                 if event.modifiers() == QtCore.Qt.AltModifier:
                     diameter = int(self._diameter_edit.text())
                     self._add_roi(
-                        position=np.array([
-                            click_y - _ROI_POSITION_OFFSET,
-                            click_x - _ROI_POSITION_OFFSET,
-                            diameter,
-                            diameter,
-                        ]),
+                        position=np.array(
+                            [
+                                click_y - _ROI_POSITION_OFFSET,
+                                click_x - _ROI_POSITION_OFFSET,
+                                diameter,
+                                diameter,
+                            ]
+                        ),
                     )
                 if event.double():
                     self._image_view.setXRange(0, self._frame_width)
                     self._image_view.setYRange(0, self._frame_height)
             elif item == self._trace_plot:
                 if event.double():
-                    self._trace_plot.setXRange(0, self._time_range.size)
+                    self._trace_plot.setXRange(0, self._frame_indices.size)
                     self._trace_plot.setYRange(self._y_minimum, self._y_maximum)
 
     def _process_rois(self) -> None:
@@ -555,19 +579,22 @@ class ROIDraw(QMainWindow):
             y_pixels = y_grid[ellipse].flatten()
             x_pixels = x_grid[ellipse].flatten()
             pixel_weights = np.ones(y_pixels.shape)
-            stat_list.append({
-                "y_pixels": y_pixels,
-                "x_pixels": x_pixels,
-                "pixel_weights": pixel_weights,
-                "pixel_count": y_pixels.size,
-                "centroid": centroid,
-            })
+            stat_list.append(
+                {
+                    "y_pixels": y_pixels,
+                    "x_pixels": x_pixels,
+                    "pixel_weights": pixel_weights,
+                    "pixel_count": y_pixels.size,
+                    "centroid": centroid,
+                }
+            )
             text_label = pg.TextItem(str(roi_index), self._roi_list[roi_index].color, anchor=(0, 0))
             text_label.setPos(x_pixels.mean(), y_pixels.mean())
             self._image_view.addItem(text_label)
             self._text_labels.append(text_label)
             scatter = pg.ScatterPlotItem(
-                [x_pixels.mean()], [y_pixels.mean()],
+                [x_pixels.mean()],
+                [y_pixels.mean()],
                 pen=self._roi_list[roi_index].color,
                 symbol="+",
             )
@@ -609,7 +636,7 @@ class ROIDraw(QMainWindow):
 
     def _plot_traces(self) -> None:
         """Renders fluorescence traces for all drawn ROIs in the trace panel."""
-        self._time_range = np.arange(0, self._cell_fluorescence.shape[1])
+        self._frame_indices = np.arange(0, self._cell_fluorescence.shape[1], dtype=np.int32)
         self._trace_plot.clear()
         vertical_spacing = 1.0
         axis = self._trace_plot.getAxis("left")
@@ -622,11 +649,13 @@ class ROIDraw(QMainWindow):
             f_min = fluorescence.min()
             normalized = (fluorescence - f_min) / (f_max - f_min)
             rgb = self._roi_list[roi_index].color
-            self._trace_plot.plot(self._time_range, normalized + row * vertical_spacing, pen=rgb)
+            self._trace_plot.plot(self._frame_indices, normalized + row * vertical_spacing, pen=rgb)
             normalized_neuropil = (neuropil - f_min) / (f_max - f_min)
             if self._roi_count == 1:
                 self._trace_plot.plot(
-                    self._time_range, normalized_neuropil + row * vertical_spacing, pen="r",
+                    self._frame_indices,
+                    normalized_neuropil + row * vertical_spacing,
+                    pen="r",
                 )
             tick_labels.append((row * vertical_spacing + normalized.mean(), str(roi_index)))
             row -= 1
@@ -829,7 +858,8 @@ class _EllipseROI:
 
         bounding_rect = self._pyqtgraph_roi.boundingRect()
         x_grid, y_grid = np.meshgrid(
-            np.arange(0, x_range.size, 1), np.arange(0, y_range.size, 1),
+            np.arange(0, x_range.size, 1),
+            np.arange(0, y_range.size, 1),
         )
         ellipse = (
             (y_grid - bounding_rect.center().y()) ** 2 / (bounding_rect.plane_heights() / 2) ** 2
@@ -837,8 +867,11 @@ class _EllipseROI:
         ) <= 1
         if self._pyqtgraph_roi.angle() not in (0, 180, -180):
             ellipse, x_range, y_range = self._rotate_ellipse(
-                ellipse=ellipse, x_range=x_range, y_range=y_range,
-                origin_x=origin_x, origin_y=origin_y,
+                ellipse=ellipse,
+                x_range=x_range,
+                y_range=y_range,
+                origin_x=origin_x,
+                origin_y=origin_y,
             )
         # Clips the ellipse mask to the field of view boundaries.
         valid_x = np.logical_and(x_range >= 0, x_range < parent._frame_width)

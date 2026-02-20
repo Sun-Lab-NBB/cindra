@@ -287,8 +287,11 @@ class _RangeSlider(QSlider):
             slider_max = groove_rect.bottom() - slider_length + 1
 
         return style.sliderValueFromPosition(
-            self.minimum(), self.maximum(), position - slider_min,
-            slider_max - slider_min, option.upsideDown,
+            self.minimum(),
+            self.maximum(),
+            position - slider_min,
+            slider_max - slider_min,
+            option.upsideDown,
         )
 
 
@@ -379,9 +382,7 @@ class VisWindow(QMainWindow):
         # Computes activity data based on parent's activity mode.
         if len(self._parent.imerge) == 1:
             classification_label = self._parent.cell_classification[self._parent.imerge[0]]
-            self._cells = np.array(
-                (self._parent.cell_classification == classification_label).nonzero()
-            ).flatten()
+            self._cells = np.array((self._parent.cell_classification == classification_label).nonzero()).flatten()
         else:
             self._cells = np.array(self._parent.imerge).flatten()
 
@@ -391,16 +392,14 @@ class VisWindow(QMainWindow):
         elif activity_mode == 1:
             spike_data = self._parent.Fneu[self._cells, :]
         elif activity_mode == _ACTIVITY_MODE_COUNT:
-            spike_data = (
-                self._parent.Fcell[self._cells, :]
-                - _NEUROPIL_COEFFICIENT * self._parent.Fneu[self._cells, :]
-            )
+            spike_data = self._parent.Fcell[self._cells, :] - _NEUROPIL_COEFFICIENT * self._parent.Fneu[self._cells, :]
         else:
             spike_data = self._parent.Spks[self._cells, :]
         spike_data = np.squeeze(spike_data)
         spike_data = zscore(spike_data, axis=1)
         self._spike_matrix = np.maximum(
-            _ZSCORE_LOWER_BOUND, np.minimum(_ZSCORE_UPPER_BOUND, spike_data),
+            _ZSCORE_LOWER_BOUND,
+            np.minimum(_ZSCORE_UPPER_BOUND, spike_data),
         ) + abs(_ZSCORE_LOWER_BOUND)
         self._spike_matrix /= _ZSCORE_NORMALIZATION
         self._time_sort = np.arange(0, spike_data.shape[1]).astype(np.int32)
@@ -410,8 +409,10 @@ class VisWindow(QMainWindow):
         self._full_plot.setXRange(0, spike_data.shape[1])
         self._full_plot.setYRange(0, spike_data.shape[0])
         self._full_plot.setLimits(
-            xMin=-10, xMax=spike_data.shape[1] + 10,
-            yMin=-10, yMax=spike_data.shape[0] + 10,
+            xMin=-10,
+            xMax=spike_data.shape[1] + 10,
+            yMin=-10,
+            yMax=spike_data.shape[0] + 10,
         )
         self._full_plot.setLabel("left", "neurons")
         self._full_plot.setLabel("bottom", "time")
@@ -556,10 +557,12 @@ class VisWindow(QMainWindow):
         for item in items:
             if item == self._full_plot and event.button() == 1 and event.double():
                 self._time_roi.setPos([-1, -1])
-                self._time_roi.setSize([
-                    self._spike_matrix.shape[1] + 1,
-                    self._spike_matrix.shape[0] + 1,
-                ])
+                self._time_roi.setSize(
+                    [
+                        self._spike_matrix.shape[1] + 1,
+                        self._spike_matrix.shape[0] + 1,
+                    ]
+                )
 
     def keyPressEvent(self, event: object) -> None:  # noqa: N802
         """Handles arrow key navigation for time and neuron ROIs."""
@@ -584,7 +587,8 @@ class VisWindow(QMainWindow):
                     else:
                         move = True
                         x_range = x_range + np.minimum(
-                            frame_count - x_range.max() - 1, frame_count * _MOVEMENT_FRACTION,
+                            frame_count - x_range.max() - 1,
+                            frame_count * _MOVEMENT_FRACTION,
                         )
                     if move:
                         self._time_roi.setPos([x_range.min() - 1, -1])
@@ -598,7 +602,8 @@ class VisWindow(QMainWindow):
                     else:
                         move = True
                         y_range = y_range + np.minimum(
-                            neuron_count - y_range.max() - 1, neuron_count * _MOVEMENT_FRACTION,
+                            neuron_count - y_range.max() - 1,
+                            neuron_count * _MOVEMENT_FRACTION,
                         )
                     if move:
                         self._neuron_roi.setPos([-1, y_range.min()])
@@ -701,13 +706,19 @@ class VisWindow(QMainWindow):
 
         # Resets dependent ROIs.
         self._neuron_roi.maxBounds = QtCore.QRectF(
-            -1, -1.0, x_range.size + 1, self._spike_matrix.shape[0] + 1,
+            -1,
+            -1.0,
+            x_range.size + 1,
+            self._spike_matrix.shape[0] + 1,
         )
         self._neuron_roi.setSize([x_range.size + 1, self._selected.size])
         self._neuron_roi.setZValue(_ROI_Z_VALUE)
 
         self._threshold_roi.maxBounds = QtCore.QRectF(
-            self._x_range[0] - 1, -5.0, self._x_range[1] + 1, 10,
+            self._x_range[0] - 1,
+            -5.0,
+            self._x_range[1] + 1,
+            10,
         )
         self._threshold_roi.setPos([self._x_range[0] - 1, self._threshold_position])
         self._threshold_roi.setSize([x_range.size + 1, self._threshold_size])
@@ -847,7 +858,9 @@ class VisWindow(QMainWindow):
                 if not hasattr(self, "_sort_indices_2"):
                     self._model = Rastermap()
                     self._model.fit(
-                        self._spike_matrix.T, Usv=self._svd_v, Vsv=self._svd_u,
+                        self._spike_matrix.T,
+                        Usv=self._svd_v,
+                        Vsv=self._svd_u,
                     )
                     self._sort_indices_2 = np.argsort(self._model.embedding[:, 0])
                 self._time_sort = self._sort_indices_2.astype(np.int32)
@@ -881,7 +894,8 @@ class VisWindow(QMainWindow):
         self._sorted_spike_matrix = zscore(self._sorted_spike_matrix, axis=1)
         self._sorted_spike_matrix = np.minimum(_ZSCORE_UPPER_BOUND, self._sorted_spike_matrix)
         self._sorted_spike_matrix = np.maximum(
-            _ZSCORE_LOWER_BOUND, self._sorted_spike_matrix,
+            _ZSCORE_LOWER_BOUND,
+            self._sorted_spike_matrix,
         ) + abs(_ZSCORE_LOWER_BOUND)
         self._sorted_spike_matrix /= _ZSCORE_NORMALIZATION
         self.img.setImage(self._sorted_spike_matrix)

@@ -67,24 +67,16 @@ class ContextData:
     roi_statistics: list[ROIStatistics] = field(default_factory=list)
     """Spatial and shape statistics for each detected ROI."""
 
-    cell_fluorescence: NDArray[np.float32] = field(
-        default_factory=lambda: np.array([], dtype=np.float32)
-    )
+    cell_fluorescence: NDArray[np.float32] = field(default_factory=lambda: np.array([], dtype=np.float32))
     """Cell fluorescence traces with shape (cells, frames)."""
 
-    neuropil_fluorescence: NDArray[np.float32] = field(
-        default_factory=lambda: np.array([], dtype=np.float32)
-    )
+    neuropil_fluorescence: NDArray[np.float32] = field(default_factory=lambda: np.array([], dtype=np.float32))
     """Neuropil fluorescence traces with shape (cells, frames)."""
 
-    spikes: NDArray[np.float32] = field(
-        default_factory=lambda: np.array([], dtype=np.float32)
-    )
+    spikes: NDArray[np.float32] = field(default_factory=lambda: np.array([], dtype=np.float32))
     """Deconvolved spike traces with shape (cells, frames)."""
 
-    cell_classification_labels: NDArray[np.bool_] = field(
-        default_factory=lambda: np.array([], dtype=np.bool_)
-    )
+    cell_classification_labels: NDArray[np.bool_] = field(default_factory=lambda: np.array([], dtype=np.bool_))
     """Boolean classification array marking each ROI as cell or non-cell."""
 
     cell_classification_probabilities: NDArray[np.float32] = field(
@@ -92,9 +84,7 @@ class ContextData:
     )
     """Classifier probability for each ROI being a cell."""
 
-    cell_colocalization_labels: NDArray[np.bool_] = field(
-        default_factory=lambda: np.array([], dtype=np.bool_)
-    )
+    cell_colocalization_labels: NDArray[np.bool_] = field(default_factory=lambda: np.array([], dtype=np.bool_))
     """Boolean classification array marking each ROI as a channel 2 cell."""
 
     cell_colocalization_probabilities: NDArray[np.float32] = field(
@@ -105,9 +95,7 @@ class ContextData:
     has_channel_2: bool = False
     """Determines whether channel 2 data is available."""
 
-    not_merged: NDArray[np.bool_] = field(
-        default_factory=lambda: np.array([], dtype=np.bool_)
-    )
+    not_merged: NDArray[np.bool_] = field(default_factory=lambda: np.array([], dtype=np.bool_))
     """Boolean mask tracking which ROIs have not been merged into other ROIs."""
 
     # Channel 2 traces (optional).
@@ -569,8 +557,7 @@ class ContextData:
 
         if session_index < 0 or session_index >= len(self.multi_day_contexts):
             message = (
-                f"Unable to switch to session {session_index}. Valid range is "
-                f"0 to {len(self.multi_day_contexts) - 1}."
+                f"Unable to switch to session {session_index}. Valid range is 0 to {len(self.multi_day_contexts) - 1}."
             )
             console.error(message=message, error=ValueError)
 

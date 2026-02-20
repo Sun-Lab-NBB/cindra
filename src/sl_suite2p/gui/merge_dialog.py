@@ -120,10 +120,14 @@ def merge_activity_masks(parent: MainWindow) -> None:
         pixel_weights = np.append(pixel_weights, roi.pixel_weights)
         footprints = np.append(footprints, roi.footprint)
         cell_fluorescence = np.append(
-            cell_fluorescence, context.cell_fluorescence[roi_index, :][np.newaxis, :], axis=0,
+            cell_fluorescence,
+            context.cell_fluorescence[roi_index, :][np.newaxis, :],
+            axis=0,
         )
         neuropil_fluorescence = np.append(
-            neuropil_fluorescence, context.neuropil_fluorescence[roi_index, :][np.newaxis, :], axis=0,
+            neuropil_fluorescence,
+            context.neuropil_fluorescence[roi_index, :][np.newaxis, :],
+            axis=0,
         )
         if context.has_channel_2 and context.cell_fluorescence_channel_2 is not None:
             channel_2_fluorescence = np.append(
@@ -143,7 +147,8 @@ def merge_activity_masks(parent: MainWindow) -> None:
 
     # Removes overlapping pixels, keeping the first occurrence.
     combined_pixels = np.concatenate(
-        (y_pixels[:, np.newaxis], x_pixels[:, np.newaxis]), axis=1,
+        (y_pixels[:, np.newaxis], x_pixels[:, np.newaxis]),
+        axis=1,
     )
     _, unique_indices = np.unique(combined_pixels, return_index=True, axis=0)
     y_pixels = y_pixels[unique_indices]
@@ -163,9 +168,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
         mean_channel_2_fluorescence = channel_2_fluorescence.mean(axis=0)
         mean_channel_2_neuropil = channel_2_neuropil.mean(axis=0)
 
-    corrected_fluorescence = (
-        mean_cell_fluorescence - context.neuropil_coefficient * mean_neuropil_fluorescence
-    )
+    corrected_fluorescence = mean_cell_fluorescence - context.neuropil_coefficient * mean_neuropil_fluorescence
 
     spikes = apply_oasis_deconvolution(
         roi_fluorescence=corrected_fluorescence[np.newaxis, :],
@@ -220,30 +223,40 @@ def merge_activity_masks(parent: MainWindow) -> None:
         context.spikes = np.delete(context.spikes, constituent, 0)
         context.cell_classification_labels = np.delete(context.cell_classification_labels, constituent, 0)
         context.cell_classification_probabilities = np.delete(
-            context.cell_classification_probabilities, constituent, 0,
+            context.cell_classification_probabilities,
+            constituent,
+            0,
         )
         context.cell_colocalization_probabilities = np.delete(
-            context.cell_colocalization_probabilities, constituent, 0,
+            context.cell_colocalization_probabilities,
+            constituent,
+            0,
         )
         context.cell_colocalization_labels = np.delete(context.cell_colocalization_labels, constituent, 0)
         context.not_merged = np.delete(context.not_merged, constituent, 0)
         if context.has_channel_2:
             if context.cell_fluorescence_channel_2 is not None:
                 context.cell_fluorescence_channel_2 = np.delete(
-                    context.cell_fluorescence_channel_2, constituent, 0,
+                    context.cell_fluorescence_channel_2,
+                    constituent,
+                    0,
                 )
             if context.neuropil_fluorescence_channel_2 is not None:
                 context.neuropil_fluorescence_channel_2 = np.delete(
-                    context.neuropil_fluorescence_channel_2, constituent, 0,
+                    context.neuropil_fluorescence_channel_2,
+                    constituent,
+                    0,
                 )
 
     # Appends the merged ROI to all data arrays.
     context.roi_statistics.append(merged_roi)
     context.cell_fluorescence = np.concatenate(
-        (context.cell_fluorescence, mean_cell_fluorescence[np.newaxis, :]), axis=0,
+        (context.cell_fluorescence, mean_cell_fluorescence[np.newaxis, :]),
+        axis=0,
     )
     context.neuropil_fluorescence = np.concatenate(
-        (context.neuropil_fluorescence, mean_neuropil_fluorescence[np.newaxis, :]), axis=0,
+        (context.neuropil_fluorescence, mean_neuropil_fluorescence[np.newaxis, :]),
+        axis=0,
     )
     if context.has_channel_2:
         if context.cell_fluorescence_channel_2 is not None:
@@ -259,13 +272,16 @@ def merge_activity_masks(parent: MainWindow) -> None:
     context.spikes = np.concatenate((context.spikes, spikes), axis=0)
     classification_label = np.array([context.cell_classification_labels[state.chosen_index]], dtype=bool)
     context.cell_classification_labels = np.concatenate(
-        (context.cell_classification_labels, classification_label), axis=0,
+        (context.cell_classification_labels, classification_label),
+        axis=0,
     )
     context.cell_classification_probabilities = np.append(
-        context.cell_classification_probabilities, mean_probability,
+        context.cell_classification_probabilities,
+        mean_probability,
     )
     context.cell_colocalization_probabilities = np.append(
-        context.cell_colocalization_probabilities, -1.0,
+        context.cell_colocalization_probabilities,
+        -1.0,
     )
     context.cell_colocalization_labels = np.append(context.cell_colocalization_labels, False)
     context.not_merged = np.append(context.not_merged, False)
@@ -275,10 +291,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
         centroid=merged_roi.centroid,
         radius=merged_roi.radius,
     )
-    valid = (
-        (y_circle >= 0) & (x_circle >= 0)
-        & (y_circle < context.frame_height) & (x_circle < context.frame_width)
-    )
+    valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < context.frame_height) & (x_circle < context.frame_width)
     merged_roi.circle_y_pixels = y_circle[valid]
     merged_roi.circle_x_pixels = x_circle[valid]
 
@@ -372,13 +385,25 @@ class MergeWindow(QDialog):
             "dist_thres": _DEFAULT_DISTANCE_THRESHOLD,
         }
         self._grid_layout.addWidget(
-            QLabel("Press enter in a text box to update params"), 0, 0, 1, 2,
+            QLabel("Press enter in a text box to update params"),
+            0,
+            0,
+            1,
+            2,
         )
         self._grid_layout.addWidget(
-            QLabel("(Correlations use 'activity mode' and 'bin' from main GUI)"), 1, 0, 1, 2,
+            QLabel("(Correlations use 'activity mode' and 'bin' from main GUI)"),
+            1,
+            0,
+            1,
+            2,
         )
         self._grid_layout.addWidget(
-            QLabel(">>>>>>>>>>>> Parameters <<<<<<<<<<<"), 2, 0, 1, 2,
+            QLabel(">>>>>>>>>>>> Parameters <<<<<<<<<<<"),
+            2,
+            0,
+            1,
+            2,
         )
         self._merge_button = QPushButton("merge selected ROIs", default=False, autoDefault=False)
         self._merge_button.clicked.connect(lambda: self._do_merge(parent))
@@ -414,7 +439,9 @@ class MergeWindow(QDialog):
 
         console.echo(message="Creating merge window... this may take some time.")
         self._correlation_matrix = (
-            np.matmul(parent.Fbin[context.cell_classification_labels], parent.Fbin[context.cell_classification_labels].T)
+            np.matmul(
+                parent.Fbin[context.cell_classification_labels], parent.Fbin[context.cell_classification_labels].T
+            )
             / parent.Fbin.shape[-1]
         )
         self._correlation_matrix /= (
@@ -452,10 +479,12 @@ class MergeWindow(QDialog):
         correlation_row /= parent.Fstd[context.cell_classification_labels] * parent.Fstd[-1] + _CORRELATION_EPSILON
         correlation_row[-1] = 0
         self._correlation_matrix = np.concatenate(
-            (self._correlation_matrix, correlation_row[np.newaxis, :-1]), axis=0,
+            (self._correlation_matrix, correlation_row[np.newaxis, :-1]),
+            axis=0,
         )
         self._correlation_matrix = np.concatenate(
-            (self._correlation_matrix, correlation_row[:, np.newaxis]), axis=1,
+            (self._correlation_matrix, correlation_row[:, np.newaxis]),
+            axis=1,
         )
         for _ in state.merge_indices:
             self._correlation_matrix[state.merge_indices] = 0
@@ -464,9 +493,7 @@ class MergeWindow(QDialog):
         state.chosen_index = context.roi_count - 1
         state.merge_indices = [state.chosen_index]
         console.echo(
-            message=(
-                f"ROIs merged: {context.roi_statistics[state.chosen_index].merged_roi_indices}"
-            ),
+            message=(f"ROIs merged: {context.roi_statistics[state.chosen_index].merged_roi_indices}"),
             level=LogLevel.SUCCESS,
         )
         self._compute_merge_list(parent)
@@ -491,7 +518,8 @@ class MergeWindow(QDialog):
         for cell_index in range(cell_count):
             if not_used[cell_index]:
                 correlated = [
-                    i for i, correlation in enumerate(self._correlation_matrix[cell_index])
+                    i
+                    for i, correlation in enumerate(self._correlation_matrix[cell_index])
                     if correlation >= self.ops["corr_thres"]
                 ]
                 correlated.append(cell_index)
@@ -500,10 +528,7 @@ class MergeWindow(QDialog):
                         if not_used[candidate]:
                             correlated[position] = cell_indices[candidate]
                             roi = context.roi_statistics[correlated[position]]
-                            if (
-                                roi.merged_into_roi_index is not None
-                                and roi.merged_into_roi_index >= 0
-                            ):
+                            if roi.merged_into_roi_index is not None and roi.merged_into_roi_index >= 0:
                                 correlated[position] = roi.merged_into_roi_index
                     correlated = np.unique(np.array(correlated))
                     if correlated.size > 1:
@@ -556,7 +581,9 @@ class MergeWindow(QDialog):
                 rgb = parent.color_arrays.cols[0, roi_index]
                 pen = pg.mkPen(rgb, width=_SCATTER_PEN_WIDTH)
                 scatter = pg.ScatterPlotItem(
-                    parent.Fbin[reference_cell], parent.Fbin[roi_index], pen=pen,
+                    parent.Fbin[reference_cell],
+                    parent.Fbin[roi_index],
+                    pen=pen,
                 )
                 self._scatter_plot.addItem(scatter)
                 label_parts += f" {roi_index} "

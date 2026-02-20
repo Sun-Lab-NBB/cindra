@@ -129,9 +129,7 @@ def create_selection_buttons(
     selection_buttons.setExclusive(True)
 
     count_label = QLabel("n=")
-    count_label.setAlignment(
-        QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
-    )
+    count_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
     count_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
     count_label.setFont(label_font_bold())
     layout.addWidget(count_label, 0, 10, 1, 1)
@@ -171,9 +169,7 @@ def create_cell_toggle_buttons(
     """
     cell_count_label = QLabel("")
     cell_count_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
-    cell_count_label.setAlignment(
-        QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
-    )
+    cell_count_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
     layout.addWidget(cell_count_label, 0, 12, 1, 2)
 
     noncell_count_label = QLabel("")
@@ -260,12 +256,14 @@ def apply_quadrant_zoom(
 
     x_column = button_index % _QUADRANT_COLUMNS
     y_row = button_index // _QUADRANT_COLUMNS
-    x_range = np.array(
-        [x_column - _QUADRANT_ZOOM_MARGIN, x_column + 1 + _QUADRANT_ZOOM_MARGIN]
-    ) * frame_width / _QUADRANT_COLUMNS
-    y_range = np.array(
-        [y_row - _QUADRANT_ZOOM_MARGIN, y_row + 1 + _QUADRANT_ZOOM_MARGIN]
-    ) * frame_height / _QUADRANT_COLUMNS
+    x_range = (
+        np.array([x_column - _QUADRANT_ZOOM_MARGIN, x_column + 1 + _QUADRANT_ZOOM_MARGIN])
+        * frame_width
+        / _QUADRANT_COLUMNS
+    )
+    y_range = (
+        np.array([y_row - _QUADRANT_ZOOM_MARGIN, y_row + 1 + _QUADRANT_ZOOM_MARGIN]) * frame_height / _QUADRANT_COLUMNS
+    )
 
     set_view_range(float(x_range[0]), float(x_range[1]), float(y_range[0]), float(y_range[1]))
 
