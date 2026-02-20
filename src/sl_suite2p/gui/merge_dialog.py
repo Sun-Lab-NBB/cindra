@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QLabel, QDialog, QWidget, QLineEdit, QGridLayout, 
 from ataraxis_base_utilities import LogLevel, console
 
 from .styles import PARAMETER_EDIT_WIDTH, merge_label_font
-from .roi_geometry import circle
+from .roi_geometry import compute_circle_mask
 from .roi_overlays import (
     add_roi,
     remove_roi,
@@ -287,8 +287,9 @@ def merge_activity_masks(parent: MainWindow) -> None:
     context.not_merged = np.append(context.not_merged, False)
 
     # Computes circle overlay for the new merged ROI.
-    y_circle, x_circle = circle(
-        centroid=merged_roi.centroid,
+    y_circle, x_circle = compute_circle_mask(
+        centroid_y=merged_roi.centroid[0],
+        centroid_x=merged_roi.centroid[1],
         radius=merged_roi.radius,
     )
     valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < context.frame_height) & (x_circle < context.frame_width)
