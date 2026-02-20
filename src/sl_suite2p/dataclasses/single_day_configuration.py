@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import copy
 from enum import StrEnum
-from pathlib import Path
+from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class BaselineMethod(StrEnum):
@@ -76,17 +78,17 @@ class AcquisitionParameters(YamlConfig):
     """The number of regions of interest (ROIs) acquired per plane. For standard imaging this is 1. For MROI
     line-scanning microscopes (e.g., 2-Photon Random Access Mesoscope), this can be greater than 1."""
 
-    roi_lines: list[list[int]] = field(default_factory=list)
-    """The line indices for each ROI in MROI acquisitions. Each inner list contains the row indices in the raw
-    frame that belong to that ROI. The length of the outer list must equal roi_number. For single-ROI data, this
+    roi_lines: tuple[tuple[int, ...], ...] = ()
+    """The line indices for each ROI in MROI acquisitions. Each inner tuple contains the row indices in the raw
+    frame that belong to that ROI. The length of the outer tuple must equal roi_number. For single-ROI data, this
     field is empty."""
 
-    roi_x_coordinates: list[int] = field(default_factory=list)
+    roi_x_coordinates: tuple[int, ...] = ()
     """The x-coordinates (in pixels) for positioning each ROI in MROI acquisitions. These define the horizontal
     position of each ROI's top-left corner in the combined field of view. The length must equal roi_number. For
     single-ROI data, this field is empty."""
 
-    roi_y_coordinates: list[int] = field(default_factory=list)
+    roi_y_coordinates: tuple[int, ...] = ()
     """The y-coordinates (in pixels) for positioning each ROI in MROI acquisitions. These define the vertical
     position of each ROI's top-left corner in the combined field of view. The length must equal roi_number. For
     single-ROI data, this field is empty."""
@@ -135,24 +137,14 @@ class Main:
     this decay and is not fit to the data. The default value is optimized for GCaMP6f animals recorded with the
     Mesoscope and likely needs to be increased for most other use cases."""
 
-    ignored_flyback_planes: list[int] = field(default_factory=list)
-    """The list of flyback plane indices to ignore when processing the data. Flyback planes typically contain no valid
+    ignored_flyback_planes: tuple[int, ...] = ()
+    """The tuple of flyback plane indices to ignore when processing the data. Flyback planes typically contain no valid
     imaging data, so it is common to exclude them from processing."""
 
     custom_classifier_path: Path | None = None
     """The absolute path to a custom classifier file used for ROI classification. When set, this classifier is used
     instead of the built-in classifier for both preclassification during detection and final classification after
     signal extraction. Leave as None to use the built-in classifier bundled with sl-suite2p."""
-
-    def __post_init__(self) -> None:
-        """Converts string custom_classifier_path to Path after YAML loading."""
-        if isinstance(self.custom_classifier_path, str):
-            self.custom_classifier_path = Path(self.custom_classifier_path) if self.custom_classifier_path else None
-
-    def prepare_for_saving(self) -> None:
-        """Converts Path fields to strings for YAML serialization."""
-        if self.custom_classifier_path is not None:
-            self.custom_classifier_path = str(self.custom_classifier_path)  # type: ignore[assignment]
 
 
 @dataclass
@@ -167,30 +159,16 @@ class FileIO:
     """The path to the root output directory where to save the processing results. The pipeline automatically
     creates a 'suite2p' subdirectory under this path to store all output files."""
 
-    ignored_file_names: list[str] = field(default_factory=list)
-    """The list of file names to ignore when searching for and loading raw data. Any file whose name exactly matches
-    one of the names in this list is excluded from processing even if it has the correct extension and is located inside
-    the input data directory."""
+    ignored_file_names: tuple[str, ...] = ()
+    """The tuple of file names to ignore when searching for and loading raw data. Any file whose name exactly matches
+    one of the names in this tuple is excluded from processing even if it has the correct extension and is located 
+    inside the input data directory."""
 
     repeat_binarization: bool = False
     """Determines whether to repeat the binarization step when processing. When True, the pipeline re-runs TIFF to
     binary conversion using the data_path from the current configuration, even if binary files already exist. This
     allows raw data to be relocated or updated without affecting other pipeline states. When False (default), existing
     binary files are used if present."""
-
-    def __post_init__(self) -> None:
-        """Converts string paths to Path objects after YAML loading."""
-        if isinstance(self.data_path, str):
-            self.data_path = Path(self.data_path) if self.data_path else None
-        if isinstance(self.save_path, str):
-            self.save_path = Path(self.save_path) if self.save_path else None
-
-    def prepare_for_saving(self) -> None:
-        """Converts Path fields to strings for YAML serialization."""
-        if self.data_path is not None:
-            self.data_path = str(self.data_path)  # type: ignore[assignment]
-        if self.save_path is not None:
-            self.save_path = str(self.save_path)  # type: ignore[assignment]
 
 
 @dataclass
@@ -311,7 +289,7 @@ class NonRigidRegistration:
     """Determines whether to perform non-rigid registration to correct for local motion and deformation. This is
     primarily used for correcting non-uniform motion."""
 
-    block_size: list[int] = field(default_factory=lambda: [128, 128])
+    block_size: tuple[int, int] = (128, 128)
     """The block size, in pixels, for non-rigid registration, defining the dimensions of subregions used in
     the correction. It is recommended to keep this size a power of 2 and/or 3 for more efficient FFT computation.
     During processing, each frame is split into sub-regions with these dimensions and the registration is applied
@@ -461,15 +439,6 @@ class SpikeDeconvolution:
     select points near the trace minimum, providing a robust estimate that ignores outliers. Only used when
     baseline_method is set to CONSTANT_PERCENTILE."""
 
-    def __post_init__(self) -> None:
-        """Converts string baseline_method to BaselineMethod enum after YAML loading."""
-        if isinstance(self.baseline_method, str):
-            self.baseline_method = BaselineMethod(self.baseline_method)
-
-    def prepare_for_saving(self) -> None:
-        """Converts enum fields to strings for YAML serialization."""
-        self.baseline_method = str(self.baseline_method)
-
 
 @dataclass
 class SingleDayConfiguration(YamlConfig):
@@ -510,22 +479,11 @@ class SingleDayConfiguration(YamlConfig):
     def save(self, file_path: Path) -> None:
         """Saves the configuration to a YAML file.
 
-        Converts enum and Path fields to strings before serialization to ensure YAML compatibility.
-
         Args:
             file_path: The path to the .yaml file where to save the configuration data.
         """
         ensure_directory_exists(file_path)
-
-        # Creates a deep copy to avoid modifying the original instance.
-        yaml_copy = copy.deepcopy(self)
-
-        # Prepares each child dataclass for YAML serialization.
-        yaml_copy.main.prepare_for_saving()
-        yaml_copy.file_io.prepare_for_saving()
-        yaml_copy.spike_deconvolution.prepare_for_saving()
-
-        yaml_copy.to_yaml(file_path=file_path)
+        self.to_yaml(file_path=file_path)
 
     @classmethod
     def load(cls, file_path: Path) -> SingleDayConfiguration:

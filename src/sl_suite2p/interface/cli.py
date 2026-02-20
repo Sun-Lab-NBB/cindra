@@ -6,6 +6,7 @@ pipelines supported by the sl-suite2p library.
 from pathlib import Path
 
 import click
+from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console
 
 from ..gui import run
@@ -343,7 +344,7 @@ def run_md_pipeline(
 
     # Writes session directories from the CLI into the configuration file before running the pipeline.
     configuration = MultiDayConfiguration.from_yaml(file_path=config_path)
-    configuration.session_io.session_directories = list(session_paths)
+    configuration.session_io.session_directories = tuple(natsorted(session_paths))
     configuration.save(file_path=config_path)
 
     run_multi_day_pipeline(

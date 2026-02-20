@@ -447,18 +447,18 @@ class ContextData:
     # Registration data from the first plane.
 
     @property
-    def valid_y_range(self) -> list[int]:
+    def valid_y_range(self) -> tuple[int, int]:
         """Returns the valid Y pixel range from the first plane's registration."""
         if self.single_day_contexts is not None and self.single_day_contexts:
             return self.single_day_contexts[0].runtime.registration.valid_y_range
-        return [0, 0]
+        return (0, 0)
 
     @property
-    def valid_x_range(self) -> list[int]:
+    def valid_x_range(self) -> tuple[int, int]:
         """Returns the valid X pixel range from the first plane's registration."""
         if self.single_day_contexts is not None and self.single_day_contexts:
             return self.single_day_contexts[0].runtime.registration.valid_x_range
-        return [0, 0]
+        return (0, 0)
 
     # Derived convenience properties.
 

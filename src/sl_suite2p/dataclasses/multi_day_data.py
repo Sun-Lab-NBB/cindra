@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 from typing import TYPE_CHECKING
-from pathlib import Path
 from dataclasses import field, dataclass
 
 import numpy as np
@@ -15,6 +14,8 @@ from .version import version, python_version
 from .single_day_data import CombinedData, ROIStatistics, ExtractionData
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from numpy.typing import NDArray
 
 
@@ -34,36 +35,24 @@ class MultiDayIOData:
     dataset_name: str = ""
     """The name of the multi-day dataset, used to create the output subdirectory structure."""
 
-    mroi_region_borders: list[int] = field(default_factory=list)
+    mroi_region_borders: tuple[int, ...] = ()
     """The x-coordinates of MROI region borders, computed from acquisition parameters during initialization. For MROI
     recordings, these borders mark the boundaries between adjacent imaging regions in the combined field of view.
     ROIs near these borders are filtered out during cell selection to avoid tracking ambiguities. This field is empty
     for non-MROI recordings."""
 
-    dataset_output_paths: list[Path] = field(default_factory=list)
+    dataset_output_paths: tuple[Path, ...] = ()
     """The multiday output paths for every session in the dataset, stored in natural-sorted order. Each entry points
-    to a session's multiday output directory (e.g., {suite2p_parent}/multiday/{dataset_name}/). Storing this list in
+    to a session's multiday output directory (e.g., {suite2p_parent}/multiday/{dataset_name}/). Storing this tuple in
     every session enables full dataset hierarchy reconstruction from any single session's serialized YAML file."""
 
-    selected_cell_indices: list[int] = field(default_factory=list)
+    selected_cell_indices: tuple[int, ...] = ()
     """The indices of channel 1 ROIs selected from CombinedData.extraction.roi_statistics for multi-day tracking.
     These indices reference the original single-day ROI list, avoiding duplication of ROI data."""
 
-    selected_cell_indices_channel_2: list[int] = field(default_factory=list)
+    selected_cell_indices_channel_2: tuple[int, ...] = ()
     """The indices of channel 2 ROIs selected from CombinedData.extraction.roi_statistics_channel_2 for multi-day
     tracking. Empty if channel 2 data is not available or no channel 2 ROIs were selected."""
-
-    def __post_init__(self) -> None:
-        """Converts string paths to Path objects after YAML loading."""
-        if isinstance(self.data_path, str):
-            self.data_path = Path(self.data_path) if self.data_path else None
-        self.dataset_output_paths = [Path(p) if isinstance(p, str) else p for p in self.dataset_output_paths]
-
-    def prepare_for_saving(self) -> None:
-        """Converts Path fields to strings for YAML serialization."""
-        if self.data_path is not None:
-            self.data_path = str(self.data_path)  # type: ignore[assignment]
-        self.dataset_output_paths = [str(p) for p in self.dataset_output_paths]  # type: ignore[misc]
 
 
 @dataclass
@@ -359,11 +348,7 @@ class MultiDayRuntimeData(YamlConfig):
     serialized to YAML and is loaded on-demand from the single-day pipeline outputs."""
 
     def __post_init__(self) -> None:
-        """Converts string fields to typed objects and loads arrays from existing output files."""
-        # Converts output_path to Path if it was loaded as a string from YAML.
-        if self.output_path is not None and isinstance(self.output_path, str):
-            self.output_path = Path(self.output_path)
-
+        """Loads arrays from existing output files."""
         # Loads arrays from each child dataclass if output_path is set.
         if self.output_path is not None:
             self.registration.load_arrays(self.output_path)
@@ -402,12 +387,11 @@ class MultiDayRuntimeData(YamlConfig):
         self.tracking.save_arrays(output_path)
         self.extraction.save_arrays(output_path)
 
-        # Creates a deep copy for YAML serialization.
+        # Creates a deep copy for YAML serialization. The deep copy is still needed because array fields must be
+        # nulled for YAML serialization while keeping the originals intact in memory.
         yaml_copy = copy.deepcopy(self)
 
-        # Prepares each child dataclass for YAML serialization.
-        yaml_copy.output_path = str(output_path)  # type: ignore[assignment]
-        yaml_copy.io.prepare_for_saving()
+        # Nulls array fields in child dataclasses for YAML serialization.
         yaml_copy.registration.prepare_for_saving()
         yaml_copy.tracking.prepare_for_saving()
         yaml_copy.extraction.prepare_for_saving()

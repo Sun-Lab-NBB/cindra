@@ -442,8 +442,8 @@ def _initialize_gui(parent: MainWindow) -> None:
         maximum_projection=context.maximum_projection,
         corrected_channel_2_image=context.corrected_structural_mean_image,
         channel_2_mean_image=context.mean_image_channel_2,
-        valid_y_range=(context.valid_y_range[0], context.valid_y_range[1]),
-        valid_x_range=(context.valid_x_range[0], context.valid_x_range[1]),
+        valid_y_range=context.valid_y_range,
+        valid_x_range=context.valid_x_range,
     )
 
     # Computes color statistics and builds ROI index maps.

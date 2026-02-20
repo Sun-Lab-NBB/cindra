@@ -261,7 +261,7 @@ def _deform_masks(
         new_global_x = new_local_x + adjusted_origin[1]
 
         # Computes new centroid from transformed coordinates.
-        new_centroid = [int(np.median(new_global_y)), int(np.median(new_global_x))]
+        new_centroid = (int(np.median(new_global_y)), int(np.median(new_global_x)))
 
         # Computes raveled pixel indices for multi-day tracking. The raveled index is y * width + x in the deformed
         # visual space.

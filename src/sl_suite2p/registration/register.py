@@ -283,7 +283,7 @@ def _compute_crop(
     maximum_shift_fraction: float,
     frame_height: int,
     frame_width: int,
-) -> tuple[NDArray[np.bool_], list[int], list[int]]:
+) -> tuple[NDArray[np.bool_], tuple[int, int], tuple[int, int]]:
     """Computes the valid pixel region after registration by analyzing frame shifts.
 
     After registration, frames that shifted significantly will have undefined pixels at their edges. This function
@@ -305,7 +305,7 @@ def _compute_crop(
 
     Returns:
         A tuple containing the updated bad_frames boolean array with outliers marked, the valid y-range as
-        [y_min, y_max] defining usable rows, and the valid x-range as [x_min, x_max] defining usable columns.
+        (y_min, y_max) defining usable rows, and the valid x-range as (x_min, x_max) defining usable columns.
     """
     # Computes median filter window: largest odd number up to array length, capped at maximum.
     # This extracts a smooth baseline trend from the offset time series.
@@ -355,8 +355,8 @@ def _compute_crop(
     # Valid region is the interior rectangle after accounting for maximum shifts in each direction.
     y_max = frame_height - y_min
     x_max = frame_width - x_min
-    valid_y_range = [int(y_min), int(y_max)]
-    valid_x_range = [int(x_min), int(x_max)]
+    valid_y_range = (int(y_min), int(y_max))
+    valid_x_range = (int(x_min), int(x_max))
 
     return bad_frames, valid_y_range, valid_x_range
 
@@ -734,8 +734,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
     batch_size = config.registration.batch_size
     reference_frame_count = config.registration.reference_frame_count
     nonrigid_enabled = config.non_rigid_registration.enabled
-    block_size_config = config.non_rigid_registration.block_size
-    block_size: tuple[int, int] = (block_size_config[0], block_size_config[1])
+    block_size = config.non_rigid_registration.block_size
     signal_to_noise_threshold = config.non_rigid_registration.signal_to_noise_threshold
     maximum_block_shift = config.non_rigid_registration.maximum_block_shift
     parallel_workers = config.runtime.parallel_workers
@@ -983,8 +982,7 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
     config = context.configuration
     align_by_first_channel = config.registration.align_by_first_channel
     nonrigid_enabled = config.non_rigid_registration.enabled
-    block_size_config = config.non_rigid_registration.block_size
-    block_size: tuple[int, int] = (block_size_config[0], block_size_config[1])
+    block_size = config.non_rigid_registration.block_size
     batch_size = config.registration.batch_size
 
     # Extracts runtime IO data.

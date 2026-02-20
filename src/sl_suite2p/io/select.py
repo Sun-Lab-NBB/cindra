@@ -95,11 +95,11 @@ def select_session_cells(contexts: list[MultiDayRuntimeContext]) -> None:
 def _filter_channel_cells(
     roi_statistics: list[ROIStatistics],
     cell_classification: NDArray[np.float32],
-    mroi_region_borders: list[int],
+    mroi_region_borders: tuple[int, ...],
     probability_threshold: float,
     maximum_size: int,
     region_margin: int,
-) -> list[int]:
+) -> tuple[int, ...]:
     """Filters ROIs from a single channel using the multi-day ROI selection criteria.
 
     Applies probability threshold, maximum size, and MROI region border margin filters to select ROIs suitable for
@@ -111,13 +111,13 @@ def _filter_channel_cells(
         cell_classification: The classification array for this channel. Each row contains [probability, is_cell] for
             one ROI. Only ROIs whose classifier probability exceeds the threshold are retained.
         mroi_region_borders: The x-coordinates of MROI region borders. ROIs near these borders are filtered out
-            to avoid tracking ambiguities. Pass an empty list for non-MROI recordings.
+            to avoid tracking ambiguities. Pass an empty tuple for non-MROI recordings.
         probability_threshold: The minimum classifier probability required for an ROI to be selected.
         maximum_size: The maximum allowed ROI size in pixels. ROIs with more pixels are excluded.
         region_margin: The minimum distance in pixels between an ROI's centroid and MROI region borders.
 
     Returns:
-        A list of indices into roi_statistics for ROIs that passed all selection filters.
+        A tuple of indices into roi_statistics for ROIs that passed all selection filters.
     """
     # Filters ROIs by classifier probability and pixel count.
     selected_indices: list[int] = []
@@ -138,7 +138,7 @@ def _filter_channel_cells(
 
         selected_indices.append(index)
 
-    return selected_indices
+    return tuple(selected_indices)
 
 
 def _filter_cells(
