@@ -21,7 +21,7 @@ from .view_state import ViewState
 from .trace_panel import plot_trace
 from .context_data import ContextData
 from .plot_widgets import initialize_ranges
-from .roi_geometry import circle, boundary
+from .roi_geometry import compute_circle_mask, compute_boundary_mask
 from .roi_overlays import (
     draw_masks,
     display_masks,
@@ -613,12 +613,13 @@ def _compute_roi_geometry(context: ContextData) -> None:
     for roi in context.roi_statistics:
         y_pixels = roi.y_pixels.flatten()
         x_pixels = roi.x_pixels.flatten()
-        roi.boundary_y_pixels, roi.boundary_x_pixels = boundary(
+        roi.boundary_y_pixels, roi.boundary_x_pixels = compute_boundary_mask(
             y_pixels=y_pixels,
             x_pixels=x_pixels,
         )
-        y_circle, x_circle = circle(
-            centroid=roi.centroid,
+        y_circle, x_circle = compute_circle_mask(
+            centroid_y=roi.centroid[0],
+            centroid_x=roi.centroid[1],
             radius=roi.radius,
         )
         valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < context.frame_height) & (x_circle < context.frame_width)

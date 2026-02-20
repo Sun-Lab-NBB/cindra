@@ -1,4 +1,4 @@
-"""Provides boundary and circle geometry utilities for ROI rendering."""
+"""Provides boundary and circle geometry computation utilities for ROI rendering."""
 
 from __future__ import annotations
 
@@ -20,71 +20,79 @@ _CIRCLE_RADIUS_SCALE: float = 1.25
 _CIRCLE_POINT_COUNT: int = 100
 
 
-def boundary(
+def compute_boundary_mask(
     y_pixels: NDArray[np.int32],
     x_pixels: NDArray[np.int32],
 ) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
-    """Computes the exterior boundary pixels of a binary mask.
-
-    Takes the y and x coordinates of mask pixels and returns the coordinates of
-    pixels that lie on the outer border of the mask region.
+    """Computes the exterior boundary mask of the ROI specified by the input pixel coordinates.
 
     Args:
-        y_pixels: Row coordinates of the mask pixels.
-        x_pixels: Column coordinates of the mask pixels.
+        y_pixels: The row coordinates of the mask pixels.
+        x_pixels: The column coordinates of the mask pixels.
 
     Returns:
-        Tuple of (y_boundary, x_boundary) arrays containing the boundary pixel coordinates.
+        The (y_boundary, x_boundary) arrays containing the boundary mask pixel coordinates.
     """
+    # Reshapes the coordinate arrays into column vectors for 2D array indexing.
     y_pixels = np.expand_dims(y_pixels.flatten(), axis=1)
     x_pixels = np.expand_dims(x_pixels.flatten(), axis=1)
     pixel_count = y_pixels.shape[0]
 
-    if pixel_count > 0:
-        mask = np.zeros(
-            (int(np.ptp(y_pixels)) + 2 * _BOUNDARY_PADDING, int(np.ptp(x_pixels)) + 2 * _BOUNDARY_PADDING),
-            dtype=bool,
-        )
-        mask[
-            y_pixels - y_pixels.min() + _BOUNDARY_PADDING,
-            x_pixels - x_pixels.min() + _BOUNDARY_PADDING,
-        ] = True
-        mask = binary_dilation(mask)
-        mask = binary_fill_holes(mask)
+    if not pixel_count:
+        return np.zeros((0,), dtype=np.int32), np.zeros((0,), dtype=np.int32)
 
-        # Uses an 8-connected structuring element to find the exterior ring.
-        kernel = np.zeros((3, 3), dtype=np.int32)
-        kernel[1] = 1
-        kernel[:, 1] = 1
-        exterior = binary_dilation(mask == 0, structure=kernel) & mask
+    # Builds a tight bounding box around the ROI with padding to ensure boundary pixels at the edges of the mask are
+    # not clipped during morphological operations.
+    y_min = y_pixels.min()
+    x_min = x_pixels.min()
+    mask = np.zeros(
+        (int(y_pixels.max() - y_min) + 2 * _BOUNDARY_PADDING, int(x_pixels.max() - x_min) + 2 * _BOUNDARY_PADDING),
+        dtype=np.bool_,
+    )
 
-        y_boundary, x_boundary = np.nonzero(exterior)
-        y_boundary = y_boundary + y_pixels.min() - _BOUNDARY_PADDING
-        x_boundary = x_boundary + x_pixels.min() - _BOUNDARY_PADDING
-    else:
-        y_boundary = np.zeros((0,), dtype=np.int32)
-        x_boundary = np.zeros((0,), dtype=np.int32)
+    # Stamps the ROI pixels into the local coordinate system offset by the bounding box origin.
+    mask[
+        y_pixels - y_min + _BOUNDARY_PADDING,
+        x_pixels - x_min + _BOUNDARY_PADDING,
+    ] = True
+
+    # Dilates the mask to close single-pixel gaps, then fills interior holes to produce a solid region.
+    mask = binary_dilation(mask)
+    mask = binary_fill_holes(mask)
+
+    # Uses a 4-connected structuring element (cross pattern) to find the exterior ring. Dilating the background into
+    # the foreground and intersecting with the original mask isolates the outermost pixel layer.
+    kernel = np.zeros((3, 3), dtype=np.int32)
+    kernel[1] = 1
+    kernel[:, 1] = 1
+    exterior = binary_dilation(mask == 0, structure=kernel) & mask
+
+    # Converts local bounding-box coordinates back to the original frame coordinate system.
+    y_boundary, x_boundary = np.nonzero(exterior)
+    y_boundary = y_boundary + y_min - _BOUNDARY_PADDING
+    x_boundary = x_boundary + x_min - _BOUNDARY_PADDING
 
     return y_boundary, x_boundary
 
 
-def circle(
-    centroid: NDArray[np.float64],
+def compute_circle_mask(
+    centroid_y: int,
+    centroid_x: int,
     radius: float,
 ) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
-    """Computes the pixel coordinates of a circle around a cell centroid.
-
-    Generates a circle with radius scaled by 1.25x the cell radius, returning
-    integer pixel coordinates suitable for overlay rendering.
+    """Computes the pixel coordinates of a circle around the ROI centroid specified by the input coordinates.
 
     Args:
-        centroid: Two-element array containing the (y, x) center of the cell.
-        radius: Radius of the cell in pixels.
+        centroid_y: The row coordinate of the ROI's center.
+        centroid_x: The column coordinate of the ROI's center.
+        radius: The radius of the ROI in pixels.
 
     Returns:
-        Tuple of (x_circle, y_circle) arrays containing the circle pixel coordinates.
+        The (y_circle, x_circle) arrays containing the circle pixel coordinates.
     """
-    theta = np.linspace(0.0, 2 * np.pi, _CIRCLE_POINT_COUNT)
-    x_circle = (radius * _CIRCLE_RADIUS_SCALE * np.cos(theta) + centroid[0]).astype(np.int32)
-    y_circle = (radius * _CIRCLE_RADIUS_SCALE * np.sin(theta) + centroid[1]).astype(np.int32)
-    return x_circle, y_circle
+    # Scales the radius up to provide visual clearance around the ROI boundary.
+    scaled_radius = radius * _CIRCLE_RADIUS_SCALE
+    theta = np.linspace(0.0, 2 * np.pi, num=_CIRCLE_POINT_COUNT)
+    y_circle = (scaled_radius * np.sin(theta) + centroid_y).astype(np.int32)
+    x_circle = (scaled_radius * np.cos(theta) + centroid_x).astype(np.int32)
+    return y_circle, x_circle

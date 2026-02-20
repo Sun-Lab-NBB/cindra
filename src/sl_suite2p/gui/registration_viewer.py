@@ -27,7 +27,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from ..io import compute_plane_offsets
 from .styles import WHITE_LABEL_STYLESHEET, metrics_font, metrics_font_bold
-from .roi_geometry import boundary
+from .roi_geometry import compute_boundary_mask
 from .roi_overlays import hsv2rgb
 
 # Scatter plot marker point size in pixels.
@@ -395,7 +395,7 @@ class BinaryPlayer(QMainWindow):
             if not self.ops[0]["allow_overlap"]:
                 ypix = ypix[~self.stat[n]["overlap_mask"]]
                 xpix = xpix[~self.stat[n]["overlap_mask"]]
-            yext, xext = boundary(ypix, xpix)
+            yext, xext = compute_boundary_mask(ypix, xpix)
             if len(yext) > 0:
                 goodi = (yext >= 0) & (xext >= 0) & (yext < self.LY) & (xext < self.LX)
                 self.stat[n]["yext"] = yext[goodi] + 0.5
