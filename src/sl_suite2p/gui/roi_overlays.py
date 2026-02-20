@@ -397,9 +397,7 @@ def compute_colors(
 
                 stat_low = np.percentile(stat_values, _LOWER_PERCENTILE)
                 stat_high = np.percentile(stat_values, _UPPER_PERCENTILE)
-                colorbar.append(
-                    [float(stat_low), float((stat_high - stat_low) / 2 + stat_low), float(stat_high)]
-                )
+                colorbar.append([float(stat_low), float((stat_high - stat_low) / 2 + stat_low), float(stat_high)])
                 stat_values = stat_values - stat_low
                 stat_values = stat_values / (stat_high - stat_low)
                 stat_values = np.maximum(0, np.minimum(1, stat_values))
@@ -584,7 +582,10 @@ def draw_masks(
             roi_color = color_arrays.cols[color_index, roi_index]
             if y_circle is not None and x_circle is not None:
                 overlays[active_panel] = _make_chosen_circle(
-                    overlays[active_panel], y_circle, x_circle, roi_color,
+                    overlays[active_panel],
+                    y_circle,
+                    x_circle,
+                    roi_color,
                 )
 
     return overlays[0], overlays[1]
@@ -629,9 +630,7 @@ def render_colorbar(
         colorbar_widgets.image.setImage(colorbar_image)
 
     for label_index in range(3):
-        colorbar_widgets.labels[label_index].setText(
-            f"{color_arrays.colorbar[color_index][label_index]:1.2f}"
-        )
+        colorbar_widgets.labels[label_index].setText(f"{color_arrays.colorbar[color_index][label_index]:1.2f}")
 
 
 def flip_rois(
@@ -664,9 +663,7 @@ def flip_rois(
         merged = context.roi_statistics[roi_index].merged_roi_indices
         if merged is not None:
             for merged_index in merged:
-                context.cell_classification_labels[merged_index] = (
-                    ~context.cell_classification_labels[merged_index]
-                )
+                context.cell_classification_labels[merged_index] = ~context.cell_classification_labels[merged_index]
 
 
 def flip_for_class(
@@ -763,23 +760,23 @@ def remove_roi(
     layer2_pixels = np.array((roi_maps.iroi[panel, 2, :, :] == roi_index).nonzero()).astype(np.int32)
 
     # Shifts layers up to fill the gap.
-    roi_maps.lam[panel, 0, layer0_pixels[0], layer0_pixels[1]] = (
-        roi_maps.lam[panel, 1, layer0_pixels[0], layer0_pixels[1]]
-    )
+    roi_maps.lam[panel, 0, layer0_pixels[0], layer0_pixels[1]] = roi_maps.lam[
+        panel, 1, layer0_pixels[0], layer0_pixels[1]
+    ]
     roi_maps.lam[panel, 1, layer0_pixels[0], layer0_pixels[1]] = 0
-    roi_maps.lam[panel, 1, layer1_pixels[0], layer1_pixels[1]] = (
-        roi_maps.lam[panel, 2, layer1_pixels[0], layer1_pixels[1]]
-    )
+    roi_maps.lam[panel, 1, layer1_pixels[0], layer1_pixels[1]] = roi_maps.lam[
+        panel, 2, layer1_pixels[0], layer1_pixels[1]
+    ]
     roi_maps.lam[panel, 2, layer1_pixels[0], layer1_pixels[1]] = 0
     roi_maps.lam[panel, 2, layer2_pixels[0], layer2_pixels[1]] = 0
 
-    roi_maps.iroi[panel, 0, layer0_pixels[0], layer0_pixels[1]] = (
-        roi_maps.iroi[panel, 1, layer0_pixels[0], layer0_pixels[1]]
-    )
+    roi_maps.iroi[panel, 0, layer0_pixels[0], layer0_pixels[1]] = roi_maps.iroi[
+        panel, 1, layer0_pixels[0], layer0_pixels[1]
+    ]
     roi_maps.iroi[panel, 1, layer0_pixels[0], layer0_pixels[1]] = -1
-    roi_maps.iroi[panel, 1, layer1_pixels[0], layer1_pixels[1]] = (
-        roi_maps.iroi[panel, 2, layer1_pixels[0], layer1_pixels[1]]
-    )
+    roi_maps.iroi[panel, 1, layer1_pixels[0], layer1_pixels[1]] = roi_maps.iroi[
+        panel, 2, layer1_pixels[0], layer1_pixels[1]
+    ]
     roi_maps.iroi[panel, 2, layer1_pixels[0], layer1_pixels[1]] = -1
     roi_maps.iroi[panel, 2, layer2_pixels[0], layer2_pixels[1]] = -1
 
@@ -847,9 +844,7 @@ def update_colormap(
     """
     console.echo(message=f"Colormap changed to {colormap}, loading...")
     for color_index in range(1, color_arrays.istat.shape[0]):
-        color_arrays.cols[color_index] = istat_transform(
-            color_arrays.istat[color_index], colormap
-        )
+        color_arrays.cols[color_index] = istat_transform(color_arrays.istat[color_index], colormap)
         rgb_masks(
             color_arrays=color_arrays,
             roi_maps=roi_maps,
@@ -965,9 +960,7 @@ def update_behavior_masks(
     """
     color_index = _COLOR_BEHAVIOR
     bin_count = int(np.floor(behavior_resampled.size / bin_size))
-    binned_behavior = np.reshape(
-        behavior_resampled[: bin_count * bin_size], (bin_count, bin_size)
-    ).mean(axis=1)
+    binned_behavior = np.reshape(behavior_resampled[: bin_count * bin_size], (bin_count, bin_size)).mean(axis=1)
     binned_behavior -= binned_behavior.mean()
     behavior_std = float((binned_behavior**2).mean() ** 0.5)
     denominator = binned_fluorescence.shape[-1] * fluorescence_std * behavior_std

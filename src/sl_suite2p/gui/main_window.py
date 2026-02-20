@@ -45,7 +45,7 @@ from .styles import (
     header_font,
 )
 from .signals import GUISignals
-from .view_state import ViewState
+from .view_state import ViewState, ROIToolPanel
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -107,7 +107,7 @@ class MainWindow(QMainWindow):
         # Computed binned activity state (used by MergeWindow correlation computation).
         self.Fbin: NDArray[np.float32] | None = None
         self.Fstd: NDArray[np.float32] | None = None
-        self.trange: NDArray | None = None
+        self.frame_indices: NDArray | None = None
 
         self.setGeometry(50, 50, 1500, 800)
         self.setWindowTitle("suite2p (run pipeline or load session directory)")
@@ -152,7 +152,9 @@ class MainWindow(QMainWindow):
         self.make_graphics(b0)
         # Draws quadrant buttons last so they appear on top of the plot.
         self._quadrant_controls = selection_buttons.create_quadrant_buttons(
-            owner=self, layout=self.l0, signals=self._signals,
+            owner=self,
+            layout=self.l0,
+            signals=self._signals,
         )
         self.quadbtns = self._quadrant_controls.quadrant_buttons
 
@@ -203,10 +205,14 @@ class MainWindow(QMainWindow):
         self.l0.addWidget(self.checkBox, 0, 0, 1, 2)
 
         self._selection_controls = selection_buttons.create_selection_buttons(
-            owner=self, layout=self.l0, signals=self._signals,
+            owner=self,
+            layout=self.l0,
+            signals=self._signals,
         )
         self._cell_toggle_controls = selection_buttons.create_cell_toggle_buttons(
-            owner=self, layout=self.l0, signals=self._signals,
+            owner=self,
+            layout=self.l0,
+            signals=self._signals,
         )
         # Backward-compat aliases for button groups used by context_loader and other modules.
         self.topbtns = self._selection_controls.selection_buttons
@@ -217,13 +223,19 @@ class MainWindow(QMainWindow):
         self.lcell1 = self._cell_toggle_controls.noncell_count_label
 
         self._view_controls, b0 = background_views.create_view_controls(
-            owner=self, layout=self.l0, row=1, signals=self._signals,
+            owner=self,
+            layout=self.l0,
+            row=1,
+            signals=self._signals,
         )
         self.viewbtns = self._view_controls.view_buttons
         self.view_names = self._view_controls.view_names
 
         self._color_controls, b0 = roi_overlays.build_color_controls(
-            owner=self, layout=self.l0, row=b0, signals=self._signals,
+            owner=self,
+            layout=self.l0,
+            row=b0,
+            signals=self._signals,
         )
         self.colorbtns = self._color_controls.color_buttons
         self.binedit = self._color_controls.bin_edit
@@ -231,7 +243,9 @@ class MainWindow(QMainWindow):
         self.probedit = self._color_controls.classifier_edit
 
         self.colorbar_widgets = roi_overlays.build_colorbar(
-            owner=self, layout=self.l0, row=b0,
+            owner=self,
+            layout=self.l0,
+            row=b0,
         )
         b0 += 1
         b0 = classifier_panel.make_buttons(self, b0)
@@ -239,7 +253,12 @@ class MainWindow(QMainWindow):
 
         # Cell stats / ROI selection.
         self.stats_to_show = [
-            "centroid", "pixel_count", "skewness", "compactness", "footprint", "aspect_ratio",
+            "centroid",
+            "pixel_count",
+            "skewness",
+            "compactness",
+            "footprint",
+            "aspect_ratio",
         ]
         lilfont = label_font()
         qlabel = QLabel(self)
@@ -268,7 +287,10 @@ class MainWindow(QMainWindow):
         self.l0.setRowStretch(b0, 1)
         b0 += 2
         self._trace_controls, b0 = trace_panel.create_trace_controls(
-            owner=self, layout=self.l0, row=b0, signals=self._signals,
+            owner=self,
+            layout=self.l0,
+            row=b0,
+            signals=self._signals,
         )
         # Backward-compat aliases for modules that reference parent.comboBox, checkboxes, etc.
         self.comboBox = self._trace_controls.activity_combo
@@ -340,7 +362,10 @@ class MainWindow(QMainWindow):
         self.l0.addWidget(self.win, 1, 2, b0 - 1, 30)
         # Cells image panel.
         self.p1 = plot_widgets.ViewBox(
-            panel_index=0, name="plot1", border=[100, 100, 100], invert_y=True,
+            panel=ROIToolPanel.CELLS,
+            name="plot1",
+            border=[100, 100, 100],
+            invert_y=True,
         )
         self.win.addItem(self.p1, 0, 0)
         self.p1.setMenuEnabled(False)
@@ -355,7 +380,10 @@ class MainWindow(QMainWindow):
         self.color1.setLevels([0, 255])
         # Non-cells image panel.
         self.p2 = plot_widgets.ViewBox(
-            panel_index=1, name="plot2", border=[100, 100, 100], invert_y=True,
+            panel=ROIToolPanel.NON_CELLS,
+            name="plot2",
+            border=[100, 100, 100],
+            invert_y=True,
         )
         self.win.addItem(self.p2, 0, 1)
         self.p2.setMenuEnabled(False)
@@ -478,9 +506,7 @@ class MainWindow(QMainWindow):
                 return
             ctype = self.context_data.cell_classification_labels[self.view_state.chosen_index]
             while True:
-                self.view_state.chosen_index = (
-                    (self.view_state.chosen_index - 1) % self.context_data.roi_count
-                )
+                self.view_state.chosen_index = (self.view_state.chosen_index - 1) % self.context_data.roi_count
                 if self.context_data.cell_classification_labels[self.view_state.chosen_index] is ctype:
                     break
             self.view_state.merge_indices = [self.view_state.chosen_index]
@@ -492,9 +518,7 @@ class MainWindow(QMainWindow):
             self._roi_remove()
             ctype = self.context_data.cell_classification_labels[self.view_state.chosen_index]
             while True:
-                self.view_state.chosen_index = (
-                    (self.view_state.chosen_index + 1) % self.context_data.roi_count
-                )
+                self.view_state.chosen_index = (self.view_state.chosen_index + 1) % self.context_data.roi_count
                 if self.context_data.cell_classification_labels[self.view_state.chosen_index] is ctype:
                     break
             self.view_state.merge_indices = [self.view_state.chosen_index]
@@ -549,7 +573,7 @@ class MainWindow(QMainWindow):
             cell_fluorescence=self.context_data.cell_fluorescence,
             neuropil_fluorescence=self.context_data.neuropil_fluorescence,
             spikes=self.context_data.spikes,
-            time_range=self.trange,
+            frame_indices=self.frame_indices,
             merge_indices=self.view_state.merge_indices,
             activity_mode=self.view_state.activity_mode,
             roi_colors=self.color_arrays.cols[self.view_state.color_mode],
@@ -594,12 +618,9 @@ class MainWindow(QMainWindow):
             self.Fbin = f[:, : nb * bin_size].reshape((ncells, nb, bin_size)).mean(axis=2)
             self.Fbin -= self.Fbin.mean(axis=1)[:, np.newaxis]
             self.Fstd = (self.Fbin**2).mean(axis=1) ** 0.5
-            self.trange = np.arange(0, self.context_data.frame_count)
+            self.frame_indices = np.arange(0, self.context_data.frame_count, dtype=np.int32)
             # If in behavior-view, recomputes.
-            if (
-                self.view_state.color_mode == _BEHAVIOR_COLOR
-                and self.context_data.behavior_resampled is not None
-            ):
+            if self.view_state.color_mode == _BEHAVIOR_COLOR and self.context_data.behavior_resampled is not None:
                 roi_overlays.update_behavior_masks(
                     color_arrays=self.color_arrays,
                     roi_maps=self.roi_maps,
@@ -772,8 +793,10 @@ class MainWindow(QMainWindow):
 
         # Bounds-checks the click coordinates.
         if (
-            click_y < 0 or click_y >= self.context_data.frame_height
-            or click_x < 0 or click_x >= self.context_data.frame_width
+            click_y < 0
+            or click_y >= self.context_data.frame_height
+            or click_x < 0
+            or click_x >= self.context_data.frame_width
         ):
             return False
 

@@ -396,9 +396,7 @@ class RangeSlider(QSlider):
 
             for handle_index, value in enumerate([self._low, self._high]):
                 option.sliderPosition = value
-                hit = style.hitTestComplexControl(
-                    style.CC_Slider, option, event.pos(), self
-                )
+                hit = style.hitTestComplexControl(style.CC_Slider, option, event.pos(), self)
                 if hit == style.SC_SliderHandle:
                     self._active_slider = handle_index
                     self._pressed_control = hit
@@ -409,9 +407,7 @@ class RangeSlider(QSlider):
 
             if self._active_slider < 0:
                 self._pressed_control = QStyle.SC_SliderHandle
-                self._click_offset = self._pixel_position_to_value(
-                    self._pick_coordinate(event.pos())
-                )
+                self._click_offset = self._pixel_position_to_value(self._pick_coordinate(event.pos()))
                 self.triggerAction(self.SliderMove)
                 self.setRepeatAction(self.SliderNoAction)
         else:
@@ -424,9 +420,7 @@ class RangeSlider(QSlider):
             return
 
         event.accept()
-        new_position = self._pixel_position_to_value(
-            self._pick_coordinate(event.pos())
-        )
+        new_position = self._pixel_position_to_value(self._pick_coordinate(event.pos()))
         option = QStyleOptionSlider()
         self.initStyleOption(option)
 
@@ -486,12 +480,8 @@ class RangeSlider(QSlider):
         self.initStyleOption(option)
         style = QApplication.style()
 
-        groove_rect = style.subControlRect(
-            style.CC_Slider, option, style.SC_SliderGroove, self
-        )
-        handle_rect = style.subControlRect(
-            style.CC_Slider, option, style.SC_SliderHandle, self
-        )
+        groove_rect = style.subControlRect(style.CC_Slider, option, style.SC_SliderGroove, self)
+        handle_rect = style.subControlRect(style.CC_Slider, option, style.SC_SliderHandle, self)
 
         if self.orientation() == QtCore.Qt.Horizontal:
             slider_length = handle_rect.width()
@@ -661,7 +651,7 @@ def _place_in_valid_region(
     if valid_y_range is not None and valid_x_range is not None:
         try:
             output[valid_y_range[0] : valid_y_range[1], valid_x_range[0] : valid_x_range[1]] = normalized
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             if warn_on_error:
                 console.echo(
                     message="Max projection not in combined view",

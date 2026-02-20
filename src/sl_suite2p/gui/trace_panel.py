@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget, QGridLayout
 
     from .signals import GUISignals
+    from .plot_widgets import TraceBox
 
 
 # Default activity mode index (deconvolved).
@@ -114,12 +115,12 @@ class TraceControls:
 
 
 def plot_trace(
-    trace_box: pg.PlotItem,
+    trace_box: TraceBox,
     *,
     cell_fluorescence: NDArray[np.float32],
     neuropil_fluorescence: NDArray[np.float32],
     spikes: NDArray[np.float32],
-    time_range: NDArray,
+    frame_indices: NDArray,
     merge_indices: list[int],
     activity_mode: int,
     roi_colors: NDArray | None = None,
@@ -143,7 +144,7 @@ def plot_trace(
         cell_fluorescence: Cell fluorescence array with shape (roi_count, frame_count).
         neuropil_fluorescence: Neuropil fluorescence array with shape (roi_count, frame_count).
         spikes: Deconvolved spike array with shape (roi_count, frame_count).
-        time_range: Time axis array with shape (frame_count,).
+        frame_indices: Time axis array with shape (frame_count,).
         merge_indices: Indices of the selected ROIs to display.
         activity_mode: Trace type index (0=F, 1=Fneu, 2=F-0.7*Fneu, 3=spks).
         roi_colors: Per-ROI RGB colors with shape (roi_count, 3) for multi-trace coloring.
@@ -169,7 +170,7 @@ def plot_trace(
             cell_fluorescence=cell_fluorescence,
             neuropil_fluorescence=neuropil_fluorescence,
             spikes=spikes,
-            time_range=time_range,
+            frame_indices=frame_indices,
             roi_index=merge_indices[0],
             traces_visible=traces_visible,
             neuropil_visible=neuropil_visible,
@@ -182,7 +183,7 @@ def plot_trace(
             cell_fluorescence=cell_fluorescence,
             neuropil_fluorescence=neuropil_fluorescence,
             spikes=spikes,
-            time_range=time_range,
+            frame_indices=frame_indices,
             merge_indices=merge_indices,
             activity_mode=activity_mode,
             roi_colors=roi_colors,
@@ -193,6 +194,11 @@ def plot_trace(
             behavior_loaded=behavior_loaded,
         )
 
+    trace_box.update_range(
+        frame_count=len(frame_indices),
+        y_minimum=y_minimum,
+        y_maximum=y_maximum,
+    )
     trace_box.setYRange(y_minimum, y_maximum)
     return y_minimum, y_maximum
 
@@ -303,15 +309,9 @@ def create_trace_controls(
     scale_up.clicked.connect(lambda: _expand_scale(controls=controls, signals=signals))
     scale_down.clicked.connect(lambda: _collapse_scale(controls=controls, signals=signals))
     max_plotted_edit.returnPressed.connect(signals.trace_needs_update.emit)
-    deconvolved_checkbox.toggled.connect(
-        lambda: _on_deconvolved_toggle(controls=controls, signals=signals)
-    )
-    neuropil_checkbox.toggled.connect(
-        lambda: _on_neuropil_toggle(controls=controls, signals=signals)
-    )
-    traces_checkbox.toggled.connect(
-        lambda: _on_traces_toggle(controls=controls, signals=signals)
-    )
+    deconvolved_checkbox.toggled.connect(lambda: _on_deconvolved_toggle(controls=controls, signals=signals))
+    neuropil_checkbox.toggled.connect(lambda: _on_neuropil_toggle(controls=controls, signals=signals))
+    traces_checkbox.toggled.connect(lambda: _on_traces_toggle(controls=controls, signals=signals))
 
     return controls, row
 
@@ -322,7 +322,7 @@ def _plot_single_trace(
     cell_fluorescence: NDArray[np.float32],
     neuropil_fluorescence: NDArray[np.float32],
     spikes: NDArray[np.float32],
-    time_range: NDArray,
+    frame_indices: NDArray,
     roi_index: int,
     traces_visible: bool,
     neuropil_visible: bool,
@@ -336,7 +336,7 @@ def _plot_single_trace(
         cell_fluorescence: Cell fluorescence array with shape (roi_count, frame_count).
         neuropil_fluorescence: Neuropil fluorescence array with shape (roi_count, frame_count).
         spikes: Deconvolved spike array with shape (roi_count, frame_count).
-        time_range: Time axis array.
+        frame_indices: Time axis array.
         roi_index: Index of the ROI to plot.
         traces_visible: Determines whether the raw fluorescence trace is drawn.
         neuropil_visible: Determines whether the neuropil trace is drawn.
@@ -363,12 +363,12 @@ def _plot_single_trace(
     spike_trace *= y_maximum - y_minimum
 
     if traces_visible:
-        trace_box.plot(time_range, fluorescence, pen="c")
+        trace_box.plot(frame_indices, fluorescence, pen="c")
     if neuropil_visible:
-        trace_box.plot(time_range, neuropil, pen="r")
+        trace_box.plot(frame_indices, neuropil, pen="r")
     if deconvolved_visible:
         trace_box.plot(
-            time_range,
+            frame_indices,
             spike_trace + y_minimum,
             pen=(255, 255, 255, _DECONVOLVED_ALPHA),
         )
@@ -383,7 +383,7 @@ def _plot_multi_trace(
     cell_fluorescence: NDArray[np.float32],
     neuropil_fluorescence: NDArray[np.float32],
     spikes: NDArray[np.float32],
-    time_range: NDArray,
+    frame_indices: NDArray,
     merge_indices: list[int],
     activity_mode: int,
     roi_colors: NDArray | None,
@@ -401,7 +401,7 @@ def _plot_multi_trace(
         cell_fluorescence: Cell fluorescence array with shape (roi_count, frame_count).
         neuropil_fluorescence: Neuropil fluorescence array with shape (roi_count, frame_count).
         spikes: Deconvolved spike array with shape (roi_count, frame_count).
-        time_range: Time axis array.
+        frame_indices: Time axis array.
         merge_indices: Indices of selected ROIs.
         activity_mode: Trace type index (0=F, 1=Fneu, 2=F-0.7*Fneu, 3=spks).
         roi_colors: Per-ROI RGB colors with shape (roi_count, 3).
@@ -427,10 +427,7 @@ def _plot_multi_trace(
         elif activity_mode == 1:
             trace = neuropil_fluorescence[index, :]
         elif activity_mode == _ACTIVITY_MODE_SUBTRACTED:
-            trace = (
-                cell_fluorescence[index, :]
-                - _NEUROPIL_COEFFICIENT * neuropil_fluorescence[index, :]
-            )
+            trace = cell_fluorescence[index, :] - _NEUROPIL_COEFFICIENT * neuropil_fluorescence[index, :]
         else:
             trace = spikes[index, :]
 
@@ -447,7 +444,7 @@ def _plot_multi_trace(
         # Determines pen color for this ROI.
         pen_color = roi_colors[index, :] if roi_colors is not None else (255, 255, 255)
 
-        trace_box.plot(time_range, normalized + stack_position * k_space, pen=pen_color)
+        trace_box.plot(frame_indices, normalized + stack_position * k_space, pen=pen_color)
         tick_labels.append((stack_position * k_space + float(normalized.mean()), str(index)))
         stack_position -= 1
 
@@ -464,7 +461,7 @@ def _plot_multi_trace(
     # Plots average trace at bottom when enough cells are selected.
     if len(selected) > _AVERAGE_THRESHOLD:
         trace_box.plot(
-            time_range,
+            frame_indices,
             -1 * behavior_scale + average * behavior_scale,
             pen=average_pen,
         )
@@ -473,7 +470,7 @@ def _plot_multi_trace(
     # Overlays behavioral trace when loaded.
     if behavior_loaded and behavior is not None and behavior_time is not None:
         trace_box.plot(
-            time_range,
+            frame_indices,
             -1 * behavior_scale + average * behavior_scale,
             pen=average_pen,
         )

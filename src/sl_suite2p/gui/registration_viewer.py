@@ -563,7 +563,8 @@ class BinaryPlayer(QMainWindow):
                     self.Fcell = np.load(fluorescence_path)
                     self.stat = np.load(file_path.parent / "stat.npy", allow_pickle=True)
                     self.cell_classification = np.load(
-                        file_path.parent / "cell_classification.npy", allow_pickle=True,
+                        file_path.parent / "cell_classification.npy",
+                        allow_pickle=True,
                     )
                     self.Floaded = True
                 else:
@@ -739,11 +740,7 @@ class BinaryPlayer(QMainWindow):
                             pos = x.mapSceneToView(event.scenePos())
                             posy = int(pos.x())
                             posx = int(pos.y())
-                            if (
-                                0 <= posy < self.LX
-                                and 0 <= posx < self.LY
-                                and self.cellpix[posx, posy] > -1
-                            ):
+                            if 0 <= posy < self.LX and 0 <= posx < self.LY and self.cellpix[posx, posy] > -1:
                                 self.ichosen = self.cellpix[posx, posy]
                                 self.cell_chosen()
                 if iplot in (1, 2) and event.button() == 1:

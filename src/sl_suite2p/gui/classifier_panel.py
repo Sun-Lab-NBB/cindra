@@ -227,7 +227,9 @@ class ListChooser(QDialog):
     def _load_cell(self) -> None:
         """Loads a cell_classification.npy file and adds it to the training file list."""
         name = QFileDialog.getOpenFileName(
-            self, "Open cell_classification.npy file", filter="cell_classification.npy",
+            self,
+            "Open cell_classification.npy file",
+            filter="cell_classification.npy",
         )
         if name:
             try:
@@ -238,7 +240,7 @@ class ListChooser(QDialog):
                     self.list.addItem(name[0])
                 if bad_file:
                     QMessageBox.information(self, "Error", "cell_classification.npy should be 0/1")
-            except (OSError, RuntimeError, TypeError, NameError):
+            except OSError, RuntimeError, TypeError, NameError:
                 QMessageBox.information(self, "Error", "cell_classification.npy should be 0/1")
         else:
             QMessageBox.information(self, "Error", "cell_classification.npy should be 0/1")
@@ -253,7 +255,7 @@ class ListChooser(QDialog):
                 files = files.splitlines()
                 for file_path in files:
                     self.list.addItem(file_path)
-            except (OSError, RuntimeError, TypeError, NameError):
+            except OSError, RuntimeError, TypeError, NameError:
                 QMessageBox.information(self, "Error", "not a text file")
                 console.echo(message="Failed to load text file: invalid file format.", level=LogLevel.ERROR)
 
@@ -270,13 +272,17 @@ class ListChooser(QDialog):
             loaded = _load_data(parent=parent, trainfiles=parent.trainfiles)
             if loaded:
                 QMessageBox.information(
-                    parent, "Classifier saved", "Classifier built from valid files and saved.",
+                    parent,
+                    "Classifier saved",
+                    "Classifier built from valid files and saved.",
                 )
                 self.apply_button.setEnabled(True)
                 self.save_as_default_button.setEnabled(True)
         else:
             QMessageBox.information(
-                parent, "Incorrect files", "No valid datasets chosen to build classifier, classifier not built.",
+                parent,
+                "Incorrect files",
+                "No valid datasets chosen to build classifier, classifier not built.",
             )
 
     def _apply_class(self, parent: MainWindow) -> None:
@@ -395,7 +401,7 @@ def _load_data(
             try:
                 classification_data = np.load(fname)
                 ncells = classification_data.shape[0]
-            except (ValueError, OSError, RuntimeError, TypeError, NameError):
+            except ValueError, OSError, RuntimeError, TypeError, NameError:
                 console.echo(message=f"  {fname}: not a numpy array of booleans", level=LogLevel.WARNING)
                 bad_file = True
             if not bad_file:
@@ -405,7 +411,7 @@ def _load_data(
                     stat = np.load(str(base_path / "stat.npy"), allow_pickle=True)
                     _ = stat[0]["y_pixels"]
                     stat_length = len(stat)
-                except (IndexError, KeyError, OSError, RuntimeError, TypeError, NameError):
+                except IndexError, KeyError, OSError, RuntimeError, TypeError, NameError:
                     console.echo(
                         message=f"  {base_path}: incorrect or missing stat.npy file",
                         level=LogLevel.WARNING,
@@ -429,18 +435,24 @@ def _load_data(
                     trainfiles_good.append(fname)
     if trainfiles_good:
         classfile, saved = _save_classifier(
-            parent=parent, feature_matrix=train_stats, training_labels=train_labels,
+            parent=parent,
+            feature_matrix=train_stats,
+            training_labels=train_labels,
         )
         if saved:
             parent.classfile = classfile
             loaded = True
         else:
             QMessageBox.information(
-                parent, "Incorrect file path", "Incorrect save path for classifier, classifier not built.",
+                parent,
+                "Incorrect file path",
+                "Incorrect save path for classifier, classifier not built.",
             )
     else:
         QMessageBox.information(
-            parent, "Incorrect files", "No valid datasets chosen to build classifier, classifier not built.",
+            parent,
+            "Incorrect files",
+            "No valid datasets chosen to build classifier, classifier not built.",
         )
     return loaded
 
@@ -474,10 +486,13 @@ def _add_to(parent: MainWindow) -> None:
 
         # Concatenates new session data with existing training data.
         combined_features = np.concatenate([existing_features, new_features], axis=0)
-        combined_labels = np.concatenate([
-            existing_labels,
-            parent.context_data.cell_classification_labels,
-        ], axis=0)
+        combined_labels = np.concatenate(
+            [
+                existing_labels,
+                parent.context_data.cell_classification_labels,
+            ],
+            axis=0,
+        )
 
         # Saves the combined dataset and reloads the classifier.
         _save_model(
@@ -526,7 +541,7 @@ def _save_classifier(
                 feature_matrix=feature_matrix,
             )
             saved = True
-        except (OSError, RuntimeError, TypeError, NameError, FileNotFoundError):
+        except OSError, RuntimeError, TypeError, NameError, FileNotFoundError:
             console.echo(message="Failed to save classifier: incorrect filename.", level=LogLevel.ERROR)
     return name, saved
 
@@ -544,7 +559,7 @@ def _save_list(parent: MainWindow) -> None:
                 for file_path in parent.trainfiles:
                     output_file.write(file_path)
                     output_file.write("\n")
-        except (ValueError, OSError, RuntimeError, TypeError, NameError, FileNotFoundError):
+        except ValueError, OSError, RuntimeError, TypeError, NameError, FileNotFoundError:
             console.echo(message="Failed to save list: incorrect filename.", level=LogLevel.ERROR)
 
 
@@ -556,7 +571,9 @@ def _class_masks(parent: MainWindow) -> None:
     """
     istat = parent.context_data.cell_classification_probabilities.copy()
     parent.color_arrays.colorbar[_CLASSIFIER_COLOR_INDEX] = [
-        float(istat.min()), float((istat.max() - istat.min()) / 2), float(istat.max()),
+        float(istat.min()),
+        float((istat.max() - istat.min()) / 2),
+        float(istat.max()),
     ]
     istat = istat - istat.min()
     istat_max = istat.max()

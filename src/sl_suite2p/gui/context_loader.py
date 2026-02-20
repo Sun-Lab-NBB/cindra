@@ -99,9 +99,7 @@ def save_cell_classification(parent: MainWindow) -> None:
         ),
     )
     parent.lcell0.setText(f"{int(context.cell_classification_labels.sum())}")
-    parent.lcell1.setText(
-        f"{int(context.cell_classification_labels.size - context.cell_classification_labels.sum())}"
-    )
+    parent.lcell1.setText(f"{int(context.cell_classification_labels.size - context.cell_classification_labels.sum())}")
 
 
 def save_cell_colocalization(parent: MainWindow) -> None:
@@ -269,7 +267,7 @@ def load_behavior(parent: MainWindow) -> None:
         elif beh.shape[0] == context.frame_count:
             behavior_loaded = True
             beh_time = np.arange(0, context.frame_count, dtype=np.float32)
-    except (ValueError, KeyError, OSError, RuntimeError, TypeError, NameError):
+    except ValueError, KeyError, OSError, RuntimeError, TypeError, NameError:
         console.echo(
             message="ERROR: this is not a 1D array with length of data",
             level=LogLevel.ERROR,
@@ -350,7 +348,7 @@ def load_custom_mask(parent: MainWindow) -> None:
         mask = np.load(name).flatten().astype(np.float32)
         if mask.size == context.roi_count:
             custom_loaded = True
-    except (ValueError, KeyError, OSError, RuntimeError, TypeError, NameError):
+    except ValueError, KeyError, OSError, RuntimeError, TypeError, NameError:
         console.echo(
             message="ERROR: this is not a 1D array with length of data",
             level=LogLevel.ERROR,
@@ -488,7 +486,7 @@ def _initialize_gui(parent: MainWindow) -> None:
     parent.lcell1.setText(f"{int(context.roi_count - context.cell_count)}")
 
     # Initializes plot ranges and displays background views.
-    parent.trange = initialize_ranges(
+    parent.frame_indices = initialize_ranges(
         cells_view=parent.p1,
         noncells_view=parent.p2,
         trace_box=parent.p3,
@@ -508,7 +506,7 @@ def _initialize_gui(parent: MainWindow) -> None:
         cell_fluorescence=context.cell_fluorescence,
         neuropil_fluorescence=context.neuropil_fluorescence,
         spikes=context.spikes,
-        time_range=parent.trange,
+        frame_indices=parent.frame_indices,
         merge_indices=state.merge_indices,
         activity_mode=state.activity_mode,
     )
@@ -623,12 +621,7 @@ def _compute_roi_geometry(context: ContextData) -> None:
             centroid=roi.centroid,
             radius=roi.radius,
         )
-        valid = (
-            (y_circle >= 0)
-            & (x_circle >= 0)
-            & (y_circle < context.frame_height)
-            & (x_circle < context.frame_width)
-        )
+        valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < context.frame_height) & (x_circle < context.frame_width)
         roi.circle_y_pixels = y_circle[valid]
         roi.circle_x_pixels = x_circle[valid]
 
