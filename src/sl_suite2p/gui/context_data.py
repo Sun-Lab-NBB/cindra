@@ -82,22 +82,22 @@ class ContextData:
     )
     """Deconvolved spike traces with shape (cells, frames)."""
 
-    is_cell: NDArray[np.bool_] = field(
+    cell_classification_labels: NDArray[np.bool_] = field(
         default_factory=lambda: np.array([], dtype=np.bool_)
     )
     """Boolean classification array marking each ROI as cell or non-cell."""
 
-    cell_probability: NDArray[np.float32] = field(
+    cell_classification_probabilities: NDArray[np.float32] = field(
         default_factory=lambda: np.array([], dtype=np.float32)
     )
     """Classifier probability for each ROI being a cell."""
 
-    is_red_cell: NDArray[np.bool_] = field(
+    cell_colocalization_labels: NDArray[np.bool_] = field(
         default_factory=lambda: np.array([], dtype=np.bool_)
     )
     """Boolean classification array marking each ROI as a red (channel 2) cell."""
 
-    red_cell_probability: NDArray[np.float32] = field(
+    cell_colocalization_probabilities: NDArray[np.float32] = field(
         default_factory=lambda: np.array([], dtype=np.float32)
     )
     """Probability of each ROI being a red (channel 2) cell."""
@@ -165,9 +165,9 @@ class ContextData:
     @property
     def cell_count(self) -> int:
         """Returns the number of ROIs classified as cells."""
-        if self.is_cell.size == 0:
+        if self.cell_classification_labels.size == 0:
             return 0
-        return int(self.is_cell.sum())
+        return int(self.cell_classification_labels.sum())
 
     # Background images from combined detection data.
 
@@ -654,20 +654,20 @@ class ContextData:
 
         # Copies classification arrays.
         if extraction.cell_classification is not None:
-            self.cell_probability = extraction.cell_classification[:, 0].copy()
-            self.is_cell = extraction.cell_classification[:, 1].astype(np.bool_).copy()
+            self.cell_classification_probabilities = extraction.cell_classification[:, 0].copy()
+            self.cell_classification_labels = extraction.cell_classification[:, 1].astype(np.bool_).copy()
         else:
-            self.cell_probability = np.ones(roi_count, dtype=np.float32)
-            self.is_cell = np.ones(roi_count, dtype=np.bool_)
+            self.cell_classification_probabilities = np.ones(roi_count, dtype=np.float32)
+            self.cell_classification_labels = np.ones(roi_count, dtype=np.bool_)
 
-        # Copies colocalization (red cell) arrays.
+        # Copies colocalization arrays.
         if extraction.cell_colocalization is not None:
-            self.red_cell_probability = extraction.cell_colocalization[:, 0].copy()
-            self.is_red_cell = extraction.cell_colocalization[:, 1].astype(np.bool_).copy()
+            self.cell_colocalization_probabilities = extraction.cell_colocalization[:, 0].copy()
+            self.cell_colocalization_labels = extraction.cell_colocalization[:, 1].astype(np.bool_).copy()
             self.has_red_channel = True
         else:
-            self.red_cell_probability = np.zeros(roi_count, dtype=np.float32)
-            self.is_red_cell = np.zeros(roi_count, dtype=np.bool_)
+            self.cell_colocalization_probabilities = np.zeros(roi_count, dtype=np.float32)
+            self.cell_colocalization_labels = np.zeros(roi_count, dtype=np.bool_)
             self.has_red_channel = combined.detection.mean_image_channel_2 is not None
 
         # Initializes the not-merged mask.

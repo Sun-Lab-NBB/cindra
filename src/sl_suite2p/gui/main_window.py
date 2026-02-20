@@ -302,14 +302,14 @@ class MainWindow(QMainWindow):
             return
         if QtCore.Qt.CheckState(state) == QtCore.Qt.Checked:
             for n in range(len(self.roi_maps.text_labels)):
-                if self.context_data.is_cell[n] == 1:
+                if self.context_data.cell_classification_labels[n] == 1:
                     self.p1.addItem(self.roi_maps.text_labels[n])
                 else:
                     self.p2.addItem(self.roi_maps.text_labels[n])
             self.view_state.show_roi_labels = True
         else:
             for n in range(len(self.roi_maps.text_labels)):
-                if self.context_data.is_cell[n] == 1:
+                if self.context_data.cell_classification_labels[n] == 1:
                     with suppress(Exception):
                         self.p1.removeItem(self.roi_maps.text_labels[n])
                 else:
@@ -476,12 +476,12 @@ class MainWindow(QMainWindow):
         elif event.key() == QtCore.Qt.Key_Left:
             if self.context_data is None:
                 return
-            ctype = self.context_data.is_cell[self.view_state.chosen_index]
+            ctype = self.context_data.cell_classification_labels[self.view_state.chosen_index]
             while True:
                 self.view_state.chosen_index = (
                     (self.view_state.chosen_index - 1) % self.context_data.roi_count
                 )
-                if self.context_data.is_cell[self.view_state.chosen_index] is ctype:
+                if self.context_data.cell_classification_labels[self.view_state.chosen_index] is ctype:
                     break
             self.view_state.merge_indices = [self.view_state.chosen_index]
             self._roi_remove()
@@ -490,12 +490,12 @@ class MainWindow(QMainWindow):
             if self.context_data is None:
                 return
             self._roi_remove()
-            ctype = self.context_data.is_cell[self.view_state.chosen_index]
+            ctype = self.context_data.cell_classification_labels[self.view_state.chosen_index]
             while True:
                 self.view_state.chosen_index = (
                     (self.view_state.chosen_index + 1) % self.context_data.roi_count
                 )
-                if self.context_data.is_cell[self.view_state.chosen_index] is ctype:
+                if self.context_data.cell_classification_labels[self.view_state.chosen_index] is ctype:
                     break
             self.view_state.merge_indices = [self.view_state.chosen_index]
             self.update_plot()
@@ -624,7 +624,7 @@ class MainWindow(QMainWindow):
         if self.view_state.is_loaded and not self.sizebtns.button(1).isChecked():
             for b in [1, 2]:
                 if self.topbtns.button(b).isChecked():
-                    self._signals.selection_changed.emit()
+                    self._signals.roi_selection_changed.emit()
                     self.show()
 
     def _roi_selection(self) -> None:
@@ -789,8 +789,8 @@ class MainWindow(QMainWindow):
         else:
             merged = False
             if is_multi and (
-                self.context_data.is_cell[self.view_state.merge_indices[0]]
-                == self.context_data.is_cell[ichosen]
+                self.context_data.cell_classification_labels[self.view_state.merge_indices[0]]
+                == self.context_data.cell_classification_labels[ichosen]
             ):
                 if ichosen not in self.view_state.merge_indices:
                     self.view_state.merge_indices.append(ichosen)
@@ -881,7 +881,7 @@ class MainWindow(QMainWindow):
             color_arrays=self.color_arrays,
             roi_maps=self.roi_maps,
         )
-        self.save_iscell()
+        self.save_cell_classification()
         self.update_plot()
 
     def _zoom_plot(self, panel: int) -> None:
@@ -896,13 +896,13 @@ class MainWindow(QMainWindow):
         elif panel == _NONCELLS_PLOT:
             self.p2.autoRange()
 
-    def save_iscell(self) -> None:
+    def save_cell_classification(self) -> None:
         """Saves the current cell classification labels to disk."""
-        context_loader.save_iscell(self)
+        context_loader.save_cell_classification(self)
 
-    def save_redcell(self) -> None:
-        """Saves the current red channel cell labels to disk."""
-        context_loader.save_redcell(self)
+    def save_cell_colocalization(self) -> None:
+        """Saves the current cell colocalization labels to disk."""
+        context_loader.save_cell_colocalization(self)
 
     def apply_merge(self) -> None:
         """Applies the pending ROI merge operation."""

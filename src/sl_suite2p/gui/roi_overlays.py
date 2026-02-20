@@ -373,7 +373,7 @@ def compute_colors(
     random_colors = np.random.random((cell_count,))  # noqa: NPY002
     if context.has_red_channel:
         random_colors = random_colors / _CHAN2_COLOR_DIVISOR + _CHAN2_COLOR_OFFSET
-        is_red = context.red_cell_probability > state.channel_2_threshold
+        is_red = context.cell_colocalization_probabilities > state.channel_2_threshold
         console.echo(message=f"Number of red cells: {int(is_red.sum())}")
         random_hues = random_colors.copy()
         random_colors[is_red] = 0
@@ -404,7 +404,7 @@ def compute_colors(
                 stat_values = stat_values / (stat_high - stat_low)
                 stat_values = np.maximum(0, np.minimum(1, stat_values))
             else:
-                stat_values = np.expand_dims(context.cell_probability, axis=1)
+                stat_values = np.expand_dims(context.cell_classification_probabilities, axis=1)
                 colorbar.append(list(_FIXED_COLORBAR_RANGE))
 
             color = istat_transform(stat_values, state.colormap)
@@ -448,7 +448,7 @@ def init_roi_maps(
         Initialized ROI index maps.
     """
     roi_statistics = context.roi_statistics
-    is_cell = context.is_cell
+    classification_labels = context.cell_classification_labels
     cell_count = len(roi_statistics)
     frame_height = context.frame_height
     frame_width = context.frame_width
@@ -474,7 +474,7 @@ def init_roi_maps(
             x_pixels = roi_statistics[roi_index].x_pixels
             weights = roi_statistics[roi_index].pixel_weights
             weights = weights / weights.sum()
-            panel = int(1 - is_cell[roi_index])
+            panel = int(1 - classification_labels[roi_index])
 
             # Pushes down existing layers and adds cell on top.
             iroi[panel, 2, y_pixels, x_pixels] = iroi[panel, 1, y_pixels, x_pixels]
@@ -551,7 +551,7 @@ def draw_masks(
     view_index = state.view_mode
     opacity = state.opacity
 
-    active_panel = int(1 - context.is_cell[state.chosen_index])
+    active_panel = int(1 - context.cell_classification_labels[state.chosen_index])
 
     # Resets transparency based on ROI weights.
     for panel in range(2):
@@ -642,38 +642,40 @@ def flip_rois(
 ) -> None:
     """Flips selected ROIs between the cell and non-cell panels.
 
-    Toggles the ``is_cell`` classification for all ROIs in ``state.merge_indices``,
+    Toggles the ``cell_classification_labels`` for all ROIs in ``state.merge_indices``,
     moves them between panels. The caller is responsible for saving and updating the plot.
 
     Args:
-        context: The loaded data context (is_cell is modified in place).
+        context: The loaded data context (cell_classification_labels is modified in place).
         state: The current GUI display state.
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
     """
     state.flipped_index = state.chosen_index
     for roi_index in state.merge_indices:
-        context.is_cell[roi_index] = ~context.is_cell[roi_index]
+        context.cell_classification_labels[roi_index] = ~context.cell_classification_labels[roi_index]
         _flip_roi(
             roi_maps=roi_maps,
             color_arrays=color_arrays,
             roi_statistics=context.roi_statistics,
-            is_cell=context.is_cell,
+            cell_classification_labels=context.cell_classification_labels,
             roi_index=roi_index,
         )
         merged = context.roi_statistics[roi_index].merged_roi_indices
         if merged is not None:
             for merged_index in merged:
-                context.is_cell[merged_index] = ~context.is_cell[merged_index]
+                context.cell_classification_labels[merged_index] = (
+                    ~context.cell_classification_labels[merged_index]
+                )
 
 
 def flip_for_class(
     context: ContextData,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
-    new_is_cell: NDArray[np.bool_],
+    new_classification_labels: NDArray[np.bool_],
 ) -> bool:
-    """Applies a new is_cell classification from the classifier.
+    """Applies new cell classification labels from the classifier.
 
     For small numbers of changes, flips individual ROIs incrementally. For large
     changes, returns False to signal the caller should reinitialize all masks.
@@ -682,26 +684,26 @@ def flip_for_class(
         context: The loaded data context.
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
-        new_is_cell: New cell classification array.
+        new_classification_labels: New cell classification label array.
 
     Returns:
         True if changes were applied incrementally, False if full reinit is needed.
     """
-    cell_count = new_is_cell.size
-    if int((new_is_cell == context.is_cell).sum()) < _FLIP_THRESHOLD:
+    cell_count = new_classification_labels.size
+    if int((new_classification_labels == context.cell_classification_labels).sum()) < _FLIP_THRESHOLD:
         for roi_index in range(cell_count):
-            if new_is_cell[roi_index] != context.is_cell[roi_index]:
-                context.is_cell[roi_index] = new_is_cell[roi_index]
+            if new_classification_labels[roi_index] != context.cell_classification_labels[roi_index]:
+                context.cell_classification_labels[roi_index] = new_classification_labels[roi_index]
                 _flip_roi(
                     roi_maps=roi_maps,
                     color_arrays=color_arrays,
                     roi_statistics=context.roi_statistics,
-                    is_cell=context.is_cell,
+                    cell_classification_labels=context.cell_classification_labels,
                     roi_index=roi_index,
                 )
         return True
 
-    context.is_cell[:] = new_is_cell
+    context.cell_classification_labels[:] = new_classification_labels
     return False
 
 
@@ -871,7 +873,7 @@ def update_chan2_colors(
         color_arrays: The computed color arrays (modified in place).
         roi_maps: The ROI index maps.
     """
-    is_red = context.red_cell_probability > state.channel_2_threshold
+    is_red = context.cell_colocalization_probabilities > state.channel_2_threshold
     color = color_arrays.random_hues.copy()
     color[is_red] = 0
     color = color.flatten()
@@ -1119,7 +1121,7 @@ def _flip_roi(
     roi_maps: ROIIndexMaps,
     color_arrays: ColorArrays,
     roi_statistics: list[ROIStatistics],
-    is_cell: NDArray[np.bool_],
+    cell_classification_labels: NDArray[np.bool_],
     roi_index: int,
 ) -> None:
     """Flips a single ROI between cell and non-cell panels.
@@ -1131,10 +1133,10 @@ def _flip_roi(
         roi_maps: The ROI index maps.
         color_arrays: The computed color arrays.
         roi_statistics: The ROI statistics list.
-        is_cell: The current cell classification array.
+        cell_classification_labels: The current cell classification label array.
         roi_index: Index of the ROI to flip.
     """
-    new_panel = int(1 - is_cell[roi_index])
+    new_panel = int(1 - cell_classification_labels[roi_index])
     old_panel = 1 - new_panel
 
     remove_roi(roi_maps=roi_maps, roi_statistics=roi_statistics, roi_index=roi_index, panel=old_panel)

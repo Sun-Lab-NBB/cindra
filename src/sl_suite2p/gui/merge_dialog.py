@@ -83,7 +83,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
     state = parent.view_state
 
     console.echo(message="Merging ROI activity... this may take some time.")
-    panel_index = int(1 - context.is_cell[state.chosen_index])
+    panel_index = int(1 - context.cell_classification_labels[state.chosen_index])
     y_pixels = np.zeros((0,), dtype=np.int32)
     x_pixels = np.zeros((0,), dtype=np.int32)
     pixel_weights = np.zeros((0,), dtype=np.float32)
@@ -136,7 +136,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
                 context.neuropil_fluorescence_channel_2[roi_index, :][np.newaxis, :],
                 axis=0,
             )
-        probabilities.append(context.cell_probability[roi_index])
+        probabilities.append(context.cell_classification_probabilities[roi_index])
 
     probability_array = np.array(probabilities)
     mean_probability = probability_array.mean()
@@ -218,10 +218,14 @@ def merge_activity_masks(parent: MainWindow) -> None:
         context.cell_fluorescence = np.delete(context.cell_fluorescence, constituent, 0)
         context.neuropil_fluorescence = np.delete(context.neuropil_fluorescence, constituent, 0)
         context.spikes = np.delete(context.spikes, constituent, 0)
-        context.is_cell = np.delete(context.is_cell, constituent, 0)
-        context.cell_probability = np.delete(context.cell_probability, constituent, 0)
-        context.red_cell_probability = np.delete(context.red_cell_probability, constituent, 0)
-        context.is_red_cell = np.delete(context.is_red_cell, constituent, 0)
+        context.cell_classification_labels = np.delete(context.cell_classification_labels, constituent, 0)
+        context.cell_classification_probabilities = np.delete(
+            context.cell_classification_probabilities, constituent, 0,
+        )
+        context.cell_colocalization_probabilities = np.delete(
+            context.cell_colocalization_probabilities, constituent, 0,
+        )
+        context.cell_colocalization_labels = np.delete(context.cell_colocalization_labels, constituent, 0)
         context.not_merged = np.delete(context.not_merged, constituent, 0)
         if context.has_red_channel:
             if context.cell_fluorescence_channel_2 is not None:
@@ -253,11 +257,17 @@ def merge_activity_masks(parent: MainWindow) -> None:
                 axis=0,
             )
     context.spikes = np.concatenate((context.spikes, spikes), axis=0)
-    is_cell = np.array([context.is_cell[state.chosen_index]], dtype=bool)
-    context.is_cell = np.concatenate((context.is_cell, is_cell), axis=0)
-    context.cell_probability = np.append(context.cell_probability, mean_probability)
-    context.red_cell_probability = np.append(context.red_cell_probability, -1.0)
-    context.is_red_cell = np.append(context.is_red_cell, False)
+    classification_label = np.array([context.cell_classification_labels[state.chosen_index]], dtype=bool)
+    context.cell_classification_labels = np.concatenate(
+        (context.cell_classification_labels, classification_label), axis=0,
+    )
+    context.cell_classification_probabilities = np.append(
+        context.cell_classification_probabilities, mean_probability,
+    )
+    context.cell_colocalization_probabilities = np.append(
+        context.cell_colocalization_probabilities, -1.0,
+    )
+    context.cell_colocalization_labels = np.append(context.cell_colocalization_labels, False)
     context.not_merged = np.append(context.not_merged, False)
 
     # Computes circle overlay for the new merged ROI.
@@ -314,15 +324,15 @@ def apply(parent: MainWindow) -> None:
     if parent.context_data is None or parent.color_arrays is None or parent.roi_maps is None:
         return
     threshold = float(parent.probedit.text())
-    is_cell = parent.context_data.cell_probability > threshold
+    classification_labels = parent.context_data.cell_classification_probabilities > threshold
     flip_for_class(
         context=parent.context_data,
         color_arrays=parent.color_arrays,
         roi_maps=parent.roi_maps,
-        new_is_cell=is_cell,
+        new_classification_labels=classification_labels,
     )
     parent.update_plot()
-    parent.save_iscell()
+    parent.save_cell_classification()
 
 
 class MergeWindow(QDialog):
@@ -404,13 +414,13 @@ class MergeWindow(QDialog):
 
         console.echo(message="Creating merge window... this may take some time.")
         self._correlation_matrix = (
-            np.matmul(parent.Fbin[context.is_cell], parent.Fbin[context.is_cell].T)
+            np.matmul(parent.Fbin[context.cell_classification_labels], parent.Fbin[context.cell_classification_labels].T)
             / parent.Fbin.shape[-1]
         )
         self._correlation_matrix /= (
             np.matmul(
-                parent.Fstd[context.is_cell][:, np.newaxis],
-                parent.Fstd[context.is_cell][np.newaxis, :],
+                parent.Fstd[context.cell_classification_labels][:, np.newaxis],
+                parent.Fstd[context.cell_classification_labels][np.newaxis, :],
             )
             + _CORRELATION_EPSILON
         )
@@ -437,9 +447,9 @@ class MergeWindow(QDialog):
         parent.update_plot()
 
         correlation_row = (
-            np.matmul(parent.Fbin[context.is_cell], parent.Fbin[-1].T) / parent.Fbin.shape[-1]
+            np.matmul(parent.Fbin[context.cell_classification_labels], parent.Fbin[-1].T) / parent.Fbin.shape[-1]
         )
-        correlation_row /= parent.Fstd[context.is_cell] * parent.Fstd[-1] + _CORRELATION_EPSILON
+        correlation_row /= parent.Fstd[context.cell_classification_labels] * parent.Fstd[-1] + _CORRELATION_EPSILON
         correlation_row[-1] = 0
         self._correlation_matrix = np.concatenate(
             (self._correlation_matrix, correlation_row[np.newaxis, :-1]), axis=0,
@@ -477,7 +487,7 @@ class MergeWindow(QDialog):
         candidate_groups: list = []
         cell_count = context.cell_count
         not_used = np.ones(cell_count, dtype=bool)
-        cell_indices = np.where(context.is_cell)[0]
+        cell_indices = np.where(context.cell_classification_labels)[0]
         for cell_index in range(cell_count):
             if not_used[cell_index]:
                 correlated = [
@@ -502,7 +512,7 @@ class MergeWindow(QDialog):
                         correlated = correlated[min_distances <= self.ops["dist_thres"]]
                         if correlated.size > 1:
                             for candidate in correlated:
-                                not_used[context.is_cell[:candidate].sum()] = False
+                                not_used[context.cell_classification_labels[:candidate].sum()] = False
                             candidate_groups.append(correlated)
         self._set_merge_list(parent=parent, candidate_groups=candidate_groups)
 

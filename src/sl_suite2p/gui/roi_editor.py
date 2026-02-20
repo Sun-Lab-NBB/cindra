@@ -290,7 +290,7 @@ class ROIDraw(QMainWindow):
 
         self._frame_height: int = self._parent.ops["frame_height"]
         self._frame_width: int = self._parent.ops["frame_width"]
-        self._is_cell = self._parent.iscell
+        self._cell_classification_labels = self._parent.cell_classification
 
         self._masked_images = self._normalize_images_with_masks()
         self._image_item.setImage(self._masked_images[:, :, :, 0])
@@ -348,13 +348,15 @@ class ROIDraw(QMainWindow):
         for index in range(len(self._parent.stat)):
             stat_all.append(self._parent.stat[index])
         np.save(base_path / "stat.npy", stat_all)
-        iscell_probability = np.concatenate(
-            (self._parent.iscell[:, np.newaxis], self._parent.probcell[:, np.newaxis]), axis=1,
+        existing_classification = np.concatenate(
+            (self._parent.cell_classification[:, np.newaxis],
+             self._parent.cell_classification_probabilities[:, np.newaxis]),
+            axis=1,
         )
 
-        new_iscell = np.ones((self._roi_count, 2))
-        new_iscell = np.concatenate((new_iscell, iscell_probability), axis=0)
-        np.save(base_path / "iscell.npy", new_iscell)
+        new_classification = np.ones((self._roi_count, 2))
+        new_classification = np.concatenate((new_classification, existing_classification), axis=0)
+        np.save(base_path / "cell_classification.npy", new_classification)
 
         # Saves fluorescence traces.
         combined_cell_fluorescence = np.concatenate(
@@ -371,24 +373,24 @@ class ROIDraw(QMainWindow):
         if "registered_binary_path_channel_2" in self._parent.ops:
             channel_2_fluorescence = np.load(base_path / "F_chan2.npy")
             channel_2_neuropil = np.load(base_path / "Fneu_chan2.npy")
-            red_original = np.load(base_path / "redcell.npy")
+            red_original = np.load(base_path / "cell_colocalization.npy")
             channel_2_fluorescence = np.concatenate(
                 (self._channel_2_fluorescence, channel_2_fluorescence), axis=0,
             )
             channel_2_neuropil = np.concatenate(
                 (self._channel_2_neuropil, channel_2_neuropil), axis=0,
             )
-            new_redcell = np.zeros((self._roi_count, 2))
-            new_redcell = np.concatenate((new_redcell, red_original), axis=0)
+            new_colocalization = np.zeros((self._roi_count, 2))
+            new_colocalization = np.concatenate((new_colocalization, red_original), axis=0)
             np.save(base_path / "F_chan2.npy", channel_2_fluorescence)
             np.save(base_path / "Fneu_chan2.npy", channel_2_neuropil)
-            np.save(base_path / "redcell.npy", new_redcell)
+            np.save(base_path / "cell_colocalization.npy", new_colocalization)
 
         console.echo(
             message=(
                 f"Saved data shapes - Fcell: {np.shape(combined_cell_fluorescence)}, "
                 f"Fneu: {np.shape(combined_neuropil)}, Spks: {np.shape(combined_spikes)}, "
-                f"iscell: {np.shape(new_iscell)}, stat: {np.shape(stat_all)}"
+                f"cell_classification: {np.shape(new_classification)}, stat: {np.shape(stat_all)}"
             ),
         )
 
@@ -441,8 +443,8 @@ class ROIDraw(QMainWindow):
         hue = np.zeros_like(mean_image)
         saturation = np.zeros_like(mean_image)
 
-        for roi_index in range(self._parent.iscell.shape[0]):
-            if self._parent.iscell[roi_index] == 1:
+        for roi_index in range(self._parent.cell_classification.shape[0]):
+            if self._parent.cell_classification[roi_index] == 1:
                 y_pixels = self._parent.stat[roi_index]["y_pixels"].flatten()
                 x_pixels = self._parent.stat[roi_index]["x_pixels"].flatten()
                 hue[y_pixels, x_pixels] = _random_generator.random()

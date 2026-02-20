@@ -145,7 +145,7 @@ def create_selection_buttons(
     controls.top_count_edit.setText(str(_DEFAULT_TOP_N))
     controls.top_count_edit.setFixedWidth(SMALL_EDIT_WIDTH)
     controls.top_count_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-    controls.top_count_edit.returnPressed.connect(signals.selection_changed.emit)
+    controls.top_count_edit.returnPressed.connect(signals.roi_selection_changed.emit)
     layout.addWidget(controls.top_count_edit, 0, 11, 1, 1)
 
     return controls
@@ -274,7 +274,7 @@ class _QuadButton(QPushButton):
     """Implements a quadrant zoom button for navigating field-of-view subregions.
 
     Each button maps to one of nine quadrant positions in a 3x3 grid. Pressing a button
-    emits the selection_changed signal for the orchestrator to handle.
+    emits the roi_selection_changed signal for the orchestrator to handle.
 
     Args:
         button_id: Zero-based index identifying this button's grid position.
@@ -360,7 +360,7 @@ class _SelectionButton(QPushButton):
     """Implements a cell selection mode button (draw, top-n, bottom-n).
 
     Controls the cell selection behavior in the main viewer. Pressing emits the
-    selection_changed signal so the orchestrator can activate the appropriate mode.
+    roi_selection_changed signal so the orchestrator can activate the appropriate mode.
 
     Args:
         button_id: Selection mode index (0=draw, 1=top n, 2=bottom n).
@@ -393,5 +393,5 @@ class _SelectionButton(QPushButton):
         self.show()
 
     def _press(self) -> None:
-        """Emits the selection_changed signal for the orchestrator to handle mode activation."""
-        self._signals.selection_changed.emit()
+        """Emits the roi_selection_changed signal for the orchestrator to handle mode activation."""
+        self._signals.roi_selection_changed.emit()

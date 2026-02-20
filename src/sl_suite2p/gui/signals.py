@@ -15,27 +15,27 @@ class GUISignals(QObject):
 
     # Session lifecycle signals.
     context_loaded = Signal()
-    """Emitted after ContextData has been populated (single-day or multi-day)."""
+    """Emitted after ContextData has been populated with runtime data (single-day or multi-day)."""
 
     context_closing = Signal()
     """Emitted when the current context is about to be unloaded."""
 
     # ROI selection signals.
-    selection_changed = Signal()
+    roi_selection_changed = Signal()
     """Emitted when chosen_index or merge_indices changed."""
 
-    roi_flipped = Signal(int)
+    roi_reclassified = Signal(int)
     """Emitted when an ROI is moved between the cell and non-cell panels."""
 
     # Data mutation signals.
     cells_reclassified = Signal()
-    """Emitted when the is_cell array has been modified."""
+    """Emitted when the cell_classification array has been modified."""
 
     rois_merged = Signal()
     """Emitted when ROIs have been merged."""
 
     classifier_applied = Signal()
-    """Emitted when the classifier has updated cell_probability."""
+    """Emitted when the classifier has updated cell_classification_probabilities."""
 
     # View change signals.
     view_mode_changed = Signal(int)
