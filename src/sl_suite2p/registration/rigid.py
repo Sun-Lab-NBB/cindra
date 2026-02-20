@@ -10,9 +10,9 @@ from .utils import (
     compute_reference_fft,
     apply_phase_correlation,
     apply_temporal_smoothing,
-    compute_spatial_taper_mask,
     compute_gaussian_frequency_filter,
 )
+from ..detection import compute_spatial_taper_mask
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

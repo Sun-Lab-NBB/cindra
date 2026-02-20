@@ -45,26 +45,21 @@ dependencies = [
     "numba>=0.64,<1",
     "scipy>=1,<2",
     "scikit-learn>=1,<2",
-    "scikit-image>=0,<1",
-    "opencv-python-headless>=4,<5",
     "natsort>=8,<9",
 
     # Image I/O
     "tifffile>=2026,<2027",
     "imagecodecs>=2026,<2027",
-    "xmltodict>=1,<2",
 
     # Visualization
     "matplotlib>=3,<4",
     "rastermap>=1,<2",
 
     # GUI
-    "qtpy>=2,<3",
-    "pyqt6>=6,<7",
+    "pyside6>=6,<7",
     "pyqtgraph>=0,<1",
     "ipywidgets>=8,<9",
     "ipython>=9,<10",
-    "ipympl>=0,<1",
 
     # CLI and MCP Server
     "click>=8,<9",

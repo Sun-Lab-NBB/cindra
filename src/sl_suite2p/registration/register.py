@@ -28,9 +28,9 @@ from .metrics import compute_pc_metrics
 from .nonrigid import (
     compute_nonrigid_shifts,
     apply_nonrigid_correction,
-    compute_registration_blocks,
     compute_nonrigid_reference_data,
 )
+from ..detection import compute_registration_blocks
 from .bidiphase_correction import compute_bidirectional_phase_offset, apply_bidirectional_phase_correction
 
 # Minimum number of frames required to compute registration quality metrics.

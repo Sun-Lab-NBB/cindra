@@ -152,41 +152,6 @@ def compute_gaussian_frequency_filter(sigma: float, height: int, width: int) -> 
     return scipy_rfft2(ifftshift(gaussian_kernel), axes=(-2, -1)).astype(np.complex64)
 
 
-@lru_cache(maxsize=5)
-def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray[np.float32]:
-    """Creates a spatial taper mask with sigmoid falloff at the edges.
-
-    The mask smoothly transitions from 1.0 in the center to ~0 at the edges, suppressing border artifacts
-    during phase correlation. The transition follows a sigmoid curve controlled by sigma. Results are cached
-    since the same mask is reused across all frames in a recording.
-
-    Args:
-        sigma: Controls the steepness of the edge falloff. Larger values produce a more gradual taper.
-        height: The height of the frames to be processed with the generated taper mask, in pixels.
-        width: The width of the frames to be processed with the generated taper mask, in pixels.
-
-    Returns:
-        The multiplicative taper mask with shape (height, width), values in range [0, 1].
-    """
-    # Creates grids of absolute distances from center for each axis. Arguments are swapped because meshgrid
-    # returns (x-varies-along-columns, y-varies-along-rows) but we need (row-distances, col-distances).
-    column_distances, row_distances = _mean_centered_meshgrid(height=width, width=height)
-
-    # Computes where taper begins: 2*sigma pixels inward from the edge. This ensures the sigmoid reaches
-    # ~0.12 at the edge (when distance equals half-width).
-    taper_start_row = np.float32(((height - 1) / 2) - 2 * sigma)
-    taper_start_column = np.float32(((width - 1) / 2) - 2 * sigma)
-
-    # Applies sigmoid function: 1.0 at center, 0.5 at taper_start, approaches 0 at edges.
-    sigma_f32 = np.float32(sigma)
-    row_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((row_distances - taper_start_row) / sigma_f32))
-    col_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((column_distances - taper_start_column) / sigma_f32))
-
-    # Combines row and column tapers multiplicatively for 2D falloff.
-    taper_mask: NDArray[np.float32] = row_taper * col_taper
-    return taper_mask
-
-
 def apply_temporal_smoothing(frames: NDArray[np.float32], sigma: float) -> NDArray[np.float32]:
     """Applies Gaussian filtering along the temporal (first) axis.
 
@@ -285,38 +250,6 @@ def compute_reference_fft(reference_image: NDArray[np.float32]) -> NDArray[np.co
         The complex conjugate of the FFT with shape (height, width // 2 + 1).
     """
     return np.conj(scipy_rfft2(reference_image, axes=(-2, -1))).astype(np.complex64)
-
-
-@lru_cache(maxsize=5)
-def compute_block_smoothing_kernel(x_block_count: int, y_block_count: int) -> NDArray[np.float32]:
-    """Computes a normalized Gaussian kernel matrix for smoothing non-rigid block shifts.
-
-    Creates a kernel that weights neighboring blocks based on their spatial distance, used to enforce smoothness
-    constraints in non-rigid registration. Results are cached since block counts don't change during a recording.
-
-    Args:
-        x_block_count: Number of blocks along the x-axis.
-        y_block_count: Number of blocks along the y-axis.
-
-    Returns:
-        The row-normalized Gaussian kernel matrix with shape (num_blocks, num_blocks).
-    """
-    # Creates 2D coordinate grids from block indices.
-    grid_y, grid_x = np.meshgrid(
-        np.arange(x_block_count, dtype=np.float32),
-        np.arange(y_block_count, dtype=np.float32),
-    )
-
-    # Reshapes to row vectors for pairwise distance computation via broadcasting.
-    grid_y = grid_y.reshape(1, -1)
-    grid_x = grid_x.reshape(1, -1)
-
-    # Computes pairwise Gaussian weights based on squared Euclidean distance.
-    kernel_matrix = np.exp(-((grid_y - grid_y.T) ** 2 + (grid_x - grid_x.T) ** 2), dtype=np.float32)
-
-    # Normalizes each column to sum to 1 for weighted averaging.
-    kernel_matrix /= kernel_matrix.sum(axis=0)
-    return kernel_matrix
 
 
 @lru_cache(maxsize=5)

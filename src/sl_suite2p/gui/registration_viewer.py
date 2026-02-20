@@ -1,17 +1,15 @@
-"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+"""Provides registration binary viewer and principal component metrics viewer windows."""
 
-# heavily modified script from a pyqt4 release
-import os
 import json
 from pathlib import Path
 
-from qtpy import QtGui, QtCore
 import numpy as np
+from PySide6 import QtGui, QtCore
 from natsort import natsorted
 from tifffile import imread
 import pyqtgraph as pg
 from scipy.ndimage import gaussian_filter1d
-from qtpy.QtWidgets import (
+from PySide6.QtWidgets import (
     QLabel,
     QStyle,
     QSlider,
@@ -27,12 +25,75 @@ from qtpy.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from . import masks, utils
-from ..io.save import compute_plane_offsets
+from ..io import compute_plane_offsets
+from .styles import WHITE_LABEL_STYLESHEET, metrics_font, metrics_font_bold
+from .roi_geometry import boundary
+from .roi_overlays import hsv2rgb
+
+# Scatter plot marker point size in pixels.
+_SCATTER_POINT_SIZE: int = 10
+
+# Size for media control button icons in pixels.
+_ICON_SIZE: int = 30
+
+# Gaussian smoothing sigma for z-position correlation filtering.
+_Z_SMOOTHING_SIGMA: int = 2
+
+# Alpha value for ROI boundary rendering.
+_BOUNDARY_ALPHA: int = 200
+
+# Divisor applied to hue values for red cell coloring.
+_RED_CELL_HUE_DIVISOR: float = 1.4
+
+# Offset added to hue values for red cell coloring.
+_RED_CELL_HUE_OFFSET: float = 0.1
+
+# Multiplier for real-time playback speed.
+_PLAYBACK_SPEED_MULTIPLIER: int = 5
+
+# Number of frames subsampled for dynamic range estimation.
+_SUBSAMPLE_FRAME_COUNT: int = 100
+
+# Minimum frame increment for arrow key navigation.
+_MIN_FRAME_DELTA: int = 5
+
+# Divisor for computing frame slider step size from total frames.
+_FRAME_DELTA_DIVISOR: int = 200
+
+# Maximum ROI index for the input validator.
+_MAX_ROI_INDEX: int = 10000
+
+# Default number of principal components.
+_DEFAULT_PC_COUNT: int = 50
+
+# Animation interval for PC viewer in milliseconds.
+_PC_ANIMATION_INTERVAL_MS: int = 200
+
+# Number of standard deviations below mean for display range lower bound.
+_DISPLAY_RANGE_LOW_SIGMA: float = 2.0
+
+# Number of standard deviations above mean for display range upper bound.
+_DISPLAY_RANGE_HIGH_SIGMA: float = 5.0
+
+# Z-stack percentile bounds for display range.
+_Z_PERCENTILE_LOW: int = 1
+_Z_PERCENTILE_HIGH: int = 99
+
+# Width for z-plane input field.
+_Z_EDIT_WIDTH: int = 30
+
+# Width for ROI index input field.
+_ROI_EDIT_WIDTH: int = 45
+
+# Width for PC number input field.
+_PC_EDIT_WIDTH: int = 40
 
 
 class BinaryPlayer(QMainWindow):
-    def __init__(self, parent=None):
+    """Provides a playback window for viewing registered binary imaging data."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initializes the binary player window and all UI components."""
         super().__init__(parent)
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.setGeometry(70, 70, 1070, 1070)
@@ -47,7 +108,6 @@ class BinaryPlayer(QMainWindow):
         self.win.move(600, 0)
         self.win.resize(1000, 500)
         self.l0.addWidget(self.win, 1, 2, 13, 14)
-        layout = self.win.ci.layout
         self.loaded = False
         self.zloaded = False
         self.zcorr = None
@@ -73,31 +133,31 @@ class BinaryPlayer(QMainWindow):
 
         # view red channel
         self.redbox = QCheckBox("view red channel")
-        self.redbox.setStyleSheet("color: white;")
+        self.redbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self.redbox.setEnabled(False)
         self.redbox.toggled.connect(self.add_red)
         self.l0.addWidget(self.redbox, 0, 5, 1, 1)
         # view masks
         self.maskbox = QCheckBox("view masks")
-        self.maskbox.setStyleSheet("color: white;")
+        self.maskbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self.maskbox.setEnabled(False)
         self.maskbox.toggled.connect(self.add_masks)
         self.l0.addWidget(self.maskbox, 0, 6, 1, 1)
         # view raw binary
         self.rawbox = QCheckBox("view raw binary")
-        self.rawbox.setStyleSheet("color: white;")
+        self.rawbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self.rawbox.setEnabled(False)
         self.rawbox.toggled.connect(self.add_raw)
         self.l0.addWidget(self.rawbox, 0, 7, 1, 1)
         # view zstack
         self.zbox = QCheckBox("view z-stack")
-        self.zbox.setStyleSheet("color: white;")
+        self.zbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self.zbox.setEnabled(False)
         self.zbox.toggled.connect(self.add_zstack)
         self.l0.addWidget(self.zbox, 0, 8, 1, 1)
 
         zlabel = QLabel("Z-plane:")
-        zlabel.setStyleSheet("color: white;")
+        zlabel.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self.l0.addWidget(zlabel, 0, 9, 1, 1)
 
         self.Zedit = QLineEdit(self)
@@ -128,11 +188,11 @@ class BinaryPlayer(QMainWindow):
 
         self.win.ci.layout.setRowStretchFactor(0, 12)
         self.movieLabel = QLabel("No ops chosen")
-        self.movieLabel.setStyleSheet("color: white;")
+        self.movieLabel.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self.movieLabel.setAlignment(QtCore.Qt.AlignCenter)
         self.nframes = 0
         self.cframe = 0
-        self.createButtons(parent)
+        self._create_buttons(parent)
         # create ROI chooser
         self.l0.addWidget(QLabel(""), 6, 0, 1, 2)
         qlabel = QLabel(self)
@@ -147,11 +207,10 @@ class BinaryPlayer(QMainWindow):
         self.l0.addWidget(self.ROIedit, 8, 0, 1, 1)
         # create frame slider
         self.frameLabel = QLabel("Current frame:")
-        self.frameLabel.setStyleSheet("color: white;")
+        self.frameLabel.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self.frameNumber = QLabel("0")
-        self.frameNumber.setStyleSheet("color: white;")
+        self.frameNumber.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self.frameSlider = QSlider(QtCore.Qt.Horizontal)
-        # self.frameSlider.setTickPosition(QSlider.TicksBelow)
         self.frameSlider.setTickInterval(5)
         self.frameSlider.setTracking(False)
         self.frameDelta = 10
@@ -162,12 +221,12 @@ class BinaryPlayer(QMainWindow):
         self.l0.addWidget(self.frameSlider, 13, 2, 14, 13)
         self.l0.addWidget(QLabel(""), 14, 1, 1, 1)
         ll = QLabel("(when paused, left/right arrow keys can move slider)")
-        ll.setStyleSheet("color: white;")
+        ll.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self.l0.addWidget(ll, 16, 0, 1, 3)
         self.frameSlider.valueChanged.connect(self.go_to_frame)
         self.l0.addWidget(self.movieLabel, 0, 0, 1, 5)
-        self.updateFrameSlider()
-        self.updateButtons()
+        self._update_frame_slider()
+        self._update_buttons()
         self.updateTimer = QtCore.QTimer()
         self.updateTimer.timeout.connect(self.next_frame)
         self.cframe = 0
@@ -181,17 +240,17 @@ class BinaryPlayer(QMainWindow):
         self.wraw_wred = False
         self.win.scene().sigMouseClicked.connect(self.plot_clicked)
         # if not a combined recording, automatically open binary
-        if hasattr(parent, "ops"):
-            if Path(parent.ops["save_path"]).name != "combined":
-                filename = os.path.abspath(os.path.join(parent.basename, "ops.npy"))
-                console.echo(message=f"Opening file: {filename}")
-                self.Fcell = parent.Fcell
-                self.stat = parent.stat
-                self.iscell = parent.iscell
-                self.Floaded = True
-                self.openFile(filename, True)
+        if hasattr(parent, "ops") and Path(parent.ops["save_path"]).name != "combined":
+            ops_path = str((Path(parent.basename) / "ops.npy").resolve())
+            console.echo(message=f"Opening file: {ops_path}")
+            self.Fcell = parent.Fcell
+            self.stat = parent.stat
+            self.iscell = parent.iscell
+            self.Floaded = True
+            self._open_file(ops_path, True)
 
-    def add_masks(self):
+    def add_masks(self) -> None:
+        """Toggles mask overlay visibility on the main and side views."""
         if self.loaded:
             if self.maskbox.isChecked():
                 self.vmain.addItem(self.maskmain)
@@ -200,7 +259,8 @@ class BinaryPlayer(QMainWindow):
                 self.vmain.removeItem(self.maskmain)
                 self.vside.removeItem(self.maskside)
 
-    def add_red(self):
+    def add_red(self) -> None:
+        """Toggles red channel display based on checkbox state."""
         if self.loaded:
             if self.redbox.isChecked():
                 self.red_on = True
@@ -208,7 +268,8 @@ class BinaryPlayer(QMainWindow):
                 self.red_on = False
             self.next_frame()
 
-    def zoom_image(self):
+    def zoom_image(self) -> None:
+        """Resets the main and side view zoom to fit the full image extent."""
         self.vmain.setRange(yRange=(0, self.LY), xRange=(0, self.LX))
         if self.raw_on or self.z_on:
             if self.z_on:
@@ -218,7 +279,8 @@ class BinaryPlayer(QMainWindow):
             self.vside.setXLink("plot1")
             self.vside.setYLink("plot1")
 
-    def add_raw(self):
+    def add_raw(self) -> None:
+        """Toggles raw binary side view display based on checkbox state."""
         if self.loaded:
             if self.rawbox.isChecked():
                 self.raw_on = True
@@ -229,7 +291,8 @@ class BinaryPlayer(QMainWindow):
                 self.win.removeItem(self.vside)
             self.next_frame()
 
-    def add_zstack(self):
+    def add_zstack(self) -> None:
+        """Toggles z-stack side view display based on checkbox state."""
         if self.loaded:
             if self.zbox.isChecked():
                 if self.rawbox.isChecked():
@@ -242,7 +305,8 @@ class BinaryPlayer(QMainWindow):
                 self.win.removeItem(self.vside)
             self.next_frame()
 
-    def next_frame(self):
+    def next_frame(self) -> None:
+        """Advances to the next frame and updates all display elements."""
         # loop after video finishes
         self.cframe += 1
         if self.cframe > self.nframes - 1:
@@ -311,15 +375,16 @@ class BinaryPlayer(QMainWindow):
                 brush=pg.mkBrush(255, 0, 0),
             )
 
-    def make_masks(self):
+    def make_masks(self) -> None:
+        """Generates ROI boundary masks and color overlays for all detected cells."""
         ncells = len(self.stat)
-        np.random.seed(seed=0)
-        allcols = np.random.random((ncells,))
+        generator = np.random.default_rng(seed=0)
+        allcols = generator.random(ncells)
         if hasattr(self, "redcell"):
             allcols = allcols / 1.4
             allcols = allcols + 0.1
             allcols[self.redcell] = 0
-        self.colors = masks.hsv2rgb(allcols)
+        self.colors = hsv2rgb(allcols)
         self.RGB = -1 * np.ones((self.LY, self.LX, 3), np.int32)
         self.cellpix = -1 * np.ones((self.LY, self.LX), np.int32)
         self.sroi = np.zeros((self.LY, self.LX), np.uint8)
@@ -330,7 +395,7 @@ class BinaryPlayer(QMainWindow):
             if not self.ops[0]["allow_overlap"]:
                 ypix = ypix[~self.stat[n]["overlap_mask"]]
                 xpix = xpix[~self.stat[n]["overlap_mask"]]
-            yext, xext = utils.boundary(ypix, xpix)
+            yext, xext = boundary(ypix, xpix)
             if len(yext) > 0:
                 goodi = (yext >= 0) & (xext >= 0) & (yext < self.LY) & (xext < self.LX)
                 self.stat[n]["yext"] = yext[goodi] + 0.5
@@ -346,7 +411,8 @@ class BinaryPlayer(QMainWindow):
         self.maskmain.setImage(self.allmasks, levels=[0, 255])
         self.maskside.setImage(self.allmasks, levels=[0, 255])
 
-    def plot_trace(self):
+    def plot_trace(self) -> None:
+        """Plots the fluorescence trace for the currently selected ROI."""
         self.p2.clear()
         self.ft = self.Fcell[self.ichosen, :]
         self.p2.plot(self.ft, pen=self.colors[self.ichosen])
@@ -356,26 +422,32 @@ class BinaryPlayer(QMainWindow):
         self.p2.setRange(xRange=(0, self.nframes), yRange=(self.ft.min(), self.ft.max()), padding=0.0)
         self.p2.setLimits(xMin=0, xMax=self.nframes)
 
-    def open(self):
+    def open(self) -> None:
+        """Opens a file dialog to select and load a single-plane ops file."""
         filename = QFileDialog.getOpenFileName(self, "Open single-plane ops.npy file or single-plane ops.json file")
         # load ops in same folder
         if filename:
             console.echo(message=f"Opening file: {filename[0]}")
-            self.openFile(filename[0], False)
+            self._open_file(filename[0], False)
 
-    def open_combined(self):
+    def open_combined(self) -> None:
+        """Opens a folder dialog to load multi-plane combined binary data."""
         filename = QFileDialog.getExistingDirectory(
             self, "Load binaries for all planes (choose folder with planeX folders)"
         )
         # load ops in same folder
         if filename:
             console.echo(message=f"Opening combined folder: {filename}")
-            self.openCombined(filename)
+            self._open_combined(filename)
 
-    def openCombined(self, save_folder):
+    def _open_combined(self, save_folder: str) -> None:
+        """Opens and loads binary data from a combined multi-plane folder."""
         try:
-            plane_folders = natsorted([f.path for f in os.scandir(save_folder) if f.is_dir() and f.name[:5] == "plane"])
-            ops1 = [np.load(os.path.join(f, "ops.npy"), allow_pickle=True).item() for f in plane_folders]
+            save_path = Path(save_folder)
+            plane_folders = natsorted(
+                [entry for entry in save_path.iterdir() if entry.is_dir() and entry.name[:5] == "plane"],
+            )
+            ops1 = [np.load(folder / "ops.npy", allow_pickle=True).item() for folder in plane_folders]
             self.LY = 0
             self.LX = 0
             self.reg_loc = []
@@ -390,13 +462,16 @@ class BinaryPlayer(QMainWindow):
             # check that all binaries still exist
             dy, dx = compute_plane_offsets(ops1)
             for ipl, ops in enumerate(ops1):
-                if os.path.isfile(ops["registered_binary_path"]):
-                    reg_file = ops["registered_binary_path"]
+                registered_path = Path(ops["registered_binary_path"])
+                if registered_path.is_file():
+                    binary_path = str(registered_path)
                 else:
-                    reg_file = os.path.abspath(os.path.join(os.path.dirname(filename), "plane%d" % ipl, "data.bin"))
-                console.echo(message=f"Registration file: {reg_file}, exists: {os.path.isfile(reg_file)}")
-                self.reg_loc.append(reg_file)
-                self.reg_file.append(open(self.reg_loc[-1], "rb"))
+                    binary_path = str((save_path / f"plane{ipl}" / "data.bin").resolve())
+                console.echo(
+                    message=f"Registration file: {binary_path}, exists: {Path(binary_path).is_file()}",
+                )
+                self.reg_loc.append(binary_path)
+                self.reg_file.append(Path(self.reg_loc[-1]).open("rb"))
                 self.Ly.append(ops["frame_height"])
                 self.Lx.append(ops["frame_width"])
                 self.dy.append(dy[ipl])
@@ -414,28 +489,30 @@ class BinaryPlayer(QMainWindow):
                 for n in range(len(self.reg_loc)):
                     self.reg_file[n].close()
                 console.echo(message="Closed binaries", level=LogLevel.SUCCESS)
-            except:
+            except Exception:
                 console.echo(message="Tried to close binaries", level=LogLevel.WARNING)
         if good:
             self.filename = save_folder
             self.ops = ops1
             self.setup_views()
 
-    def openFile(self, filename, fromgui):
+    def _open_file(self, filename: str, fromgui: bool) -> None:
+        """Opens a single-plane ops file and its associated binary data."""
         try:
-            ext = os.path.splitext(filename)[1]
+            file_path = Path(filename)
+            ext = file_path.suffix
             if ext == ".npy":
                 ops = np.load(filename, allow_pickle=True).item()
-                dirname = os.path.dirname(filename)
+                parent_dir = file_path.parent
             elif ext == ".json":
-                with open(filename) as f:
+                with file_path.open() as f:
                     ops = json.load(f)
                 ops["frame_height"] = ops["Lys"] if isinstance(ops["Lys"], int) else ops["Lys"][0]
                 ops["frame_width"] = ops["Lxs"] if isinstance(ops["Lxs"], int) else ops["Lxs"][0]
-                dirname = os.path.join(os.path.dirname(filename), "suite2p/plane0/")
-                ops["registered_binary_path"] = os.path.join(dirname, "data.bin")
+                parent_dir = file_path.parent / "suite2p" / "plane0"
+                ops["registered_binary_path"] = str(parent_dir / "data.bin")
                 nbytesread = np.int64(2 * ops["frame_height"] * ops["frame_width"])
-                ops["frame_count"] = os.path.getsize(ops["registered_binary_path"]) // nbytesread
+                ops["frame_count"] = Path(ops["registered_binary_path"]).stat().st_size // nbytesread
             self.LY = ops["frame_height"]
             self.LX = ops["frame_width"]
             self.Ly = [ops["frame_height"]]
@@ -443,11 +520,12 @@ class BinaryPlayer(QMainWindow):
             self.dx = [0]
             self.dy = [0]
 
-            if os.path.isfile(ops["registered_binary_path"]):
+            registered_path = Path(ops["registered_binary_path"])
+            if registered_path.is_file():
                 self.reg_loc = [ops["registered_binary_path"]]
             else:
-                self.reg_loc = [os.path.abspath(os.path.join(dirname, "data.bin"))]
-            self.reg_file = [open(self.reg_loc[-1], "rb")]
+                self.reg_loc = [str((parent_dir / "data.bin").resolve())]
+            self.reg_file = [Path(self.reg_loc[-1]).open("rb")]
             self.wraw = False
             self.wred = False
             self.wraw_wred = False
@@ -455,41 +533,36 @@ class BinaryPlayer(QMainWindow):
                 if self.reg_loc == ops["registered_binary_path"]:
                     self.reg_loc_raw = ops["raw_binary_path"]
                 else:
-                    self.reg_loc_raw = os.path.abspath(os.path.join(os.path.dirname(filename), "data_raw.bin"))
+                    self.reg_loc_raw = str((file_path.parent / "data_raw.bin").resolve())
                 try:
-                    self.reg_file_raw = open(self.reg_loc_raw, "rb")
+                    self.reg_file_raw = Path(self.reg_loc_raw).open("rb")
                     self.wraw = True
-                except:
+                except Exception:
                     self.wraw = False
             if "registered_binary_path_channel_2" in ops:
                 if self.reg_loc == ops["registered_binary_path"]:
                     self.reg_loc_red = ops["registered_binary_path_channel_2"]
                 else:
-                    self.reg_loc_red = os.path.abspath(os.path.join(os.path.dirname(filename), "data_chan2.bin"))
-                self.reg_file_chan2 = open(self.reg_loc_red, "rb")
+                    self.reg_loc_red = str((file_path.parent / "data_chan2.bin").resolve())
+                self.reg_file_chan2 = Path(self.reg_loc_red).open("rb")
                 self.wred = True
             if "raw_binary_path_channel_2" in ops:
                 if self.reg_loc == ops["registered_binary_path"]:
                     self.reg_loc_raw_chan2 = ops["raw_binary_path_channel_2"]
                 else:
-                    self.reg_loc_raw_chan2 = os.path.abspath(
-                        os.path.join(os.path.dirname(filename), "data_raw_chan2.bin")
-                    )
+                    self.reg_loc_raw_chan2 = str((file_path.parent / "data_raw_chan2.bin").resolve())
                 try:
-                    self.reg_file_raw_chan2 = open(self.reg_loc_raw_chan2, "rb")
+                    self.reg_file_raw_chan2 = Path(self.reg_loc_raw_chan2).open("rb")
                     self.wraw_wred = True
-                except:
+                except Exception:
                     self.wraw_wred = False
 
             if not fromgui:
-                if os.path.isfile(os.path.abspath(os.path.join(os.path.dirname(filename), "F.npy"))):
-                    self.Fcell = np.load(os.path.abspath(os.path.join(os.path.dirname(filename), "F.npy")))
-                    self.stat = np.load(
-                        os.path.abspath(os.path.join(os.path.dirname(filename), "stat.npy")), allow_pickle=True
-                    )
-                    self.iscell = np.load(
-                        os.path.abspath(os.path.join(os.path.dirname(filename), "iscell.npy")), allow_pickle=True
-                    )
+                fluorescence_path = file_path.parent / "F.npy"
+                if fluorescence_path.is_file():
+                    self.Fcell = np.load(fluorescence_path)
+                    self.stat = np.load(file_path.parent / "stat.npy", allow_pickle=True)
+                    self.iscell = np.load(file_path.parent / "iscell.npy", allow_pickle=True)
                     self.Floaded = True
                 else:
                     self.Floaded = False
@@ -508,7 +581,7 @@ class BinaryPlayer(QMainWindow):
                 for n in range(len(self.reg_loc)):
                     self.reg_file[n].close()
                 console.echo(message="Closed binaries", level=LogLevel.SUCCESS)
-            except:
+            except Exception:
                 console.echo(message="Tried to close binaries", level=LogLevel.WARNING)
             good = False
         if good:
@@ -516,14 +589,15 @@ class BinaryPlayer(QMainWindow):
             self.ops = [ops]
             self.setup_views()
 
-    def setup_views(self):
+    def setup_views(self) -> None:
+        """Configures all plot views and display parameters after loading data."""
         self.p1.clear()
         self.p2.clear()
         self.ichosen = 0
         self.ROIedit.setText("0")
         # get scaling from 100 random frames
         ops = self.ops[-1]
-        frames = subsample_frames(ops, np.minimum(ops["frame_count"] - 1, 100), self.reg_loc[-1])
+        frames = _subsample_frames(ops, np.minimum(ops["frame_count"] - 1, 100), self.reg_loc[-1])
         self.srange = frames.mean() + frames.std() * np.array([-2, 5])
 
         self.movieLabel.setText(self.reg_loc[-1])
@@ -547,8 +621,8 @@ class BinaryPlayer(QMainWindow):
         self.frameSlider.setSingleStep(self.frameDelta)
         self.currentMovieDirectory = QtCore.QFileInfo(self.filename).path()
         if self.nframes > 0:
-            self.updateFrameSlider()
-            self.updateButtons()
+            self._update_frame_slider()
+            self._update_buttons()
         # plot ops X-Y offsets
         if "rigid_y_offsets" in ops:
             self.yoff = ops["rigid_y_offsets"]
@@ -591,31 +665,31 @@ class BinaryPlayer(QMainWindow):
         self.loaded = True
         self.next_frame()
 
-    def keyPressEvent(self, event):
-        bid = -1
-        if self.playButton.isEnabled():
-            if event.modifiers() != QtCore.Qt.ShiftModifier:
-                if event.key() == QtCore.Qt.Key_Left:
-                    self.cframe -= self.frameDelta
-                    self.cframe = np.maximum(0, np.minimum(self.nframes - 1, self.cframe))
-                    self.frameSlider.setValue(self.cframe)
-                elif event.key() == QtCore.Qt.Key_Right:
-                    self.cframe += self.frameDelta
-                    self.cframe = np.maximum(0, np.minimum(self.nframes - 1, self.cframe))
-                    self.frameSlider.setValue(self.cframe)
-        if event.modifiers() != QtCore.Qt.ShiftModifier:
-            if event.key() == QtCore.Qt.Key_Space:
-                if self.playButton.isEnabled():
-                    # then play
-                    self.start()
-                else:
-                    self.pause()
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
+        """Handles keyboard navigation for frame stepping and playback control."""
+        if self.playButton.isEnabled() and event.modifiers() != QtCore.Qt.ShiftModifier:
+            if event.key() == QtCore.Qt.Key_Left:
+                self.cframe -= self.frameDelta
+                self.cframe = np.maximum(0, np.minimum(self.nframes - 1, self.cframe))
+                self.frameSlider.setValue(self.cframe)
+            elif event.key() == QtCore.Qt.Key_Right:
+                self.cframe += self.frameDelta
+                self.cframe = np.maximum(0, np.minimum(self.nframes - 1, self.cframe))
+                self.frameSlider.setValue(self.cframe)
+        if event.modifiers() != QtCore.Qt.ShiftModifier and event.key() == QtCore.Qt.Key_Space:
+            if self.playButton.isEnabled():
+                # then play
+                self.start()
+            else:
+                self.pause()
 
-    def number_chosen(self):
+    def number_chosen(self) -> None:
+        """Processes the ROI number entered by the user."""
         self.ichosen = int(self.ROIedit.text())
         self.cell_chosen()
 
-    def cell_chosen(self):
+    def cell_chosen(self) -> None:
+        """Updates the display to highlight and trace the currently selected cell."""
         if self.Floaded:
             self.cell_mask()
             self.ROIedit.setText(str(self.ichosen))
@@ -634,13 +708,14 @@ class BinaryPlayer(QMainWindow):
             self.jump_to_frame()
             self.show()
 
-    def plot_clicked(self, event):
+    def plot_clicked(self, event: object) -> None:
+        """Handles mouse click events on plots for frame navigation and cell selection."""
         items = self.win.scene().items(event.scenePos())
         posx = 0
         posy = 0
         iplot = 0
         zoom = False
-        zoomImg = False
+        _zoom_image = False
         choose = False
         if self.loaded:
             for x in items:
@@ -654,7 +729,7 @@ class BinaryPlayer(QMainWindow):
                     pos = vb.mapSceneToView(event.scenePos())
                     posx = pos.x()
                     iplot = 2
-                elif x == self.vmain or x == self.vside:
+                elif x in (self.vmain, self.vside):
                     if event.button() == 1:
                         if event.double():
                             self.zoom_image()
@@ -662,28 +737,29 @@ class BinaryPlayer(QMainWindow):
                             pos = x.mapSceneToView(event.scenePos())
                             posy = int(pos.x())
                             posx = int(pos.y())
-                            if posy >= 0 and posy < self.LX and posx >= 0 and posx < self.LY:
-                                if self.cellpix[posx, posy] > -1:
-                                    self.ichosen = self.cellpix[posx, posy]
-                                    self.cell_chosen()
-                if iplot == 1 or iplot == 2:
-                    if event.button() == 1:
-                        if event.double():
-                            zoom = True
-                        else:
-                            choose = True
+                            if (
+                                0 <= posy < self.LX
+                                and 0 <= posx < self.LY
+                                and self.cellpix[posx, posy] > -1
+                            ):
+                                self.ichosen = self.cellpix[posx, posy]
+                                self.cell_chosen()
+                if iplot in (1, 2) and event.button() == 1:
+                    if event.double():
+                        zoom = True
+                    else:
+                        choose = True
         if zoom:
             self.p1.setRange(xRange=(0, self.nframes))
             self.p2.setRange(xRange=(0, self.nframes))
             self.p3.setRange(xRange=(0, self.nframes))
 
-        if choose:
-            if self.playButton.isEnabled():
-                self.cframe = np.maximum(0, np.minimum(self.nframes - 1, int(np.round(posx))))
-                self.frameSlider.setValue(self.cframe)
-                # self.jump_to_frame()
+        if choose and self.playButton.isEnabled():
+            self.cframe = np.maximum(0, np.minimum(self.nframes - 1, int(np.round(posx))))
+            self.frameSlider.setValue(self.cframe)
 
-    def load_zstack(self):
+    def load_zstack(self) -> None:
+        """Opens a file dialog to load a z-stack TIFF and initializes z-position tracking."""
         name = QFileDialog.getOpenFileName(self, "Open zstack", filter="*.tif")
         self.fname = name[0]
         try:
@@ -722,40 +798,42 @@ class BinaryPlayer(QMainWindow):
         except Exception as e:
             console.echo(message=f"ERROR: {e}", level=LogLevel.ERROR)
 
-    def cell_mask(self):
+    def cell_mask(self) -> None:
+        """Extracts the boundary coordinates for the currently selected cell."""
         self.yext = self.stat[self.ichosen]["yext"]
         self.xext = self.stat[self.ichosen]["xext"]
 
-    def go_to_frame(self):
+    def go_to_frame(self) -> None:
+        """Seeks to the frame indicated by the frame slider position."""
         self.cframe = int(self.frameSlider.value())
         self.jump_to_frame()
 
-    def fitToWindow(self):
-        self.movieLabel.setScaledContents(self.fitCheckBox.isChecked())
-
-    def updateFrameSlider(self):
+    def _update_frame_slider(self) -> None:
+        """Configures the frame slider range and enables it."""
         self.frameSlider.setMaximum(self.nframes - 1)
         self.frameSlider.setMinimum(0)
         self.frameLabel.setEnabled(True)
         self.frameSlider.setEnabled(True)
 
-    def updateButtons(self):
+    def _update_buttons(self) -> None:
+        """Sets the initial enabled state for play and pause buttons."""
         self.playButton.setEnabled(True)
         self.pauseButton.setEnabled(False)
         self.pauseButton.setChecked(True)
 
-    def createButtons(self, parent):
-        iconSize = QtCore.QSize(30, 30)
-        openButton = QPushButton("load ops.npy")
-        openButton.setToolTip("Open single-plane ops.npy")
-        openButton.clicked.connect(self.open)
+    def _create_buttons(self, parent: QWidget | None) -> None:
+        """Creates and lays out all control buttons for the player window."""
+        icon_size = QtCore.QSize(30, 30)
+        open_button = QPushButton("load ops.npy")
+        open_button.setToolTip("Open single-plane ops.npy")
+        open_button.clicked.connect(self.open)
 
-        openButton2 = QPushButton("load folder")
-        openButton2.setToolTip("Choose a folder with planeX folders to load together")
-        openButton2.clicked.connect(self.open_combined)
+        open_combined_button = QPushButton("load folder")
+        open_combined_button.setToolTip("Choose a folder with planeX folders to load together")
+        open_combined_button.clicked.connect(self.open_combined)
 
-        loadZ = QPushButton("load z-stack tiff")
-        loadZ.clicked.connect(self.load_zstack)
+        load_z_button = QPushButton("load z-stack tiff")
+        load_z_button.clicked.connect(self.load_zstack)
 
         self.computeZ = QPushButton("compute z position")
         self.computeZ.setEnabled(False)
@@ -763,7 +841,7 @@ class BinaryPlayer(QMainWindow):
 
         self.playButton = QToolButton()
         self.playButton.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        self.playButton.setIconSize(iconSize)
+        self.playButton.setIconSize(icon_size)
         self.playButton.setToolTip("Play")
         self.playButton.setCheckable(True)
         self.playButton.clicked.connect(self.start)
@@ -771,7 +849,7 @@ class BinaryPlayer(QMainWindow):
         self.pauseButton = QToolButton()
         self.pauseButton.setCheckable(True)
         self.pauseButton.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
-        self.pauseButton.setIconSize(iconSize)
+        self.pauseButton.setIconSize(icon_size)
         self.pauseButton.setToolTip("Pause")
         self.pauseButton.clicked.connect(self.pause)
 
@@ -780,24 +858,24 @@ class BinaryPlayer(QMainWindow):
         btns.addButton(self.pauseButton, 1)
         btns.setExclusive(True)
 
-        quitButton = QToolButton()
-        quitButton.setIcon(self.style().standardIcon(QStyle.SP_DialogCloseButton))
-        quitButton.setIconSize(iconSize)
-        quitButton.setToolTip("Quit")
-        quitButton.clicked.connect(self.close)
+        quit_button = QToolButton()
+        quit_button.setIcon(self.style().standardIcon(QStyle.SP_DialogCloseButton))
+        quit_button.setIconSize(icon_size)
+        quit_button.setToolTip("Quit")
+        quit_button.clicked.connect(self.close)
 
-        self.l0.addWidget(openButton, 1, 0, 1, 2)
-        self.l0.addWidget(openButton2, 2, 0, 1, 2)
-        self.l0.addWidget(loadZ, 3, 0, 1, 2)
+        self.l0.addWidget(open_button, 1, 0, 1, 2)
+        self.l0.addWidget(open_combined_button, 2, 0, 1, 2)
+        self.l0.addWidget(load_z_button, 3, 0, 1, 2)
         self.l0.addWidget(self.computeZ, 4, 0, 1, 2)
         self.l0.addWidget(self.playButton, 15, 0, 1, 1)
         self.l0.addWidget(self.pauseButton, 15, 1, 1, 1)
-        # self.l0.addWidget(quitButton,0,1,1,1)
         self.playButton.setEnabled(False)
         self.pauseButton.setEnabled(False)
         self.pauseButton.setChecked(True)
 
-    def jump_to_frame(self):
+    def jump_to_frame(self) -> None:
+        """Seeks all binary file handles to an absolute frame position and displays it."""
         if self.playButton.isEnabled():
             self.cframe = np.maximum(0, np.minimum(self.nframes - 1, self.cframe))
             self.cframe = int(self.cframe)
@@ -813,7 +891,8 @@ class BinaryPlayer(QMainWindow):
             self.cframe -= 1
             self.next_frame()
 
-    def start(self):
+    def start(self) -> None:
+        """Starts video playback by enabling the frame update timer."""
         if self.cframe < self.nframes - 1:
             console.echo(message="Playing video...")
             self.playButton.setEnabled(False)
@@ -821,50 +900,27 @@ class BinaryPlayer(QMainWindow):
             self.frameSlider.setEnabled(False)
             self.updateTimer.start(self.time_step)
 
-    def pause(self):
+    def pause(self) -> None:
+        """Pauses video playback and re-enables manual frame navigation."""
         self.updateTimer.stop()
         self.playButton.setEnabled(True)
         self.pauseButton.setEnabled(False)
         self.frameSlider.setEnabled(True)
         console.echo(message="Video paused")
 
-    def compute_z(self, parent):
-        # TODO: Refactor to use RuntimeContext. The compute_z_position function now requires a RuntimeContext
-        # instead of individual parameters. This GUI method needs to be updated to either:
-        # 1. Construct a RuntimeContext from the legacy ops dictionary, or
-        # 2. Load the RuntimeContext from disk if available
-        # For now, this functionality is broken until the GUI is refactored to use the new data architecture.
+    def compute_z(self, parent: QWidget | None) -> None:  # noqa: ARG002
+        """Computes z-position correlations for the current session.
+
+        Currently disabled pending refactor to use RuntimeContext instead of legacy ops dictionary.
+        """
         console.echo(
             message="Z-position computation is temporarily disabled. The GUI needs to be refactored to use "
             "RuntimeContext instead of the legacy ops dictionary.",
             level="WARNING",
         )
 
-        # Legacy code preserved for reference during refactoring:
-        # ops = self.ops[0]
-        # registered_binary_path = Path(ops["registered_binary_path"])
-        # frame_height = ops["frame_height"]
-        # frame_width = ops["frame_width"]
-        # frame_count = ops["frame_count"]
-        # batch_size = ops.get("batch_size", 100)
-        # one_photon_mode = ops.get("one_p_reg", False)
-        # pre_smoothing_sigma = float(ops.get("pre_smooth", 0))
-        # spatial_highpass_window = int(ops.get("spatial_hp_reg", 42))
-        # spatial_smoothing_sigma = float(ops.get("smooth_sigma", 1.15))
-        # if one_photon_mode:
-        #     edge_taper_slope = float(ops.get("spatial_taper", 40.0))
-        # else:
-        #     edge_taper_slope = 3.0 * spatial_smoothing_sigma
-        # maximum_shift_fraction = float(ops.get("maxregshift", 0.1))
-        # temporal_smoothing_sigma = float(ops.get("smooth_sigma_time", 0.0))
-        # self.zcorr = registration.compute_z_position(...)
-        # self.zmax = np.argmax(gaussian_filter1d(self.zcorr.T.copy(), 2, axis=1), axis=1)
-        # zcorr_path = Path(self.filename).parent / "zcorr.npy"
-        # np.save(zcorr_path, self.zcorr)
-        # console.echo(message=f"Z-position correlations saved to: {zcorr_path}")
-        # self.plot_zcorr()
-
-    def plot_zcorr(self):
+    def plot_zcorr(self) -> None:
+        """Plots the z-position correlation trace on the z-position plot."""
         self.p3.clear()
         self.p3.plot(self.zmax, pen="r")
         self.p3.addItem(self.scatter3)
@@ -873,26 +929,38 @@ class BinaryPlayer(QMainWindow):
         self.p3.setXLink("plot_shift")
 
 
-def subsample_frames(ops, nsamps, reg_loc):
-    nFrames = ops["frame_count"]
-    Ly = ops["frame_height"]
-    Lx = ops["frame_width"]
-    frames = np.zeros((nsamps, Ly, Lx), dtype="int16")
-    nbytesread = 2 * Ly * Lx
-    istart = np.linspace(0, nFrames, 1 + nsamps).astype("int64")
-    reg_file = open(reg_loc, "rb")
-    for j in range(nsamps):
-        reg_file.seek(nbytesread * istart[j], 0)
-        buff = reg_file.read(nbytesread)
-        data = np.frombuffer(buff, dtype=np.int16, offset=0)
-        buff = []
-        frames[j, :, :] = np.reshape(data, (Ly, Lx))
-    reg_file.close()
+def _subsample_frames(ops: dict, sample_count: int, registration_path: str) -> np.ndarray:
+    """Reads evenly-spaced frames from a binary file for dynamic range estimation.
+
+    Args:
+        ops: Operations dictionary containing frame dimensions and count.
+        sample_count: Number of frames to subsample.
+        registration_path: Path to the registered binary file.
+
+    Returns:
+        Array of subsampled frames with shape (sample_count, height, width).
+    """
+    frame_count = ops["frame_count"]
+    height = ops["frame_height"]
+    width = ops["frame_width"]
+    frames = np.zeros((sample_count, height, width), dtype=np.int16)
+    bytes_per_frame = 2 * height * width
+    start_indices = np.linspace(0, frame_count, 1 + sample_count).astype(np.int64)
+    binary_file = Path(registration_path).open("rb")
+    for index in range(sample_count):
+        binary_file.seek(bytes_per_frame * start_indices[index], 0)
+        buffer = binary_file.read(bytes_per_frame)
+        data = np.frombuffer(buffer, dtype=np.int16, offset=0)
+        frames[index, :, :] = np.reshape(data, (height, width))
+    binary_file.close()
     return frames
 
 
 class PCViewer(QMainWindow):
-    def __init__(self, parent=None):
+    """Provides a viewer window for principal component registration metrics."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initializes the PC viewer window and all UI components."""
         super().__init__(parent)
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.setGeometry(70, 70, 1300, 800)
@@ -900,15 +968,12 @@ class PCViewer(QMainWindow):
         self.cwidget = QWidget(self)
         self.setCentralWidget(self.cwidget)
         self.l0 = QGridLayout()
-        # layout = QtGui.QFormLayout()
         self.cwidget.setLayout(self.l0)
 
-        # self.p0 = pg.ViewBox(lockAspect=False,name="plot1",border=[100,100,100],invertY=True)
         self.win = pg.GraphicsLayoutWidget()
         # --- cells image
         self.win = pg.GraphicsLayoutWidget()
         self.l0.addWidget(self.win, 0, 2, 13, 14)
-        layout = self.win.ci.layout
         # A plot area (ViewBox + axes) for displaying the image
         self.p3 = self.win.addPlot(row=0, col=0)
         self.p3.setMouseEnabled(x=False, y=False)
@@ -942,12 +1007,11 @@ class PCViewer(QMainWindow):
         self.PCedit.returnPressed.connect(self.plot_frame)
         self.PCedit.textEdited.connect(self.pause)
         qlabel = QLabel("PC: ")
-        boldfont = QtGui.QFont("Arial", 14, QtGui.QFont.Bold)
-        bigfont = QtGui.QFont("Arial", 14)
+        boldfont = metrics_font_bold()
+        bigfont = metrics_font()
         qlabel.setFont(boldfont)
         self.PCedit.setFont(bigfont)
-        qlabel.setStyleSheet("color: white;")
-        # qlabel.setAlignment(QtCore.Qt.AlignRight)
+        qlabel.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self.l0.addWidget(QLabel(""), 1, 0, 1, 1)
         self.l0.addWidget(qlabel, 2, 0, 1, 1)
         self.l0.addWidget(self.PCedit, 2, 1, 1, 1)
@@ -955,11 +1019,11 @@ class PCViewer(QMainWindow):
         self.titles = []
         for j in range(3):
             num1 = QLabel("")
-            num1.setStyleSheet("color: white;")
+            num1.setStyleSheet(WHITE_LABEL_STYLESHEET)
             self.l0.addWidget(num1, 3 + j, 0, 1, 2)
             self.nums.append(num1)
             t1 = QLabel("")
-            t1.setStyleSheet("color: white;")
+            t1.setStyleSheet(WHITE_LABEL_STYLESHEET)
             self.l0.addWidget(t1, 12, 4 + j * 4, 1, 2)
             self.titles.append(t1)
         self.loaded = False
@@ -969,31 +1033,30 @@ class PCViewer(QMainWindow):
         self.l0.addWidget(QLabel(""), 7, 0, 1, 1)
         self.l0.setRowStretch(7, 1)
         self.cframe = 0
-        self.createButtons()
+        self._create_buttons()
         self.nPCs = 50
         self.PCedit.setValidator(QtGui.QIntValidator(1, self.nPCs))
         # play button
         self.updateTimer = QtCore.QTimer()
         self.updateTimer.timeout.connect(self.next_frame)
-        # self.win.scene().sigMouseClicked.connect(self.plot_clicked)
         # if not a combined recording, automatically open binary
-        if hasattr(parent, "ops"):
-            if Path(parent.ops["save_path"]).name != "combined":
-                filename = os.path.abspath(os.path.join(parent.basename, "ops.npy"))
-                console.echo(message=f"Opening ops file: {filename}")
-                self.openFile(filename)
+        if hasattr(parent, "ops") and Path(parent.ops["save_path"]).name != "combined":
+            ops_path = str((Path(parent.basename) / "ops.npy").resolve())
+            console.echo(message=f"Opening ops file: {ops_path}")
+            self._open_file(ops_path)
 
-    def createButtons(self):
-        iconSize = QtCore.QSize(30, 30)
-        openButton = QToolButton()
-        openButton.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
-        openButton.setIconSize(iconSize)
-        openButton.setToolTip("Open ops file")
-        openButton.clicked.connect(self.open)
+    def _create_buttons(self) -> None:
+        """Creates and lays out the open, play, and pause buttons."""
+        icon_size = QtCore.QSize(30, 30)
+        open_button = QToolButton()
+        open_button.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        open_button.setIconSize(icon_size)
+        open_button.setToolTip("Open ops file")
+        open_button.clicked.connect(self.open)
 
         self.playButton = QToolButton()
         self.playButton.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        self.playButton.setIconSize(iconSize)
+        self.playButton.setIconSize(icon_size)
         self.playButton.setToolTip("Play")
         self.playButton.setCheckable(True)
         self.playButton.clicked.connect(self.start)
@@ -1001,7 +1064,7 @@ class PCViewer(QMainWindow):
         self.pauseButton = QToolButton()
         self.pauseButton.setCheckable(True)
         self.pauseButton.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
-        self.pauseButton.setIconSize(iconSize)
+        self.pauseButton.setIconSize(icon_size)
         self.pauseButton.setToolTip("Pause")
         self.pauseButton.clicked.connect(self.pause)
 
@@ -1010,34 +1073,37 @@ class PCViewer(QMainWindow):
         btns.addButton(self.pauseButton, 1)
         btns.setExclusive(True)
 
-        self.l0.addWidget(openButton, 0, 0, 1, 1)
+        self.l0.addWidget(open_button, 0, 0, 1, 1)
         self.l0.addWidget(self.playButton, 14, 12, 1, 1)
         self.l0.addWidget(self.pauseButton, 14, 13, 1, 1)
-        # self.l0.addWidget(quitButton,0,1,1,1)
         self.playButton.setEnabled(False)
         self.pauseButton.setEnabled(False)
         self.pauseButton.setChecked(True)
 
-    def start(self):
+    def start(self) -> None:
+        """Starts PC animation playback."""
         if self.loaded:
             self.playButton.setEnabled(False)
             self.pauseButton.setEnabled(True)
             self.updateTimer.start(200)
 
-    def pause(self):
+    def pause(self) -> None:
+        """Pauses PC animation playback."""
         self.updateTimer.stop()
         self.playButton.setEnabled(True)
         self.pauseButton.setChecked(True)
         self.pauseButton.setEnabled(False)
 
-    def open(self):
+    def open(self) -> None:
+        """Opens a file dialog to select and load a single-plane ops file."""
         filename = QFileDialog.getOpenFileName(self, "Open single-plane ops.npy file", filter="ops*.npy")
         # load ops in same folder
         if filename:
             console.echo(message=f"Opening ops file: {filename[0]}")
-            self.openFile(filename[0])
+            self._open_file(filename[0])
 
-    def openFile(self, filename):
+    def _open_file(self, filename: str) -> None:
+        """Loads principal component data from the specified ops file."""
         try:
             ops = np.load(filename, allow_pickle=True).item()
             self.PC = ops["regPC"]
@@ -1064,10 +1130,11 @@ class PCViewer(QMainWindow):
             self.plot_frame()
             self.playButton.setEnabled(True)
 
-    def next_frame(self):
-        iPC = int(self.PCedit.text()) - 1
-        pc1 = self.PC[1, iPC, :, :]
-        pc0 = self.PC[0, iPC, :, :]
+    def next_frame(self) -> None:
+        """Advances the PC animation to the next frame, toggling between top and bottom halves."""
+        pc_index = int(self.PCedit.text()) - 1
+        pc1 = self.PC[1, pc_index, :, :]
+        pc0 = self.PC[0, pc_index, :, :]
         if self.cframe == 0:
             self.img2.setImage(np.tile(pc0[:, :, np.newaxis], (1, 1, 3)))
             self.titles[2].setText("top")
@@ -1079,14 +1146,15 @@ class PCViewer(QMainWindow):
         self.img2.setLevels([pc0.min(), pc0.max()])
         self.cframe = 1 - self.cframe
 
-    def plot_frame(self):
+    def plot_frame(self) -> None:
+        """Renders all PC visualizations for the currently selected principal component."""
         if self.loaded:
             self.titles[0].setText("difference")
             self.titles[1].setText("merged")
             self.titles[2].setText("top")
-            iPC = int(self.PCedit.text()) - 1
-            pc1 = self.PC[1, iPC, :, :]
-            pc0 = self.PC[0, iPC, :, :]
+            pc_index = int(self.PCedit.text()) - 1
+            pc1 = self.PC[1, pc_index, :, :]
+            pc0 = self.PC[0, pc_index, :, :]
             diff = pc1[:, :, np.newaxis] - pc0[:, :, np.newaxis]
             diff /= np.abs(diff).max() * 2
             diff += 0.5
@@ -1109,30 +1177,34 @@ class PCViewer(QMainWindow):
             if not hasattr(self, "leg"):
                 self.leg = pg.LegendItem((100, 60), offset=(350, 30))
                 self.leg.setParentItem(self.p3)
-                drawLeg = True
+                draw_legend = True
             else:
-                drawLeg = False
+                draw_legend = False
             for j in range(3):
                 cj = self.p3.plot(np.arange(1, self.nPCs + 1), self.DX[:, j], pen=p[j])
-                if drawLeg:
+                if draw_legend:
                     self.leg.addItem(cj, ptitle[j])
-                self.nums[j].setText("%s: %1.3f" % (ptitle[j], self.DX[iPC, j]))
+                self.nums[j].setText(f"{ptitle[j]}: {self.DX[pc_index, j]:.3f}")
             self.scatter = pg.ScatterPlotItem()
             self.p3.addItem(self.scatter)
             self.scatter.setData(
-                [iPC + 1, iPC + 1, iPC + 1], self.DX[iPC, :].tolist(), size=10, brush=pg.mkBrush(255, 255, 255)
+                [pc_index + 1, pc_index + 1, pc_index + 1],
+                self.DX[pc_index, :].tolist(),
+                size=_SCATTER_POINT_SIZE,
+                brush=pg.mkBrush(255, 255, 255),
             )
             self.p3.setLabel("left", "pixel shift")
             self.p3.setLabel("bottom", "PC #")
 
             self.p4.clear()
-            self.p4.plot(self.tPC[:, iPC])
+            self.p4.plot(self.tPC[:, pc_index])
             self.p4.setLabel("left", "magnitude")
             self.p4.setLabel("bottom", "time")
             self.show()
             self.zoom_plot()
 
-    def zoom_plot(self):
+    def zoom_plot(self) -> None:
+        """Resets all PC image view ranges to fit the full image extent."""
         self.p0.setXRange(0, self.Lx)
         self.p0.setYRange(0, self.Ly)
         self.p1.setXRange(0, self.Lx)
@@ -1140,22 +1212,16 @@ class PCViewer(QMainWindow):
         self.p2.setXRange(0, self.Lx)
         self.p2.setYRange(0, self.Ly)
 
-    def plot_clicked(self, event):
-        items = self.win.scene().items(event.scenePos())
-        posx = 0
-        posy = 0
-        iplot = 0
-        zoom = False
+    def plot_clicked(self, event: object) -> None:
+        """Handles double-click to zoom the PC image plots."""
         if self.loaded:
+            items = self.win.scene().items(event.scenePos())
             for x in items:
-                if x == self.p0 or x == self.p1 or x == self.p2:
-                    if event.button() == 1:
-                        if event.double():
-                            zoom = True
-                            self.zoom_plot()
+                if x in (self.p0, self.p1, self.p2) and event.button() == 1 and event.double():
+                    self.zoom_plot()
 
-    def keyPressEvent(self, event):
-        bid = -1
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
+        """Handles keyboard navigation for PC stepping and animation control."""
         if event.modifiers() != QtCore.Qt.ShiftModifier:
             if event.key() == QtCore.Qt.Key_Left:
                 self.pause()

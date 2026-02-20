@@ -1,16 +1,14 @@
-"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+"""Provides the pipeline run configuration dialog and supporting helper widgets."""
 
-import os
 import sys
-import glob
 import json
 import shutil
-import pathlib
-from datetime import datetime
+from pathlib import Path
+from datetime import UTC, datetime
 
-from qtpy import QtGui, QtCore
 import numpy as np
-from qtpy.QtWidgets import (
+from PySide6 import QtGui, QtCore
+from PySide6.QtWidgets import (
     QLabel,
     QDialog,
     QWidget,
@@ -24,14 +22,16 @@ from qtpy.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from . import io
+from .styles import header_font
 from ..dataclasses import generate_default_ops
-
-### ---- this file contains helper functions for GUI and the RUN window ---- ###
+from .context_loader import load_proc
 
 
 class TextChooser(QDialog):
-    def __init__(self, parent=None):
+    """Prompt dialog for entering an HDF5 dataset key."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize the HDF5 key chooser dialog."""
         super().__init__(parent)
         self.setGeometry(300, 300, 180, 100)
         self.setWindowTitle("h5 key")
@@ -45,14 +45,17 @@ class TextChooser(QDialog):
         done.clicked.connect(self.exit_list)
         layout.addWidget(done, 2, 1, 1, 1)
 
-    def exit_list(self):
+    def exit_list(self) -> None:
+        """Store the entered key and accept the dialog."""
         self.h5_key = self.qedit.text()
         self.accept()
 
 
-### custom QDialog which allows user to fill in ops and run suite2p!
 class RunWindow(QDialog):
-    def __init__(self, parent=None):
+    """Pipeline run configuration dialog for suite2p processing."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize the run configuration dialog and load default ops."""
         super().__init__(parent)
         self.setGeometry(10, 10, 1500, 900)
         self.setWindowTitle("Choose run options (hold mouse over parameters to see descriptions)")
@@ -64,7 +67,7 @@ class RunWindow(QDialog):
         self.win.setLayout(self.layout)
         # initial ops values
         self.opsfile = parent.opsuser
-        self.ops_path = os.fspath(pathlib.Path.home().joinpath(".suite2p").joinpath("ops").absolute())
+        self.ops_path = Path.home() / ".suite2p" / "ops"
         try:
             self.reset_ops()
             console.echo(message="Loaded default ops", level=LogLevel.SUCCESS)
@@ -73,13 +76,11 @@ class RunWindow(QDialog):
             console.echo(message="Could not load default ops, using built-in ops settings", level=LogLevel.WARNING)
             self.ops = generate_default_ops()
 
-        # remove any remaining ops files
-        fs = glob.glob("ops*.npy")
-        for f in fs:
-            os.remove(f)
-        fs = glob.glob("db*.npy")
-        for f in fs:
-            os.remove(f)
+        # Removes any remaining ops files from the current directory.
+        for ops_file in Path.cwd().glob("ops*.npy"):
+            ops_file.unlink()
+        for db_file in Path.cwd().glob("db*.npy"):
+            db_file.unlink()
 
         self.data_path = ""
         self.save_path = ""
@@ -88,7 +89,8 @@ class RunWindow(QDialog):
         self.f = 0
         self.create_buttons()
 
-    def reset_ops(self):
+    def reset_ops(self) -> None:
+        """Reload ops from disk and merge with built-in defaults."""
         self.ops = np.load(self.opsfile, allow_pickle=True).item()
         ops0 = generate_default_ops()
         self.ops = {**ops0, **self.ops}
@@ -96,7 +98,8 @@ class RunWindow(QDialog):
             for k in range(len(self.editlist)):
                 self.editlist[k].set_text(self.ops)
 
-    def create_buttons(self):
+    def create_buttons(self) -> None:
+        """Build all parameter editing widgets, section labels, and action buttons."""
         self.intkeys = [
             "nplanes",
             "nchannels",
@@ -184,7 +187,8 @@ class RunWindow(QDialog):
             "whether or not to compute bidirectional phase offset of recording (from line scanning)",
             "set a fixed number (in pixels) for the bidirectional phase offset",
             "process each plane with a separate job on a computing cluster",
-            "ignore flyback planes 0-indexed separated by a comma e.g. '0,10'; '-1' means no planes ignored so all planes processed",
+            "ignore flyback planes 0-indexed separated by a comma e.g. '0,10'; "
+            "'-1' means no planes ignored so all planes processed",
             "apply ROI classifier before signal extraction with probability threshold (set to 0 to turn off)",
             "um/pixels in X / um/pixels in Y (for correct aspect ratio in GUI)",
             "if 1, registration is performed if it wasn't performed already",
@@ -194,17 +198,20 @@ class RunWindow(QDialog):
             "gaussian smoothing after phase corr: 1.15 good for 2P recordings, recommend 2-5 for 1P recordings",
             "gaussian smoothing in time, useful for low SNR data",
             "max allowed registration shift, as a fraction of frame max(width and height)",
-            "this parameter determines which frames to exclude when determining cropped frame size - set it smaller to exclude more frames",
+            "this parameter determines which frames to exclude when determining cropped frame size "
+            "- set it smaller to exclude more frames",
             "if 1, unregistered binary is kept in a separate file data_raw.bin",
             "run registration twice (useful if data is really noisy), *keep_movie_raw must be 1*",
             "whether to use nonrigid registration (splits FOV into blocks of size block_size)",
             "block size in number of pixels in Y and X (two numbers separated by a comma)",
-            "if any nonrigid block is below this threshold, it gets smoothed until above this threshold. 1.0 results in no smoothing",
+            "if any nonrigid block is below this threshold, it gets smoothed until above this threshold. "
+            "1.0 results in no smoothing",
             "maximum *pixel* shift allowed for nonrigid, relative to rigid",
             "whether to perform high-pass filtering and tapering for registration (necessary for 1P recordings)",
             "window for spatial high-pass filtering before registration",
             "whether to smooth before high-pass filtering before registration",
-            "how much to ignore on edges (important for vignetted windows, for FFT padding do not set BELOW 3*smooth_sigma)",
+            "how much to ignore on edges (important for vignetted windows, "
+            "for FFT padding do not set BELOW 3*smooth_sigma)",
             "if 1, run cell (ROI) detection",
             "if 1, run PCA denoising on binned movie to improve cell detection",
             "choose size of ROIs: 0 = multi-scale; 1 = 6 pixels, 2 = 12, 3 = 24, 4 = 48",
@@ -214,7 +221,8 @@ class RunWindow(QDialog):
             "temporal running mean subtraction with window of size 'high_pass' (use low values for 1P)",
             "spatial high-pass filter size (used to remove spatially-correlated neuropil)",
             "whether or not to extract neuropil; if 0, Fneu is set to 0",
-            "allow shared pixels to be used for fluorescence extraction from overlapping ROIs (otherwise excluded from both ROIs)",
+            "allow shared pixels to be used for fluorescence extraction from overlapping ROIs "
+            "(otherwise excluded from both ROIs)",
             "number of pixels between ROI and neuropil donut",
             "minimum number of pixels in the neuropil",
             "if 1, crop dendrites for cell classification stats like compactness",
@@ -224,27 +232,24 @@ class RunWindow(QDialog):
             "neuropil coefficient",
         ]
 
-        bigfont = QtGui.QFont("Arial", 10, QtGui.QFont.Bold)
+        section_font = header_font()
         qlabel = QLabel("File paths")
-        qlabel.setFont(bigfont)
+        qlabel.setFont(section_font)
         self.layout.addWidget(qlabel, 0, 0, 1, 1)
-        loadOps = QPushButton("Load ops file")
-        loadOps.clicked.connect(self.load_ops)
-        saveDef = QPushButton("Save ops as default")
-        saveDef.clicked.connect(self.save_default_ops)
-        revertDef = QPushButton("Revert default ops to built-in")
-        revertDef.clicked.connect(self.revert_default_ops)
-        saveOps = QPushButton("Save ops to file")
-        saveOps.clicked.connect(self.save_ops)
-        self.layout.addWidget(loadOps, 0, 4, 1, 2)
-        self.layout.addWidget(saveDef, 1, 4, 1, 2)
-        self.layout.addWidget(revertDef, 2, 4, 1, 2)
-        self.layout.addWidget(saveOps, 3, 4, 1, 2)
+        load_ops_button = QPushButton("Load ops file")
+        load_ops_button.clicked.connect(self.load_ops)
+        save_default_button = QPushButton("Save ops as default")
+        save_default_button.clicked.connect(self.save_default_ops)
+        revert_default_button = QPushButton("Revert default ops to built-in")
+        revert_default_button.clicked.connect(self.revert_default_ops)
+        save_ops_button = QPushButton("Save ops to file")
+        save_ops_button.clicked.connect(self.save_ops)
+        self.layout.addWidget(load_ops_button, 0, 4, 1, 2)
+        self.layout.addWidget(save_default_button, 1, 4, 1, 2)
+        self.layout.addWidget(revert_default_button, 2, 4, 1, 2)
+        self.layout.addWidget(save_ops_button, 3, 4, 1, 2)
         self.layout.addWidget(QLabel(""), 4, 4, 1, 2)
         self.layout.addWidget(QLabel("Load example ops"), 5, 4, 1, 2)
-        for k in range(3):
-            qw = QPushButton("Save ops to file")
-        # saveOps.clicked.connect(self.save_ops)
         self.opsbtns = QButtonGroup(self)
         opsstr = ["1P imaging", "dendrites/axons"]
         self.opsname = ["1P", "dendrite"]
@@ -252,48 +257,43 @@ class RunWindow(QDialog):
             btn = OpsButton(b, opsstr[b], self)
             self.opsbtns.addButton(btn, b)
             self.layout.addWidget(btn, 6 + b, 4, 1, 2)
-        l = 0
         self.keylist = []
         self.editlist = []
-        kk = 0
-        wk = 0
-        for lkey in keys:
-            k = 0
-            kl = 0
-            if type(labels[l]) is list:
-                labs = labels[l]
-                keyl = lkey
+        tooltip_index = 0
+        widget_index = 0
+        for section_index, section_keys in enumerate(keys):
+            row = 0
+            if type(labels[section_index]) is list:
+                section_labels = labels[section_index]
+                sub_keys = section_keys
             else:
-                labs = [labels[l]]
-                keyl = [lkey]
-            for label in labs:
+                section_labels = [labels[section_index]]
+                sub_keys = [section_keys]
+            for sub_section, label in enumerate(section_labels):
                 qlabel = QLabel(label)
-                qlabel.setFont(bigfont)
-                self.layout.addWidget(qlabel, k * 2, 2 * (l + 4), 1, 2)
-                k += 1
-                for key in keyl[kl]:
-                    lops = 1
+                qlabel.setFont(section_font)
+                self.layout.addWidget(qlabel, row * 2, 2 * (section_index + 4), 1, 2)
+                row += 1
+                for key in sub_keys[sub_section]:
                     if self.ops[key] or (self.ops[key] == 0) or len(self.ops[key]) == 0:
-                        qedit = LineEdit(wk, key, self)
+                        qedit = LineEdit(widget_index, key, self)
                         qlabel = QLabel(key)
-                        qlabel.setToolTip(tooltips[kk])
+                        qlabel.setToolTip(tooltips[tooltip_index])
                         qedit.set_text(self.ops)
-                        qedit.setToolTip(tooltips[kk])
+                        qedit.setToolTip(tooltips[tooltip_index])
                         qedit.setFixedWidth(90)
-                        self.layout.addWidget(qlabel, k * 2 - 1, 2 * (l + 4), 1, 2)
-                        self.layout.addWidget(qedit, k * 2, 2 * (l + 4), 1, 2)
+                        self.layout.addWidget(qlabel, row * 2 - 1, 2 * (section_index + 4), 1, 2)
+                        self.layout.addWidget(qedit, row * 2, 2 * (section_index + 4), 1, 2)
                         self.keylist.append(key)
                         self.editlist.append(qedit)
-                        wk += 1
-                    k += 1
-                    kk += 1
-                kl += 1
-            l += 1
+                        widget_index += 1
+                    row += 1
+                    tooltip_index += 1
 
         # data_path
         key = "input_format"
         qlabel = QLabel(key)
-        qlabel.setFont(bigfont)
+        qlabel.setFont(section_font)
         qlabel.setToolTip("File format (selects which parser to use)")
         self.layout.addWidget(qlabel, 1, 0, 1, 1)
         self.inputformat = QComboBox()
@@ -305,7 +305,7 @@ class RunWindow(QDialog):
         qlabel = QLabel(key)
         qlabel.setToolTip("(deprecated) files are now always searched recursively")
         self.layout.addWidget(qlabel, 3, 0, 1, 1)
-        qedit = LineEdit(wk, key, self)
+        qedit = LineEdit(widget_index, key, self)
         qedit.set_text(self.ops)
         qedit.setFixedWidth(95)
         self.layout.addWidget(qedit, 4, 0, 1, 1)
@@ -317,7 +317,7 @@ class RunWindow(QDialog):
         self.btiff.clicked.connect(self.get_folders)
         self.layout.addWidget(self.btiff, 5, 0, 1, cw)
         qlabel = QLabel("data_path")
-        qlabel.setFont(bigfont)
+        qlabel.setFont(section_font)
         self.layout.addWidget(qlabel, 6, 0, 1, 1)
         self.qdata = []
         for n in range(9):
@@ -330,12 +330,12 @@ class RunWindow(QDialog):
         self.savelabel = QLabel("")
         self.layout.addWidget(self.savelabel, 17, 0, 1, cw)
         self.runButton = QPushButton("RUN SUITE2P")
-        self.runButton.clicked.connect(self.run_S2P)
+        self.runButton.clicked.connect(self.run_suite2p)
         n0 = 22
         self.layout.addWidget(self.runButton, n0, 0, 1, 1)
         self.runButton.setEnabled(False)
         self.textEdit = QTextEdit()
-        self.layout.addWidget(self.textEdit, n0 + 1, 0, 30, 2 * l)
+        self.layout.addWidget(self.textEdit, n0 + 1, 0, 30, 2 * section_index)
         self.textEdit.setFixedHeight(300)
         self.process = QtCore.QProcess(self)
         self.process.readyReadStandardOutput.connect(self.stdout_write)
@@ -371,23 +371,25 @@ class RunWindow(QDialog):
             self.odata.append(QLabel(""))
             self.layout.addWidget(self.odata[n], n0 + 1 + n, 12, 1, 4)
 
-    def remove_ops(self):
-        L = len(self.opslist)
-        if L == 1:
+    def remove_ops(self) -> None:
+        """Remove the most recently added batch ops entry."""
+        count = len(self.opslist)
+        if count == 1:
             self.batch = False
             self.opslist = []
             self.removeOps.setEnabled(False)
         else:
-            del self.opslist[L - 1]
-        self.odata[L - 1].setText("")
-        self.odata[L - 1].setToolTip("")
+            del self.opslist[count - 1]
+        self.odata[count - 1].setText("")
+        self.odata[count - 1].setToolTip("")
         self.f = 0
 
-    def add_batch(self):
+    def add_batch(self) -> None:
+        """Save current settings as a batch entry and reset file fields."""
         self.add_ops()
-        L = len(self.opslist)
-        self.odata[L].setText(self.datastr)
-        self.odata[L].setToolTip(self.datastr)
+        count = len(self.opslist)
+        self.odata[count].setText(self.datastr)
+        self.odata[count].setToolTip(self.datastr)
 
         # clear file fields
         self.db = {}
@@ -397,10 +399,7 @@ class RunWindow(QDialog):
             self.qdata[n].setText("")
         self.savelabel.setText("")
 
-        # clear all ops
-        # self.reset_ops()
-
-        # enable all the file loaders again
+        # Enables all the file loaders again.
         self.btiff.setEnabled(True)
         self.bsave.setEnabled(True)
         # and enable the run button
@@ -408,15 +407,17 @@ class RunWindow(QDialog):
         self.removeOps.setEnabled(True)
         self.listOps.setEnabled(False)
 
-    def add_ops(self):
+    def add_ops(self) -> None:
+        """Compile current ops and database, then save to disk."""
         self.f = 0
         self.compile_ops_db()
-        L = len(self.opslist)
-        np.save(os.path.join(self.ops_path, "ops%d.npy" % L), self.ops)
-        np.save(os.path.join(self.ops_path, "db%d.npy" % L), self.db)
-        self.opslist.append("ops%d.npy" % L)
+        count = len(self.opslist)
+        np.save(self.ops_path / f"ops{count}.npy", self.ops)
+        np.save(self.ops_path / f"db{count}.npy", self.db)
+        self.opslist.append(f"ops{count}.npy")
 
-    def compile_ops_db(self):
+    def compile_ops_db(self) -> None:
+        """Gather current widget values into the ops dictionary and build the database dict."""
         for k, key in enumerate(self.keylist):
             self.ops[key] = self.editlist[k].get_text(self.intkeys, self.boolkeys, self.stringkeys)
         self.db = {}
@@ -429,19 +430,16 @@ class RunWindow(QDialog):
         self.db["save_path"] = self.save_path
         self.db["input_format"] = self.inputformat.currentText()
 
-    def run_S2P(self):
-        if len(self.opslist) == 0:
+    def run_suite2p(self) -> None:
+        """Launch the suite2p pipeline as an external process."""
+        if not self.opslist:
             self.add_ops()
-        # pre-download model
-        pretrained_model_string = self.ops.get("pretrained_model", "cyto")
-        pretrained_model_string = pretrained_model_string if pretrained_model_string is not None else "cyto"
-        pretrained_model_path = model_path(pretrained_model_string, 0)
         self.finish = True
         self.error = False
-        ops_file = os.path.join(self.ops_path, "ops.npy")
-        db_file = os.path.join(self.ops_path, "db.npy")
-        shutil.copy(os.path.join(self.ops_path, "ops%d.npy" % self.f), ops_file)
-        shutil.copy(os.path.join(self.ops_path, "db%d.npy" % self.f), db_file)
+        ops_file = self.ops_path / "ops.npy"
+        db_file = self.ops_path / "db.npy"
+        shutil.copy(self.ops_path / f"ops{self.f}.npy", ops_file)
+        shutil.copy(self.ops_path / f"db{self.f}.npy", db_file)
         self.db = np.load(db_file, allow_pickle=True).item()
         console.echo(message=f"Parameter overrides: {self.db}")
         console.echo(message="Running suite2p with command:")
@@ -449,26 +447,25 @@ class RunWindow(QDialog):
         console.echo(message=f"python {cmd}")
         self.process.start(sys.executable, cmd.split(" "))
 
-        # self.process.start('python -u -W ignore -m suite2p --ops "%s" --db "%s"' %
-        #                   (ops_file, db_file))
-
-    def stop(self):
+    def stop(self) -> None:
+        """Terminate the running suite2p process."""
         self.finish = False
         self.logfile.close()
         self.process.kill()
 
-    def started(self):
+    def started(self) -> None:
+        """Handle process start by disabling controls and opening the log file."""
         self.runButton.setEnabled(False)
         self.stopButton.setEnabled(True)
         self.cleanButton.setEnabled(False)
-        save_folder = os.path.join(self.db["save_path"], "suite2p/")
-        if not os.path.isdir(save_folder):
-            os.makedirs(save_folder)
-        self.logfile = open(os.path.join(save_folder, "run.log"), "a")
-        dstring = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-        self.logfile.write("\n >>>>> started run at %s" % dstring)
+        save_folder = Path(self.db["save_path"]) / "suite2p"
+        save_folder.mkdir(parents=True, exist_ok=True)
+        self.logfile = (save_folder / "run.log").open(mode="a")
+        timestamp = datetime.now(tz=UTC).strftime("%d/%m/%Y %H:%M:%S")
+        self.logfile.write(f"\n >>>>> started run at {timestamp}")
 
-    def finished(self):
+    def finished(self) -> None:
+        """Handle process completion, load results or continue batch processing."""
         self.logfile.close()
         self.runButton.setEnabled(True)
         self.stopButton.setEnabled(False)
@@ -477,17 +474,19 @@ class RunWindow(QDialog):
         if self.finish and not self.error:
             self.cleanButton.setEnabled(True)
             if len(self.opslist) == 1:
-                self.parent.fname = os.path.join(self.db["save_path"], "suite2p", "plane0", "stat.npy")
-                if os.path.exists(self.parent.fname):
+                stat_path = Path(self.db["save_path"]) / "suite2p" / "plane0" / "stat.npy"
+                self.parent.fname = str(stat_path)
+                if stat_path.exists():
                     cursor.insertText("Opening in GUI (can close this window)\n")
-                    io.load_proc(self.parent)
+                    load_proc(self.parent)
                 else:
                     cursor.insertText("not opening plane in GUI (no ROIs)\n")
             else:
-                cursor.insertText("BATCH MODE: %d more recordings remaining \n" % (len(self.opslist) - self.f - 1))
+                remaining = len(self.opslist) - self.f - 1
+                cursor.insertText(f"BATCH MODE: {remaining} more recordings remaining \n")
                 self.f += 1
                 if self.f < len(self.opslist):
-                    self.run_S2P()
+                    self.run_suite2p()
         elif not self.error:
             cursor.insertText("Interrupted by user (not finished)\n")
         else:
@@ -497,7 +496,8 @@ class RunWindow(QDialog):
         if len(self.opslist) == 1:
             del self.opslist[0]
 
-    def save_ops(self):
+    def save_ops(self) -> None:
+        """Save the current ops to a user-selected file."""
         name = QFileDialog.getSaveFileName(self, "Ops name (*.npy)")
         name = name[0]
         self.save_text()
@@ -505,7 +505,8 @@ class RunWindow(QDialog):
             np.save(name, self.ops)
             console.echo(message=f"Saved current settings to {name}", level=LogLevel.SUCCESS)
 
-    def save_default_ops(self):
+    def save_default_ops(self) -> None:
+        """Persist the current GUI settings as the default ops file."""
         name = self.opsfile
         ops = self.ops.copy()
         self.ops = generate_default_ops()
@@ -514,41 +515,43 @@ class RunWindow(QDialog):
         self.ops = ops
         console.echo(message="Saved current settings in GUI as default ops", level=LogLevel.SUCCESS)
 
-    def revert_default_ops(self):
+    def revert_default_ops(self) -> None:
+        """Reset the default ops file to the built-in ops values."""
         name = self.opsfile
-        ops = self.ops.copy()
         self.ops = generate_default_ops()
         np.save(name, self.ops)
         self.load_ops(name)
         console.echo(message="Reverted default ops to built-in ops", level=LogLevel.SUCCESS)
 
-    def save_text(self):
+    def save_text(self) -> None:
+        """Read all widget values back into the ops dictionary."""
         for k in range(len(self.editlist)):
             key = self.keylist[k]
             self.ops[key] = self.editlist[k].get_text(self.intkeys, self.boolkeys, self.stringkeys)
 
-    def load_ops(self, name=None):
+    def load_ops(self, name: str | None = None) -> None:
+        """Load ops from a npy or json file and populate the dialog widgets."""
         console.echo(message="Loading ops...")
         if not (isinstance(name, str) and len(name) > 0):
             name = QFileDialog.getOpenFileName(self, "Open ops file (npy or json)")
             name = name[0]
 
         if len(name) > 0:
-            ext = os.path.splitext(name)[1]
+            ext = Path(name).suffix
             try:
                 if ext == ".npy":
                     ops = np.load(name, allow_pickle=True).item()
                 elif ext == ".json":
-                    with open(name) as f:
-                        ops = json.load(f)
+                    with Path(name).open() as file:
+                        ops = json.load(file)
                 ops0 = generate_default_ops()
                 ops = {**ops0, **ops}
                 for key in ops:
-                    if key != "data_path" and key != "save_path" and key != "cleanup":
+                    if key not in {"data_path", "save_path", "cleanup"}:
                         if key in self.keylist:
                             self.editlist[self.keylist.index(key)].set_text(ops)
                         self.ops[key] = ops[key]
-                if "input_format" not in self.ops.keys():
+                if "input_format" not in self.ops:
                     self.ops["input_format"] = "tiff"
                 if "data_path" in ops and len(ops["data_path"]) > 0:
                     self.data_path = ops["data_path"]
@@ -577,10 +580,12 @@ class RunWindow(QDialog):
                 console.echo(message="Could not load ops file", level=LogLevel.ERROR)
                 console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
 
-    def load_db(self):
+    def load_db(self) -> None:
+        """Load parameter overrides from disk."""
         console.echo(message="Loading parameter overrides...")
 
-    def stdout_write(self):
+    def stdout_write(self) -> None:
+        """Append standard output from the subprocess to the text area and log file."""
         cursor = self.textEdit.textCursor()
         cursor.movePosition(cursor.End)
         output = str(self.process.readAllStandardOutput(), "utf-8")
@@ -588,7 +593,8 @@ class RunWindow(QDialog):
         self.textEdit.ensureCursorVisible()
         self.logfile.write(output)
 
-    def stderr_write(self):
+    def stderr_write(self) -> None:
+        """Append standard error from the subprocess to the text area and log file."""
         cursor = self.textEdit.textCursor()
         cursor.movePosition(cursor.End)
         cursor.insertText(">>>ERROR<<<\n")
@@ -599,7 +605,8 @@ class RunWindow(QDialog):
         self.logfile.write(">>>ERROR<<<\n")
         self.logfile.write(output)
 
-    def clean_script(self):
+    def clean_script(self) -> None:
+        """Select a Python cleanup script to run after processing completes."""
         name = QFileDialog.getOpenFileName(self, "Open clean up file", filter="*.py")
         name = name[0]
         if name:
@@ -608,7 +615,8 @@ class RunWindow(QDialog):
             self.cleanLabel.setText(name)
             self.ops["clean_script"] = name
 
-    def get_folders(self):
+    def get_folders(self) -> None:
+        """Prompt the user to select a directory and add it to the data path list."""
         name = QFileDialog.getExistingDirectory(self, "Add directory to data path")
         if len(name) > 0:
             self.data_path.append(name)
@@ -616,18 +624,18 @@ class RunWindow(QDialog):
             self.qdata[len(self.data_path) - 1].setToolTip(name)
             self.runButton.setEnabled(True)
             self.listOps.setEnabled(True)
-            # self.loadDb.setEnabled(False)
 
-    def get_h5py(self):
-        # used to choose file, now just choose key
-        TC = TextChooser(self)
-        result = TC.exec_()
+    def get_h5py(self) -> None:
+        """Open the HDF5 key chooser dialog and store the selected key."""
+        chooser = TextChooser(self)
+        result = chooser.exec()
         if result:
-            self.h5_key = TC.h5_key
+            self.h5_key = chooser.h5_key
         else:
             self.h5_key = "data"
 
-    def parse_inputformat(self):
+    def parse_inputformat(self) -> None:
+        """Handle input format selection changes and trigger format-specific dialogs."""
         inputformat = self.inputformat.currentText()
         console.echo(message=f"Input format: {inputformat}")
         if inputformat == "h5":
@@ -636,7 +644,8 @@ class RunWindow(QDialog):
         else:
             pass
 
-    def save_folder(self):
+    def save_folder(self) -> None:
+        """Prompt the user to select a save directory for output data."""
         name = QFileDialog.getExistingDirectory(self, "Save folder for data")
         if len(name) > 0:
             self.save_path = name
@@ -645,19 +654,21 @@ class RunWindow(QDialog):
 
 
 class LineEdit(QLineEdit):
-    def __init__(self, k, key, parent=None):
+    """Parameter line editor that converts between display text and typed ops values."""
+
+    def __init__(self, _index: int, key: str, parent: QWidget | None = None) -> None:
+        """Initialize the line editor for the given ops key."""
         super().__init__(parent)
         self.key = key
-        # self.textEdited.connect(lambda: self.edit_changed(parent.ops, k))
 
-    def get_text(self, intkeys, boolkeys, stringkeys):
+    def get_text(
+        self, intkeys: list[str], boolkeys: list[str], stringkeys: list[str]
+    ) -> int | float | bool | str | list[int]:
+        """Parse the widget text into the appropriate Python type for this ops key."""
         key = self.key
-        if key == "cell_diameter" or key == "block_size":
+        if key in {"cell_diameter", "block_size"}:
             diams = self.text().replace(" ", "").split(",")
-            if len(diams) > 1:
-                okey = [int(diams[0]), int(diams[1])]
-            else:
-                okey = int(diams[0])
+            okey = [int(diams[0]), int(diams[1])] if len(diams) > 1 else int(diams[0])
         elif key == "ignore_flyback":
             okey = self.text().replace(" ", "").split(",")
             for i in range(len(okey)):
@@ -674,9 +685,10 @@ class LineEdit(QLineEdit):
             okey = float(self.text())
         return okey
 
-    def set_text(self, ops):
+    def set_text(self, ops: dict[str, object]) -> None:
+        """Format and display the ops value for this key in the widget."""
         key = self.key
-        if key == "cell_diameter" or key == "block_size":
+        if key in {"cell_diameter", "block_size"}:
             if (type(ops[key]) is not int) and (len(ops[key]) > 1):
                 dstr = str(int(ops[key][0])) + ", " + str(int(ops[key][1]))
             else:
@@ -700,34 +712,41 @@ class LineEdit(QLineEdit):
 
 
 class OpsButton(QPushButton):
-    def __init__(self, bid, Text, parent=None):
+    """Push button that loads a preset ops configuration when clicked."""
+
+    def __init__(self, bid: int, text: str, parent: RunWindow | None = None) -> None:
+        """Initialize the ops preset button with the given label and button identifier."""
         super().__init__(parent)
-        self.setText(Text)
+        self.setText(text)
         self.clicked.connect(lambda: self.press(parent, bid))
         self.show()
 
-    def press(self, parent, bid):
+    def press(self, parent: RunWindow, bid: int) -> None:
+        """Load a preset ops file and apply its values to the parent dialog."""
         try:
-            opsdef = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../ops/ops_%s.npy" % parent.opsname[bid])
-            ops = np.load(opsdef, allow_pickle=True).item()
+            ops_path = Path(__file__).resolve().parent.parent / "ops" / f"ops_{parent.opsname[bid]}.npy"
+            ops = np.load(ops_path, allow_pickle=True).item()
             for key in ops:
                 if key in parent.keylist:
                     parent.editlist[parent.keylist.index(key)].set_text(ops)
                     parent.ops[key] = ops[key]
-        except Exception as e:
+        except Exception as error:
             console.echo(message="Could not load ops file", level=LogLevel.ERROR)
-            console.echo(message=f"Error details: {e}", level=LogLevel.ERROR)
+            console.echo(message=f"Error details: {error}", level=LogLevel.ERROR)
 
 
-# custom vertical label
 class VerticalLabel(QWidget):
-    def __init__(self, text=None):
-        super(self.__class__, self).__init__()
+    """Widget that renders text rotated 90 degrees clockwise."""
+
+    def __init__(self, text: str | None = None) -> None:
+        """Initialize the vertical label with the given text."""
+        super().__init__()
         self.text = text
 
-    def paintEvent(self, event):
+    def paintEvent(self, _event: QtGui.QPaintEvent) -> None:  # noqa: N802
+        """Draw the label text rotated 90 degrees."""
         painter = QtGui.QPainter(self)
-        painter.setPen(QtCore.Qt.white)
+        painter.setPen(QtCore.Qt.GlobalColor.white)
         painter.translate(0, 0)
         painter.rotate(90)
         if self.text:

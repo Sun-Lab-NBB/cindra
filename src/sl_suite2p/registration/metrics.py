@@ -18,7 +18,8 @@ from .rigid import (
     compute_phase_correlation_kernel,
 )
 from .utils import apply_spatial_high_pass, apply_spatial_smoothing
-from .nonrigid import compute_nonrigid_shifts, compute_registration_blocks, compute_nonrigid_reference_data
+from .nonrigid import compute_nonrigid_shifts, compute_nonrigid_reference_data
+from ..detection import compute_registration_blocks
 from .bidiphase_correction import apply_bidirectional_phase_correction
 
 if TYPE_CHECKING:
