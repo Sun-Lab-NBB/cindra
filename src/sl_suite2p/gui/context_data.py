@@ -95,15 +95,15 @@ class ContextData:
     cell_colocalization_labels: NDArray[np.bool_] = field(
         default_factory=lambda: np.array([], dtype=np.bool_)
     )
-    """Boolean classification array marking each ROI as a red (channel 2) cell."""
+    """Boolean classification array marking each ROI as a channel 2 cell."""
 
     cell_colocalization_probabilities: NDArray[np.float32] = field(
         default_factory=lambda: np.array([], dtype=np.float32)
     )
-    """Probability of each ROI being a red (channel 2) cell."""
+    """Probability of each ROI being a channel 2 cell."""
 
-    has_red_channel: bool = False
-    """Determines whether channel 2 (red) data is available."""
+    has_channel_2: bool = False
+    """Determines whether channel 2 data is available."""
 
     not_merged: NDArray[np.bool_] = field(
         default_factory=lambda: np.array([], dtype=np.bool_)
@@ -664,11 +664,11 @@ class ContextData:
         if extraction.cell_colocalization is not None:
             self.cell_colocalization_probabilities = extraction.cell_colocalization[:, 0].copy()
             self.cell_colocalization_labels = extraction.cell_colocalization[:, 1].astype(np.bool_).copy()
-            self.has_red_channel = True
+            self.has_channel_2 = True
         else:
             self.cell_colocalization_probabilities = np.zeros(roi_count, dtype=np.float32)
             self.cell_colocalization_labels = np.zeros(roi_count, dtype=np.bool_)
-            self.has_red_channel = combined.detection.mean_image_channel_2 is not None
+            self.has_channel_2 = combined.detection.mean_image_channel_2 is not None
 
         # Initializes the not-merged mask.
         self.not_merged = np.ones(roi_count, dtype=np.bool_)

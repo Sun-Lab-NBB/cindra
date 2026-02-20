@@ -1,95 +1,248 @@
-"""Provides the ViewState dataclass that holds all GUI display and selection state."""
+"""Provides the ViewState dataclass and display-mode enums for GUI state tracking."""
 
 from __future__ import annotations
 
+from enum import IntEnum
 from dataclasses import field, dataclass
+
+
+class ROIColorMode(IntEnum):
+    """Selects the statistic used to color ROI overlays in the image panels."""
+
+    RANDOM = 0
+    """Assigns each ROI a random color from the active colormap."""
+
+    SKEWNESS = 1
+    """Colors ROIs by the skewness of their spatial footprint pixel distribution."""
+
+    COMPACTNESS = 2
+    """Colors ROIs by the compactness (circularity) of their spatial footprint."""
+
+    FOOTPRINT = 3
+    """Colors ROIs by their total spatial footprint area in pixels."""
+
+    ASPECT_RATIO = 4
+    """Colors ROIs by the aspect ratio of their bounding ellipse."""
+
+    COLOCALIZATION_PROBABILITY = 5
+    """Colors ROIs by their channel 2 colocalization probability."""
+
+    CLASSIFIER_PROBABILITY = 6
+    """Colors ROIs by the trained classifier's cell-probability estimate."""
+
+    CORRELATIONS = 7
+    """Colors ROIs by pairwise activity correlation with the selected ROI."""
+
+    BEHAVIOR_CORRELATION = 8
+    """Colors ROIs by the correlation between their activity and the loaded behavioral trace."""
+
+    RASTERMAP = 9
+    """Colors ROIs by their rastermap embedding position or a custom sorting metric."""
+
+
+class BackgroundView(IntEnum):
+    """Selects the background image displayed behind ROI overlays in the image panels."""
+
+    ROIS_ONLY = 0
+    """Displays a blank background with ROI overlays only."""
+
+    # Channel 1 reference images.
+    MEAN_IMAGE = 1
+    """Displays the temporal mean of all registered channel 1 frames."""
+
+    ENHANCED_MEAN_IMAGE = 2
+    """Displays the high-pass filtered channel 1 mean image used for cell boundary detection."""
+
+    CORRELATION_MAP = 3
+    """Displays the pixel-wise activity correlation map computed during channel 1 detection."""
+
+    MAXIMUM_PROJECTION = 4
+    """Displays the maximum intensity projection across all channel 1 frames."""
+
+    # Channel 2 reference images.
+    MEAN_IMAGE_CHANNEL_2 = 5
+    """Displays the temporal mean of all registered channel 2 frames."""
+
+    ENHANCED_MEAN_IMAGE_CHANNEL_2 = 6
+    """Displays the high-pass filtered channel 2 mean image used for cell boundary detection."""
+
+    CORRELATION_MAP_CHANNEL_2 = 7
+    """Displays the pixel-wise activity correlation map computed during channel 2 detection."""
+
+    MAXIMUM_PROJECTION_CHANNEL_2 = 8
+    """Displays the maximum intensity projection across all channel 2 frames."""
+
+    # Structural reference images.
+    CORRECTED_STRUCTURAL_MEAN_IMAGE = 9
+    """Displays the bleed-through-corrected structural channel mean image computed during
+    functional-to-structural channel colocalization."""
+
+
+class TraceMode(IntEnum):
+    """Selects the fluorescence trace type displayed in the trace panel."""
+
+    RAW_FLUORESCENCE = 0
+    """Displays the raw cell_fluorescence trace."""
+
+    NEUROPIL = 1
+    """Displays the neuropil_fluorescence trace."""
+
+    NEUROPIL_CORRECTED = 2
+    """Displays the neuropil-corrected trace (cell_fluorescence - neuropil_coefficient *
+    neuropil_fluorescence)."""
+
+    DECONVOLVED = 3
+    """Displays the deconvolved spikes trace."""
+
+
+class ROIToolPanel(IntEnum):
+    """Identifies which image panel hosts the rectangular ROI selection tool."""
+
+    CELLS = 0
+    """The ROI selection tool is active on the cell image panel."""
+
+    NON_CELLS = 1
+    """The ROI selection tool is active on the non-cell image panel."""
+
+
+class MaskLayer(IntEnum):
+    """Selects the active ROI mask layer in multi-day mode."""
+
+    ORIGINAL_ROI_MASKS = 0
+    """Displays the original ROI masks from single-day extraction in native session coordinates."""
+
+    DEFORMED_ROI_MASKS = 1
+    """Displays the original ROI masks warped to the shared cross-session coordinate space via
+    multi-day registration deformation fields."""
+
+    TEMPLATE_ROI_MASKS = 2
+    """Displays the consensus template ROI masks derived from cross-session clustering, defined in
+    the shared coordinate space. These masks specify the ROIs tracked across sessions."""
+
+    SESSION_TEMPLATE_ROI_MASKS = 3
+    """Displays the template ROI masks warped back to native session coordinates via the inverse
+    deformation fields."""
+
+
+class CoordinateSpace(IntEnum):
+    """Selects the coordinate space for reference images in multi-day mode."""
+
+    NATIVE = 0
+    """Displays reference images in the original recording session coordinate space."""
+
+    TRANSFORMED = 1
+    """Displays reference images warped to align with the cross-session template coordinate space."""
 
 
 @dataclass
 class ViewState:
-    """Tracks all mutable GUI display state.
+    """Tracks all mutable GUI display and selection state.
 
-    Replaces the scattered ``parent.ops_plot``, ``parent.ichosen``, ``parent.activityMode``,
-    and similar attributes that were previously stored directly on the MainWindow instance.
+    This dataclass decouples UI element state from the MainWindow orchestrator, allowing
+    independent submodules to read and write display settings through a shared, typed object
+    rather than through direct parent references.
     """
 
-    # Plot display state.
+    # Image panel display state.
     rois_visible: bool = True
-    """Determines whether ROI overlays are drawn on the image panels."""
+    """Controls whether ROI overlays are drawn on the cell and non-cell image panels."""
 
-    color_mode: int = 0
-    """Index into the color statistics array (0-9)."""
+    roi_color_mode: ROIColorMode = ROIColorMode.RANDOM
+    """Selects the statistic used to color ROI overlays. Must be a valid ``ROIColorMode``
+    member."""
 
-    view_mode: int = 0
-    """Index into the background view array (0-6)."""
+    background_view: BackgroundView = BackgroundView.ROIS_ONLY
+    """Selects the background image displayed behind ROI overlays. Must be a valid
+    ``BackgroundView`` member."""
 
-    opacity: list[int] = field(default_factory=lambda: [127, 255])
-    """Opacity values for ROI overlays in [circle-view, roi-view] modes."""
+    roi_opacity: list[int] = field(default_factory=lambda: [127, 255])
+    """Alpha values for ROI overlays in [circle-view, filled-ROI-view] rendering modes. Each value
+    ranges from 0 (fully transparent) to 255 (fully opaque)."""
 
-    saturation: list[int] = field(default_factory=lambda: [0, 255])
-    """Saturation range for background image display."""
+    background_saturation: list[int] = field(default_factory=lambda: [0, 255])
+    """Intensity range [min, max] applied to the background image before display. Pixel values
+    outside this range are clipped, stretching contrast within the window."""
 
-    colormap: str = "hsv"
-    """Name of the active matplotlib colormap for ROI coloring."""
+    roi_colormap: str = "hsv"
+    """Name of the matplotlib colormap applied when mapping ROI statistics to overlay colors."""
 
     # ROI selection state.
-    chosen_index: int = 0
-    """Index of the currently selected (highlighted) ROI."""
+    selected_roi_index: int = 0
+    """Index of the currently highlighted ROI. This ROI's trace is plotted in the trace panel, and
+    its spatial footprint is highlighted in the image panels."""
 
-    merge_indices: list[int] = field(default_factory=lambda: [0])
-    """Indices of all ROIs in the current merge selection."""
+    merge_roi_indices: list[int] = field(default_factory=lambda: [0])
+    """Indices of all ROIs staged for a merge operation. The merge dialog combines these ROIs into a
+    single ROI when the user confirms the merge."""
 
-    flipped_index: int = 0
-    """Index of the most recently flipped ROI."""
+    last_reclassified_index: int = 0
+    """Index of the most recently reclassified ROI, used to briefly highlight the ROI that was moved
+    between the cell and non-cell panels."""
 
-    is_roi_active: bool = False
-    """Determines whether a rectangular ROI selection tool is active."""
+    roi_tool_active: bool = False
+    """Controls whether the rectangular ROI selection tool is active, allowing the user to drag a
+    rectangle on an image panel to select ROIs within the region."""
 
-    roi_plot_panel: int = 0
-    """Panel index where the ROI selection tool is displayed (0=cells, 1=non-cells)."""
+    roi_tool_panel: ROIToolPanel = ROIToolPanel.CELLS
+    """Identifies which image panel hosts the active rectangular ROI selection tool. Must be a
+    valid ``ROIToolPanel`` member."""
 
-    # Trace display state.
-    activity_mode: int = 2
-    """Trace activity mode (0=F, 1=Fneu, 2=F-0.7*Fneu, 3=spks)."""
+    # Trace panel display state.
+    trace_mode: TraceMode = TraceMode.NEUROPIL_CORRECTED
+    """Selects which fluorescence trace type is displayed and used for correlation computations.
+    Must be a valid ``TraceMode`` member."""
 
-    bin_size: int = 1
-    """Temporal bin size for activity computation."""
+    temporal_bin_size: int = 1
+    """Number of consecutive frames averaged together when computing binned activity traces. Higher
+    values smooth the trace and reduce noise at the cost of temporal resolution."""
 
-    traces_visible: bool = True
-    """Determines whether the deconvolved spike trace is drawn."""
+    fluorescence_visible: bool = True
+    """Controls whether the cell_fluorescence trace (raw or neuropil-corrected) is drawn in the
+    trace panel."""
 
     neuropil_visible: bool = True
-    """Determines whether the neuropil fluorescence trace is drawn."""
+    """Controls whether the neuropil_fluorescence trace is drawn in the trace panel."""
 
     deconvolved_visible: bool = True
-    """Determines whether the deconvolved trace is drawn."""
+    """Controls whether the deconvolved spike trace is drawn in the trace panel."""
 
-    # View toggles.
-    zoom_to_cell: bool = False
-    """Determines whether the image panels auto-zoom to the selected cell."""
+    # Display toggles.
+    auto_zoom_to_roi: bool = False
+    """Controls whether the image panels automatically zoom to center on the currently selected
+    ROI when the selection changes."""
 
-    show_roi_labels: bool = False
-    """Determines whether ROI index labels are drawn on the image panels."""
+    roi_labels_visible: bool = False
+    """Controls whether numeric ROI index labels are drawn at each ROI centroid on the image
+    panels."""
 
     behavior_loaded: bool = False
-    """Determines whether a behavioral trace has been loaded."""
+    """Indicates that a 1D behavioral trace has been loaded and resampled to the imaging frame rate.
+    When True, the behavior correlation color mode and behavior trace overlay become available."""
 
     rastermap_loaded: bool = False
-    """Determines whether rastermap sorting has been applied."""
+    """Indicates that rastermap sorting has been applied, reordering ROIs by embedding similarity.
+    When True, the rastermap color mode becomes available."""
 
-    is_loaded: bool = False
-    """Determines whether any data context has been loaded into the GUI."""
+    session_loaded: bool = False
+    """Indicates that a data context (single-day or multi-day) has been loaded into the GUI. When
+    False, most interactive features are disabled."""
 
-    # Channel 2 state.
-    channel_2_threshold: float = 0.6
-    """Probability threshold for classifying channel 2 (red) cells."""
+    # Channel 2 colocalization state.
+    colocalization_threshold: float = 0.6
+    """Display threshold applied to cell_colocalization_probabilities when rendering ROI overlays.
+    ROIs with a probability above this value are visually distinguished as channel 2 cells in the
+    color overlay. This threshold only affects visualization and does not modify the underlying
+    classification data."""
 
     # Multi-day specific state.
-    mask_set: int = 0
-    """Active mask set index (0=detected, 1=registered, 2=template, 3=session-template)."""
+    mask_layer: MaskLayer = MaskLayer.ORIGINAL_ROI_MASKS
+    """Selects the active ROI mask layer in multi-day mode. Must be a valid ``MaskLayer``
+    member."""
 
-    image_space: int = 0
-    """Active image space index (0=native, 1=transformed/deformed)."""
+    coordinate_space: CoordinateSpace = CoordinateSpace.NATIVE
+    """Selects the coordinate space for reference images in multi-day mode. Must be a valid
+    ``CoordinateSpace`` member."""
 
     mask_opacity: float = 0.5
-    """Overlay opacity for mask blending in multi-day views."""
+    """Alpha value for blending ROI mask overlays onto reference images in multi-day views. Ranges
+    from 0.0 (fully transparent) to 1.0 (fully opaque)."""

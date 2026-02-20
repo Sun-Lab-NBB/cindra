@@ -90,7 +90,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
     footprints = np.array([])
     cell_fluorescence = np.zeros((0, context.frame_count), dtype=np.float32)
     neuropil_fluorescence = np.zeros((0, context.frame_count), dtype=np.float32)
-    if context.has_red_channel:
+    if context.has_channel_2:
         channel_2_fluorescence = np.zeros((0, context.frame_count), dtype=np.float32)
         channel_2_neuropil = np.zeros((0, context.frame_count), dtype=np.float32)
         if context.cell_fluorescence_channel_2 is None and context.save_path is not None:
@@ -125,7 +125,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
         neuropil_fluorescence = np.append(
             neuropil_fluorescence, context.neuropil_fluorescence[roi_index, :][np.newaxis, :], axis=0,
         )
-        if context.has_red_channel and context.cell_fluorescence_channel_2 is not None:
+        if context.has_channel_2 and context.cell_fluorescence_channel_2 is not None:
             channel_2_fluorescence = np.append(
                 channel_2_fluorescence,
                 context.cell_fluorescence_channel_2[roi_index, :][np.newaxis, :],
@@ -159,7 +159,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
     # Computes mean activity across merged cells.
     mean_cell_fluorescence = cell_fluorescence.mean(axis=0)
     mean_neuropil_fluorescence = neuropil_fluorescence.mean(axis=0)
-    if context.has_red_channel:
+    if context.has_channel_2:
         mean_channel_2_fluorescence = channel_2_fluorescence.mean(axis=0)
         mean_channel_2_neuropil = channel_2_neuropil.mean(axis=0)
 
@@ -227,7 +227,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
         )
         context.cell_colocalization_labels = np.delete(context.cell_colocalization_labels, constituent, 0)
         context.not_merged = np.delete(context.not_merged, constituent, 0)
-        if context.has_red_channel:
+        if context.has_channel_2:
             if context.cell_fluorescence_channel_2 is not None:
                 context.cell_fluorescence_channel_2 = np.delete(
                     context.cell_fluorescence_channel_2, constituent, 0,
@@ -245,7 +245,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
     context.neuropil_fluorescence = np.concatenate(
         (context.neuropil_fluorescence, mean_neuropil_fluorescence[np.newaxis, :]), axis=0,
     )
-    if context.has_red_channel:
+    if context.has_channel_2:
         if context.cell_fluorescence_channel_2 is not None:
             context.cell_fluorescence_channel_2 = np.concatenate(
                 (context.cell_fluorescence_channel_2, mean_channel_2_fluorescence[np.newaxis, :]),

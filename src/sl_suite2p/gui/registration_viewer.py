@@ -42,11 +42,11 @@ _Z_SMOOTHING_SIGMA: int = 2
 # Alpha value for ROI boundary rendering.
 _BOUNDARY_ALPHA: int = 200
 
-# Divisor applied to hue values for red cell coloring.
-_RED_CELL_HUE_DIVISOR: float = 1.4
+# Divisor applied to hue values for channel 2 cell coloring.
+_CHANNEL_2_CELL_HUE_DIVISOR: float = 1.4
 
-# Offset added to hue values for red cell coloring.
-_RED_CELL_HUE_OFFSET: float = 0.1
+# Offset added to hue values for channel 2 cell coloring.
+_CHANNEL_2_CELL_HUE_OFFSET: float = 0.1
 
 # Multiplier for real-time playback speed.
 _PLAYBACK_SPEED_MULTIPLIER: int = 5
@@ -131,12 +131,12 @@ class BinaryPlayer(QMainWindow):
         self.vside.addItem(self.cellscatter_side)
         self.maskside = pg.ImageItem()
 
-        # view red channel
-        self.redbox = QCheckBox("view red channel")
-        self.redbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
-        self.redbox.setEnabled(False)
-        self.redbox.toggled.connect(self.add_red)
-        self.l0.addWidget(self.redbox, 0, 5, 1, 1)
+        # view channel 2
+        self.channel_2_checkbox = QCheckBox("view channel 2")
+        self.channel_2_checkbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        self.channel_2_checkbox.setEnabled(False)
+        self.channel_2_checkbox.toggled.connect(self.toggle_channel_2)
+        self.l0.addWidget(self.channel_2_checkbox, 0, 5, 1, 1)
         # view masks
         self.maskbox = QCheckBox("view masks")
         self.maskbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
@@ -233,11 +233,11 @@ class BinaryPlayer(QMainWindow):
         self.loaded = False
         self.Floaded = False
         self.raw_on = False
-        self.red_on = False
+        self.channel_2_visible = False
         self.z_on = False
         self.wraw = False
-        self.wred = False
-        self.wraw_wred = False
+        self.has_channel_2_binary = False
+        self.has_raw_channel_2_binary = False
         self.win.scene().sigMouseClicked.connect(self.plot_clicked)
         # if not a combined recording, automatically open binary
         if hasattr(parent, "ops") and Path(parent.ops["save_path"]).name != "combined":
@@ -259,13 +259,13 @@ class BinaryPlayer(QMainWindow):
                 self.vmain.removeItem(self.maskmain)
                 self.vside.removeItem(self.maskside)
 
-    def add_red(self) -> None:
-        """Toggles red channel display based on checkbox state."""
+    def toggle_channel_2(self) -> None:
+        """Toggles channel 2 display based on checkbox state."""
         if self.loaded:
-            if self.redbox.isChecked():
-                self.red_on = True
+            if self.channel_2_checkbox.isChecked():
+                self.channel_2_visible = True
             else:
-                self.red_on = False
+                self.channel_2_visible = False
             self.next_frame()
 
     def zoom_image(self) -> None:
@@ -318,9 +318,9 @@ class BinaryPlayer(QMainWindow):
                 self.reg_file.seek(0, 0)
                 if self.wraw:
                     self.reg_file_raw.seek(0, 0)
-                if self.wred:
+                if self.has_channel_2_binary:
                     self.reg_file_chan2.seek(0, 0)
-                if self.wraw_wred:
+                if self.has_raw_channel_2_binary:
                     self.reg_file_raw_chan2.seek(0, 0)
         self.img = np.zeros((self.LY, self.LX), dtype=np.int16)
         for n in range(len(self.reg_loc)):
@@ -328,7 +328,7 @@ class BinaryPlayer(QMainWindow):
             img = np.reshape(np.frombuffer(buff, dtype=np.int16, offset=0), (self.Ly[n], self.Lx[n]))
             self.img[self.dy[n] : self.dy[n] + self.Ly[n], self.dx[n] : self.dx[n] + self.Lx[n]] = img
 
-        if self.wred and self.red_on:
+        if self.has_channel_2_binary and self.channel_2_visible:
             buff = self.reg_file_chan2.read(self.nbytesread[0])
             imgred = np.reshape(np.frombuffer(buff, dtype=np.int16, offset=0), (self.Ly[0], self.Lx[0]))[
                 :, :, np.newaxis
@@ -337,7 +337,7 @@ class BinaryPlayer(QMainWindow):
         if self.wraw and self.raw_on:
             buff = self.reg_file_raw.read(self.nbytesread[0])
             self.imgraw = np.reshape(np.frombuffer(buff, dtype=np.int16, offset=0), (self.Ly[0], self.Lx[0]))
-            if self.wraw_wred:
+            if self.has_raw_channel_2_binary:
                 buff = self.reg_file_raw_chan2.read(self.nbytesread[0])
                 imgred_raw = np.reshape(np.frombuffer(buff, dtype=np.int16, offset=0), (self.Ly[0], self.Lx[0]))[
                     :, :, np.newaxis
@@ -457,8 +457,8 @@ class BinaryPlayer(QMainWindow):
             self.dy = []
             self.dx = []
             self.wraw = False
-            self.wred = False
-            self.wraw_wred = False
+            self.has_channel_2_binary = False
+            self.has_raw_channel_2_binary = False
             # check that all binaries still exist
             dy, dx = compute_plane_offsets(ops1)
             for ipl, ops in enumerate(ops1):
@@ -527,8 +527,8 @@ class BinaryPlayer(QMainWindow):
                 self.reg_loc = [str((parent_dir / "data.bin").resolve())]
             self.reg_file = [Path(self.reg_loc[-1]).open("rb")]
             self.wraw = False
-            self.wred = False
-            self.wraw_wred = False
+            self.has_channel_2_binary = False
+            self.has_raw_channel_2_binary = False
             if "raw_binary_path" in ops:
                 if self.reg_loc == ops["registered_binary_path"]:
                     self.reg_loc_raw = ops["raw_binary_path"]
@@ -541,11 +541,11 @@ class BinaryPlayer(QMainWindow):
                     self.wraw = False
             if "registered_binary_path_channel_2" in ops:
                 if self.reg_loc == ops["registered_binary_path"]:
-                    self.reg_loc_red = ops["registered_binary_path_channel_2"]
+                    self.reg_loc_channel_2 = ops["registered_binary_path_channel_2"]
                 else:
-                    self.reg_loc_red = str((file_path.parent / "data_chan2.bin").resolve())
-                self.reg_file_chan2 = Path(self.reg_loc_red).open("rb")
-                self.wred = True
+                    self.reg_loc_channel_2 = str((file_path.parent / "data_chan2.bin").resolve())
+                self.reg_file_chan2 = Path(self.reg_loc_channel_2).open("rb")
+                self.has_channel_2_binary = True
             if "raw_binary_path_channel_2" in ops:
                 if self.reg_loc == ops["registered_binary_path"]:
                     self.reg_loc_raw_chan2 = ops["raw_binary_path_channel_2"]
@@ -553,9 +553,9 @@ class BinaryPlayer(QMainWindow):
                     self.reg_loc_raw_chan2 = str((file_path.parent / "data_raw_chan2.bin").resolve())
                 try:
                     self.reg_file_raw_chan2 = Path(self.reg_loc_raw_chan2).open("rb")
-                    self.wraw_wred = True
+                    self.has_raw_channel_2_binary = True
                 except Exception:
-                    self.wraw_wred = False
+                    self.has_raw_channel_2_binary = False
 
             if not fromgui:
                 fluorescence_path = file_path.parent / "F.npy"
@@ -653,10 +653,10 @@ class BinaryPlayer(QMainWindow):
             self.rawbox.setEnabled(True)
         else:
             self.rawbox.setEnabled(False)
-        if self.wred:
-            self.redbox.setEnabled(True)
+        if self.has_channel_2_binary:
+            self.channel_2_checkbox.setEnabled(True)
         else:
-            self.redbox.setEnabled(False)
+            self.channel_2_checkbox.setEnabled(False)
 
         if self.Floaded:
             self.maskbox.setEnabled(True)
@@ -886,9 +886,9 @@ class BinaryPlayer(QMainWindow):
                 self.reg_file[n].seek(self.nbytesread[n] * self.cframe, 0)
             if self.wraw:
                 self.reg_file_raw.seek(self.nbytesread[-1] * self.cframe, 0)
-            if self.wred:
+            if self.has_channel_2_binary:
                 self.reg_file_chan2.seek(self.nbytesread[-1] * self.cframe, 0)
-            if self.wraw_wred:
+            if self.has_raw_channel_2_binary:
                 self.reg_file_raw_chan2.seek(self.nbytesread[-1] * self.cframe, 0)
             self.cframe -= 1
             self.next_frame()
@@ -1030,8 +1030,8 @@ class PCViewer(QMainWindow):
             self.titles.append(t1)
         self.loaded = False
         self.wraw = False
-        self.wred = False
-        self.wraw_wred = False
+        self.has_channel_2_binary = False
+        self.has_raw_channel_2_binary = False
         self.l0.addWidget(QLabel(""), 7, 0, 1, 1)
         self.l0.setRowStretch(7, 1)
         self.cframe = 0

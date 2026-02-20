@@ -371,12 +371,12 @@ def compute_colors(
     # Generates random colors, adjusting for channel 2 data if present.
     np.random.seed(seed=0)  # noqa: NPY002
     random_colors = np.random.random((cell_count,))  # noqa: NPY002
-    if context.has_red_channel:
+    if context.has_channel_2:
         random_colors = random_colors / _CHAN2_COLOR_DIVISOR + _CHAN2_COLOR_OFFSET
-        is_red = context.cell_colocalization_probabilities > state.channel_2_threshold
-        console.echo(message=f"Number of red cells: {int(is_red.sum())}")
+        is_channel_2 = context.cell_colocalization_probabilities > state.channel_2_threshold
+        console.echo(message=f"Number of channel 2 cells: {int(is_channel_2.sum())}")
         random_hues = random_colors.copy()
-        random_colors[is_red] = 0
+        random_colors[is_channel_2] = 0
     else:
         random_hues = random_colors.copy()
 
@@ -873,9 +873,9 @@ def update_chan2_colors(
         color_arrays: The computed color arrays (modified in place).
         roi_maps: The ROI index maps.
     """
-    is_red = context.cell_colocalization_probabilities > state.channel_2_threshold
+    is_channel_2 = context.cell_colocalization_probabilities > state.channel_2_threshold
     color = color_arrays.random_hues.copy()
-    color[is_red] = 0
+    color[is_channel_2] = 0
     color = color.flatten()
     color_arrays.cols[0] = hsv2rgb(color)
     rgb_masks(color_arrays=color_arrays, roi_maps=roi_maps, color=color_arrays.cols[0], color_index=0)

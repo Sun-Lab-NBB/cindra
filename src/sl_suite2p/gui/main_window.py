@@ -456,7 +456,7 @@ class MainWindow(QMainWindow):
             self.colorbtns.button(4).setChecked(True)
             self._signals.color_mode_changed.emit(4)
         elif event.key() == QtCore.Qt.Key_H:
-            if self.context_data is not None and self.context_data.has_red_channel:
+            if self.context_data is not None and self.context_data.has_channel_2:
                 self.colorbtns.button(5).setChecked(True)
                 self._signals.color_mode_changed.emit(5)
         elif event.key() == QtCore.Qt.Key_J:
