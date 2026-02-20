@@ -1,3 +1,8 @@
-"""Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu."""
+"""Provides the interactive desktop GUI for suite2p data visualization and analysis."""
 
-from .gui2p import run
+from .main_window import MainWindow, run
+
+__all__ = [
+    "MainWindow",
+    "run",
+]

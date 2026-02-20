@@ -30,7 +30,6 @@ from .pipelines import (  # noqa: E402
     run_single_day_pipeline,
 )
 from .dataclasses import CombinedData, RuntimeContext, MultiDayConfiguration, SingleDayConfiguration  # noqa: E402
-from .gui.multiday import show_images_with_masks  # noqa: E402
 
 # Ensures console output is enabled whenever the suite2p library is imported. In sl-suite2p, the 'Console' class is
 # used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal
@@ -47,5 +46,4 @@ __all__ = [
     "SingleDayJobNames",
     "run_multi_day_pipeline",
     "run_single_day_pipeline",
-    "show_images_with_masks",
 ]

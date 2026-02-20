@@ -10,7 +10,7 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from sklearn.decomposition import PCA  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
-from ..registration import compute_spatial_taper_mask, compute_registration_blocks
+from .utils import compute_spatial_taper_mask, compute_registration_blocks
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

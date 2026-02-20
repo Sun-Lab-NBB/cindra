@@ -10,10 +10,9 @@ from .utils import (
     apply_mask,
     apply_phase_correlation,
     compute_upsampling_kernel,
-    compute_spatial_taper_mask,
-    compute_block_smoothing_kernel,
     compute_gaussian_frequency_filter,
 )
+from ..detection import compute_spatial_taper_mask
 
 # Small epsilon value used to prevent division by zero in SNR calculations.
 _SNR_EPSILON: float = 1e-10
@@ -26,69 +25,6 @@ _UPSAMPLING_PADDING: int = 3
 
 # Maximum number of blocks to process in a single FFT batch during phase correlation. Limits memory usage.
 _CORRELATION_BATCH_SIZE: int = 64
-
-
-def compute_registration_blocks(
-    height: int,
-    width: int,
-    block_size: tuple[int, int] = (128, 128),
-) -> tuple[list[NDArray[np.int32]], list[NDArray[np.int32]], tuple[int, int], tuple[int, int], NDArray[np.float32]]:
-    """Computes overlapping blocks for nonrigid registration.
-
-    Divides the field of view into overlapping blocks that are registered independently. The blocks
-    are arranged in a regular grid with positions computed to provide approximately 50% overlap
-    between adjacent blocks.
-
-    Args:
-        height: The imaging field height in pixels.
-        width: The imaging field width in pixels.
-        block_size: The target block size as (height, width) in pixels. Actual block sizes may differ
-            if the image dimensions are smaller than the requested block size.
-
-    Returns:
-        A tuple of (y_blocks, x_blocks, block_counts, actual_block_size, smoothing_kernel). The
-        y_blocks and x_blocks are lists of 2-element arrays specifying the start and end indices for
-        each block. The block_counts tuple gives (y_count, x_count). The actual_block_size tuple gives
-        the final block dimensions. The smoothing_kernel is used for interpolating block shifts.
-    """
-    # Computes block dimensions and counts for each axis. If the requested block size exceeds the image
-    # dimension, uses the full dimension as a single block. Otherwise, the 1.5x multiplier produces
-    # approximately 50% overlap between adjacent blocks.
-    if block_size[0] >= height:
-        block_size_y, y_block_count = height, 1
-    else:
-        block_size_y, y_block_count = block_size[0], int(np.ceil(1.5 * height / block_size[0]))
-
-    if block_size[1] >= width:
-        block_size_x, x_block_count = width, 1
-    else:
-        block_size_x, x_block_count = block_size[1], int(np.ceil(1.5 * width / block_size[1]))
-
-    actual_block_size = (block_size_y, block_size_x)
-
-    # Computes evenly-spaced block start positions spanning from 0 to the last valid position.
-    y_starts = np.linspace(0, height - block_size_y, y_block_count).astype(np.int32)
-    x_starts = np.linspace(0, width - block_size_x, x_block_count).astype(np.int32)
-
-    # Creates block boundary arrays in row-major order (all x positions for each y position).
-    y_blocks = [
-        np.array([y_starts[y_index], y_starts[y_index] + block_size_y], dtype=np.int32)
-        for y_index in range(y_block_count)
-        for _ in range(x_block_count)
-    ]
-    x_blocks = [
-        np.array([x_starts[x_index], x_starts[x_index] + block_size_x], dtype=np.int32)
-        for _ in range(y_block_count)
-        for x_index in range(x_block_count)
-    ]
-
-    # Computes the smoothing kernel used for SNR-based adaptive smoothing during shift estimation.
-    smoothing_kernel = compute_block_smoothing_kernel(
-        x_block_count=x_block_count,
-        y_block_count=y_block_count,
-    ).T
-
-    return y_blocks, x_blocks, (y_block_count, x_block_count), actual_block_size, smoothing_kernel
 
 
 def compute_nonrigid_reference_data(
