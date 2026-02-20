@@ -46,8 +46,8 @@ _BIN_SIZE_DIVISOR: int = 2
 # Minimum number of columns in a behavior array to treat it as (data, time) format.
 _MIN_BEHAVIOR_COLUMNS: int = 2
 
-# Index of the red channel color mode button in the color button group.
-_RED_CHANNEL_COLOR_INDEX: int = 5
+# Index of the channel 2 color mode button in the color button group.
+_CHANNEL_2_COLOR_INDEX: int = 5
 
 # Number of basic (non-dynamic) color mode buttons.
 _BASIC_COLOR_COUNT: int = 8
@@ -132,7 +132,7 @@ def save_merge(parent: MainWindow) -> None:
     """Saves all session data arrays after a merge operation.
 
     Writes fluorescence traces, spike deconvolution, and classification arrays to the
-    session directory. Also saves channel 2 data if the red channel is available. Resets
+    session directory. Also saves channel 2 data if channel 2 is available. Resets
     the not-merged mask after saving.
 
     Args:
@@ -149,7 +149,7 @@ def save_merge(parent: MainWindow) -> None:
     np.save(str(save_path / "F.npy"), context.cell_fluorescence)
     np.save(str(save_path / "Fneu.npy"), context.neuropil_fluorescence)
     np.save(str(save_path / "spks.npy"), context.spikes)
-    if context.has_red_channel:
+    if context.has_channel_2:
         if context.cell_fluorescence_channel_2 is not None:
             np.save(str(save_path / "F_chan2.npy"), context.cell_fluorescence_channel_2)
         if context.neuropil_fluorescence_channel_2 is not None:
@@ -564,8 +564,8 @@ def _enable_views_and_classifier(parent: MainWindow) -> None:
     # Enables color mode buttons.
     color_button_count = len(parent.colorbtns.buttons())
     for b in range(color_button_count):
-        if b == _RED_CHANNEL_COLOR_INDEX:
-            if context.has_red_channel:
+        if b == _CHANNEL_2_COLOR_INDEX:
+            if context.has_channel_2:
                 parent.colorbtns.button(b).setEnabled(True)
                 parent.colorbtns.button(b).setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
         elif b == 0:
