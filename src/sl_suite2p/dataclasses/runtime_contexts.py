@@ -98,9 +98,9 @@ def _relocate_runtime_paths(
     else:
         if runtime.io.data_path is not None:
             runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
-        runtime.io.dataset_output_paths = [
+        runtime.io.dataset_output_paths = tuple(
             new_prefix / path.relative_to(old_prefix) for path in runtime.io.dataset_output_paths
-        ]
+        )
 
 
 @dataclass

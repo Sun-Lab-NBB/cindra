@@ -242,7 +242,7 @@ def _create_template_roi(
     y_pixels = pixel_coordinates[0].astype(np.int32)
     x_pixels = pixel_coordinates[1].astype(np.int32)
 
-    centroid = [int(np.median(y_pixels)), int(np.median(x_pixels))]
+    centroid = (int(np.median(y_pixels)), int(np.median(x_pixels)))
     radius = float(np.mean([roi.radius for roi in cluster_rois]))
 
     return ROIStatistics(

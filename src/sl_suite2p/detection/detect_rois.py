@@ -220,7 +220,7 @@ def detect(
             grid_coordinates[best_scale_index][1, peak_y, peak_x],
             grid_coordinates[best_scale_index][0, peak_y, peak_x],
         )
-        centroid = [int(peak_y), int(peak_x)]
+        centroid = (int(peak_y), int(peak_x))
 
         # Terminates when the strongest remaining peak falls below the detection threshold, indicating that only
         # noise-level activity remains in the residual.
@@ -287,7 +287,7 @@ def detect(
             median_y = np.median(y_pixels)
             median_x = np.median(x_pixels)
             closest_pixel_index = np.argmin((x_pixels - median_x) ** 2 + (y_pixels - median_y) ** 2)
-            centroid = [int(y_pixels[closest_pixel_index]), int(x_pixels[closest_pixel_index])]
+            centroid = (int(y_pixels[closest_pixel_index]), int(x_pixels[closest_pixel_index]))
             flat_indices = y_pixels * width + x_pixels
 
         # Residual subtraction.

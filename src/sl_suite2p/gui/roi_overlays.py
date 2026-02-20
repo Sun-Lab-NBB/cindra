@@ -489,7 +489,7 @@ def init_roi_maps(
             label_text = str(roi_index)
         else:
             label_text = ""
-            centroid = [0, 0]
+            centroid = (0, 0)
 
         text_item = pg.TextItem(label_text, color=_ROI_TEXT_COLOR, anchor=(0.5, 0.5))
         text_item.setPos(centroid[1], centroid[0])

@@ -273,8 +273,10 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
             roi_copy = copy.deepcopy(roi)
             roi_copy.x_pixels = roi_copy.x_pixels + x_offsets[plane_index]
             roi_copy.y_pixels = roi_copy.y_pixels + y_offsets[plane_index]
-            roi_copy.centroid[0] += y_offsets[plane_index]
-            roi_copy.centroid[1] += x_offsets[plane_index]
+            roi_copy.centroid = (
+                roi_copy.centroid[0] + int(y_offsets[plane_index]),
+                roi_copy.centroid[1] + int(x_offsets[plane_index]),
+            )
             roi_copy.plane_index = plane_index
             combined_roi_stats.append(roi_copy)
 

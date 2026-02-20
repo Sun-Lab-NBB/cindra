@@ -179,7 +179,7 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
             roi_index = virtual_plane_index // acquisition.plane_number
             physical_plane_index = virtual_plane_index % acquisition.plane_number
 
-            io_data.mroi_lines = list(acquisition.roi_lines[roi_index])
+            io_data.mroi_lines = acquisition.roi_lines[roi_index]
             io_data.mroi_y_offset = acquisition.roi_y_coordinates[roi_index]
             io_data.mroi_x_offset = acquisition.roi_x_coordinates[roi_index]
             # For MROI, stores the physical plane index (which may differ from virtual plane index).
@@ -267,7 +267,7 @@ def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[Mult
             # Updates IO paths to reflect the current configuration's session directories. This handles cases where
             # session directories have changed or data was moved since the runtime was last saved.
             runtime.io.data_path = data_path
-            runtime.io.dataset_output_paths = list(output_paths)
+            runtime.io.dataset_output_paths = tuple(output_paths)
             runtime.io.mroi_region_borders = _compute_mroi_region_borders(data_path=data_path)
 
             # Injects the preloaded CombinedData to ensure it's available regardless of __post_init__ behavior.
@@ -285,7 +285,7 @@ def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[Mult
             session_id=session_id,
             data_path=data_path,
             dataset_name=dataset_name,
-            dataset_output_paths=list(output_paths),
+            dataset_output_paths=tuple(output_paths),
         )
 
         # Computes MROI region borders from acquisition parameters if applicable.
@@ -519,25 +519,25 @@ def _find_suite2p_directory(session_directory: Path) -> Path:
     return matches[0].parent
 
 
-def _compute_mroi_region_borders(data_path: Path) -> list[int]:
+def _compute_mroi_region_borders(data_path: Path) -> tuple[int, ...]:
     """Computes MROI region border x-coordinates from the acquisition parameters.
 
     For MROI recordings, the borders are the x-coordinates where one imaging region ends and another begins, computed
     from the sorted ROI x-coordinates (excluding the leftmost region's starting position). For non-MROI recordings,
-    returns an empty list.
+    returns an empty tuple.
 
     Args:
         data_path: The path to the suite2p output directory containing acquisition_parameters.yaml.
 
     Returns:
-        A list of border x-coordinates for MROI recordings, or an empty list for non-MROI recordings.
+        A tuple of border x-coordinates for MROI recordings, or an empty tuple for non-MROI recordings.
     """
     acquisition_path = data_path / "acquisition_parameters.yaml"
     acquisition = AcquisitionParameters.from_yaml(file_path=acquisition_path)
     if not acquisition.is_mroi:
-        return []
+        return ()
 
     # Computes region borders from ROI x-coordinates. The borders are the x-coordinates where one region ends and
     # another begins, which are all x-coordinates except the minimum (leftmost region).
     sorted_x = sorted(acquisition.roi_x_coordinates)
-    return sorted_x[1:]
+    return tuple(sorted_x[1:])

@@ -96,8 +96,7 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
 
     # Extracts non-rigid registration parameters.
     nonrigid_enabled = context.configuration.non_rigid_registration.enabled
-    block_size_list = context.configuration.non_rigid_registration.block_size
-    block_size = (block_size_list[0], block_size_list[1])
+    block_size = context.configuration.non_rigid_registration.block_size
     snr_threshold = context.configuration.non_rigid_registration.signal_to_noise_threshold
     maximum_nonrigid_shift = context.configuration.non_rigid_registration.maximum_block_shift
 

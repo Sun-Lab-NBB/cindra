@@ -198,8 +198,8 @@ def detect_plane_rois(context: RuntimeContext) -> None:
 def _create_enhanced_mean_image(
     mean_image: NDArray[np.float32],
     cell_diameter: int,
-    valid_y_range: list[int],
-    valid_x_range: list[int],
+    valid_y_range: tuple[int, int],
+    valid_x_range: tuple[int, int],
     frame_height: int,
     frame_width: int,
 ) -> NDArray[np.float32]:
@@ -214,8 +214,8 @@ def _create_enhanced_mean_image(
     Args:
         mean_image: The mean image to enhance, with shape (frame_height, frame_width).
         cell_diameter: The estimated cell diameter in pixels, used to compute the median filter kernel size.
-        valid_y_range: The valid Y pixel range [start, end] after registration cropping.
-        valid_x_range: The valid X pixel range [start, end] after registration cropping.
+        valid_y_range: The valid Y pixel range (start, end) after registration cropping.
+        valid_x_range: The valid X pixel range (start, end) after registration cropping.
         frame_height: The height of the full frame in pixels.
         frame_width: The width of the full frame in pixels.
 
@@ -329,11 +329,11 @@ def _detect_channel(
     frame_width: int,
     frame_count: int,
     bin_size: int,
-    valid_y_range: list[int],
-    valid_x_range: list[int],
+    valid_y_range: tuple[int, int],
+    valid_x_range: tuple[int, int],
     bad_frames: NDArray[np.bool_] | None,
     detection_config: ROIDetection,
-    nonrigid_block_size: list[int],
+    nonrigid_block_size: tuple[int, int],
     parallel_workers: int,
     custom_classifier_path: Path | None,
     plane_index: int,
@@ -352,12 +352,12 @@ def _detect_channel(
         frame_width: The width of each frame in pixels.
         frame_count: The total number of frames in the binary file.
         bin_size: The temporal bin size in frames.
-        valid_y_range: The valid Y pixel range [start, end] after registration cropping.
-        valid_x_range: The valid X pixel range [start, end] after registration cropping.
+        valid_y_range: The valid Y pixel range (start, end) after registration cropping.
+        valid_x_range: The valid X pixel range (start, end) after registration cropping.
         bad_frames: A boolean array with shape (num_frames,) marking frames to exclude from binning, or None if no
             frames are excluded.
         detection_config: The ROIDetection configuration dataclass containing detection parameters.
-        nonrigid_block_size: The non-rigid registration block size [height, width], used to derive the PCA denoising
+        nonrigid_block_size: The non-rigid registration block size (height, width), used to derive the PCA denoising
             block dimensions.
         parallel_workers: The number of parallel threads for PCA denoising. Values of -1 or 0 use all available cores.
             A value of 1 disables parallelism.
@@ -460,8 +460,7 @@ def _detect_channel(
     for roi in roi_statistics:
         roi.y_pixels += y_pixel_offset
         roi.x_pixels += x_pixel_offset
-        roi.centroid[0] += y_pixel_offset
-        roi.centroid[1] += x_pixel_offset
+        roi.centroid = (roi.centroid[0] + y_pixel_offset, roi.centroid[1] + x_pixel_offset)
 
     # Applies optional preclassification filtering to remove unlikely cell candidates early.
     if detection_config.preclassification_threshold > 0:

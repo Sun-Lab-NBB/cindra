@@ -106,8 +106,8 @@ def compute_roi_statistics(
 
     # Initializes centroids for ROIs that lack them. The centroid is required for computing radial statistics.
     for roi in rois:
-        if not roi.centroid or roi.centroid == [0, 0]:
-            roi.centroid = list(compute_median_pixel_position(y_pixels=roi.y_pixels, x_pixels=roi.x_pixels))
+        if not roi.centroid or roi.centroid == (0, 0):
+            roi.centroid = compute_median_pixel_position(y_pixels=roi.y_pixels, x_pixels=roi.x_pixels)
 
     # Resolves the cell diameter for distance normalization. A sensible default is used when no diameter is provided.
     default_diameter = 10

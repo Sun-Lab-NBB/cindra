@@ -68,7 +68,7 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
     # Discovers TIFF files in the data directory.
     tiff_files = _discover_tiff_files(
         data_directory=data_directory,
-        ignored_file_names=tuple(config.file_io.ignored_file_names),
+        ignored_file_names=config.file_io.ignored_file_names,
     )
 
     # Extracts processing parameters.
@@ -248,8 +248,8 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
             context.runtime.detection.mean_image_channel_2 = mean_image_channel_2
 
         # Sets initial valid pixel ranges to full frame (registration will update these).
-        context.runtime.registration.valid_y_range = [0, io_data.frame_height]
-        context.runtime.registration.valid_x_range = [0, io_data.frame_width]
+        context.runtime.registration.valid_y_range = (0, io_data.frame_height)
+        context.runtime.registration.valid_x_range = (0, io_data.frame_width)
 
     message = f"Converted {total_frames} frames across {len(tiff_files)} TIFF files to binary format."
     console.echo(message=message, level=LogLevel.SUCCESS)

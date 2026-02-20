@@ -488,7 +488,7 @@ def _run_discover_job(config_path: Path, session_paths: list[Path], workers: int
     try:
         # Writes session directories into the configuration file before running the pipeline.
         configuration = MultiDayConfiguration.from_yaml(file_path=config_path)
-        configuration.session_io.session_directories = list(session_paths)
+        configuration.session_io.session_directories = tuple(natsorted(session_paths))
         configuration.save(file_path=config_path)
 
         run_multi_day_pipeline(
@@ -530,7 +530,7 @@ def _run_extract_job(
     try:
         # Writes session directories into the configuration file before running the pipeline.
         configuration = MultiDayConfiguration.from_yaml(file_path=config_path)
-        configuration.session_io.session_directories = list(session_paths)
+        configuration.session_io.session_directories = tuple(natsorted(session_paths))
         configuration.save(file_path=config_path)
 
         run_multi_day_pipeline(

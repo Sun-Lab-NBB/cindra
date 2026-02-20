@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import copy
 from enum import StrEnum
-from pathlib import Path
+from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
 from natsort import natsorted
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from .single_day_configuration import RuntimeSettings, SignalExtraction, SpikeDeconvolution
 
@@ -31,7 +33,7 @@ class ReferenceImageType(StrEnum):
 class SessionIO:
     """Stores the parameters that specify input session locations and output directories."""
 
-    session_directories: list[Path] = field(default_factory=list)
+    session_directories: tuple[Path, ...] = ()
     """Specifies the sessions to register across days as absolute paths to their root directories.
     Sessions are natural-sorted, and the first session after sorting becomes the 'main session' which stores
     the processing tracker file. Each session directory is expected to contain the combined_metadata.npz file created
@@ -49,12 +51,8 @@ class SessionIO:
     (default), existing cell selections are used if present."""
 
     def __post_init__(self) -> None:
-        """Converts string paths to Path objects and natural-sorts them after YAML loading."""
-        self.session_directories = natsorted([Path(p) if isinstance(p, str) else p for p in self.session_directories])
-
-    def prepare_for_saving(self) -> None:
-        """Converts Path fields to strings for YAML serialization."""
-        self.session_directories = [str(p) for p in self.session_directories]  # type: ignore[misc]
+        """Natural-sorts session directories after construction or YAML loading."""
+        self.session_directories = tuple(natsorted(self.session_directories))
 
 
 @dataclass
@@ -97,7 +95,7 @@ class DiffeomorphicRegistration:
     visual (sampling) space.
     """
 
-    image_type: ReferenceImageType = ReferenceImageType.ENHANCED_MEAN
+    image_type: ReferenceImageType | str = ReferenceImageType.ENHANCED_MEAN
     """The type of suite2p-generated reference image to use for across-day registration. This image is used to
     calculate the deformation fields that register all sessions to a common visual space."""
 
@@ -139,7 +137,7 @@ class ROITracking:
     cross-session template mask. Pixels below this threshold are excluded, so only spatially stable regions of each
     tracked ROI contribute to the template used for fluorescence extraction across sessions."""
 
-    step_sizes: list[int] = field(default_factory=lambda: [200, 200])
+    step_sizes: tuple[int, int] = (200, 200)
     """The block size, in pixels, as (height, width) used to partition the deformed visual space into spatial bins
     for clustering. Smaller blocks reduce memory usage but increase processing overhead."""
 
@@ -190,21 +188,11 @@ class MultiDayConfiguration(YamlConfig):
     def save(self, file_path: Path) -> None:
         """Saves the configuration to a YAML file.
 
-        Converts Path fields to strings before serialization to ensure YAML compatibility.
-
         Args:
             file_path: The path to the .yaml file where to save the configuration data.
         """
         ensure_directory_exists(file_path)
-
-        # Creates a deep copy to avoid modifying the original instance.
-        yaml_copy = copy.deepcopy(self)
-
-        # Prepares each child dataclass for YAML serialization.
-        yaml_copy.session_io.prepare_for_saving()
-        yaml_copy.spike_deconvolution.prepare_for_saving()
-
-        yaml_copy.to_yaml(file_path=file_path)
+        self.to_yaml(file_path=file_path)
 
     @classmethod
     def load(cls, file_path: Path) -> MultiDayConfiguration:

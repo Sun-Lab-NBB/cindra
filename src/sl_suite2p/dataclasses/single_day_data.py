@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 from typing import TYPE_CHECKING
-from pathlib import Path
 from dataclasses import field, dataclass
 
 import numpy as np
@@ -14,13 +13,15 @@ from ataraxis_data_structures import YamlConfig
 from .version import version, python_version
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from numpy.typing import NDArray
     from numpy.lib.npyio import NpzFile
 
 
 def _save_optional_array_field(
     field_name: str,
-    arrays: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | list[int] | None],
+    arrays: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | tuple[int, ...] | None],
     save_dictionary: dict[str, NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | NDArray[np.uint32]],
     dtype: type,
 ) -> None:
@@ -121,45 +122,23 @@ class IOData:
     """The horizontal offset in pixels for positioning this ROI within the full combined field of view. Only used
     for MROI recordings."""
 
-    mroi_lines: list[int] = field(default_factory=list)
-    """The list of scan line indices used for extracting this ROI from raw multi-ROI data. Only used for MROI
+    mroi_lines: tuple[int, ...] = ()
+    """The tuple of scan line indices used for extracting this ROI from raw multi-ROI data. Only used for MROI
     recordings."""
 
     plane_index: int | None = None
     """The zero-based index identifying this plane's position in a multi-plane volumetric recording."""
-
-    def __post_init__(self) -> None:
-        """Converts string paths to Path objects after YAML loading."""
-        if isinstance(self.registered_binary_path, str):
-            self.registered_binary_path = Path(self.registered_binary_path) if self.registered_binary_path else None
-        if isinstance(self.registered_binary_path_channel_2, str):
-            self.registered_binary_path_channel_2 = (
-                Path(self.registered_binary_path_channel_2) if self.registered_binary_path_channel_2 else None
-            )
-        if isinstance(self.output_directory, str):
-            self.output_directory = Path(self.output_directory) if self.output_directory else None
-
-    def prepare_for_saving(self) -> None:
-        """Converts Path fields to strings for YAML serialization."""
-        if self.registered_binary_path is not None:
-            self.registered_binary_path = str(self.registered_binary_path)  # type: ignore[assignment]
-        if self.registered_binary_path_channel_2 is not None:
-            self.registered_binary_path_channel_2 = str(  # type: ignore[assignment]
-                self.registered_binary_path_channel_2
-            )
-        if self.output_directory is not None:
-            self.output_directory = str(self.output_directory)  # type: ignore[assignment]
 
 
 @dataclass
 class RegistrationData:
     """Stores runtime data from the registration stage."""
 
-    valid_y_range: list[int] = field(default_factory=lambda: [0, 0])
-    """The valid Y pixel range [start, end] defining the usable recording region after border cropping."""
+    valid_y_range: tuple[int, int] = (0, 0)
+    """The valid Y pixel range (start, end) defining the usable recording region after border cropping."""
 
-    valid_x_range: list[int] = field(default_factory=lambda: [0, 0])
-    """The valid X pixel range [start, end] defining the usable recording region after border cropping."""
+    valid_x_range: tuple[int, int] = (0, 0)
+    """The valid X pixel range (start, end) defining the usable recording region after border cropping."""
 
     bad_frames: NDArray[np.bool_] | None = None
     """A boolean array with shape (num_frames,) marking frames with excessive motion or poor correlation. Computed
@@ -225,8 +204,8 @@ class RegistrationData:
 
     def clear(self) -> None:
         """Clears all registration data to prepare for re-registration."""
-        self.valid_y_range = [0, 0]
-        self.valid_x_range = [0, 0]
+        self.valid_y_range = (0, 0)
+        self.valid_x_range = (0, 0)
         self.bad_frames = None
         self.bidirectional_phase_offset = 0
         self.bidirectional_phase_corrected = False
@@ -466,8 +445,8 @@ class ROIStatistics:
     pixel_weights: NDArray[np.float32]
     """The spatial filter weights (lambda values) for each pixel, indicating contribution to the ROI signal."""
 
-    centroid: list[int]
-    """The median [y, x] pixel position of the ROI, representing its approximate center."""
+    centroid: tuple[int, int]
+    """The median (y, x) pixel position of the ROI, representing its approximate center."""
 
     footprint: int = 0
     """The spatial scale (hop size) used during sparse detection for this ROI."""
@@ -547,8 +526,9 @@ class ROIStatistics:
     circle_x_pixels: NDArray[np.float32] | None = None
     """The x-coordinates of the circle drawn around the ROI centroid in the GUI."""
 
-    merged_roi_indices: list[int] | None = None
-    """The list of original ROI indices that were merged to create this ROI. None indicates this is not a merged ROI."""
+    merged_roi_indices: tuple[int, ...] | None = None
+    """The tuple of original ROI indices that were merged to create this ROI. None indicates this is not a merged 
+    ROI."""
 
     merged_into_roi_index: int | None = None
     """The index of the merged ROI that this ROI was merged into. None indicates this ROI has not been merged."""
@@ -732,15 +712,15 @@ class ROIStatistics:
         # Reconstructs ROIStatistics instances.
         roi_list = []
         for i in range(roi_count):
-            # Converts merged_roi_indices array back to list[int] if present.
+            # Converts merged_roi_indices array back to tuple[int, ...] if present.
             merged_indices = merged_roi_indices_list[i]
-            merged_indices_as_list = list(merged_indices.astype(int)) if merged_indices is not None else None
+            merged_indices_as_tuple = tuple(int(v) for v in merged_indices) if merged_indices is not None else None
 
             roi = ROIStatistics(
                 y_pixels=y_pixels_list[i].astype(np.int32),
                 x_pixels=x_pixels_list[i].astype(np.int32),
                 pixel_weights=pixel_weights_list[i].astype(np.float32),
-                centroid=[int(centroids[i, 0]), int(centroids[i, 1])],
+                centroid=(int(centroids[i, 0]), int(centroids[i, 1])),
                 footprint=int(footprints[i]),
                 mean_radius=float(mean_radius[i]),
                 baseline_mean_radius=float(baseline_mean_radius[i]),
@@ -765,7 +745,7 @@ class ROIStatistics:
                 boundary_x_pixels=boundary_x_pixels_list[i],  # type: ignore[arg-type]
                 circle_y_pixels=circle_y_pixels_list[i],  # type: ignore[arg-type]
                 circle_x_pixels=circle_x_pixels_list[i],  # type: ignore[arg-type]
-                merged_roi_indices=merged_indices_as_list,
+                merged_roi_indices=merged_indices_as_tuple,
                 merged_into_roi_index=None if merged_into_roi_index[i] < 0 else int(merged_into_roi_index[i]),
                 colocalization_probability=(
                     None if np.isnan(colocalization_probability[i]) else float(colocalization_probability[i])
@@ -1093,10 +1073,6 @@ class SingleDayRuntimeData(YamlConfig):
         if self.output_path is None:
             return
 
-        # Converts output_path to Path if it was loaded as a string from YAML.
-        if isinstance(self.output_path, str):
-            self.output_path = Path(self.output_path)
-
         # Loads arrays from each child dataclass.
         self.registration.load_arrays(self.output_path)
         self.detection.load_arrays(self.output_path)
@@ -1124,12 +1100,11 @@ class SingleDayRuntimeData(YamlConfig):
         self.detection.save_arrays(output_path)
         self.extraction.save_arrays(output_path)
 
-        # Creates a deep copy for YAML serialization.
+        # Creates a deep copy for YAML serialization. The deep copy is still needed because array fields must be
+        # nulled for YAML serialization while keeping the originals intact in memory.
         yaml_copy = copy.deepcopy(self)
 
-        # Prepares each child dataclass for YAML serialization.
-        yaml_copy.output_path = str(output_path)  # type: ignore[assignment]
-        yaml_copy.io.prepare_for_saving()
+        # Nulls array fields in child dataclasses for YAML serialization.
         yaml_copy.registration.prepare_for_saving()
         yaml_copy.detection.prepare_for_saving()
         yaml_copy.extraction.prepare_for_saving()

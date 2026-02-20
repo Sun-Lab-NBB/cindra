@@ -156,7 +156,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
     pixel_weights = pixel_weights[unique_indices]
 
     # Computes the merged ROI centroid.
-    centroid = list(compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels))
+    centroid = compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
 
     # Normalizes pixel weights.
     normalized_weights = pixel_weights / pixel_weights.sum()
@@ -192,7 +192,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
         pixel_count=len(y_pixels),
         skewness=float(stats.skew(corrected_fluorescence)),
         standard_deviation=float(corrected_fluorescence.std()),
-        merged_roi_indices=list(merged_cells),
+        merged_roi_indices=tuple(merged_cells),
         plane_index=plane_index,
     )
 
