@@ -245,7 +245,7 @@ class BinaryPlayer(QMainWindow):
             console.echo(message=f"Opening file: {ops_path}")
             self.Fcell = parent.Fcell
             self.stat = parent.stat
-            self.iscell = parent.iscell
+            self.cell_classification = parent.cell_classification
             self.Floaded = True
             self._open_file(ops_path, True)
 
@@ -380,16 +380,16 @@ class BinaryPlayer(QMainWindow):
         ncells = len(self.stat)
         generator = np.random.default_rng(seed=0)
         allcols = generator.random(ncells)
-        if hasattr(self, "redcell"):
+        if hasattr(self, "cell_colocalization"):
             allcols = allcols / 1.4
             allcols = allcols + 0.1
-            allcols[self.redcell] = 0
+            allcols[self.cell_colocalization] = 0
         self.colors = hsv2rgb(allcols)
         self.RGB = -1 * np.ones((self.LY, self.LX, 3), np.int32)
         self.cellpix = -1 * np.ones((self.LY, self.LX), np.int32)
         self.sroi = np.zeros((self.LY, self.LX), np.uint8)
 
-        for n in np.nonzero(self.iscell)[0]:
+        for n in np.nonzero(self.cell_classification)[0]:
             ypix = self.stat[n]["y_pixels"].flatten()
             xpix = self.stat[n]["x_pixels"].flatten()
             if not self.ops[0]["allow_overlap"]:
@@ -562,7 +562,9 @@ class BinaryPlayer(QMainWindow):
                 if fluorescence_path.is_file():
                     self.Fcell = np.load(fluorescence_path)
                     self.stat = np.load(file_path.parent / "stat.npy", allow_pickle=True)
-                    self.iscell = np.load(file_path.parent / "iscell.npy", allow_pickle=True)
+                    self.cell_classification = np.load(
+                        file_path.parent / "cell_classification.npy", allow_pickle=True,
+                    )
                     self.Floaded = True
                 else:
                     self.Floaded = False

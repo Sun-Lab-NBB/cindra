@@ -378,8 +378,10 @@ class VisWindow(QMainWindow):
 
         # Computes activity data based on parent's activity mode.
         if len(self._parent.imerge) == 1:
-            is_cell = self._parent.iscell[self._parent.imerge[0]]
-            self._cells = np.array((self._parent.iscell == is_cell).nonzero()).flatten()
+            classification_label = self._parent.cell_classification[self._parent.imerge[0]]
+            self._cells = np.array(
+                (self._parent.cell_classification == classification_label).nonzero()
+            ).flatten()
         else:
             self._cells = np.array(self._parent.imerge).flatten()
 

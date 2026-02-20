@@ -55,7 +55,7 @@ def make_buttons(parent: MainWindow, b0: int) -> int:
     classifier_label = QLabel("")
     classifier_label.setFont(header_font())
     classifier_label.setText("<font color='white'>Classifier</font>")
-    parent.classLabel = QLabel("<font color='white'>not loaded (using prob from iscell.npy)</font>")
+    parent.classLabel = QLabel("<font color='white'>not loaded (using prob from cell_classification.npy)</font>")
     parent.classLabel.setFont(label_font())
     parent.l0.addWidget(classifier_label, b0, 0, 1, 2)
     b0 += 1
@@ -155,7 +155,7 @@ def activate(parent: MainWindow, inactive: bool) -> None:
     """
     if inactive:
         result = parent.model.classify(roi_statistics=parent.context_data.roi_statistics)
-        parent.context_data.cell_probability[:] = result[:, 1]
+        parent.context_data.cell_classification_probabilities[:] = result[:, 1]
     _class_masks(parent=parent)
     parent.update_plot()
 
@@ -176,7 +176,7 @@ def disable(parent: MainWindow) -> None:
 class ListChooser(QDialog):
     """Dialog for selecting training files to build a classifier.
 
-    Allows the user to add iscell.npy files or text file lists, then build and
+    Allows the user to add cell_classification.npy files or text file lists, then build and
     apply a classifier from the selected training data.
 
     Args:
@@ -192,7 +192,7 @@ class ListChooser(QDialog):
         layout = QGridLayout()
         self.win.setLayout(layout)
 
-        load_cell_button = QPushButton("Load iscell.npy")
+        load_cell_button = QPushButton("Load cell_classification.npy")
         load_cell_button.resize(200, 50)
         load_cell_button.clicked.connect(self._load_cell)
         layout.addWidget(load_cell_button, 0, 0, 1, 1)
@@ -225,21 +225,23 @@ class ListChooser(QDialog):
         layout.addWidget(done_button, 8, 3, 1, 1)
 
     def _load_cell(self) -> None:
-        """Loads an iscell.npy file and adds it to the training file list."""
-        name = QFileDialog.getOpenFileName(self, "Open iscell.npy file", filter="iscell.npy")
+        """Loads a cell_classification.npy file and adds it to the training file list."""
+        name = QFileDialog.getOpenFileName(
+            self, "Open cell_classification.npy file", filter="cell_classification.npy",
+        )
         if name:
             try:
-                iscell = np.load(name[0])
+                classification = np.load(name[0])
                 bad_file = True
-                if iscell.shape[0] > 0 and (iscell[0, 0] == 0 or iscell[0, 0] == 1):
+                if classification.shape[0] > 0 and (classification[0, 0] == 0 or classification[0, 0] == 1):
                     bad_file = False
                     self.list.addItem(name[0])
                 if bad_file:
-                    QMessageBox.information(self, "Error", "iscell.npy should be 0/1")
+                    QMessageBox.information(self, "Error", "cell_classification.npy should be 0/1")
             except (OSError, RuntimeError, TypeError, NameError):
-                QMessageBox.information(self, "Error", "iscell.npy should be 0/1")
+                QMessageBox.information(self, "Error", "cell_classification.npy should be 0/1")
         else:
-            QMessageBox.information(self, "Error", "iscell.npy should be 0/1")
+            QMessageBox.information(self, "Error", "cell_classification.npy should be 0/1")
 
     def _load_text(self) -> None:
         """Loads a text file containing paths to training files."""
@@ -369,30 +371,30 @@ def _load_data(
     parent: MainWindow,
     trainfiles: list[str],
 ) -> bool:
-    """Loads training data from multiple iscell.npy files and builds a classifier.
+    """Loads training data from multiple cell_classification.npy files and builds a classifier.
 
-    Loads stat.npy files adjacent to each iscell.npy and extracts classification features.
-    The stat.npy files must contain dicts with the standard feature keys (normalized_pixel_count,
-    compactness, skewness).
+    Loads stat.npy files adjacent to each cell_classification.npy and extracts classification
+    features. The stat.npy files must contain dicts with the standard feature keys
+    (normalized_pixel_count, compactness, skewness).
 
     Args:
         parent: The main GUI window.
-        trainfiles: List of paths to iscell.npy training files.
+        trainfiles: List of paths to cell_classification.npy training files.
 
     Returns:
         True if the classifier was successfully built and saved.
     """
     feature_count = len(_CLASSIFICATION_FEATURES)
     train_stats = np.zeros((0, feature_count), dtype=np.float32)
-    train_iscell = np.zeros((0,), dtype=np.bool_)
+    train_labels = np.zeros((0,), dtype=np.bool_)
     trainfiles_good = []
     loaded = False
     if trainfiles is not None:
         for fname in trainfiles:
             bad_file = False
             try:
-                iscells = np.load(fname)
-                ncells = iscells.shape[0]
+                classification_data = np.load(fname)
+                ncells = classification_data.shape[0]
             except (ValueError, OSError, RuntimeError, TypeError, NameError):
                 console.echo(message=f"  {fname}: not a numpy array of booleans", level=LogLevel.WARNING)
                 bad_file = True
@@ -410,12 +412,12 @@ def _load_data(
                     )
                 if stat_length != ncells:
                     console.echo(
-                        message=f"  {base_path}: stat.npy length doesn't match iscell.npy",
+                        message=f"  {base_path}: stat.npy length doesn't match cell_classification.npy",
                         level=LogLevel.WARNING,
                     )
                 else:
                     console.echo(message=f"  {fname}: added to classifier", level=LogLevel.SUCCESS)
-                    iscell = iscells[:, 0].astype(np.bool_)
+                    labels = classification_data[:, 0].astype(np.bool_)
                     stat_values = np.reshape(
                         np.array(
                             [stat[j][k] for j in range(len(stat)) for k in _CLASSIFICATION_FEATURES],
@@ -423,11 +425,11 @@ def _load_data(
                         (len(stat), -1),
                     ).astype(np.float32)
                     train_stats = np.concatenate((train_stats, stat_values), axis=0)
-                    train_iscell = np.concatenate((train_iscell, iscell), axis=0)
+                    train_labels = np.concatenate((train_labels, labels), axis=0)
                     trainfiles_good.append(fname)
     if trainfiles_good:
         classfile, saved = _save_classifier(
-            parent=parent, feature_matrix=train_stats, training_labels=train_iscell,
+            parent=parent, feature_matrix=train_stats, training_labels=train_labels,
         )
         if saved:
             parent.classfile = classfile
@@ -474,7 +476,7 @@ def _add_to(parent: MainWindow) -> None:
         combined_features = np.concatenate([existing_features, new_features], axis=0)
         combined_labels = np.concatenate([
             existing_labels,
-            parent.context_data.is_cell,
+            parent.context_data.cell_classification_labels,
         ], axis=0)
 
         # Saves the combined dataset and reloads the classifier.
@@ -535,7 +537,7 @@ def _save_list(parent: MainWindow) -> None:
     Args:
         parent: The main GUI window.
     """
-    name = QFileDialog.getSaveFileName(parent, "Save list of iscell.npy")
+    name = QFileDialog.getSaveFileName(parent, "Save list of cell_classification.npy")
     if name:
         try:
             with Path(name[0]).open("w") as output_file:
@@ -552,7 +554,7 @@ def _class_masks(parent: MainWindow) -> None:
     Args:
         parent: The main GUI window.
     """
-    istat = parent.context_data.cell_probability.copy()
+    istat = parent.context_data.cell_classification_probabilities.copy()
     parent.color_arrays.colorbar[_CLASSIFIER_COLOR_INDEX] = [
         float(istat.min()), float((istat.max() - istat.min()) / 2), float(istat.max()),
     ]

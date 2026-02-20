@@ -72,8 +72,8 @@ def export_fig(parent: MainWindow) -> None:
     parent.win.scene().showExportDialog()
 
 
-def save_iscell(parent: MainWindow) -> None:
-    """Saves the current cell classification labels to iscell.npy.
+def save_cell_classification(parent: MainWindow) -> None:
+    """Saves the current cell classification labels to cell_classification.npy.
 
     Writes both the boolean classification and probability arrays, filtered by the
     not-merged mask, to the session directory. Updates the cell count labels in the
@@ -89,21 +89,23 @@ def save_iscell(parent: MainWindow) -> None:
     if save_path is None:
         return
     np.save(
-        str(save_path / "iscell.npy"),
+        str(save_path / "cell_classification.npy"),
         np.concatenate(
             (
-                np.expand_dims(context.is_cell[context.not_merged], axis=1),
-                np.expand_dims(context.cell_probability[context.not_merged], axis=1),
+                np.expand_dims(context.cell_classification_labels[context.not_merged], axis=1),
+                np.expand_dims(context.cell_classification_probabilities[context.not_merged], axis=1),
             ),
             axis=1,
         ),
     )
-    parent.lcell0.setText(f"{int(context.is_cell.sum())}")
-    parent.lcell1.setText(f"{int(context.is_cell.size - context.is_cell.sum())}")
+    parent.lcell0.setText(f"{int(context.cell_classification_labels.sum())}")
+    parent.lcell1.setText(
+        f"{int(context.cell_classification_labels.size - context.cell_classification_labels.sum())}"
+    )
 
 
-def save_redcell(parent: MainWindow) -> None:
-    """Saves the current red channel cell labels to redcell.npy.
+def save_cell_colocalization(parent: MainWindow) -> None:
+    """Saves the current cell colocalization labels to cell_colocalization.npy.
 
     Args:
         parent: The main GUI window.
@@ -115,11 +117,11 @@ def save_redcell(parent: MainWindow) -> None:
     if save_path is None:
         return
     np.save(
-        str(save_path / "redcell.npy"),
+        str(save_path / "cell_colocalization.npy"),
         np.concatenate(
             (
-                np.expand_dims(context.is_red_cell[context.not_merged], axis=1),
-                np.expand_dims(context.red_cell_probability[context.not_merged], axis=1),
+                np.expand_dims(context.cell_colocalization_labels[context.not_merged], axis=1),
+                np.expand_dims(context.cell_colocalization_probabilities[context.not_merged], axis=1),
             ),
             axis=1,
         ),
@@ -153,21 +155,24 @@ def save_merge(parent: MainWindow) -> None:
         if context.neuropil_fluorescence_channel_2 is not None:
             np.save(str(save_path / "Fneu_chan2.npy"), context.neuropil_fluorescence_channel_2)
         np.save(
-            str(save_path / "redcell.npy"),
+            str(save_path / "cell_colocalization.npy"),
             np.concatenate(
                 (
-                    np.expand_dims(context.is_red_cell, axis=1),
-                    np.expand_dims(context.red_cell_probability, axis=1),
+                    np.expand_dims(context.cell_colocalization_labels, axis=1),
+                    np.expand_dims(context.cell_colocalization_probabilities, axis=1),
                 ),
                 axis=1,
             ),
         )
-    iscell = np.concatenate(
-        (context.is_cell[:, np.newaxis], context.cell_probability[:, np.newaxis]),
+    cell_classification = np.concatenate(
+        (
+            context.cell_classification_labels[:, np.newaxis],
+            context.cell_classification_probabilities[:, np.newaxis],
+        ),
         axis=1,
     )
-    np.save(str(save_path / "iscell.npy"), iscell)
-    context.not_merged = np.ones(context.is_cell.size, dtype=np.bool_)
+    np.save(str(save_path / "cell_classification.npy"), cell_classification)
+    context.not_merged = np.ones(context.cell_classification_labels.size, dtype=np.bool_)
 
 
 def load_session(parent: MainWindow, session_path: Path | None = None) -> None:
@@ -448,7 +453,7 @@ def _initialize_gui(parent: MainWindow) -> None:
     parent.roi_maps = init_roi_maps(context=context, color_arrays=parent.color_arrays)
 
     # Selects the first classified cell as the initial selection.
-    first_cell = int(np.nonzero(context.is_cell)[0][0]) if context.cell_count > 0 else 0
+    first_cell = int(np.nonzero(context.cell_classification_labels)[0][0]) if context.cell_count > 0 else 0
     state.chosen_index = first_cell
     state.merge_indices = [first_cell]
     state.flipped_index = first_cell
