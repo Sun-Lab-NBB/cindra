@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import (
+from ..styles import (
     WHITE_LABEL_STYLESHEET,
     RANGE_SLIDER_STYLESHEET,
     BUTTON_PRESSED_STYLESHEET,

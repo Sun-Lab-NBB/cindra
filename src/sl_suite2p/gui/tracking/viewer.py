@@ -50,9 +50,6 @@ _CHANNEL_1_MASK_COLOR: tuple[int, int, int] = (0, 255, 255)
 # Mask outline color for channel 2 ROIs (red).
 _CHANNEL_2_MASK_COLOR: tuple[int, int, int] = (255, 80, 80)
 
-# Standard font family used throughout the viewer.
-_FONT_FAMILY: str = "Arial"
-
 # Percentile values for normalizing background images.
 _LOWER_PERCENTILE: float = 1.0
 _UPPER_PERCENTILE: float = 99.0

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QLabel, QComboBox, QLineEdit, QPushButton, QButton
 from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import (
+from ..styles import (
     COLORBAR_MAX_WIDTH,
     COLORBAR_MAX_HEIGHT,
     WHITE_LABEL_STYLESHEET,

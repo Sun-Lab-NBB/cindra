@@ -10,7 +10,7 @@ import pyqtgraph as pg
 from PySide6.QtWidgets import QLabel, QDialog, QWidget, QLineEdit, QGridLayout, QMessageBox, QPushButton
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import PARAMETER_EDIT_WIDTH, merge_label_font
+from ..styles import PARAMETER_EDIT_WIDTH, merge_label_font
 from .roi_geometry import compute_circle_mask
 from .roi_overlays import (
     add_roi,

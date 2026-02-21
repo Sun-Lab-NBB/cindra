@@ -9,7 +9,7 @@ import numpy as np
 from PySide6 import QtGui, QtCore
 from PySide6.QtWidgets import QLabel, QCheckBox, QComboBox, QLineEdit, QPushButton
 
-from .styles import (
+from ..styles import (
     COMBO_BOX_WIDTH,
     SMALL_EDIT_WIDTH,
     RED_LABEL_STYLESHEET,

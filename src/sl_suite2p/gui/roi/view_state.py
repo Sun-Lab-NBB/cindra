@@ -190,4 +190,3 @@ class ViewState:
     ROIs with a probability above this value are visually distinguished as channel 2 cells in the
     color overlay. This threshold only affects visualization and does not modify the underlying
     classification data."""
-

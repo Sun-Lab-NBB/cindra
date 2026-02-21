@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import (
+from ..styles import (
     SMALL_EDIT_WIDTH,
     MEDIUM_EDIT_WIDTH,
     WHITE_LABEL_STYLESHEET,

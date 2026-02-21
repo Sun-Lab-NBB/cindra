@@ -10,7 +10,7 @@ import numpy as np
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import (
+from ..styles import (
     BUTTON_PRESSED_STYLESHEET,
     BUTTON_INACTIVE_STYLESHEET,
     BUTTON_UNPRESSED_STYLESHEET,

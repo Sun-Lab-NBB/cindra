@@ -601,5 +601,3 @@ class ContextData:
 
         # Initializes the not-merged mask.
         self.not_merged = np.ones(roi_count, dtype=np.bool_)
-
-
