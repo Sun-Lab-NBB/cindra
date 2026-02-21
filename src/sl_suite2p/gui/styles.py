@@ -1,4 +1,4 @@
-"""Provides centralized style constants and font factories for GUI widgets."""
+"""Provides centralized style constants and font factories for all GUI viewer sub-packages."""
 
 from PySide6 import QtGui
 
@@ -61,37 +61,37 @@ COLORBAR_MAX_HEIGHT: int = 60
 COLORBAR_MAX_WIDTH: int = 150
 
 # Standard font family used throughout the GUI.
-_FONT_FAMILY: str = "Arial"
+FONT_FAMILY: str = "Arial"
 
 # Alternative font family used for colorbar and merge dialog labels.
-_ALT_FONT_FAMILY: str = "Times"
+ALT_FONT_FAMILY: str = "Times"
 
 
 def label_font() -> QtGui.QFont:
     """Creates the standard label font (Arial 8pt)."""
-    return QtGui.QFont(_FONT_FAMILY, pointSize=8)
+    return QtGui.QFont(FONT_FAMILY, pointSize=8)
 
 
 def label_font_bold() -> QtGui.QFont:
     """Creates the standard bold label font (Arial 8pt bold)."""
-    return QtGui.QFont(_FONT_FAMILY, pointSize=8, weight=QtGui.QFont.Weight.Bold)
+    return QtGui.QFont(FONT_FAMILY, pointSize=8, weight=QtGui.QFont.Weight.Bold)
 
 
 def header_font() -> QtGui.QFont:
     """Creates the section header font (Arial 10pt bold)."""
-    return QtGui.QFont(_FONT_FAMILY, pointSize=10, weight=QtGui.QFont.Weight.Bold)
+    return QtGui.QFont(FONT_FAMILY, pointSize=10, weight=QtGui.QFont.Weight.Bold)
 
 
 def arrow_button_font() -> QtGui.QFont:
     """Creates the font for trace expand/collapse arrow buttons (Arial 11pt bold)."""
-    return QtGui.QFont(_FONT_FAMILY, pointSize=11, weight=QtGui.QFont.Weight.Bold)
+    return QtGui.QFont(FONT_FAMILY, pointSize=11, weight=QtGui.QFont.Weight.Bold)
 
 
 def colorbar_font() -> QtGui.QFont:
     """Creates the font for colorbar tick labels (Times 8pt bold)."""
-    return QtGui.QFont(_ALT_FONT_FAMILY, pointSize=8, weight=QtGui.QFont.Weight.Bold)
+    return QtGui.QFont(ALT_FONT_FAMILY, pointSize=8, weight=QtGui.QFont.Weight.Bold)
 
 
 def merge_label_font() -> QtGui.QFont:
     """Creates the font for merge dialog parameter labels (Times bold)."""
-    return QtGui.QFont(_ALT_FONT_FAMILY, weight=QtGui.QFont.Weight.Bold)
+    return QtGui.QFont(ALT_FONT_FAMILY, weight=QtGui.QFont.Weight.Bold)

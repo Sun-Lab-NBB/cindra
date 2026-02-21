@@ -357,10 +357,7 @@ class TrackingViewerData:
             ValueError: If the index is out of range.
         """
         if session_index < 0 or session_index >= len(self._contexts):
-            message = (
-                f"Unable to switch to session {session_index}. Valid range is "
-                f"0 to {len(self._contexts) - 1}."
-            )
+            message = f"Unable to switch to session {session_index}. Valid range is 0 to {len(self._contexts) - 1}."
             raise ValueError(message)
 
         self.current_session_index = session_index

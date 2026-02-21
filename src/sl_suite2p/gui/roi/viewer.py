@@ -33,7 +33,7 @@ from . import (
     classifier_panel,
     selection_buttons,
 )
-from .styles import (
+from ..styles import (
     MAIN_WINDOW_STYLESHEET,
     WHITE_LABEL_STYLESHEET,
     BUTTON_PRESSED_STYLESHEET,

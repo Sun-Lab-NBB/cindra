@@ -1,4 +1,4 @@
-"""Provides the RegistrationViewerData class for per-plane registration visualization."""
+"""Provides the data hierarchy for per-plane registration quality visualization."""
 
 from __future__ import annotations
 

@@ -24,8 +24,8 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
+from ..styles import FONT_FAMILY, WHITE_LABEL_STYLESHEET
 from .context_data import RegistrationViewerData
-from ..roi_viewer.styles import WHITE_LABEL_STYLESHEET
 
 # Scatter plot marker point size in pixels.
 _SCATTER_POINT_SIZE: int = 10
@@ -69,9 +69,6 @@ _Z_EDIT_WIDTH: int = 30
 
 # Width for PC number input field.
 _PC_EDIT_WIDTH: int = 40
-
-# Font family used for metrics labels.
-_FONT_FAMILY: str = "Arial"
 
 # Font point size for metrics labels.
 _METRICS_FONT_SIZE: int = 14
@@ -396,9 +393,7 @@ class BinaryPlayer(QMainWindow):
             sample_count=sample_count,
             registration_path=str(self._data.registered_binary_path),
         )
-        self.srange = frames.mean() + frames.std() * np.array(
-            [-_DISPLAY_RANGE_LOW_SIGMA, _DISPLAY_RANGE_HIGH_SIGMA]
-        )
+        self.srange = frames.mean() + frames.std() * np.array([-_DISPLAY_RANGE_LOW_SIGMA, _DISPLAY_RANGE_HIGH_SIGMA])
 
         self.movie_label.setText(self.reg_loc[-1])
         self.nbytesread = [2 * self.Ly[index] * self.Lx[index] for index in range(len(self.reg_loc))]
@@ -762,8 +757,8 @@ class PCViewer(QMainWindow):
         self.pc_edit.returnPressed.connect(self.plot_frame)
         self.pc_edit.textEdited.connect(self.pause)
         pc_label = QLabel("PC: ")
-        bold_font = QtGui.QFont(_FONT_FAMILY, pointSize=_METRICS_FONT_SIZE, weight=QtGui.QFont.Weight.Bold)
-        big_font = QtGui.QFont(_FONT_FAMILY, pointSize=_METRICS_FONT_SIZE)
+        bold_font = QtGui.QFont(FONT_FAMILY, pointSize=_METRICS_FONT_SIZE, weight=QtGui.QFont.Weight.Bold)
+        big_font = QtGui.QFont(FONT_FAMILY, pointSize=_METRICS_FONT_SIZE)
         pc_label.setFont(bold_font)
         self.pc_edit.setFont(big_font)
         pc_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
