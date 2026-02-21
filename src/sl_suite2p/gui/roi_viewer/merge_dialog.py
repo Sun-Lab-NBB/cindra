@@ -20,11 +20,11 @@ from .roi_overlays import (
     compute_colors,
     flip_for_class,
 )
-from ..extraction.deconvolve import apply_oasis_deconvolution
-from ..detection.roi_statistics import compute_roi_statistics, compute_median_pixel_position
+from ...extraction.deconvolve import apply_oasis_deconvolution
+from ...detection.roi_statistics import compute_roi_statistics, compute_median_pixel_position
 
 if TYPE_CHECKING:
-    from .main_window import MainWindow
+    from .viewer import MainWindow
     from .context_data import ContextData
 
 # Large sentinel distance used to initialize the distance matrix upper triangle.
@@ -60,7 +60,7 @@ def do_merge(parent: MainWindow) -> None:
     )
     if result == QMessageBox.Yes:
         merge_activity_masks(parent=parent)
-        parent.merged.append(list(parent.view_state.merge_indices))
+        parent.merged.append(list(parent.view_state.merge_roi_indices))
         parent.update_plot()
         console.echo(message=f"Merged ROIs list: {parent.merged}")
         console.echo(message="ROIs merged successfully.", level=LogLevel.SUCCESS)
@@ -83,7 +83,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
     state = parent.view_state
 
     console.echo(message="Merging ROI activity... this may take some time.")
-    panel_index = int(1 - context.cell_classification_labels[state.chosen_index])
+    panel_index = int(1 - context.cell_classification_labels[state.selected_roi_index])
     y_pixels = np.zeros((0,), dtype=np.int32)
     x_pixels = np.zeros((0,), dtype=np.int32)
     pixel_weights = np.zeros((0,), dtype=np.float32)
@@ -104,7 +104,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
     probabilities = []
     merged_cells = []
     remove_merged = []
-    for roi_index in np.array(state.merge_indices):
+    for roi_index in np.array(state.merge_roi_indices):
         roi = context.roi_statistics[roi_index]
         if roi.merged_roi_indices is not None and len(roi.merged_roi_indices) > 0:
             remove_merged.append(roi_index)
@@ -181,7 +181,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
     plane_index = context.roi_statistics[merged_cells[0]].plane_index
 
     # Creates the merged ROIStatistics instance.
-    from ..dataclasses.single_day_data import ROIStatistics  # noqa: PLC0415
+    from ...dataclasses.single_day_data import ROIStatistics  # noqa: PLC0415
 
     merged_roi = ROIStatistics(
         y_pixels=y_pixels,
@@ -270,7 +270,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
                 axis=0,
             )
     context.spikes = np.concatenate((context.spikes, spikes), axis=0)
-    classification_label = np.array([context.cell_classification_labels[state.chosen_index]], dtype=bool)
+    classification_label = np.array([context.cell_classification_labels[state.selected_roi_index]], dtype=bool)
     context.cell_classification_labels = np.concatenate(
         (context.cell_classification_labels, classification_label),
         axis=0,
@@ -299,7 +299,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
     # Recomputes all color arrays and ROI maps.
     parent.color_arrays = compute_colors(context=context, state=state)
     parent.roi_maps = init_roi_maps(context=context, color_arrays=parent.color_arrays)
-    parent.mode_change(state.activity_mode)
+    parent.mode_change(state.trace_mode)
 
     # Marks constituent ROIs as merged into the new ROI.
     merged_target_index = context.roi_count - 1
@@ -471,7 +471,7 @@ class MergeWindow(QDialog):
         state = parent.view_state
 
         merge_activity_masks(parent=parent)
-        parent.merged.append(list(state.merge_indices))
+        parent.merged.append(list(state.merge_roi_indices))
         parent.update_plot()
 
         correlation_row = (
@@ -487,14 +487,14 @@ class MergeWindow(QDialog):
             (self._correlation_matrix, correlation_row[:, np.newaxis]),
             axis=1,
         )
-        for _ in state.merge_indices:
-            self._correlation_matrix[state.merge_indices] = 0
-            self._correlation_matrix[:, state.merge_indices] = 0
+        for _ in state.merge_roi_indices:
+            self._correlation_matrix[state.merge_roi_indices] = 0
+            self._correlation_matrix[:, state.merge_roi_indices] = 0
 
-        state.chosen_index = context.roi_count - 1
-        state.merge_indices = [state.chosen_index]
+        state.selected_roi_index = context.roi_count - 1
+        state.merge_roi_indices = [state.selected_roi_index]
         console.echo(
-            message=(f"ROIs merged: {context.roi_statistics[state.chosen_index].merged_roi_indices}"),
+            message=(f"ROIs merged: {context.roi_statistics[state.selected_roi_index].merged_roi_indices}"),
             level=LogLevel.SUCCESS,
         )
         self._compute_merge_list(parent)
@@ -570,15 +570,15 @@ class MergeWindow(QDialog):
         context = parent.context_data
         state = parent.view_state
 
-        state.chosen_index = self._merge_list[self._suggestion_index][0]
-        state.merge_indices = list(self._merge_list[self._suggestion_index])
+        state.selected_roi_index = self._merge_list[self._suggestion_index][0]
+        state.merge_roi_indices = list(self._merge_list[self._suggestion_index])
         if self._unmerged[self._suggestion_index]:
-            self._suggested_rois_label.setText(f"suggested ROIs to merge: {state.merge_indices}")
+            self._suggested_rois_label.setText(f"suggested ROIs to merge: {state.merge_roi_indices}")
             self._merge_button.setEnabled(True)
             self._scatter_plot.clear()
-            reference_cell = state.merge_indices[0]
+            reference_cell = state.merge_roi_indices[0]
             label_parts = ""
-            for roi_index in state.merge_indices[1:]:
+            for roi_index in state.merge_roi_indices[1:]:
                 rgb = parent.color_arrays.cols[0, roi_index]
                 pen = pg.mkPen(rgb, width=_SCATTER_PEN_WIDTH)
                 scatter = pg.ScatterPlotItem(
@@ -592,11 +592,11 @@ class MergeWindow(QDialog):
             self._scatter_plot.setLabel("bottom", str(reference_cell))
         else:
             # Sets to the merged ROI index.
-            roi = context.roi_statistics[state.chosen_index]
+            roi = context.roi_statistics[state.selected_roi_index]
             if roi.merged_into_roi_index is not None:
-                state.chosen_index = roi.merged_into_roi_index
-            state.merge_indices = [state.chosen_index]
-            merged_roi = context.roi_statistics[state.chosen_index]
+                state.selected_roi_index = roi.merged_into_roi_index
+            state.merge_roi_indices = [state.selected_roi_index]
+            merged_roi = context.roi_statistics[state.selected_roi_index]
             self._suggested_rois_label.setText(
                 f"ROIs merged: {list(merged_roi.merged_roi_indices or [])}",
             )

@@ -7,14 +7,14 @@ from dataclasses import field, dataclass
 
 import numpy as np
 
-from ..dataclasses import CombinedData, RuntimeContext
+from ...dataclasses import CombinedData, RuntimeContext
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from numpy.typing import NDArray
 
-    from ..dataclasses import (
+    from ...dataclasses import (
         ROIStatistics,
         BaselineMethod,
         ExtractionData,

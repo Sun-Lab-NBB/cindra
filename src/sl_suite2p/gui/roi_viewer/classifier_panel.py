@@ -28,12 +28,12 @@ from .styles import (
     label_font_bold,
 )
 from .roi_overlays import rgb_masks, istat_transform
-from ..classification import Classifier
+from ...classification import Classifier
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from .main_window import MainWindow
+    from .viewer import MainWindow
 
 # Index of the classifier probability color mode in the color button group.
 _CLASSIFIER_COLOR_INDEX: int = 6
@@ -579,7 +579,7 @@ def _class_masks(parent: MainWindow) -> None:
     istat_max = istat.max()
     if istat_max > 0:
         istat = istat / istat_max
-    color = istat_transform(istat=istat, colormap=parent.view_state.colormap)
+    color = istat_transform(istat=istat, colormap=parent.view_state.roi_colormap)
     parent.color_arrays.cols[_CLASSIFIER_COLOR_INDEX] = color
     parent.color_arrays.istat[_CLASSIFIER_COLOR_INDEX] = istat.flatten()
     rgb_masks(

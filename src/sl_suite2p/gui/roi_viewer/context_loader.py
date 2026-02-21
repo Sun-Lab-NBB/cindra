@@ -31,7 +31,7 @@ from .roi_overlays import (
 from .background_views import build_views, display_views
 
 if TYPE_CHECKING:
-    from .main_window import MainWindow
+    from .viewer import MainWindow
 
 # Default channel 2 probability threshold.
 _DEFAULT_CHANNEL_2_THRESHOLD: float = 0.6
@@ -225,9 +225,9 @@ def _initialize_gui(parent: MainWindow) -> None:
         return
 
     # Resets display state.
-    state.color_mode = 0
-    state.view_mode = 0
-    state.chosen_index = 0
+    state.roi_color_mode = 0
+    state.background_view = 0
+    state.selected_roi_index = 0
     parent.checkBox.setChecked(True)
     if parent.checkBoxN.isChecked():
         parent._roi_text(False)
@@ -242,10 +242,10 @@ def _initialize_gui(parent: MainWindow) -> None:
     parent.setWindowTitle(session_title)
 
     # Computes default bin size from tau and sampling rate.
-    state.bin_size = max(1, int(context.tau * context.sampling_rate / _BIN_SIZE_DIVISOR))
-    parent.binedit.setText(str(state.bin_size))
-    state.channel_2_threshold = _DEFAULT_CHANNEL_2_THRESHOLD
-    parent.chan2edit.setText(str(state.channel_2_threshold))
+    state.temporal_bin_size = max(1, int(context.tau * context.sampling_rate / _BIN_SIZE_DIVISOR))
+    parent.binedit.setText(str(state.temporal_bin_size))
+    state.colocalization_threshold = _DEFAULT_CHANNEL_2_THRESHOLD
+    parent.chan2edit.setText(str(state.colocalization_threshold))
 
     # Computes boundary and circle geometry for each ROI.
     _compute_roi_geometry(context=context)
@@ -273,14 +273,14 @@ def _initialize_gui(parent: MainWindow) -> None:
 
     # Selects the first classified cell as the initial selection.
     first_cell = int(np.nonzero(context.cell_classification_labels)[0][0]) if context.cell_count > 0 else 0
-    state.chosen_index = first_cell
-    state.merge_indices = [first_cell]
-    state.flipped_index = first_cell
+    state.selected_roi_index = first_cell
+    state.merge_roi_indices = [first_cell]
+    state.last_reclassified_index = first_cell
     parent._ichosen_stats()
     parent.comboBox.setCurrentIndex(_DEFAULT_ACTIVITY_MODE)
 
     # Draws the colorbar and initial mask overlays.
-    parent.colorbar_image = draw_colorbar(colormap=state.colormap)
+    parent.colorbar_image = draw_colorbar(colormap=state.roi_colormap)
     render_colorbar(
         state=state,
         color_arrays=parent.color_arrays,
@@ -319,8 +319,8 @@ def _initialize_gui(parent: MainWindow) -> None:
         view1=parent.view1,
         view2=parent.view2,
         views=parent.views,
-        view_index=state.view_mode,
-        saturation=state.saturation,
+        view_index=state.background_view,
+        saturation=state.background_saturation,
     )
     plot_trace(
         trace_box=parent.p3,
@@ -328,15 +328,15 @@ def _initialize_gui(parent: MainWindow) -> None:
         neuropil_fluorescence=context.neuropil_fluorescence,
         spikes=context.spikes,
         frame_indices=parent.frame_indices,
-        merge_indices=state.merge_indices,
-        activity_mode=state.activity_mode,
+        merge_indices=state.merge_roi_indices,
+        activity_mode=state.trace_mode,
     )
 
     # Sets aspect ratio on both panels.
     parent.p1.setAspectLocked(lock=True, ratio=context.aspect_ratio)
     parent.p2.setAspectLocked(lock=True, ratio=context.aspect_ratio)
 
-    state.is_loaded = True
+    state.session_loaded = True
 
     # Computes binned activity and triggers initial full redraw.
     parent.mode_change(_DEFAULT_ACTIVITY_MODE)
