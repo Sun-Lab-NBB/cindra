@@ -99,35 +99,6 @@ class ROIToolPanel(IntEnum):
     """The ROI selection tool is active on the non-cell image panel."""
 
 
-class MaskLayer(IntEnum):
-    """Selects the active ROI mask layer in multi-day mode."""
-
-    ORIGINAL_ROI_MASKS = 0
-    """Displays the original ROI masks from single-day extraction in native session coordinates."""
-
-    DEFORMED_ROI_MASKS = 1
-    """Displays the original ROI masks warped to the shared cross-session coordinate space via
-    multi-day registration deformation fields."""
-
-    TEMPLATE_ROI_MASKS = 2
-    """Displays the consensus template ROI masks derived from cross-session clustering, defined in
-    the shared coordinate space. These masks specify the ROIs tracked across sessions."""
-
-    SESSION_TEMPLATE_ROI_MASKS = 3
-    """Displays the template ROI masks warped back to native session coordinates via the inverse
-    deformation fields."""
-
-
-class CoordinateSpace(IntEnum):
-    """Selects the coordinate space for reference images in multi-day mode."""
-
-    NATIVE = 0
-    """Displays reference images in the original recording session coordinate space."""
-
-    TRANSFORMED = 1
-    """Displays reference images warped to align with the cross-session template coordinate space."""
-
-
 @dataclass
 class ViewState:
     """Tracks all mutable GUI display and selection state.
@@ -220,15 +191,3 @@ class ViewState:
     color overlay. This threshold only affects visualization and does not modify the underlying
     classification data."""
 
-    # Multi-day specific state.
-    mask_layer: MaskLayer = MaskLayer.ORIGINAL_ROI_MASKS
-    """Selects the active ROI mask layer in multi-day mode. Must be a valid ``MaskLayer``
-    member."""
-
-    coordinate_space: CoordinateSpace = CoordinateSpace.NATIVE
-    """Selects the coordinate space for reference images in multi-day mode. Must be a valid
-    ``CoordinateSpace`` member."""
-
-    mask_opacity: float = 0.5
-    """Alpha value for blending ROI mask overlays onto reference images in multi-day views. Ranges
-    from 0.0 (fully transparent) to 1.0 (fully opaque)."""

@@ -17,7 +17,7 @@ from .styles import (
 )
 from .view_state import ViewState
 from .trace_panel import plot_trace
-from .context_data import ContextData, MultiDayContextData
+from .context_data import ContextData
 from .plot_widgets import initialize_ranges
 from .roi_geometry import compute_circle_mask, compute_boundary_mask
 from .roi_overlays import (
@@ -178,13 +178,8 @@ def load_session(parent: MainWindow, session_path: Path | None = None) -> None:
 
     console.echo(message=f"Loading session: {session_path}")
 
-    is_multi_day = _is_multi_day_session(session_path=session_path)
-
     try:
-        if is_multi_day:
-            context_data = MultiDayContextData.from_multi_day(root_path=session_path)
-        else:
-            context_data = ContextData.from_single_day(root_path=session_path)
+        context_data = ContextData.from_single_day(root_path=session_path)
     except Exception:
         console.echo(message="Failed to load session data.", level=LogLevel.ERROR)
         _load_again(parent=parent, text="Failed to load session. Try another directory?")
@@ -476,15 +471,3 @@ def _load_again(parent: MainWindow, text: str) -> None:
     result = QMessageBox.question(parent, "ERROR", text, QMessageBox.Yes | QMessageBox.No)
     if result == QMessageBox.Yes:
         load_dialog(parent=parent)
-
-
-def _is_multi_day_session(session_path: Path) -> bool:
-    """Checks whether the session directory contains multi-day pipeline output.
-
-    Args:
-        session_path: Path to the suite2p output directory.
-
-    Returns:
-        True if a multiday_runtime_data.yaml file is found in the directory tree.
-    """
-    return any(session_path.rglob("multiday_runtime_data.yaml"))

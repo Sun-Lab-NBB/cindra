@@ -101,20 +101,12 @@ def build_views(
     channel_2_mean_image: NDArray[np.float32] | None = None,
     valid_y_range: tuple[int, int] | None = None,
     valid_x_range: tuple[int, int] | None = None,
-    image_space: int = 0,
-    transformed_mean_image: NDArray[np.float32] | None = None,
-    transformed_enhanced_mean_image: NDArray[np.float32] | None = None,
-    transformed_maximum_projection: NDArray[np.float32] | None = None,
 ) -> NDArray[np.uint8]:
     """Builds the background view stack from detection images.
 
     Creates a stack of 7 RGB background images, each normalized to [0, 255] uint8 range.
     Views are indexed as: 0=ROIs (black), 1=mean, 2=enhanced mean, 3=correlation map,
     4=max projection, 5=corrected channel 2, 6=raw channel 2.
-
-    When ``image_space`` is 1 (transformed), the mean, enhanced mean, and max projection
-    views use the deformed (registered) images from multi-day processing instead of the
-    native single-day images.
 
     Args:
         frame_height: Height of the field of view in pixels.
@@ -127,23 +119,10 @@ def build_views(
         channel_2_mean_image: Raw channel 2 mean image.
         valid_y_range: Tuple of (start, end) row indices for the valid image region.
         valid_x_range: Tuple of (start, end) column indices for the valid image region.
-        image_space: Image space selector (0=native, 1=transformed/deformed).
-        transformed_mean_image: Multi-day deformed mean image for transformed space.
-        transformed_enhanced_mean_image: Multi-day deformed enhanced mean image.
-        transformed_maximum_projection: Multi-day deformed maximum projection.
 
     Returns:
         Array of shape (7, frame_height, frame_width, 3) containing uint8 RGB views.
     """
-    # Selects transformed images when image_space is 1 and they are available.
-    if image_space == 1:
-        if transformed_mean_image is not None:
-            mean_image = transformed_mean_image
-        if transformed_enhanced_mean_image is not None:
-            enhanced_mean_image = transformed_enhanced_mean_image
-        if transformed_maximum_projection is not None:
-            maximum_projection = transformed_maximum_projection
-
     views = np.zeros((_VIEW_COUNT, frame_height, frame_width, 3), dtype=np.float32)
 
     for view_index in range(_VIEW_COUNT):
