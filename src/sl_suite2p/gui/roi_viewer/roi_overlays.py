@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from .signals import GUISignals
     from .view_state import ViewState
     from .context_data import ContextData
-    from ..dataclasses.single_day_data import ROIStatistics
+    from ...dataclasses.single_day_data import ROIStatistics
 
 # Width for color panel edit fields and the colormap combo box.
 _COLOR_EDIT_WIDTH: int = 65
@@ -365,7 +365,7 @@ def compute_colors(
     random_colors = np.random.random((cell_count,))  # noqa: NPY002
     if context.has_channel_2:
         random_colors = random_colors / _CHAN2_COLOR_DIVISOR + _CHAN2_COLOR_OFFSET
-        is_channel_2 = context.cell_colocalization_probabilities > state.channel_2_threshold
+        is_channel_2 = context.cell_colocalization_probabilities > state.colocalization_threshold
         console.echo(message=f"Number of channel 2 cells: {int(is_channel_2.sum())}")
         random_hues = random_colors.copy()
         random_colors[is_channel_2] = 0
@@ -397,7 +397,7 @@ def compute_colors(
                 stat_values = np.expand_dims(context.cell_classification_probabilities, axis=1)
                 colorbar.append(list(_FIXED_COLORBAR_RANGE))
 
-            color = istat_transform(stat_values, state.colormap)
+            color = istat_transform(stat_values, state.roi_colormap)
             cols[stat_index] = color
             istat[stat_index] = stat_values.flatten()
         else:
@@ -535,11 +535,11 @@ def draw_masks(
     Returns:
         Tuple of (cells_overlay, noncells_overlay) RGBA arrays.
     """
-    color_index = state.color_mode
-    view_index = state.view_mode
-    opacity = state.opacity
+    color_index = state.roi_color_mode
+    view_index = state.background_view
+    opacity = state.roi_opacity
 
-    active_panel = int(1 - context.cell_classification_labels[state.chosen_index])
+    active_panel = int(1 - context.cell_classification_labels[state.selected_roi_index])
 
     # Resets transparency based on ROI weights.
     for panel in range(2):
@@ -555,7 +555,7 @@ def draw_masks(
     roi_statistics = context.roi_statistics
     if view_index == 0:
         # ROI view: highlights selected ROIs with brightness based on overlap depth.
-        for roi_index in state.merge_indices:
+        for roi_index in state.merge_roi_indices:
             y_pixels = roi_statistics[roi_index].y_pixels.flatten()
             x_pixels = roi_statistics[roi_index].x_pixels.flatten()
             overlap_count = (roi_maps.iroi[active_panel][:, y_pixels, x_pixels] > -1).sum(axis=0) - 1
@@ -563,7 +563,7 @@ def draw_masks(
             overlays[active_panel] = _make_chosen_roi(overlays[active_panel], y_pixels, x_pixels, brightness)
     else:
         # Image view: highlights selected ROIs with colored circles.
-        for roi_index in state.merge_indices:
+        for roi_index in state.merge_roi_indices:
             y_circle = roi_statistics[roi_index].circle_y_pixels
             x_circle = roi_statistics[roi_index].circle_x_pixels
             y_pixels = roi_statistics[roi_index].y_pixels.flatten()
@@ -613,7 +613,7 @@ def render_colorbar(
         colorbar_widgets: The colorbar display widgets.
         colorbar_image: The colorbar gradient image from ``draw_colorbar``.
     """
-    color_index = state.color_mode
+    color_index = state.roi_color_mode
     if color_index == 0:
         colorbar_widgets.image.setImage(np.zeros((_COLORBAR_ROW_COUNT, _COLORBAR_SAMPLE_COUNT - 1, 3)))
     else:
@@ -631,7 +631,7 @@ def flip_rois(
 ) -> None:
     """Flips selected ROIs between the cell and non-cell panels.
 
-    Toggles the ``cell_classification_labels`` for all ROIs in ``state.merge_indices``,
+    Toggles the ``cell_classification_labels`` for all ROIs in ``state.merge_roi_indices``,
     moves them between panels. The caller is responsible for saving and updating the plot.
 
     Args:
@@ -640,8 +640,8 @@ def flip_rois(
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
     """
-    state.flipped_index = state.chosen_index
-    for roi_index in state.merge_indices:
+    state.last_reclassified_index = state.selected_roi_index
+    for roi_index in state.merge_roi_indices:
         context.cell_classification_labels[roi_index] = ~context.cell_classification_labels[roi_index]
         _flip_roi(
             roi_maps=roi_maps,
@@ -858,7 +858,7 @@ def update_chan2_colors(
         color_arrays: The computed color arrays (modified in place).
         roi_maps: The ROI index maps.
     """
-    is_channel_2 = context.cell_colocalization_probabilities > state.channel_2_threshold
+    is_channel_2 = context.cell_colocalization_probabilities > state.colocalization_threshold
     color = color_arrays.random_hues.copy()
     color[is_channel_2] = 0
     color = color.flatten()

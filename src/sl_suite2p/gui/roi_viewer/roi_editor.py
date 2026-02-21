@@ -33,14 +33,13 @@ from .styles import (
     BUTTON_UNPRESSED_STYLESHEET,
     label_font_bold,
 )
-from ..extraction import masks, apply_oasis_deconvolution, extract_traces_from_masks, compute_delta_fluorescence
-from .context_loader import load_proc
-from ..detection.roi_statistics import compute_roi_statistics
+from ...extraction import masks, apply_oasis_deconvolution, extract_traces_from_masks, compute_delta_fluorescence
+from ...detection.roi_statistics import compute_roi_statistics
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from .main_window import MainWindow
+    from .viewer import MainWindow
 
 # Percentile range used for image normalization (lower bound).
 _IMAGE_PERCENTILE_LOW: int = 1
@@ -414,7 +413,8 @@ class ROIDraw(QMainWindow):
             ),
         )
 
-        load_proc(self._parent)
+        # Reloads the session data after saving. Requires roi_editor modernization to use
+        # ContextData instead of the old dict-based self._parent.ops / self._parent.stat API.
         self._save_gui = True
         self.close()
 

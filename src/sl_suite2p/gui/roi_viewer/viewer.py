@@ -1,8 +1,7 @@
-"""Provides the main application window and entry point for the suite2p GUI."""
+"""Provides the main application window for the ROI viewer and editor GUI."""
 
 from __future__ import annotations
 
-import sys
 import shutil
 from typing import TYPE_CHECKING
 from pathlib import Path
@@ -18,7 +17,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QGridLayout,
     QMainWindow,
-    QApplication,
 )
 from ataraxis_base_utilities import LogLevel, console
 
@@ -324,7 +322,7 @@ class MainWindow(QMainWindow):
                     self.p1.addItem(self.roi_maps.text_labels[n])
                 else:
                     self.p2.addItem(self.roi_maps.text_labels[n])
-            self.view_state.show_roi_labels = True
+            self.view_state.roi_labels_visible = True
         else:
             for n in range(len(self.roi_maps.text_labels)):
                 if self.context_data.cell_classification_labels[n] == 1:
@@ -333,7 +331,7 @@ class MainWindow(QMainWindow):
                 else:
                     with suppress(Exception):
                         self.p2.removeItem(self.roi_maps.text_labels[n])
-            self.view_state.show_roi_labels = False
+            self.view_state.roi_labels_visible = False
 
     def _zoom_cell(self, state: int) -> None:
         """Toggles zoom-to-cell behavior based on checkbox state.
@@ -341,9 +339,9 @@ class MainWindow(QMainWindow):
         Args:
             state: Qt checkbox state value.
         """
-        if not self.view_state.is_loaded:
+        if not self.view_state.session_loaded:
             return
-        self.view_state.zoom_to_cell = QtCore.Qt.CheckState(state) == QtCore.Qt.Checked
+        self.view_state.auto_zoom_to_roi = QtCore.Qt.CheckState(state) == QtCore.Qt.Checked
         self.update_plot()
 
     def make_graphics(self, b0: int) -> None:
@@ -420,12 +418,12 @@ class MainWindow(QMainWindow):
         Args:
             event: The key press event from Qt.
         """
-        if not self.view_state.is_loaded:
+        if not self.view_state.session_loaded:
             return
         if event.modifiers() in {QtCore.Qt.ControlModifier, QtCore.Qt.ShiftModifier}:
             return
         if event.key() == QtCore.Qt.Key_Return:
-            if event.modifiers() == QtCore.Qt.AltModifier and len(self.view_state.merge_indices) > 1:
+            if event.modifiers() == QtCore.Qt.AltModifier and len(self.view_state.merge_roi_indices) > 1:
                 merge_dialog.do_merge(self)
         elif event.key() == QtCore.Qt.Key_Escape:
             self._zoom_plot(_CELLS_PLOT)
@@ -492,24 +490,26 @@ class MainWindow(QMainWindow):
         elif event.key() == QtCore.Qt.Key_Left:
             if self.context_data is None:
                 return
-            ctype = self.context_data.cell_classification_labels[self.view_state.chosen_index]
+            ctype = self.context_data.cell_classification_labels[self.view_state.selected_roi_index]
+            roi_count = self.context_data.roi_count
             while True:
-                self.view_state.chosen_index = (self.view_state.chosen_index - 1) % self.context_data.roi_count
-                if self.context_data.cell_classification_labels[self.view_state.chosen_index] is ctype:
+                self.view_state.selected_roi_index = (self.view_state.selected_roi_index - 1) % roi_count
+                if self.context_data.cell_classification_labels[self.view_state.selected_roi_index] is ctype:
                     break
-            self.view_state.merge_indices = [self.view_state.chosen_index]
+            self.view_state.merge_roi_indices = [self.view_state.selected_roi_index]
             self._roi_remove()
             self.update_plot()
         elif event.key() == QtCore.Qt.Key_Right:
             if self.context_data is None:
                 return
             self._roi_remove()
-            ctype = self.context_data.cell_classification_labels[self.view_state.chosen_index]
+            ctype = self.context_data.cell_classification_labels[self.view_state.selected_roi_index]
+            roi_count = self.context_data.roi_count
             while True:
-                self.view_state.chosen_index = (self.view_state.chosen_index + 1) % self.context_data.roi_count
-                if self.context_data.cell_classification_labels[self.view_state.chosen_index] is ctype:
+                self.view_state.selected_roi_index = (self.view_state.selected_roi_index + 1) % roi_count
+                if self.context_data.cell_classification_labels[self.view_state.selected_roi_index] is ctype:
                     break
-            self.view_state.merge_indices = [self.view_state.chosen_index]
+            self.view_state.merge_roi_indices = [self.view_state.selected_roi_index]
             self.update_plot()
             self.show()
         elif event.key() == QtCore.Qt.Key_Up:
@@ -522,14 +522,14 @@ class MainWindow(QMainWindow):
             return
         if self.views is None or self.colorbar_widgets is None or self.colorbar_image is None:
             return
-        if self.view_state.color_mode == _CORRELATION_COLOR and self.Fbin is not None:
+        if self.view_state.roi_color_mode == _CORRELATION_COLOR and self.Fbin is not None:
             roi_overlays.update_correlation_masks(
                 color_arrays=self.color_arrays,
                 roi_maps=self.roi_maps,
                 binned_fluorescence=self.Fbin,
                 fluorescence_std=self.Fstd,
-                merge_indices=self.view_state.merge_indices,
-                colormap=self.view_state.colormap,
+                merge_indices=self.view_state.merge_roi_indices,
+                colormap=self.view_state.roi_colormap,
             )
         roi_overlays.render_colorbar(
             state=self.view_state,
@@ -542,8 +542,8 @@ class MainWindow(QMainWindow):
             view1=self.view1,
             view2=self.view2,
             views=self.views,
-            view_index=self.view_state.view_mode,
-            saturation=self.view_state.saturation,
+            view_index=self.view_state.background_view,
+            saturation=self.view_state.background_saturation,
         )
         masks = roi_overlays.draw_masks(
             context=self.context_data,
@@ -562,16 +562,16 @@ class MainWindow(QMainWindow):
             neuropil_fluorescence=self.context_data.neuropil_fluorescence,
             spikes=self.context_data.spikes,
             frame_indices=self.frame_indices,
-            merge_indices=self.view_state.merge_indices,
-            activity_mode=self.view_state.activity_mode,
-            roi_colors=self.color_arrays.cols[self.view_state.color_mode],
+            merge_indices=self.view_state.merge_roi_indices,
+            activity_mode=self.view_state.trace_mode,
+            roi_colors=self.color_arrays.cols[self.view_state.roi_color_mode],
             traces_visible=self._trace_controls.traces_visible,
             neuropil_visible=self._trace_controls.neuropil_visible,
             deconvolved_visible=self._trace_controls.deconvolved_visible,
             scale_factor=self._trace_controls.scale_factor,
             max_plotted=int(self._trace_controls.max_plotted_edit.text() or "40"),
         )
-        if self.view_state.zoom_to_cell:
+        if self.view_state.auto_zoom_to_roi:
             self._zoom_to_cell()
         self.p1.show()
         self.p2.show()
@@ -586,10 +586,10 @@ class MainWindow(QMainWindow):
         Args:
             i: The activity mode index to switch to.
         """
-        self.view_state.activity_mode = i
-        if self.view_state.is_loaded and self.context_data is not None:
-            self.view_state.bin_size = max(1, int(self.binedit.text()))
-            nb = int(np.floor(float(self.context_data.frame_count) / float(self.view_state.bin_size)))
+        self.view_state.trace_mode = i
+        if self.view_state.session_loaded and self.context_data is not None:
+            self.view_state.temporal_bin_size = max(1, int(self.binedit.text()))
+            nb = int(np.floor(float(self.context_data.frame_count) / float(self.view_state.temporal_bin_size)))
             if i == 0:
                 f = self.context_data.cell_fluorescence
             elif i == 1:
@@ -599,7 +599,7 @@ class MainWindow(QMainWindow):
             else:
                 f = self.context_data.spikes
             ncells = self.context_data.roi_count
-            bin_size = self.view_state.bin_size
+            bin_size = self.view_state.temporal_bin_size
             self.Fbin = f[:, : nb * bin_size].reshape((ncells, nb, bin_size)).mean(axis=2)
             self.Fbin -= self.Fbin.mean(axis=1)[:, np.newaxis]
             self.Fstd = (self.Fbin**2).mean(axis=1) ** 0.5
@@ -609,7 +609,7 @@ class MainWindow(QMainWindow):
     def top_number_chosen(self) -> None:
         """Updates the top-N ROI count and refreshes the selection if applicable."""
         self.ntop = int(self.topedit.text())
-        if self.view_state.is_loaded and not self.sizebtns.button(1).isChecked():
+        if self.view_state.session_loaded and not self.sizebtns.button(1).isChecked():
             for b in [1, 2]:
                 if self.topbtns.button(b).isChecked():
                     self._signals.roi_selection_changed.emit()
@@ -629,7 +629,7 @@ class MainWindow(QMainWindow):
         if draw:
             self._roi_remove()
             self.topbtns.button(0).setStyleSheet(BUTTON_PRESSED_STYLESHEET)
-            self.view_state.roi_plot_panel = wplot
+            self.view_state.roi_tool_panel = wplot
             imx = (view[0][1] + view[0][0]) / 2
             imy = (view[1][1] + view[1][0]) / 2
             dx = (view[0][1] - view[0][0]) / 4
@@ -645,16 +645,16 @@ class MainWindow(QMainWindow):
                 self.p2.addItem(self.ROI)
             self._roi_position()
             self.ROI.sigRegionChangeFinished.connect(self._roi_position)
-            self.view_state.is_roi_active = True
+            self.view_state.roi_tool_active = True
 
     def _roi_remove(self) -> None:
         """Removes the current rectangular ROI selection and resets button styles."""
-        if self.view_state.is_roi_active:
-            if self.view_state.roi_plot_panel == 0:
+        if self.view_state.roi_tool_active:
+            if self.view_state.roi_tool_panel == 0:
                 self.p1.removeItem(self.ROI)
             else:
                 self.p2.removeItem(self.ROI)
-            self.view_state.is_roi_active = False
+            self.view_state.roi_tool_active = False
         if self.sizebtns.button(1).isChecked():
             self.topbtns.button(0).setStyleSheet(BUTTON_INACTIVE_STYLESHEET)
             self.topbtns.button(0).setEnabled(False)
@@ -668,7 +668,7 @@ class MainWindow(QMainWindow):
         pos0 = self.ROI.getSceneHandlePositions()
         pos = (
             self.p1.mapSceneToView(pos0[0][1])
-            if self.view_state.roi_plot_panel == 0
+            if self.view_state.roi_tool_panel == 0
             else self.p2.mapSceneToView(pos0[0][1])
         )
         posy = pos.y()
@@ -692,26 +692,26 @@ class MainWindow(QMainWindow):
         """
         if self.roi_maps is None or self.context_data is None:
             return
-        i = self.view_state.roi_plot_panel
+        i = self.view_state.roi_tool_panel
         roi_indices = self.roi_maps.iroi[i, 0, ypix, xpix]
         icells = np.unique(roi_indices[roi_indices >= 0])
-        self.view_state.merge_indices = []
+        self.view_state.merge_roi_indices = []
         for n in icells:
             pixel_count = self.context_data.roi_statistics[n].pixel_count
             if (self.roi_maps.iroi[i, :, ypix, xpix] == n).sum() > 0.6 * pixel_count:
-                self.view_state.merge_indices.append(n)
-        if len(self.view_state.merge_indices) > 0:
-            self.view_state.chosen_index = self.view_state.merge_indices[0]
+                self.view_state.merge_roi_indices.append(n)
+        if len(self.view_state.merge_roi_indices) > 0:
+            self.view_state.selected_roi_index = self.view_state.merge_roi_indices[0]
             self.update_plot()
             self.show()
 
     def number_chosen(self) -> None:
         """Jumps to the ROI number entered in the ROI edit field."""
-        if self.view_state.is_loaded and self.context_data is not None:
-            self.view_state.chosen_index = int(self.ROIedit.text())
-            if self.view_state.chosen_index >= self.context_data.roi_count:
-                self.view_state.chosen_index = self.context_data.roi_count - 1
-            self.view_state.merge_indices = [self.view_state.chosen_index]
+        if self.view_state.session_loaded and self.context_data is not None:
+            self.view_state.selected_roi_index = int(self.ROIedit.text())
+            if self.view_state.selected_roi_index >= self.context_data.roi_count:
+                self.view_state.selected_roi_index = self.context_data.roi_count - 1
+            self.view_state.merge_roi_indices = [self.view_state.selected_roi_index]
             self.update_plot()
             self.show()
 
@@ -755,7 +755,7 @@ class MainWindow(QMainWindow):
         Returns:
             True if the click was handled (hit an ROI), False otherwise.
         """
-        if not self.view_state.is_loaded or self.roi_maps is None or self.context_data is None:
+        if not self.view_state.session_loaded or self.roi_maps is None or self.context_data is None:
             return False
 
         # Bounds-checks the click coordinates.
@@ -772,29 +772,29 @@ class MainWindow(QMainWindow):
             return False
 
         if is_right:
-            if ichosen not in self.view_state.merge_indices:
-                self.view_state.merge_indices = [ichosen]
-                self.view_state.chosen_index = ichosen
+            if ichosen not in self.view_state.merge_roi_indices:
+                self.view_state.merge_roi_indices = [ichosen]
+                self.view_state.selected_roi_index = ichosen
             self._flip_plot()
         else:
             merged = False
             if is_multi and (
-                self.context_data.cell_classification_labels[self.view_state.merge_indices[0]]
+                self.context_data.cell_classification_labels[self.view_state.merge_roi_indices[0]]
                 == self.context_data.cell_classification_labels[ichosen]
             ):
-                if ichosen not in self.view_state.merge_indices:
-                    self.view_state.merge_indices.append(ichosen)
-                    self.view_state.chosen_index = ichosen
+                if ichosen not in self.view_state.merge_roi_indices:
+                    self.view_state.merge_roi_indices.append(ichosen)
+                    self.view_state.selected_roi_index = ichosen
                     merged = True
-                elif len(self.view_state.merge_indices) > 1:
-                    self.view_state.merge_indices.remove(ichosen)
-                    self.view_state.chosen_index = self.view_state.merge_indices[0]
+                elif len(self.view_state.merge_roi_indices) > 1:
+                    self.view_state.merge_roi_indices.remove(ichosen)
+                    self.view_state.selected_roi_index = self.view_state.merge_roi_indices[0]
                     merged = True
             if not merged:
-                self.view_state.merge_indices = [ichosen]
-                self.view_state.chosen_index = ichosen
+                self.view_state.merge_roi_indices = [ichosen]
+                self.view_state.selected_roi_index = ichosen
 
-        if self.view_state.is_roi_active:
+        if self.view_state.roi_tool_active:
             self._roi_remove()
         if not self.sizebtns.button(1).isChecked():
             for btn in self.topbtns.buttons():
@@ -807,7 +807,7 @@ class MainWindow(QMainWindow):
         """Updates the ROI statistics labels for the currently selected cell."""
         if self.context_data is None:
             return
-        n = self.view_state.chosen_index
+        n = self.view_state.selected_roi_index
         self.ROIedit.setText(str(n))
         roi = self.context_data.roi_statistics[n]
         for k in range(1, len(self.stats_to_show) + 1):
@@ -828,9 +828,9 @@ class MainWindow(QMainWindow):
             return
         irange = 0.1 * np.array([self.context_data.frame_height, self.context_data.frame_width]).max()
         roi_statistics = self.context_data.roi_statistics
-        if len(self.view_state.merge_indices) > 1:
+        if len(self.view_state.merge_roi_indices) > 1:
             apix = np.zeros((0, 2))
-            for _i, k in enumerate(self.view_state.merge_indices):
+            for _i, k in enumerate(self.view_state.merge_roi_indices):
                 apix = np.append(
                     apix,
                     np.concatenate(
@@ -851,7 +851,7 @@ class MainWindow(QMainWindow):
             imax[0] = max(icent[0] + irange, imax[0])
             imax[1] = max(icent[1] + irange, imax[1])
         else:
-            icent = np.array(roi_statistics[self.view_state.chosen_index].centroid)
+            icent = np.array(roi_statistics[self.view_state.selected_roi_index].centroid)
             imin = icent - irange
             imax = icent + irange
         self.p1.setYRange(imin[0], imax[0])
@@ -898,24 +898,7 @@ class MainWindow(QMainWindow):
         """Applies the pending ROI merge operation."""
         merge_dialog.apply(self)
 
-
-def run(session_path: str | None = None) -> None:
-    """Launches the suite2p GUI application.
-
-    Args:
-        session_path: Optional path to a suite2p output directory to load on startup.
-    """
-    # Always starts by initializing Qt (only once per application).
-    app = QApplication(sys.argv)
-
-    app_icon = QtGui.QIcon()
-    app_icon.addFile(_ICON_PATH, QtCore.QSize(16, 16))
-    app_icon.addFile(_ICON_PATH, QtCore.QSize(24, 24))
-    app_icon.addFile(_ICON_PATH, QtCore.QSize(32, 32))
-    app_icon.addFile(_ICON_PATH, QtCore.QSize(48, 48))
-    app_icon.addFile(_ICON_PATH, QtCore.QSize(64, 64))
-    app_icon.addFile(_ICON_PATH, QtCore.QSize(256, 256))
-    app.setWindowIcon(app_icon)
-    _window = MainWindow(session_path=Path(session_path) if session_path else None)
-    ret = app.exec()
-    sys.exit(ret)
+    @staticmethod
+    def suite2p_directory() -> Path:
+        """Returns the root path of the sl-suite2p package directory."""
+        return _SUITE2P_DIR

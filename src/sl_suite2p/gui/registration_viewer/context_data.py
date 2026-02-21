@@ -18,16 +18,16 @@ if TYPE_CHECKING:
 
 @dataclass
 class RegistrationViewerData:
-    """Wraps single-day per-plane registration data for the registration viewer GUI.
+    """Wraps single-day per-plane registration data and serves it to the registration viewer GUI.
 
-    Holds all imaging planes from a single-day session and supports switching between
-    planes for independent registration quality review. Each plane has its own frame
-    geometry, binary paths, registration offsets, and principal component metrics.
+    Holds all imaging planes from a single-day session and supports switching between planes for independent
+    registration quality review. Each plane has its own frame geometry, binary paths, registration offsets, and
+    principal component metrics.
 
     Notes:
-        The backing ``RuntimeContext`` instances are stored privately. All public properties
-        delegate to the current plane's ``IOData``, ``RegistrationData``, and ``DetectionData``
-        without exposing extraction, timing, or configuration internals.
+        The backing ``RuntimeContext`` instances are stored privately. All public properties delegate to the current
+        plane's ``IOData``, ``RegistrationData``, and ``DetectionData`` without exposing extraction, timing, or
+        configuration internals.
     """
 
     _contexts: list[RuntimeContext] = field(repr=False)
