@@ -74,8 +74,8 @@ _AVERAGE_GRAY: int = 140
 # Minimum number of selected cells before the average trace is displayed.
 _AVERAGE_THRESHOLD: int = 5
 
-# Ratio of selected cells to determine behavior/average trace vertical scale.
-_BEHAVIOR_SCALE_DIVISOR: float = 25.0
+# Ratio of selected cells to determine average trace vertical scale.
+_AVERAGE_SCALE_DIVISOR: float = 25.0
 
 
 @dataclass
@@ -129,9 +129,6 @@ def plot_trace(
     deconvolved_visible: bool = True,
     scale_factor: float = _DEFAULT_SCALE_FACTOR,
     max_plotted: int = _DEFAULT_PLOTTED_COUNT,
-    behavior: NDArray[np.float32] | None = None,
-    behavior_time: NDArray[np.float32] | None = None,
-    behavior_loaded: bool = False,
 ) -> tuple[float, float]:
     """Draws fluorescence traces for the selected ROIs.
 
@@ -153,9 +150,6 @@ def plot_trace(
         deconvolved_visible: Determines whether the deconvolved spike trace is drawn.
         scale_factor: Vertical spacing factor for stacked multi-trace display.
         max_plotted: Maximum number of traces to plot in multi-ROI mode.
-        behavior: Behavioral trace array, or None if not loaded.
-        behavior_time: Time axis for the behavioral trace, or None if not loaded.
-        behavior_loaded: Determines whether behavioral data has been loaded.
 
     Returns:
         Tuple of (y_minimum, y_maximum) defining the plotted y-axis range.
@@ -189,9 +183,6 @@ def plot_trace(
             roi_colors=roi_colors,
             scale_factor=scale_factor,
             max_plotted=max_plotted,
-            behavior=behavior,
-            behavior_time=behavior_time,
-            behavior_loaded=behavior_loaded,
         )
 
     trace_box.update_range(
@@ -389,9 +380,6 @@ def _plot_multi_trace(
     roi_colors: NDArray | None,
     scale_factor: float,
     max_plotted: int,
-    behavior: NDArray[np.float32] | None,
-    behavior_time: NDArray[np.float32] | None,
-    behavior_loaded: bool,
 ) -> tuple[float, float]:
     """Plots stacked traces for multiple selected ROIs.
 
@@ -407,9 +395,6 @@ def _plot_multi_trace(
         roi_colors: Per-ROI RGB colors with shape (roi_count, 3).
         scale_factor: Vertical spacing factor for trace stacking.
         max_plotted: Maximum number of traces to display.
-        behavior: Behavioral trace array, or None.
-        behavior_time: Time axis for the behavioral trace, or None.
-        behavior_loaded: Determines whether behavioral data is available.
 
     Returns:
         Tuple of (y_minimum, y_maximum) for the plotted range.
@@ -448,8 +433,8 @@ def _plot_multi_trace(
         tick_labels.append((stack_position * k_space + float(normalized.mean()), str(index)))
         stack_position -= 1
 
-    # Computes average trace and behavior scale.
-    behavior_scale = len(selected) / _BEHAVIOR_SCALE_DIVISOR + 1
+    # Computes average trace scale.
+    average_scale = len(selected) / _AVERAGE_SCALE_DIVISOR + 1
     average -= average.min()
     average_max = average.max()
     if average_max > 0:
@@ -462,24 +447,10 @@ def _plot_multi_trace(
     if len(selected) > _AVERAGE_THRESHOLD:
         trace_box.plot(
             frame_indices,
-            -1 * behavior_scale + average * behavior_scale,
+            -1 * average_scale + average * average_scale,
             pen=average_pen,
         )
-        y_minimum = -1 * behavior_scale
-
-    # Overlays behavioral trace when loaded.
-    if behavior_loaded and behavior is not None and behavior_time is not None:
-        trace_box.plot(
-            frame_indices,
-            -1 * behavior_scale + average * behavior_scale,
-            pen=average_pen,
-        )
-        trace_box.plot(
-            behavior_time,
-            -1 * behavior_scale + behavior * behavior_scale,
-            pen="w",
-        )
-        y_minimum = -1 * behavior_scale
+        y_minimum = -1 * average_scale
 
     y_maximum = (len(selected) - 1) * k_space + 1
     axis.setTicks([tick_labels])

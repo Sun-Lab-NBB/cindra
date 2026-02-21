@@ -44,8 +44,8 @@ _LAMBDA_NORM_SCALE: float = 0.75
 # Minimum lambda value threshold for computing the mean weight.
 _LAMBDA_THRESHOLD: float = 1e-10
 
-# Number of color statistics (random, skew, compact, footprint, aspect, chan2, class, corr, beh, rastermap).
-_COLOR_STAT_COUNT: int = 10
+# Number of color statistics (random, skew, compact, footprint, aspect, chan2, class, corr).
+_COLOR_STAT_COUNT: int = 8
 
 # Fixed colorbar range for statistics without computed percentiles.
 _FIXED_COLORBAR_RANGE: list[float] = [0.0, 0.5, 1.0]
@@ -93,8 +93,6 @@ _COLOR_NAMES: list[str] = [
     "H: chan2_prob",
     "J: classifier, cell prob=",
     "K: correlations, bin=",
-    "L: corr with 1D var, bin=^^^",
-    "M: rastermap / custom",
 ]
 
 # Short names extracted from the color buttons (after the prefix).
@@ -112,12 +110,6 @@ _COLOR_CLASSIFIER: int = 6
 
 # Correlation color index.
 _COLOR_CORRELATION: int = 7
-
-# Behavior correlation color index.
-_COLOR_BEHAVIOR: int = 8
-
-# Rastermap / custom color index.
-_COLOR_RASTERMAP: int = 9
 
 # Minimum number of changed cells before incremental flip is used over full reinit.
 _FLIP_THRESHOLD: int = 100
@@ -411,9 +403,7 @@ def compute_colors(
         else:
             colorbar.append(list(_FIXED_COLORBAR_RANGE))
 
-    # Appends fixed ranges for the remaining color channels.
-    colorbar.append(list(_FIXED_COLORBAR_RANGE))
-    colorbar.append(list(_FIXED_COLORBAR_RANGE))
+    # Appends a fixed range for the correlation color channel.
     colorbar.append(list(_FIXED_COLORBAR_RANGE))
 
     # Creates a placeholder RGB array (populated by init_roi_maps via rgb_masks).
@@ -874,109 +864,6 @@ def update_chan2_colors(
     color = color.flatten()
     color_arrays.cols[0] = hsv2rgb(color)
     rgb_masks(color_arrays=color_arrays, roi_maps=roi_maps, color=color_arrays.cols[0], color_index=0)
-
-
-def update_custom_masks(
-    color_arrays: ColorArrays,
-    roi_maps: ROIIndexMaps,
-    custom_mask: NDArray[np.float32],
-    colormap: str,
-) -> None:
-    """Applies a custom mask coloring from a user-loaded array.
-
-    Args:
-        color_arrays: The computed color arrays (modified in place).
-        roi_maps: The ROI index maps.
-        custom_mask: Custom per-ROI values.
-        colormap: Name of the active colormap.
-    """
-    color_index = _COLOR_RASTERMAP
-    istat = custom_mask.copy()
-    istat_low = float(np.percentile(istat, 1))
-    istat_high = float(np.percentile(istat, 99))
-    color_range = [istat_low, (istat_high - istat_low) / 2 + istat_low, istat_high]
-    istat -= istat_low
-    istat /= istat_high - istat_low
-    istat = np.maximum(0, np.minimum(1, istat))
-
-    color_arrays.colorbar[color_index] = color_range
-    istat = istat / istat.max()
-    color = istat_transform(istat, colormap)
-
-    color_arrays.cols[color_index] = color
-    color_arrays.istat[color_index] = istat.flatten()
-    rgb_masks(color_arrays=color_arrays, roi_maps=roi_maps, color=color, color_index=color_index)
-
-
-def update_rastermap_masks(
-    color_arrays: ColorArrays,
-    roi_maps: ROIIndexMaps,
-    sorting_indices: NDArray[np.float32],
-    colormap: str,
-) -> None:
-    """Applies rastermap sorting coloring to ROIs.
-
-    Args:
-        color_arrays: The computed color arrays (modified in place).
-        roi_maps: The ROI index maps.
-        sorting_indices: Per-ROI rastermap sorting values.
-        colormap: Name of the active colormap.
-    """
-    color_index = _COLOR_RASTERMAP
-    istat = sorting_indices.copy()
-    color_arrays.colorbar[color_index] = [0.0, float(istat.max() / 2), float(istat.max())]
-
-    istat = istat / istat.max()
-    color = istat_transform(istat, colormap)
-    color[sorting_indices == -1] = 0
-    color_arrays.cols[color_index] = color
-    color_arrays.istat[color_index] = istat.flatten()
-    rgb_masks(color_arrays=color_arrays, roi_maps=roi_maps, color=color, color_index=color_index)
-
-
-def update_behavior_masks(
-    color_arrays: ColorArrays,
-    roi_maps: ROIIndexMaps,
-    binned_fluorescence: NDArray[np.float32],
-    fluorescence_std: NDArray[np.float32],
-    behavior_resampled: NDArray[np.float32],
-    bin_size: int,
-    merge_indices: list[int],
-    colormap: str,
-) -> None:
-    """Computes behavior correlation coloring for ROIs.
-
-    Correlates each ROI's binned fluorescence with the behavioral signal.
-
-    Args:
-        color_arrays: The computed color arrays (modified in place).
-        roi_maps: The ROI index maps.
-        binned_fluorescence: Binned fluorescence with shape (roi_count, bin_count).
-        fluorescence_std: Per-ROI standard deviation with shape (roi_count,).
-        behavior_resampled: Resampled behavioral trace.
-        bin_size: Temporal bin size.
-        merge_indices: Currently selected ROI indices.
-        colormap: Name of the active colormap.
-    """
-    color_index = _COLOR_BEHAVIOR
-    bin_count = int(np.floor(behavior_resampled.size / bin_size))
-    binned_behavior = np.reshape(behavior_resampled[: bin_count * bin_size], (bin_count, bin_size)).mean(axis=1)
-    binned_behavior -= binned_behavior.mean()
-    behavior_std = float((binned_behavior**2).mean() ** 0.5)
-    denominator = binned_fluorescence.shape[-1] * fluorescence_std * behavior_std
-    correlation = np.dot(binned_fluorescence, binned_behavior.T) / denominator
-    correlation[np.array(merge_indices)] = correlation.mean()
-
-    istat = correlation
-    istat_min = float(istat.min())
-    istat_max = float(istat.max())
-    istat = istat - istat.min()
-    istat = istat / istat.max()
-    color = istat_transform(istat, colormap)
-    color_arrays.cols[color_index] = color
-    color_arrays.istat[color_index] = istat.flatten()
-    color_arrays.colorbar[color_index] = [istat_min, (istat_max - istat_min) / 2 + istat_min, istat_max]
-    rgb_masks(color_arrays=color_arrays, roi_maps=roi_maps, color=color, color_index=color_index)
 
 
 def update_correlation_masks(

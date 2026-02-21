@@ -63,9 +63,6 @@ _ICON_PATH: str = str(_SUITE2P_DIR / "logo" / "logo.png")
 # Color index for correlation-based coloring mode.
 _CORRELATION_COLOR: int = 7
 
-# Color index for behavior-based coloring mode.
-_BEHAVIOR_COLOR: int = 8
-
 # Stat display index for the centroid stat (formatted as coordinate pair).
 _CENTROID_STAT_INDEX: int = 1
 
@@ -135,8 +132,7 @@ class MainWindow(QMainWindow):
 
         menu_bar.mainmenu(self)
         menu_bar.classifier(self)
-        menu_bar.visualizations(self)
-        menu_bar.registration(self)
+
         menu_bar.mergebar(self)
         menu_bar.plugins(self)
 
@@ -493,14 +489,6 @@ class MainWindow(QMainWindow):
         elif event.key() == QtCore.Qt.Key_K:
             self.colorbtns.button(7).setChecked(True)
             self._signals.color_mode_changed.emit(7)
-        elif event.key() == QtCore.Qt.Key_L:
-            if self.view_state.behavior_loaded:
-                self.colorbtns.button(8).setChecked(True)
-                self._signals.color_mode_changed.emit(8)
-        elif event.key() == QtCore.Qt.Key_M:
-            if self.view_state.rastermap_loaded:
-                self.colorbtns.button(9).setChecked(True)
-                self._signals.color_mode_changed.emit(9)
         elif event.key() == QtCore.Qt.Key_Left:
             if self.context_data is None:
                 return
@@ -582,9 +570,6 @@ class MainWindow(QMainWindow):
             deconvolved_visible=self._trace_controls.deconvolved_visible,
             scale_factor=self._trace_controls.scale_factor,
             max_plotted=int(self._trace_controls.max_plotted_edit.text() or "40"),
-            behavior=self.context_data.behavior,
-            behavior_time=self.context_data.behavior_time,
-            behavior_loaded=self.view_state.behavior_loaded,
         )
         if self.view_state.zoom_to_cell:
             self._zoom_to_cell()
@@ -619,24 +604,6 @@ class MainWindow(QMainWindow):
             self.Fbin -= self.Fbin.mean(axis=1)[:, np.newaxis]
             self.Fstd = (self.Fbin**2).mean(axis=1) ** 0.5
             self.frame_indices = np.arange(0, self.context_data.frame_count, dtype=np.int32)
-            # If in behavior-view, recomputes.
-            if self.view_state.color_mode == _BEHAVIOR_COLOR and self.context_data.behavior_resampled is not None:
-                roi_overlays.update_behavior_masks(
-                    color_arrays=self.color_arrays,
-                    roi_maps=self.roi_maps,
-                    binned_fluorescence=self.Fbin,
-                    fluorescence_std=self.Fstd,
-                    behavior_resampled=self.context_data.behavior_resampled,
-                    bin_size=self.view_state.bin_size,
-                    merge_indices=self.view_state.merge_indices,
-                    colormap=self.view_state.colormap,
-                )
-                roi_overlays.render_colorbar(
-                    state=self.view_state,
-                    color_arrays=self.color_arrays,
-                    colorbar_widgets=self.colorbar_widgets,
-                    colorbar_image=self.colorbar_image,
-                )
             self.update_plot()
 
     def top_number_chosen(self) -> None:

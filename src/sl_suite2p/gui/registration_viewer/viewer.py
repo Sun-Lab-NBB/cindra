@@ -25,10 +25,10 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from ..io import compute_plane_offsets
-from .styles import WHITE_LABEL_STYLESHEET, metrics_font, metrics_font_bold
-from .roi_geometry import compute_boundary_mask
-from .roi_overlays import hsv2rgb
+from ...io import compute_plane_offsets
+from ..styles import WHITE_LABEL_STYLESHEET
+from ..roi_geometry import compute_boundary_mask
+from ..roi_overlays import hsv2rgb
 
 # Scatter plot marker point size in pixels.
 _SCATTER_POINT_SIZE: int = 10
@@ -87,6 +87,12 @@ _ROI_EDIT_WIDTH: int = 45
 
 # Width for PC number input field.
 _PC_EDIT_WIDTH: int = 40
+
+# Font family used for metrics labels.
+_FONT_FAMILY: str = "Arial"
+
+# Font point size for metrics labels.
+_METRICS_FONT_SIZE: int = 14
 
 
 class BinaryPlayer(QMainWindow):
@@ -1006,8 +1012,8 @@ class PCViewer(QMainWindow):
         self.PCedit.returnPressed.connect(self.plot_frame)
         self.PCedit.textEdited.connect(self.pause)
         qlabel = QLabel("PC: ")
-        boldfont = metrics_font_bold()
-        bigfont = metrics_font()
+        boldfont = QtGui.QFont(_FONT_FAMILY, pointSize=_METRICS_FONT_SIZE, weight=QtGui.QFont.Weight.Bold)
+        bigfont = QtGui.QFont(_FONT_FAMILY, pointSize=_METRICS_FONT_SIZE)
         qlabel.setFont(boldfont)
         self.PCedit.setFont(bigfont)
         qlabel.setStyleSheet(WHITE_LABEL_STYLESHEET)

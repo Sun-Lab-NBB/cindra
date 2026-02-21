@@ -7,9 +7,7 @@ from typing import TYPE_CHECKING
 from pathlib import Path
 
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
 from PySide6.QtWidgets import QFileDialog, QMessageBox
-from scipy.interpolate import interp1d
 from ataraxis_base_utilities import LogLevel, console
 
 from .styles import (
@@ -19,7 +17,7 @@ from .styles import (
 )
 from .view_state import ViewState
 from .trace_panel import plot_trace
-from .context_data import ContextData
+from .context_data import ContextData, MultiDayContextData
 from .plot_widgets import initialize_ranges
 from .roi_geometry import compute_circle_mask, compute_boundary_mask
 from .roi_overlays import (
@@ -29,8 +27,6 @@ from .roi_overlays import (
     init_roi_maps,
     compute_colors,
     render_colorbar,
-    update_custom_masks,
-    update_behavior_masks,
 )
 from .background_views import build_views, display_views
 
@@ -43,20 +39,11 @@ _DEFAULT_CHANNEL_2_THRESHOLD: float = 0.6
 # Divisor for computing the default trace bin size from tau and sampling rate.
 _BIN_SIZE_DIVISOR: int = 2
 
-# Minimum number of columns in a behavior array to treat it as (data, time) format.
-_MIN_BEHAVIOR_COLUMNS: int = 2
-
 # Index of the channel 2 color mode button in the color button group.
 _CHANNEL_2_COLOR_INDEX: int = 5
 
 # Number of basic (non-dynamic) color mode buttons.
 _BASIC_COLOR_COUNT: int = 8
-
-# Index of the behavior color mode button.
-_BEHAVIOR_COLOR_INDEX: int = 8
-
-# Index of the rastermap / custom color mode button.
-_CUSTOM_COLOR_INDEX: int = 9
 
 # Default activity mode index (neuropil-corrected: F - 0.7*Fneu).
 _DEFAULT_ACTIVITY_MODE: int = 2
@@ -195,7 +182,7 @@ def load_session(parent: MainWindow, session_path: Path | None = None) -> None:
 
     try:
         if is_multi_day:
-            context_data = ContextData.from_multi_day(root_path=session_path)
+            context_data = MultiDayContextData.from_multi_day(root_path=session_path)
         else:
             context_data = ContextData.from_single_day(root_path=session_path)
     except Exception:
@@ -228,166 +215,6 @@ def load_dialog_folder(parent: MainWindow) -> None:
     load_session(parent=parent)
 
 
-def load_behavior(parent: MainWindow) -> None:
-    """Opens a file dialog to load a behavioral trace array.
-
-    The behavioral data is resampled to match the fluorescence frame count if timestamps
-    are provided in a second column. After loading, the behavior color mode button is
-    enabled and the behavior correlation masks are computed.
-
-    Args:
-        parent: The main GUI window.
-    """
-    if parent.context_data is None:
-        return
-    context = parent.context_data
-
-    name = QFileDialog.getOpenFileName(parent, "Open *.npy", filter="*.npy")
-    name = name[0]
-    if not name:
-        return
-
-    behavior_loaded = False
-    beh_time = np.arange(0, context.frame_count, dtype=np.float32)
-    needs_resample = False
-
-    try:
-        beh = np.load(name)
-        if beh.ndim > 1:
-            if beh.shape[1] < _MIN_BEHAVIOR_COLUMNS:
-                beh = beh.flatten()
-                if beh.shape[0] == context.frame_count:
-                    behavior_loaded = True
-                    beh_time = np.arange(0, context.frame_count, dtype=np.float32)
-            else:
-                behavior_loaded = True
-                beh_time = beh[:, 1].astype(np.float32)
-                beh = beh[:, 0]
-                needs_resample = True
-        elif beh.shape[0] == context.frame_count:
-            behavior_loaded = True
-            beh_time = np.arange(0, context.frame_count, dtype=np.float32)
-    except ValueError, KeyError, OSError, RuntimeError, TypeError, NameError:
-        console.echo(
-            message="ERROR: this is not a 1D array with length of data",
-            level=LogLevel.ERROR,
-        )
-
-    if not behavior_loaded:
-        console.echo(
-            message="ERROR: this is not a 1D array with length of data",
-            level=LogLevel.ERROR,
-        )
-        return
-
-    beh = beh.astype(np.float32)
-    beh -= beh.min()
-    beh_max = beh.max()
-    if beh_max > 0:
-        beh /= beh_max
-
-    context.behavior = beh
-    context.behavior_time = beh_time
-    if needs_resample:
-        context.behavior_resampled = _resample_frames(
-            signal=beh,
-            time_points=beh_time,
-            target_times=np.arange(0, context.frame_count, dtype=np.float32),
-        ).astype(np.float32)
-    else:
-        context.behavior_resampled = beh
-
-    parent.view_state.behavior_loaded = True
-    parent.colorbtns.button(_BEHAVIOR_COLOR_INDEX).setEnabled(True)
-    parent.colorbtns.button(_BEHAVIOR_COLOR_INDEX).setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
-
-    # Computes behavior correlation masks if binned activity data is available.
-    if parent.Fbin is not None and parent.Fstd is not None and parent.color_arrays is not None:
-        update_behavior_masks(
-            color_arrays=parent.color_arrays,
-            roi_maps=parent.roi_maps,
-            binned_fluorescence=parent.Fbin,
-            fluorescence_std=parent.Fstd,
-            behavior_resampled=context.behavior_resampled,
-            bin_size=parent.view_state.bin_size,
-            merge_indices=parent.view_state.merge_indices,
-            colormap=parent.view_state.colormap,
-        )
-
-    parent.update_plot()
-
-    if hasattr(parent, "VW"):
-        parent.VW.bloaded = parent.view_state.behavior_loaded
-        parent.VW.beh = context.behavior
-        parent.VW.beh_time = context.behavior_time
-        parent.VW.plot_traces()
-
-    parent.show()
-
-
-def load_custom_mask(parent: MainWindow) -> None:
-    """Opens a file dialog to load a custom ROI mask overlay.
-
-    The mask must be a 1D array with one value per ROI. After loading, the custom color
-    mode button is enabled and the mask overlay is displayed.
-
-    Args:
-        parent: The main GUI window.
-    """
-    if parent.context_data is None or parent.color_arrays is None or parent.roi_maps is None:
-        return
-    context = parent.context_data
-
-    name = QFileDialog.getOpenFileName(parent, "Open *.npy", filter="*.npy")
-    name = name[0]
-    if not name:
-        return
-
-    custom_loaded = False
-    try:
-        mask = np.load(name).flatten().astype(np.float32)
-        if mask.size == context.roi_count:
-            custom_loaded = True
-    except ValueError, KeyError, OSError, RuntimeError, TypeError, NameError:
-        console.echo(
-            message="ERROR: this is not a 1D array with length of data",
-            level=LogLevel.ERROR,
-        )
-
-    if not custom_loaded:
-        console.echo(
-            message="ERROR: this is not a 1D array with length of # of ROIs",
-            level=LogLevel.ERROR,
-        )
-        return
-
-    parent.custom_mask = mask
-    update_custom_masks(
-        color_arrays=parent.color_arrays,
-        roi_maps=parent.roi_maps,
-        custom_mask=mask,
-        colormap=parent.view_state.colormap,
-    )
-    masks = draw_masks(
-        context=context,
-        state=parent.view_state,
-        color_arrays=parent.color_arrays,
-        roi_maps=parent.roi_maps,
-    )
-    display_masks(
-        color1=parent.color1,
-        color2=parent.color2,
-        masks=masks,
-    )
-
-    parent.colorbtns.button(_CUSTOM_COLOR_INDEX).setEnabled(True)
-    parent.colorbtns.button(_CUSTOM_COLOR_INDEX).setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
-    parent.colorbtns.button(_CUSTOM_COLOR_INDEX).setChecked(True)
-    parent.view_state.color_mode = _CUSTOM_COLOR_INDEX
-    parent.update_plot()
-    parent.show()
-
-
 def _initialize_gui(parent: MainWindow) -> None:
     """Initializes all GUI components after loading context data.
 
@@ -411,7 +238,6 @@ def _initialize_gui(parent: MainWindow) -> None:
         parent._roi_text(False)
     parent.checkBoxN.setChecked(False)
     parent.checkBoxN.setEnabled(True)
-    parent.loadBeh.setEnabled(True)
     parent.saveMerge.setEnabled(True)
     parent.sugMerge.setEnabled(True)
     parent.manual.setEnabled(True)
@@ -515,9 +341,6 @@ def _initialize_gui(parent: MainWindow) -> None:
     parent.p1.setAspectLocked(lock=True, ratio=context.aspect_ratio)
     parent.p2.setAspectLocked(lock=True, ratio=context.aspect_ratio)
 
-    # Backward-compat alias for visualization_window.py.
-    parent.color_names = [btn.text() for btn in parent.colorbtns.buttons()]
-
     state.is_loaded = True
 
     # Computes binned activity and triggers initial full redraw.
@@ -597,8 +420,6 @@ def _enable_views_and_classifier(parent: MainWindow) -> None:
     parent.loadUClass.setEnabled(True)
     parent.loadSClass.setEnabled(True)
     parent.resetDefault.setEnabled(True)
-    parent.visualizations.setEnabled(True)
-    parent.custommask.setEnabled(True)
 
 
 def _compute_roi_geometry(context: ContextData) -> None:
@@ -625,30 +446,6 @@ def _compute_roi_geometry(context: ContextData) -> None:
         valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < context.frame_height) & (x_circle < context.frame_width)
         roi.circle_y_pixels = y_circle[valid]
         roi.circle_x_pixels = x_circle[valid]
-
-
-def _resample_frames(
-    signal: np.ndarray,
-    time_points: np.ndarray,
-    target_times: np.ndarray,
-) -> np.ndarray:
-    """Resamples a behavioral signal to match fluorescence frame times.
-
-    Applies Gaussian smoothing proportional to the resampling ratio before interpolation
-    to prevent aliasing artifacts.
-
-    Args:
-        signal: The behavioral signal values.
-        time_points: The original time points of the signal.
-        target_times: The target time points to interpolate onto.
-
-    Returns:
-        Resampled signal at the target time points.
-    """
-    resampling_ratio = time_points.size / target_times.size
-    smoothed = gaussian_filter1d(signal, np.ceil(resampling_ratio / 2), axis=0)
-    interpolator = interp1d(time_points, smoothed, fill_value="extrapolate")
-    return interpolator(target_times)
 
 
 def _select_directory(parent: MainWindow) -> Path | None:

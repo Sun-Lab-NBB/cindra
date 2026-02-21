@@ -87,16 +87,6 @@ def arrow_button_font() -> QtGui.QFont:
     return QtGui.QFont(_FONT_FAMILY, pointSize=11, weight=QtGui.QFont.Weight.Bold)
 
 
-def metrics_font() -> QtGui.QFont:
-    """Creates the font for registration metrics labels (Arial 14pt)."""
-    return QtGui.QFont(_FONT_FAMILY, pointSize=14)
-
-
-def metrics_font_bold() -> QtGui.QFont:
-    """Creates the bold font for registration metrics headers (Arial 14pt bold)."""
-    return QtGui.QFont(_FONT_FAMILY, pointSize=14, weight=QtGui.QFont.Weight.Bold)
-
-
 def colorbar_font() -> QtGui.QFont:
     """Creates the font for colorbar tick labels (Times 8pt bold)."""
     return QtGui.QFont(_ALT_FONT_FAMILY, pointSize=8, weight=QtGui.QFont.Weight.Bold)

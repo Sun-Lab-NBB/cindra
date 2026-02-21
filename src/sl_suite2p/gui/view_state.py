@@ -33,12 +33,6 @@ class ROIColorMode(IntEnum):
     CORRELATIONS = 7
     """Colors ROIs by pairwise activity correlation with the selected ROI."""
 
-    BEHAVIOR_CORRELATION = 8
-    """Colors ROIs by the correlation between their activity and the loaded behavioral trace."""
-
-    RASTERMAP = 9
-    """Colors ROIs by their rastermap embedding position or a custom sorting metric."""
-
 
 class BackgroundView(IntEnum):
     """Selects the background image displayed behind ROI overlays in the image panels."""
@@ -214,14 +208,6 @@ class ViewState:
     roi_labels_visible: bool = False
     """Controls whether numeric ROI index labels are drawn at each ROI centroid on the image
     panels."""
-
-    behavior_loaded: bool = False
-    """Indicates that a 1D behavioral trace has been loaded and resampled to the imaging frame rate.
-    When True, the behavior correlation color mode and behavior trace overlay become available."""
-
-    rastermap_loaded: bool = False
-    """Indicates that rastermap sorting has been applied, reordering ROIs by embedding similarity.
-    When True, the rastermap color mode becomes available."""
 
     session_loaded: bool = False
     """Indicates that a data context (single-day or multi-day) has been loaded into the GUI. When
