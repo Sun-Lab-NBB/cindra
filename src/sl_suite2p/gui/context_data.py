@@ -6,9 +6,8 @@ from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
 import numpy as np
-from ataraxis_base_utilities import console
 
-from ..dataclasses import CombinedData, RuntimeContext, MultiDayRuntimeContext
+from ..dataclasses import CombinedData, RuntimeContext
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -19,8 +18,6 @@ if TYPE_CHECKING:
         ROIStatistics,
         BaselineMethod,
         ExtractionData,
-        MultiDayRuntimeData,
-        MultiDayConfiguration,
         SingleDayConfiguration,
     )
 
@@ -113,9 +110,7 @@ class ContextData:
 
     Notes:
         Single-day data comes from ``RuntimeContext.load()`` which provides ``CombinedData``
-        containing detection images and extraction results. Multi-day data uses the
-        ``MultiDayContextData`` subclass which extends this class with session navigation,
-        registration overlays, and tracking mask sets.
+        containing detection images and extraction results.
     """
 
     # Underlying contexts for all planes.
@@ -361,7 +356,7 @@ class ContextData:
         return self.combined.plane_widths
 
     @property
-    def configuration(self) -> SingleDayConfiguration | MultiDayConfiguration | None:
+    def configuration(self) -> SingleDayConfiguration | None:
         """Returns the pipeline configuration used to produce this data."""
         if self.contexts:
             return self.contexts[0].configuration
@@ -608,157 +603,3 @@ class ContextData:
         self.not_merged = np.ones(roi_count, dtype=np.bool_)
 
 
-@dataclass
-class MultiDayContextData(ContextData):
-    """Extends ContextData with multi-day session navigation and registration overlays.
-
-    Provides session switching, transformed reference images from cross-session registration,
-    and deformed and template mask sets from cell tracking.
-
-    Notes:
-        Multi-day data comes from ``MultiDayRuntimeContext.load()`` which provides per-session
-        ``MultiDayRuntimeData`` wrapping the single-day ``CombinedData`` along with registration
-        and tracking data. The base ``contexts`` field is not populated in multi-day mode.
-    """
-
-    multi_day_contexts: list[MultiDayRuntimeContext] = field(default_factory=list)
-    """Multi-day runtime contexts for all sessions."""
-
-    current_session_index: int = 0
-    """Zero-based index of the currently displayed multi-day session."""
-
-    multi_day_runtime: MultiDayRuntimeData | None = None
-    """Runtime data for the current multi-day session."""
-
-    @property
-    def configuration(self) -> SingleDayConfiguration | MultiDayConfiguration | None:
-        """Returns the pipeline configuration used to produce this data."""
-        if self.multi_day_contexts:
-            return self.multi_day_contexts[0].configuration
-        return None
-
-    @property
-    def save_path(self) -> Path | None:
-        """Returns the root output directory path for the current session."""
-        if self.multi_day_contexts:
-            return self.multi_day_contexts[self.current_session_index].runtime.output_path
-        return None
-
-    @property
-    def data_path(self) -> Path | None:
-        """Returns the root input data directory path for the current session."""
-        if self.multi_day_contexts:
-            return self.multi_day_contexts[self.current_session_index].runtime.io.data_path
-        return None
-
-    @property
-    def session_count(self) -> int:
-        """Returns the number of multi-day sessions."""
-        return len(self.multi_day_contexts)
-
-    @property
-    def session_ids(self) -> list[str]:
-        """Returns the session identifier strings for all multi-day sessions."""
-        return [context.runtime.io.session_id for context in self.multi_day_contexts]
-
-    @property
-    def transformed_mean_image(self) -> NDArray[np.float32] | None:
-        """Returns the mean image in deformed (registered) space."""
-        if self.multi_day_runtime is None:
-            return None
-        return self.multi_day_runtime.registration.transformed_mean_image
-
-    @property
-    def transformed_enhanced_mean_image(self) -> NDArray[np.float32] | None:
-        """Returns the enhanced mean image in deformed (registered) space."""
-        if self.multi_day_runtime is None:
-            return None
-        return self.multi_day_runtime.registration.transformed_enhanced_mean_image
-
-    @property
-    def transformed_maximum_projection(self) -> NDArray[np.float32] | None:
-        """Returns the maximum projection in deformed (registered) space."""
-        if self.multi_day_runtime is None:
-            return None
-        return self.multi_day_runtime.registration.transformed_maximum_projection
-
-    @property
-    def deformed_masks(self) -> list[ROIStatistics] | None:
-        """Returns the registered (deformed) cell masks for the current session."""
-        if self.multi_day_runtime is None:
-            return None
-        return self.multi_day_runtime.registration.deformed_cell_masks
-
-    @property
-    def template_masks(self) -> list[ROIStatistics] | None:
-        """Returns the shared template masks from cross-session tracking."""
-        if self.multi_day_runtime is None:
-            return None
-        return self.multi_day_runtime.tracking.template_masks
-
-    @classmethod
-    def from_multi_day(cls, root_path: Path) -> MultiDayContextData:
-        """Loads multi-day pipeline data into a MultiDayContextData wrapper.
-
-        Loads all sessions via ``MultiDayRuntimeContext.load()`` and initializes the view
-        with the first session's data.
-
-        Args:
-            root_path: Root multi-day output directory (first session's multiday folder).
-
-        Returns:
-            A fully populated MultiDayContextData instance.
-        """
-        # Loads all sessions.
-        contexts = MultiDayRuntimeContext.load(root_path=root_path, session_index=-1)
-        if not isinstance(contexts, list):
-            contexts = [contexts]
-
-        # Initializes from the first session.
-        runtime = contexts[0].runtime
-
-        # Loads extraction results for the first session's combined data.
-        if runtime.combined_data is not None and runtime.io.data_path is not None:
-            runtime.combined_data.load_results(root_path=runtime.io.data_path)
-
-        # Loads multi-day extraction results.
-        if runtime.output_path is not None:
-            runtime.extraction.load_results(output_path=runtime.output_path)
-
-        instance = cls(
-            multi_day_contexts=contexts,
-            combined=runtime.combined_data,
-            current_session_index=0,
-            multi_day_runtime=runtime,
-        )
-        instance._reload_mutable_arrays(combined=runtime.combined_data)
-        return instance
-
-    def switch_session(self, session_index: int) -> None:
-        """Switches the active multi-day session and reloads all mutable arrays.
-
-        Args:
-            session_index: Zero-based index of the session to switch to.
-
-        Raises:
-            ValueError: If the index is out of range.
-        """
-        if session_index < 0 or session_index >= len(self.multi_day_contexts):
-            message = (
-                f"Unable to switch to session {session_index}. Valid range is "
-                f"0 to {len(self.multi_day_contexts) - 1}."
-            )
-            console.error(message=message, error=ValueError)
-
-        self.current_session_index = session_index
-        runtime = self.multi_day_contexts[session_index].runtime
-        self.multi_day_runtime = runtime
-
-        # Loads extraction results for this session.
-        if runtime.combined_data is not None and runtime.io.data_path is not None:
-            runtime.combined_data.load_results(root_path=runtime.io.data_path)
-        if runtime.output_path is not None:
-            runtime.extraction.load_results(output_path=runtime.output_path)
-
-        # Repopulates mutable arrays from this session's combined data.
-        self._reload_mutable_arrays(combined=runtime.combined_data)

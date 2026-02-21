@@ -65,20 +65,6 @@ class GUISignals(QObject):
     """Emitted when the fluorescence trace type shown in the trace panel changes. The int argument
     is a ``TraceMode`` member."""
 
-    # Multi-day specific signals.
-    session_switched = Signal(int)
-    """Emitted when the user navigates to a different recording session in multi-day mode. The int
-    argument is the new session index. Subscribers should expect all mutable pipeline arrays in
-    ContextData to have been reloaded from the newly selected session."""
-
-    mask_layer_changed = Signal(int)
-    """Emitted when the displayed ROI mask layer changes in multi-day mode. The int argument is a
-    ``MaskLayer`` member."""
-
-    coordinate_space_changed = Signal(int)
-    """Emitted when the coordinate space for reference images changes in multi-day mode. The int
-    argument is a ``CoordinateSpace`` member."""
-
     # Display update signals.
     plot_needs_update = Signal()
     """Emitted to request a full redraw of all image panels, ROI overlays, and colorbars. Use this
