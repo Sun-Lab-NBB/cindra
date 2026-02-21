@@ -79,16 +79,6 @@ class GUISignals(QObject):
     """Emitted when the coordinate space for reference images changes in multi-day mode. The int
     argument is a ``CoordinateSpace`` member."""
 
-    # Supplementary data signals.
-    behavior_loaded = Signal()
-    """Emitted after a 1D behavioral trace has been loaded and resampled to match the imaging frame
-    count. Subscribers should enable behavior-related UI elements such as the behavior correlation
-    color mode and the behavioral trace overlay in the visualization window."""
-
-    rastermap_loaded = Signal()
-    """Emitted after rastermap sorting has been applied to reorder ROIs by embedding similarity.
-    Subscribers should enable the rastermap color mode and update any ROI ordering displays."""
-
     # Display update signals.
     plot_needs_update = Signal()
     """Emitted to request a full redraw of all image panels, ROI overlays, and colorbars. Use this

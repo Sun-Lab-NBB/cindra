@@ -8,62 +8,128 @@ from dataclasses import field, dataclass
 import numpy as np
 from ataraxis_base_utilities import console
 
+from ..dataclasses import CombinedData, RuntimeContext, MultiDayRuntimeContext
+
 if TYPE_CHECKING:
     from pathlib import Path
 
     from numpy.typing import NDArray
 
     from ..dataclasses import (
-        CombinedData,
+        ROIStatistics,
         BaselineMethod,
-        RuntimeContext,
+        ExtractionData,
+        MultiDayRuntimeData,
         MultiDayConfiguration,
         SingleDayConfiguration,
     )
-    from ..dataclasses.multi_day_data import MultiDayRuntimeData
-    from ..dataclasses.single_day_data import ROIStatistics
-    from ..dataclasses.runtime_contexts import MultiDayRuntimeContext
+
+
+def _memory_map_trace(
+    save_path: Path | None,
+    file_name: str,
+    fallback: NDArray[np.float32] | None,
+    default_shape: tuple[int, ...],
+) -> NDArray[np.float32]:
+    """Memory-maps a trace array from disk with copy-on-write access.
+
+    Attempts to open the specified .npy file as a copy-on-write memory map. Falls back
+    to copying the provided array if the file does not exist, or returns a zero array
+    of the given shape if neither source is available.
+
+    Args:
+        save_path: Directory containing the .npy file.
+        file_name: Name of the .npy file to memory-map.
+        fallback: Array to copy if the file does not exist on disk.
+        default_shape: Shape for a zero-initialized fallback array.
+
+    Returns:
+        The memory-mapped, copied, or zero-initialized array.
+    """
+    if save_path is not None:
+        path = save_path / file_name
+        if path.exists():
+            mapped: NDArray[np.float32] = np.load(path, mmap_mode="c")
+            return mapped
+    if fallback is not None:
+        return fallback.copy()
+    return np.zeros(default_shape, dtype=np.float32)
+
+
+def _memory_map_optional_trace(
+    save_path: Path | None,
+    file_name: str,
+    fallback: NDArray[np.float32] | None,
+) -> NDArray[np.float32] | None:
+    """Memory-maps an optional trace array from disk with copy-on-write access.
+
+    Attempts to open the specified .npy file as a copy-on-write memory map. Falls back
+    to copying the provided array if the file does not exist. Returns None if neither
+    source is available.
+
+    Args:
+        save_path: Directory containing the .npy file.
+        file_name: Name of the .npy file to memory-map.
+        fallback: Array to copy if the file does not exist on disk.
+
+    Returns:
+        The memory-mapped or copied array, or None if unavailable.
+    """
+    if save_path is not None:
+        path = save_path / file_name
+        if path.exists():
+            mapped: NDArray[np.float32] = np.load(path, mmap_mode="c")
+            return mapped
+    if fallback is not None:
+        return fallback.copy()
+    return None
+
+
+def _release_trace_arrays(extraction: ExtractionData) -> None:
+    """Releases large trace arrays from the extraction object to free memory.
+
+    Called after memory-mapping the same data from disk, so the in-memory copies held
+    by the extraction object are no longer needed.
+
+    Args:
+        extraction: The extraction data whose trace arrays will be set to None.
+    """
+    extraction.cell_fluorescence = None
+    extraction.neuropil_fluorescence = None
+    extraction.spikes = None
+    extraction.subtracted_fluorescence = None
+    extraction.cell_fluorescence_channel_2 = None
+    extraction.neuropil_fluorescence_channel_2 = None
+    extraction.subtracted_fluorescence_channel_2 = None
 
 
 @dataclass
 class ContextData:
-    """Wraps pipeline data for both single-day and multi-day modes.
+    """Wraps imported single-day pipeline data for GUI consumption.
 
     Holds mutable copies of GUI-editable arrays and delegates read-only access to the
-    underlying context objects. For multi-day mode, additionally provides session
-    navigation, multiple mask sets, and transformed reference images.
+    underlying context objects. Large trace arrays are memory-mapped from disk with
+    copy-on-write access to minimize memory usage.
 
     Notes:
         Single-day data comes from ``RuntimeContext.load()`` which provides ``CombinedData``
-        containing detection images and extraction results. Multi-day data comes from
-        ``MultiDayRuntimeContext.load()`` which provides per-session ``MultiDayRuntimeData``
-        wrapping the single-day ``CombinedData`` along with registration and tracking data.
+        containing detection images and extraction results. Multi-day data uses the
+        ``MultiDayContextData`` subclass which extends this class with session navigation,
+        registration overlays, and tracking mask sets.
     """
 
-    # Mode flag.
-    is_multi_day: bool
-    """Determines whether the data was loaded from a multi-day pipeline output."""
+    # Underlying contexts for all planes.
+    contexts: list[RuntimeContext] = field(default_factory=list)
+    """Single-day runtime contexts for all processed recording's imaging planes."""
 
-    # Underlying contexts (one set will be None depending on mode).
-    single_day_contexts: list[RuntimeContext] | None = None
-    """Single-day runtime contexts for all planes. None in multi-day mode."""
-
-    multi_day_contexts: list[MultiDayRuntimeContext] | None = None
-    """Multi-day runtime contexts for all sessions. None in single-day mode."""
-
-    # Combined data is always present (single-day combined, or current session's combined).
+    # Combined data from the suite2p output directory.
     combined: CombinedData | None = None
     """The combined single-day data for the active view."""
 
-    # Multi-day session navigation.
-    current_session_index: int = 0
-    """Zero-based index of the currently displayed multi-day session."""
-
-    multi_day_runtime: MultiDayRuntimeData | None = None
-    """Runtime data for the current multi-day session. None in single-day mode."""
-
-    # Mutable arrays extracted from combined/extraction data. These are copies that the GUI
-    # can modify (e.g. reclassifying cells, merging ROIs) without mutating the source objects.
+    # Mutable trace arrays. These are memory-mapped from disk with copy-on-write access
+    # so the OS pages data in on demand without loading entire arrays into RAM. Merge
+    # operations can write to these arrays (copy-on-write pages are allocated in memory
+    # for modified regions only), and save_merge persists the results explicitly.
     roi_statistics: list[ROIStatistics] = field(default_factory=list)
     """Spatial and shape statistics for each detected ROI."""
 
@@ -85,12 +151,12 @@ class ContextData:
     """Classifier probability for each ROI being a cell."""
 
     cell_colocalization_labels: NDArray[np.bool_] = field(default_factory=lambda: np.array([], dtype=np.bool_))
-    """Boolean classification array marking each ROI as a channel 2 cell."""
+    """Boolean array marking each ROI as colocalized with a channel 2 fluorescence source."""
 
     cell_colocalization_probabilities: NDArray[np.float32] = field(
         default_factory=lambda: np.array([], dtype=np.float32)
     )
-    """Probability of each ROI being a channel 2 cell."""
+    """Classifier probability of each ROI being colocalized with a channel 2 fluorescence source."""
 
     has_channel_2: bool = False
     """Determines whether channel 2 data is available."""
@@ -98,22 +164,19 @@ class ContextData:
     not_merged: NDArray[np.bool_] = field(default_factory=lambda: np.array([], dtype=np.bool_))
     """Boolean mask tracking which ROIs have not been merged into other ROIs."""
 
-    # Channel 2 traces (optional).
+    # Channel 2 traces (optional, memory-mapped when available).
     cell_fluorescence_channel_2: NDArray[np.float32] | None = None
     """Channel 2 cell fluorescence traces. None if single-channel."""
 
     neuropil_fluorescence_channel_2: NDArray[np.float32] | None = None
     """Channel 2 neuropil fluorescence traces. None if single-channel."""
 
-    # Behavior data (loaded separately via context_loader).
-    behavior: NDArray[np.float32] | None = None
-    """Loaded 1D behavioral trace."""
+    # Private caches for memory-mapped subtracted fluorescence arrays.
+    _subtracted_fluorescence_map: NDArray[np.float32] | None = field(init=False, default=None, repr=False)
+    """Cached memory-mapped channel 1 subtracted fluorescence."""
 
-    behavior_time: NDArray[np.float32] | None = None
-    """Time axis for the behavioral trace."""
-
-    behavior_resampled: NDArray[np.float32] | None = None
-    """Behavioral trace resampled to match imaging frame rate."""
+    _subtracted_fluorescence_channel_2_map: NDArray[np.float32] | None = field(init=False, default=None, repr=False)
+    """Cached memory-mapped channel 2 subtracted fluorescence."""
 
     # Read-only properties delegated to the combined data object.
 
@@ -156,8 +219,6 @@ class ContextData:
         if self.cell_classification_labels.size == 0:
             return 0
         return int(self.cell_classification_labels.sum())
-
-    # Background images from combined detection data.
 
     @property
     def mean_image(self) -> NDArray[np.float32] | None:
@@ -208,67 +269,40 @@ class ContextData:
             return None
         return self.combined.extraction.corrected_structural_mean_image
 
-    # Multi-day only: transformed images from the registration data.
-
     @property
-    def transformed_mean_image(self) -> NDArray[np.float32] | None:
-        """Returns the mean image in deformed (registered) space."""
-        if self.multi_day_runtime is None:
+    def subtracted_fluorescence(self) -> NDArray[np.float32] | None:
+        """Returns the memory-mapped baseline-and-neuropil-subtracted fluorescence traces."""
+        if self._subtracted_fluorescence_map is not None:
+            return self._subtracted_fluorescence_map
+        save = self.save_path
+        if save is None:
             return None
-        return self.multi_day_runtime.registration.transformed_mean_image
-
-    @property
-    def transformed_enhanced_mean_image(self) -> NDArray[np.float32] | None:
-        """Returns the enhanced mean image in deformed (registered) space."""
-        if self.multi_day_runtime is None:
+        path = save / "subtracted_fluorescence.npy"
+        if not path.exists():
             return None
-        return self.multi_day_runtime.registration.transformed_enhanced_mean_image
+        self._subtracted_fluorescence_map = np.load(path, mmap_mode="r")
+        return self._subtracted_fluorescence_map
 
     @property
-    def transformed_maximum_projection(self) -> NDArray[np.float32] | None:
-        """Returns the maximum projection in deformed (registered) space."""
-        if self.multi_day_runtime is None:
+    def subtracted_fluorescence_channel_2(self) -> NDArray[np.float32] | None:
+        """Returns the memory-mapped channel 2 subtracted fluorescence traces."""
+        if self._subtracted_fluorescence_channel_2_map is not None:
+            return self._subtracted_fluorescence_channel_2_map
+        save = self.save_path
+        if save is None:
             return None
-        return self.multi_day_runtime.registration.transformed_maximum_projection
-
-    # Multi-day only: mask sets.
-
-    @property
-    def session_count(self) -> int:
-        """Returns the number of multi-day sessions."""
-        if self.multi_day_contexts is None:
-            return 0
-        return len(self.multi_day_contexts)
-
-    @property
-    def session_ids(self) -> list[str]:
-        """Returns the session identifier strings for all multi-day sessions."""
-        if self.multi_day_contexts is None:
-            return []
-        return [context.runtime.io.session_id for context in self.multi_day_contexts]
-
-    @property
-    def deformed_masks(self) -> list[ROIStatistics] | None:
-        """Returns the registered (deformed) cell masks for the current session."""
-        if self.multi_day_runtime is None:
+        path = save / "subtracted_fluorescence_channel_2.npy"
+        if not path.exists():
             return None
-        return self.multi_day_runtime.registration.deformed_cell_masks
-
-    @property
-    def template_masks(self) -> list[ROIStatistics] | None:
-        """Returns the shared template masks from cross-session tracking."""
-        if self.multi_day_runtime is None:
-            return None
-        return self.multi_day_runtime.tracking.template_masks
-
-    # Properties from CombinedData (geometry and binary paths).
+        self._subtracted_fluorescence_channel_2_map = np.load(path, mmap_mode="r")
+        return self._subtracted_fluorescence_channel_2_map
 
     @property
     def frame_count(self) -> int:
         """Returns the total number of imaging frames."""
         if self.cell_fluorescence.size == 0:
             return 0
-        return self.cell_fluorescence.shape[1]
+        return int(self.cell_fluorescence.shape[1])
 
     @property
     def cell_diameter(self) -> int:
@@ -326,15 +360,11 @@ class ContextData:
             return np.array([], dtype=np.uint16)
         return self.combined.plane_widths
 
-    # Configuration access.
-
     @property
     def configuration(self) -> SingleDayConfiguration | MultiDayConfiguration | None:
         """Returns the pipeline configuration used to produce this data."""
-        if self.single_day_contexts is not None and self.single_day_contexts:
-            return self.single_day_contexts[0].configuration
-        if self.multi_day_contexts is not None and self.multi_day_contexts:
-            return self.multi_day_contexts[0].configuration
+        if self.contexts:
+            return self.contexts[0].configuration
         return None
 
     @property
@@ -396,8 +426,8 @@ class ContextData:
     @property
     def crop_to_soma(self) -> bool:
         """Returns whether dendritic regions are cropped before classification."""
-        if self.single_day_contexts is not None and self.single_day_contexts:
-            return self.single_day_contexts[0].configuration.roi_detection.crop_to_soma
+        if self.contexts:
+            return self.contexts[0].configuration.roi_detection.crop_to_soma
         return True
 
     @property
@@ -427,40 +457,30 @@ class ContextData:
     @property
     def save_path(self) -> Path | None:
         """Returns the root output directory path."""
-        if self.single_day_contexts is not None and self.single_day_contexts:
-            return self.single_day_contexts[0].configuration.file_io.save_path
-        if self.multi_day_contexts is not None and self.multi_day_contexts:
-            runtime = self.multi_day_contexts[self.current_session_index].runtime
-            return runtime.output_path
+        if self.contexts:
+            return self.contexts[0].configuration.file_io.save_path
         return None
 
     @property
     def data_path(self) -> Path | None:
         """Returns the root input data directory path."""
-        if self.single_day_contexts is not None and self.single_day_contexts:
-            return self.single_day_contexts[0].configuration.file_io.data_path
-        if self.multi_day_contexts is not None and self.multi_day_contexts:
-            runtime = self.multi_day_contexts[self.current_session_index].runtime
-            return runtime.io.data_path
+        if self.contexts:
+            return self.contexts[0].configuration.file_io.data_path
         return None
-
-    # Registration data from the first plane.
 
     @property
     def valid_y_range(self) -> tuple[int, int]:
         """Returns the valid Y pixel range from the first plane's registration."""
-        if self.single_day_contexts is not None and self.single_day_contexts:
-            return self.single_day_contexts[0].runtime.registration.valid_y_range
-        return (0, 0)
+        if self.contexts:
+            return self.contexts[0].runtime.registration.valid_y_range
+        return 0, 0
 
     @property
     def valid_x_range(self) -> tuple[int, int]:
         """Returns the valid X pixel range from the first plane's registration."""
-        if self.single_day_contexts is not None and self.single_day_contexts:
-            return self.single_day_contexts[0].runtime.registration.valid_x_range
-        return (0, 0)
-
-    # Derived convenience properties.
+        if self.contexts:
+            return self.contexts[0].runtime.registration.valid_x_range
+        return 0, 0
 
     @property
     def basename(self) -> str:
@@ -470,14 +490,13 @@ class ContextData:
             return path.name
         return ""
 
-    # Factory methods.
-
     @classmethod
     def from_single_day(cls, root_path: Path) -> ContextData:
         """Loads single-day pipeline data into a ContextData wrapper.
 
         Loads all planes via ``RuntimeContext.load()`` and the combined data from the root
-        suite2p directory. Mutable arrays are copied from the extraction results.
+        suite2p directory. Large trace arrays are memory-mapped from disk with copy-on-write
+        access rather than copied into RAM.
 
         Args:
             root_path: Root suite2p output directory containing configuration.yaml.
@@ -485,8 +504,6 @@ class ContextData:
         Returns:
             A fully populated ContextData instance in single-day mode.
         """
-        from ..dataclasses import CombinedData, RuntimeContext  # noqa: PLC0415
-
         # Loads all planes.
         contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
         if not isinstance(contexts, list):
@@ -496,15 +513,192 @@ class ContextData:
         combined = CombinedData.load(root_path=root_path)
         combined.load_results(root_path=root_path)
 
-        return cls._populate_from_combined(
-            combined=combined,
-            is_multi_day=False,
-            single_day_contexts=contexts,
+        instance = cls(contexts=contexts, combined=combined)
+        instance._reload_mutable_arrays(combined=combined)
+        return instance
+
+    def _reload_mutable_arrays(self, combined: CombinedData | None) -> None:
+        """Reloads mutable arrays from the given combined data.
+
+        Large trace arrays (fluorescence, spikes) are memory-mapped from disk with
+        copy-on-write access to minimize memory usage. Small arrays (classification,
+        colocalization) are copied eagerly. After memory-mapping, the extraction object's
+        in-memory trace copies are released to avoid double-storing the data.
+
+        Args:
+            combined: The source combined data to copy arrays from.
+        """
+        self.combined = combined
+
+        if combined is None:
+            return
+
+        extraction = combined.extraction
+        save_path = self.save_path
+
+        # Copies ROI statistics list (shallow copy; individual ROIStatistics are mutable).
+        if extraction.roi_statistics is not None:
+            self.roi_statistics = list(extraction.roi_statistics)
+        else:
+            self.roi_statistics = []
+
+        roi_count = len(self.roi_statistics)
+        default_trace_shape = (roi_count, 0)
+
+        # Memory-maps fluorescence traces with copy-on-write access.
+        self.cell_fluorescence = _memory_map_trace(
+            save_path=save_path,
+            file_name="cell_fluorescence.npy",
+            fallback=extraction.cell_fluorescence,
+            default_shape=default_trace_shape,
+        )
+        self.neuropil_fluorescence = _memory_map_trace(
+            save_path=save_path,
+            file_name="neuropil_fluorescence.npy",
+            fallback=extraction.neuropil_fluorescence,
+            default_shape=default_trace_shape,
+        )
+        self.spikes = _memory_map_trace(
+            save_path=save_path,
+            file_name="spikes.npy",
+            fallback=extraction.spikes,
+            default_shape=default_trace_shape,
         )
 
+        # Memory-maps optional channel 2 traces.
+        self.cell_fluorescence_channel_2 = _memory_map_optional_trace(
+            save_path=save_path,
+            file_name="cell_fluorescence_channel_2.npy",
+            fallback=extraction.cell_fluorescence_channel_2,
+        )
+        self.neuropil_fluorescence_channel_2 = _memory_map_optional_trace(
+            save_path=save_path,
+            file_name="neuropil_fluorescence_channel_2.npy",
+            fallback=extraction.neuropil_fluorescence_channel_2,
+        )
+
+        # Invalidates memory-mapped subtracted fluorescence caches so the properties
+        # re-resolve from the current session's save path on next access.
+        self._subtracted_fluorescence_map = None
+        self._subtracted_fluorescence_channel_2_map = None
+
+        # Releases large trace arrays from the extraction object now that the data is
+        # memory-mapped. Prevents double-storing traces across multi-day session switches.
+        _release_trace_arrays(extraction=extraction)
+
+        # Copies classification arrays (small, one value per ROI).
+        if extraction.cell_classification is not None:
+            self.cell_classification_probabilities = extraction.cell_classification[:, 0].copy()
+            self.cell_classification_labels = extraction.cell_classification[:, 1].astype(np.bool_).copy()
+        else:
+            self.cell_classification_probabilities = np.ones(roi_count, dtype=np.float32)
+            self.cell_classification_labels = np.ones(roi_count, dtype=np.bool_)
+
+        # Copies colocalization arrays (small, one value per ROI).
+        if extraction.cell_colocalization is not None:
+            self.cell_colocalization_probabilities = extraction.cell_colocalization[:, 0].copy()
+            self.cell_colocalization_labels = extraction.cell_colocalization[:, 1].astype(np.bool_).copy()
+            self.has_channel_2 = True
+        else:
+            self.cell_colocalization_probabilities = np.zeros(roi_count, dtype=np.float32)
+            self.cell_colocalization_labels = np.zeros(roi_count, dtype=np.bool_)
+            self.has_channel_2 = combined.detection.mean_image_channel_2 is not None
+
+        # Initializes the not-merged mask.
+        self.not_merged = np.ones(roi_count, dtype=np.bool_)
+
+
+@dataclass
+class MultiDayContextData(ContextData):
+    """Extends ContextData with multi-day session navigation and registration overlays.
+
+    Provides session switching, transformed reference images from cross-session registration,
+    and deformed and template mask sets from cell tracking.
+
+    Notes:
+        Multi-day data comes from ``MultiDayRuntimeContext.load()`` which provides per-session
+        ``MultiDayRuntimeData`` wrapping the single-day ``CombinedData`` along with registration
+        and tracking data. The base ``contexts`` field is not populated in multi-day mode.
+    """
+
+    multi_day_contexts: list[MultiDayRuntimeContext] = field(default_factory=list)
+    """Multi-day runtime contexts for all sessions."""
+
+    current_session_index: int = 0
+    """Zero-based index of the currently displayed multi-day session."""
+
+    multi_day_runtime: MultiDayRuntimeData | None = None
+    """Runtime data for the current multi-day session."""
+
+    @property
+    def configuration(self) -> SingleDayConfiguration | MultiDayConfiguration | None:
+        """Returns the pipeline configuration used to produce this data."""
+        if self.multi_day_contexts:
+            return self.multi_day_contexts[0].configuration
+        return None
+
+    @property
+    def save_path(self) -> Path | None:
+        """Returns the root output directory path for the current session."""
+        if self.multi_day_contexts:
+            return self.multi_day_contexts[self.current_session_index].runtime.output_path
+        return None
+
+    @property
+    def data_path(self) -> Path | None:
+        """Returns the root input data directory path for the current session."""
+        if self.multi_day_contexts:
+            return self.multi_day_contexts[self.current_session_index].runtime.io.data_path
+        return None
+
+    @property
+    def session_count(self) -> int:
+        """Returns the number of multi-day sessions."""
+        return len(self.multi_day_contexts)
+
+    @property
+    def session_ids(self) -> list[str]:
+        """Returns the session identifier strings for all multi-day sessions."""
+        return [context.runtime.io.session_id for context in self.multi_day_contexts]
+
+    @property
+    def transformed_mean_image(self) -> NDArray[np.float32] | None:
+        """Returns the mean image in deformed (registered) space."""
+        if self.multi_day_runtime is None:
+            return None
+        return self.multi_day_runtime.registration.transformed_mean_image
+
+    @property
+    def transformed_enhanced_mean_image(self) -> NDArray[np.float32] | None:
+        """Returns the enhanced mean image in deformed (registered) space."""
+        if self.multi_day_runtime is None:
+            return None
+        return self.multi_day_runtime.registration.transformed_enhanced_mean_image
+
+    @property
+    def transformed_maximum_projection(self) -> NDArray[np.float32] | None:
+        """Returns the maximum projection in deformed (registered) space."""
+        if self.multi_day_runtime is None:
+            return None
+        return self.multi_day_runtime.registration.transformed_maximum_projection
+
+    @property
+    def deformed_masks(self) -> list[ROIStatistics] | None:
+        """Returns the registered (deformed) cell masks for the current session."""
+        if self.multi_day_runtime is None:
+            return None
+        return self.multi_day_runtime.registration.deformed_cell_masks
+
+    @property
+    def template_masks(self) -> list[ROIStatistics] | None:
+        """Returns the shared template masks from cross-session tracking."""
+        if self.multi_day_runtime is None:
+            return None
+        return self.multi_day_runtime.tracking.template_masks
+
     @classmethod
-    def from_multi_day(cls, root_path: Path) -> ContextData:
-        """Loads multi-day pipeline data into a ContextData wrapper.
+    def from_multi_day(cls, root_path: Path) -> MultiDayContextData:
+        """Loads multi-day pipeline data into a MultiDayContextData wrapper.
 
         Loads all sessions via ``MultiDayRuntimeContext.load()`` and initializes the view
         with the first session's data.
@@ -513,10 +707,8 @@ class ContextData:
             root_path: Root multi-day output directory (first session's multiday folder).
 
         Returns:
-            A fully populated ContextData instance in multi-day mode.
+            A fully populated MultiDayContextData instance.
         """
-        from ..dataclasses.runtime_contexts import MultiDayRuntimeContext  # noqa: PLC0415
-
         # Loads all sessions.
         contexts = MultiDayRuntimeContext.load(root_path=root_path, session_index=-1)
         if not isinstance(contexts, list):
@@ -533,13 +725,13 @@ class ContextData:
         if runtime.output_path is not None:
             runtime.extraction.load_results(output_path=runtime.output_path)
 
-        instance = cls._populate_from_combined(
-            combined=runtime.combined_data,
-            is_multi_day=True,
+        instance = cls(
             multi_day_contexts=contexts,
+            combined=runtime.combined_data,
+            current_session_index=0,
+            multi_day_runtime=runtime,
         )
-        instance.multi_day_runtime = runtime
-        instance.current_session_index = 0
+        instance._reload_mutable_arrays(combined=runtime.combined_data)
         return instance
 
     def switch_session(self, session_index: int) -> None:
@@ -549,15 +741,12 @@ class ContextData:
             session_index: Zero-based index of the session to switch to.
 
         Raises:
-            ValueError: If not in multi-day mode or the index is out of range.
+            ValueError: If the index is out of range.
         """
-        if self.multi_day_contexts is None:
-            message = "Unable to switch session. The current context is not multi-day."
-            console.error(message=message, error=ValueError)
-
         if session_index < 0 or session_index >= len(self.multi_day_contexts):
             message = (
-                f"Unable to switch to session {session_index}. Valid range is 0 to {len(self.multi_day_contexts) - 1}."
+                f"Unable to switch to session {session_index}. Valid range is "
+                f"0 to {len(self.multi_day_contexts) - 1}."
             )
             console.error(message=message, error=ValueError)
 
@@ -573,106 +762,3 @@ class ContextData:
 
         # Repopulates mutable arrays from this session's combined data.
         self._reload_mutable_arrays(combined=runtime.combined_data)
-
-    @classmethod
-    def _populate_from_combined(
-        cls,
-        combined: CombinedData | None,
-        is_multi_day: bool,
-        single_day_contexts: list[RuntimeContext] | None = None,
-        multi_day_contexts: list[MultiDayRuntimeContext] | None = None,
-    ) -> ContextData:
-        """Creates a ContextData instance and populates mutable arrays from combined data.
-
-        Args:
-            combined: The combined single-day or multi-day session data.
-            is_multi_day: Determines whether the data is from a multi-day pipeline.
-            single_day_contexts: Single-day runtime contexts (all planes).
-            multi_day_contexts: Multi-day runtime contexts (all sessions).
-
-        Returns:
-            A populated ContextData instance.
-        """
-        instance = cls(
-            is_multi_day=is_multi_day,
-            single_day_contexts=single_day_contexts,
-            multi_day_contexts=multi_day_contexts,
-            combined=combined,
-        )
-        instance._reload_mutable_arrays(combined=combined)
-        return instance
-
-    def _reload_mutable_arrays(self, combined: CombinedData | None) -> None:
-        """Reloads mutable arrays from the given combined data.
-
-        Args:
-            combined: The source combined data to copy arrays from.
-        """
-        self.combined = combined
-
-        if combined is None:
-            return
-
-        extraction = combined.extraction
-
-        # Copies ROI statistics list (shallow copy; individual ROIStatistics are mutable).
-        if extraction.roi_statistics is not None:
-            self.roi_statistics = list(extraction.roi_statistics)
-        else:
-            self.roi_statistics = []
-
-        roi_count = len(self.roi_statistics)
-
-        # Copies fluorescence traces.
-        if extraction.cell_fluorescence is not None:
-            self.cell_fluorescence = extraction.cell_fluorescence.copy()
-        else:
-            self.cell_fluorescence = np.zeros((roi_count, 0), dtype=np.float32)
-
-        if extraction.neuropil_fluorescence is not None:
-            self.neuropil_fluorescence = extraction.neuropil_fluorescence.copy()
-        else:
-            self.neuropil_fluorescence = np.zeros((roi_count, 0), dtype=np.float32)
-
-        if extraction.spikes is not None:
-            self.spikes = extraction.spikes.copy()
-        else:
-            self.spikes = np.zeros((roi_count, 0), dtype=np.float32)
-
-        # Copies classification arrays.
-        if extraction.cell_classification is not None:
-            self.cell_classification_probabilities = extraction.cell_classification[:, 0].copy()
-            self.cell_classification_labels = extraction.cell_classification[:, 1].astype(np.bool_).copy()
-        else:
-            self.cell_classification_probabilities = np.ones(roi_count, dtype=np.float32)
-            self.cell_classification_labels = np.ones(roi_count, dtype=np.bool_)
-
-        # Copies colocalization arrays.
-        if extraction.cell_colocalization is not None:
-            self.cell_colocalization_probabilities = extraction.cell_colocalization[:, 0].copy()
-            self.cell_colocalization_labels = extraction.cell_colocalization[:, 1].astype(np.bool_).copy()
-            self.has_channel_2 = True
-        else:
-            self.cell_colocalization_probabilities = np.zeros(roi_count, dtype=np.float32)
-            self.cell_colocalization_labels = np.zeros(roi_count, dtype=np.bool_)
-            self.has_channel_2 = combined.detection.mean_image_channel_2 is not None
-
-        # Initializes the not-merged mask.
-        self.not_merged = np.ones(roi_count, dtype=np.bool_)
-
-        # Copies channel 2 traces if available.
-        self.cell_fluorescence_channel_2 = (
-            extraction.cell_fluorescence_channel_2.copy()
-            if extraction.cell_fluorescence_channel_2 is not None
-            else None
-        )
-        self.neuropil_fluorescence_channel_2 = (
-            extraction.neuropil_fluorescence_channel_2.copy()
-            if extraction.neuropil_fluorescence_channel_2 is not None
-            else None
-        )
-
-        # Resets behavior data (must be reloaded after session switch).
-        self.behavior = None
-        self.behavior_time = None
-        self.behavior_resampled = None
