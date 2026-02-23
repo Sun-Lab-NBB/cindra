@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from pathlib import Path
 from dataclasses import field, dataclass
 
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class BaselineMethod(StrEnum):

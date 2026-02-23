@@ -17,10 +17,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 # The tracker file name for the single-day processing pipeline.
-_SINGLE_DAY_TRACKER_NAME: str = "single_day_tracker"
+_SINGLE_DAY_TRACKER_NAME: str = "single_day_tracker.yaml"
 
 # The tracker file name for the multi-day processing pipeline.
-_MULTI_DAY_TRACKER_NAME: str = "multi_day_tracker"
+_MULTI_DAY_TRACKER_NAME: str = "multi_day_tracker.yaml"
 
 
 class SingleDayJobNames(StrEnum):
@@ -372,11 +372,15 @@ def _execute_single_day_job(
                 )
                 console.error(message=message, error=ValueError)
 
-            # Loads contexts from disk and combines all processed planes into a dataset.
+            # Loads contexts from disk and combines all processed planes into a dataset. Extraction result
+            # arrays (fluorescence traces, classification) are not loaded automatically due to their memory
+            # footprint, so they must be loaded explicitly before combining.
             root_path = configuration.file_io.save_path / "suite2p"
             contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
             if not isinstance(contexts, list):
                 contexts = [contexts]
+            for context in contexts:
+                context.runtime.load_results()
             save_combined_data(contexts=contexts)
 
         else:

@@ -9,7 +9,6 @@ import click
 from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console
 
-from ..gui import run
 from ..pipelines import run_multi_day_pipeline, run_single_day_pipeline
 from .mcp_server import run_server
 from ..dataclasses import MultiDayConfiguration, SingleDayConfiguration
@@ -23,16 +22,6 @@ def ss2p() -> None:
     """This Command-Line Interface (CLI) functions as an entry-point for all interactions with the Sun lab's suite2p
     implementation (sl-suite2p library).
     """
-
-
-@ss2p.command("gui")
-def ss2p_gui() -> None:
-    """Starts the sl-suite2p Graphical User Interface (GUI) application.
-
-    Use this command to work with the single-day sl-suite2p processing pipeline via a graphical interface. At this
-    time, the GUI does not support the multi-day processing pipeline.
-    """
-    run()
 
 
 @ss2p.command("mcp")
@@ -73,7 +62,7 @@ def ss2p_mcp(transport: str) -> None:
 def ss2p_config(ctx: click.Context, output_directory: Path, name: str) -> None:
     """Generates the single-day or the multi-day processing pipeline configuration file.
 
-    Commands from this group generate the configuration files which are used to run sl-suite2p processing pipelines.
+    Commands from this group generate the configuration files for running processing pipelines.
     Modifying the parameters stored in the file(s) generated via this command group allows configuring all aspects of
     the target processing pipeline. Provide the path to the modified file to the 'run' CLI command group to execute the
     desired pipeline with the parameters specified inside the file.

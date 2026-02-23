@@ -109,6 +109,7 @@ def register_plane(context: RuntimeContext) -> None:
 
     # Starts timing for first registration step.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
 
     # Computes registration offsets from the alignment channel and applies them.
     _register_alignment_channel(context)
@@ -767,6 +768,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
 
     # Opens BinaryFile and performs registration in-place.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
     with BinaryFile(height=height, width=width, file_path=binary_path, frame_number=num_frames) as frames_file:
         # Tracks the bidirectional phase offset (may be updated from data).
         bidirectional_phase_offset = initial_bidirectional_phase_offset
@@ -1031,6 +1033,7 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
 
     # Opens BinaryFile and performs registration in-place.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
     mean_image = np.zeros((height, width), dtype=np.float32)
 
     with BinaryFile(height=height, width=width, file_path=binary_path, frame_number=num_frames) as frames_file:

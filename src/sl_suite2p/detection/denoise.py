@@ -40,6 +40,7 @@ def pca_denoise(
             Defaults to 1 (sequential).
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
 
     num_frames, height, width = frames.shape
     y_blocks, x_blocks, _, (block_height, block_width), _ = compute_registration_blocks(

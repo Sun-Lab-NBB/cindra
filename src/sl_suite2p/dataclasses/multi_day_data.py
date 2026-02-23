@@ -3,20 +3,16 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING
+from pathlib import Path
 from dataclasses import field, dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from .version import version, python_version
 from .single_day_data import CombinedData, ROIStatistics, ExtractionData
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from numpy.typing import NDArray
 
 
 @dataclass

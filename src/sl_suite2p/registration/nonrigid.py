@@ -132,7 +132,7 @@ def compute_nonrigid_shifts(
     upsampling_kernel, upsampled_size = compute_upsampling_kernel(padding=_UPSAMPLING_PADDING)
 
     num_frames = frames.shape[0]
-    block_height, block_width = reference_kernel.shape[-2], reference_kernel.shape[-1]
+    block_height, block_width = taper_mask.shape[-2], taper_mask.shape[-1]
 
     # Computes maximum registration shift, constrained by block dimensions.
     correlation_radius = int(
@@ -147,7 +147,7 @@ def compute_nonrigid_shifts(
         extracted_blocks[:, block_index] = frames[:, y_range[0] : y_range[1], x_range[0] : x_range[1]]
 
     # Applies taper mask and computes phase correlation.
-    extracted_blocks = apply_mask(frames=extracted_blocks, mask=taper_mask, offset=mean_offset)
+    extracted_blocks = apply_mask(extracted_blocks, taper_mask, mean_offset)
     batch_size = min(_CORRELATION_BATCH_SIZE, extracted_blocks.shape[1])
     for batch_start in np.arange(0, num_blocks, batch_size):
         batch_end = min(extracted_blocks.shape[1], batch_start + batch_size)

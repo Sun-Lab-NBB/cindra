@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from .version import version, python_version
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from numpy.typing import NDArray
     from numpy.lib.npyio import NpzFile
 
 
@@ -495,8 +494,10 @@ class ROIStatistics:
     standard_deviation: float | None = None
     """The standard deviation of the baseline-subtracted fluorescence time series."""
 
-    neuropil_mask: NDArray[np.bool_] | None = None
-    """The boolean mask indicating pixels used for neuropil signal extraction."""
+    neuropil_mask: NDArray[np.int32] | None = None
+    """The raveled (flattened) pixel indices used for neuropil signal extraction. Each index refers to a pixel position
+    in the row-major flattened representation of the imaging plane (height * width). Use ``np.unravel_index`` with the
+    plane dimensions to recover 2D coordinates if needed."""
 
     # Multi-plane data. The plane_index should be set from IOData.plane_index during ROI creation.
     plane_index: int = 0
@@ -632,7 +633,7 @@ class ROIStatistics:
         # Saves optional variable-length array fields.
         _save_optional_array_field("soma_mask", [roi.soma_mask for roi in roi_list], save_dict, dtype=np.bool_)
         _save_optional_array_field("overlap_mask", [roi.overlap_mask for roi in roi_list], save_dict, dtype=np.bool_)
-        _save_optional_array_field("neuropil_mask", [roi.neuropil_mask for roi in roi_list], save_dict, dtype=np.bool_)
+        _save_optional_array_field("neuropil_mask", [roi.neuropil_mask for roi in roi_list], save_dict, dtype=np.int32)
         _save_optional_array_field(
             "raveled_pixels", [roi.raveled_pixels for roi in roi_list], save_dict, dtype=np.int32
         )
@@ -701,7 +702,7 @@ class ROIStatistics:
         # Loads optional variable-length array fields.
         soma_mask_list = _load_optional_array_field("soma_mask", roi_count, data, dtype=np.bool_)
         overlap_mask_list = _load_optional_array_field("overlap_mask", roi_count, data, dtype=np.bool_)
-        neuropil_mask_list = _load_optional_array_field("neuropil_mask", roi_count, data, dtype=np.bool_)
+        neuropil_mask_list = _load_optional_array_field("neuropil_mask", roi_count, data, dtype=np.int32)
         raveled_pixels_list = _load_optional_array_field("raveled_pixels", roi_count, data, dtype=np.int32)
         boundary_y_pixels_list = _load_optional_array_field("boundary_y_pixels", roi_count, data, dtype=np.float32)
         boundary_x_pixels_list = _load_optional_array_field("boundary_x_pixels", roi_count, data, dtype=np.float32)

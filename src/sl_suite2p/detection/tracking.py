@@ -42,6 +42,7 @@ def track_rois_across_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
         return
 
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
 
     # Determines which channels have data to process by checking the first context with available registration data.
     has_channel_1 = False

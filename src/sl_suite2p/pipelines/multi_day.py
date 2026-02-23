@@ -28,6 +28,7 @@ def discover_multiday_cells(configuration: MultiDayConfiguration) -> None:
         configuration: The multi-day pipeline configuration.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
 
     console.echo(message="Initializing multi-day discovery phase...", level=LogLevel.INFO)
 
