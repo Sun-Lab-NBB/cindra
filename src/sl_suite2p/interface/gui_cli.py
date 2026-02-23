@@ -5,6 +5,8 @@ during headless pipeline execution.
 
 import click
 
+from ..gui import run
+
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
 CONTEXT_SETTINGS = {"max_content_width": 120}
 
@@ -16,6 +18,4 @@ def ss2p_gui() -> None:
     Use this command to work with the single-day sl-suite2p processing pipeline via a graphical interface. At this
     time, the GUI does not support the multi-day processing pipeline.
     """
-    from ..gui import run
-
     run()

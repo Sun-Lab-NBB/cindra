@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import copy
-from pathlib import Path
 from typing import TYPE_CHECKING
+from pathlib import Path  # noqa: TC003 - needed at runtime for dacite deserialization
 from dataclasses import field, dataclass
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import NDArray  # noqa: TC002 - needed at runtime for dacite deserialization
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
