@@ -33,7 +33,7 @@ from ..styles import (
     BUTTON_UNPRESSED_STYLESHEET,
     label_font_bold,
 )
-from ...extraction import masks, apply_oasis_deconvolution, extract_traces_from_masks, compute_delta_fluorescence
+from ...extraction import create_masks, apply_oasis_deconvolution, compute_delta_fluorescence
 from ...detection.roi_statistics import compute_roi_statistics
 
 if TYPE_CHECKING:
@@ -109,7 +109,7 @@ def _extract_masks_and_traces(
         aspect=ops.get("aspect_ratio"),
         diameter=ops["cell_diameter"],
     )
-    per_roi_masks = masks.create_masks(
+    per_roi_masks = create_masks(
         roi_statistics=all_statistics,
         height=ops["frame_height"],
         width=ops["frame_width"],

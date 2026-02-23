@@ -65,6 +65,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
         ValueError: If no ROIs are detected on either channel.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
 
     # Extracts configuration.
     detection_config = context.configuration.roi_detection
@@ -212,7 +213,7 @@ def _create_enhanced_mean_image(
         regions outside the valid registration crop are filled with the minimum value of the enhanced interior.
 
     Args:
-        mean_image: The mean image to enhance, with shape (frame_height, frame_width).
+        mean_image: The mean image to enhance, already cropped to the valid registration region.
         cell_diameter: The estimated cell diameter in pixels, used to compute the median filter kernel size.
         valid_y_range: The valid Y pixel range (start, end) after registration cropping.
         valid_x_range: The valid X pixel range (start, end) after registration cropping.
@@ -241,18 +242,16 @@ def _create_enhanced_mean_image(
     np.add(local_variance, _VARIANCE_EPSILON, out=local_variance)
     np.divide(background_removed, local_variance, out=background_removed)
 
-    # Extracts the valid region excluding border pixels.
-    y_start, y_end = valid_y_range
-    x_start, x_end = valid_x_range
-    roi_image = background_removed[y_start:y_end, x_start:x_end]
-
-    # Clips intensities and scales to [0, 1] range.
-    clipped_roi = np.clip(roi_image, _ENHANCED_MINIMUM_INTENSITY, _ENHANCED_MAXIMUM_INTENSITY)
+    # Clips intensities and scales to [0, 1] range. The mean_image is already cropped to the valid region, so no
+    # additional slicing is needed.
+    clipped_roi = np.clip(background_removed, _ENHANCED_MINIMUM_INTENSITY, _ENHANCED_MAXIMUM_INTENSITY)
     scaled_roi = (clipped_roi - _ENHANCED_MINIMUM_INTENSITY) / (
         _ENHANCED_MAXIMUM_INTENSITY - _ENHANCED_MINIMUM_INTENSITY
     )
 
     # Places the enhanced image into a full-size array with border set to the minimum value.
+    y_start, y_end = valid_y_range
+    x_start, x_end = valid_x_range
     enhanced_image = np.full((frame_height, frame_width), scaled_roi.min(), dtype=np.float32)
     enhanced_image[y_start:y_end, x_start:x_end] = scaled_roi
 
@@ -374,6 +373,7 @@ def _detect_channel(
         ValueError: If no ROIs are detected after the sparse detection step.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
 
     console.echo(
         message=f"Binning plane {plane_index} {channel_label} frames in chunks of length {bin_size}...",
@@ -446,6 +446,23 @@ def _detect_channel(
         frame_height=frame_height,
         frame_width=frame_width,
     )
+
+    # Embeds cropped detection images into full-frame arrays. The mean_image, maximum_projection, and correlation_map
+    # are computed from cropped binned frames and must be placed into the full frame coordinate space.
+    y_start, y_end = valid_y_range
+    x_start, x_end = valid_x_range
+
+    full_mean_image = np.zeros((frame_height, frame_width), dtype=np.float32)
+    full_mean_image[y_start:y_end, x_start:x_end] = mean_image
+    mean_image = full_mean_image
+
+    full_maximum_projection = np.zeros((frame_height, frame_width), dtype=np.float32)
+    full_maximum_projection[y_start:y_end, x_start:x_end] = maximum_projection
+    maximum_projection = full_maximum_projection
+
+    full_correlation_map = np.zeros((frame_height, frame_width), dtype=np.float32)
+    full_correlation_map[y_start:y_end, x_start:x_end] = correlation_map
+    correlation_map = full_correlation_map
 
     if len(roi_statistics) == 0:
         message = (

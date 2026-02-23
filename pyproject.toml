@@ -82,9 +82,10 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/Sun-Lab-NBB/sl_suite2p"
 
-# All interactions with the library are performed via the 'ss2p' CLI command.
+# All interactions with the library are performed via the 'ss2p' and 'ss2p-gui' CLI commands.
 [project.scripts]
 ss2p = "sl_suite2p.interface.cli:ss2p"  # Top-level CLI group
+ss2p-gui = "sl_suite2p.interface.gui_cli:ss2p_gui"  # GUI launcher (separate to avoid loading Qt during headless runs)
 
 # Development dependencies (PEP 735). Not published to PyPI.
 [dependency-groups]

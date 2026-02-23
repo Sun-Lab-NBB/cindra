@@ -224,47 +224,32 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
                 context.runtime.detection.enhanced_mean_image_channel_2
             )
 
-        # Updates correlation map using valid pixel range.
-        valid_y_start, valid_y_end = context.runtime.registration.valid_y_range
-        valid_x_start, valid_x_end = context.runtime.registration.valid_x_range
-        correlation_y_range = np.arange(
-            y_offsets[plane_index] + valid_y_start,
-            y_offsets[plane_index] + valid_y_end,
-            dtype=np.int32,
-        )
-        correlation_x_range = np.arange(
-            x_offsets[plane_index] + valid_x_start,
-            x_offsets[plane_index] + valid_x_end,
-            dtype=np.int32,
-        )
+        # Updates correlation map. The detection pipeline embeds cropped correlation maps into full-frame arrays, so
+        # these use the full plane range (not the valid pixel range).
         if context.runtime.detection.correlation_map is not None:
-            combined_correlation_map[np.ix_(correlation_y_range, correlation_x_range)] = (
-                context.runtime.detection.correlation_map
-            )
+            combined_correlation_map[np.ix_(y_range, x_range)] = context.runtime.detection.correlation_map
         if (
             second_channel_functional
             and combined_correlation_map_channel_2 is not None
             and context.runtime.detection.correlation_map_channel_2 is not None
         ):
-            combined_correlation_map_channel_2[np.ix_(correlation_y_range, correlation_x_range)] = (
+            combined_correlation_map_channel_2[np.ix_(y_range, x_range)] = (
                 context.runtime.detection.correlation_map_channel_2
             )
 
-        # Updates maximum projection if available.
+        # Updates maximum projection if available. Like correlation maps, these are full-frame arrays.
         if (
             has_max_projection
             and combined_max_projection is not None
             and context.runtime.detection.maximum_projection is not None
         ):
-            combined_max_projection[np.ix_(correlation_y_range, correlation_x_range)] = (
-                context.runtime.detection.maximum_projection
-            )
+            combined_max_projection[np.ix_(y_range, x_range)] = context.runtime.detection.maximum_projection
         if (
             second_channel_functional
             and combined_max_projection_channel_2 is not None
             and context.runtime.detection.maximum_projection_channel_2 is not None
         ):
-            combined_max_projection_channel_2[np.ix_(correlation_y_range, correlation_x_range)] = (
+            combined_max_projection_channel_2[np.ix_(y_range, x_range)] = (
                 context.runtime.detection.maximum_projection_channel_2
             )
 

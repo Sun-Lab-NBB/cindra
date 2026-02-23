@@ -211,7 +211,7 @@ def _create_neuropil_masks(
             # Unreachable due to the all() guard; included for type narrowing.
             if roi.neuropil_mask is None:
                 continue
-            cached_masks.append(np.flatnonzero(roi.neuropil_mask).astype(np.int32))
+            cached_masks.append(roi.neuropil_mask)
         return tuple(cached_masks)
 
     # Creates a binary mask of all cell pixels across all ROIs.
@@ -269,8 +269,9 @@ def _create_neuropil_masks(
         neuropil_mask[current_y_pixels[is_non_cell], current_x_pixels[is_non_cell]] = True
         neuropil_mask[inner_y_pixels, inner_x_pixels] = False
 
-        # Caches the boolean mask on the ROI and extracts flat indices for the return value.
-        roi.neuropil_mask = neuropil_mask
-        neuropil_masks.append(np.flatnonzero(neuropil_mask).astype(np.int32))
+        # Converts the dense boolean mask to flat indices and caches on the ROI.
+        flat_indices = np.flatnonzero(neuropil_mask).astype(np.int32)
+        roi.neuropil_mask = flat_indices
+        neuropil_masks.append(flat_indices)
 
     return tuple(neuropil_masks)

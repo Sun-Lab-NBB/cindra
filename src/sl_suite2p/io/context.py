@@ -182,8 +182,6 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
             io_data.mroi_lines = acquisition.roi_lines[roi_index]
             io_data.mroi_y_offset = acquisition.roi_y_coordinates[roi_index]
             io_data.mroi_x_offset = acquisition.roi_x_coordinates[roi_index]
-            # For MROI, stores the physical plane index (which may differ from virtual plane index).
-            io_data.plane_index = physical_plane_index
 
         # Creates the SingleDayRuntimeData with the initialized IOData.
         runtime_data = SingleDayRuntimeData(

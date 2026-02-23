@@ -622,7 +622,7 @@ def _estimate_spatial_scale(scale_images: NDArray[np.float32]) -> int:
     else:
         top_indices = np.arange(len(peak_values))
 
-    estimated_scale, _ = mode(peak_scales[top_indices], keepdims=True)
+    estimated_scale, _ = mode(peak_scales[top_indices], keepdims=False)
     return int(estimated_scale)
 
 

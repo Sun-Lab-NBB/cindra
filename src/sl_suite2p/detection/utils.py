@@ -143,9 +143,8 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
     Returns:
         The multiplicative taper mask with shape (height, width), values in range [0, 1].
     """
-    # Creates grids of absolute distances from center for each axis. Arguments are swapped because meshgrid
-    # returns (x-varies-along-columns, y-varies-along-rows) but we need (row-distances, col-distances).
-    column_distances, row_distances = _mean_centered_meshgrid(height=width, width=height)
+    # Creates grids of absolute distances from center for each axis.
+    column_distances, row_distances = _mean_centered_meshgrid(height=height, width=width)
 
     # Computes where taper begins: 2*sigma pixels inward from the edge. This ensures the sigmoid reaches
     # ~0.12 at the edge (when distance equals half-width).

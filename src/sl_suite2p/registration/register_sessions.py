@@ -40,6 +40,7 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
             configuration. Each context's runtime.combined_data must be loaded with single-day detection results.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
 
     configuration = contexts[0].configuration
     registration_config = configuration.diffeomorphic_registration
@@ -155,6 +156,7 @@ def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> Non
             in runtime.tracking from cell tracking.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
     runtime_config = contexts[0].configuration.runtime
 
     if runtime_config.parallel_workers > 1:

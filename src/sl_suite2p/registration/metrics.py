@@ -114,6 +114,7 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
     edge_taper_slope = edge_taper_pixels if one_photon_mode else 3.0 * spatial_smoothing_sigma
 
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
 
     console.echo(
         message=(
