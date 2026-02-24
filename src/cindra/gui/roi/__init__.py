@@ -1,4 +1,4 @@
-"""Provides the standalone ROI viewer and editor GUI for suite2p data visualization and analysis."""
+"""Provides the standalone ROI viewer and editor GUI for cindra data visualization and analysis."""
 
 from .app import run
 

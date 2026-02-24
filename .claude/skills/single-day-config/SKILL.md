@@ -21,14 +21,15 @@ optimized for GCaMP6f data from 2-Photon Random Access Mesoscope (2P-RAM).
 All parameters are specified in the `SingleDayConfiguration` YAML file. The pipeline loads the fully resolved
 configuration directly from the file without any runtime overrides.
 
-Additionally, **mesoscope processing automatically overwrites** certain parameters from `suite2p_parameters.json`.
+Additionally, **mesoscope processing automatically overwrites** certain parameters from `cindra_parameters.json`
+(or `suite2p_parameters.json` as a legacy fallback).
 
 ---
 
 ## Mesoscope Auto-Overwrite Parameters
 
 **IMPORTANT**: When `file_io.mesoscan = True`, these parameters are **automatically overwritten** during the binarize
-phase by reading `suite2p_parameters.json` from the data directory:
+phase by reading `cindra_parameters.json` (or `suite2p_parameters.json`) from the data directory:
 
 | Parameter          | Source Field in JSON | Description                                                                 |
 |--------------------|----------------------|-----------------------------------------------------------------------------|
@@ -87,7 +88,7 @@ I/O parameters for input data location and output directories.
 | Parameter            | Type      | Default | Description                                                                           |
 |----------------------|-----------|---------|---------------------------------------------------------------------------------------|
 | `data_path`          | str       | ""      | Root directory containing input TIFFs. Recursively searched. **Set by pipeline.**     |
-| `save_path`          | str       | ""      | Output directory root. Pipeline creates `suite2p/` subdirectory. **Set by pipeline.** |
+| `save_path`          | str       | ""      | Output directory root. Pipeline creates `cindra/` subdirectory. **Set by pipeline.** |
 | `mesoscan`           | bool      | False   | **True for mesoscope data.** Triggers auto-overwrite of plane/ROI parameters.         |
 | `delete_bin`         | bool      | False   | Delete registered .bin files after processing. **Must be False for multi-day.**       |
 | `ignored_file_names` | list[str] | []      | Exact filenames to skip when loading TIFFs.                                           |

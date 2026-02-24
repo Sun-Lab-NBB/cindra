@@ -30,7 +30,7 @@ def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray
     Notes:
         The output of this function is used to properly arrange the data from multiple planes in the 'shared' recording
         space, re-assembling the recording from individually processed planes. This is used as part of outputting the
-        suite2p-processed data as a 'combined' dataset that integrates the data from all available planes.
+        cindra-processed data as a 'combined' dataset that integrates the data from all available planes.
 
     Args:
         plane_contexts: A list of RuntimeContext instances, one for each plane being processed.

@@ -27,7 +27,7 @@ _MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
 
 
 def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
-    """Converts TIFF files to suite2p binary format for all planes.
+    """Converts TIFF files to cindra binary format for all planes.
 
     This function performs TIFF to binary conversion using pre-initialized RuntimeContext instances. It discovers TIFF
     files in the data directory, reads them in batches, and writes the converted frames to binary files. The function

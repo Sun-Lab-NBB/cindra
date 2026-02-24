@@ -1147,7 +1147,7 @@ class CombinedData:
     fluorescence traces, and classification results) along with metadata about the combined field of view.
 
     Notes:
-        Combined data is saved to the root suite2p directory alongside configuration.yaml and
+        Combined data is saved to the root cindra directory alongside configuration.yaml and
         acquisition_parameters.yaml. The same filenames are used as per-plane data, but stored at the root
         level rather than in plane subdirectories.
     """
@@ -1196,13 +1196,13 @@ class CombinedData:
     """Channel 2 registered binary file paths, one per plane. None when the recording is single-channel."""
 
     def save(self, root_path: Path) -> None:
-        """Saves combined data to the root suite2p directory.
+        """Saves combined data to the root cindra directory.
 
-        This method saves all combined detection and extraction arrays to the root suite2p directory. Metadata
+        This method saves all combined detection and extraction arrays to the root cindra directory. Metadata
         (plane count, dimensions) is saved to combined_metadata.npz.
 
         Args:
-            root_path: The root suite2p output directory containing configuration.yaml.
+            root_path: The root cindra output directory containing configuration.yaml.
         """
         ensure_directory_exists(root_path)
 
@@ -1246,10 +1246,10 @@ class CombinedData:
 
     @classmethod
     def load(cls, root_path: Path) -> CombinedData:
-        """Loads combined data from the root suite2p directory.
+        """Loads combined data from the root cindra directory.
 
         Args:
-            root_path: The root suite2p output directory containing combined_metadata.npz.
+            root_path: The root cindra output directory containing combined_metadata.npz.
 
         Returns:
             A CombinedData instance with all combined arrays loaded.
@@ -1330,6 +1330,6 @@ class CombinedData:
         analysis or visualization.
 
         Args:
-            root_path: The root suite2p output directory containing the result .npy files.
+            root_path: The root cindra output directory containing the result .npy files.
         """
         self.extraction.load_results(root_path)

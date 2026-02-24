@@ -1,4 +1,4 @@
-"""Provides diffeomorphic across-session registration entry point for the multi-day suite2p processing pipeline."""
+"""Provides diffeomorphic across-session registration entry point for the multi-day cindra processing pipeline."""
 
 from __future__ import annotations
 

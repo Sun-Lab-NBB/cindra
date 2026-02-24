@@ -157,10 +157,10 @@ Phase 3: COMBINE (Sequential across sessions)
 
 ### Output Structure
 
-Results are saved to `{session_path}/suite2p/`:
+Results are saved to `{session_path}/cindra/`:
 
 ```
-suite2p/
+cindra/
 ├── plane0/          # Per-plane processing results
 │   ├── data.bin     # Registered binary data
 │   ├── ops.npy      # Processing parameters
@@ -380,7 +380,8 @@ The default configuration works well for GCaMP6f data from 2P mesoscope. Only as
 
 ### Auto-Overwritten Parameters (Mesoscope)
 
-When `mesoscan=True`, these parameters are **automatically overwritten** from `suite2p_parameters.json`:
+When `mesoscan=True`, these parameters are **automatically overwritten** from `cindra_parameters.json` (or
+`suite2p_parameters.json` as a legacy fallback):
 - `nplanes` - Set to `plane_number × roi_number`
 - `fs` - Set to `frame_rate`
 - ROI geometry (`lines`, `dx`, `dy`, `nrois`)

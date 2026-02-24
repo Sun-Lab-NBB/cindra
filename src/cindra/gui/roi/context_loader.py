@@ -1,4 +1,4 @@
-"""Provides data loading, saving, and GUI initialization for suite2p sessions."""
+"""Provides data loading, saving, and GUI initialization for cindra sessions."""
 
 from __future__ import annotations
 
@@ -169,7 +169,7 @@ def load_session(parent: MainWindow, session_path: Path | None = None) -> None:
 
     Args:
         parent: The main GUI window.
-        session_path: Path to the suite2p output directory. If None, opens a dialog.
+        session_path: Path to the cindra output directory. If None, opens a dialog.
     """
     if session_path is None:
         session_path = _select_directory(parent=parent)
@@ -191,7 +191,7 @@ def load_session(parent: MainWindow, session_path: Path | None = None) -> None:
 
 
 def load_dialog(parent: MainWindow) -> None:
-    """Opens a directory dialog to select and load a suite2p output directory.
+    """Opens a directory dialog to select and load a cindra output directory.
 
     Args:
         parent: The main GUI window.
@@ -200,7 +200,7 @@ def load_dialog(parent: MainWindow) -> None:
 
 
 def load_dialog_folder(parent: MainWindow) -> None:
-    """Opens a directory dialog to select and load a suite2p output directory.
+    """Opens a directory dialog to select and load a cindra output directory.
 
     This is an alias for ``load_dialog`` maintained for menu bar compatibility.
 
@@ -444,7 +444,7 @@ def _compute_roi_geometry(context: ContextData) -> None:
 
 
 def _select_directory(parent: MainWindow) -> Path | None:
-    """Opens a directory dialog to select a suite2p output directory.
+    """Opens a directory dialog to select a cindra output directory.
 
     Args:
         parent: The main GUI window.
@@ -454,7 +454,7 @@ def _select_directory(parent: MainWindow) -> Path | None:
     """
     name = QFileDialog.getExistingDirectory(
         parent=parent,
-        caption="Open suite2p output directory",
+        caption="Open cindra output directory",
     )
     if not name:
         return None

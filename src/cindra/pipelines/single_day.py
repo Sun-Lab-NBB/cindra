@@ -48,7 +48,7 @@ def binarize_recording(configuration: SingleDayConfiguration) -> None:
         configuration.file_io.save_path = configuration.file_io.data_path
 
     # Checks for existing valid binaries to allow early return.
-    root_path = configuration.file_io.save_path / "suite2p"
+    root_path = configuration.file_io.save_path / "cindra"
     config_path = root_path / "configuration.yaml"
     if config_path.exists():
         console.echo(message=f"Found existing configuration at: {config_path}.", level=LogLevel.INFO)
@@ -124,7 +124,7 @@ def process_plane(configuration: SingleDayConfiguration, plane_index: int) -> No
         console.error(message=message, error=ValueError)
 
     # Loads the RuntimeContext for the target plane from disk.
-    root_path = configuration.file_io.save_path / "suite2p"
+    root_path = configuration.file_io.save_path / "cindra"
     context = RuntimeContext.load(root_path=root_path, plane_index=plane_index)
     if isinstance(context, list):
         message = (
@@ -214,6 +214,6 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
     # Combines all planes into a unified dataset.
     combined_data = combine_planes(plane_contexts=contexts)
 
-    # Saves the combined data to the root suite2p directory.
-    combined_data.save(root_path / "suite2p")
-    console.echo(message=f"Combined data saved to: {root_path / 'suite2p'}", level=LogLevel.SUCCESS)
+    # Saves the combined data to the root cindra directory.
+    combined_data.save(root_path / "cindra")
+    console.echo(message=f"Combined data saved to: {root_path / 'cindra'}", level=LogLevel.SUCCESS)

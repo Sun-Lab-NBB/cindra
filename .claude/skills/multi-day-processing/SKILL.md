@@ -17,7 +17,7 @@ fluorescence traces using the cindra MCP server tools.
 **Before using this skill, ensure:**
 
 1. All sessions have been processed with the single-day pipeline
-2. The `combine` step completed for each session (suite2p/combined/ exists)
+2. The `combine` step completed for each session (cindra/combined/ exists)
 3. Sessions are from the same animal and imaging region
 
 If single-day processing is not complete, use the `/single-day-processing` skill first.
@@ -326,7 +326,7 @@ Summary: 1/2 animals complete | 2/4 sessions extracted | 0 failed
 **You MUST complete this checklist before starting batch processing.** Do not skip any step.
 
 ```
-- [ ] Verified all sessions have single-day processing complete (suite2p/combined/ exists)
+- [ ] Verified all sessions have single-day processing complete (cindra/combined/ exists)
 - [ ] Organized sessions by animal/dataset
 - [ ] Configuration file confirmed or created (see Configuration Guidance section)
 - [ ] Asked about dataset name and MROI region margin if creating new config
@@ -422,7 +422,7 @@ The system automatically calculates optimal resource allocation:
 
 | Error Message                          | Cause                          | Resolution                        |
 |----------------------------------------|--------------------------------|-----------------------------------|
-| "No suite2p output directory found"    | Single-day processing incomplete| Run single-day pipeline first     |
+| "No cindra output directory found"     | Single-day processing incomplete| Run single-day pipeline first     |
 | "Configuration file not found"         | Invalid config_path            | Generate or verify configuration  |
 | "Session directory not found"          | Invalid path for session       | Verify path exists                |
 | "Batch processing already in progress" | Batch already running          | Wait for current batch to complete|
@@ -440,7 +440,7 @@ If processing fails for some animals/sessions:
 
 | Error Pattern                          | Likely Cause                           | Resolution                           |
 |----------------------------------------|----------------------------------------|--------------------------------------|
-| `No suite2p output found`              | Single-day processing incomplete       | Complete single-day pipeline first   |
+| `No cindra output found`               | Single-day processing incomplete       | Complete single-day pipeline first   |
 | `Session IDs mismatch`                 | Configuration doesn't match sessions   | Verify session_directories in config |
 | `Registration failed between sessions` | Too much drift between days            | Check FOV alignment                  |
 | `No trackable cells found`             | Insufficient overlap in detected cells | Adjust clustering threshold          |

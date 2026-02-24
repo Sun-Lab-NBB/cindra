@@ -5,15 +5,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
+import numpy as np
 from ataraxis_base_utilities import console
 
+from ...io import BinaryFile
 from ...dataclasses import RuntimeContext
 from ...registration import compute_z_position
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import numpy as np
     from numpy.typing import NDArray
 
     from ...dataclasses import IOData, DetectionData, RegistrationData
@@ -30,6 +31,9 @@ class RegistrationViewerData:
         The backing ``RuntimeContext`` instances are stored privately. All public properties delegate to the current
         plane's ``IOData``, ``RegistrationData``, and ``DetectionData`` without exposing extraction, timing, or
         configuration internals.
+
+        This class manages ``BinaryFile`` handles for the current plane. Call ``close()`` to release file handles when
+        the data model is no longer needed.
     """
 
     _contexts: list[RuntimeContext] = field(repr=False)
@@ -37,6 +41,12 @@ class RegistrationViewerData:
 
     _current_plane_index: int = 0
     """The index of the plane whose data is currently displayed by the GUI application."""
+
+    _binary_file: BinaryFile | None = field(default=None, repr=False)
+    """Lazily opened BinaryFile for the current plane's primary registered binary."""
+
+    _binary_file_channel_2: BinaryFile | None = field(default=None, repr=False)
+    """Lazily opened BinaryFile for the current plane's channel 2 registered binary, or None if absent."""
 
     @property
     def current_plane_index(self) -> int:
@@ -74,14 +84,58 @@ class RegistrationViewerData:
         return self._current_io.sampling_rate
 
     @property
-    def registered_binary_path(self) -> Path | None:
-        """Returns the path to the motion-corrected binary file for the primary imaging channel."""
-        return self._current_io.registered_binary_path
+    def binary_file(self) -> BinaryFile:
+        """Returns a read-only BinaryFile for the current plane's primary registered binary.
+
+        The file is opened lazily on first access and cached until the next plane switch.
+        """
+        if self._binary_file is None:
+            path = self._current_io.registered_binary_path
+            if path is None or not path.is_file():
+                message = "No registered binary found for this plane."
+                console.error(message=message, error=FileNotFoundError)
+            self._binary_file = BinaryFile(
+                height=self.frame_height,
+                width=self.frame_width,
+                file_path=path,
+                read_only=True,
+            )
+        return self._binary_file
 
     @property
-    def registered_binary_path_channel_2(self) -> Path | None:
-        """Returns the path to the motion-corrected binary file for the second imaging channel."""
-        return self._current_io.registered_binary_path_channel_2
+    def binary_file_channel_2(self) -> BinaryFile | None:
+        """Returns a read-only BinaryFile for the current plane's channel 2 registered binary, or None if absent."""
+        if self._binary_file_channel_2 is None:
+            path = self._current_io.registered_binary_path_channel_2
+            if path is None or not path.is_file():
+                return None
+            self._binary_file_channel_2 = BinaryFile(
+                height=self.frame_height,
+                width=self.frame_width,
+                file_path=path,
+                read_only=True,
+            )
+        return self._binary_file_channel_2
+
+    @property
+    def has_channel_2(self) -> bool:
+        """Returns whether a channel 2 registered binary exists for the current plane."""
+        path = self._current_io.registered_binary_path_channel_2
+        return path is not None and path.is_file()
+
+    @property
+    def has_nonrigid(self) -> bool:
+        """Returns whether nonrigid registration data exists for the current plane."""
+        return (
+            self._current_registration.nonrigid_y_offsets is not None
+            and self._current_registration.nonrigid_x_offsets is not None
+        )
+
+    @property
+    def registered_binary_display_path(self) -> str:
+        """Returns a string representation of the primary registered binary path for display labels."""
+        path = self._current_io.registered_binary_path
+        return str(path) if path is not None else ""
 
     @property
     def output_directory(self) -> Path | None:
@@ -89,14 +143,26 @@ class RegistrationViewerData:
         return self._current_io.output_directory
 
     @property
-    def rigid_y_offsets(self) -> NDArray[np.int32] | None:
-        """Returns the vertical (Y) translation offsets from rigid registration, one value per frame."""
-        return self._current_registration.rigid_y_offsets
+    def rigid_y_offsets(self) -> NDArray[np.int32]:
+        """Returns the vertical (Y) translation offsets from rigid registration, one value per frame.
+
+        Returns a zero array with shape (frame_count,) when the underlying data is None.
+        """
+        offsets = self._current_registration.rigid_y_offsets
+        if offsets is not None:
+            return offsets
+        return np.zeros((self.frame_count,), dtype=np.int32)
 
     @property
-    def rigid_x_offsets(self) -> NDArray[np.int32] | None:
-        """Returns the horizontal (X) translation offsets from rigid registration, one value per frame."""
-        return self._current_registration.rigid_x_offsets
+    def rigid_x_offsets(self) -> NDArray[np.int32]:
+        """Returns the horizontal (X) translation offsets from rigid registration, one value per frame.
+
+        Returns a zero array with shape (frame_count,) when the underlying data is None.
+        """
+        offsets = self._current_registration.rigid_x_offsets
+        if offsets is not None:
+            return offsets
+        return np.zeros((self.frame_count,), dtype=np.int32)
 
     @property
     def nonrigid_y_offsets(self) -> NDArray[np.float32] | None:
@@ -107,6 +173,20 @@ class RegistrationViewerData:
     def nonrigid_x_offsets(self) -> NDArray[np.float32] | None:
         """Returns the horizontal (X) translation offsets from nonrigid registration, per frame and per block."""
         return self._current_registration.nonrigid_x_offsets
+
+    @property
+    def nonrigid_rms(self) -> NDArray[np.float32] | None:
+        """Returns the pre-computed Root Mean Square of nonrigid offsets, or None when no nonrigid data exists.
+
+        Computed as ``sqrt(mean(y^2 + x^2, axis=1))``.
+        """
+        nonrigid_y = self._current_registration.nonrigid_y_offsets
+        nonrigid_x = self._current_registration.nonrigid_x_offsets
+        if nonrigid_y is None or nonrigid_x is None:
+            return None
+        return np.sqrt(
+            np.mean(nonrigid_y.astype(np.float32) ** 2 + nonrigid_x.astype(np.float32) ** 2, axis=1)
+        ).astype(np.float32)
 
     @property
     def principal_component_extreme_images(self) -> NDArray[np.float32] | None:
@@ -152,7 +232,7 @@ class RegistrationViewerData:
         return self._current_detection.aspect_ratio
 
     @classmethod
-    def from_session(cls, root_path: Path) -> RegistrationViewerData:
+    def from_recording(cls, root_path: Path) -> RegistrationViewerData:
         """Loads the registration data for all imaging planes of the target recording for registration review.
 
         Args:
@@ -169,6 +249,8 @@ class RegistrationViewerData:
     def switch_plane(self, plane_index: int) -> None:
         """Switches the data view to a different imaging plane.
 
+        Closes any open BinaryFile handles for the previous plane so they reopen lazily for the new plane.
+
         Args:
             plane_index: The index of the plane to switch to.
 
@@ -181,6 +263,7 @@ class RegistrationViewerData:
                 f"{len(self._contexts) - 1}."
             )
             console.error(message=message, error=ValueError)
+        self._close_binary_files()
         self._current_plane_index = plane_index
 
     def compute_z_correlations(self, z_stack: NDArray[np.float32]) -> NDArray[np.float32]:
@@ -199,6 +282,19 @@ class RegistrationViewerData:
             context=self._contexts[self._current_plane_index],
             z_stack=z_stack,
         )
+
+    def close(self) -> None:
+        """Closes any open BinaryFile handles managed by this instance."""
+        self._close_binary_files()
+
+    def _close_binary_files(self) -> None:
+        """Closes and resets cached BinaryFile handles."""
+        if self._binary_file is not None:
+            self._binary_file.close()
+            self._binary_file = None
+        if self._binary_file_channel_2 is not None:
+            self._binary_file_channel_2.close()
+            self._binary_file_channel_2 = None
 
     @property
     def _current_io(self) -> IOData:

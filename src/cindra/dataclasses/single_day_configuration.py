@@ -56,8 +56,8 @@ class AcquisitionParameters(YamlConfig):
         For single-ROI data, only frame_rate, plane_number, and channel_number are required. For MROI data,
         additional fields describe the geometry of each ROI.
 
-        The pipeline expects a suite2p_parameters.json file in the data directory containing these parameters. Use the
-        is_mroi property to determine whether the data uses multi-ROI acquisition.
+        The pipeline expects a cindra_parameters.json or suite2p_parameters.json file in the data directory containing
+        these parameters. Use the is_mroi property to determine whether the data uses multi-ROI acquisition.
     """
 
     frame_rate: float
@@ -154,7 +154,7 @@ class FileIO:
 
     save_path: Path | None = None
     """The path to the root output directory where to save the processing results. The pipeline automatically
-    creates a 'suite2p' subdirectory under this path to store all output files."""
+    creates a 'cindra' subdirectory under this path to store all output files."""
 
     ignored_file_names: tuple[str, ...] = ()
     """The tuple of file names to ignore when searching for and loading raw data. Any file whose name exactly matches
@@ -439,7 +439,7 @@ class SpikeDeconvolution:
 
 @dataclass
 class SingleDayConfiguration(YamlConfig):
-    """Aggregates the user-defined configuration parameters for the single-day suite2p pipeline.
+    """Aggregates the user-defined configuration parameters for the single-day cindra pipeline.
 
     This class stores all user-configurable parameters that control how the pipeline processes data.
     These parameters are immutable during processing - the pipeline reads them but does not modify them.
@@ -454,7 +454,7 @@ class SingleDayConfiguration(YamlConfig):
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
     """Stores runtime behavior settings shared with the multi-day pipeline (parallel workers, progress bars)."""
     main: Main = field(default_factory=Main)
-    """Stores global parameters that broadly define the suite2p single-day processing configuration."""
+    """Stores global parameters that broadly define the cindra single-day processing configuration."""
     file_io: FileIO = field(default_factory=FileIO)
     """Stores general I/O parameters that specify input data location, format, and working and output directories."""
     registration: Registration = field(default_factory=Registration)

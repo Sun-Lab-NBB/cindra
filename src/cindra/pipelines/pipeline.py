@@ -373,7 +373,7 @@ def _execute_single_day_job(
             # Loads contexts from disk and combines all processed planes into a dataset. Extraction result
             # arrays (fluorescence traces, classification) are not loaded automatically due to their memory
             # footprint, so they must be loaded explicitly before combining.
-            root_path = configuration.file_io.save_path / "suite2p"
+            root_path = configuration.file_io.save_path / "cindra"
             contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
             if not isinstance(contexts, list):
                 contexts = [contexts]

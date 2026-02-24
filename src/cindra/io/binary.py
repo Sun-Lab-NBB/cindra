@@ -1,4 +1,4 @@
-"""Provides assets for reading and writing image data stored in suite2p binary (.bin) files."""
+"""Provides assets for reading and writing image data stored in cindra binary (.bin) files."""
 
 from __future__ import annotations
 
@@ -22,9 +22,9 @@ _DEFAULT_BIN_BATCH_SIZE: int = 500
 
 
 class BinaryFile:
-    """Creates or opens a Suite2p BinaryFile (.bin) for reading and/or writing image data.
+    """Creates or opens a cindra binary (.bin) for reading and/or writing image data.
 
-    The file behaves like a memory-mapped NumPy array and can be converted between suite2p BinaryFile and
+    The file behaves like a memory-mapped NumPy array and can be converted between cindra binary and
     NumPy array format at any time with minimal call API changes.
 
     Args:
@@ -81,7 +81,7 @@ class BinaryFile:
         # If the file does not exist and the number of frames is not provided, raises a ValueError.
         if write and frame_number == 0:
             message = (
-                f"Unable to create a new suite2p BinaryFile {file_path}, as the number of frames to be "
+                f"Unable to create a new cindra binary {file_path}, as the number of frames to be "
                 f"written to the file is not specified (is 0). Provide a non-zero 'frame_number' argument "
                 f"value to create a new BinaryFile."
             )
@@ -91,7 +91,7 @@ class BinaryFile:
         elif not write:
             frame_number = self.frame_number
 
-        # Determines the shape of the file using the default order of frames x height x width used by suite2p.
+        # Determines the shape of the file using the default order of frames x height x width used by cindra.
         shape = (frame_number, self.height, self.width)
 
         # Resolves the memory-mapping mode. For new files, uses 'w+'. For existing files, uses 'r' if read-only
@@ -112,12 +112,12 @@ class BinaryFile:
         )
 
     @staticmethod
-    def convert_numpy_file_to_suite2p_binary(source_file_name: Path, destination_file_name: Path) -> None:
-        """Converts a NumPy file, such as a .npz or .npy file, to a suite2p BinaryFile.
+    def convert_numpy_file_to_binary(source_file_name: Path, destination_file_name: Path) -> None:
+        """Converts a NumPy file, such as a .npz or .npy file, to a cindra binary.
 
         Args:
-            source_file_name: The absolute path to the NumPy .npy or .npz file to convert to suite2p BinaryFile format.
-            destination_file_name: The absolute path to the suite2p .bin file to create using the data from the source
+            source_file_name: The absolute path to the NumPy .npy or .npz file to convert to cindra binary format.
+            destination_file_name: The absolute path to the cindra .bin file to create using the data from the source
                 file.
 
         Raises:
@@ -129,7 +129,7 @@ class BinaryFile:
             or source_file_name.suffix not in (".npy", ".npz")
         ):
             message = (
-                f"Unable to create the target suite2p BinaryFile {destination_file_name}, as the source file "
+                f"Unable to create the target cindra binary {destination_file_name}, as the source file "
                 f"'{source_file_name}' does not exist or is not a valid NumPy file."
             )
             console.error(message=message, error=FileNotFoundError)
@@ -405,9 +405,9 @@ class BinaryFile:
 
 
 class BinaryFileCombined:
-    """Creates or opens a collection of Suite2p BinaryFiles (.bin) for reading image data across planes.
+    """Creates or opens a collection of cindra binarys (.bin) for reading image data across planes.
 
-    This class allows working with multiple imaging planes, each stored inside a separate Suite2p BinaryFile.
+    This class allows working with multiple imaging planes, each stored inside a separate cindra binary.
     It provides similar functionality to the BinaryFile class but extends it to handle multiple planes.
 
     Args:

@@ -23,8 +23,11 @@ from ..dataclasses import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Default name for the acquisition parameters JSON file.
-_ACQUISITION_PARAMETERS_FILENAME: str = "suite2p_parameters.json"
+# Preferred name for the acquisition parameters JSON file.
+_PREFERRED_PARAMETERS_FILENAME: str = "cindra_parameters.json"
+
+# Legacy name for the acquisition parameters JSON file (fallback).
+_LEGACY_PARAMETERS_FILENAME: str = "suite2p_parameters.json"
 
 # Maximum number of imaging channels supported by the pipeline.
 _MAXIMUM_CHANNEL_COUNT: int = 2
@@ -33,8 +36,9 @@ _MAXIMUM_CHANNEL_COUNT: int = 2
 def find_data_directory(data_path: Path) -> Path:
     """Recursively searches for the directory containing the acquisition parameters JSON file.
 
-    This function searches the data_path directory and all subdirectories for a file named 'suite2p_parameters.json'
-    and returns the parent directory containing that file. This directory is expected to also contain the TIFF files.
+    This function searches the data_path directory and all subdirectories for a file named 'cindra_parameters.json'
+    first, then falls back to 'suite2p_parameters.json' (created by sl-experiment). Returns the parent directory
+    containing the matched file. This directory is expected to also contain the TIFF files.
 
     Args:
         data_path: The root directory to search for the acquisition parameters file.
@@ -50,12 +54,16 @@ def find_data_directory(data_path: Path) -> Path:
         message = f"Unable to find data directory. The data_path is not a directory: {data_path}"
         console.error(message=message, error=ValueError)
 
-    parameter_files = list(data_path.rglob(_ACQUISITION_PARAMETERS_FILENAME))
+    # Searches for the preferred cindra parameters file first, then falls back to the legacy suite2p file.
+    parameter_files = list(data_path.rglob(_PREFERRED_PARAMETERS_FILENAME))
+    if not parameter_files:
+        parameter_files = list(data_path.rglob(_LEGACY_PARAMETERS_FILENAME))
 
     if not parameter_files:
         message = (
-            f"Unable to find '{_ACQUISITION_PARAMETERS_FILENAME}' in the data directory or its subdirectories: "
-            f"{data_path}. This file is required and must contain acquisition metadata."
+            f"Unable to find '{_PREFERRED_PARAMETERS_FILENAME}' or '{_LEGACY_PARAMETERS_FILENAME}' in the data "
+            f"directory or its subdirectories: {data_path}. This file is required and must contain acquisition "
+            f"metadata."
         )
         console.error(message=message, error=FileNotFoundError)
 
@@ -101,7 +109,7 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
         console.error(message=message, error=ValueError)
 
     # Checks if processed data already exists with saved acquisition parameters.
-    saved_acquisition_path = save_path_root / "suite2p" / "acquisition_parameters.yaml"
+    saved_acquisition_path = save_path_root / "cindra" / "acquisition_parameters.yaml"
     if saved_acquisition_path.exists():
         # Loads acquisition parameters from processed output (supports loading moved data without raw TIFFs).
         acquisition = AcquisitionParameters.from_yaml(file_path=saved_acquisition_path)
@@ -139,8 +147,8 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
 
     # Creates a RuntimeContext for each plane.
     for virtual_plane_index in range(plane_count):
-        # Resolves the output directory for this plane. Always uses 'suite2p' as the subdirectory.
-        plane_output_path = save_path_root / "suite2p" / f"plane_{virtual_plane_index}"
+        # Resolves the output directory for this plane. Always uses 'cindra' as the subdirectory.
+        plane_output_path = save_path_root / "cindra" / f"plane_{virtual_plane_index}"
 
         # Checks if existing runtime data exists for this plane.
         runtime_yaml_path = plane_output_path / "runtime_data.yaml"
@@ -209,11 +217,11 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
 def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[MultiDayRuntimeContext]:
     """Creates MultiDayRuntimeContext instances for all recording sessions processed by the target multi-day pipeline.
 
-    This function performs the initial setup for multi-day processing: it discovers suite2p output directories for each
+    This function performs the initial setup for multi-day processing: it discovers cindra output directories for each
     session, derives multiday output paths, and initializes MultiDayRuntimeContext instances.
 
     Notes:
-        Each session directory must contain exactly one suite2p output directory with a combined_metadata.npz file from
+        Each session directory must contain exactly one cindra output directory with a combined_metadata.npz file from
         a completed single-day pipeline run. The function extracts unique session identifiers from the directory paths
         to distinguish sessions within the dataset.
 
@@ -237,13 +245,13 @@ def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[Mult
     session_ids = _extract_unique_components(paths=session_directories)
     dataset_name = configuration.session_io.dataset_name
 
-    # Resolves all suite2p directories (data_paths), output paths, and CombinedData upfront. Loading CombinedData
+    # Resolves all cindra directories (data_paths), output paths, and CombinedData upfront. Loading CombinedData
     # here validates that single-day processing completed successfully for all sessions before proceeding.
     data_paths: list[Path] = []
     output_paths: list[Path] = []
     combined_data_list: list[CombinedData] = []
     for session_directory in session_directories:
-        data_path = _find_suite2p_directory(session_directory=session_directory)
+        data_path = _find_cindra_directory(session_directory=session_directory)
         data_paths.append(data_path)
         output_paths.append(data_path.parent / "multiday" / dataset_name)
         combined_data_list.append(CombinedData.load(root_path=data_path))
@@ -406,6 +414,9 @@ def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
 def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
     """Finds and loads acquisition parameters from the data directory.
 
+    Searches for the preferred 'cindra_parameters.json' first, then falls back to the legacy
+    'suite2p_parameters.json'.
+
     Args:
         data_path: The root directory to search for the acquisition parameters file.
 
@@ -417,7 +428,11 @@ def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
         ValueError: If the data_path is not a directory, or if required fields are missing from the JSON file.
     """
     data_directory = find_data_directory(data_path)
-    parameters_path = data_directory / _ACQUISITION_PARAMETERS_FILENAME
+
+    # Tries the preferred filename first, then falls back to the legacy filename.
+    parameters_path = data_directory / _PREFERRED_PARAMETERS_FILENAME
+    if not parameters_path.exists():
+        parameters_path = data_directory / _LEGACY_PARAMETERS_FILENAME
 
     message = f"Found acquisition parameters at: {parameters_path}."
     console.echo(message=message, level=LogLevel.SUCCESS)
@@ -477,18 +492,18 @@ def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[st
     return tuple(unique_components)
 
 
-def _find_suite2p_directory(session_directory: Path) -> Path:
-    """Discovers the suite2p output directory within a session directory tree.
+def _find_cindra_directory(session_directory: Path) -> Path:
+    """Discovers the cindra output directory within a session directory tree.
 
     Searches recursively for the combined_metadata.npz file created by the single-day pipeline's combination step.
-    Since multi-day session paths are not pre-sanitized, the suite2p directory may be
+    Since multi-day session paths are not pre-sanitized, the cindra directory may be
     nested at an arbitrary depth below the session root (e.g., under a processed_data/mesoscope_data/ subdirectory).
 
     Args:
         session_directory: The path to the session's root directory.
 
     Returns:
-        The path to the suite2p output directory that contains the combined_metadata.npz file.
+        The path to the cindra output directory that contains the combined_metadata.npz file.
 
     Raises:
         FileNotFoundError: If no combined_metadata.npz file is found under the session directory.
@@ -498,7 +513,7 @@ def _find_suite2p_directory(session_directory: Path) -> Path:
 
     if not matches:
         message = (
-            f"Unable to locate suite2p output for session {session_directory}. No combined_metadata.npz file was "
+            f"Unable to locate cindra output for session {session_directory}. No combined_metadata.npz file was "
             f"found anywhere in the directory tree. Ensure the single-day pipeline has completed successfully for "
             f"this recording session before running multi-day processing."
         )
@@ -506,12 +521,12 @@ def _find_suite2p_directory(session_directory: Path) -> Path:
 
     if len(matches) > 1:
         message = (
-            f"Unable to locate suite2p output for session {session_directory}. Found {len(matches)} "
+            f"Unable to locate cindra output for session {session_directory}. Found {len(matches)} "
             f"combined_metadata.npz files, but expected exactly one unique match."
         )
         console.error(message=message, error=RuntimeError)
 
-    # The combined_metadata.npz file is saved at the suite2p root level by CombinedData.save().
+    # The combined_metadata.npz file is saved at the cindra root level by CombinedData.save().
     return matches[0].parent
 
 
@@ -523,7 +538,7 @@ def _compute_mroi_region_borders(data_path: Path) -> tuple[int, ...]:
     returns an empty tuple.
 
     Args:
-        data_path: The path to the suite2p output directory containing acquisition_parameters.yaml.
+        data_path: The path to the cindra output directory containing acquisition_parameters.yaml.
 
     Returns:
         A tuple of border x-coordinates for MROI recordings, or an empty tuple for non-MROI recordings.

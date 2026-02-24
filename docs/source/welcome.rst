@@ -12,7 +12,7 @@ This website only contains the API documentation for the classes and methods off
 GitHub repository for installation instructions and library usage examples:
 `cindra GitHub repository <https://github.com/Sun-Lab-NBB/cindra>`_.
 
-Note! Currently, the work on converting the suite2p to the latest Sun lab documentation standards is still ongoing and
+Note! Currently, the work on converting cindra to the latest Sun lab documentation standards is still ongoing and
 a large portion of the original source code remains undocumented. Future incremental patches will iteratively add
 documentation for the entire original (single-day) pipeline codebase, while also optimizing the source code where
 necessary.
