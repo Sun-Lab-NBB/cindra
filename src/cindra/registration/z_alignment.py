@@ -36,6 +36,10 @@ def compute_z_position(
         reference kernels for each z-stack plane. For one-photon recordings, additional preprocessing (smoothing and
         high-pass filtering) is applied to both z-stack planes and frames before correlation.
 
+        Currently, this functionality is supported exclusively by the registration data viewer for informational
+        purposes. Users are advised to implement online x, y, and z-drift correction algorithms in their data
+        acquisition frameworks.
+
     Args:
         context: The runtime context containing pipeline configuration and runtime data for the current plane.
         z_stack: The reference z-stack with shape (z_plane_count, height, width) constructed before starting the

@@ -4,46 +4,46 @@
 Command Line Interfaces
 =======================
 
-.. click:: sl_suite2p.cli:ss2p
+.. click:: cindra.interface.cli:cindra_cli
 
 Single-Day Pipeline Configuration
 =================================
-.. automodule:: sl_suite2p.configuration.single_day
+.. automodule:: cindra.configuration.single_day
    :members:
    :undoc-members:
    :show-inheritance:
 
 Single-Day Pipeline API
 =======================
-.. automodule:: sl_suite2p.single_day
+.. automodule:: cindra.single_day
    :members:
    :undoc-members:
    :show-inheritance:
 
 Multi-Day Pipeline Configuration
 =================================
-.. automodule:: sl_suite2p.configuration.multi_day
+.. automodule:: cindra.configuration.multi_day
    :members:
    :undoc-members:
    :show-inheritance:
 
 Multi-Day Pipeline API
 ======================
-.. automodule:: sl_suite2p.multi_day
+.. automodule:: cindra.multi_day
    :members:
    :undoc-members:
    :show-inheritance:
 
 Multi-day Pipeline Algorithms
 =============================
-.. automodule:: sl_suite2p.multiday
+.. automodule:: cindra.multiday
    :members:
    :undoc-members:
    :show-inheritance:
 
 Version API
 ===========
-.. automodule:: sl_suite2p.version
+.. automodule:: cindra.version
    :members:
    :undoc-members:
    :show-inheritance:

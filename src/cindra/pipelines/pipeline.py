@@ -79,7 +79,7 @@ def run_single_day_pipeline(
     # Ensures the input configuration file is valid.
     if not configuration_path.exists() or configuration_path.suffix != ".yaml":
         message = (
-            f"Unable to run the single-day sl-suite2p processing pipeline. Expected the configuration file to end with "
+            f"Unable to run the single-day cindra processing pipeline. Expected the configuration file to end with "
             f"a '.yaml' extension and exist at the specified path, but encountered: {configuration_path}."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -89,7 +89,7 @@ def run_single_day_pipeline(
         configuration: SingleDayConfiguration = SingleDayConfiguration.from_yaml(file_path=configuration_path)
     except Exception:
         message = (
-            "Unable to run the single-day sl-suite2p processing pipeline, as the input configuration file is not a "
+            "Unable to run the single-day cindra processing pipeline, as the input configuration file is not a "
             "valid single-day pipeline configuration file. Specifically, failed to load the file's data as a "
             "SingleDayConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
             "valid single-day configuration .yaml file."
@@ -114,7 +114,7 @@ def run_single_day_pipeline(
     # Validates that the save_path is configured.
     if configuration.file_io.save_path is None:
         message = (
-            "Unable to run the single-day sl-suite2p processing pipeline. The save_path must be configured in the "
+            "Unable to run the single-day cindra processing pipeline. The save_path must be configured in the "
             "FileIO section of the configuration, but it is currently None."
         )
         console.error(message=message, error=ValueError)
@@ -216,7 +216,7 @@ def run_multi_day_pipeline(
     # Ensures the input configuration file is valid.
     if not configuration_path.exists() or configuration_path.suffix != ".yaml":
         message = (
-            f"Unable to run the multi-day sl-suite2p processing pipeline. Expected the configuration file to end with "
+            f"Unable to run the multi-day cindra processing pipeline. Expected the configuration file to end with "
             f"a '.yaml' extension and exist at the specified path, but encountered: {configuration_path}."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -226,7 +226,7 @@ def run_multi_day_pipeline(
         config: MultiDayConfiguration = MultiDayConfiguration.from_yaml(file_path=configuration_path)
     except Exception:
         message = (
-            "Unable to run the multi-day sl-suite2p processing pipeline, as the input configuration file is not a "
+            "Unable to run the multi-day cindra processing pipeline, as the input configuration file is not a "
             "valid multi-day pipeline configuration file. Specifically, failed to load the file's data as a "
             "MultiDayConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
             "valid multi-day configuration .yaml file."
@@ -236,7 +236,7 @@ def run_multi_day_pipeline(
     # Validates that the configuration contains the required session directories.
     if not config.session_io.session_directories:
         message = (
-            "Unable to run the multi-day sl-suite2p processing pipeline. The configuration file must specify at least "
+            "Unable to run the multi-day cindra processing pipeline. The configuration file must specify at least "
             "two session directories under 'session_io.session_directories'. The provided configuration has no session "
             "directories specified."
         )
@@ -245,7 +245,7 @@ def run_multi_day_pipeline(
     # Validates that the configuration contains a dataset name.
     if not config.session_io.dataset_name:
         message = (
-            "Unable to run the multi-day sl-suite2p processing pipeline. The configuration file must specify a dataset "
+            "Unable to run the multi-day cindra processing pipeline. The configuration file must specify a dataset "
             "name under 'session_io.dataset_name'. The provided configuration has no dataset name specified."
         )
         console.error(message=message, error=ValueError)

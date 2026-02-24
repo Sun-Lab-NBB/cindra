@@ -1,4 +1,4 @@
-"""Provides configuration and runtime data classes for the single-day and multi-day sl-suite2p pipelines."""
+"""Provides configuration and runtime data classes for the single-day and multi-day cindra pipelines."""
 
 from .version import version, python_version
 from .multi_day_data import (

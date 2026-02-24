@@ -4,9 +4,9 @@ import sys
 
 from importlib_metadata import metadata as _metadata
 
-_package_metadata = _metadata("sl-suite2p")
+_package_metadata = _metadata("cindra")
 
-# The sl-suite2p library version string, resolved from package metadata at import time.
+# The cindra library version string, resolved from package metadata at import time.
 if _package_metadata is None:
     version: str = "unknown"
 else:

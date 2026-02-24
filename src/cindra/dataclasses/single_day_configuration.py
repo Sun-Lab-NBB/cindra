@@ -141,7 +141,7 @@ class Main:
     custom_classifier_path: Path | None = None
     """The absolute path to a custom classifier file used for ROI classification. When set, this classifier is used
     instead of the built-in classifier for both preclassification during detection and final classification after
-    signal extraction. Leave as None to use the built-in classifier bundled with sl-suite2p."""
+    signal extraction. Leave as None to use the built-in classifier bundled with cindra."""
 
 
 @dataclass

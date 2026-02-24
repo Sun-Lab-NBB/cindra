@@ -76,7 +76,7 @@ class DiffeomorphicDemonsRegistration:
         deformation_limit: float = 1.0,
         noise_factor: float = 1.0,
     ) -> None:
-        # Ensures that the input images use the fp32 precision, consistent with the rest of the sl-suite2p codebase.
+        # Ensures that the input images use the fp32 precision, consistent with the rest of the cindra codebase.
         self._images: list[NDArray[np.float32]] = []
         for image in images:
             converted_image = image if image.dtype == np.float32 else image.astype(np.float32)

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 
 # Project metadata section. Provides the general ID information about the project.
 [project]
-name = "sl-suite2p"
+name = "cindra"
 version = "2.0.0rc9"
 description = "A reimplementation of the suite2p library with novel data arhetecture and accross-day tracking pipeline."
 readme = "README.md"
@@ -80,12 +80,12 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Sun-Lab-NBB/sl_suite2p"
+Homepage = "https://github.com/Sun-Lab-NBB/cindra"
 
-# All interactions with the library are performed via the 'ss2p' and 'ss2p-gui' CLI commands.
+# All interactions with the library are performed via the 'cindra' and 'cindra-gui' CLI commands.
 [project.scripts]
-ss2p = "sl_suite2p.interface.cli:ss2p"  # Top-level CLI group
-ss2p-gui = "sl_suite2p.interface.gui_cli:ss2p_gui"  # GUI launcher (separate to avoid loading Qt during headless runs)
+cindra = "cindra.interface.cli:cindra_cli"  # Top-level CLI group
+cindra-gui = "cindra.interface.gui_cli:cindra_gui"  # GUI launcher (separate to avoid loading Qt during headless runs)
 
 # Development dependencies (PEP 735). Not published to PyPI.
 [dependency-groups]
@@ -108,7 +108,7 @@ exclude = [".github", "recipe"]
 
 # Specifies the library structure.
 [tool.hatch.build.targets.wheel]
-packages = ["src/sl_suite2p", "notebooks"]
+packages = ["src/cindra", "notebooks"]
 
 # Ruff Configuration.
 [tool.ruff]
@@ -183,7 +183,7 @@ disallow_untyped_defs = true # Enforces function annotation
 warn_unused_ignores = true   # Warns against using 'type: ignore' for packages with type stubs
 
 exclude = [
-    "sl-suite2p-\\d+",    # Ignores temporary folder created by setuptools when building the sdist
+    "cindra-\\d+",    # Ignores temporary folder created by setuptools when building the sdist
     "venv.*/",             # Ignores virtual environments
     "build/",              # Ignores the sdist directory
     "dist/",               # Ignores the wheel directory

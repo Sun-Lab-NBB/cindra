@@ -1,5 +1,5 @@
-"""This module provides the command-line interface for launching the sl-suite2p Graphical User Interface (GUI)
-applications. This CLI is installed as a separate entry-point from the main 'ss2p' CLI to avoid loading GUI
+"""This module provides the command-line interface for launching the cindra Graphical User Interface (GUI)
+applications. This CLI is installed as a separate entry-point from the main 'cindra' CLI to avoid loading GUI
 dependencies during headless pipeline execution.
 """
 
@@ -14,16 +14,16 @@ from ..gui.registration import run_registration_viewer
 CONTEXT_SETTINGS = {"max_content_width": 120}
 
 
-@click.group("ss2p-gui", context_settings=CONTEXT_SETTINGS)
-def ss2p_gui() -> None:
-    """Launches sl-suite2p GUI applications for visualizing pipeline outputs.
+@click.group("cindra-gui", context_settings=CONTEXT_SETTINGS)
+def cindra_gui() -> None:
+    """Launches cindra GUI applications for visualizing pipeline outputs.
 
     Use this command group to launch the ROI viewer, registration quality viewer, or other GUI tools. At this time,
     the GUI does not support the multi-day processing pipeline.
     """
 
 
-@ss2p_gui.command("roi")
+@cindra_gui.command("roi")
 @click.option(
     "-s",
     "--session-path",
@@ -36,7 +36,7 @@ def gui_roi(session_path: Path | None) -> None:
     run(session_path=session_path)
 
 
-@ss2p_gui.command("registration")
+@cindra_gui.command("registration")
 @click.option(
     "-s",
     "--session-path",

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from ..dataclasses import ROIStatistics
 
 
-# Path to the built-in classifier bundled with sl-suite2p.
+# Path to the built-in classifier bundled with cindra.
 _BUILTIN_CLASSIFIER_PATH: Path = Path(__file__).parent / "classifier.npz"
 
 # The names of the ROI features used for full classification (after signal extraction), in the order they appear in
@@ -332,7 +332,7 @@ def classify(
         classification_threshold: The probability threshold above which an ROI is classified as a cell. ROIs with
             probabilities above this threshold are labeled as cells (1.0), others as non-cells (0.0).
         custom_classifier_path: An optional path to a custom classifier .npz file. If None, the built-in classifier
-            bundled with sl-suite2p is used.
+            bundled with cindra is used.
         preclassification: Determines whether to use a 2-feature model (normalized_pixel_count, compactness) suitable
             for early filtering during detection before signal extraction. When False, uses the full 3-feature model
             that includes skewness computed from extracted fluorescence traces.

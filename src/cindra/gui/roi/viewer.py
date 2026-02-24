@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-import sl_suite2p as suite2p
+import cindra as suite2p
 
 from . import (
     menu_bar,
@@ -52,7 +52,7 @@ if TYPE_CHECKING:
     from .context_data import ContextData
     from .roi_overlays import ColorArrays, ROIIndexMaps, ColorbarWidgets
 
-# Path to the root of the sl-suite2p package directory.
+# Path to the root of the cindra package directory.
 _SUITE2P_DIR: Path = Path(suite2p.__file__).parent
 
 # String path to the application icon file.
@@ -900,5 +900,5 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def suite2p_directory() -> Path:
-        """Returns the root path of the sl-suite2p package directory."""
+        """Returns the root path of the cindra package directory."""
         return _SUITE2P_DIR

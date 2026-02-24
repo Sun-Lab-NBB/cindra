@@ -252,8 +252,8 @@ class MultiDayTimingData:
     python_version: str = python_version
     """The Python interpreter version used for processing this session."""
 
-    sl_suite2p_version: str = version
-    """The sl-suite2p library version used for processing this session."""
+    cindra_version: str = version
+    """The cindra library version used for processing this session."""
 
 
 @dataclass
