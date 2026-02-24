@@ -135,6 +135,18 @@ class RegistrationViewerData:
         return self._current_registration.principal_component_projections
 
     @property
+    def temporal_smoothing_sigma(self) -> float:
+        """Returns the temporal smoothing sigma used for z-position correlation filtering."""
+        return self._contexts[self._current_plane_index].configuration.registration.temporal_smoothing_sigma
+
+    @property
+    def principal_component_count(self) -> int:
+        """Returns the number of principal components used for registration quality metrics."""
+        return self._contexts[
+            self._current_plane_index
+        ].configuration.registration.registration_metric_principal_components
+
+    @property
     def aspect_ratio(self) -> float:
         """Returns the aspect ratio of detected ROIs, computed as vertical to horizontal diameter ratio."""
         return self._current_detection.aspect_ratio

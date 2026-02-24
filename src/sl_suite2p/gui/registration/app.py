@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def run(session_path: Path | None = None) -> None:
+def run_registration_viewer(session_path: Path | None = None) -> None:
     """Launches the standalone single-day registration viewer.
 
     Creates a QApplication, shows the BinaryPlayer and PCViewer windows, and enters the event
@@ -24,23 +24,32 @@ def run(session_path: Path | None = None) -> None:
     Args:
         session_path: Optional path to a suite2p output directory to load on startup.
     """
+    # Reuses the existing QApplication if one is already running (e.g. when embedded in a larger GUI),
+    # otherwise creates a new one.
     application = QApplication.instance()
     owns_application = application is None
     if owns_application:
         application = QApplication(sys.argv)
 
+    # Loads session data upfront so both viewer windows share the same data model. This ensures
+    # plane switches in the binary player are reflected in the PC viewer without reloading from disk.
     data: RegistrationViewerData | None = None
     if session_path is not None:
         data = RegistrationViewerData.from_session(root_path=session_path)
 
+    # Creates both viewer windows with the shared data model.
     binary_player = BinaryPlayer(data=data)
     pc_viewer = PCViewer(data=data)
 
-    # Synchronizes plane changes from the binary player to the PC viewer.
-    binary_player.plane_changed.connect(lambda _index: pc_viewer.load_data(data=binary_player._data))
+    # When the user switches planes in the binary player, the shared data model is mutated in place
+    # (via switch_plane). This signal connection triggers the PC viewer to re-read PC images and
+    # metrics from the updated data model so both windows stay synchronized.
+    binary_player.plane_changed.connect(lambda _index: pc_viewer.load_data(data=binary_player.data))
 
     binary_player.show()
     pc_viewer.show()
 
+    # Only enters the event loop if this function created the QApplication. When embedded in a
+    # larger GUI, the caller is responsible for running the event loop.
     if owns_application:
         sys.exit(application.exec())
