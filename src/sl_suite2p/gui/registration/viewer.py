@@ -27,56 +27,51 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
+from ...io import BinaryFile
 from ..styles import FONT_FAMILY, WHITE_LABEL_STYLESHEET
 from .context_data import RegistrationViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-# Scatter plot marker point size in pixels.
+# Scatter plot marker point size in pixels. Used for the red dot overlays on shift, nonrigid, and z-position plots.
 _SCATTER_POINT_SIZE: int = 10
 
-# Size for media control button icons in pixels.
+# Size for media control button icons in pixels. Applied to play, pause, and quit tool buttons.
 _ICON_SIZE: int = 30
 
-# Gaussian smoothing sigma for z-position correlation filtering.
-_Z_SMOOTHING_SIGMA: int = 2
-
-# Multiplier for real-time playback speed.
+# Multiplier for real-time playback speed. The timer interval is the per-frame period divided by this factor.
 _PLAYBACK_SPEED_MULTIPLIER: int = 5
 
-# Number of frames subsampled for dynamic range estimation.
+# Number of frames subsampled for dynamic range estimation. Evenly-spaced frames are read to compute mean and std.
 _SUBSAMPLE_FRAME_COUNT: int = 100
 
-# Minimum frame increment for arrow key navigation.
+# Minimum frame increment for arrow key navigation. Prevents single-frame steps on very short recordings.
 _MIN_FRAME_DELTA: int = 5
 
-# Divisor for computing frame slider step size from total frames.
+# Divisor for computing frame slider step size from total frames. Larger values produce finer navigation steps.
 _FRAME_DELTA_DIVISOR: int = 200
 
-# Default number of principal components.
-_DEFAULT_PC_COUNT: int = 50
-
-# Animation interval for PC viewer in milliseconds.
+# Animation interval for PC viewer in milliseconds. Controls how fast the top/bottom extreme images alternate.
 _PC_ANIMATION_INTERVAL_MS: int = 200
 
-# Number of standard deviations below mean for display range lower bound.
+# Number of standard deviations below mean for display range lower bound. Pixels below this are clipped to black.
 _DISPLAY_RANGE_LOW_SIGMA: float = 2.0
 
-# Number of standard deviations above mean for display range upper bound.
+# Number of standard deviations above mean for display range upper bound. Pixels above this are clipped to white.
 _DISPLAY_RANGE_HIGH_SIGMA: float = 5.0
 
-# Z-stack percentile bounds for display range.
+# Z-stack percentile bounds for display range. Clips z-stack images to the 1st–99th percentile intensity window.
 _Z_PERCENTILE_LOW: int = 1
 _Z_PERCENTILE_HIGH: int = 99
 
-# Width for z-plane input field.
+# Width for z-plane input field in pixels. Constrains the QLineEdit used to enter the current z-plane index.
 _Z_EDIT_WIDTH: int = 30
 
-# Width for PC number input field.
+# Width for PC number input field in pixels. Constrains the QLineEdit used to enter the current PC number.
 _PC_EDIT_WIDTH: int = 40
 
-# Font point size for metrics labels.
+# Font point size for metrics labels. Applied to the per-PC rigid, nonrigid, and nonrigid-max shift value labels.
 _METRICS_FONT_SIZE: int = 14
 
 
@@ -313,6 +308,11 @@ class BinaryPlayer(QMainWindow):
         if data is not None:
             self.load_data(data=data)
 
+    @property
+    def data(self) -> RegistrationViewerData | None:
+        """The current registration viewer data model, or None if no session is loaded."""
+        return self._data
+
     def load_data(self, data: RegistrationViewerData) -> None:
         """Stores the data model, populates the plane selector, and opens the first plane.
 
@@ -502,14 +502,13 @@ class BinaryPlayer(QMainWindow):
         self._shift_plot.clear()
 
         # Computes dynamic range from subsampled frames.
-        sample_count = min(self._data.frame_count - 1, _SUBSAMPLE_FRAME_COUNT)
-        frames = _subsample_frames(
-            frame_count=self._data.frame_count,
-            frame_height=self._data.frame_height,
-            frame_width=self._data.frame_width,
-            sample_count=sample_count,
-            registration_path=str(self._data.registered_binary_path),
-        )
+        with BinaryFile(
+            height=self._data.frame_height,
+            width=self._data.frame_width,
+            file_path=self._data.registered_binary_path,
+            read_only=True,
+        ) as binary_file:
+            frames = binary_file.subsample_movie(sample_count=_SUBSAMPLE_FRAME_COUNT)
         frame_mean = np.float32(frames.mean())
         frame_std = np.float32(frames.std())
         self._display_range = frame_mean + frame_std * np.array(
@@ -645,9 +644,13 @@ class BinaryPlayer(QMainWindow):
             # Checks for cached z-correlation data in order of priority:
             # 1. Local instance cache (self._z_correlation)
             # 2. Separate zcorr.npy file from the output directory
-            if self._z_correlation is not None and self._z_stack.shape[0] == self._z_correlation.shape[0]:
+            if (
+                self._data is not None
+                and self._z_correlation is not None
+                and self._z_stack.shape[0] == self._z_correlation.shape[0]
+            ):
                 self._z_max_positions = np.argmax(
-                    gaussian_filter1d(self._z_correlation.T.copy(), sigma=_Z_SMOOTHING_SIGMA, axis=1),
+                    gaussian_filter1d(self._z_correlation.T.copy(), sigma=self._data.temporal_smoothing_sigma, axis=1),
                     axis=1,
                 ).astype(np.int32)
                 self._plot_z_correlation()
@@ -657,7 +660,9 @@ class BinaryPlayer(QMainWindow):
                     self._z_correlation = np.load(z_correlation_path).astype(np.float32)
                     if self._z_stack.shape[0] == self._z_correlation.shape[0]:
                         self._z_max_positions = np.argmax(
-                            gaussian_filter1d(self._z_correlation.T.copy(), sigma=_Z_SMOOTHING_SIGMA, axis=1),
+                            gaussian_filter1d(
+                                self._z_correlation.T.copy(), sigma=self._data.temporal_smoothing_sigma, axis=1
+                            ),
                             axis=1,
                         ).astype(np.int32)
                         self._plot_z_correlation()
@@ -709,7 +714,7 @@ class BinaryPlayer(QMainWindow):
                 z_stack=self._z_stack.astype(np.float32),
             )
             self._z_max_positions = np.argmax(
-                gaussian_filter1d(self._z_correlation.T.copy(), sigma=_Z_SMOOTHING_SIGMA, axis=1),
+                gaussian_filter1d(self._z_correlation.T.copy(), sigma=self._data.temporal_smoothing_sigma, axis=1),
                 axis=1,
             ).astype(np.int32)
 
@@ -855,7 +860,7 @@ class PCViewer(QMainWindow):
         self._data: RegistrationViewerData | None = None
         self._loaded: bool = False
         self._current_frame: int = 0
-        self._pc_count: int = _DEFAULT_PC_COUNT
+        self._pc_count: int = data.principal_component_count if data is not None else 0
         self._pc_images: NDArray[np.float32] | None = None
         self._image_height: int = 0
         self._image_width: int = 0
@@ -1147,34 +1152,3 @@ class PCViewer(QMainWindow):
         self._play_button.setEnabled(False)
         self._pause_button.setEnabled(False)
         self._pause_button.setChecked(True)
-
-
-def _subsample_frames(
-    frame_count: int,
-    frame_height: int,
-    frame_width: int,
-    sample_count: int,
-    registration_path: str,
-) -> NDArray[np.int16]:
-    """Reads evenly-spaced frames from a binary file for dynamic range estimation.
-
-    Args:
-        frame_count: Total number of frames in the binary file.
-        frame_height: Height of each frame in pixels.
-        frame_width: Width of each frame in pixels.
-        sample_count: Number of frames to subsample.
-        registration_path: Path to the registered binary file.
-
-    Returns:
-        Array of subsampled frames with shape (sample_count, height, width).
-    """
-    frames = np.zeros((sample_count, frame_height, frame_width), dtype=np.int16)
-    bytes_per_frame = 2 * frame_height * frame_width
-    start_indices = np.linspace(start=0, stop=frame_count, num=1 + sample_count).astype(np.int32)
-    with Path(registration_path).open("rb") as binary_file:
-        for index in range(sample_count):
-            binary_file.seek(bytes_per_frame * start_indices[index], 0)
-            buffer = binary_file.read(bytes_per_frame)
-            data = np.frombuffer(buffer, dtype=np.int16, offset=0)
-            frames[index, :, :] = data.reshape((frame_height, frame_width))
-    return frames
