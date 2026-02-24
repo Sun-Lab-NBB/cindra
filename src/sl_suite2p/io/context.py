@@ -177,8 +177,6 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
             # Computes ROI index and physical plane index from the virtual plane index. Virtual planes are organized
             # as: ROI 0 plane 0, ROI 0 plane 1, ..., ROI 1 plane 0, ROI 1 plane 1, etc.
             roi_index = virtual_plane_index // acquisition.plane_number
-            physical_plane_index = virtual_plane_index % acquisition.plane_number
-
             io_data.mroi_lines = acquisition.roi_lines[roi_index]
             io_data.mroi_y_offset = acquisition.roi_y_coordinates[roi_index]
             io_data.mroi_x_offset = acquisition.roi_x_coordinates[roi_index]

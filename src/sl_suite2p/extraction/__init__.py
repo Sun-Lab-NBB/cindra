@@ -2,9 +2,9 @@
 multichannel recordings.
 """
 
-from .deconvolve import apply_oasis_deconvolution, compute_delta_fluorescence
-from .extract import extract_traces
 from .masks import create_masks
+from .extract import extract_traces
+from .deconvolve import apply_oasis_deconvolution, compute_delta_fluorescence
 
 __all__ = [
     "apply_oasis_deconvolution",
