@@ -1,14 +1,14 @@
 ---
 name: multi-day-processing
 description: >-
-  Guides AI agents through multi-day (cross-session) neural imaging data processing using the sl-suite2p MCP server.
+  Guides AI agents through multi-day (cross-session) neural imaging data processing using the cindra MCP server.
   Covers cell tracking across sessions, configuration, batch processing, and status monitoring for longitudinal studies.
 ---
 
 # Multi-Day Neural Imaging Processing
 
 Guides AI agents through the workflow for tracking cells across multiple recording sessions and extracting consistent
-fluorescence traces using the sl-suite2p MCP server tools.
+fluorescence traces using the cindra MCP server tools.
 
 ---
 
@@ -26,13 +26,13 @@ If single-day processing is not complete, use the `/single-day-processing` skill
 
 ## Agent Requirements
 
-**You MUST use the MCP tools provided by this library for all neural imaging data processing tasks.** The sl-suite2p
+**You MUST use the MCP tools provided by this library for all neural imaging data processing tasks.** The cindra
 library provides an MCP server that exposes specialized tools for discovering sessions, executing pipelines, and
 monitoring processing status. These tools are the only supported interface for agentic neural imaging data processing.
 
 ### Mandatory Tool Usage
 
-- You MUST NOT import or call sl-suite2p Python functions directly (e.g., `from sl_suite2p.multi_day import ...`)
+- You MUST NOT import or call cindra Python functions directly (e.g., `from cindra.multi_day import ...`)
 - You MUST NOT attempt to run processing by executing Python scripts or CLI commands
 - You MUST use the MCP tools listed in the "Available Tools" section below
 - You MUST verify the MCP server is connected before attempting any processing operations
@@ -61,13 +61,13 @@ The MCP server must be running and connected for the tools to be available.
 The server is started via the CLI:
 
 ```bash
-ss2p mcp
+cindra mcp
 ```
 
 Transport options:
-- `ss2p mcp` - Default stdio transport
-- `ss2p mcp -t sse` - Server-Sent Events transport
-- `ss2p mcp -t streamable-http` - Streamable HTTP transport
+- `cindra mcp` - Default stdio transport
+- `cindra mcp -t sse` - Server-Sent Events transport
+- `cindra mcp -t streamable-http` - Streamable HTTP transport
 
 ### Claude Code Configuration
 
@@ -76,9 +76,9 @@ Add to your `.mcp.json` file in the project root:
 ```json
 {
   "mcpServers": {
-    "ss2p-mcp": {
+    "cindra-mcp": {
       "type": "stdio",
-      "command": "ss2p",
+      "command": "cindra",
       "args": ["mcp"]
     }
   }
@@ -87,7 +87,7 @@ Add to your `.mcp.json` file in the project root:
 
 ### Verifying Connection
 
-Before processing, verify the MCP tools are available by checking your tool list. If the sl-suite2p tools
+Before processing, verify the MCP tools are available by checking your tool list. If the cindra tools
 (`discover_sessions_tool`, `start_multiday_batch_processing_tool`, etc.) are not present, the server is not connected.
 
 ---
@@ -168,7 +168,7 @@ Results are saved to `{session_path}/multiday/{dataset_name}/`:
 multiday/
 └── dataset_name/
     ├── ops.npy                              # Processing parameters
-    ├── multi_day_ss2p_configuration.yaml    # Configuration snapshot
+    ├── multi_day_cindra_configuration.yaml    # Configuration snapshot
     ├── multiday_tracker.json                # Processing tracker (main session only)
     ├── template_cell_masks.npy              # Tracked cell masks
     ├── F.npy                                # Fluorescence traces

@@ -7,7 +7,7 @@ description: >-
 
 # Multi-Day Configuration Reference
 
-Complete parameter reference for the multi-day (cross-session) sl-suite2p cell tracking pipeline.
+Complete parameter reference for the multi-day (cross-session) cindra cell tracking pipeline.
 
 ---
 
@@ -40,7 +40,7 @@ These parameters are set automatically by the pipeline and should not be manuall
 | `main.parallel_workers` | CLI/MCP | Number of workers (or auto-detected from CPU count) |
 | `main.progress_bars` | CLI/MCP | Whether to show progress bars |
 | `main.python_version` | `multi_day.py` | Current Python version |
-| `main.sl_suite2p_version` | `multi_day.py` | Current sl-suite2p version |
+| `main.cindra_version` | `multi_day.py` | Current cindra version |
 
 ---
 
@@ -53,7 +53,7 @@ Global parameters for multi-day processing.
 | `parallel_workers` | int | 20 | Numba parallel workers. 10-20 optimal per session. -1/0 = all cores. |
 | `progress_bars` | bool | False | Show progress bars. Disable for parallel processing. |
 | `python_version` | str | (auto) | (Internal) Python version used. |
-| `sl_suite2p_version` | str | (auto) | (Internal) Library version used. |
+| `cindra_version` | str | (auto) | (Internal) Library version used. |
 
 ---
 
@@ -323,7 +323,7 @@ Multi-day processing creates outputs in each session's directory:
 ```
 {session_path}/multiday/{dataset_name}/
 ├── ops.npy                              # Processing parameters
-├── multi_day_ss2p_configuration.yaml    # Configuration snapshot
+├── multi_day_cindra_configuration.yaml    # Configuration snapshot
 ├── multiday_tracker.json                # Processing tracker (main session only)
 ├── template_cell_masks.npy              # Tracked cell mask templates
 ├── F.npy                                # Fluorescence traces (n_cells × n_frames)

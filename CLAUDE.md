@@ -64,7 +64,7 @@ state to prevent integration errors.
 
 ## Project Context
 
-This is **sl-suite2p**, a Python library for neural imaging analysis in the Sun Lab at Cornell University. The library
+This is **cindra**, a Python library for neural imaging analysis in the Sun Lab at Cornell University. The library
 is a reimplementation of the original suite2p library with enhanced documentation, modern Python support, and a new
 multi-day cell tracking pipeline.
 
@@ -72,16 +72,16 @@ multi-day cell tracking pipeline.
 
 | Directory                          | Purpose                                         |
 |------------------------------------|-------------------------------------------------|
-| `src/sl_suite2p/`                  | Main library source code                        |
-| `src/sl_suite2p/registration/`     | Image registration and motion correction        |
-| `src/sl_suite2p/detection/`        | Cell detection algorithms                       |
-| `src/sl_suite2p/extraction/`       | Signal extraction from detected cells           |
-| `src/sl_suite2p/classification/`   | Cell classification and filtering               |
-| `src/sl_suite2p/multiday/`         | Multi-day cell tracking pipeline                |
-| `src/sl_suite2p/configuration/`    | Pipeline configuration dataclasses              |
-| `src/sl_suite2p/mcp/`              | MCP server for AI agent integration             |
-| `src/sl_suite2p/gui/`              | GUI components (from original suite2p)          |
-| `src/sl_suite2p/io/`               | Input/output utilities                          |
+| `src/cindra/`                  | Main library source code                        |
+| `src/cindra/registration/`     | Image registration and motion correction        |
+| `src/cindra/detection/`        | Cell detection algorithms                       |
+| `src/cindra/extraction/`       | Signal extraction from detected cells           |
+| `src/cindra/classification/`   | Cell classification and filtering               |
+| `src/cindra/multiday/`         | Multi-day cell tracking pipeline                |
+| `src/cindra/configuration/`    | Pipeline configuration dataclasses              |
+| `src/cindra/mcp/`              | MCP server for AI agent integration             |
+| `src/cindra/gui/`              | GUI components (from original suite2p)          |
+| `src/cindra/io/`               | Input/output utilities                          |
 | `notebooks/`                       | Example notebooks for single-day and multi-day  |
 | `tests/`                           | Test suite                                      |
 
@@ -105,19 +105,19 @@ multi-day cell tracking pipeline.
 
 **Modifying the single-day pipeline:**
 
-1. Review `src/sl_suite2p/pipeline.py` for orchestration logic
+1. Review `src/cindra/pipeline.py` for orchestration logic
 2. Check the relevant module (`registration/`, `detection/`, `extraction/`, `classification/`)
 3. Follow existing patterns for configuration and processing
 4. Update CLI commands in `cli.py` if adding new functionality
 
 **Modifying the multi-day pipeline:**
 
-1. Review `src/sl_suite2p/multi_day.py` for pipeline orchestration
-2. Check `src/sl_suite2p/multiday/` for cross-session tracking logic
+1. Review `src/cindra/multi_day.py` for pipeline orchestration
+2. Check `src/cindra/multiday/` for cross-session tracking logic
 3. Understand the relationship between single-day outputs and multi-day inputs
 
 **Adding MCP tools:**
 
-1. Review existing tools in `src/sl_suite2p/mcp/`
+1. Review existing tools in `src/cindra/mcp/`
 2. Follow MCP tool docstring conventions from PYTHON_STYLE.md
 3. Keep tool responses concise and information-dense

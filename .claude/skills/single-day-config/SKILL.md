@@ -7,7 +7,7 @@ description: >-
 
 # Single-Day Configuration Reference
 
-Complete parameter reference for the single-day (within-session) sl-suite2p processing pipeline.
+Complete parameter reference for the single-day (within-session) cindra processing pipeline.
 
 ---
 
@@ -53,7 +53,7 @@ These parameters are set automatically by the pipeline and should not be manuall
 | `main.parallel_workers`   | CLI/MCP         | Number of workers (or auto-detected from CPU count) |
 | `main.progress_bars`      | CLI/MCP         | Whether to show progress bars                       |
 | `main.python_version`     | `single_day.py` | Current Python version                              |
-| `main.sl_suite2p_version` | `single_day.py` | Current sl-suite2p version                          |
+| `main.cindra_version` | `single_day.py` | Current cindra version                          |
 
 ---
 
@@ -76,7 +76,7 @@ Global parameters that broadly define the processing configuration.
 | `progress_bars`      | bool      | False   | Show progress bars. Disable for parallel processing.                                              |
 | `ignore_flyback`     | list[int] | []      | Flyback plane indices to exclude (0-based). e.g., [0] or [3].                                     |
 | `python_version`     | str       | (auto)  | (Internal) Python version used.                                                                   |
-| `sl_suite2p_version` | str       | (auto)  | (Internal) Library version used.                                                                  |
+| `cindra_version` | str       | (auto)  | (Internal) Library version used.                                                                  |
 
 ---
 

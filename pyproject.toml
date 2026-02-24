@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 
 # Project metadata section. Provides the general ID information about the project.
 [project]
-name = "sl-suite2p"
+name = "cindra"
 version = "2.0.0rc9"
 description = "A reimplementation of the suite2p library with novel data arhetecture and accross-day tracking pipeline."
 readme = "README.md"
@@ -45,26 +45,21 @@ dependencies = [
     "numba>=0.64,<1",
     "scipy>=1,<2",
     "scikit-learn>=1,<2",
-    "scikit-image>=0,<1",
-    "opencv-python-headless>=4,<5",
     "natsort>=8,<9",
 
     # Image I/O
     "tifffile>=2026,<2027",
     "imagecodecs>=2026,<2027",
-    "xmltodict>=1,<2",
 
     # Visualization
     "matplotlib>=3,<4",
     "rastermap>=1,<2",
 
     # GUI
-    "qtpy>=2,<3",
-    "pyqt6>=6,<7",
+    "pyside6>=6,<7",
     "pyqtgraph>=0,<1",
     "ipywidgets>=8,<9",
     "ipython>=9,<10",
-    "ipympl>=0,<1",
 
     # CLI and MCP Server
     "click>=8,<9",
@@ -85,11 +80,12 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Sun-Lab-NBB/sl_suite2p"
+Homepage = "https://github.com/Sun-Lab-NBB/cindra"
 
-# All interactions with the library are performed via the 'ss2p' CLI command.
+# All interactions with the library are performed via the 'cindra' and 'cindra-gui' CLI commands.
 [project.scripts]
-ss2p = "sl_suite2p.interface.cli:ss2p"  # Top-level CLI group
+cindra = "cindra.interface.cli:cindra_cli"  # Top-level CLI group
+cindra-gui = "cindra.interface.gui_cli:cindra_gui"  # GUI launcher (separate to avoid loading Qt during headless runs)
 
 # Development dependencies (PEP 735). Not published to PyPI.
 [dependency-groups]
@@ -112,7 +108,7 @@ exclude = [".github", "recipe"]
 
 # Specifies the library structure.
 [tool.hatch.build.targets.wheel]
-packages = ["src/sl_suite2p", "notebooks"]
+packages = ["src/cindra", "notebooks"]
 
 # Ruff Configuration.
 [tool.ruff]
@@ -187,7 +183,7 @@ disallow_untyped_defs = true # Enforces function annotation
 warn_unused_ignores = true   # Warns against using 'type: ignore' for packages with type stubs
 
 exclude = [
-    "sl-suite2p-\\d+",    # Ignores temporary folder created by setuptools when building the sdist
+    "cindra-\\d+",    # Ignores temporary folder created by setuptools when building the sdist
     "venv.*/",             # Ignores virtual environments
     "build/",              # Ignores the sdist directory
     "dist/",               # Ignores the wheel directory
