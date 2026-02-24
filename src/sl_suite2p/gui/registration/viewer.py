@@ -701,7 +701,6 @@ class BinaryPlayer(QMainWindow):
     def _start_playback(self) -> None:
         """Starts video playback by enabling the frame update timer."""
         if self._current_frame < self._frame_count - 1:
-            console.echo(message="Playing video...")
             self._play_button.setEnabled(False)
             self._pause_button.setEnabled(True)
             self._frame_slider.setEnabled(False)
@@ -713,7 +712,6 @@ class BinaryPlayer(QMainWindow):
         self._play_button.setEnabled(True)
         self._pause_button.setEnabled(False)
         self._frame_slider.setEnabled(True)
-        console.echo(message="Video paused")
 
     def _compute_z(self) -> None:
         """Computes z-position correlations between the loaded z-stack and the registered binary."""

@@ -53,10 +53,13 @@ def run_single_day_pipeline(
     process: bool = False,
     combine: bool = False,
     target_plane: int = -1,
-    workers: int = -1,
-    progress_bars: bool = False,
 ) -> None:
     """Executes the requested single-day processing pipeline steps for the target data.
+
+    The caller is responsible for writing all runtime overrides (``file_io.data_path``, ``file_io.save_path``,
+    ``runtime.parallel_workers``, ``runtime.display_progress_bars``) into the configuration file before invoking this
+    function. The pipeline reads these values from the file at ``configuration_path`` and does not accept them as
+    direct parameters.
 
     Args:
         configuration_path: The path to the single-day configuration YAML file.
@@ -68,9 +71,6 @@ def run_single_day_pipeline(
         combine: Determines whether to combine processed plane data into a uniform dataset (step 3).
         target_plane: The index of the plane to process. Setting this to '-1' processes all available planes
             sequentially.
-        workers: The number of parallel workers to use when processing the data. Setting this to '-1' uses all
-            available CPU cores.
-        progress_bars: Determines whether to show progress bars during processing.
 
     Raises:
         FileNotFoundError: If the single-day configuration data cannot be loaded from the specified file.
@@ -96,13 +96,13 @@ def run_single_day_pipeline(
         )
         console.error(message=message, error=FileNotFoundError)
 
-    # Overrides the 'workers' and 'progress_bars' parameters with the provided values. Resolves the requested worker
-    # count to a valid positive integer based on available CPU cores.
-    configuration.runtime.display_progress_bars = progress_bars
-    configuration.runtime.parallel_workers = resolve_worker_count(requested_workers=workers)
+    # Resolves the requested worker count to a valid positive integer based on available CPU cores.
+    configuration.runtime.parallel_workers = resolve_worker_count(
+        requested_workers=configuration.runtime.parallel_workers
+    )
 
-    # Configures the console's progress bar display state based on the progress_bars flag.
-    if progress_bars:
+    # Configures the console's progress bar display state based on the configuration flag.
+    if configuration.runtime.display_progress_bars:
         console.enable_progress()
     else:
         console.disable_progress()
@@ -190,23 +190,23 @@ def run_multi_day_pipeline(
     discover: bool = False,
     extract: bool = False,
     target_session: str | None = None,
-    workers: int = -1,
-    progress_bars: bool = False,
 ) -> None:
     """Executes the requested multi-day processing pipeline steps for the target data.
 
+    The caller is responsible for writing all runtime overrides (``session_io.session_directories``,
+    ``runtime.parallel_workers``, ``runtime.display_progress_bars``) into the configuration file before invoking this
+    function. The pipeline reads these values from the file at ``configuration_path`` and does not accept them as
+    direct parameters.
+
     Args:
         configuration_path: The path to the multi-day configuration YAML file. The configuration must include the
-            `session_io.session_directories` list of session paths and `session_io.dataset_name`.
+            ``session_io.session_directories`` list of session paths and ``session_io.dataset_name``.
         job_id: The unique hexadecimal identifier for the processing job to execute. If provided, only the job
             matching this ID is executed. If not provided, all requested jobs are run sequentially.
         discover: Determines whether to discover cells whose activity can be tracked across days (step 1).
         extract: Determines whether to extract fluorescence from the cells tracked across multiple days (step 2).
         target_session: The unique identifier of the session to process when running the 'extract' job. If None,
             processes all sessions.
-        workers: The number of parallel workers to use when processing the data. Setting this to '-1' uses all
-            available CPU cores.
-        progress_bars: Determines whether to show progress bars during processing.
 
     Raises:
         FileNotFoundError: If the multi-day configuration data cannot be loaded from the specified file.
@@ -250,13 +250,11 @@ def run_multi_day_pipeline(
         )
         console.error(message=message, error=ValueError)
 
-    # Overrides the 'workers' and 'progress_bars' parameters with the provided values. Resolves the requested worker
-    # count to a valid positive integer based on available CPU cores.
-    config.runtime.display_progress_bars = progress_bars
-    config.runtime.parallel_workers = resolve_worker_count(requested_workers=workers)
+    # Resolves the requested worker count to a valid positive integer based on available CPU cores.
+    config.runtime.parallel_workers = resolve_worker_count(requested_workers=config.runtime.parallel_workers)
 
-    # Configures the console's progress bar display state based on the progress_bars flag.
-    if progress_bars:
+    # Configures the console's progress bar display state based on the configuration flag.
+    if config.runtime.display_progress_bars:
         console.enable_progress()
     else:
         console.disable_progress()
