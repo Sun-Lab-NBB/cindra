@@ -12,7 +12,7 @@ Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer a
 Sun lab code changes copyright:
 Copyright © 2025 Cornell University, Authored by Ivan Kondratyev and Kushaan Gupta.
 
-For documentation and additional information, see the sl-suite2p repository: https://github.com/Sun-Lab-NBB/suite2p
+For documentation and additional information, see the cindra repository: https://github.com/Sun-Lab-NBB/suite2p
 """
 
 # Configures numba threading layer for parallel execution across all modules. This must be set before any numba
@@ -31,7 +31,7 @@ from .pipelines import (  # noqa: E402
 )
 from .dataclasses import CombinedData, RuntimeContext, MultiDayConfiguration, SingleDayConfiguration  # noqa: E402
 
-# Ensures console output is enabled whenever the suite2p library is imported. In sl-suite2p, the 'Console' class is
+# Ensures console output is enabled whenever the suite2p library is imported. In cindra, the 'Console' class is
 # used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal
 # outputs instead of or in addition to sending them to the terminal.
 if not console.enabled:

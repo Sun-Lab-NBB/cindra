@@ -27,10 +27,10 @@ jupyter/*.tif
 .ipynb_checkpoints/
 __pycache__/
 dist/
-suite2p.egg-info/
+cindra.egg-info/
 build/
-src/sl_suite2p/classifiers/classifier_user.npy
-src/sl_suite2p/ops/ops_user.npy
+src/cindra/classifiers/classifier_user.npy
+src/cindra/ops/ops_user.npy
 .buildinfo
 doctrees/
 

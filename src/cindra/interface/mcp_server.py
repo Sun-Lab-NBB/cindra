@@ -26,7 +26,7 @@ from ..dataclasses import (
 )
 
 # Initializes the MCP server with JSON response mode for structured output.
-mcp = FastMCP(name="ss2p-mcp", json_response=True)
+mcp = FastMCP(name="cindra-mcp", json_response=True)
 
 # CPU cores reserved for system operations.
 _RESERVED_CORES: int = 4
@@ -845,7 +845,7 @@ def get_multi_day_status(session_path: str) -> dict[str, Any]:
     for dataset in datasets:
         dataset_status: dict[str, Any] = {
             "runtime_exists": (dataset / "multiday_runtime_data.yaml").exists(),
-            "config_exists": (dataset / "multi_day_ss2p_configuration.yaml").exists(),
+            "config_exists": (dataset / "multi_day_cindra_configuration.yaml").exists(),
             "tracker_exists": (dataset / "multiday_tracker.json").exists(),
             "template_masks_exists": (dataset / "template_cell_masks.npy").exists(),
             "F_exists": (dataset / "F.npy").exists(),

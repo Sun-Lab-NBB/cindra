@@ -1,26 +1,26 @@
 ---
 name: single-day-processing
 description: >-
-  Guides AI agents through single-day (within-session) neural imaging data processing using the sl-suite2p MCP server.
+  Guides AI agents through single-day (within-session) neural imaging data processing using the cindra MCP server.
   Covers session discovery, configuration, batch processing, and status monitoring for individual recording sessions.
 ---
 
 # Single-Day Neural Imaging Processing
 
 Guides AI agents through the workflow for processing neural imaging data from individual recording sessions using the
-sl-suite2p MCP server tools.
+cindra MCP server tools.
 
 ---
 
 ## Agent Requirements
 
-**You MUST use the MCP tools provided by this library for all neural imaging data processing tasks.** The sl-suite2p
+**You MUST use the MCP tools provided by this library for all neural imaging data processing tasks.** The cindra
 library provides an MCP server that exposes specialized tools for discovering sessions, executing pipelines, and
 monitoring processing status. These tools are the only supported interface for agentic neural imaging data processing.
 
 ### Mandatory Tool Usage
 
-- You MUST NOT import or call sl-suite2p Python functions directly (e.g., `from sl_suite2p.pipeline import ...`)
+- You MUST NOT import or call cindra Python functions directly (e.g., `from cindra.pipeline import ...`)
 - You MUST NOT attempt to run processing by executing Python scripts or CLI commands
 - You MUST use the MCP tools listed in the "Available Tools" section below
 - You MUST verify the MCP server is connected before attempting any processing operations
@@ -49,13 +49,13 @@ The MCP server must be running and connected for the tools to be available.
 The server is started via the CLI:
 
 ```bash
-ss2p mcp
+cindra mcp
 ```
 
 Transport options:
-- `ss2p mcp` - Default stdio transport
-- `ss2p mcp -t sse` - Server-Sent Events transport
-- `ss2p mcp -t streamable-http` - Streamable HTTP transport
+- `cindra mcp` - Default stdio transport
+- `cindra mcp -t sse` - Server-Sent Events transport
+- `cindra mcp -t streamable-http` - Streamable HTTP transport
 
 ### Claude Code Configuration
 
@@ -64,9 +64,9 @@ Add to your `.mcp.json` file in the project root:
 ```json
 {
   "mcpServers": {
-    "ss2p-mcp": {
+    "cindra-mcp": {
       "type": "stdio",
-      "command": "ss2p",
+      "command": "cindra",
       "args": ["mcp"]
     }
   }
@@ -75,7 +75,7 @@ Add to your `.mcp.json` file in the project root:
 
 ### Verifying Connection
 
-Before processing, verify the MCP tools are available by checking your tool list. If the sl-suite2p tools
+Before processing, verify the MCP tools are available by checking your tool list. If the cindra tools
 (`discover_sessions_tool`, `start_batch_processing_tool`, etc.) are not present, the server is not connected.
 
 ---

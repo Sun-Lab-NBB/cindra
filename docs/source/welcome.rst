@@ -1,7 +1,7 @@
-Welcome to sl-suite2p API documentation page
+Welcome to cindra API documentation page
 ============================================
 
-sl-suite2p is an enhanced suite2p implementation that includes a pipeline to track cell activity across sessions (days).
+cindra is an enhanced suite2p implementation that includes a pipeline to track cell activity across sessions (days).
 
 This library is developed in the `Sun lab <https://neuroai.github.io/sunlab/>`_ at Cornell University. It is an
 extension of the original `suite2p <https://github.com/MouseLand/suite2p>`_ library that features a new pipeline,
@@ -10,13 +10,13 @@ compatible and interchangeable with the original suite2p library.
 
 This website only contains the API documentation for the classes and methods offered by this library. See the project
 GitHub repository for installation instructions and library usage examples:
-`sl-suite2p GitHub repository <https://github.com/Sun-Lab-NBB/suite2p>`_.
+`cindra GitHub repository <https://github.com/Sun-Lab-NBB/cindra>`_.
 
 Note! Currently, the work on converting the suite2p to the latest Sun lab documentation standards is still ongoing and
 a large portion of the original source code remains undocumented. Future incremental patches will iteratively add
 documentation for the entire original (single-day) pipeline codebase, while also optimizing the source code where
 necessary.
 
-.. _`sl-suite2p GitHub repository`: https://github.com/Sun-Lab-NBB/suite2p
+.. _`cindra GitHub repository`: https://github.com/Sun-Lab-NBB/cindra
 .. _`Sun lab`: https://neuroai.github.io/sunlab/
 .. _`suite2p`: https://github.com/MouseLand/suite2p

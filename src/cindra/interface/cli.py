@@ -1,6 +1,6 @@
 """This module provides the command-line interfaces (CLIs) that are installed into the host-environment together
-with the sl-suite2p library. The CLIs from this module provide a complete terminal-based interface for running all
-pipelines supported by the sl-suite2p library.
+with the cindra library. The CLIs from this module provide a complete terminal-based interface for running all
+pipelines supported by the cindra library.
 """
 
 from pathlib import Path
@@ -17,14 +17,14 @@ from ..dataclasses import MultiDayConfiguration, SingleDayConfiguration
 CONTEXT_SETTINGS = {"max_content_width": 120}
 
 
-@click.group("ss2p", context_settings=CONTEXT_SETTINGS)
-def ss2p() -> None:
+@click.group("cindra", context_settings=CONTEXT_SETTINGS)
+def cindra_cli() -> None:
     """This Command-Line Interface (CLI) functions as an entry-point for all interactions with the Sun lab's suite2p
-    implementation (sl-suite2p library).
+    implementation (cindra library).
     """
 
 
-@ss2p.command("mcp")
+@cindra_cli.command("mcp")
 @click.option(
     "-t",
     "--transport",
@@ -33,7 +33,7 @@ def ss2p() -> None:
     show_default=True,
     help="The transport protocol to use for MCP communication.",
 )
-def ss2p_mcp(transport: str) -> None:
+def cindra_mcp(transport: str) -> None:
     """Starts the Model Context Protocol (MCP) server for agentic neural imaging data processing.
 
     The MCP server exposes tools that enable AI agents to discover sessions, execute pipelines,
@@ -42,7 +42,7 @@ def ss2p_mcp(transport: str) -> None:
     run_server(transport=transport)  # type: ignore[arg-type]
 
 
-@ss2p.group("configure")
+@cindra_cli.group("configure")
 @click.option(
     "-od",
     "--output-directory",
@@ -54,12 +54,12 @@ def ss2p_mcp(transport: str) -> None:
     "-n",
     "--name",
     type=str,
-    default="single_day_sls2p_configuration",
+    default="single_day_cindra_configuration",
     required=True,
     help="The name to use for the generated configuration file.",
 )
 @click.pass_context
-def ss2p_config(ctx: click.Context, output_directory: Path, name: str) -> None:
+def cindra_config(ctx: click.Context, output_directory: Path, name: str) -> None:
     """Generates the single-day or the multi-day processing pipeline configuration file.
 
     Commands from this group generate the configuration files for running processing pipelines.
@@ -72,10 +72,10 @@ def ss2p_config(ctx: click.Context, output_directory: Path, name: str) -> None:
 
 
 # noinspection PyUnresolvedReferences
-@ss2p_config.command("single-day")
+@cindra_config.command("single-day")
 @click.pass_context
-def ss2p_sd_config(ctx: click.Context) -> None:
-    """Generates the single-day sl-suite2p processing pipeline configuration file."""
+def cindra_sd_conf(ctx: click.Context) -> None:
+    """Generates the single-day cindra processing pipeline configuration file."""
     # Unpacks the shared parameters
     file_path = Path(ctx.obj["file_path"])
 
@@ -91,7 +91,7 @@ def ss2p_sd_config(ctx: click.Context) -> None:
 
     message = (
         "See the original suite2p documentation (https://suite2p.readthedocs.io/en/latest/) and the Sun lab "
-        "repository (https://github.com/Sun-Lab-NBB/suite2p) for more information about sl-suite2p and its "
+        "repository (https://github.com/Sun-Lab-NBB/suite2p) for more information about cindra and its "
         "configuration parameters. Note! The sun-lab suite2p library overlaps, but does not have the same "
         "configuration parameters as the original suite2p library."
     )
@@ -99,10 +99,10 @@ def ss2p_sd_config(ctx: click.Context) -> None:
 
 
 # noinspection PyUnresolvedReferences
-@ss2p_config.command("multi-day")
+@cindra_config.command("multi-day")
 @click.pass_context
-def ss2p_md_config(ctx: click.Context) -> None:
-    """Generates the multi-day sl-suite2p processing pipeline configuration file."""
+def cindra_md_conf(ctx: click.Context) -> None:
+    """Generates the multi-day cindra processing pipeline configuration file."""
     # Unpacks the shared parameters
     file_path = Path(ctx.obj["file_path"])
 
@@ -118,14 +118,14 @@ def ss2p_md_config(ctx: click.Context) -> None:
 
     message = (
         "See the original suite2p documentation (https://suite2p.readthedocs.io/en/latest/) and the Sun lab "
-        "repository (https://github.com/Sun-Lab-NBB/suite2p) for more information about sl-suite2p and its "
+        "repository (https://github.com/Sun-Lab-NBB/suite2p) for more information about cindra and its "
         "configuration parameters. Note! The sun-lab suite2p library overlaps, but does not have the same "
         "configuration parameters as the original suite2p library."
     )
     console.echo(message=message, level=LogLevel.INFO)
 
 
-@ss2p.group("run")
+@cindra_cli.group("run")
 @click.option(
     "-i",
     "--input_path",
@@ -155,13 +155,13 @@ def ss2p_md_config(ctx: click.Context) -> None:
     help="Determines whether to use progress bars during long-running tasks to visualize progress.",
 )
 @click.pass_context
-def ss2p_run(
+def cindra_run(
     ctx: click.Context,
     input_path: Path,
     workers: int,
     progress_bars: bool,
 ) -> None:
-    """Runs the single-day or multi-day sl-suite2p processing pipeline."""
+    """Runs the single-day or multi-day cindra processing pipeline."""
     # Ensures the input configuration file is valid.
     if input_path.suffix != ".yaml":
         message = (
@@ -177,7 +177,7 @@ def ss2p_run(
 
 
 # noinspection PyUnresolvedReferences
-@ss2p_run.command("single-day")
+@cindra_run.command("single-day")
 @click.option(
     "-id",
     "--job-id",
@@ -286,7 +286,7 @@ def run_sd_pipeline(
 
 
 # noinspection PyUnresolvedReferences
-@ss2p_run.command("multi-day")
+@cindra_run.command("multi-day")
 @click.option(
     "-sp",
     "--session-path",

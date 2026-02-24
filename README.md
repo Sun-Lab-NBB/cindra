@@ -1,16 +1,16 @@
-# sl-suite2p
+# cindra
 The Sun lab reimplementation of the suite2p library that provides clean and modern code, expanded documentation, and a 
 new pipeline to track cells across multiple days.
 
 
-![PyPI - Version](https://img.shields.io/pypi/v/sl-suite2p)
-![PyPI - Python Version](https://img.shields.io/pypi/pyversions/sl-suite2p)
+![PyPI - Version](https://img.shields.io/pypi/v/cindra)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/cindra)
 [![uv](https://tinyurl.com/uvbadge)](https://github.com/astral-sh/uv)
 [![Ruff](https://tinyurl.com/ruffbadge)](https://github.com/astral-sh/ruff)
 ![type-checked: mypy](https://img.shields.io/badge/type--checked-mypy-blue?style=flat-square&logo=python)
-![PyPI - License](https://img.shields.io/pypi/l/sl-suite2p)
-![PyPI - Status](https://img.shields.io/pypi/status/sl-suite2p)
-![PyPI - Wheel](https://img.shields.io/pypi/wheel/sl-suite2p)
+![PyPI - License](https://img.shields.io/pypi/l/cindra)
+![PyPI - Status](https://img.shields.io/pypi/status/cindra)
+![PyPI - Wheel](https://img.shields.io/pypi/wheel/cindra)
 
 ___
 
@@ -27,9 +27,9 @@ algorithmic and computation optimizations, such as adding GPU support and fine-t
 pipelines. Currently, there are no plans to keep up with the existing suite2p implementation unless it receives an 
 update that majorly expands or enhances its functionality relative to this project.
 
-**Warning!** The resultant sl-suite2p is now largely ***incompatible*** with both 'source' pipelines due to extensive 
+**Warning!** The resultant cindra is now largely ***incompatible*** with both 'source' pipelines due to extensive 
 modifications to the APIs, CLIs, and configuration parameters in this project relative to both sources. Currently, 
-there are no plans to make sl-suite2p compatible with the existing or future suite2p library implementations.
+there are no plans to make cindra compatible with the existing or future suite2p library implementations.
 
 ---
 
@@ -102,13 +102,13 @@ Note, installation from source is ***highly discouraged*** for everyone who is n
    wheel into the active python environment.
 
 ### pip
-Use the following command to install the library using pip: ```pip install sl-suite2p```.
+Use the following command to install the library using pip: ```pip install cindra```.
 
 ### Optional performance enhancement
 
 If this library is installed on an AMD64 (x64) system, use the optional `x64` installation specification to install 
 additional dependencies that enhance library performance in some processing scenario, e.g.:
-```pip install sl-suite2p[x64]```
+```pip install cindra[x64]```
 
 ---
 
@@ -128,7 +128,7 @@ and their arguments.
 
 ## API Documentation
 
-See the [API documentation](https://sl-suite2p-api-docs.netlify.app/) for the detailed description of the methods and 
+See the [API documentation](https://cindra-api-docs.netlify.app/) for the detailed description of the methods and 
 classes exposed by components of this library.
 
 ***Note!*** As the work on refactoring the library is still ongoing, the current version of the API documentation does 
@@ -149,7 +149,7 @@ version 1.0.0, to reflect that this library has evolved from the original suite2
 
 ## License
 
-This project is licensed under the GPL3 License: see the [LICENSE](../sl-suite2p/LICENSE) file for details.
+This project is licensed under the GPL3 License: see the [LICENSE](../cindra/LICENSE) file for details.
 
 ___
 
@@ -160,6 +160,6 @@ ___
 - The authors and maintainers of the original [suite2p](https://github.com/MouseLand/suite2p) and 
 [multi-day pipeline](https://github.com/sprustonlab/multiday-suite2p-public).
 - The creators of all other projects used in our development automation pipelines and source code 
-  [see pyproject.toml](../sl-suite2p/pyproject.toml).
+  [see pyproject.toml](../cindra/pyproject.toml).
 
 ---

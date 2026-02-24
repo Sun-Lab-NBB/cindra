@@ -1043,8 +1043,8 @@ class TimingData:
     python_version: str = python_version
     """Python version used for processing."""
 
-    sl_suite2p_version: str = version
-    """sl-suite2p version used for processing."""
+    cindra_version: str = version
+    """cindra version used for processing."""
 
 
 @dataclass

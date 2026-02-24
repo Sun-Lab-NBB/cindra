@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "ss2p-mcp": {
+    "cindra-mcp": {
       "type": "stdio",
-      "command": "ss2p",
+      "command": "cindra",
       "args": ["mcp"]
     }
   }

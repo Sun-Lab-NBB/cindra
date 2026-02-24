@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import IO, TYPE_CHECKING
 from pathlib import Path
+from dataclasses import dataclass
 
 import numpy as np
 from PySide6 import QtGui, QtCore
@@ -28,51 +29,77 @@ from PySide6.QtWidgets import (
 from ataraxis_base_utilities import LogLevel, console
 
 from ...io import BinaryFile
-from ..styles import FONT_FAMILY, WHITE_LABEL_STYLESHEET
 from .context_data import RegistrationViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-# Scatter plot marker point size in pixels. Used for the red dot overlays on shift, nonrigid, and z-position plots.
-_SCATTER_POINT_SIZE: int = 10
 
-# Size for media control button icons in pixels. Applied to play, pause, and quit tool buttons.
-_ICON_SIZE: int = 30
+@dataclass(frozen=True, slots=True)
+class _BinaryPlayerStyle:
+    """Encapsulates visual and behavioral constants for the BinaryPlayer window."""
 
-# Multiplier for real-time playback speed. The timer interval is the per-frame period divided by this factor.
-_PLAYBACK_SPEED_MULTIPLIER: int = 5
+    white_label_stylesheet: str = "color: white;"
+    """Stylesheet for white label text on a dark background."""
 
-# Number of frames subsampled for dynamic range estimation. Evenly-spaced frames are read to compute mean and std.
-_SUBSAMPLE_FRAME_COUNT: int = 100
+    scatter_point_size: int = 10
+    """Marker size in pixels for red dot overlays on shift, nonrigid, and z-position plots."""
 
-# Minimum frame increment for arrow key navigation. Prevents single-frame steps on very short recordings.
-_MIN_FRAME_DELTA: int = 5
+    icon_size: int = 30
+    """Dimension in pixels for media control button icons."""
 
-# Divisor for computing frame slider step size from total frames. Larger values produce finer navigation steps.
-_FRAME_DELTA_DIVISOR: int = 200
+    playback_speed_multiplier: int = 5
+    """Factor by which the real-time frame period is divided to compute the playback timer interval."""
 
-# Animation interval for PC viewer in milliseconds. Controls how fast the top/bottom extreme images alternate.
-_PC_ANIMATION_INTERVAL_MS: int = 200
+    subsample_frame_count: int = 100
+    """Number of evenly-spaced frames subsampled for dynamic range estimation."""
 
-# Number of standard deviations below mean for display range lower bound. Pixels below this are clipped to black.
-_DISPLAY_RANGE_LOW_SIGMA: float = 2.0
+    min_frame_delta: int = 5
+    """Minimum frame increment for arrow key navigation."""
 
-# Number of standard deviations above mean for display range upper bound. Pixels above this are clipped to white.
-_DISPLAY_RANGE_HIGH_SIGMA: float = 5.0
+    frame_delta_divisor: int = 200
+    """Divisor for computing frame slider step size from total frame count."""
 
-# Z-stack percentile bounds for display range. Clips z-stack images to the 1st–99th percentile intensity window.
-_Z_PERCENTILE_LOW: int = 1
-_Z_PERCENTILE_HIGH: int = 99
+    display_range_low_sigma: float = 2.0
+    """Standard deviations below mean for display range lower bound."""
 
-# Width for z-plane input field in pixels. Constrains the QLineEdit used to enter the current z-plane index.
-_Z_EDIT_WIDTH: int = 30
+    display_range_high_sigma: float = 5.0
+    """Standard deviations above mean for display range upper bound."""
 
-# Width for PC number input field in pixels. Constrains the QLineEdit used to enter the current PC number.
-_PC_EDIT_WIDTH: int = 40
+    z_percentile_low: int = 1
+    """Lower percentile for z-stack display range clipping."""
 
-# Font point size for metrics labels. Applied to the per-PC rigid, nonrigid, and nonrigid-max shift value labels.
-_METRICS_FONT_SIZE: int = 14
+    z_percentile_high: int = 99
+    """Upper percentile for z-stack display range clipping."""
+
+    z_edit_width: int = 30
+    """Width in pixels for the z-plane input field."""
+
+
+@dataclass(frozen=True, slots=True)
+class _PCViewerStyle:
+    """Encapsulates visual and behavioral constants for the PCViewer window."""
+
+    font_family: str = "Arial"
+    """Font family used for metric labels and PC input field."""
+
+    white_label_stylesheet: str = "color: white;"
+    """Stylesheet for white label text on a dark background."""
+
+    scatter_point_size: int = 10
+    """Marker size in pixels for the selected PC indicator on the metrics plot."""
+
+    icon_size: int = 30
+    """Dimension in pixels for media control button icons."""
+
+    animation_interval_ms: int = 200
+    """Interval in milliseconds between PC extreme image animation updates."""
+
+    pc_edit_width: int = 40
+    """Width in pixels for the principal component number input field."""
+
+    metrics_font_size: int = 14
+    """Point size for metric value labels and PC input field font."""
 
 
 class BinaryPlayer(QMainWindow):
@@ -82,6 +109,7 @@ class BinaryPlayer(QMainWindow):
         data: Pre-loaded registration data to display on startup.
 
     Attributes:
+        _style: Frozen style constants for the binary player window.
         _data: The registration viewer data model, or None if no session is loaded.
         _loaded: Determines whether registration data has been loaded and is ready for display.
         _z_loaded: Determines whether a z-stack has been loaded.
@@ -141,6 +169,9 @@ class BinaryPlayer(QMainWindow):
         _compute_z_button: Button to compute z-position correlations.
         _update_timer: Timer driving frame advancement during playback.
     """
+
+    _style: _BinaryPlayerStyle = _BinaryPlayerStyle()
+    """Frozen style constants for the binary player window."""
 
     # Notifies listeners when the user selects a different imaging plane from the plane selector.
     plane_changed = QtCore.Signal(int)
@@ -215,26 +246,26 @@ class BinaryPlayer(QMainWindow):
 
         # Configures channel 2 checkbox.
         self._channel_2_checkbox: QCheckBox = QCheckBox("view channel 2")
-        self._channel_2_checkbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        self._channel_2_checkbox.setStyleSheet(self._style.white_label_stylesheet)
         self._channel_2_checkbox.setEnabled(False)
         self._channel_2_checkbox.toggled.connect(self._toggle_channel_2)
         self._layout.addWidget(self._channel_2_checkbox, 0, 5, 1, 1)
 
         # Configures z-stack checkbox.
         self._z_stack_checkbox: QCheckBox = QCheckBox("view z-stack")
-        self._z_stack_checkbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        self._z_stack_checkbox.setStyleSheet(self._style.white_label_stylesheet)
         self._z_stack_checkbox.setEnabled(False)
         self._z_stack_checkbox.toggled.connect(self._add_z_stack)
         self._layout.addWidget(self._z_stack_checkbox, 0, 8, 1, 1)
 
         z_label = QLabel("Z-plane:")
-        z_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        z_label.setStyleSheet(self._style.white_label_stylesheet)
         self._layout.addWidget(z_label, 0, 9, 1, 1)
 
         self._z_plane_edit: QLineEdit = QLineEdit(self)
         self._z_plane_edit.setValidator(QtGui.QIntValidator(0, 0))
         self._z_plane_edit.setText("0")
-        self._z_plane_edit.setFixedWidth(_Z_EDIT_WIDTH)
+        self._z_plane_edit.setFixedWidth(self._style.z_edit_width)
         self._z_plane_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._layout.addWidget(self._z_plane_edit, 0, 10, 1, 1)
 
@@ -266,13 +297,13 @@ class BinaryPlayer(QMainWindow):
         # noinspection PyUnresolvedReferences
         self._graphics_widget.ci.layout.setRowStretchFactor(0, 12)
         self._movie_label: QLabel = QLabel("No session loaded")
-        self._movie_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        self._movie_label.setStyleSheet(self._style.white_label_stylesheet)
         self._movie_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self._create_buttons()
 
         # Configures plane selector dropdown.
         plane_label = QLabel("Plane:")
-        plane_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        plane_label.setStyleSheet(self._style.white_label_stylesheet)
         self._layout.addWidget(plane_label, 6, 0, 1, 1)
         self._plane_selector: QComboBox = QComboBox(self)
         self._plane_selector.setEnabled(False)
@@ -281,9 +312,9 @@ class BinaryPlayer(QMainWindow):
 
         # Configures frame slider.
         self._frame_label: QLabel = QLabel("Current frame:")
-        self._frame_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        self._frame_label.setStyleSheet(self._style.white_label_stylesheet)
         self._frame_number_label: QLabel = QLabel("0")
-        self._frame_number_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        self._frame_number_label.setStyleSheet(self._style.white_label_stylesheet)
         self._frame_slider: QSlider = QSlider(QtCore.Qt.Orientation.Horizontal)
         self._frame_slider.setTickInterval(5)
         self._frame_slider.setTracking(False)
@@ -294,7 +325,7 @@ class BinaryPlayer(QMainWindow):
         self._layout.addWidget(self._frame_slider, 13, 2, 14, 13)
         self._layout.addWidget(QLabel(""), 14, 1, 1, 1)
         hint_label = QLabel("(when paused, left/right arrow keys can move slider)")
-        hint_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        hint_label.setStyleSheet(self._style.white_label_stylesheet)
         self._layout.addWidget(hint_label, 16, 0, 1, 3)
         self._frame_slider.valueChanged.connect(self._go_to_frame)
         self._layout.addWidget(self._movie_label, 0, 0, 1, 5)
@@ -347,6 +378,77 @@ class BinaryPlayer(QMainWindow):
             else:
                 self._pause_playback()
 
+    def _create_buttons(self) -> None:
+        """Creates and lays out all control buttons for the player window."""
+        icon_size = QtCore.QSize(self._style.icon_size, self._style.icon_size)
+        load_session_button = QPushButton("Load Session")
+        load_session_button.setToolTip("Open a suite2p session directory")
+        load_session_button.clicked.connect(self._load_session)
+
+        load_z_button = QPushButton("load z-stack tiff")
+        load_z_button.clicked.connect(self._load_z_stack)
+
+        self._compute_z_button: QPushButton = QPushButton("compute z position")
+        self._compute_z_button.setEnabled(False)
+        self._compute_z_button.clicked.connect(self._compute_z)
+
+        self._play_button: QToolButton = QToolButton()
+        self._play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self._play_button.setIconSize(icon_size)
+        self._play_button.setToolTip("Play")
+        self._play_button.setCheckable(True)
+        self._play_button.clicked.connect(self._start_playback)
+
+        self._pause_button: QToolButton = QToolButton()
+        self._pause_button.setCheckable(True)
+        self._pause_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+        self._pause_button.setIconSize(icon_size)
+        self._pause_button.setToolTip("Pause")
+        self._pause_button.clicked.connect(self._pause_playback)
+
+        button_group = QButtonGroup(self)
+        button_group.addButton(self._play_button, 0)
+        button_group.addButton(self._pause_button, 1)
+        button_group.setExclusive(True)
+
+        quit_button = QToolButton()
+        quit_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton))
+        quit_button.setIconSize(icon_size)
+        quit_button.setToolTip("Quit")
+        quit_button.clicked.connect(self.close)
+
+        self._layout.addWidget(load_session_button, 1, 0, 1, 2)
+        self._layout.addWidget(load_z_button, 2, 0, 1, 2)
+        self._layout.addWidget(self._compute_z_button, 3, 0, 1, 2)
+        self._layout.addWidget(self._play_button, 15, 0, 1, 1)
+        self._layout.addWidget(self._pause_button, 15, 1, 1, 1)
+        self._play_button.setEnabled(False)
+        self._pause_button.setEnabled(False)
+        self._pause_button.setChecked(True)
+
+    def _update_frame_slider(self) -> None:
+        """Configures the frame slider range and enables it."""
+        self._frame_slider.setMaximum(self._frame_count - 1)
+        self._frame_slider.setMinimum(0)
+        self._frame_label.setEnabled(True)
+        self._frame_slider.setEnabled(True)
+
+    def _update_buttons(self) -> None:
+        """Sets the initial enabled state for play and pause buttons."""
+        self._play_button.setEnabled(True)
+        self._pause_button.setEnabled(False)
+        self._pause_button.setChecked(True)
+
+    def _load_session(self) -> None:
+        """Opens a file dialog to select a session directory and loads it."""
+        directory = QFileDialog.getExistingDirectory(self, "Open session directory")
+        if directory:
+            try:
+                data = RegistrationViewerData.from_session(root_path=Path(directory))
+                self.load_data(data=data)
+            except Exception as error:
+                console.echo(message=f"Unable to load session. {error}", level=LogLevel.ERROR)
+
     def _on_plane_changed(self, index: int) -> None:
         """Handles plane selector index changes by switching to the selected plane.
 
@@ -398,42 +500,109 @@ class BinaryPlayer(QMainWindow):
             self._registration_file_channel_2 = None
         self._has_channel_2_binary = False
 
-    def _load_session(self) -> None:
-        """Opens a file dialog to select a session directory and loads it."""
-        directory = QFileDialog.getExistingDirectory(self, "Open session directory")
-        if directory:
-            try:
-                data = RegistrationViewerData.from_session(root_path=Path(directory))
-                self.load_data(data=data)
-            except Exception as error:
-                console.echo(message=f"Unable to load session. {error}", level=LogLevel.ERROR)
+    def _setup_views(self) -> None:
+        """Configures all plot views and display parameters after loading data."""
+        if self._data is None:
+            return
 
-    def _toggle_channel_2(self) -> None:
-        """Toggles channel 2 display based on checkbox state."""
-        if self._loaded:
-            self._channel_2_visible = self._channel_2_checkbox.isChecked()
-            self._next_frame()
+        self._shift_plot.clear()
 
-    def _zoom_image(self) -> None:
-        """Resets the main and side view zoom to fit the full image extent."""
-        self._main_view_box.setRange(yRange=(0, self._frame_height), xRange=(0, self._frame_width))
-        if self._z_on:
-            self._side_view_box.setRange(yRange=(0, self._z_height), xRange=(0, self._z_width))
-            self._side_view_box.setXLink("plot1")
-            self._side_view_box.setYLink("plot1")
+        # Computes dynamic range from subsampled frames.
+        with BinaryFile(
+            height=self._data.frame_height,
+            width=self._data.frame_width,
+            file_path=self._data.registered_binary_path,
+            read_only=True,
+        ) as binary_file:
+            frames = binary_file.subsample_movie(sample_count=self._style.subsample_frame_count)
+        frame_mean = np.float32(frames.mean())
+        frame_std = np.float32(frames.std())
+        self._display_range = frame_mean + frame_std * np.array(
+            [-self._style.display_range_low_sigma, self._style.display_range_high_sigma], dtype=np.float32
+        )
 
-    def _add_z_stack(self) -> None:
-        """Toggles z-stack side view display based on checkbox state."""
-        if self._loaded:
-            if self._z_stack_checkbox.isChecked():
-                self._z_on = True
-                # noinspection PyUnresolvedReferences,PyArgumentList
-                self._graphics_widget.addItem(self._side_view_box, row=0, col=1)
-            else:
-                self._z_on = False
-                # noinspection PyUnresolvedReferences
-                self._graphics_widget.removeItem(self._side_view_box)
-            self._next_frame()
+        self._movie_label.setText(self._registration_paths[-1])
+        self._bytes_per_frame = [
+            2 * self._plane_heights[index] * self._plane_widths[index] for index in range(len(self._registration_paths))
+        ]
+
+        # Loads aspect ratio from data model.
+        self._aspect_ratio = self._data.aspect_ratio
+        self._main_view_box.setAspectLocked(lock=True, ratio=self._aspect_ratio)
+        self._side_view_box.setAspectLocked(lock=True, ratio=self._aspect_ratio)
+
+        self._frame_count = self._data.frame_count
+        self._time_step = 1.0 / self._data.sampling_rate * 1000 / self._style.playback_speed_multiplier
+        self._frame_delta = max(self._style.min_frame_delta, int(self._frame_count / self._style.frame_delta_divisor))
+        self._frame_slider.setSingleStep(self._frame_delta)
+        if self._frame_count > 0:
+            self._update_frame_slider()
+            self._update_buttons()
+
+        # Plots registration X-Y offsets.
+        rigid_y = self._data.rigid_y_offsets
+        rigid_x = self._data.rigid_x_offsets
+        if rigid_y is not None and rigid_x is not None:
+            self._y_offsets = rigid_y
+            self._x_offsets = rigid_x
+        else:
+            self._y_offsets = np.zeros((self._frame_count,), dtype=np.int32)
+            self._x_offsets = np.zeros((self._frame_count,), dtype=np.int32)
+        self._shift_plot.plot(self._y_offsets, pen="g")
+        self._shift_plot.plot(self._x_offsets, pen="y")
+        shift_min = min(int(self._y_offsets.min()), int(self._x_offsets.min()))
+        shift_max = max(int(self._y_offsets.max()), int(self._x_offsets.max()))
+        # Prevents a zero-height range when all offsets are zero, which causes pyqtgraph to compute
+        # infinite scale factors that overflow on cast to integer pixel coordinates.
+        if shift_min == shift_max:
+            shift_min -= 1
+            shift_max += 1
+        self._shift_plot.setRange(
+            xRange=(0, self._frame_count),
+            yRange=(shift_min, shift_max),
+            padding=0.0,
+        )
+        self._shift_plot.setLimits(xMin=0, xMax=self._frame_count)
+        self._shift_scatter = pg.ScatterPlotItem()
+        self._shift_plot.addItem(self._shift_scatter)
+        self._shift_scatter.setData(
+            [self._current_frame, self._current_frame],
+            [int(self._y_offsets[self._current_frame]), int(self._x_offsets[self._current_frame])],
+            size=self._style.scatter_point_size,
+            brush=pg.mkBrush(255, 0, 0),
+        )
+
+        # Plots per-frame nonrigid RMS displacement if available.
+        self._nonrigid_plot.clear()
+        nonrigid_y = self._data.nonrigid_y_offsets
+        nonrigid_x = self._data.nonrigid_x_offsets
+        if nonrigid_y is not None and nonrigid_x is not None:
+            self._nonrigid_rms = np.sqrt(
+                np.mean(nonrigid_y.astype(np.float32) ** 2 + nonrigid_x.astype(np.float32) ** 2, axis=1)
+            ).astype(np.float32)
+            self._has_nonrigid = True
+            self._nonrigid_plot.plot(self._nonrigid_rms, pen=(180, 100, 255))
+            nonrigid_max = float(self._nonrigid_rms.max())
+            # Prevents a zero-height range when all nonrigid displacements are zero.
+            if nonrigid_max == 0.0:
+                nonrigid_max = 1.0
+            self._nonrigid_plot.setRange(
+                xRange=(0, self._frame_count),
+                yRange=(0.0, nonrigid_max),
+                padding=0.0,
+            )
+            self._nonrigid_plot.setLimits(xMin=0, xMax=self._frame_count)
+            self._nonrigid_plot.setLabel("left", "nonrigid RMS", units="px")
+            self._nonrigid_scatter = pg.ScatterPlotItem()
+            self._nonrigid_plot.addItem(self._nonrigid_scatter)
+        else:
+            self._has_nonrigid = False
+
+        self._channel_2_checkbox.setEnabled(self._has_channel_2_binary)
+
+        self._current_frame = -1
+        self._loaded = True
+        self._next_frame()
 
     def _next_frame(self) -> None:
         """Advances to the next frame and updates all display elements."""
@@ -476,7 +645,7 @@ class BinaryPlayer(QMainWindow):
         self._shift_scatter.setData(
             [self._current_frame, self._current_frame],
             [int(self._y_offsets[self._current_frame]), int(self._x_offsets[self._current_frame])],
-            size=_SCATTER_POINT_SIZE,
+            size=self._style.scatter_point_size,
             brush=pg.mkBrush(255, 0, 0),
         )
         if self._has_nonrigid and self._nonrigid_rms is not None:
@@ -484,7 +653,7 @@ class BinaryPlayer(QMainWindow):
             self._nonrigid_scatter.setData(
                 [self._current_frame],
                 [float(self._nonrigid_rms[self._current_frame])],
-                size=_SCATTER_POINT_SIZE,
+                size=self._style.scatter_point_size,
                 brush=pg.mkBrush(255, 0, 0),
             )
         if self._z_loaded and self._z_on and self._z_max_positions is not None:
@@ -493,113 +662,68 @@ class BinaryPlayer(QMainWindow):
             self._z_position_scatter.setData(
                 [self._current_frame, self._current_frame],
                 [z_position, z_position],
-                size=_SCATTER_POINT_SIZE,
+                size=self._style.scatter_point_size,
                 brush=pg.mkBrush(255, 0, 0),
             )
 
-    def _setup_views(self) -> None:
-        """Configures all plot views and display parameters after loading data."""
-        if self._data is None:
-            return
+    def _go_to_frame(self) -> None:
+        """Seeks to the frame indicated by the frame slider position."""
+        self._current_frame = int(self._frame_slider.value())
+        self._jump_to_frame()
 
-        self._shift_plot.clear()
+    def _jump_to_frame(self) -> None:
+        """Seeks all binary file handles to an absolute frame position and displays it."""
+        if self._play_button.isEnabled():
+            self._current_frame = max(0, min(self._frame_count - 1, self._current_frame))
+            self._current_frame = int(self._current_frame)
+            for index in range(len(self._registration_files)):
+                self._registration_files[index].seek(self._bytes_per_frame[index] * self._current_frame, 0)
+            if self._has_channel_2_binary and self._registration_file_channel_2 is not None:
+                self._registration_file_channel_2.seek(self._bytes_per_frame[-1] * self._current_frame, 0)
+            self._current_frame -= 1
+            self._next_frame()
 
-        # Computes dynamic range from subsampled frames.
-        with BinaryFile(
-            height=self._data.frame_height,
-            width=self._data.frame_width,
-            file_path=self._data.registered_binary_path,
-            read_only=True,
-        ) as binary_file:
-            frames = binary_file.subsample_movie(sample_count=_SUBSAMPLE_FRAME_COUNT)
-        frame_mean = np.float32(frames.mean())
-        frame_std = np.float32(frames.std())
-        self._display_range = frame_mean + frame_std * np.array(
-            [-_DISPLAY_RANGE_LOW_SIGMA, _DISPLAY_RANGE_HIGH_SIGMA], dtype=np.float32
-        )
+    def _start_playback(self) -> None:
+        """Starts video playback by enabling the frame update timer."""
+        if self._current_frame < self._frame_count - 1:
+            self._play_button.setEnabled(False)
+            self._pause_button.setEnabled(True)
+            self._frame_slider.setEnabled(False)
+            self._update_timer.start(int(self._time_step))
 
-        self._movie_label.setText(self._registration_paths[-1])
-        self._bytes_per_frame = [
-            2 * self._plane_heights[index] * self._plane_widths[index] for index in range(len(self._registration_paths))
-        ]
+    def _pause_playback(self) -> None:
+        """Pauses video playback and re-enables manual frame navigation."""
+        self._update_timer.stop()
+        self._play_button.setEnabled(True)
+        self._pause_button.setEnabled(False)
+        self._frame_slider.setEnabled(True)
 
-        # Loads aspect ratio from data model.
-        self._aspect_ratio = self._data.aspect_ratio
-        self._main_view_box.setAspectLocked(lock=True, ratio=self._aspect_ratio)
-        self._side_view_box.setAspectLocked(lock=True, ratio=self._aspect_ratio)
+    def _toggle_channel_2(self) -> None:
+        """Toggles channel 2 display based on checkbox state."""
+        if self._loaded:
+            self._channel_2_visible = self._channel_2_checkbox.isChecked()
+            self._next_frame()
 
-        self._frame_count = self._data.frame_count
-        self._time_step = 1.0 / self._data.sampling_rate * 1000 / _PLAYBACK_SPEED_MULTIPLIER
-        self._frame_delta = max(_MIN_FRAME_DELTA, int(self._frame_count / _FRAME_DELTA_DIVISOR))
-        self._frame_slider.setSingleStep(self._frame_delta)
-        if self._frame_count > 0:
-            self._update_frame_slider()
-            self._update_buttons()
+    def _add_z_stack(self) -> None:
+        """Toggles z-stack side view display based on checkbox state."""
+        if self._loaded:
+            if self._z_stack_checkbox.isChecked():
+                self._z_on = True
+                # noinspection PyUnresolvedReferences,PyArgumentList
+                self._graphics_widget.addItem(self._side_view_box, row=0, col=1)
+            else:
+                self._z_on = False
+                # noinspection PyUnresolvedReferences
+                self._graphics_widget.removeItem(self._side_view_box)
+            self._next_frame()
 
-        # Plots registration X-Y offsets.
-        rigid_y = self._data.rigid_y_offsets
-        rigid_x = self._data.rigid_x_offsets
-        if rigid_y is not None and rigid_x is not None:
-            self._y_offsets = rigid_y
-            self._x_offsets = rigid_x
-        else:
-            self._y_offsets = np.zeros((self._frame_count,), dtype=np.int32)
-            self._x_offsets = np.zeros((self._frame_count,), dtype=np.int32)
-        self._shift_plot.plot(self._y_offsets, pen="g")
-        self._shift_plot.plot(self._x_offsets, pen="y")
-        shift_min = min(int(self._y_offsets.min()), int(self._x_offsets.min()))
-        shift_max = max(int(self._y_offsets.max()), int(self._x_offsets.max()))
-        # Prevents a zero-height range when all offsets are zero, which causes pyqtgraph to compute
-        # infinite scale factors that overflow on cast to integer pixel coordinates.
-        if shift_min == shift_max:
-            shift_min -= 1
-            shift_max += 1
-        self._shift_plot.setRange(
-            xRange=(0, self._frame_count),
-            yRange=(shift_min, shift_max),
-            padding=0.0,
-        )
-        self._shift_plot.setLimits(xMin=0, xMax=self._frame_count)
-        self._shift_scatter = pg.ScatterPlotItem()
-        self._shift_plot.addItem(self._shift_scatter)
-        self._shift_scatter.setData(
-            [self._current_frame, self._current_frame],
-            [int(self._y_offsets[self._current_frame]), int(self._x_offsets[self._current_frame])],
-            size=_SCATTER_POINT_SIZE,
-            brush=pg.mkBrush(255, 0, 0),
-        )
-
-        # Plots per-frame nonrigid RMS displacement if available.
-        self._nonrigid_plot.clear()
-        nonrigid_y = self._data.nonrigid_y_offsets
-        nonrigid_x = self._data.nonrigid_x_offsets
-        if nonrigid_y is not None and nonrigid_x is not None:
-            self._nonrigid_rms = np.sqrt(
-                np.mean(nonrigid_y.astype(np.float32) ** 2 + nonrigid_x.astype(np.float32) ** 2, axis=1)
-            ).astype(np.float32)
-            self._has_nonrigid = True
-            self._nonrigid_plot.plot(self._nonrigid_rms, pen=(180, 100, 255))
-            nonrigid_max = float(self._nonrigid_rms.max())
-            # Prevents a zero-height range when all nonrigid displacements are zero.
-            if nonrigid_max == 0.0:
-                nonrigid_max = 1.0
-            self._nonrigid_plot.setRange(
-                xRange=(0, self._frame_count),
-                yRange=(0.0, nonrigid_max),
-                padding=0.0,
-            )
-            self._nonrigid_plot.setLimits(xMin=0, xMax=self._frame_count)
-            self._nonrigid_plot.setLabel("left", "nonrigid RMS", units="px")
-            self._nonrigid_scatter = pg.ScatterPlotItem()
-            self._nonrigid_plot.addItem(self._nonrigid_scatter)
-        else:
-            self._has_nonrigid = False
-
-        self._channel_2_checkbox.setEnabled(self._has_channel_2_binary)
-
-        self._current_frame = -1
-        self._loaded = True
-        self._next_frame()
+    def _zoom_image(self) -> None:
+        """Resets the main and side view zoom to fit the full image extent."""
+        self._main_view_box.setRange(yRange=(0, self._frame_height), xRange=(0, self._frame_width))
+        if self._z_on:
+            self._side_view_box.setRange(yRange=(0, self._z_height), xRange=(0, self._z_width))
+            self._side_view_box.setXLink("plot1")
+            self._side_view_box.setYLink("plot1")
 
     def _plot_clicked(self, event: object) -> None:
         """Handles mouse click events on plots for frame navigation."""
@@ -642,7 +766,10 @@ class BinaryPlayer(QMainWindow):
             self._z_height, self._z_width = self._z_stack.shape[1:]
             self._z_plane_edit.setValidator(QtGui.QIntValidator(0, self._z_stack.shape[0]))
             self._z_display_range = np.array(
-                [np.percentile(self._z_stack, _Z_PERCENTILE_LOW), np.percentile(self._z_stack, _Z_PERCENTILE_HIGH)],
+                [
+                    np.percentile(self._z_stack, self._style.z_percentile_low),
+                    np.percentile(self._z_stack, self._style.z_percentile_high),
+                ],
                 dtype=np.float32,
             )
 
@@ -680,38 +807,6 @@ class BinaryPlayer(QMainWindow):
 
         except Exception as error:
             console.echo(message=f"Unable to load z-stack TIFF. {error}", level=LogLevel.ERROR)
-
-    def _go_to_frame(self) -> None:
-        """Seeks to the frame indicated by the frame slider position."""
-        self._current_frame = int(self._frame_slider.value())
-        self._jump_to_frame()
-
-    def _jump_to_frame(self) -> None:
-        """Seeks all binary file handles to an absolute frame position and displays it."""
-        if self._play_button.isEnabled():
-            self._current_frame = max(0, min(self._frame_count - 1, self._current_frame))
-            self._current_frame = int(self._current_frame)
-            for index in range(len(self._registration_files)):
-                self._registration_files[index].seek(self._bytes_per_frame[index] * self._current_frame, 0)
-            if self._has_channel_2_binary and self._registration_file_channel_2 is not None:
-                self._registration_file_channel_2.seek(self._bytes_per_frame[-1] * self._current_frame, 0)
-            self._current_frame -= 1
-            self._next_frame()
-
-    def _start_playback(self) -> None:
-        """Starts video playback by enabling the frame update timer."""
-        if self._current_frame < self._frame_count - 1:
-            self._play_button.setEnabled(False)
-            self._pause_button.setEnabled(True)
-            self._frame_slider.setEnabled(False)
-            self._update_timer.start(int(self._time_step))
-
-    def _pause_playback(self) -> None:
-        """Pauses video playback and re-enables manual frame navigation."""
-        self._update_timer.stop()
-        self._play_button.setEnabled(True)
-        self._pause_button.setEnabled(False)
-        self._frame_slider.setEnabled(True)
 
     def _compute_z(self) -> None:
         """Computes z-position correlations between the loaded z-stack and the registered binary."""
@@ -753,67 +848,6 @@ class BinaryPlayer(QMainWindow):
         self._z_position_plot.setLimits(xMin=0, xMax=self._frame_count)
         self._z_position_plot.setXLink("plot_shift")
 
-    def _update_frame_slider(self) -> None:
-        """Configures the frame slider range and enables it."""
-        self._frame_slider.setMaximum(self._frame_count - 1)
-        self._frame_slider.setMinimum(0)
-        self._frame_label.setEnabled(True)
-        self._frame_slider.setEnabled(True)
-
-    def _update_buttons(self) -> None:
-        """Sets the initial enabled state for play and pause buttons."""
-        self._play_button.setEnabled(True)
-        self._pause_button.setEnabled(False)
-        self._pause_button.setChecked(True)
-
-    def _create_buttons(self) -> None:
-        """Creates and lays out all control buttons for the player window."""
-        icon_size = QtCore.QSize(_ICON_SIZE, _ICON_SIZE)
-        load_session_button = QPushButton("Load Session")
-        load_session_button.setToolTip("Open a suite2p session directory")
-        load_session_button.clicked.connect(self._load_session)
-
-        load_z_button = QPushButton("load z-stack tiff")
-        load_z_button.clicked.connect(self._load_z_stack)
-
-        self._compute_z_button: QPushButton = QPushButton("compute z position")
-        self._compute_z_button.setEnabled(False)
-        self._compute_z_button.clicked.connect(self._compute_z)
-
-        self._play_button: QToolButton = QToolButton()
-        self._play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        self._play_button.setIconSize(icon_size)
-        self._play_button.setToolTip("Play")
-        self._play_button.setCheckable(True)
-        self._play_button.clicked.connect(self._start_playback)
-
-        self._pause_button: QToolButton = QToolButton()
-        self._pause_button.setCheckable(True)
-        self._pause_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
-        self._pause_button.setIconSize(icon_size)
-        self._pause_button.setToolTip("Pause")
-        self._pause_button.clicked.connect(self._pause_playback)
-
-        button_group = QButtonGroup(self)
-        button_group.addButton(self._play_button, 0)
-        button_group.addButton(self._pause_button, 1)
-        button_group.setExclusive(True)
-
-        quit_button = QToolButton()
-        quit_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCloseButton))
-        quit_button.setIconSize(icon_size)
-        quit_button.setToolTip("Quit")
-        quit_button.clicked.connect(self.close)
-
-        self._layout.addWidget(load_session_button, 1, 0, 1, 2)
-        self._layout.addWidget(load_z_button, 2, 0, 1, 2)
-        self._layout.addWidget(self._compute_z_button, 3, 0, 1, 2)
-        self._layout.addWidget(self._play_button, 15, 0, 1, 1)
-        self._layout.addWidget(self._pause_button, 15, 1, 1, 1)
-        self._play_button.setEnabled(False)
-        self._pause_button.setEnabled(False)
-        self._pause_button.setChecked(True)
-
 
 class PCViewer(QMainWindow):
     """Provides a viewer window for principal component registration metrics.
@@ -822,6 +856,7 @@ class PCViewer(QMainWindow):
         data: Pre-loaded registration data to display on startup.
 
     Attributes:
+        _style: Frozen style constants for the PC viewer window.
         _data: The registration viewer data model, or None if no session is loaded.
         _loaded: Determines whether PC data has been loaded and is ready for display.
         _current_frame: Animation toggle state for PC extreme image cycling.
@@ -851,6 +886,9 @@ class PCViewer(QMainWindow):
         _metrics_scatter: Scatter plot overlay indicating the selected PC on the metrics plot, or None.
         _legend: Legend item for the metrics plot, or None.
     """
+
+    _style: _PCViewerStyle = _PCViewerStyle()
+    """Frozen style constants for the PC viewer window."""
 
     def __init__(self, data: RegistrationViewerData | None = None) -> None:
         """Initializes the PC viewer window and all UI components."""
@@ -919,16 +957,18 @@ class PCViewer(QMainWindow):
 
         self._pc_edit: QLineEdit = QLineEdit(self)
         self._pc_edit.setText("1")
-        self._pc_edit.setFixedWidth(_PC_EDIT_WIDTH)
+        self._pc_edit.setFixedWidth(self._style.pc_edit_width)
         self._pc_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._pc_edit.returnPressed.connect(self._plot_frame)
         self._pc_edit.textEdited.connect(self._pause_animation)
         pc_label = QLabel("PC: ")
-        bold_font = QtGui.QFont(FONT_FAMILY, pointSize=_METRICS_FONT_SIZE, weight=QtGui.QFont.Weight.Bold)
-        big_font = QtGui.QFont(FONT_FAMILY, pointSize=_METRICS_FONT_SIZE)
+        bold_font = QtGui.QFont(
+            self._style.font_family, pointSize=self._style.metrics_font_size, weight=QtGui.QFont.Weight.Bold
+        )
+        big_font = QtGui.QFont(self._style.font_family, pointSize=self._style.metrics_font_size)
         pc_label.setFont(bold_font)
         self._pc_edit.setFont(big_font)
-        pc_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        pc_label.setStyleSheet(self._style.white_label_stylesheet)
         self._layout.addWidget(QLabel(""), 1, 0, 1, 1)
         self._layout.addWidget(pc_label, 2, 0, 1, 1)
         self._layout.addWidget(self._pc_edit, 2, 1, 1, 1)
@@ -936,11 +976,11 @@ class PCViewer(QMainWindow):
         self._title_labels: list[QLabel] = []
         for index in range(3):
             metric_label = QLabel("")
-            metric_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+            metric_label.setStyleSheet(self._style.white_label_stylesheet)
             self._layout.addWidget(metric_label, 3 + index, 0, 1, 2)
             self._metric_labels.append(metric_label)
             title_label = QLabel("")
-            title_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+            title_label.setStyleSheet(self._style.white_label_stylesheet)
             self._layout.addWidget(title_label, 12, 4 + index * 4, 1, 2)
             self._title_labels.append(title_label)
         self._layout.addWidget(QLabel(""), 7, 0, 1, 1)
@@ -1004,6 +1044,41 @@ class PCViewer(QMainWindow):
                 else:
                     self._pause_animation()
 
+    def _create_buttons(self) -> None:
+        """Creates and lays out the open, play, and pause buttons."""
+        icon_size = QtCore.QSize(self._style.icon_size, self._style.icon_size)
+        open_button = QToolButton()
+        open_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton))
+        open_button.setIconSize(icon_size)
+        open_button.setToolTip("Open session directory")
+        open_button.clicked.connect(self._open_session)
+
+        self._play_button: QToolButton = QToolButton()
+        self._play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self._play_button.setIconSize(icon_size)
+        self._play_button.setToolTip("Play")
+        self._play_button.setCheckable(True)
+        self._play_button.clicked.connect(self._start_animation)
+
+        self._pause_button: QToolButton = QToolButton()
+        self._pause_button.setCheckable(True)
+        self._pause_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+        self._pause_button.setIconSize(icon_size)
+        self._pause_button.setToolTip("Pause")
+        self._pause_button.clicked.connect(self._pause_animation)
+
+        button_group = QButtonGroup(self)
+        button_group.addButton(self._play_button, 0)
+        button_group.addButton(self._pause_button, 1)
+        button_group.setExclusive(True)
+
+        self._layout.addWidget(open_button, 0, 0, 1, 1)
+        self._layout.addWidget(self._play_button, 14, 12, 1, 1)
+        self._layout.addWidget(self._pause_button, 14, 13, 1, 1)
+        self._play_button.setEnabled(False)
+        self._pause_button.setEnabled(False)
+        self._pause_button.setChecked(True)
+
     def _open_session(self) -> None:
         """Opens a file dialog to select a session directory and loads PC data."""
         directory = QFileDialog.getExistingDirectory(self, "Open session directory")
@@ -1019,7 +1094,7 @@ class PCViewer(QMainWindow):
         if self._loaded:
             self._play_button.setEnabled(False)
             self._pause_button.setEnabled(True)
-            self._update_timer.start(_PC_ANIMATION_INTERVAL_MS)
+            self._update_timer.start(self._style.animation_interval_ms)
 
     def _pause_animation(self) -> None:
         """Pauses PC animation playback."""
@@ -1093,7 +1168,7 @@ class PCViewer(QMainWindow):
         self._metrics_scatter.setData(
             [pc_index + 1, pc_index + 1, pc_index + 1],
             np.asarray(self._pc_metrics[pc_index, :]).tolist(),
-            size=_SCATTER_POINT_SIZE,
+            size=self._style.scatter_point_size,
             brush=pg.mkBrush(255, 255, 255),
         )
         self._metrics_plot.setLabel("left", "pixel shift")
@@ -1127,38 +1202,3 @@ class PCViewer(QMainWindow):
                     and event.double()  # type: ignore[attr-defined]
                 ):
                     self._zoom_plot()
-
-    def _create_buttons(self) -> None:
-        """Creates and lays out the open, play, and pause buttons."""
-        icon_size = QtCore.QSize(_ICON_SIZE, _ICON_SIZE)
-        open_button = QToolButton()
-        open_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton))
-        open_button.setIconSize(icon_size)
-        open_button.setToolTip("Open session directory")
-        open_button.clicked.connect(self._open_session)
-
-        self._play_button: QToolButton = QToolButton()
-        self._play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        self._play_button.setIconSize(icon_size)
-        self._play_button.setToolTip("Play")
-        self._play_button.setCheckable(True)
-        self._play_button.clicked.connect(self._start_animation)
-
-        self._pause_button: QToolButton = QToolButton()
-        self._pause_button.setCheckable(True)
-        self._pause_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
-        self._pause_button.setIconSize(icon_size)
-        self._pause_button.setToolTip("Pause")
-        self._pause_button.clicked.connect(self._pause_animation)
-
-        button_group = QButtonGroup(self)
-        button_group.addButton(self._play_button, 0)
-        button_group.addButton(self._pause_button, 1)
-        button_group.setExclusive(True)
-
-        self._layout.addWidget(open_button, 0, 0, 1, 1)
-        self._layout.addWidget(self._play_button, 14, 12, 1, 1)
-        self._layout.addWidget(self._pause_button, 14, 13, 1, 1)
-        self._play_button.setEnabled(False)
-        self._pause_button.setEnabled(False)
-        self._pause_button.setChecked(True)
