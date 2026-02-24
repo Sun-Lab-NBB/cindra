@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path  # noqa: TC003 - needed at runtime for dacite deserialization
 from dataclasses import field, dataclass
 
 from ataraxis_base_utilities import ensure_directory_exists
