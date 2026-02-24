@@ -117,7 +117,7 @@ class ContextData:
     contexts: list[RuntimeContext] = field(default_factory=list)
     """Single-day runtime contexts for all processed recording's imaging planes."""
 
-    # Combined data from the suite2p output directory.
+    # Combined data from the cindra output directory.
     combined: CombinedData | None = None
     """The combined single-day data for the active view."""
 
@@ -490,11 +490,11 @@ class ContextData:
         """Loads single-day pipeline data into a ContextData wrapper.
 
         Loads all planes via ``RuntimeContext.load()`` and the combined data from the root
-        suite2p directory. Large trace arrays are memory-mapped from disk with copy-on-write
+        cindra directory. Large trace arrays are memory-mapped from disk with copy-on-write
         access rather than copied into RAM.
 
         Args:
-            root_path: Root suite2p output directory containing configuration.yaml.
+            root_path: Root cindra output directory containing configuration.yaml.
 
         Returns:
             A fully populated ContextData instance in single-day mode.

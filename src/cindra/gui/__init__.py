@@ -1,4 +1,4 @@
-"""Provides the interactive desktop GUIs for suite2p data visualization and analysis.
+"""Provides the interactive desktop GUIs for cindra data visualization and analysis.
 
 Sub-packages:
     roi: ROI viewer and editor for single-day pipeline output.

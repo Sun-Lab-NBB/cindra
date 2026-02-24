@@ -19,9 +19,7 @@ CONTEXT_SETTINGS = {"max_content_width": 120}
 
 @click.group("cindra", context_settings=CONTEXT_SETTINGS)
 def cindra_cli() -> None:
-    """This Command-Line Interface (CLI) functions as an entry-point for all interactions with the Sun lab's suite2p
-    implementation (cindra library).
-    """
+    """This Command-Line Interface (CLI) functions as an entry-point for all interactions with the cindra library."""
 
 
 @cindra_cli.command("mcp")
@@ -54,7 +52,7 @@ def cindra_mcp(transport: str) -> None:
     "-n",
     "--name",
     type=str,
-    default="single_day_cindra_configuration",
+    default="cindra_sd_conf",
     required=True,
     help="The name to use for the generated configuration file.",
 )
@@ -90,10 +88,10 @@ def cindra_sd_conf(ctx: click.Context) -> None:
     console.echo(message=message, level=LogLevel.SUCCESS)
 
     message = (
-        "See the original suite2p documentation (https://suite2p.readthedocs.io/en/latest/) and the Sun lab "
-        "repository (https://github.com/Sun-Lab-NBB/suite2p) for more information about cindra and its "
-        "configuration parameters. Note! The sun-lab suite2p library overlaps, but does not have the same "
-        "configuration parameters as the original suite2p library."
+        "See the original suite2p documentation (https://suite2p.readthedocs.io/en/latest/) and the cindra "
+        "repository (https://github.com/Sun-Lab-NBB/cindra) for more information about cindra and its "
+        "configuration parameters. Note! cindra overlaps with, but does not have the same "
+        "configuration parameters as, the original suite2p library."
     )
     console.echo(message=message, level=LogLevel.INFO)
 
@@ -117,10 +115,10 @@ def cindra_md_conf(ctx: click.Context) -> None:
     console.echo(message=message, level=LogLevel.SUCCESS)
 
     message = (
-        "See the original suite2p documentation (https://suite2p.readthedocs.io/en/latest/) and the Sun lab "
-        "repository (https://github.com/Sun-Lab-NBB/suite2p) for more information about cindra and its "
-        "configuration parameters. Note! The sun-lab suite2p library overlaps, but does not have the same "
-        "configuration parameters as the original suite2p library."
+        "See the original suite2p documentation (https://suite2p.readthedocs.io/en/latest/) and the cindra "
+        "repository (https://github.com/Sun-Lab-NBB/cindra) for more information about cindra and its "
+        "configuration parameters. Note! cindra overlaps with, but does not have the same "
+        "configuration parameters as, the original suite2p library."
     )
     console.echo(message=message, level=LogLevel.INFO)
 
@@ -165,7 +163,7 @@ def cindra_run(
     # Ensures the input configuration file is valid.
     if input_path.suffix != ".yaml":
         message = (
-            f"Unable to run the requested suite2p processing pipeline. Expected the configuration file to end with a "
+            f"Unable to run the requested cindra processing pipeline. Expected the configuration file to end with a "
             f"'.yaml' extension, but encountered the file with extension {input_path.suffix}."
         )
         console.error(message=message, error=FileNotFoundError)

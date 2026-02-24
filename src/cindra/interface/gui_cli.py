@@ -29,7 +29,7 @@ def cindra_gui() -> None:
     "--session-path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     default=None,
-    help="Path to a suite2p output directory to load on startup.",
+    help="Path to a cindra output directory to load on startup.",
 )
 def gui_roi(session_path: Path | None) -> None:
     """Launches the ROI viewer and editor for single-day pipeline output."""
@@ -38,12 +38,12 @@ def gui_roi(session_path: Path | None) -> None:
 
 @cindra_gui.command("registration")
 @click.option(
-    "-s",
-    "--session-path",
+    "-r",
+    "--recording-path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    default=None,
-    help="Path to a suite2p output directory to load on startup.",
+    required=True,
+    help="Path to a cindra output directory containing registration results.",
 )
-def gui_registration(session_path: Path | None) -> None:
+def gui_registration(recording_path: Path) -> None:
     """Launches the registration quality viewer for inspecting motion correction results."""
-    run_registration_viewer(session_path=session_path)
+    run_registration_viewer(recording_path=recording_path)

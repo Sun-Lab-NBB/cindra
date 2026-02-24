@@ -57,7 +57,7 @@ class ROISelection:
     """Stores parameters for selecting single-day-detected ROIs to be tracked across multiple sessions (days)."""
 
     probability_threshold: float = 0.85
-    """The minimum required cell probability score assigned to the ROI by the single-day suite2p classifier. ROIs
+    """The minimum required cell probability score assigned to the ROI by the single-day cindra classifier. ROIs
     with a lower classifier score are excluded from multi-day processing. This parameter applies to channel 1 ROIs."""
 
     maximum_size: int = 1000
@@ -93,7 +93,7 @@ class DiffeomorphicRegistration:
     """
 
     image_type: ReferenceImageType | str = ReferenceImageType.ENHANCED_MEAN
-    """The type of suite2p-generated reference image to use for across-day registration. This image is used to
+    """The type of cindra-generated reference image to use for across-day registration. This image is used to
     calculate the deformation fields that register all sessions to a common visual space."""
 
     grid_sampling_factor: float = 1
@@ -154,7 +154,7 @@ class ROITracking:
 
 @dataclass
 class MultiDayConfiguration(YamlConfig):
-    """Aggregates the user-defined configuration parameters for the multi-day suite2p pipeline.
+    """Aggregates the user-defined configuration parameters for the multi-day cindra pipeline.
 
     This class stores all user-configurable parameters that control how the pipeline processes data.
     These parameters are immutable during processing - the pipeline reads them but does not modify them.

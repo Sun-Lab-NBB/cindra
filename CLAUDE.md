@@ -57,7 +57,7 @@ state to prevent integration errors.
 |---------------------------|---------------------------------------------------------------------|
 | `/explore-codebase`       | Perform in-depth codebase exploration at session start              |
 | `/sun-lab-style`          | Apply Sun Lab coding conventions (REQUIRED for all code changes)    |
-| `/single-day-processing`  | Guide agents through single-day suite2p processing using MCP tools  |
+| `/single-day-processing`  | Guide agents through single-day cindra processing using MCP tools   |
 | `/single-day-config`      | Complete reference for single-day pipeline configuration parameters |
 | `/multi-day-processing`   | Guide agents through multi-day cell tracking using MCP tools        |
 | `/multi-day-config`       | Complete reference for multi-day pipeline configuration parameters  |

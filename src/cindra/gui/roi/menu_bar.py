@@ -71,7 +71,7 @@ def classifier(parent: MainWindow) -> None:
     parent.loadUClass.setEnabled(False)
     parent.loadMenu.addAction(parent.loadUClass)
     parent.loadSClass = QAction("built-in classifier", parent)
-    parent.loadSClass.triggered.connect(lambda: classifier_panel.load_s2p_classifier(parent))
+    parent.loadSClass.triggered.connect(lambda: classifier_panel.load_cindra_classifier(parent))
     parent.loadSClass.setEnabled(False)
     parent.loadMenu.addAction(parent.loadSClass)
     parent.loadTrain = QAction("Build", parent)
@@ -109,7 +109,7 @@ def plugins(parent: MainWindow) -> None:
     main_menu = parent.menuBar()
     parent.plugins = {}
     plugin_menu = main_menu.addMenu("&Plugins")
-    for entry_pt in entry_points(group="suite2p.plugin"):
+    for entry_pt in entry_points(group="cindra.plugin"):
         plugin_obj = entry_pt.load()  # load the advertised class from entry_points
         parent.plugins[entry_pt.name] = plugin_obj(
             parent

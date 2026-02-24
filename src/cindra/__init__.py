@@ -1,10 +1,8 @@
-"""Enhanced suite2p implementation that includes a pipeline to track cell activity across sessions (days).
+"""Enhanced neural imaging analysis library with single-day and multi-day cell tracking pipelines.
 
-This implementation of the popular suite2p (https://github.com/MouseLand/suite2p) features various documentation, source
-code and API augmentations performed in the Sun (NeuroAI) lab to improve its runtime efficiency and user experience.
-Additionally, it features the across-day cell tracking pipeline featured in the OSM manuscript
-(https://www.nature.com/articles/s41586-024-08548-w), which has been integrated into the suite2p codebase and API
-structure.
+cindra is a reimplementation of the popular suite2p (https://github.com/MouseLand/suite2p) library with expanded
+documentation, modern Python support, and a new multi-day cell tracking pipeline based on the OSM manuscript
+(https://www.nature.com/articles/s41586-024-08548-w).
 
 Original suite2p copyright:
 Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
@@ -12,7 +10,7 @@ Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer a
 Sun lab code changes copyright:
 Copyright © 2025 Cornell University, Authored by Ivan Kondratyev and Kushaan Gupta.
 
-For documentation and additional information, see the cindra repository: https://github.com/Sun-Lab-NBB/suite2p
+For documentation and additional information, see: https://github.com/Sun-Lab-NBB/cindra
 """
 
 # Configures numba threading layer for parallel execution across all modules. This must be set before any numba
@@ -31,7 +29,7 @@ from .pipelines import (  # noqa: E402
 )
 from .dataclasses import CombinedData, RuntimeContext, MultiDayConfiguration, SingleDayConfiguration  # noqa: E402
 
-# Ensures console output is enabled whenever the suite2p library is imported. In cindra, the 'Console' class is
+# Ensures console output is enabled whenever the cindra library is imported. The 'Console' class is
 # used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal
 # outputs instead of or in addition to sending them to the terminal.
 if not console.enabled:

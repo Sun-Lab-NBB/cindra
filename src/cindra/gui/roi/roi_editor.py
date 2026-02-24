@@ -93,7 +93,7 @@ def _extract_masks_and_traces(
     compatibility.
 
     Args:
-        ops: Suite2p operations dictionary.
+        ops: Operations dictionary.
         manual_statistics: List of stat dictionaries for manually drawn ROIs.
         original_statistics: Array of stat dictionaries for existing detected ROIs.
 

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-import cindra as suite2p
+import cindra
 
 from . import (
     menu_bar,
@@ -53,10 +53,10 @@ if TYPE_CHECKING:
     from .roi_overlays import ColorArrays, ROIIndexMaps, ColorbarWidgets
 
 # Path to the root of the cindra package directory.
-_SUITE2P_DIR: Path = Path(suite2p.__file__).parent
+_CINDRA_DIR: Path = Path(cindra.__file__).parent
 
 # String path to the application icon file.
-_ICON_PATH: str = str(_SUITE2P_DIR / "logo" / "logo.png")
+_ICON_PATH: str = str(_CINDRA_DIR / "logo" / "logo.png")
 
 # Color index for correlation-based coloring mode.
 _CORRELATION_COLOR: int = 7
@@ -78,13 +78,13 @@ _NONCELLS_PLOT: int = 1
 
 
 class MainWindow(QMainWindow):
-    """Provides the main application window for the suite2p graphical interface."""
+    """Provides the main application window for the cindra graphical interface."""
 
     def __init__(self, session_path: Path | None = None) -> None:
         """Initializes the main window, menus, buttons, and graphics panels.
 
         Args:
-            session_path: Optional path to a suite2p output directory to load on startup.
+            session_path: Optional path to a cindra output directory to load on startup.
         """
         super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
@@ -105,7 +105,7 @@ class MainWindow(QMainWindow):
         self.frame_indices: NDArray | None = None
 
         self.setGeometry(50, 50, 1500, 800)
-        self.setWindowTitle("suite2p (run pipeline or load session directory)")
+        self.setWindowTitle("cindra (run pipeline or load session directory)")
 
         app_icon = QtGui.QIcon()
         app_icon.addFile(_ICON_PATH, QtCore.QSize(16, 16))
@@ -118,12 +118,12 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(MAIN_WINDOW_STYLESHEET)
 
         # Classifier file initialization.
-        user_dir = Path.home() / ".suite2p"
+        user_dir = Path.home() / ".cindra"
         user_dir.mkdir(exist_ok=True)
         class_dir = user_dir / "classifiers"
         class_dir.mkdir(exist_ok=True)
         self.classuser = str(class_dir / "classifier_user.npz")
-        self.classorig = str(_SUITE2P_DIR / "classification" / "classifier.npz")
+        self.classorig = str(_CINDRA_DIR / "classification" / "classifier.npz")
         if not Path(self.classuser).is_file():
             shutil.copy(self.classorig, self.classuser)
         self.classfile = self.classuser
@@ -177,7 +177,7 @@ class MainWindow(QMainWindow):
             context_loader.load_session(parent=self, session_path=dropped_path)
         else:
             console.echo(
-                message=f"Invalid drop target '{dropped_path}'. Drop a suite2p output directory.",
+                message=f"Invalid drop target '{dropped_path}'. Drop a cindra output directory.",
                 level=LogLevel.ERROR,
             )
 
@@ -899,6 +899,6 @@ class MainWindow(QMainWindow):
         merge_dialog.apply(self)
 
     @staticmethod
-    def suite2p_directory() -> Path:
+    def cindra_directory() -> Path:
         """Returns the root path of the cindra package directory."""
-        return _SUITE2P_DIR
+        return _CINDRA_DIR

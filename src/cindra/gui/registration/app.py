@@ -14,15 +14,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def run_registration_viewer(session_path: Path | None = None) -> None:
+def run_registration_viewer(recording_path: Path) -> None:
     """Launches the standalone single-day registration viewer.
 
     Creates a QApplication, shows the BinaryPlayer and PCViewer windows, and enters the event
-    loop. If a session path is provided, both viewers load registration data from that directory
-    on startup and share the same data model for synchronized plane switching.
+    loop. Both viewers load registration data from the provided directory on startup and share the
+    same data model for synchronized plane switching.
 
     Args:
-        session_path: Optional path to a suite2p output directory to load on startup.
+        recording_path: Path to a cindra output directory containing registration results.
     """
     # Reuses the existing QApplication if one is already running (e.g. when embedded in a larger GUI),
     # otherwise creates a new one.
@@ -31,11 +31,9 @@ def run_registration_viewer(session_path: Path | None = None) -> None:
     if owns_application:
         application = QApplication(sys.argv)
 
-    # Loads session data upfront so both viewer windows share the same data model. This ensures
+    # Loads recording data upfront so both viewer windows share the same data model. This ensures
     # plane switches in the binary player are reflected in the PC viewer without reloading from disk.
-    data: RegistrationViewerData | None = None
-    if session_path is not None:
-        data = RegistrationViewerData.from_session(root_path=session_path)
+    data = RegistrationViewerData.from_recording(root_path=recording_path)
 
     # Creates both viewer windows with the shared data model.
     binary_player = BinaryPlayer(data=data)

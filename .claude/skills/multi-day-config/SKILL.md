@@ -349,4 +349,4 @@ output:
   combined: true      # Create combined folder used by multi-day
 ```
 
-The multi-day pipeline reads from `{session}/suite2p/combined/` for each session.
+The multi-day pipeline reads from `{session}/cindra/combined/` for each session.

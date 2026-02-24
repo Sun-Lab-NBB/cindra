@@ -23,7 +23,7 @@ def _load_single_day_runtime(plane_directory: Path) -> SingleDayRuntimeData:
     disk.
 
     Args:
-        plane_directory: The actual on-disk path to the plane directory (e.g., ``suite2p/plane_0``).
+        plane_directory: The actual on-disk path to the plane directory (e.g., ``cindra/plane_0``).
 
     Returns:
         A fully-loaded SingleDayRuntimeData instance with all paths and arrays resolved against the correct location.
@@ -129,7 +129,7 @@ class RuntimeContext:
     def save_shared(self) -> None:
         """Saves shared configuration and acquisition parameters to the root output directory.
 
-        This method derives the root path from self.configuration.file_io.save_path and creates the suite2p subdirectory
+        This method derives the root path from self.configuration.file_io.save_path and creates the cindra subdirectory
         if it does not exist. It should be called once at pipeline initialization to save the static data shared
         across all planes.
 
@@ -143,7 +143,7 @@ class RuntimeContext:
             )
             console.error(message=message, error=ValueError)
 
-        root_path = self.configuration.file_io.save_path / "suite2p"
+        root_path = self.configuration.file_io.save_path / "cindra"
         root_path.mkdir(parents=True, exist_ok=True)
 
         self.configuration.save(file_path=root_path / "configuration.yaml")
@@ -171,14 +171,14 @@ class RuntimeContext:
     def load(cls, root_path: Path, plane_index: int = -1) -> RuntimeContext | list[RuntimeContext]:
         """Loads one or more RuntimeContext instances from disk.
 
-        Searches root_path recursively for configuration.yaml to discover the suite2p output directory, then loads
+        Searches root_path recursively for configuration.yaml to discover the cindra output directory, then loads
         shared configuration, acquisition parameters, and plane-specific runtime data. If the dataset was moved to a
         different location, stale output_path values in each plane's runtime YAML are silently corrected so that
         array loading succeeds.
 
         Args:
             root_path: The path to the session's root processed data directory. The method searches
-                recursively for configuration.yaml to locate the suite2p output directory.
+                recursively for configuration.yaml to locate the cindra output directory.
             plane_index: The index of the plane to load. Use -1 to load all available planes.
 
         Returns:
@@ -189,7 +189,7 @@ class RuntimeContext:
             FileNotFoundError: If no configuration.yaml is found, or if required files are missing.
             RuntimeError: If multiple configuration.yaml files are found under root_path.
         """
-        # Discovers the suite2p output directory within the root_path directory tree.
+        # Discovers the cindra output directory within the root_path directory tree.
         matches = list(root_path.rglob("configuration.yaml"))
 
         if len(matches) == 0:
@@ -206,10 +206,10 @@ class RuntimeContext:
             )
             console.error(message=message, error=RuntimeError)
 
-        suite2p_root = matches[0].parent
+        cindra_root = matches[0].parent
 
-        config_path = suite2p_root / "configuration.yaml"
-        acquisition_path = suite2p_root / "acquisition_parameters.yaml"
+        config_path = cindra_root / "configuration.yaml"
+        acquisition_path = cindra_root / "acquisition_parameters.yaml"
 
         if not acquisition_path.exists():
             message = (
@@ -223,7 +223,7 @@ class RuntimeContext:
 
         if plane_index == -1:
             # Loads all planes.
-            plane_directories = natsorted([d for d in suite2p_root.glob("plane_*") if d.is_dir()])
+            plane_directories = natsorted([d for d in cindra_root.glob("plane_*") if d.is_dir()])
             contexts: list[RuntimeContext] = []
 
             for plane_directory in plane_directories:
@@ -233,7 +233,7 @@ class RuntimeContext:
             return contexts
 
         # Loads a specific plane.
-        plane_path = suite2p_root / f"plane_{plane_index}"
+        plane_path = cindra_root / f"plane_{plane_index}"
         if not plane_path.exists():
             message = (
                 f"Unable to load RuntimeContext. Plane directory does not exist at the specified path: {plane_path}."

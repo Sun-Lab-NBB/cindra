@@ -24,7 +24,7 @@ class MultiDayIOData:
     path. This ID is used to name output subdirectories and identify the session in logs."""
 
     data_path: Path | None = None
-    """The path to this session's suite2p single-day pipeline output directory. This is the resolved suite2p root
+    """The path to this session's cindra single-day pipeline output directory. This is the resolved cindra root
     that contains combined_metadata.npz and other single-day outputs. Used to reload CombinedData on demand by
     downstream pipeline stages."""
 
@@ -39,7 +39,7 @@ class MultiDayIOData:
 
     dataset_output_paths: tuple[Path, ...] = ()
     """The multiday output paths for every session in the dataset, stored in natural-sorted order. Each entry points
-    to a session's multiday output directory (e.g., {suite2p_parent}/multiday/{dataset_name}/). Storing this tuple in
+    to a session's multiday output directory (e.g., {cindra_parent}/multiday/{dataset_name}/). Storing this tuple in
     every session enables full dataset hierarchy reconstruction from any single session's serialized YAML file."""
 
     selected_cell_indices: tuple[int, ...] = ()

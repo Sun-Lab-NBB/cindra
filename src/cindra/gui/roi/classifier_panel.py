@@ -83,8 +83,8 @@ def load_classifier(parent: MainWindow) -> None:
         console.echo(message="No classifier file selected.", level=LogLevel.WARNING)
 
 
-def load_s2p_classifier(parent: MainWindow) -> None:
-    """Loads the built-in suite2p classifier.
+def load_cindra_classifier(parent: MainWindow) -> None:
+    """Loads the built-in cindra classifier.
 
     Args:
         parent: The main GUI window.
@@ -121,7 +121,7 @@ def class_default(parent: MainWindow) -> None:
 
 
 def reset_default(parent: MainWindow) -> None:
-    """Resets the user's default classifier to the built-in suite2p version.
+    """Resets the user's default classifier to the built-in cindra version.
 
     Args:
         parent: The main GUI window.
@@ -129,7 +129,7 @@ def reset_default(parent: MainWindow) -> None:
     result = QMessageBox.question(
         parent,
         "Default classifier",
-        "Are you sure you want to reset the default classifier to the built-in suite2p classifier?",
+        "Are you sure you want to reset the default classifier to the built-in cindra classifier?",
         QMessageBox.Yes | QMessageBox.No,
     )
     if result == QMessageBox.Yes:
@@ -318,7 +318,7 @@ def _class_file(parent: MainWindow) -> None:
     if parent.classfile == parent.classuser:
         classifier_name = "default classifier"
     elif parent.classfile == parent.classorig:
-        classifier_name = "suite2p classifier"
+        classifier_name = "cindra classifier"
     else:
         classifier_name = parent.classfile
     parent.classLabel.setText(f"<font color='white'>{classifier_name}</font>")

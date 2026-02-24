@@ -78,7 +78,7 @@ ___
 - The source code has been augmented with many fixes and small optimizations to improve library performance and make it
   easier to maintain the source code in the future.
 - Critically, the library now includes a similarly reimplemented multi-day cell tracking pipeline from the 
-  [OSM manuscript](https://www.nature.com/articles/s41586-024-08548-w), enabling suite2p to track cells both 
+  [OSM manuscript](https://www.nature.com/articles/s41586-024-08548-w), enabling cindra to track cells both 
   within-days and across-days.
 
 ---
@@ -96,7 +96,7 @@ All software library dependencies are installed automatically as part of the lib
 Note, installation from source is ***highly discouraged*** for everyone who is not an active project developer.
 
 1. Download this repository to your local machine using your preferred method, such as Git-cloning. Use one
-   of the stable releases from [GitHub](https://github.com/Sun-Lab-NBB/suite2p/releases).
+   of the stable releases from [GitHub](https://github.com/Sun-Lab-NBB/cindra/releases).
 2. Unpack the downloaded zip and note the path to the binary wheel (`.whl`) file contained in the archive.
 3. Run ```python -m pip install WHEEL_PATH```, replacing 'WHEEL_PATH' with the path to the wheel file, to install the 
    wheel into the active python environment.
@@ -140,7 +140,7 @@ ___
 ## Versioning
 
 This project uses [semantic versioning](https://semver.org/). For the versions available, see the 
-[tags on this repository](https://github.com/Sun-Lab-NBB/suite2p/tags).
+[tags on this repository](https://github.com/Sun-Lab-NBB/cindra/tags).
 
 **Note!** Since this project started as an extension of the original suite2p project, public versioning starts from 
 version 1.0.0, to reflect that this library has evolved from the original suite2p version 0.
@@ -149,7 +149,7 @@ version 1.0.0, to reflect that this library has evolved from the original suite2
 
 ## License
 
-This project is licensed under the GPL3 License: see the [LICENSE](../cindra/LICENSE) file for details.
+This project is licensed under the GPL3 License: see the [LICENSE](LICENSE) file for details.
 
 ___
 
@@ -160,6 +160,6 @@ ___
 - The authors and maintainers of the original [suite2p](https://github.com/MouseLand/suite2p) and 
 [multi-day pipeline](https://github.com/sprustonlab/multiday-suite2p-public).
 - The creators of all other projects used in our development automation pipelines and source code 
-  [see pyproject.toml](../cindra/pyproject.toml).
+  [see pyproject.toml](pyproject.toml).
 
 ---

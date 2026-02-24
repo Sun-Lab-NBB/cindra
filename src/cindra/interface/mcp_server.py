@@ -1,7 +1,7 @@
 """Provides the MCP server for agentic neural imaging data processing.
 
 Exposes tools that enable AI agents to discover sessions, execute pipelines, and monitor processing status for both
-single-day and multi-day suite2p processing workflows.
+single-day and multi-day cindra processing workflows.
 """
 
 from __future__ import annotations
@@ -208,7 +208,7 @@ def _run_binarize_job(config_path: Path) -> tuple[bool, int, str | None]:
         )
         if effective_save_path is None:
             return False, 0, "Configuration error: neither file_io.save_path nor file_io.data_path is set."
-        root_path = effective_save_path / "suite2p"
+        root_path = effective_save_path / "cindra"
         contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
         if not isinstance(contexts, list):
             contexts = [contexts]
@@ -767,28 +767,28 @@ def get_single_day_status(session_path: str) -> dict[str, Any]:
     if not session.exists():
         return {"success": False, "error": f"Session directory not found: {session_path}"}
 
-    suite2p_path = session / "suite2p"
-    if not suite2p_path.exists():
+    cindra_path = session / "cindra"
+    if not cindra_path.exists():
         # Searches recursively for the RuntimeContext configuration marker.
         matches = list(session.rglob("configuration.yaml"))
         if matches:
-            suite2p_path = matches[0].parent
+            cindra_path = matches[0].parent
 
-    if not suite2p_path.exists():
+    if not cindra_path.exists():
         return {
             "success": True,
             "session_path": str(session),
             "status": "not_started",
-            "message": "No suite2p output directory found",
+            "message": "No cindra output directory found",
         }
 
-    combined_path = suite2p_path / "combined"
-    planes = [p for p in suite2p_path.iterdir() if p.is_dir() and p.name.startswith("plane")]
+    combined_path = cindra_path / "combined"
+    planes = [p for p in cindra_path.iterdir() if p.is_dir() and p.name.startswith("plane")]
 
     status: dict[str, Any] = {
         "success": True,
         "session_path": str(session),
-        "suite2p_path": str(suite2p_path),
+        "cindra_path": str(cindra_path),
         "planes_found": len(planes),
         "combined_exists": combined_path.exists(),
     }
@@ -880,8 +880,9 @@ def get_multi_day_status(session_path: str) -> dict[str, Any]:
 def discover_single_day_sessions_tool(root_directory: str) -> dict[str, Any]:
     """Discovers sessions containing raw neural imaging data that can be processed by the single-day pipeline.
 
-    Searches recursively for suite2p_parameters.json files, which mark directories containing raw session data suitable
-    for single-day processing. Returns the parent directory of each match as a session candidate path.
+    Searches recursively for cindra_parameters.json or suite2p_parameters.json files (created by sl-experiment),
+    which mark directories containing raw session data suitable for single-day processing. Returns the parent directory
+    of each match as a session candidate path.
 
     Args:
         root_directory: The absolute path to the root directory to search.
@@ -897,12 +898,19 @@ def discover_single_day_sessions_tool(root_directory: str) -> dict[str, Any]:
     session_paths: list[str] = []
     errors: list[str] = []
 
+    # Tracks discovered directories to avoid duplicates when both cindra and legacy parameter files exist.
+    discovered: set[str] = set()
+
     try:
-        for marker_file in root_path.rglob("suite2p_parameters.json"):
-            try:
-                session_paths.append(str(marker_file.parent))
-            except Exception as error:
-                errors.append(f"{marker_file.parent}: {error}")
+        for filename in ("cindra_parameters.json", "suite2p_parameters.json"):
+            for marker_file in root_path.rglob(filename):
+                try:
+                    parent = str(marker_file.parent)
+                    if parent not in discovered:
+                        discovered.add(parent)
+                        session_paths.append(parent)
+                except Exception as error:
+                    errors.append(f"{marker_file.parent}: {error}")
     except PermissionError as error:
         errors.append(f"Access denied during search: {error}")
 
@@ -921,8 +929,8 @@ def discover_single_day_sessions_tool(root_directory: str) -> dict[str, Any]:
 def discover_multi_day_candidates_tool(root_directory: str) -> dict[str, Any]:
     """Discovers sessions with completed single-day processing that are candidates for multi-day cell tracking.
 
-    Searches recursively for combined_metadata.npz files, which mark completed single-day suite2p outputs. Returns the
-    grandparent directory paths (session root directories containing suite2p output).
+    Searches recursively for combined_metadata.npz files, which mark completed single-day cindra outputs. Returns the
+    grandparent directory paths (session root directories containing cindra output).
 
     Args:
         root_directory: The absolute path to the root directory to search.
@@ -941,7 +949,7 @@ def discover_multi_day_candidates_tool(root_directory: str) -> dict[str, Any]:
     try:
         for marker_file in root_path.rglob("combined_metadata.npz"):
             try:
-                # The combined_metadata.npz lives in suite2p/combined/; grandparent is the suite2p output root,
+                # The combined_metadata.npz lives in cindra/combined/; grandparent is the cindra output root,
                 # and its parent is the session directory.
                 session_root = str(marker_file.parent.parent.parent)
                 if session_root not in session_paths:
