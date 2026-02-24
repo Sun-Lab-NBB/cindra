@@ -45,7 +45,9 @@ class _SingleDayBatchState:
     sessions: list[Path] = field(default_factory=list)
     """All sessions to process."""
     config_path: Path | None = None
-    """Shared configuration file path."""
+    """Template configuration file path."""
+    session_config_paths: dict[str, Path] = field(default_factory=dict)
+    """Per-session configuration file paths (session_key -> config_path)."""
     current_phase: str = "binarize"
     """Current processing phase: 'binarize', 'process', or 'combine'."""
 
@@ -139,6 +141,8 @@ class _MultiDayBatchState:
     """Workers for extract phase."""
     max_parallel_extracts: int = 1
     """Max concurrent extractions."""
+    progress_bars: bool = False
+    """Determines whether to display progress bars during processing."""
 
     # Error tracking.
     errors: dict[str, list[str]] = field(default_factory=dict)
@@ -195,14 +199,16 @@ def _run_binarize_job(config_path: Path) -> tuple[bool, int, str | None]:
             binarize=True,
             process=False,
             combine=False,
-            progress_bars=False,
         )
 
         # Loads the configuration to find the save path, then counts planes via RuntimeContext.
         config = SingleDayConfiguration.from_yaml(file_path=config_path)
-        if config.file_io.save_path is None:
-            return False, 0, "Configuration error: file_io.save_path is None."
-        root_path = config.file_io.save_path / "suite2p"
+        effective_save_path = (
+            config.file_io.save_path if config.file_io.save_path is not None else config.file_io.data_path
+        )
+        if effective_save_path is None:
+            return False, 0, "Configuration error: neither file_io.save_path nor file_io.data_path is set."
+        root_path = effective_save_path / "suite2p"
         contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
         if not isinstance(contexts, list):
             contexts = [contexts]
@@ -217,13 +223,12 @@ def _run_binarize_job(config_path: Path) -> tuple[bool, int, str | None]:
         return True, plane_count, None
 
 
-def _run_process_job(config_path: Path, plane_index: int, workers: int) -> tuple[bool, str | None]:
+def _run_process_job(config_path: Path, plane_index: int) -> tuple[bool, str | None]:
     """Runs the process phase for a single plane.
 
     Args:
         config_path: The path to the configuration file.
         plane_index: The plane index to process.
-        workers: The number of workers to use.
 
     Returns:
         A tuple containing success status and error message if failed.
@@ -235,8 +240,6 @@ def _run_process_job(config_path: Path, plane_index: int, workers: int) -> tuple
             process=True,
             combine=False,
             target_plane=plane_index,
-            workers=workers,
-            progress_bars=False,
         )
 
     except Exception as error:
@@ -263,7 +266,6 @@ def _run_combine_job(config_path: Path) -> tuple[bool, str | None]:
             binarize=False,
             process=False,
             combine=True,
-            progress_bars=False,
         )
 
     except Exception as error:
@@ -306,14 +308,13 @@ def _binarize_worker(session_path: Path, config_path: Path) -> None:
                         _single_day_batch_state.errors.setdefault(session_key, []).append(f"binarize: {error}")
 
 
-def _process_worker(session_path: Path, config_path: Path, plane_index: int, workers: int) -> None:
+def _process_worker(session_path: Path, config_path: Path, plane_index: int) -> None:
     """Worker function for process phase.
 
     Args:
         session_path: The path to the session directory.
-        config_path: The path to the configuration file.
+        config_path: The path to the session's configuration file.
         plane_index: The plane index to process.
-        workers: The number of workers to use.
     """
     session_key = _get_session_key(session_path)
     plane_key = _get_plane_key(session_path, plane_index)
@@ -321,7 +322,7 @@ def _process_worker(session_path: Path, config_path: Path, plane_index: int, wor
     error: str | None = None
 
     try:
-        success, error = _run_process_job(config_path=config_path, plane_index=plane_index, workers=workers)
+        success, error = _run_process_job(config_path=config_path, plane_index=plane_index)
     except Exception as e:
         frames = traceback.extract_tb(e.__traceback__)
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
@@ -376,10 +377,8 @@ def _single_day_batch_manager() -> None:
     """
     timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
-    if _single_day_batch_state is None or _single_day_batch_state.config_path is None:
+    if _single_day_batch_state is None:
         return
-
-    config_path = _single_day_batch_state.config_path
 
     while True:
         with _single_day_batch_state.lock:
@@ -389,10 +388,11 @@ def _single_day_batch_manager() -> None:
                 if not _single_day_batch_state.binarize_active and _single_day_batch_state.binarize_queue:
                     next_session = _single_day_batch_state.binarize_queue.pop(0)
                     session_key = _get_session_key(next_session)
+                    session_config = _single_day_batch_state.session_config_paths[session_key]
 
                     thread = Thread(
                         target=_binarize_worker,
-                        kwargs={"session_path": next_session, "config_path": config_path},
+                        kwargs={"session_path": next_session, "config_path": session_config},
                         daemon=True,
                     )
                     thread.start()
@@ -418,14 +418,14 @@ def _single_day_batch_manager() -> None:
                     session_key, plane_index = _single_day_batch_state.process_queue.pop(0)
                     session_path = Path(session_key)
                     plane_key = _get_plane_key(session_path, plane_index)
+                    session_config = _single_day_batch_state.session_config_paths[session_key]
 
                     thread = Thread(
                         target=_process_worker,
                         kwargs={
                             "session_path": session_path,
-                            "config_path": config_path,
+                            "config_path": session_config,
                             "plane_index": plane_index,
-                            "workers": _single_day_batch_state.workers_per_plane,
                         },
                         daemon=True,
                     )
@@ -457,10 +457,11 @@ def _single_day_batch_manager() -> None:
                 if not _single_day_batch_state.combine_active and _single_day_batch_state.combine_queue:
                     next_session = _single_day_batch_state.combine_queue.pop(0)
                     session_key = _get_session_key(next_session)
+                    session_config = _single_day_batch_state.session_config_paths[session_key]
 
                     thread = Thread(
                         target=_combine_worker,
-                        kwargs={"session_path": next_session, "config_path": config_path},
+                        kwargs={"session_path": next_session, "config_path": session_config},
                         daemon=True,
                     )
                     thread.start()
@@ -474,29 +475,32 @@ def _single_day_batch_manager() -> None:
         timer.delay(delay=1000, allow_sleep=True)
 
 
-def _run_discover_job(config_path: Path, session_paths: list[Path], workers: int) -> tuple[bool, list[str], str | None]:
+def _run_discover_job(
+    config_path: Path, session_paths: list[Path], workers: int, progress_bars: bool = False
+) -> tuple[bool, list[str], str | None]:
     """Runs the discover phase for a single animal.
 
     Args:
         config_path: The path to the configuration file.
         session_paths: The list of session paths for this animal.
         workers: The number of workers to use.
+        progress_bars: Determines whether to display progress bars during processing.
 
     Returns:
         A tuple containing success status, list of session IDs, and error message if failed.
     """
     try:
-        # Writes session directories into the configuration file before running the pipeline.
+        # Writes session directories and runtime settings into the configuration file before running the pipeline.
         configuration = MultiDayConfiguration.from_yaml(file_path=config_path)
         configuration.session_io.session_directories = tuple(natsorted(session_paths))
+        configuration.runtime.parallel_workers = workers
+        configuration.runtime.display_progress_bars = progress_bars
         configuration.save(file_path=config_path)
 
         run_multi_day_pipeline(
             configuration_path=config_path,
             discover=True,
             extract=False,
-            workers=workers,
-            progress_bars=False,
         )
 
         # Reloads the configuration and resolves contexts to extract session IDs.
@@ -514,7 +518,7 @@ def _run_discover_job(config_path: Path, session_paths: list[Path], workers: int
 
 
 def _run_extract_job(
-    config_path: Path, session_paths: list[Path], session_id: str, workers: int
+    config_path: Path, session_paths: list[Path], session_id: str, workers: int, progress_bars: bool = False
 ) -> tuple[bool, str | None]:
     """Runs the extract phase for a single session.
 
@@ -523,14 +527,17 @@ def _run_extract_job(
         session_paths: The list of session paths for this animal.
         session_id: The session ID to extract.
         workers: The number of workers to use.
+        progress_bars: Determines whether to display progress bars during processing.
 
     Returns:
         A tuple containing success status and error message if failed.
     """
     try:
-        # Writes session directories into the configuration file before running the pipeline.
+        # Writes session directories and runtime settings into the configuration file before running the pipeline.
         configuration = MultiDayConfiguration.from_yaml(file_path=config_path)
         configuration.session_io.session_directories = tuple(natsorted(session_paths))
+        configuration.runtime.parallel_workers = workers
+        configuration.runtime.display_progress_bars = progress_bars
         configuration.save(file_path=config_path)
 
         run_multi_day_pipeline(
@@ -538,8 +545,6 @@ def _run_extract_job(
             discover=False,
             extract=True,
             target_session=session_id,
-            workers=workers,
-            progress_bars=False,
         )
 
     except Exception as error:
@@ -551,7 +556,9 @@ def _run_extract_job(
         return True, None
 
 
-def _discover_worker(animal_key: str, config_path: Path, session_paths: list[Path], workers: int) -> None:
+def _discover_worker(
+    animal_key: str, config_path: Path, session_paths: list[Path], workers: int, progress_bars: bool = False
+) -> None:
     """Worker function for discover phase.
 
     Args:
@@ -559,6 +566,7 @@ def _discover_worker(animal_key: str, config_path: Path, session_paths: list[Pat
         config_path: The path to the configuration file.
         session_paths: The list of session paths for this animal.
         workers: The number of workers to use.
+        progress_bars: Determines whether to display progress bars during processing.
     """
     success: bool = False
     session_ids: list[str] = []
@@ -566,7 +574,7 @@ def _discover_worker(animal_key: str, config_path: Path, session_paths: list[Pat
 
     try:
         success, session_ids, error = _run_discover_job(
-            config_path=config_path, session_paths=session_paths, workers=workers
+            config_path=config_path, session_paths=session_paths, workers=workers, progress_bars=progress_bars
         )
     except Exception as e:
         frames = traceback.extract_tb(e.__traceback__)
@@ -586,7 +594,12 @@ def _discover_worker(animal_key: str, config_path: Path, session_paths: list[Pat
 
 
 def _extract_worker(
-    animal_key: str, config_path: Path, session_paths: list[Path], session_id: str, workers: int
+    animal_key: str,
+    config_path: Path,
+    session_paths: list[Path],
+    session_id: str,
+    workers: int,
+    progress_bars: bool = False,
 ) -> None:
     """Worker function for extract phase.
 
@@ -596,6 +609,7 @@ def _extract_worker(
         session_paths: The list of session paths for this animal.
         session_id: The session ID to extract.
         workers: The number of workers to use.
+        progress_bars: Determines whether to display progress bars during processing.
     """
     extract_key = f"{animal_key}|{session_id}"
     success: bool = False
@@ -603,7 +617,11 @@ def _extract_worker(
 
     try:
         success, error = _run_extract_job(
-            config_path=config_path, session_paths=session_paths, session_id=session_id, workers=workers
+            config_path=config_path,
+            session_paths=session_paths,
+            session_id=session_id,
+            workers=workers,
+            progress_bars=progress_bars,
         )
     except Exception as e:
         frames = traceback.extract_tb(e.__traceback__)
@@ -659,6 +677,7 @@ def _multi_day_batch_manager() -> None:
                             "config_path": config_path,
                             "session_paths": session_paths,
                             "workers": _multi_day_batch_state.workers_per_discover,
+                            "progress_bars": _multi_day_batch_state.progress_bars,
                         },
                         daemon=True,
                     )
@@ -693,6 +712,7 @@ def _multi_day_batch_manager() -> None:
                             "session_paths": session_paths,
                             "session_id": session_id,
                             "workers": _multi_day_batch_state.workers_per_extract,
+                            "progress_bars": _multi_day_batch_state.progress_bars,
                         },
                         daemon=True,
                     )
@@ -947,8 +967,10 @@ def start_batch_processing_tool(
     session_paths: list[str],
     config_path: str,
     *,
+    session_save_paths: list[str] | None = None,
     workers_per_plane: int = -1,
     max_parallel_planes: int = -1,
+    progress_bars: bool = False,
 ) -> dict[str, Any]:
     """Starts batch single-day processing for multiple sessions.
 
@@ -956,15 +978,25 @@ def start_batch_processing_tool(
     get_batch_processing_status_tool to monitor progress.
 
     Args:
-        session_paths: List of absolute paths to session root data directories.
-        config_path: The absolute path to the configuration YAML file.
+        session_paths: List of absolute paths to session data directories (used as file_io.data_path per session).
+        config_path: The absolute path to the template configuration YAML file.
+        session_save_paths: Optional list of absolute paths for per-session output directories (used as
+            file_io.save_path). Must match the length of session_paths when provided. When not provided, each
+            session's save_path defaults to its data_path.
         workers_per_plane: CPU cores per plane job (-1 for automatic, max 30).
         max_parallel_planes: Max concurrent plane jobs (-1 for automatic).
+        progress_bars: Determines whether to display progress bars during processing.
     """
     global _single_day_batch_state
 
     if not session_paths:
         return {"error": "At least one session path is required"}
+
+    if session_save_paths is not None and len(session_save_paths) != len(session_paths):
+        return {
+            "error": f"session_save_paths length ({len(session_save_paths)}) must match "
+            f"session_paths length ({len(session_paths)})."
+        }
 
     config = Path(config_path)
     if not config.exists():
@@ -974,18 +1006,28 @@ def start_batch_processing_tool(
         return {"error": f"Configuration file must be a .yaml file: {config_path}"}
 
     # Validates session paths.
+    valid_indices: list[int] = []
     valid_paths: list[Path] = []
     invalid_paths: list[str] = []
 
-    for session_path in session_paths:
+    for index, session_path in enumerate(session_paths):
         path = Path(session_path)
         if path.exists() and path.is_dir():
             valid_paths.append(path)
+            valid_indices.append(index)
         else:
             invalid_paths.append(session_path)
 
     if not valid_paths:
         return {"error": "No valid session paths provided", "invalid_paths": invalid_paths}
+
+    # Resolves per-session save paths. Defaults to data_path when session_save_paths is not provided.
+    resolved_save_paths: list[Path] = []
+    for index, data_path in zip(valid_indices, valid_paths, strict=True):
+        if session_save_paths is not None:
+            resolved_save_paths.append(Path(session_save_paths[index]))
+        else:
+            resolved_save_paths.append(data_path)
 
     # Checks if batch processing is already active.
     if _single_day_batch_state is not None:
@@ -1017,10 +1059,27 @@ def start_batch_processing_tool(
         else resolve_parallel_job_capacity(workers_per_job=actual_workers)
     )
 
+    # Creates per-session configuration copies with session-specific paths and runtime settings. Each session gets its
+    # own config file so that concurrent workers do not interfere with one another. The config file is written to the
+    # save directory, which is guaranteed to be writable (the pipeline writes output there).
+    session_config_paths: dict[str, Path] = {}
+    for data_path, save_path in zip(valid_paths, resolved_save_paths, strict=True):
+        session_key = _get_session_key(data_path)
+        session_config = SingleDayConfiguration.from_yaml(file_path=config)
+        session_config.file_io.data_path = data_path
+        session_config.file_io.save_path = save_path
+        session_config.runtime.parallel_workers = actual_workers
+        session_config.runtime.display_progress_bars = progress_bars
+        save_path.mkdir(parents=True, exist_ok=True)
+        session_config_path = save_path / "_batch_config.yaml"
+        session_config.save(file_path=session_config_path)
+        session_config_paths[session_key] = session_config_path
+
     # Initializes batch state.
     _single_day_batch_state = _SingleDayBatchState(
         sessions=list(valid_paths),
         config_path=config,
+        session_config_paths=session_config_paths,
         current_phase="binarize",
         binarize_queue=list(valid_paths),
         workers_per_plane=actual_workers,
@@ -1242,6 +1301,7 @@ def start_multiday_batch_processing_tool(
     *,
     workers_per_discover: int = 20,
     workers_per_extract: int = -1,
+    progress_bars: bool = False,
 ) -> dict[str, Any]:
     """Starts batch multi-day processing for multiple animals.
 
@@ -1252,6 +1312,7 @@ def start_multiday_batch_processing_tool(
         animal_configs: List of animal configurations, each with 'config_path' and 'session_paths'.
         workers_per_discover: Workers for discover phase (default 20).
         workers_per_extract: Workers for extract phase (-1 for automatic, max 30).
+        progress_bars: Determines whether to display progress bars during processing.
     """
     global _multi_day_batch_state
 
@@ -1328,6 +1389,7 @@ def start_multiday_batch_processing_tool(
         max_parallel_discovers=max_parallel_discovers,
         workers_per_extract=actual_workers_extract,
         max_parallel_extracts=max_parallel_extracts,
+        progress_bars=progress_bars,
         lock=Lock(),
     )
 

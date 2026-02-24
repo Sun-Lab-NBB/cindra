@@ -232,6 +232,22 @@ def ss2p_run(
         "processes all available planes sequentially."
     ),
 )
+@click.option(
+    "-d",
+    "--data-path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=False,
+    default=None,
+    help="Overrides the configuration's file_io.data_path with the specified directory.",
+)
+@click.option(
+    "-s",
+    "--save-path",
+    type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
+    required=False,
+    default=None,
+    help="Overrides the configuration's file_io.save_path with the specified directory.",
+)
 @click.pass_context
 def run_sd_pipeline(
     ctx: click.Context,
@@ -240,12 +256,24 @@ def run_sd_pipeline(
     process: bool,
     combine: bool,
     target: int,
+    data_path: Path | None,
+    save_path: Path | None,
 ) -> None:
     """Runs the requested single-day pipeline step(s)."""
     # Extracts shared configuration parameters passed as the context dictionary.
-    config_path = ctx.obj["config_path"]
-    progress_bars = ctx.obj["progress_bars"]
-    workers = ctx.obj["workers"]
+    config_path: Path = ctx.obj["config_path"]
+    progress_bars: bool = ctx.obj["progress_bars"]
+    workers: int = ctx.obj["workers"]
+
+    # Writes CLI overrides into the configuration file before running the pipeline.
+    configuration = SingleDayConfiguration.from_yaml(file_path=config_path)
+    configuration.runtime.parallel_workers = workers
+    configuration.runtime.display_progress_bars = progress_bars
+    if data_path is not None:
+        configuration.file_io.data_path = data_path
+    if save_path is not None:
+        configuration.file_io.save_path = save_path
+    configuration.save(file_path=config_path)
 
     run_single_day_pipeline(
         configuration_path=config_path,
@@ -254,8 +282,6 @@ def run_sd_pipeline(
         process=process,
         combine=combine,
         target_plane=target,
-        workers=workers,
-        progress_bars=progress_bars,
     )
 
 
@@ -328,12 +354,14 @@ def run_md_pipeline(
     """Runs the requested multi-day pipeline step(s)."""
     # Extracts shared configuration parameters passed as the context dictionary.
     config_path: Path = ctx.obj["config_path"]
-    progress_bars = ctx.obj["progress_bars"]
-    workers = ctx.obj["workers"]
+    progress_bars: bool = ctx.obj["progress_bars"]
+    workers: int = ctx.obj["workers"]
 
-    # Writes session directories from the CLI into the configuration file before running the pipeline.
+    # Writes CLI overrides into the configuration file before running the pipeline.
     configuration = MultiDayConfiguration.from_yaml(file_path=config_path)
     configuration.session_io.session_directories = tuple(natsorted(session_paths))
+    configuration.runtime.parallel_workers = workers
+    configuration.runtime.display_progress_bars = progress_bars
     configuration.save(file_path=config_path)
 
     run_multi_day_pipeline(
@@ -342,6 +370,4 @@ def run_md_pipeline(
         discover=discover,
         extract=extract,
         target_session=target,
-        workers=workers,
-        progress_bars=progress_bars,
     )

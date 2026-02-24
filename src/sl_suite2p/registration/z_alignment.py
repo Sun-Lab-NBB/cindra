@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from tqdm import tqdm
 import numpy as np
-from ataraxis_base_utilities import console, resolve_worker_count
+from ataraxis_base_utilities import console
 
 from ..io import BinaryFile
 from .rigid import apply_edge_taper, compute_edge_taper, compute_rigid_shifts, compute_phase_correlation_kernel
@@ -86,8 +86,8 @@ def compute_z_position(
 
     num_z_planes = z_stack.shape[0]
 
-    # Resolves the number of FFT workers for phase correlation computation.
-    fft_workers = resolve_worker_count(requested_workers=parallel_workers)
+    # Uses the pre-resolved worker count for FFT parallelization in phase correlation computation.
+    fft_workers = parallel_workers
 
     # Prepares reference kernels and edge taper masks for each z-stack plane.
     edge_taper_slope = edge_taper_pixels if one_photon_mode else 3.0 * spatial_smoothing_sigma

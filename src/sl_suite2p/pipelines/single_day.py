@@ -2,7 +2,7 @@
 
 import numba  # type: ignore[import-untyped]
 from ataraxis_time import PrecisionTimer, TimerPrecisions, get_timestamp
-from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
+from ataraxis_base_utilities import LogLevel, console
 
 from ..io import combine_planes, convert_tiffs_to_binary, resolve_single_day_contexts
 from ..detection import detect_plane_rois
@@ -135,8 +135,9 @@ def process_plane(configuration: SingleDayConfiguration, plane_index: int) -> No
 
     console.echo(message=f"Processing plane {plane_index}...", level=LogLevel.INFO)
 
-    # Resolves the configured worker count and configures the maximum number of numba threads for parallelization.
-    numba.set_num_threads(resolve_worker_count(requested_workers=configuration.runtime.parallel_workers))
+    # Configures the maximum number of numba threads for parallelization. The worker count is already resolved to a
+    # valid positive integer by the pipeline entry point.
+    numba.set_num_threads(configuration.runtime.parallel_workers)
 
     # Validates the frame count meets minimum processing requirements.
     frame_count = context.runtime.io.frame_count
