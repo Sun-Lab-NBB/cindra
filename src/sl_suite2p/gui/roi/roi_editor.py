@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
+from ...io import BinaryFile
 from ..styles import (
     SMALL_EDIT_WIDTH,
     MEDIUM_EDIT_WIDTH,
@@ -33,7 +34,12 @@ from ..styles import (
     BUTTON_UNPRESSED_STYLESHEET,
     label_font_bold,
 )
-from ...extraction import create_masks, apply_oasis_deconvolution, compute_delta_fluorescence
+from ...extraction import (
+    create_masks,
+    apply_oasis_deconvolution,
+    compute_delta_fluorescence,
+    extract_fluorescence_traces,
+)
 from ...detection.roi_statistics import compute_roi_statistics
 
 if TYPE_CHECKING:
@@ -121,7 +127,7 @@ def _extract_masks_and_traces(
     )
     manual_stat = all_statistics[: len(manual_statistics)]
 
-    # Unpacks per-ROI masks for manual ROIs into the separate formats expected by extract_traces_from_masks.
+    # Unpacks per-ROI masks for manual ROIs into the separate formats expected by the extraction pipeline.
     manual_masks = per_roi_masks[: len(manual_statistics)]
     manual_cell_masks = tuple((indices, weights) for indices, weights, _ in manual_masks)
     manual_neuropil_masks = (
@@ -132,11 +138,39 @@ def _extract_masks_and_traces(
         level=LogLevel.SUCCESS,
     )
 
-    cell_fluorescence, neuropil_fluorescence, channel_2_fluorescence, channel_2_neuropil = extract_traces_from_masks(
-        ops,
-        manual_cell_masks,
-        manual_neuropil_masks,
-    )
+    # Extracts channel 1 fluorescence traces from the registered binary file.
+    with BinaryFile(
+        height=ops["frame_height"],
+        width=ops["frame_width"],
+        file_path=ops["registered_binary_path"],
+    ) as binary:
+        cell_fluorescence, neuropil_fluorescence = extract_fluorescence_traces(
+            frames=binary,
+            cell_masks=manual_cell_masks,
+            neuropil_masks=manual_neuropil_masks,
+            batch_size=ops["batch_size"],
+            channel_label="manual ROI channel 1",
+        )
+
+    # Extracts channel 2 fluorescence traces if a second channel binary exists.
+    if "registered_binary_path_channel_2" in ops:
+        with BinaryFile(
+            height=ops["frame_height"],
+            width=ops["frame_width"],
+            file_path=ops["registered_binary_path_channel_2"],
+        ) as binary:
+            channel_2_fluorescence, channel_2_neuropil = extract_fluorescence_traces(
+                frames=binary,
+                cell_masks=manual_cell_masks,
+                neuropil_masks=manual_neuropil_masks,
+                batch_size=ops["batch_size"],
+                channel_label="manual ROI channel 2",
+            )
+    else:
+        roi_count = len(manual_cell_masks)
+        frame_count = cell_fluorescence.shape[1]
+        channel_2_fluorescence = np.zeros((roi_count, frame_count), dtype=np.float32)
+        channel_2_neuropil = np.zeros((roi_count, frame_count), dtype=np.float32)
 
     # Computes activity statistics for classifier compatibility.
     pixel_counts = np.array(

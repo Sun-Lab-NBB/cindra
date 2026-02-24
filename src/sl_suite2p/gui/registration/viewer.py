@@ -83,6 +83,9 @@ _METRICS_FONT_SIZE: int = 14
 class BinaryPlayer(QMainWindow):
     """Provides a playback window for viewing registered binary imaging data.
 
+    Args:
+        data: Pre-loaded registration data to display on startup.
+
     Attributes:
         _data: The registration viewer data model, or None if no session is loaded.
         _loaded: Determines whether registration data has been loaded and is ready for display.
@@ -115,7 +118,7 @@ class BinaryPlayer(QMainWindow):
         _z_stack: Loaded z-stack volume, or None if not loaded.
         _z_height: Height of z-stack planes in pixels.
         _z_width: Width of z-stack planes in pixels.
-        _z_display_range: Percentile-based display range for z-stack images.
+        _z_display_range: Percentile-based display range for z-stack images as a 2-element array.
         _z_max_positions: Per-frame z-plane indices of maximum correlation, or None.
         _central_widget: Central widget container.
         _layout: Grid layout for arranging all controls and views.
@@ -144,15 +147,11 @@ class BinaryPlayer(QMainWindow):
         _update_timer: Timer driving frame advancement during playback.
     """
 
-    # Emitted when the user selects a different imaging plane from the plane selector.
+    # Notifies listeners when the user selects a different imaging plane from the plane selector.
     plane_changed = QtCore.Signal(int)
 
     def __init__(self, data: RegistrationViewerData | None = None) -> None:
-        """Initializes the binary player window and all UI components.
-
-        Args:
-            data: Pre-loaded registration data to display on startup.
-        """
+        """Initializes the binary player window and all UI components."""
         super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.setGeometry(70, 70, 1070, 1070)
@@ -166,17 +165,17 @@ class BinaryPlayer(QMainWindow):
         self._graphics_widget.resize(1000, 500)
         self._layout.addWidget(self._graphics_widget, 1, 2, 13, 14)
 
-        # State flags and data model.
+        # Initializes state flags and data model.
         self._loaded: bool = False
         self._z_loaded: bool = False
         self._z_on: bool = False
         self._channel_2_visible: bool = False
         self._has_channel_2_binary: bool = False
         self._has_nonrigid: bool = False
-        self._z_correlation: np.ndarray | None = None
+        self._z_correlation: NDArray[np.float32] | None = None
         self._data: RegistrationViewerData | None = None
 
-        # Frame geometry and binary file handles.
+        # Initializes frame geometry and binary file handles.
         self._frame_count: int = 0
         self._current_frame: int = 0
         self._frame_delta: int = 10
@@ -190,42 +189,43 @@ class BinaryPlayer(QMainWindow):
         self._registration_files: list[IO[bytes]] = []
         self._registration_file_channel_2: IO[bytes] | None = None
         self._bytes_per_frame: list[int] = []
-        self._display_range: np.ndarray = np.zeros((2,), dtype=np.float64)
+        self._display_range: NDArray[np.float32] = np.zeros((2,), dtype=np.float32)
         self._aspect_ratio: float = 1.0
         self._time_step: float = 0.0
-        self._y_offsets: np.ndarray = np.zeros((0,), dtype=np.int32)
-        self._x_offsets: np.ndarray = np.zeros((0,), dtype=np.int32)
-        self._nonrigid_rms: np.ndarray | None = None
-        self._image: np.ndarray | None = None
+        self._y_offsets: NDArray[np.int32] = np.zeros((0,), dtype=np.int32)
+        self._x_offsets: NDArray[np.int32] = np.zeros((0,), dtype=np.int32)
+        self._nonrigid_rms: NDArray[np.float32] | None = None
+        self._image: NDArray[np.int16] | None = None
 
-        # Z-stack data.
-        self._z_stack: np.ndarray | None = None
+        # Initializes z-stack data.
+        self._z_stack: NDArray[np.int16] | None = None
         self._z_height: int = 0
         self._z_width: int = 0
-        self._z_display_range: list[float] = []
-        self._z_max_positions: np.ndarray | None = None
+        self._z_display_range: NDArray[np.float32] = np.zeros((2,), dtype=np.float32)
+        self._z_max_positions: NDArray[np.int32] | None = None
 
-        # Main image view.
+        # Configures main image view.
         self._main_view_box: pg.ViewBox = pg.ViewBox(lockAspect=True, invertY=True, name="plot1")
+        # noinspection PyUnresolvedReferences,PyArgumentList
         self._graphics_widget.addItem(self._main_view_box, row=0, col=0)
         self._main_view_box.setMenuEnabled(False)
         self._main_image: pg.ImageItem = pg.ImageItem()
         self._main_view_box.addItem(self._main_image)
 
-        # Side box for z-stack display.
+        # Configures side box for z-stack display.
         self._side_view_box: pg.ViewBox = pg.ViewBox(lockAspect=True, invertY=True)
         self._side_view_box.setMenuEnabled(False)
         self._side_image: pg.ImageItem = pg.ImageItem()
         self._side_view_box.addItem(self._side_image)
 
-        # Channel 2 checkbox.
+        # Configures channel 2 checkbox.
         self._channel_2_checkbox: QCheckBox = QCheckBox("view channel 2")
         self._channel_2_checkbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self._channel_2_checkbox.setEnabled(False)
         self._channel_2_checkbox.toggled.connect(self._toggle_channel_2)
         self._layout.addWidget(self._channel_2_checkbox, 0, 5, 1, 1)
 
-        # Z-stack checkbox.
+        # Configures z-stack checkbox.
         self._z_stack_checkbox: QCheckBox = QCheckBox("view z-stack")
         self._z_stack_checkbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self._z_stack_checkbox.setEnabled(False)
@@ -243,7 +243,8 @@ class BinaryPlayer(QMainWindow):
         self._z_plane_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._layout.addWidget(self._z_plane_edit, 0, 10, 1, 1)
 
-        # Rigid registration offset plot.
+        # Configures rigid registration offset plot.
+        # noinspection PyUnresolvedReferences
         self._shift_plot = self._graphics_widget.addPlot(name="plot_shift", row=1, col=0, colspan=2)
         self._shift_plot.setMouseEnabled(x=True, y=False)
         self._shift_plot.setMenuEnabled(False)
@@ -251,27 +252,30 @@ class BinaryPlayer(QMainWindow):
         self._shift_scatter.setData([0, 0], [0, 0])
         self._shift_plot.addItem(self._shift_scatter)
 
-        # Nonrigid RMS displacement plot.
+        # Configures nonrigid RMS displacement plot.
+        # noinspection PyUnresolvedReferences
         self._nonrigid_plot = self._graphics_widget.addPlot(name="plot_nonrigid", row=2, col=0, colspan=2)
         self._nonrigid_plot.setMouseEnabled(x=True, y=False)
         self._nonrigid_plot.setMenuEnabled(False)
         self._nonrigid_scatter: pg.ScatterPlotItem = pg.ScatterPlotItem()
         self._nonrigid_plot.setXLink("plot_shift")
 
-        # Z-position correlation plot.
+        # Configures z-position correlation plot.
+        # noinspection PyUnresolvedReferences
         self._z_position_plot = self._graphics_widget.addPlot(name="plot_Z", row=3, col=0, colspan=2)
         self._z_position_plot.setMouseEnabled(x=True, y=False)
         self._z_position_plot.setMenuEnabled(False)
         self._z_position_scatter: pg.ScatterPlotItem = pg.ScatterPlotItem()
         self._z_position_plot.setXLink("plot_shift")
 
+        # noinspection PyUnresolvedReferences
         self._graphics_widget.ci.layout.setRowStretchFactor(0, 12)
         self._movie_label: QLabel = QLabel("No session loaded")
         self._movie_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self._movie_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self._create_buttons()
 
-        # Plane selector dropdown.
+        # Configures plane selector dropdown.
         plane_label = QLabel("Plane:")
         plane_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self._layout.addWidget(plane_label, 6, 0, 1, 1)
@@ -280,7 +284,7 @@ class BinaryPlayer(QMainWindow):
         self._plane_selector.currentIndexChanged.connect(self._on_plane_changed)
         self._layout.addWidget(self._plane_selector, 6, 1, 1, 1)
 
-        # Frame slider.
+        # Configures frame slider.
         self._frame_label: QLabel = QLabel("Current frame:")
         self._frame_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
         self._frame_number_label: QLabel = QLabel("0")
@@ -303,6 +307,7 @@ class BinaryPlayer(QMainWindow):
         self._update_buttons()
         self._update_timer: QtCore.QTimer = QtCore.QTimer()
         self._update_timer.timeout.connect(self._next_frame)
+        # noinspection PyUnresolvedReferences
         self._graphics_widget.scene().sigMouseClicked.connect(self._plot_clicked)
 
         if data is not None:
@@ -422,9 +427,11 @@ class BinaryPlayer(QMainWindow):
         if self._loaded:
             if self._z_stack_checkbox.isChecked():
                 self._z_on = True
+                # noinspection PyUnresolvedReferences,PyArgumentList
                 self._graphics_widget.addItem(self._side_view_box, row=0, col=1)
             else:
                 self._z_on = False
+                # noinspection PyUnresolvedReferences
                 self._graphics_widget.removeItem(self._side_view_box)
             self._next_frame()
 
@@ -439,8 +446,8 @@ class BinaryPlayer(QMainWindow):
                 self._registration_file_channel_2.seek(0, 0)
         self._image = np.zeros((self._frame_height, self._frame_width), dtype=np.int16)
         for index in range(len(self._registration_paths)):
-            buff = self._registration_files[index].read(self._bytes_per_frame[index])
-            frame = np.frombuffer(buff, dtype=np.int16, offset=0).reshape(
+            buffer = self._registration_files[index].read(self._bytes_per_frame[index])
+            frame = np.frombuffer(buffer, dtype=np.int16, offset=0).reshape(
                 (self._plane_heights[index], self._plane_widths[index])
             )
             self._image[
@@ -449,8 +456,8 @@ class BinaryPlayer(QMainWindow):
             ] = frame
 
         if self._has_channel_2_binary and self._channel_2_visible and self._registration_file_channel_2 is not None:
-            buff = self._registration_file_channel_2.read(self._bytes_per_frame[0])
-            channel_2_frame = np.frombuffer(buff, dtype=np.int16, offset=0).reshape(
+            buffer = self._registration_file_channel_2.read(self._bytes_per_frame[0])
+            channel_2_frame = np.frombuffer(buffer, dtype=np.int16, offset=0).reshape(
                 (self._plane_heights[0], self._plane_widths[0])
             )[:, :, np.newaxis]
             self._image = np.concatenate(
@@ -460,7 +467,8 @@ class BinaryPlayer(QMainWindow):
         if self._z_loaded and self._z_on and self._z_stack is not None:
             if self._z_max_positions is not None:
                 self._z_plane_edit.setText(str(self._z_max_positions[self._current_frame]))
-            self._side_image.setImage(self._z_stack[int(self._z_plane_edit.text())], levels=self._z_display_range)
+            z_plane_frame = np.asarray(self._z_stack[int(self._z_plane_edit.text())])
+            self._side_image.setImage(z_plane_frame, levels=self._z_display_range)
 
         self._main_image.setImage(self._image, levels=self._display_range)
         self._frame_slider.setValue(self._current_frame)
@@ -502,8 +510,10 @@ class BinaryPlayer(QMainWindow):
             sample_count=sample_count,
             registration_path=str(self._data.registered_binary_path),
         )
-        self._display_range = frames.mean() + frames.std() * np.array(
-            [-_DISPLAY_RANGE_LOW_SIGMA, _DISPLAY_RANGE_HIGH_SIGMA]
+        frame_mean = np.float32(frames.mean())
+        frame_std = np.float32(frames.std())
+        self._display_range = frame_mean + frame_std * np.array(
+            [-_DISPLAY_RANGE_LOW_SIGMA, _DISPLAY_RANGE_HIGH_SIGMA], dtype=np.float32
         )
 
         self._movie_label.setText(self._registration_paths[-1])
@@ -511,7 +521,7 @@ class BinaryPlayer(QMainWindow):
             2 * self._plane_heights[index] * self._plane_widths[index] for index in range(len(self._registration_paths))
         ]
 
-        # Aspect ratio from data model.
+        # Loads aspect ratio from data model.
         self._aspect_ratio = self._data.aspect_ratio
         self._main_view_box.setAspectLocked(lock=True, ratio=self._aspect_ratio)
         self._side_view_box.setAspectLocked(lock=True, ratio=self._aspect_ratio)
@@ -560,7 +570,7 @@ class BinaryPlayer(QMainWindow):
         if nonrigid_y is not None and nonrigid_x is not None:
             self._nonrigid_rms = np.sqrt(
                 np.mean(nonrigid_y.astype(np.float32) ** 2 + nonrigid_x.astype(np.float32) ** 2, axis=1)
-            )
+            ).astype(np.float32)
             self._has_nonrigid = True
             self._nonrigid_plot.plot(self._nonrigid_rms, pen=(180, 100, 255))
             self._nonrigid_plot.setRange(
@@ -583,6 +593,7 @@ class BinaryPlayer(QMainWindow):
 
     def _plot_clicked(self, event: object) -> None:
         """Handles mouse click events on plots for frame navigation."""
+        # noinspection PyUnresolvedReferences
         items = self._graphics_widget.scene().items(event.scenePos())  # type: ignore[attr-defined]
         position_x = 0
         is_time_plot = False
@@ -620,16 +631,16 @@ class BinaryPlayer(QMainWindow):
             self._z_stack = imread(z_stack_path)
             self._z_height, self._z_width = self._z_stack.shape[1:]
             self._z_plane_edit.setValidator(QtGui.QIntValidator(0, self._z_stack.shape[0]))
-            self._z_display_range = [
-                np.percentile(self._z_stack, _Z_PERCENTILE_LOW),
-                np.percentile(self._z_stack, _Z_PERCENTILE_HIGH),
-            ]
+            self._z_display_range = np.array(
+                [np.percentile(self._z_stack, _Z_PERCENTILE_LOW), np.percentile(self._z_stack, _Z_PERCENTILE_HIGH)],
+                dtype=np.float32,
+            )
 
             self._compute_z_button.setEnabled(True)
             self._z_loaded = True
             self._z_stack_checkbox.setEnabled(True)
             self._z_stack_checkbox.setChecked(True)
-            self._z_max_positions = np.zeros(self._frame_count, dtype=int)
+            self._z_max_positions = np.zeros(self._frame_count, dtype=np.int32)
 
             # Checks for cached z-correlation data in order of priority:
             # 1. Local instance cache (self._z_correlation)
@@ -638,17 +649,17 @@ class BinaryPlayer(QMainWindow):
                 self._z_max_positions = np.argmax(
                     gaussian_filter1d(self._z_correlation.T.copy(), sigma=_Z_SMOOTHING_SIGMA, axis=1),
                     axis=1,
-                )
+                ).astype(np.int32)
                 self._plot_z_correlation()
             elif self._data is not None and self._data.output_directory is not None:
-                zcorr_path = self._data.output_directory / "zcorr.npy"
-                if zcorr_path.exists():
-                    self._z_correlation = np.load(zcorr_path)
+                z_correlation_path = self._data.output_directory / "zcorr.npy"
+                if z_correlation_path.exists():
+                    self._z_correlation = np.load(z_correlation_path).astype(np.float32)
                     if self._z_stack.shape[0] == self._z_correlation.shape[0]:
                         self._z_max_positions = np.argmax(
                             gaussian_filter1d(self._z_correlation.T.copy(), sigma=_Z_SMOOTHING_SIGMA, axis=1),
                             axis=1,
-                        )
+                        ).astype(np.int32)
                         self._plot_z_correlation()
 
         except Exception as error:
@@ -689,15 +700,28 @@ class BinaryPlayer(QMainWindow):
         console.echo(message="Video paused")
 
     def _compute_z(self) -> None:
-        """Computes z-position correlations for the current session.
+        """Computes z-position correlations between the loaded z-stack and the registered binary."""
+        if self._data is None or self._z_stack is None:
+            return
 
-        Currently disabled pending refactor to use RuntimeContext instead of legacy ops dictionary.
-        """
-        console.echo(
-            message="Z-position computation is temporarily disabled. The GUI needs to be refactored to use "
-            "RuntimeContext instead of the legacy ops dictionary.",
-            level=LogLevel.WARNING,
-        )
+        try:
+            self._z_correlation = self._data.compute_z_correlations(
+                z_stack=self._z_stack.astype(np.float32),
+            )
+            self._z_max_positions = np.argmax(
+                gaussian_filter1d(self._z_correlation.T.copy(), sigma=_Z_SMOOTHING_SIGMA, axis=1),
+                axis=1,
+            ).astype(np.int32)
+
+            # Persists the correlation array to the output directory for future sessions.
+            if self._data.output_directory is not None:
+                z_correlation_path = self._data.output_directory / "zcorr.npy"
+                np.save(z_correlation_path, self._z_correlation)
+                console.echo(message=f"Z-position correlations saved to: {z_correlation_path}")
+
+            self._plot_z_correlation()
+        except Exception as error:
+            console.echo(message=f"Unable to compute z-position correlations. {error}", level=LogLevel.ERROR)
 
     def _plot_z_correlation(self) -> None:
         """Plots the z-position correlation trace on the z-position plot."""
@@ -779,6 +803,9 @@ class BinaryPlayer(QMainWindow):
 class PCViewer(QMainWindow):
     """Provides a viewer window for principal component registration metrics.
 
+    Args:
+        data: Pre-loaded registration data to display on startup.
+
     Attributes:
         _data: The registration viewer data model, or None if no session is loaded.
         _loaded: Determines whether PC data has been loaded and is ready for display.
@@ -811,11 +838,7 @@ class PCViewer(QMainWindow):
     """
 
     def __init__(self, data: RegistrationViewerData | None = None) -> None:
-        """Initializes the PC viewer window and all UI components.
-
-        Args:
-            data: Pre-loaded registration data to display on startup.
-        """
+        """Initializes the PC viewer window and all UI components."""
         super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
         self.setGeometry(70, 70, 1300, 800)
@@ -828,31 +851,39 @@ class PCViewer(QMainWindow):
         self._graphics_widget: pg.GraphicsLayoutWidget = pg.GraphicsLayoutWidget()
         self._layout.addWidget(self._graphics_widget, 0, 2, 13, 14)
 
-        # State and data.
+        # Initializes state and data.
         self._data: RegistrationViewerData | None = None
         self._loaded: bool = False
         self._current_frame: int = 0
         self._pc_count: int = _DEFAULT_PC_COUNT
-        self._pc_images: np.ndarray | None = None
+        self._pc_images: NDArray[np.float32] | None = None
         self._image_height: int = 0
         self._image_width: int = 0
-        self._pc_metrics: np.ndarray | None = None
-        self._pc_projections: np.ndarray | None = None
+        self._pc_metrics: NDArray[np.float32] | None = None
+        self._pc_projections: NDArray[np.float32] | None = None
         self._metrics_scatter: pg.ScatterPlotItem | None = None
         self._legend: pg.LegendItem | None = None
 
-        # Pixel shift metrics plot.
+        # Configures pixel shift metrics plot.
+        # noinspection PyUnresolvedReferences
         self._metrics_plot = self._graphics_widget.addPlot(row=0, col=0)
         self._metrics_plot.setMouseEnabled(x=False, y=False)
         self._metrics_plot.setMenuEnabled(False)
 
+        # noinspection PyUnresolvedReferences
         self._difference_view_box = self._graphics_widget.addViewBox(
-            name="plot1", lockAspect=True, row=1, col=0, invertY=True
+            name="plot1",
+            lockAspect=True,
+            row=1,
+            col=0,
+            invertY=True,
         )
+        # noinspection PyUnresolvedReferences
         self._merged_view_box = self._graphics_widget.addViewBox(lockAspect=True, row=1, col=1, invertY=True)
         self._merged_view_box.setMenuEnabled(False)
         self._merged_view_box.setXLink("plot1")
         self._merged_view_box.setYLink("plot1")
+        # noinspection PyUnresolvedReferences
         self._animated_view_box = self._graphics_widget.addViewBox(lockAspect=True, row=1, col=2, invertY=True)
         self._animated_view_box.setMenuEnabled(False)
         self._animated_view_box.setXLink("plot1")
@@ -863,8 +894,10 @@ class PCViewer(QMainWindow):
         self._difference_view_box.addItem(self._difference_image)
         self._merged_view_box.addItem(self._merged_image)
         self._animated_view_box.addItem(self._animated_image)
+        # noinspection PyUnresolvedReferences
         self._graphics_widget.scene().sigMouseClicked.connect(self._plot_clicked)
 
+        # noinspection PyUnresolvedReferences
         self._projection_plot = self._graphics_widget.addPlot(row=0, col=1, colspan=2)
         self._projection_plot.setMouseEnabled(x=False)
         self._projection_plot.setMenuEnabled(False)
@@ -985,8 +1018,8 @@ class PCViewer(QMainWindow):
         if self._pc_images is None:
             return
         pc_index = int(self._pc_edit.text()) - 1
-        pc_high = self._pc_images[1, pc_index, :, :]
-        pc_low = self._pc_images[0, pc_index, :, :]
+        pc_high = np.asarray(self._pc_images[1, pc_index, :, :])
+        pc_low = np.asarray(self._pc_images[0, pc_index, :, :])
         if self._current_frame == 0:
             self._animated_image.setImage(np.tile(pc_low[:, :, np.newaxis], (1, 1, 3)))
             self._title_labels[2].setText("top")
@@ -1006,12 +1039,12 @@ class PCViewer(QMainWindow):
         self._title_labels[1].setText("merged")
         self._title_labels[2].setText("top")
         pc_index = int(self._pc_edit.text()) - 1
-        pc_high = self._pc_images[1, pc_index, :, :]
-        pc_low = self._pc_images[0, pc_index, :, :]
-        diff = pc_high[:, :, np.newaxis] - pc_low[:, :, np.newaxis]
-        diff /= np.abs(diff).max() * 2
-        diff += 0.5
-        self._difference_image.setImage(np.tile(diff * 255, (1, 1, 3)))
+        pc_high = np.asarray(self._pc_images[1, pc_index, :, :])
+        pc_low = np.asarray(self._pc_images[0, pc_index, :, :])
+        difference = np.asarray(pc_high[:, :, np.newaxis] - pc_low[:, :, np.newaxis])
+        difference /= np.abs(difference).max() * 2
+        difference += 0.5
+        self._difference_image.setImage(np.tile(difference * 255, (1, 1, 3)))
         self._difference_image.setLevels([0, 255])
         rgb = np.zeros((self._pc_images.shape[2], self._pc_images.shape[3], 3), dtype=np.float32)
         rgb[:, :, 0] = (pc_high - pc_high.min()) / (pc_high.max() - pc_high.min()) * 255
@@ -1035,7 +1068,7 @@ class PCViewer(QMainWindow):
             draw_legend = False
         for index in range(3):
             curve = self._metrics_plot.plot(
-                np.arange(1, self._pc_count + 1), self._pc_metrics[:, index], pen=colors[index]
+                np.arange(1, self._pc_count + 1, dtype=np.int32), self._pc_metrics[:, index], pen=colors[index]
             )
             if draw_legend:
                 self._legend.addItem(curve, metric_names[index])
@@ -1044,7 +1077,7 @@ class PCViewer(QMainWindow):
         self._metrics_plot.addItem(self._metrics_scatter)
         self._metrics_scatter.setData(
             [pc_index + 1, pc_index + 1, pc_index + 1],
-            self._pc_metrics[pc_index, :].tolist(),
+            np.asarray(self._pc_metrics[pc_index, :]).tolist(),
             size=_SCATTER_POINT_SIZE,
             brush=pg.mkBrush(255, 255, 255),
         )
@@ -1070,6 +1103,7 @@ class PCViewer(QMainWindow):
     def _plot_clicked(self, event: object) -> None:
         """Handles double-click to zoom the PC image plots."""
         if self._loaded:
+            # noinspection PyUnresolvedReferences
             items = self._graphics_widget.scene().items(event.scenePos())  # type: ignore[attr-defined]
             for item in items:
                 if (
@@ -1136,7 +1170,7 @@ def _subsample_frames(
     """
     frames = np.zeros((sample_count, frame_height, frame_width), dtype=np.int16)
     bytes_per_frame = 2 * frame_height * frame_width
-    start_indices = np.linspace(start=0, stop=frame_count, num=1 + sample_count).astype(np.int64)
+    start_indices = np.linspace(start=0, stop=frame_count, num=1 + sample_count).astype(np.int32)
     with Path(registration_path).open("rb") as binary_file:
         for index in range(sample_count):
             binary_file.seek(bytes_per_frame * start_indices[index], 0)
