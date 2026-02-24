@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
+from PySide6 import QtCore
 from PySide6.QtWidgets import QApplication
 
 from .viewer import PCViewer, BinaryPlayer
@@ -19,7 +20,7 @@ def run_registration_viewer(recording_path: Path) -> None:
 
     Creates a QApplication, shows the BinaryPlayer and PCViewer windows, and enters the event
     loop. Both viewers load registration data from the provided directory on startup and share the
-    same data model for synchronized plane switching.
+    same RegistrationViewerData instance for synchronized plane switching.
 
     Args:
         recording_path: Path to a cindra output directory containing registration results.
@@ -31,23 +32,30 @@ def run_registration_viewer(recording_path: Path) -> None:
     if owns_application:
         application = QApplication(sys.argv)
 
-    # Loads recording data upfront so both viewer windows share the same data model. This ensures
-    # plane switches in the binary player are reflected in the PC viewer without reloading from disk.
+    # Loads recording data upfront so both viewer windows share the same RegistrationViewerData instance. This
+    # ensures plane switches in the binary player are reflected in the PC viewer without reloading from disk.
     data = RegistrationViewerData.from_recording(root_path=recording_path)
 
-    # Creates both viewer windows with the shared data model.
+    # Creates both viewer windows with the shared RegistrationViewerData instance.
     binary_player = BinaryPlayer(data=data)
     pc_viewer = PCViewer(data=data)
 
-    # When the user switches planes in the binary player, the shared data model is mutated in place
-    # (via switch_plane). This signal connection triggers the PC viewer to re-read PC images and
-    # metrics from the updated data model so both windows stay synchronized.
+    # When the user switches planes in the binary player, the shared RegistrationViewerData instance is mutated in
+    # place (via switch_plane). This signal connection triggers the PC viewer to re-read PC images and metrics from
+    # the updated recording data so both windows stay synchronized.
     binary_player.plane_changed.connect(lambda _index: pc_viewer.load_data(data=binary_player.data))
+
+    # Links the two windows so closing either one closes the other. WA_DeleteOnClose ensures the Qt object is
+    # destroyed on close, which emits the destroyed signal that triggers close() on the partner window.
+    binary_player.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+    pc_viewer.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+    binary_player.destroyed.connect(pc_viewer.close)
+    pc_viewer.destroyed.connect(binary_player.close)
 
     binary_player.show()
     pc_viewer.show()
 
     # Only enters the event loop if this function created the QApplication. When embedded in a
     # larger GUI, the caller is responsible for running the event loop.
-    if owns_application:
+    if owns_application and application is not None:
         sys.exit(application.exec())

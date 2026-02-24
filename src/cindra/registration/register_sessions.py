@@ -87,7 +87,7 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
         if image is None:
             message = (
                 f"Unable to register session '{context.runtime.io.session_id}' to shared visual space. The required "
-                f"reference image ({image_type.value}) is not available in combined_data."
+                f"reference image ({image_type!s}) is not available in combined_data."
             )
             console.error(message=message, error=ValueError)
         reference_images.append(image.astype(np.float32))
