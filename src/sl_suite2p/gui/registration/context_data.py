@@ -8,6 +8,7 @@ from dataclasses import field, dataclass
 from ataraxis_base_utilities import console
 
 from ...dataclasses import RuntimeContext
+from ...registration import compute_z_position
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -169,6 +170,23 @@ class RegistrationViewerData:
             )
             console.error(message=message, error=ValueError)
         self._current_plane_index = plane_index
+
+    def compute_z_correlations(self, z_stack: NDArray[np.float32]) -> NDArray[np.float32]:
+        """Computes per-frame z-position correlations for the current plane against a reference z-stack.
+
+        Delegates to the registration package's z-alignment algorithm, passing the current plane's RuntimeContext
+        to provide all necessary configuration and IO parameters.
+
+        Args:
+            z_stack: The reference z-stack with shape (num_z_planes, height, width) as float32.
+
+        Returns:
+            The z-position correlation array with shape (num_z_planes, num_frames).
+        """
+        return compute_z_position(
+            context=self._contexts[self._current_plane_index],
+            z_stack=z_stack,
+        )
 
     @property
     def _current_io(self) -> IOData:
