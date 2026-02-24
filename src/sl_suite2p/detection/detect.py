@@ -8,6 +8,7 @@ from itertools import compress
 import numpy as np
 from scipy.signal import medfilt2d
 from ataraxis_time import PrecisionTimer, TimerPrecisions
+from threadpoolctl import threadpool_limits
 from ataraxis_base_utilities import LogLevel, console
 
 from ..io import BinaryFile
@@ -413,20 +414,23 @@ def _detect_channel(
             parallel_workers=parallel_workers,
         )
 
-    # Runs the sparse iterative ROI detection algorithm.
+    # Runs the sparse iterative ROI detection algorithm. Limits BLAS and OpenMP thread count to match the requested
+    # parallel worker budget, since the detection loop performs many matrix operations (matmul, norm, outer) that
+    # otherwise spawn threads for all CPU cores via the underlying BLAS library.
     console.echo(
         message=f"Discovering ROIs for plane {plane_index} {channel_label}...",
         level=LogLevel.INFO,
     )
 
-    maximum_projection, correlation_map, spatial_scale_pixels, roi_statistics = detect(
-        frames=binned_frames,
-        temporal_highpass_window=detection_config.temporal_highpass_window,
-        spatial_highpass_window=detection_config.spatial_highpass_window,
-        threshold_scaling=detection_config.threshold_scaling,
-        maximum_iterations=_ITERATION_MULTIPLIER * detection_config.maximum_iterations,
-        plane_index=plane_index,
-    )
+    with threadpool_limits(limits=parallel_workers if parallel_workers > 0 else None):
+        maximum_projection, correlation_map, spatial_scale_pixels, roi_statistics = detect(
+            frames=binned_frames,
+            temporal_highpass_window=detection_config.temporal_highpass_window,
+            spatial_highpass_window=detection_config.spatial_highpass_window,
+            threshold_scaling=detection_config.threshold_scaling,
+            maximum_iterations=_ITERATION_MULTIPLIER * detection_config.maximum_iterations,
+            plane_index=plane_index,
+        )
 
     message = (
         f"Plane {plane_index} {channel_label} ROIs: discovered. Detected ROIs: {len(roi_statistics)}. "
