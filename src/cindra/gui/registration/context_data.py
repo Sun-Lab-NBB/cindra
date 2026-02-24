@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from pathlib import Path
 from dataclasses import field, dataclass
 
 import numpy as np
@@ -10,11 +11,8 @@ from ataraxis_base_utilities import console
 
 from ...io import BinaryFile
 from ...dataclasses import RuntimeContext
-from ...registration import compute_z_position
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from numpy.typing import NDArray
 
     from ...dataclasses import IOData, DetectionData, RegistrationData
@@ -33,7 +31,7 @@ class RegistrationViewerData:
         configuration internals.
 
         This class manages ``BinaryFile`` handles for the current plane. Call ``close()`` to release file handles when
-        the data model is no longer needed.
+        the instance is no longer needed.
     """
 
     _contexts: list[RuntimeContext] = field(repr=False)
@@ -119,23 +117,37 @@ class RegistrationViewerData:
 
     @property
     def has_channel_2(self) -> bool:
-        """Returns whether a channel 2 registered binary exists for the current plane."""
+        """Determines whether a channel 2 registered binary exists for the current plane."""
         path = self._current_io.registered_binary_path_channel_2
         return path is not None and path.is_file()
 
     @property
     def has_nonrigid(self) -> bool:
-        """Returns whether nonrigid registration data exists for the current plane."""
+        """Determines whether nonrigid registration data exists for the current plane."""
         return (
             self._current_registration.nonrigid_y_offsets is not None
             and self._current_registration.nonrigid_x_offsets is not None
         )
 
     @property
-    def registered_binary_display_path(self) -> str:
-        """Returns a string representation of the primary registered binary path for display labels."""
-        path = self._current_io.registered_binary_path
-        return str(path) if path is not None else ""
+    def recording_label(self) -> str:
+        """Returns the trailing components of the recording data path for display labels.
+
+        Starts with the last 3 path components and progressively reduces to 2, then 1, if the label
+        exceeds 45 characters.
+        """
+        data_path = self._contexts[self._current_plane_index].configuration.file_io.data_path
+        if data_path is not None:
+            parts = data_path.parts
+            max_characters = 45
+            # Tries 3, then 2, then 1 trailing component(s) until the label fits.
+            for count in (3, 2, 1):
+                if len(parts) >= count:
+                    label = str(Path(*parts[-count:]))
+                    if len(label) <= max_characters:
+                        return label
+            return str(data_path.name)
+        return ""
 
     @property
     def output_directory(self) -> Path | None:
@@ -184,9 +196,9 @@ class RegistrationViewerData:
         nonrigid_x = self._current_registration.nonrigid_x_offsets
         if nonrigid_y is None or nonrigid_x is None:
             return None
-        return np.sqrt(
-            np.mean(nonrigid_y.astype(np.float32) ** 2 + nonrigid_x.astype(np.float32) ** 2, axis=1)
-        ).astype(np.float32)
+        return np.sqrt(np.mean(nonrigid_y.astype(np.float32) ** 2 + nonrigid_x.astype(np.float32) ** 2, axis=1)).astype(
+            np.float32
+        )
 
     @property
     def principal_component_extreme_images(self) -> NDArray[np.float32] | None:
@@ -213,11 +225,6 @@ class RegistrationViewerData:
         The returned array has shape (num_frames, num_components).
         """
         return self._current_registration.principal_component_projections
-
-    @property
-    def temporal_smoothing_sigma(self) -> float:
-        """Returns the temporal smoothing sigma used for z-position correlation filtering."""
-        return self._contexts[self._current_plane_index].configuration.registration.temporal_smoothing_sigma
 
     @property
     def principal_component_count(self) -> int:
@@ -265,23 +272,6 @@ class RegistrationViewerData:
             console.error(message=message, error=ValueError)
         self._close_binary_files()
         self._current_plane_index = plane_index
-
-    def compute_z_correlations(self, z_stack: NDArray[np.float32]) -> NDArray[np.float32]:
-        """Computes per-frame z-position correlations for the current plane against a reference z-stack.
-
-        Delegates to the registration package's z-alignment algorithm, passing the current plane's RuntimeContext
-        to provide all necessary configuration and IO parameters.
-
-        Args:
-            z_stack: The reference z-stack with shape (num_z_planes, height, width) as float32.
-
-        Returns:
-            The z-position correlation array with shape (num_z_planes, num_frames).
-        """
-        return compute_z_position(
-            context=self._contexts[self._current_plane_index],
-            z_stack=z_stack,
-        )
 
     def close(self) -> None:
         """Closes any open BinaryFile handles managed by this instance."""

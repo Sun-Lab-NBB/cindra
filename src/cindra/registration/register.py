@@ -603,7 +603,8 @@ def _register_frames_batch(
         )
 
         # Applies rigid shifts to the smoothed working copy so nonrigid phase correlation operates on pre-aligned data.
-        # Without this, the per-block shifts would capture both global translation and local deformation, double-counting
+        # Without this, the per-block shifts would capture both global translation and local deformation,
+        # double-counting
         # the rigid component that was already corrected on the original frames.
         for frame_smooth, y_shift, x_shift in zip(frames_smooth, y_shifts, x_shifts, strict=False):
             frame_smooth[:] = shift_frame(frame=frame_smooth, y_shift=y_shift, x_shift=x_shift)
