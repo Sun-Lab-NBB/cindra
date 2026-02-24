@@ -475,21 +475,24 @@ class BinaryPlayer(QMainWindow):
         self._frame_number_label.setText(str(self._current_frame))
         self._shift_scatter.setData(
             [self._current_frame, self._current_frame],
-            [self._y_offsets[self._current_frame], self._x_offsets[self._current_frame]],
+            [int(self._y_offsets[self._current_frame]), int(self._x_offsets[self._current_frame])],
             size=_SCATTER_POINT_SIZE,
             brush=pg.mkBrush(255, 0, 0),
         )
         if self._has_nonrigid and self._nonrigid_rms is not None:
+            # noinspection PyTypeChecker
             self._nonrigid_scatter.setData(
                 [self._current_frame],
-                [self._nonrigid_rms[self._current_frame]],
+                [float(self._nonrigid_rms[self._current_frame])],
                 size=_SCATTER_POINT_SIZE,
                 brush=pg.mkBrush(255, 0, 0),
             )
         if self._z_loaded and self._z_on and self._z_max_positions is not None:
+            # noinspection PyTypeChecker
+            z_position = int(self._z_max_positions[self._current_frame])
             self._z_position_scatter.setData(
                 [self._current_frame, self._current_frame],
-                [self._z_max_positions[self._current_frame], self._z_max_positions[self._current_frame]],
+                [z_position, z_position],
                 size=_SCATTER_POINT_SIZE,
                 brush=pg.mkBrush(255, 0, 0),
             )
@@ -544,12 +547,16 @@ class BinaryPlayer(QMainWindow):
             self._x_offsets = np.zeros((self._frame_count,), dtype=np.int32)
         self._shift_plot.plot(self._y_offsets, pen="g")
         self._shift_plot.plot(self._x_offsets, pen="y")
+        shift_min = min(int(self._y_offsets.min()), int(self._x_offsets.min()))
+        shift_max = max(int(self._y_offsets.max()), int(self._x_offsets.max()))
+        # Prevents a zero-height range when all offsets are zero, which causes pyqtgraph to compute
+        # infinite scale factors that overflow on cast to integer pixel coordinates.
+        if shift_min == shift_max:
+            shift_min -= 1
+            shift_max += 1
         self._shift_plot.setRange(
             xRange=(0, self._frame_count),
-            yRange=(
-                min(int(self._y_offsets.min()), int(self._x_offsets.min())),
-                max(int(self._y_offsets.max()), int(self._x_offsets.max())),
-            ),
+            yRange=(shift_min, shift_max),
             padding=0.0,
         )
         self._shift_plot.setLimits(xMin=0, xMax=self._frame_count)
@@ -557,7 +564,7 @@ class BinaryPlayer(QMainWindow):
         self._shift_plot.addItem(self._shift_scatter)
         self._shift_scatter.setData(
             [self._current_frame, self._current_frame],
-            [self._y_offsets[self._current_frame], self._x_offsets[self._current_frame]],
+            [int(self._y_offsets[self._current_frame]), int(self._x_offsets[self._current_frame])],
             size=_SCATTER_POINT_SIZE,
             brush=pg.mkBrush(255, 0, 0),
         )
@@ -572,9 +579,13 @@ class BinaryPlayer(QMainWindow):
             ).astype(np.float32)
             self._has_nonrigid = True
             self._nonrigid_plot.plot(self._nonrigid_rms, pen=(180, 100, 255))
+            nonrigid_max = float(self._nonrigid_rms.max())
+            # Prevents a zero-height range when all nonrigid displacements are zero.
+            if nonrigid_max == 0.0:
+                nonrigid_max = 1.0
             self._nonrigid_plot.setRange(
                 xRange=(0, self._frame_count),
-                yRange=(0, self._nonrigid_rms.max()),
+                yRange=(0.0, nonrigid_max),
                 padding=0.0,
             )
             self._nonrigid_plot.setLimits(xMin=0, xMax=self._frame_count)
@@ -735,9 +746,10 @@ class BinaryPlayer(QMainWindow):
         self._z_position_plot.clear()
         self._z_position_plot.plot(self._z_max_positions, pen="r")
         self._z_position_plot.addItem(self._z_position_scatter)
+        # noinspection PyTypeChecker
         self._z_position_plot.setRange(
             xRange=(0, self._frame_count),
-            yRange=(self._z_max_positions.min(), self._z_max_positions.max() + 3),
+            yRange=(int(self._z_max_positions.min()), int(self._z_max_positions.max()) + 3),
             padding=0.0,
         )
         self._z_position_plot.setLimits(xMin=0, xMax=self._frame_count)

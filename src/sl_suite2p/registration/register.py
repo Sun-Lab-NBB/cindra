@@ -477,10 +477,11 @@ def _compute_reference(
         for frame, y_shift, x_shift in zip(frames, y_shifts, x_shifts, strict=False):
             frame[:] = shift_frame(frame=frame, y_shift=y_shift, x_shift=x_shift)
 
-        # Selects top-correlated frames for next reference.
+        # Selects top-correlated frames for next reference, excluding rank 0 (the frame most correlated with the
+        # current reference) to prevent self-reinforcing bias in the iterative refinement.
         # Number of frames increases each iteration: ~6% at iter 0, ~31% at iter 4, ~50% at iter 7.
         num_frames_for_reference = max(2, int(frames.shape[0] * (1.0 + iteration) / (2 * num_iterations)))
-        sorted_indices = np.argsort(-correlations)[:num_frames_for_reference]
+        sorted_indices = np.argsort(-correlations)[1:num_frames_for_reference]
 
         # Updates reference as the mean of the best-aligned frames. Input frames are float32, mean preserves dtype.
         reference_image = frames[sorted_indices].mean(axis=0)
@@ -601,10 +602,11 @@ def _register_frames_batch(
             else np.empty((0, 0, 0), dtype=np.complex64)
         )
 
-        # Applies rigid shifts to smoothed frames so nonrigid operates on pre-aligned data.
-        if temporal_smoothing_sigma > 0 or one_photon_enabled:
-            for frame_smooth, y_shift, x_shift in zip(frames_smooth, y_shifts, x_shifts, strict=False):
-                frame_smooth[:] = shift_frame(frame=frame_smooth, y_shift=y_shift, x_shift=x_shift)
+        # Applies rigid shifts to the smoothed working copy so nonrigid phase correlation operates on pre-aligned data.
+        # Without this, the per-block shifts would capture both global translation and local deformation, double-counting
+        # the rigid component that was already corrected on the original frames.
+        for frame_smooth, y_shift, x_shift in zip(frames_smooth, y_shifts, x_shifts, strict=False):
+            frame_smooth[:] = shift_frame(frame=frame_smooth, y_shift=y_shift, x_shift=x_shift)
 
         # Re-clips intensity range after rigid shift for nonrigid correlation.
         frames_for_correlation = (
