@@ -2,12 +2,12 @@
 import importlib_metadata
 
 # -- Project information -----------------------------------------------------
-project = 'sl-suite2p'
+project = 'cindra'
 # noinspection PyShadowingBuiltins
 copyright = '2023, Howard Hughes Medical Institute; 2025, Sun (NeuroAI) lab'
 authors = ['Carsen Stringer', 'Marius Pachitariu', 'Ivan Kondratyev', 'Kushaan Gupta']
 # Extracts the project version from the .toml file.
-release = importlib_metadata.version("sl-suite2p")
+release = importlib_metadata.version("cindra")
 
 # -- General configuration ---------------------------------------------------
 extensions = [
