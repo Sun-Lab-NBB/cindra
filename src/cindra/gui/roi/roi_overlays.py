@@ -7,25 +7,24 @@ from dataclasses import field, dataclass
 
 import numpy as np
 from PySide6 import QtGui, QtCore
-import pyqtgraph as pg
+import pyqtgraph as pg  # type: ignore[import-untyped]
 import matplotlib.cm
-from PySide6.QtWidgets import QLabel, QComboBox, QLineEdit, QPushButton, QButtonGroup
+from PySide6.QtWidgets import (
+    QComboBox,
+    QGroupBox,
+    QLineEdit,
+    QGridLayout,
+    QPushButton,
+    QButtonGroup,
+)
 from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
-from ..styles import (
-    COLORBAR_MAX_WIDTH,
-    COLORBAR_MAX_HEIGHT,
-    WHITE_LABEL_STYLESHEET,
-    BUTTON_INACTIVE_STYLESHEET,
-    label_font,
-    header_font,
-    label_font_bold,
-)
+from .styles import STYLE, label_font, label_font_bold
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-    from PySide6.QtWidgets import QWidget, QGridLayout
+    from PySide6.QtWidgets import QWidget
 
     from .signals import GUISignals
     from .view_state import ViewState
@@ -159,10 +158,12 @@ class ColorbarWidgets:
     Attributes:
         image: The pyqtgraph image item displaying the colorbar gradient.
         labels: The three label items showing the low, mid, and high colorbar values.
+        widget: The pyqtgraph GraphicsLayoutWidget containing the colorbar.
     """
 
     image: pg.ImageItem
     labels: list[pg.LabelItem]
+    widget: pg.GraphicsLayoutWidget
 
 
 @dataclass
@@ -207,31 +208,26 @@ class ROIIndexMaps:
 
 def build_color_controls(
     owner: QWidget,
-    layout: QGridLayout,
-    row: int,
     signals: GUISignals,
-) -> tuple[ColorControls, int]:
+) -> tuple[QGroupBox, ColorControls]:
     """Creates color statistic selection buttons and their associated controls.
 
-    Builds a button group for selecting which color statistic to display on the ROI
-    overlays, plus a colormap chooser dropdown, and edit fields for channel 2 threshold,
-    classifier probability, and binning size.
+    Builds a group box containing a button group for selecting which color statistic to
+    display on the ROI overlays, plus a colormap chooser dropdown, and edit fields for
+    channel 2 threshold, classifier probability, and binning size.
 
     Args:
         owner: The parent widget for ownership of created widgets.
-        layout: The grid layout to add widgets to.
-        row: Starting row index in the layout.
         signals: The central signal bus for GUI events.
 
     Returns:
-        Tuple of (color controls container, next available row index).
+        Tuple of (group box, color controls container).
     """
-    color_buttons = QButtonGroup(owner)
+    group_box = QGroupBox("ROI Colors")
+    group_box.setStyleSheet("QGroupBox { color: white; }")
+    layout = QGridLayout(group_box)
 
-    color_label = QLabel("Colors")
-    color_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
-    color_label.setFont(header_font())
-    layout.addWidget(color_label, row, 0, 1, 1)
+    color_buttons = QButtonGroup(owner)
 
     # Colormap chooser dropdown.
     colormap_chooser = QComboBox()
@@ -239,10 +235,9 @@ def build_color_controls(
     colormap_chooser.setCurrentIndex(0)
     colormap_chooser.setFont(label_font())
     colormap_chooser.setFixedWidth(_COLOR_EDIT_WIDTH)
-    layout.addWidget(colormap_chooser, row, 1, 1, 1)
+    layout.addWidget(colormap_chooser, 0, 1, 1, 1)
 
     # Color statistic buttons.
-    button_row = row
     for button_index, name in enumerate(_COLOR_NAMES):
         button = _ColorButton(
             button_id=button_index,
@@ -254,9 +249,9 @@ def build_color_controls(
         color_buttons.addButton(button, button_index)
 
         if _COLOR_NARROW_RANGE_START <= button_index < _COLOR_NARROW_RANGE_END:
-            layout.addWidget(button, button_row + button_index + 1, 0, 1, 1)
+            layout.addWidget(button, button_index, 0, 1, 1)
         else:
-            layout.addWidget(button, button_row + button_index + 1, 0, 1, 2)
+            layout.addWidget(button, button_index, 0, 1, 2)
 
         button.setEnabled(False)
 
@@ -264,23 +259,23 @@ def build_color_controls(
     channel_2_edit = QLineEdit(owner)
     channel_2_edit.setText("0.6")
     channel_2_edit.setFixedWidth(_COLOR_EDIT_WIDTH)
-    channel_2_edit.setAlignment(QtCore.Qt.AlignRight)
-    layout.addWidget(channel_2_edit, button_row + len(_COLOR_NAMES) - 4, 1, 1, 1)
+    channel_2_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+    layout.addWidget(channel_2_edit, len(_COLOR_NAMES) - 4, 1, 1, 1)
 
     # Classifier probability edit.
     classifier_edit = QLineEdit(owner)
     classifier_edit.setText("0.5")
     classifier_edit.setFixedWidth(_COLOR_EDIT_WIDTH)
-    classifier_edit.setAlignment(QtCore.Qt.AlignRight)
-    layout.addWidget(classifier_edit, button_row + len(_COLOR_NAMES) - 3, 1, 1, 1)
+    classifier_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+    layout.addWidget(classifier_edit, len(_COLOR_NAMES) - 3, 1, 1, 1)
 
     # Binning size edit.
     bin_edit = QLineEdit(owner)
     bin_edit.setValidator(QtGui.QIntValidator(0, 500))
     bin_edit.setText("1")
     bin_edit.setFixedWidth(_COLOR_EDIT_WIDTH)
-    bin_edit.setAlignment(QtCore.Qt.AlignRight)
-    layout.addWidget(bin_edit, button_row + len(_COLOR_NAMES) - 2, 1, 1, 1)
+    bin_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+    layout.addWidget(bin_edit, len(_COLOR_NAMES) - 2, 1, 1, 1)
 
     controls = ColorControls(
         color_buttons=color_buttons,
@@ -296,30 +291,25 @@ def build_color_controls(
     classifier_edit.returnPressed.connect(signals.plot_needs_update.emit)
     bin_edit.returnPressed.connect(signals.activity_mode_changed.emit)
 
-    return controls, button_row + len(_COLOR_NAMES) + 2
+    return group_box, controls
 
 
 def build_colorbar(
     owner: QWidget,
-    layout: QGridLayout,
-    row: int,
 ) -> ColorbarWidgets:
     """Creates the colorbar widget displaying the current color mapping.
 
     Args:
         owner: The parent widget for ownership of created widgets.
-        layout: The grid layout to add widgets to.
-        row: Row index in the layout for the colorbar.
 
     Returns:
         Colorbar widgets container.
     """
     colorbar_widget = pg.GraphicsLayoutWidget(owner)
-    colorbar_widget.setMaximumHeight(COLORBAR_MAX_HEIGHT)
-    colorbar_widget.setMaximumWidth(COLORBAR_MAX_WIDTH)
+    colorbar_widget.setMaximumHeight(STYLE.colorbar_max_height)
+    colorbar_widget.setMaximumWidth(STYLE.colorbar_max_width)
     colorbar_widget.ci.layout.setRowStretchFactor(0, 2)
     colorbar_widget.ci.layout.setContentsMargins(0, 0, 0, 0)
-    layout.addWidget(colorbar_widget, row, 0, 1, 2)
 
     image = pg.ImageItem()
     colorbar_view = colorbar_widget.addViewBox(row=0, col=0, colspan=3)
@@ -332,7 +322,7 @@ def build_colorbar(
         colorbar_widget.addLabel("1.0", color=[255, 255, 255], row=1, col=2),
     ]
 
-    return ColorbarWidgets(image=image, labels=labels)
+    return ColorbarWidgets(image=image, labels=labels, widget=colorbar_widget)
 
 
 def compute_colors(
@@ -397,7 +387,7 @@ def compute_colors(
                 stat_values = np.expand_dims(context.cell_classification_probabilities, axis=1)
                 colorbar.append(list(_FIXED_COLORBAR_RANGE))
 
-            color = istat_transform(stat_values, state.roi_colormap)
+            color = istat_transform(stat_values.astype(np.float32), state.roi_colormap)
             cols[stat_index] = color
             istat[stat_index] = stat_values.flatten()
         else:
@@ -450,7 +440,7 @@ def init_roi_maps(
     is_ignored = np.zeros(cell_count, dtype=bool)
     text_labels: list[pg.TextItem] = []
 
-    for roi_index in np.arange(cell_count - 1, -1, -1, int):
+    for roi_index in np.arange(cell_count - 1, -1, -1, dtype=np.int32):
         y_pixels = roi_statistics[roi_index].y_pixels
         if y_pixels is not None and not is_ignored[roi_index]:
             merged = roi_statistics[roi_index].merged_roi_indices
@@ -483,7 +473,7 @@ def init_roi_maps(
 
         text_item = pg.TextItem(label_text, color=_ROI_TEXT_COLOR, anchor=(0.5, 0.5))
         text_item.setPos(centroid[1], centroid[0])
-        text_item.setFont(QtGui.QFont("Times", _ROI_TEXT_SIZE, weight=QtGui.QFont.Bold))
+        text_item.setFont(QtGui.QFont("Times", _ROI_TEXT_SIZE, weight=QtGui.QFont.Weight.Bold))
         text_labels.append(text_item)
 
     text_labels.reverse()
@@ -984,7 +974,7 @@ class _ColorButton(QPushButton):
         super().__init__(owner)
         self.setText(text)
         self.setCheckable(True)
-        self.setStyleSheet(BUTTON_INACTIVE_STYLESHEET)
+        self.setStyleSheet(STYLE.button_inactive)
         self.setFont(label_font_bold())
         self.resize(self.minimumSizeHint())
         self._button_id: int = button_id
@@ -1039,7 +1029,7 @@ def _istat_hsv(istat: NDArray[np.float32]) -> NDArray[np.uint8]:
     istat = istat / _HSV_DIVISOR
     istat = istat + (_HSV_OFFSET / _HSV_DIVISOR)
     inverted = 1 - istat
-    return hsv2rgb(inverted.flatten())
+    return hsv2rgb(inverted.flatten().astype(np.float64))
 
 
 def _make_chosen_roi(

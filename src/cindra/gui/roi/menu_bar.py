@@ -16,7 +16,7 @@ from . import (
 )
 
 if TYPE_CHECKING:
-    from .main_window import MainWindow
+    from .viewer import MainWindow
 
 
 def mainmenu(parent: MainWindow) -> None:
@@ -115,10 +115,11 @@ def plugins(parent: MainWindow) -> None:
             parent
         )  # initialize an object instance from the loaded class and keep it alive in parent; expose parent to plugin
         action = QAction(
-            parent.plugins[entry_pt.name].name, parent
+            parent.plugins[entry_pt.name].name,  # type: ignore[attr-defined]
+            parent,
         )  # create plugin menu item with the name property of the loaded class
         action.triggered.connect(
-            parent.plugins[entry_pt.name].trigger
+            parent.plugins[entry_pt.name].trigger,  # type: ignore[attr-defined]
         )  # attach class method "trigger" to plugin menu action
         plugin_menu.addAction(action)
 

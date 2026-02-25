@@ -1,4 +1,4 @@
-"""Provides the multi-day tracking quality viewer window."""
+"""Provides the multi-day tracking viewer window."""
 
 from __future__ import annotations
 

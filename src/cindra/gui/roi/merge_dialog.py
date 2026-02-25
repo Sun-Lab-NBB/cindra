@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy import stats
-import pyqtgraph as pg
+import pyqtgraph as pg  # type: ignore[import-untyped]
 from PySide6.QtWidgets import QLabel, QDialog, QWidget, QLineEdit, QGridLayout, QMessageBox, QPushButton
 from ataraxis_base_utilities import LogLevel, console
 
-from ..styles import PARAMETER_EDIT_WIDTH, merge_label_font
+from .styles import STYLE, merge_label_font
 from .roi_geometry import compute_circle_mask
 from .roi_overlays import (
     add_roi,
@@ -56,9 +56,9 @@ def do_merge(parent: MainWindow) -> None:
         parent,
         "Merge cells",
         "Do you want to merge selected cells?",
-        QMessageBox.Yes | QMessageBox.No,
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
     )
-    if result == QMessageBox.Yes:
+    if result == QMessageBox.StandardButton.Yes:
         merge_activity_masks(parent=parent)
         parent.merged.append(list(parent.view_state.merge_roi_indices))
         parent.update_plot()
@@ -111,7 +111,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
             merged_cells.extend(list(roi.merged_roi_indices))
         else:
             merged_cells.append(roi_index)
-    merged_cells = np.unique(np.array(merged_cells))
+    merged_cells = np.unique(np.array(merged_cells))  # type: ignore[assignment]
 
     for roi_index in merged_cells:
         roi = context.roi_statistics[roi_index]
@@ -137,7 +137,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
             )
             channel_2_neuropil = np.append(
                 channel_2_neuropil,
-                context.neuropil_fluorescence_channel_2[roi_index, :][np.newaxis, :],
+                context.neuropil_fluorescence_channel_2[roi_index, :][np.newaxis, :],  # type: ignore[index]
                 axis=0,
             )
         probabilities.append(context.cell_classification_probabilities[roi_index])
@@ -207,7 +207,7 @@ def merge_activity_masks(parent: MainWindow) -> None:
     )
 
     # Rescales pixel weights to preserve total flux from merged cells.
-    merged_roi.pixel_weights = merged_roi.pixel_weights * merged_cells.size
+    merged_roi.pixel_weights = merged_roi.pixel_weights * merged_cells.size  # type: ignore[attr-defined]
 
     # Removes previously merged constituent ROIs from arrays (in reverse order to preserve indices).
     for constituent in sorted(remove_merged, reverse=True):
@@ -293,8 +293,8 @@ def merge_activity_masks(parent: MainWindow) -> None:
         radius=merged_roi.radius,
     )
     valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < context.frame_height) & (x_circle < context.frame_width)
-    merged_roi.circle_y_pixels = y_circle[valid]
-    merged_roi.circle_x_pixels = x_circle[valid]
+    merged_roi.circle_y_pixels = y_circle[valid]  # type: ignore[assignment]
+    merged_roi.circle_x_pixels = x_circle[valid]  # type: ignore[assignment]
 
     # Recomputes all color arrays and ROI maps.
     parent.color_arrays = compute_colors(context=context, state=state)
@@ -337,7 +337,7 @@ def apply(parent: MainWindow) -> None:
     """
     if parent.context_data is None or parent.color_arrays is None or parent.roi_maps is None:
         return
-    threshold = float(parent.probedit.text())
+    threshold = float(parent._color_controls.classifier_edit.text())
     classification_labels = parent.context_data.cell_classification_probabilities > threshold
     flip_for_class(
         context=parent.context_data,
@@ -431,7 +431,7 @@ class MergeWindow(QDialog):
             self._grid_layout.addWidget(label, row_offset * 2 + 1, 0, 1, 2)
             edit = _ParameterEdit(key=key, parent=self)
             edit.set_text(ops=self.ops)
-            edit.setFixedWidth(PARAMETER_EDIT_WIDTH)
+            edit.setFixedWidth(STYLE.parameter_edit_width)
             edit.returnPressed.connect(lambda: self._compute_merge_list(parent))
             self._grid_layout.addWidget(edit, row_offset * 2 + 2, 0, 1, 2)
             self._edit_list.append(edit)
@@ -441,14 +441,15 @@ class MergeWindow(QDialog):
         console.echo(message="Creating merge window... this may take some time.")
         self._correlation_matrix = (
             np.matmul(
-                parent.Fbin[context.cell_classification_labels], parent.Fbin[context.cell_classification_labels].T
+                parent.Fbin[context.cell_classification_labels],  # type: ignore[index]
+                parent.Fbin[context.cell_classification_labels].T,  # type: ignore[index]
             )
-            / parent.Fbin.shape[-1]
+            / parent.Fbin.shape[-1]  # type: ignore[union-attr]
         )
         self._correlation_matrix /= (
             np.matmul(
-                parent.Fstd[context.cell_classification_labels][:, np.newaxis],
-                parent.Fstd[context.cell_classification_labels][np.newaxis, :],
+                parent.Fstd[context.cell_classification_labels][:, np.newaxis],  # type: ignore[index]
+                parent.Fstd[context.cell_classification_labels][np.newaxis, :],  # type: ignore[index]
             )
             + _CORRELATION_EPSILON
         )
@@ -475,9 +476,17 @@ class MergeWindow(QDialog):
         parent.update_plot()
 
         correlation_row = (
-            np.matmul(parent.Fbin[context.cell_classification_labels], parent.Fbin[-1].T) / parent.Fbin.shape[-1]
+            np.matmul(
+                parent.Fbin[context.cell_classification_labels],  # type: ignore[index]
+                parent.Fbin[-1].T,  # type: ignore[index]
+            )
+            / parent.Fbin.shape[-1]  # type: ignore[union-attr]
         )
-        correlation_row /= parent.Fstd[context.cell_classification_labels] * parent.Fstd[-1] + _CORRELATION_EPSILON
+        correlation_row /= (
+            parent.Fstd[context.cell_classification_labels]  # type: ignore[index]
+            * parent.Fstd[-1]  # type: ignore[index]
+            + _CORRELATION_EPSILON
+        )
         correlation_row[-1] = 0
         self._correlation_matrix = np.concatenate(
             (self._correlation_matrix, correlation_row[np.newaxis, :-1]),
@@ -531,9 +540,9 @@ class MergeWindow(QDialog):
                             roi = context.roi_statistics[correlated[position]]
                             if roi.merged_into_roi_index is not None and roi.merged_into_roi_index >= 0:
                                 correlated[position] = roi.merged_into_roi_index
-                    correlated = np.unique(np.array(correlated))
-                    if correlated.size > 1:
-                        distances = _distance_matrix(context=context, roi_indices=correlated)
+                    correlated = np.unique(np.array(correlated))  # type: ignore[assignment]
+                    if correlated.size > 1:  # type: ignore[attr-defined]
+                        distances = _distance_matrix(context=context, roi_indices=correlated)  # type: ignore[arg-type]
                         min_distances = distances.min(axis=1)
                         correlated = correlated[min_distances <= self.ops["dist_thres"]]
                         if correlated.size > 1:
@@ -582,8 +591,8 @@ class MergeWindow(QDialog):
                 rgb = parent.color_arrays.cols[0, roi_index]
                 pen = pg.mkPen(rgb, width=_SCATTER_PEN_WIDTH)
                 scatter = pg.ScatterPlotItem(
-                    parent.Fbin[reference_cell],
-                    parent.Fbin[roi_index],
+                    parent.Fbin[reference_cell],  # type: ignore[index]
+                    parent.Fbin[roi_index],  # type: ignore[index]
                     pen=pen,
                 )
                 self._scatter_plot.addItem(scatter)
@@ -606,9 +615,9 @@ class MergeWindow(QDialog):
         self._suggestion_index += 1
         if self._suggestion_index > len(self._merge_list) - 1:
             self._suggestion_index = 0
-        parent.checkBoxz.setChecked(True)
+        parent._zoom_to_cell_checkbox.setChecked(True)
         parent.update_plot()
-        parent.win.show()
+        parent._graphics_widget.show()
         parent.show()
 
 

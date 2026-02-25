@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QStyle,
     QSlider,
     QWidget,
+    QGroupBox,
+    QGridLayout,
     QPushButton,
     QApplication,
     QButtonGroup,
@@ -20,20 +22,11 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from ..styles import (
-    WHITE_LABEL_STYLESHEET,
-    RANGE_SLIDER_STYLESHEET,
-    BUTTON_PRESSED_STYLESHEET,
-    BUTTON_INACTIVE_STYLESHEET,
-    BUTTON_UNPRESSED_STYLESHEET,
-    header_font,
-    label_font_bold,
-)
+from .styles import STYLE, label_font_bold
 
 if TYPE_CHECKING:
-    import pyqtgraph as pg
+    import pyqtgraph as pg  # type: ignore[import-untyped]
     from numpy.typing import NDArray
-    from PySide6.QtWidgets import QGridLayout
 
     from .signals import GUISignals
 
@@ -169,34 +162,27 @@ def display_views(
 
 def create_view_controls(
     owner: QWidget,
-    layout: QGridLayout,
-    row: int,
     signals: GUISignals,
-) -> tuple[ViewControls, int]:
-    """Creates background view selection controls and adds them to the layout.
+) -> tuple[QGroupBox, ViewControls]:
+    """Creates background view selection controls inside a group box.
 
-    Builds the view button group, saturation range slider, and a label header.
-    Each button corresponds to a different background image type.
+    Builds a group box containing the view button group, saturation range slider,
+    and a saturation label. Each button corresponds to a different background image type.
 
     Args:
         owner: The parent QWidget that owns the created controls.
-        layout: The grid layout to add widgets to.
-        row: Starting row index in the layout.
         signals: The central signal bus for emitting view change events.
 
     Returns:
-        Tuple of (view controls container, next available row index).
+        Tuple of (group box, view controls container).
     """
+    group_box = QGroupBox("Background")
+    group_box.setStyleSheet("QGroupBox { color: white; }")
+    layout = QGridLayout(group_box)
+
     view_buttons = QButtonGroup(owner)
 
-    header = QLabel("Background")
-    header.setStyleSheet(WHITE_LABEL_STYLESHEET)
-    header.setFont(header_font())
-    header.resize(header.minimumSizeHint())
-    layout.addWidget(header, row, 0, 1, 1)
-
-    button_index = 0
-    for name in _VIEW_NAMES:
+    for button_index, name in enumerate(_VIEW_NAMES):
         button = _ViewButton(
             button_id=button_index,
             text="&" + name,
@@ -205,16 +191,15 @@ def create_view_controls(
             signals=signals,
         )
         view_buttons.addButton(button, button_index)
-        layout.addWidget(button, button_index + row + 1, 0, 1, 1)
+        layout.addWidget(button, button_index, 0, 1, 1)
 
         # Adds the saturation label next to the first button.
         if button_index == 0:
             saturation_label = QLabel("sat: ")
-            saturation_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
-            layout.addWidget(saturation_label, button_index + row + 1, 1, 1, 1)
+            saturation_label.setStyleSheet(STYLE.white_label)
+            layout.addWidget(saturation_label, button_index, 1, 1, 1)
 
         button.setEnabled(False)
-        button_index += 1
 
     view_buttons.setExclusive(True)
 
@@ -223,16 +208,14 @@ def create_view_controls(
     range_slider.setMaximum(255)
     range_slider.setLow(0)
     range_slider.setHigh(255)
-    range_slider.setTickPosition(QSlider.TicksBelow)
-    layout.addWidget(range_slider, row + 2, 1, len(_VIEW_NAMES) - 2, 1)
-
-    next_row = row + button_index + 2
+    range_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+    layout.addWidget(range_slider, 1, 1, len(_VIEW_NAMES) - 2, 1)
 
     controls = ViewControls(
         view_buttons=view_buttons,
         range_slider=range_slider,
     )
-    return controls, next_row
+    return group_box, controls
 
 
 class _ViewButton(QPushButton):
@@ -261,7 +244,7 @@ class _ViewButton(QPushButton):
         super().__init__(owner)
         self.setText(text)
         self.setCheckable(True)
-        self.setStyleSheet(BUTTON_INACTIVE_STYLESHEET)
+        self.setStyleSheet(STYLE.button_inactive)
         self.setFont(label_font_bold())
         self.resize(self.minimumSizeHint())
         self._button_id: int = button_id
@@ -275,8 +258,8 @@ class _ViewButton(QPushButton):
         for index in range(_VIEW_COUNT):
             button = self._button_group.button(index)
             if button is not None and button.isEnabled():
-                button.setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
-        self.setStyleSheet(BUTTON_PRESSED_STYLESHEET)
+                button.setStyleSheet(STYLE.button_unpressed)
+        self.setStyleSheet(STYLE.button_pressed)
         self._signals.view_mode_changed.emit(self._button_id)
 
 
@@ -297,13 +280,13 @@ class RangeSlider(QSlider):
 
         self._low: int = self.minimum()
         self._high: int = self.maximum()
-        self._pressed_control = QStyle.SC_None
-        self._hover_control = QStyle.SC_None
+        self._pressed_control = QStyle.SubControl.SC_None
+        self._hover_control = QStyle.SubControl.SC_None
         self._click_offset: int = 0
 
-        self.setOrientation(QtCore.Qt.Vertical)
-        self.setTickPosition(QSlider.TicksRight)
-        self.setStyleSheet(RANGE_SLIDER_STYLESHEET)
+        self.setOrientation(QtCore.Qt.Orientation.Vertical)
+        self.setTickPosition(QSlider.TickPosition.TicksRight)
+        self.setStyleSheet(STYLE.range_slider)
 
         # 0 for the low handle, 1 for the high handle, -1 for both.
         self._active_slider: int = 0
@@ -347,20 +330,20 @@ class RangeSlider(QSlider):
         for _handle_index, value in enumerate([self._low, self._high]):
             option = QStyleOptionSlider()
             self.initStyleOption(option)
-            option.subControls = QStyle.SC_SliderHandle
+            option.subControls = QStyle.SubControl.SC_SliderHandle
 
-            if self.tickPosition() != self.NoTicks:
-                option.subControls |= QStyle.SC_SliderTickmarks
+            if self.tickPosition() != QSlider.TickPosition.NoTicks:
+                option.subControls |= QStyle.SubControl.SC_SliderTickmarks
 
             if self._pressed_control:
                 option.activeSubControls = self._pressed_control
-                option.state |= QStyle.State_Sunken
+                option.state |= QStyle.StateFlag.State_Sunken
             else:
                 option.activeSubControls = self._hover_control
 
             option.sliderPosition = value
             option.sliderValue = value
-            style.drawComplexControl(QStyle.CC_Slider, option, painter, self)
+            style.drawComplexControl(QStyle.ComplexControl.CC_Slider, option, painter, self)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """Handles mouse press to select and begin dragging a slider handle."""
@@ -375,26 +358,26 @@ class RangeSlider(QSlider):
 
             for handle_index, value in enumerate([self._low, self._high]):
                 option.sliderPosition = value
-                hit = style.hitTestComplexControl(style.CC_Slider, option, event.pos(), self)
-                if hit == style.SC_SliderHandle:
+                hit = style.hitTestComplexControl(QStyle.ComplexControl.CC_Slider, option, event.pos(), self)
+                if hit == QStyle.SubControl.SC_SliderHandle:
                     self._active_slider = handle_index
                     self._pressed_control = hit
-                    self.triggerAction(self.SliderMove)
-                    self.setRepeatAction(self.SliderNoAction)
+                    self.triggerAction(QSlider.SliderAction.SliderMove)
+                    self.setRepeatAction(QSlider.SliderAction.SliderNoAction)
                     self.setSliderDown(True)
                     break
 
             if self._active_slider < 0:
-                self._pressed_control = QStyle.SC_SliderHandle
+                self._pressed_control = QStyle.SubControl.SC_SliderHandle
                 self._click_offset = self._pixel_position_to_value(self._pick_coordinate(event.pos()))
-                self.triggerAction(self.SliderMove)
-                self.setRepeatAction(self.SliderNoAction)
+                self.triggerAction(QSlider.SliderAction.SliderMove)
+                self.setRepeatAction(QSlider.SliderAction.SliderNoAction)
         else:
             event.ignore()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """Handles mouse drag to move the active slider handle."""
-        if self._pressed_control != QStyle.SC_SliderHandle:
+        if self._pressed_control != QStyle.SubControl.SC_SliderHandle:
             event.ignore()
             return
 
@@ -442,7 +425,7 @@ class RangeSlider(QSlider):
         Returns:
             The x or y coordinate depending on the slider orientation.
         """
-        if self.orientation() == QtCore.Qt.Horizontal:
+        if self.orientation() == QtCore.Qt.Orientation.Horizontal:
             return point.x()
         return point.y()
 
@@ -459,10 +442,14 @@ class RangeSlider(QSlider):
         self.initStyleOption(option)
         style = QApplication.style()
 
-        groove_rect = style.subControlRect(style.CC_Slider, option, style.SC_SliderGroove, self)
-        handle_rect = style.subControlRect(style.CC_Slider, option, style.SC_SliderHandle, self)
+        groove_rect = style.subControlRect(
+            QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderGroove, self
+        )
+        handle_rect = style.subControlRect(
+            QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderHandle, self
+        )
 
-        if self.orientation() == QtCore.Qt.Horizontal:
+        if self.orientation() == QtCore.Qt.Orientation.Horizontal:
             slider_length = handle_rect.width()
             slider_min = groove_rect.x()
             slider_max = groove_rect.right() - slider_length + 1

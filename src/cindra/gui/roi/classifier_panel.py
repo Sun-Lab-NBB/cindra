@@ -5,28 +5,25 @@ from __future__ import annotations
 import shutil
 from typing import TYPE_CHECKING
 from pathlib import Path
+from dataclasses import dataclass
 
 import numpy as np
 from PySide6.QtWidgets import (
     QLabel,
     QDialog,
     QWidget,
+    QGroupBox,
     QFileDialog,
     QGridLayout,
     QListWidget,
     QMessageBox,
     QPushButton,
+    QVBoxLayout,
     QAbstractItemView,
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from ..styles import (
-    BUTTON_INACTIVE_STYLESHEET,
-    BUTTON_UNPRESSED_STYLESHEET,
-    label_font,
-    header_font,
-    label_font_bold,
-)
+from .styles import STYLE, label_font, label_font_bold
 from .roi_overlays import rgb_masks, istat_transform
 from ...classification import Classifier
 
@@ -34,6 +31,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from .viewer import MainWindow
+    from .signals import GUISignals
 
 # Index of the classifier probability color mode in the color button group.
 _CLASSIFIER_COLOR_INDEX: int = 6
@@ -42,31 +40,49 @@ _CLASSIFIER_COLOR_INDEX: int = 6
 _CLASSIFICATION_FEATURES: tuple[str, ...] = ("normalized_pixel_count", "compactness", "skewness")
 
 
-def make_buttons(parent: MainWindow, b0: int) -> int:
-    """Creates the classifier section buttons in the main GUI sidebar.
+@dataclass
+class ClassifierControls:
+    """Holds references to classifier section widgets.
+
+    Attributes:
+        classifier_label: Label displaying the current classifier name or status.
+        add_to_class_button: Button for adding the current session data to the classifier.
+    """
+
+    classifier_label: QLabel
+    add_to_class_button: QPushButton
+
+
+def create_classifier_controls(
+    owner: QWidget,  # noqa: ARG001
+    signals: GUISignals,  # noqa: ARG001
+) -> tuple[QGroupBox, ClassifierControls]:
+    """Creates the classifier section inside a group box.
 
     Args:
-        parent: The main GUI window.
-        b0: The current grid row offset.
+        owner: The parent widget for ownership of created widgets.
+        signals: The central signal bus for GUI events (reserved for future use).
 
     Returns:
-        Updated grid row offset after placing classifier widgets.
+        Tuple of (group box, classifier controls container).
     """
-    classifier_label = QLabel("")
-    classifier_label.setFont(header_font())
-    classifier_label.setText("<font color='white'>Classifier</font>")
-    parent.classLabel = QLabel("<font color='white'>not loaded (using prob from cell_classification.npy)</font>")
-    parent.classLabel.setFont(label_font())
-    parent.l0.addWidget(classifier_label, b0, 0, 1, 2)
-    b0 += 1
-    parent.l0.addWidget(parent.classLabel, b0, 0, 1, 2)
-    parent.addtoclass = QPushButton(" add current data to classifier")
-    parent.addtoclass.setFont(label_font_bold())
-    parent.addtoclass.clicked.connect(lambda: _add_to(parent))
-    parent.addtoclass.setStyleSheet(BUTTON_INACTIVE_STYLESHEET)
-    b0 += 1
-    parent.l0.addWidget(parent.addtoclass, b0, 0, 1, 2)
-    return b0
+    group_box = QGroupBox("Classifier")
+    group_box.setStyleSheet("QGroupBox { color: white; }")
+    layout = QVBoxLayout(group_box)
+
+    classifier_label = QLabel("<font color='white'>not loaded (using prob from cell_classification.npy)</font>")
+    classifier_label.setFont(label_font())
+    layout.addWidget(classifier_label)
+
+    add_to_class_button = QPushButton(" add current data to classifier")
+    add_to_class_button.setFont(label_font_bold())
+    add_to_class_button.setStyleSheet(STYLE.button_inactive)
+    layout.addWidget(add_to_class_button)
+
+    return group_box, ClassifierControls(
+        classifier_label=classifier_label,
+        add_to_class_button=add_to_class_button,
+    )
 
 
 def load_classifier(parent: MainWindow) -> None:
@@ -114,9 +130,9 @@ def class_default(parent: MainWindow) -> None:
         parent,
         "Default classifier",
         "Are you sure you want to overwrite your default classifier?",
-        QMessageBox.Yes | QMessageBox.No,
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
     )
-    if result == QMessageBox.Yes:
+    if result == QMessageBox.StandardButton.Yes:
         shutil.copy(parent.classfile, parent.classuser)
 
 
@@ -130,9 +146,9 @@ def reset_default(parent: MainWindow) -> None:
         parent,
         "Default classifier",
         "Are you sure you want to reset the default classifier to the built-in cindra classifier?",
-        QMessageBox.Yes | QMessageBox.No,
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
     )
-    if result == QMessageBox.Yes:
+    if result == QMessageBox.StandardButton.Yes:
         shutil.copy(parent.classorig, parent.classuser)
 
 
@@ -154,8 +170,8 @@ def activate(parent: MainWindow, inactive: bool) -> None:
         inactive: When True, recomputes cell probabilities using the loaded model.
     """
     if inactive:
-        result = parent.model.classify(roi_statistics=parent.context_data.roi_statistics)
-        parent.context_data.cell_classification_probabilities[:] = result[:, 1]
+        result = parent.model.classify(roi_statistics=parent.context_data.roi_statistics)  # type: ignore[attr-defined, union-attr]
+        parent.context_data.cell_classification_probabilities[:] = result[:, 1]  # type: ignore[union-attr]
     _class_masks(parent=parent)
     parent.update_plot()
 
@@ -166,10 +182,10 @@ def disable(parent: MainWindow) -> None:
     Args:
         parent: The main GUI window.
     """
-    parent.classbtn.setEnabled(False)
-    parent.saveClass.setEnabled(False)
-    parent.saveTrain.setEnabled(False)
-    for btn in parent.classbtns.buttons():
+    parent.classbtn.setEnabled(False)  # type: ignore[attr-defined]
+    parent.saveClass.setEnabled(False)  # type: ignore[attr-defined]
+    parent.saveTrain.setEnabled(False)  # type: ignore[attr-defined]
+    for btn in parent.classbtns.buttons():  # type: ignore[attr-defined]
         btn.setEnabled(False)
 
 
@@ -204,7 +220,9 @@ class ListChooser(QDialog):
         layout.addWidget(QLabel("(select multiple using ctrl)"), 1, 0, 1, 1)
         self.list = QListWidget(parent)
         layout.addWidget(self.list, 2, 0, 5, 4)
-        self.list.setSelectionMode(QAbstractItemView.MultiSelection)
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+
+        assert parent is not None
 
         save_button = QPushButton("build classifier")
         save_button.clicked.connect(lambda: self._build_classifier(parent))
@@ -251,9 +269,9 @@ class ListChooser(QDialog):
         if name:
             try:
                 with Path(name[0]).open() as text_file:
-                    files = text_file.read()
-                files = files.splitlines()
-                for file_path in files:
+                    file_content = text_file.read()
+                file_lines = file_content.splitlines()
+                for file_path in file_lines:
                     self.list.addItem(file_path)
             except OSError, RuntimeError, TypeError, NameError:
                 QMessageBox.information(self, "Error", "not a text file")
@@ -299,9 +317,9 @@ class ListChooser(QDialog):
             self,
             "Default classifier",
             "Are you sure you want to overwrite your default classifier?",
-            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if result == QMessageBox.Yes:
+        if result == QMessageBox.StandardButton.Yes:
             shutil.copy(parent.classfile, parent.classuser)
 
     def _exit_list(self) -> None:
@@ -321,7 +339,7 @@ def _class_file(parent: MainWindow) -> None:
         classifier_name = "cindra classifier"
     else:
         classifier_name = parent.classfile
-    parent.classLabel.setText(f"<font color='white'>{classifier_name}</font>")
+    parent._classifier_controls.classifier_label.setText(f"<font color='white'>{classifier_name}</font>")
 
 
 def _class_activated(parent: MainWindow) -> None:
@@ -332,8 +350,8 @@ def _class_activated(parent: MainWindow) -> None:
     """
     _class_file(parent=parent)
     parent.saveDefault.setEnabled(True)
-    parent.addtoclass.setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
-    parent.addtoclass.setEnabled(True)
+    parent._classifier_controls.add_to_class_button.setStyleSheet(STYLE.button_unpressed)
+    parent._classifier_controls.add_to_class_button.setEnabled(True)
 
 
 def _load_model(parent: MainWindow, name: str) -> None:
@@ -370,7 +388,7 @@ def _save_model(
     for feature_index, feature_name in enumerate(feature_names):
         save_dict[feature_name] = feature_matrix[:, feature_index]
     console.echo(message=f"Saving classifier to: {name}", level=LogLevel.SUCCESS)
-    np.savez(name, **save_dict)
+    np.savez(name, **save_dict)  # type: ignore[arg-type]
 
 
 def _load_data(
@@ -472,24 +490,24 @@ def _add_to(parent: MainWindow) -> None:
         parent,
         "Default classifier",
         f"Current classifier is {classifier_name}. Add to this classifier?",
-        QMessageBox.Yes | QMessageBox.No,
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
     )
-    if result == QMessageBox.Yes:
+    if result == QMessageBox.StandardButton.Yes:
         # Extracts features from the current session's ROI statistics.
-        roi_statistics = parent.context_data.roi_statistics
-        feature_names = parent.model._available_features
-        new_features = parent.model._extract_features(roi_statistics=roi_statistics)
+        roi_statistics = parent.context_data.roi_statistics  # type: ignore[union-attr]
+        feature_names = parent.model._available_features  # type: ignore[attr-defined]
+        new_features = parent.model._extract_features(roi_statistics=roi_statistics)  # type: ignore[attr-defined]
 
         # Gets existing training data from the loaded model.
-        existing_features = parent.model._get_training_features()
-        existing_labels = parent.model._training_labels
+        existing_features = parent.model._get_training_features()  # type: ignore[attr-defined]
+        existing_labels = parent.model._training_labels  # type: ignore[attr-defined]
 
         # Concatenates new session data with existing training data.
         combined_features = np.concatenate([existing_features, new_features], axis=0)
         combined_labels = np.concatenate(
             [
                 existing_labels,
-                parent.context_data.cell_classification_labels,
+                parent.context_data.cell_classification_labels,  # type: ignore[union-attr]
             ],
             axis=0,
         )
@@ -529,8 +547,8 @@ def _save_classifier(
         Tuple of (file_path, success) indicating where the dataset was saved and whether it
         succeeded.
     """
-    name = QFileDialog.getSaveFileName(parent, "Classifier name (*.npz)")
-    name = name[0]
+    dialog_result = QFileDialog.getSaveFileName(parent, "Classifier name (*.npz)")
+    name = dialog_result[0]
     saved = False
     if name:
         try:
@@ -569,6 +587,8 @@ def _class_masks(parent: MainWindow) -> None:
     Args:
         parent: The main GUI window.
     """
+    if parent.context_data is None or parent.color_arrays is None or parent.roi_maps is None:
+        return
     istat = parent.context_data.cell_classification_probabilities.copy()
     parent.color_arrays.colorbar[_CLASSIFIER_COLOR_INDEX] = [
         float(istat.min()),

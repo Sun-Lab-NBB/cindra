@@ -7,21 +7,14 @@ from dataclasses import dataclass
 
 import numpy as np
 from PySide6 import QtGui, QtCore
-from PySide6.QtWidgets import QLabel, QLineEdit, QPushButton, QButtonGroup
+from PySide6.QtWidgets import QLabel, QGroupBox, QLineEdit, QGridLayout, QPushButton, QButtonGroup
 
-from ..styles import (
-    SMALL_EDIT_WIDTH,
-    WHITE_LABEL_STYLESHEET,
-    BUTTON_PRESSED_STYLESHEET,
-    BUTTON_INACTIVE_STYLESHEET,
-    BUTTON_UNPRESSED_STYLESHEET,
-    label_font_bold,
-)
+from .styles import STYLE, label_font_bold
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from PySide6.QtWidgets import QWidget, QGridLayout
+    from PySide6.QtWidgets import QWidget
 
     from .signals import GUISignals
 
@@ -90,31 +83,28 @@ class QuadrantControls:
 
 def create_selection_buttons(
     owner: QWidget,
-    layout: QGridLayout,
     signals: GUISignals,
-) -> SelectionControls:
+) -> tuple[QGroupBox, SelectionControls]:
     """Creates the cell selection buttons and the top-n input field.
 
-    Adds a button group with three selection modes (draw selection, select top n, select
-    bottom n) and a numeric input field for specifying how many cells to select.
+    Builds a group box containing a button group with three selection modes (draw selection,
+    select top n, select bottom n) and a numeric input field for specifying how many cells
+    to select.
 
     Args:
         owner: The parent widget for ownership of created widgets.
-        layout: The grid layout to add widgets to.
         signals: The central signal bus for GUI events.
 
     Returns:
-        Selection controls container with all created widgets.
+        Tuple of (group box, selection controls container).
     """
+    group_box = QGroupBox("Cell Selection")
+    group_box.setStyleSheet("QGroupBox { color: white; }")
+    layout = QGridLayout(group_box)
+
     selection_buttons = QButtonGroup()
 
-    selection_label = QLabel("select cells")
-    selection_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
-    selection_label.setFont(label_font_bold())
-    layout.addWidget(selection_label, 0, 2, 1, 2)
-
     labels = [" draw selection", " select top n", " select bottom n"]
-    column_positions = [2, 3, 4]
     for button_index in range(3):
         button = _SelectionButton(
             button_id=button_index,
@@ -124,15 +114,15 @@ def create_selection_buttons(
             signals=signals,
         )
         selection_buttons.addButton(button, button_index)
-        layout.addWidget(button, 0, column_positions[button_index] * 2, 1, 2)
+        layout.addWidget(button, button_index, 0, 1, 1)
         button.setEnabled(False)
     selection_buttons.setExclusive(True)
 
     count_label = QLabel("n=")
     count_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-    count_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+    count_label.setStyleSheet(STYLE.white_label)
     count_label.setFont(label_font_bold())
-    layout.addWidget(count_label, 0, 10, 1, 1)
+    layout.addWidget(count_label, 1, 1, 1, 1)
 
     controls = SelectionControls(
         selection_buttons=selection_buttons,
@@ -141,40 +131,42 @@ def create_selection_buttons(
 
     controls.top_count_edit.setValidator(QtGui.QIntValidator(0, _MAX_TOP_N))
     controls.top_count_edit.setText(str(_DEFAULT_TOP_N))
-    controls.top_count_edit.setFixedWidth(SMALL_EDIT_WIDTH)
+    controls.top_count_edit.setFixedWidth(STYLE.small_edit_width)
     controls.top_count_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
     controls.top_count_edit.returnPressed.connect(signals.roi_selection_changed.emit)
-    layout.addWidget(controls.top_count_edit, 0, 11, 1, 1)
+    layout.addWidget(controls.top_count_edit, 2, 1, 1, 1)
 
-    return controls
+    return group_box, controls
 
 
 def create_cell_toggle_buttons(
     owner: QWidget,
-    layout: QGridLayout,
     signals: GUISignals,
-) -> CellToggleControls:
+) -> tuple[QGroupBox, CellToggleControls]:
     """Creates the cell / not-cell / both size-toggle buttons and ROI count labels.
 
-    Adds labels showing the number of cells and non-cells, plus a button group with three
-    mutually exclusive view modes.
+    Builds a group box containing labels showing the number of cells and non-cells, plus a
+    button group with three mutually exclusive view modes.
 
     Args:
         owner: The parent widget for ownership of created widgets.
-        layout: The grid layout to add widgets to.
         signals: The central signal bus for GUI events.
 
     Returns:
-        Cell toggle controls container with all created widgets.
+        Tuple of (group box, cell toggle controls container).
     """
+    group_box = QGroupBox("View Toggle")
+    group_box.setStyleSheet("QGroupBox { color: white; }")
+    layout = QGridLayout(group_box)
+
     cell_count_label = QLabel("")
-    cell_count_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+    cell_count_label.setStyleSheet(STYLE.white_label)
     cell_count_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-    layout.addWidget(cell_count_label, 0, 12, 1, 2)
+    layout.addWidget(cell_count_label, 0, 0, 1, 1)
 
     noncell_count_label = QLabel("")
-    noncell_count_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
-    layout.addWidget(noncell_count_label, 0, 20, 1, 2)
+    noncell_count_label.setStyleSheet(STYLE.white_label)
+    layout.addWidget(noncell_count_label, 0, 2, 1, 1)
 
     size_buttons = QButtonGroup(owner)
     labels = [" cells", " both", " not cells"]
@@ -187,11 +179,11 @@ def create_cell_toggle_buttons(
             signals=signals,
         )
         size_buttons.addButton(button, button_index)
-        layout.addWidget(button, 0, 14 + 2 * button_index, 1, 2)
+        layout.addWidget(button, 1, button_index, 1, 1)
         button.setEnabled(button_index == _VIEW_BOTH)
     size_buttons.setExclusive(True)
 
-    return CellToggleControls(
+    return group_box, CellToggleControls(
         size_buttons=size_buttons,
         cell_count_label=cell_count_label,
         noncell_count_label=noncell_count_label,
@@ -200,21 +192,24 @@ def create_cell_toggle_buttons(
 
 def create_quadrant_buttons(
     owner: QWidget,
-    layout: QGridLayout,
     signals: GUISignals,
-) -> QuadrantControls:
+) -> tuple[QGroupBox, QuadrantControls]:
     """Creates the 3x3 quadrant zoom navigation buttons.
 
-    Each button zooms the field-of-view plots to the corresponding ninth of the image.
+    Builds a group box containing nine buttons that zoom the field-of-view plots to the
+    corresponding ninth of the image.
 
     Args:
         owner: The parent widget for ownership of created widgets.
-        layout: The grid layout to add widgets to.
         signals: The central signal bus for GUI events.
 
     Returns:
-        Quadrant controls container with all created widgets.
+        Tuple of (group box, quadrant controls container).
     """
+    group_box = QGroupBox("Navigation")
+    group_box.setStyleSheet("QGroupBox { color: white; }")
+    layout = QGridLayout(group_box)
+
     quadrant_buttons = QButtonGroup(owner)
     for button_index in range(9):
         button = _QuadButton(
@@ -225,11 +220,13 @@ def create_quadrant_buttons(
             signals=signals,
         )
         quadrant_buttons.addButton(button, button_index)
-        layout.addWidget(button, button.ypos, 29 + button.xpos, 1, 1)
+        row = button_index // _QUADRANT_COLUMNS
+        col = button_index % _QUADRANT_COLUMNS
+        layout.addWidget(button, row, col, 1, 1)
         button.setEnabled(False)
     quadrant_buttons.setExclusive(True)
 
-    return QuadrantControls(quadrant_buttons=quadrant_buttons)
+    return group_box, QuadrantControls(quadrant_buttons=quadrant_buttons)
 
 
 def apply_quadrant_zoom(
@@ -251,8 +248,8 @@ def apply_quadrant_zoom(
     """
     for index in range(9):
         if quadrant_buttons.button(index).isEnabled():
-            quadrant_buttons.button(index).setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
-    quadrant_buttons.button(button_index).setStyleSheet(BUTTON_PRESSED_STYLESHEET)
+            quadrant_buttons.button(index).setStyleSheet(STYLE.button_unpressed)
+    quadrant_buttons.button(button_index).setStyleSheet(STYLE.button_pressed)
 
     x_column = button_index % _QUADRANT_COLUMNS
     y_row = button_index // _QUADRANT_COLUMNS
@@ -280,10 +277,6 @@ class _QuadButton(QPushButton):
         owner: The parent widget for ownership.
         button_group: The button group this button belongs to.
         signals: The central signal bus for GUI events.
-
-    Attributes:
-        xpos: Column index (0-2) in the quadrant grid.
-        ypos: Row index (0-2) in the quadrant grid.
     """
 
     def __init__(
@@ -297,12 +290,10 @@ class _QuadButton(QPushButton):
         super().__init__(owner)
         self.setText(text)
         self.setCheckable(True)
-        self.setStyleSheet(BUTTON_INACTIVE_STYLESHEET)
+        self.setStyleSheet(STYLE.button_inactive)
         self.setFont(label_font_bold())
         self.resize(self.minimumSizeHint())
-        self.setMaximumWidth(SMALL_EDIT_WIDTH)
-        self.xpos: int = button_id % _QUADRANT_COLUMNS
-        self.ypos: int = button_id // _QUADRANT_COLUMNS
+        self.setMaximumWidth(STYLE.small_edit_width)
         self._button_id: int = button_id
         self._signals = signals
         self.clicked.connect(self._press)
@@ -341,7 +332,7 @@ class _SizeButton(QPushButton):
         super().__init__(owner)
         self.setText(text)
         self.setCheckable(True)
-        self.setStyleSheet(BUTTON_INACTIVE_STYLESHEET)
+        self.setStyleSheet(STYLE.button_inactive)
         self.setFont(label_font_bold())
         self.resize(self.minimumSizeHint())
         self._button_id: int = button_id
@@ -383,7 +374,7 @@ class _SelectionButton(QPushButton):
         self._button_id: int = button_id
         self.setText(text)
         self.setCheckable(True)
-        self.setStyleSheet(BUTTON_INACTIVE_STYLESHEET)
+        self.setStyleSheet(STYLE.button_inactive)
         self.setFont(label_font_bold())
         self.resize(self.minimumSizeHint())
         self._signals = signals

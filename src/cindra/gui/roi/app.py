@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 _ICON_PATH: str = str(MainWindow.cindra_directory() / "logo" / "logo.png")
 
 
-def run(session_path: Path | None = None) -> None:
+def run_roi_viewer(session_path: Path | None = None) -> None:
     """Launches the standalone ROI viewer and editor.
 
     Creates a QApplication, shows the MainWindow, and enters the event loop.
@@ -31,6 +31,7 @@ def run(session_path: Path | None = None) -> None:
     owns_application = application is None
     if owns_application:
         application = QApplication(sys.argv)
+    assert isinstance(application, QApplication)
 
     app_icon = QtGui.QIcon()
     for size in (16, 24, 32, 48, 64, 256):
