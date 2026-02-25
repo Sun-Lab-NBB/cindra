@@ -19,10 +19,9 @@ if TYPE_CHECKING:
     from ...dataclasses import (
         CombinedData,
         DetectionData,
-        MultiDayIOData,
+        ROIStatistics,
         MultiDayRuntimeData,
         MultiDayTrackingData,
-        ROIStatistics,
         MultiDayRegistrationData,
     )
 
@@ -40,6 +39,9 @@ class MaskLayer(IntEnum):
     TEMPLATE = 2
     """Displays the consensus template ROI masks derived from cross-recording clustering, defined in the shared
     coordinate space."""
+
+    TRACKED = 3
+    """Displays the template ROI masks backward-deformed to each recording's native coordinate space."""
 
 
 class CoordinateSpace(IntEnum):
@@ -222,17 +224,37 @@ class TrackingViewerData:
 
     @property
     def original_masks(self) -> list[ROIStatistics] | None:
-        """Returns the original ROI masks from single-day extraction."""
+        """Returns the selected ROI masks that were used as input to forward deformation.
+
+        Filters the full single-day extraction ROI list to only the cells selected for multi-day tracking, giving a
+        1:1 correspondence with the deformed mask layer.
+        """
         if self._current_combined is None:
             return None
-        return self._current_combined.extraction.roi_statistics
+        all_masks = self._current_combined.extraction.roi_statistics
+        if all_masks is None:
+            return None
+        selected_indices = self._current_runtime.io.selected_cell_indices
+        if not selected_indices:
+            return all_masks
+        return [all_masks[i] for i in selected_indices]
 
     @property
     def original_masks_channel_2(self) -> list[ROIStatistics] | None:
-        """Returns the channel 2 original ROI masks from single-day extraction."""
+        """Returns the channel 2 selected ROI masks that were used as input to forward deformation.
+
+        Filters the full single-day extraction ROI list to only the cells selected for multi-day tracking, giving a
+        1:1 correspondence with the deformed mask layer.
+        """
         if self._current_combined is None:
             return None
-        return self._current_combined.extraction.roi_statistics_channel_2
+        all_masks = self._current_combined.extraction.roi_statistics_channel_2
+        if all_masks is None:
+            return None
+        selected_indices = self._current_runtime.io.selected_cell_indices_channel_2
+        if not selected_indices:
+            return all_masks
+        return [all_masks[i] for i in selected_indices]
 
     @property
     def deformed_masks(self) -> list[ROIStatistics] | None:
@@ -253,6 +275,16 @@ class TrackingViewerData:
     def template_masks_channel_2(self) -> list[ROIStatistics] | None:
         """Returns the channel 2 consensus template masks from cross-recording tracking."""
         return self._current_tracking.template_masks_channel_2
+
+    @property
+    def tracked_masks(self) -> list[ROIStatistics] | None:
+        """Returns the template ROI masks backward-deformed to the current recording's native coordinate space."""
+        return self._current_runtime.extraction.roi_statistics
+
+    @property
+    def tracked_masks_channel_2(self) -> list[ROIStatistics] | None:
+        """Returns the channel 2 template ROI masks backward-deformed to native coordinate space."""
+        return self._current_runtime.extraction.roi_statistics_channel_2
 
     @classmethod
     def from_recording(cls, root_path: Path) -> TrackingViewerData:
@@ -292,6 +324,8 @@ class TrackingViewerData:
             return self.deformed_masks_channel_2 if channel_2 else self.deformed_masks
         if layer == MaskLayer.TEMPLATE:
             return self.template_masks_channel_2 if channel_2 else self.template_masks
+        if layer == MaskLayer.TRACKED:
+            return self.tracked_masks_channel_2 if channel_2 else self.tracked_masks
         return None
 
     def background_image(

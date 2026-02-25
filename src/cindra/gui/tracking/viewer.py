@@ -7,13 +7,14 @@ from dataclasses import dataclass
 
 import numpy as np
 from PySide6 import QtGui, QtCore
-import pyqtgraph as pg
+import pyqtgraph as pg  # type: ignore[import-untyped]
 from PySide6.QtWidgets import (
     QLabel,
     QSlider,
     QWidget,
     QComboBox,
     QGroupBox,
+    QLineEdit,
     QStatusBar,
     QHBoxLayout,
     QMainWindow,
@@ -22,13 +23,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QButtonGroup,
 )
+from matplotlib.colors import hsv_to_rgb
 
 from .context_data import MaskLayer, BackgroundImage, CoordinateSpace, TrackingViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-
-    from ...dataclasses import ROIStatistics
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,17 +41,14 @@ class _TrackingViewerStyle:
     default_mask_opacity: int = 127
     """The default mask overlay opacity (0-255 uint8 range)."""
 
-    channel_1_mask_color: tuple[int, int, int] = (0, 255, 255)
-    """The mask outline color for channel 1 ROIs (cyan)."""
-
-    channel_2_mask_color: tuple[int, int, int] = (255, 80, 80)
-    """The mask outline color for channel 2 ROIs (red)."""
-
     lower_percentile: float = 1.0
     """The lower percentile value for normalizing background images."""
 
     upper_percentile: float = 99.0
     """The upper percentile value for normalizing background images."""
+
+    roi_edit_width: int = 50
+    """The fixed pixel width of the ROI index input field."""
 
 
 class TrackingViewer(QMainWindow):
@@ -70,12 +67,31 @@ class TrackingViewer(QMainWindow):
 
     def __init__(self, data: TrackingViewerData) -> None:
         super().__init__()
-        self.setWindowTitle("Multi-Day Tracking Viewer")
+        self.setWindowTitle("Multi-Day ROI Tracking")
         self.resize(1200, 800)
 
         self.data: TrackingViewerData = data
         self._auto_cycle_timer: QtCore.QTimer = QtCore.QTimer(self)
         self._auto_cycle_timer.timeout.connect(self._advance_recording)
+
+        # Configures pyqtgraph to use row-major axis order so images display with the correct orientation.
+        pg.setConfigOptions(imageAxisOrder="row-major")
+
+        # Display cache fields. Populated by _refresh_display and reused by _composite_and_display for fast opacity
+        # updates without recomputing the background or mask coordinates.
+        self._cached_background: NDArray[np.uint8] | None = None
+        self._cached_mask_y: NDArray[np.int32] | None = None
+        self._cached_mask_x: NDArray[np.int32] | None = None
+        self._cached_mask_colors: NDArray[np.uint8] | None = None
+        self._cached_mask_roi_indices: NDArray[np.int32] | None = None
+        self._cached_roi_map: NDArray[np.int32] | None = None
+        self._cached_mask_count: int = 0
+        self._selected_rois: set[int] | None = None
+
+        # Tracks the mask layer group and recording index that were active when the selection was last valid. Used by
+        # _refresh_display to decide whether a recording or layer switch invalidates the current ROI selection.
+        self._selection_was_template: bool = False
+        self._selection_recording_index: int = -1
 
         # Builds the UI layout.
         central_widget = QWidget(self)
@@ -91,6 +107,8 @@ class TrackingViewer(QMainWindow):
         self._image_item: pg.ImageItem = pg.ImageItem()
         self._view_box.addItem(self._image_item)
         main_layout.addWidget(self._graphics_widget, stretch=3)
+        # noinspection PyUnresolvedReferences
+        self._graphics_widget.scene().sigMouseClicked.connect(self._on_image_clicked)
 
         # Control panel (right sidebar).
         control_panel = self._build_control_panel()
@@ -224,6 +242,7 @@ class TrackingViewer(QMainWindow):
         self._mask_combo.addItem("Original", userData=MaskLayer.ORIGINAL)
         self._mask_combo.addItem("Deformed", userData=MaskLayer.DEFORMED)
         self._mask_combo.addItem("Template", userData=MaskLayer.TEMPLATE)
+        self._mask_combo.addItem("Tracked", userData=MaskLayer.TRACKED)
         self._mask_combo.currentIndexChanged.connect(self._refresh_display)
         mask_layout.addWidget(self._mask_combo)
 
@@ -232,7 +251,8 @@ class TrackingViewer(QMainWindow):
         self._opacity_slider = QSlider(QtCore.Qt.Orientation.Horizontal)
         self._opacity_slider.setRange(0, 255)
         self._opacity_slider.setValue(self._style.default_mask_opacity)
-        self._opacity_slider.valueChanged.connect(self._refresh_display)
+        self._opacity_slider.setToolTip("Adjust mask opacity. Use the mouse wheel over the image to change quickly.")
+        self._opacity_slider.valueChanged.connect(self._on_opacity_changed)
         opacity_row.addWidget(self._opacity_slider)
         mask_layout.addLayout(opacity_row)
 
@@ -250,45 +270,192 @@ class TrackingViewer(QMainWindow):
 
         layout.addWidget(channel_group)
 
+        # ROI selection group.
+        roi_group = QGroupBox("ROI Selection")
+        roi_layout = QVBoxLayout(roi_group)
+
+        roi_group.setToolTip("Click an ROI to select it. Ctrl-click or Shift-click to toggle individual ROIs.")
+
+        input_row = QHBoxLayout()
+        input_row.addWidget(QLabel("ROI:"))
+        self._roi_edit = QLineEdit()
+        self._roi_edit.setFixedWidth(self._style.roi_edit_width)
+        self._roi_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+        self._roi_edit.setReadOnly(True)
+        self._roi_edit.setToolTip("Displays the index of the last clicked ROI.")
+        input_row.addWidget(self._roi_edit)
+        roi_layout.addLayout(input_row)
+
+        button_row = QHBoxLayout()
+        all_button = QPushButton("All")
+        all_button.setToolTip("Show all ROIs.")
+        all_button.clicked.connect(self._select_all_rois)
+        button_row.addWidget(all_button)
+        none_button = QPushButton("None")
+        none_button.setToolTip("Hide all ROIs.")
+        none_button.clicked.connect(self._deselect_all_rois)
+        button_row.addWidget(none_button)
+        roi_layout.addLayout(button_row)
+
+        layout.addWidget(roi_group)
+
         layout.addStretch()
+
+        # Prevents control panel widgets from capturing keyboard focus so spacebar and arrow keys always reach the
+        # main window's keyPressEvent.
+        for child in panel.findChildren(QWidget):
+            child.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
         return panel
 
     def _refresh_display(self) -> None:
-        """Redraws the image panel with the current background image and mask overlay."""
+        """Rebuilds the cached background and mask coordinates, then composites and displays the result.
+
+        Caches the normalized background image and pre-collected mask pixel coordinates so that opacity-only changes
+        can skip the expensive recomputation and go directly through ``_composite_and_display``.
+        """
         coordinate_space = self._space_combo.currentData()
         background_type = self._background_combo.currentData()
         mask_layer = self._mask_combo.currentData()
         channel_2 = self._channel_2_checkbox.isChecked()
-        opacity = self._opacity_slider.value()
 
-        # Retrieves and normalizes the background image.
+        # Retrieves and normalizes the background image into the cache.
         background = self.data.background_image(
             image_type=background_type,
             coordinate_space=coordinate_space,
             channel_2=channel_2,
         )
-        display_image = self._normalize_image(image=background)
+        self._cached_background = self._normalize_image(image=background)
 
-        # Retrieves the mask set for the current layer and channel.
+        # Pre-collects all valid mask pixel coordinates and per-ROI colors into the cache.
         masks = self.data.masks_for_layer(layer=mask_layer, channel_2=channel_2)
+        self._cached_mask_count = len(masks) if masks else 0
+        self._cached_mask_y = None
+        self._cached_mask_x = None
+        self._cached_mask_colors = None
+        self._cached_mask_roi_indices = None
+        self._cached_roi_map = None
 
-        # Composites the mask overlay onto the background.
+        # Determines whether the ROI identity set has changed, requiring a selection reset. Template and Tracked
+        # layers share the same ROI identity set (template-derived) so the selection persists across recording
+        # switches and Template/Tracked toggles. Original and Deformed share a separate identity set (single-day
+        # extraction) so the selection persists only within the same session.
+        current_is_template_group = mask_layer in (MaskLayer.TEMPLATE, MaskLayer.TRACKED)
+        recording_index = self.data.current_recording_index
+        layer_group_changed = current_is_template_group != self._selection_was_template
+        session_changed = not current_is_template_group and recording_index != self._selection_recording_index
+        if layer_group_changed or session_changed:
+            self._selected_rois = None
+            self._roi_edit.clear()
+        elif self._selected_rois is not None and self._cached_mask_count > 0:
+            # Clamps the selection to valid indices in case the mask count differs.
+            self._selected_rois = {i for i in self._selected_rois if i < self._cached_mask_count}
+        self._selection_was_template = current_is_template_group
+        self._selection_recording_index = recording_index
+
         if masks:
-            mask_color = self._style.channel_2_mask_color if channel_2 else self._style.channel_1_mask_color
-            display_image = self._overlay_masks(
-                background=display_image,
-                masks=masks,
-                color=mask_color,
-                opacity=opacity,
-            )
+            frame_height = self.data.frame_height
+            frame_width = self.data.frame_width
+
+            # Generates deterministic per-ROI colors using random HSV hues with full saturation and value.
+            # Original and Deformed layers use the Original mask count as the palette reference so both layers
+            # share identical colors within a session (they represent the same ROIs in different coordinate
+            # spaces). Template layers use their own count directly, which is identical across all sessions,
+            # ensuring consistent colors when switching recordings.
+            # Template and Tracked layers share a color palette (same ROI identity set). Original and Deformed
+            # layers share a separate palette (same single-day ROIs in different coordinate spaces).
+            if mask_layer in (MaskLayer.TEMPLATE, MaskLayer.TRACKED):
+                template_masks = self.data.masks_for_layer(layer=MaskLayer.TEMPLATE, channel_2=channel_2)
+                color_count = len(template_masks) if template_masks else len(masks)
+            else:
+                original_masks = self.data.masks_for_layer(layer=MaskLayer.ORIGINAL, channel_2=channel_2)
+                color_count = len(original_masks) if original_masks else len(masks)
+
+            rng = np.random.default_rng(seed=0)
+            hues = rng.random(color_count)
+            hsv = np.stack([hues, np.ones_like(hues), np.ones_like(hues)], axis=-1)
+            roi_colors = (255.0 * hsv_to_rgb(hsv)).astype(np.uint8)
+
+            # Builds the ROI ownership map for O(1) click-to-ROI lookup. Initialized to -1 (no ROI).
+            roi_map = np.full(shape=(frame_height, frame_width), fill_value=-1, dtype=np.int32)
+
+            all_y: list[NDArray[np.int32]] = []
+            all_x: list[NDArray[np.int32]] = []
+            pixel_counts: list[int] = []
+            valid_roi_colors: list[NDArray[np.uint8]] = []
+            valid_roi_indices: list[int] = []
+            for roi_index, roi in enumerate(masks):
+                valid = (
+                    (roi.y_pixels >= 0)
+                    & (roi.y_pixels < frame_height)
+                    & (roi.x_pixels >= 0)
+                    & (roi.x_pixels < frame_width)
+                )
+                y_valid = roi.y_pixels[valid].astype(np.int32)
+                x_valid = roi.x_pixels[valid].astype(np.int32)
+                if len(y_valid) > 0:
+                    all_y.append(y_valid)
+                    all_x.append(x_valid)
+                    pixel_counts.append(len(y_valid))
+                    valid_roi_colors.append(roi_colors[roi_index])
+                    valid_roi_indices.append(roi_index)
+                    roi_map[y_valid, x_valid] = roi_index
+            if all_y:
+                self._cached_mask_y = np.concatenate(all_y)
+                self._cached_mask_x = np.concatenate(all_x)
+                self._cached_mask_colors = np.repeat(
+                    np.array(valid_roi_colors, dtype=np.uint8), repeats=pixel_counts, axis=0
+                )
+                self._cached_mask_roi_indices = np.repeat(
+                    np.array(valid_roi_indices, dtype=np.int32), repeats=pixel_counts
+                )
+            self._cached_roi_map = roi_map
+
+        self._composite_and_display()
+
+    def _composite_and_display(self) -> None:
+        """Blends cached mask coordinates onto the cached background at the current opacity and updates the display."""
+        if self._cached_background is None:
+            return
+
+        opacity = self._opacity_slider.value()
+        display_image = self._cached_background.copy()
+
+        # Vectorized alpha-blend of all mask pixels in a single operation using per-ROI colors.
+        if (
+            self._cached_mask_y is not None
+            and self._cached_mask_x is not None
+            and self._cached_mask_colors is not None
+            and len(self._cached_mask_y) > 0
+        ):
+            # Filters to only selected ROIs when a subset is active.
+            if self._selected_rois is not None and self._cached_mask_roi_indices is not None:
+                selected_mask = np.isin(self._cached_mask_roi_indices, list(self._selected_rois))
+                mask_y = self._cached_mask_y[selected_mask]
+                mask_x = self._cached_mask_x[selected_mask]
+                mask_colors = self._cached_mask_colors[selected_mask]
+            else:
+                mask_y = self._cached_mask_y
+                mask_x = self._cached_mask_x
+                mask_colors = self._cached_mask_colors
+
+            if len(mask_y) > 0:
+                alpha = opacity / 255.0
+                display_image[mask_y, mask_x] = (
+                    alpha * mask_colors.astype(np.float32)
+                    + (1.0 - alpha) * display_image[mask_y, mask_x].astype(np.float32)
+                ).astype(np.uint8)
 
         self._image_item.setImage(display_image)
 
-        # Updates the status bar.
+        # Updates the status bar with selection info when a subset is active.
         recording_id = self.data.current_recording_id
-        mask_count = len(masks) if masks else 0
+        if self._selected_rois is not None:
+            selection_text = f"Selected: {len(self._selected_rois)} / {self._cached_mask_count}"
+        else:
+            selection_text = f"Masks: {self._cached_mask_count}"
         self._status_bar.showMessage(
-            f"Recording: {recording_id}  |  Masks: {mask_count}  |  "
+            f"Recording: {recording_id}  |  {selection_text}  |  "
             f"Size: {self.data.frame_height} x {self.data.frame_width}"
         )
 
@@ -302,6 +469,74 @@ class TrackingViewer(QMainWindow):
             return
         self.data.switch_recording(recording_index=index)
         self._refresh_display()
+
+    def _on_opacity_changed(self) -> None:
+        """Handles opacity slider changes by re-compositing from cached data.
+
+        Skips the expensive background normalization and mask coordinate collection that ``_refresh_display`` performs,
+        since only the alpha blend value has changed.
+        """
+        self._composite_and_display()
+
+    def _on_image_clicked(self, event: object) -> None:
+        """Handles mouse clicks on the image to select or toggle ROIs.
+
+        Plain click selects a single ROI. Ctrl-click or Shift-click toggles an ROI in/out of the current selection.
+        Clicking empty space (no ROI) is ignored.
+
+        Args:
+            event: The pyqtgraph mouse click event from the scene signal.
+        """
+        if self._cached_roi_map is None:
+            return
+
+        # Maps click position from scene coordinates to image pixel coordinates.
+        scene_position = event.scenePos()  # type: ignore[attr-defined]
+        view_position = self._view_box.mapSceneToView(scene_position)
+        click_x = int(view_position.x())
+        click_y = int(view_position.y())
+
+        # Bounds-checks against frame dimensions.
+        if click_y < 0 or click_y >= self.data.frame_height or click_x < 0 or click_x >= self.data.frame_width:
+            return
+
+        # noinspection PyTypeChecker
+        roi_index = int(self._cached_roi_map[click_y, click_x])
+        if roi_index < 0:
+            return
+
+        # Determines whether to toggle (Ctrl/Shift held) or replace selection (plain click).
+        modifiers = event.modifiers()  # type: ignore[attr-defined]
+        # noinspection PyTypeChecker
+        is_toggle = bool(
+            modifiers & (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.ShiftModifier)
+        )
+
+        if is_toggle:
+            # Converts from "all visible" to an explicit set containing every ROI, then toggles the clicked one.
+            if self._selected_rois is None:
+                self._selected_rois = set(range(self._cached_mask_count))
+            if roi_index in self._selected_rois:
+                self._selected_rois.discard(roi_index)
+            else:
+                self._selected_rois.add(roi_index)
+        else:
+            self._selected_rois = {roi_index}
+
+        self._roi_edit.setText(str(roi_index))
+        self._composite_and_display()
+
+    def _select_all_rois(self) -> None:
+        """Resets the selection to show all ROIs."""
+        self._selected_rois = None
+        self._roi_edit.clear()
+        self._composite_and_display()
+
+    def _deselect_all_rois(self) -> None:
+        """Clears the selection so no ROIs are visible."""
+        self._selected_rois = set()
+        self._roi_edit.clear()
+        self._composite_and_display()
 
     def _previous_recording(self) -> None:
         """Navigates to the previous recording, wrapping around to the last."""
@@ -355,49 +590,3 @@ class TrackingViewer(QMainWindow):
         grayscale = (normalized * 255).astype(np.uint8)
 
         return np.stack([grayscale, grayscale, grayscale], axis=-1)
-
-    def _overlay_masks(
-        self,
-        background: NDArray[np.uint8],
-        masks: list[ROIStatistics],
-        color: tuple[int, int, int],
-        opacity: int,
-    ) -> NDArray[np.uint8]:
-        """Composites ROI mask outlines onto a background RGB image.
-
-        Renders each ROI as a filled semi-transparent region with the specified color and opacity. Pixels outside the
-        frame bounds are clipped.
-
-        Args:
-            background: The background RGB image of shape (height, width, 3).
-            masks: The list of ROIStatistics to overlay.
-            color: The RGB color tuple for mask pixels.
-            opacity: The alpha value (0-255) for mask blending.
-
-        Returns:
-            The composited RGB image with mask overlays.
-        """
-        frame_height = self.data.frame_height
-        frame_width = self.data.frame_width
-        result = background.copy()
-        alpha = opacity / 255.0
-
-        for roi in masks:
-            y_pixels = roi.y_pixels
-            x_pixels = roi.x_pixels
-
-            # Clips pixels to frame bounds.
-            valid = (y_pixels >= 0) & (y_pixels < frame_height) & (x_pixels >= 0) & (x_pixels < frame_width)
-            y_valid = y_pixels[valid]
-            x_valid = x_pixels[valid]
-
-            if len(y_valid) == 0:
-                continue
-
-            # Blends the mask color with the background.
-            for channel_index in range(3):
-                result[y_valid, x_valid, channel_index] = (
-                    alpha * color[channel_index] + (1.0 - alpha) * result[y_valid, x_valid, channel_index]
-                ).astype(np.uint8)
-
-        return result
