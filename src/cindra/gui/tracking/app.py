@@ -14,30 +14,33 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def run(session_path: Path | None = None) -> None:
+def run_tracking_viewer(recording_path: Path) -> None:
     """Launches the standalone multi-day tracking viewer.
 
-    Creates a QApplication, shows the TrackingViewer window, and enters the event loop.
-    If a session path is provided, the viewer loads multi-day tracking data from that
-    directory on startup.
+    Creates a QApplication, shows the TrackingViewer window, and enters the event loop. The viewer loads multi-day
+    tracking data from the provided directory on startup.
 
     Args:
-        session_path: Path to any session's root processed data directory. The loader
-            searches recursively for multi-day runtime data and reconstructs the full
+        recording_path: The path to the root data directory for any cindra-processed recording that makes up the
+            visualized multi-day dataset. The loader uses that recording's data to search and reconstruct the full
             dataset hierarchy.
     """
+    # Reuses the existing QApplication if one is already running (e.g. when embedded in a larger GUI),
+    # otherwise creates a new one.
     application = QApplication.instance()
     owns_application = application is None
     if owns_application:
         application = QApplication(sys.argv)
 
-    window = TrackingViewer()
+    # Loads recording data upfront so the viewer window receives a fully populated data instance.
+    data = TrackingViewerData.from_recording(root_path=recording_path)
 
-    if session_path is not None:
-        data = TrackingViewerData.from_session(root_path=session_path)
-        window.load_data(data=data)
+    # Creates the viewer window with the loaded data.
+    window = TrackingViewer(data=data)
 
     window.show()
 
-    if owns_application:
+    # Only enters the event loop if this function created the QApplication. When embedded in a larger GUI, the caller
+    # is responsible for running the event loop.
+    if owns_application and application is not None:
         sys.exit(application.exec())

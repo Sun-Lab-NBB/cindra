@@ -1,10 +1,12 @@
-"""Provides the data model for the multi-day tracking viewer."""
+"""Provides the data hierarchy for the per-recording across-day ROI tracking quality visualization."""
 
 from __future__ import annotations
 
 from enum import IntEnum
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
+
+from ataraxis_base_utilities import console
 
 from ...dataclasses import MultiDayRuntimeContext
 
@@ -14,125 +16,99 @@ if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
 
-    from ...dataclasses.multi_day_data import (
-        MultiDayIOData,
+    from ...dataclasses import (
+        CombinedData,
+        DetectionData,
+        ROIStatistics,
         MultiDayRuntimeData,
         MultiDayTrackingData,
         MultiDayRegistrationData,
     )
-    from ...dataclasses.single_day_data import CombinedData, DetectionData, ROIStatistics
 
 
 class MaskLayer(IntEnum):
     """Selects the active ROI mask layer."""
 
     ORIGINAL = 0
-    """Displays the original ROI masks from single-day extraction in native session coordinates."""
+    """Displays the original ROI masks from single-day extraction in native recording coordinates."""
 
     DEFORMED = 1
-    """Displays the original ROI masks warped to the shared cross-session coordinate space via multi-day registration
+    """Displays the original ROI masks warped to the shared cross-recording coordinate space via multi-day registration
     deformation fields."""
 
     TEMPLATE = 2
-    """Displays the consensus template ROI masks derived from cross-session clustering, defined in the shared
+    """Displays the consensus template ROI masks derived from cross-recording clustering, defined in the shared
     coordinate space."""
+
+    TRACKED = 3
+    """Displays the template ROI masks backward-deformed to each recording's native coordinate space."""
 
 
 class CoordinateSpace(IntEnum):
     """Selects the coordinate space for reference images."""
 
     NATIVE = 0
-    """Displays reference images in the original recording session coordinate space."""
+    """Displays reference images in the original recording coordinate space."""
 
     TRANSFORMED = 1
-    """Displays reference images warped to align with the cross-session template coordinate space."""
+    """Displays reference images warped to align with the cross-recording template coordinate space."""
 
 
 class BackgroundImage(IntEnum):
     """Selects the background image type displayed behind mask overlays."""
 
     MEAN = 0
-    """Mean fluorescence image."""
+    """Selects the mean fluorescence image."""
 
     ENHANCED_MEAN = 1
-    """Contrast-enhanced mean image."""
+    """Selects the contrast-enhanced mean image."""
 
     MAX_PROJECTION = 2
-    """Maximum intensity projection."""
+    """Selects the maximum intensity projection."""
 
     CORRELATION_MAP = 3
-    """Pixel correlation map."""
+    """Selects the pixel correlation map."""
 
 
 @dataclass
 class TrackingViewerData:
-    """Wraps multi-day runtime contexts for the tracking viewer.
+    """Wraps multi-day runtime data and serves it to the tracker viewer GUI.
 
-    Provides property-based delegation to the current session's multi-day runtime data,
-    supporting session navigation, coordinate space switching, mask layer selection, and
-    channel toggling. All sessions are loaded at construction time via the ``from_session``
-    factory method.
+    Provides property-based delegation to the currently viewed recording's multi-day runtime data, supporting recording
+    navigation, coordinate space switching, mask layer selection, and channel toggling. All recordings are loaded at
+    construction time via the ``from_recording`` factory method.
 
     Notes:
-        The ``combined_data`` field on each session's runtime contains the combined multi-plane
-        single-day detection data (background images, ROI statistics). Registration and tracking
-        data provide transformed images and mask sets for cross-session visualization.
+        The ``combined_data`` field on each recording's runtime contains the combined multi-plane single-day detection
+        data (background images, ROI statistics). Registration and tracking data provide transformed images and mask
+        sets for cross-recording visualization.
     """
 
     _contexts: list[MultiDayRuntimeContext] = field(repr=False)
-    """All multi-day runtime contexts, one per session."""
+    """The multi-day runtime contexts for all recordings that make up the visualized dataset."""
 
-    current_session_index: int = 0
-    """Zero-based index of the currently displayed session."""
+    _current_recording_index: int = 0
+    """The index of the currently displayed recording."""
 
     @property
-    def session_count(self) -> int:
-        """Returns the number of sessions in the dataset."""
+    def current_recording_index(self) -> int:
+        """Returns the index of the currently displayed recording."""
+        return self._current_recording_index
+
+    @property
+    def recording_count(self) -> int:
+        """Returns the number of recordings in the dataset."""
         return len(self._contexts)
 
     @property
-    def session_ids(self) -> tuple[str, ...]:
-        """Returns the session identifier strings for all sessions."""
+    def recording_ids(self) -> tuple[str, ...]:
+        """Returns the recording identifier strings for all recordings."""
         return tuple(context.runtime.io.session_id for context in self._contexts)
 
     @property
-    def current_session_id(self) -> str:
-        """Returns the session identifier for the currently displayed session."""
+    def current_recording_id(self) -> str:
+        """Returns the recording identifier for the currently displayed recording."""
         return self._current_runtime.io.session_id
-
-    @property
-    def _current_runtime(self) -> MultiDayRuntimeData:
-        """Returns the runtime data for the current session."""
-        return self._contexts[self.current_session_index].runtime
-
-    @property
-    def _current_io(self) -> MultiDayIOData:
-        """Returns the I/O data for the current session."""
-        return self._current_runtime.io
-
-    @property
-    def _current_registration(self) -> MultiDayRegistrationData:
-        """Returns the registration data for the current session."""
-        return self._current_runtime.registration
-
-    @property
-    def _current_tracking(self) -> MultiDayTrackingData:
-        """Returns the tracking data for the current session."""
-        return self._current_runtime.tracking
-
-    @property
-    def _current_combined(self) -> CombinedData | None:
-        """Returns the combined single-day data for the current session."""
-        return self._current_runtime.combined_data
-
-    @property
-    def _current_detection(self) -> DetectionData | None:
-        """Returns the combined detection data for the current session."""
-        if self._current_combined is None:
-            return None
-        return self._current_combined.detection
-
-    # Frame geometry properties.
 
     @property
     def frame_height(self) -> int:
@@ -157,10 +133,8 @@ class TrackingViewerData:
 
     @property
     def is_registered(self) -> bool:
-        """Returns True if the current session has been registered."""
+        """Returns True if the current recording has been registered to the shared visual space."""
         return self._current_registration.is_registered()
-
-    # Native-space background images (from combined single-day detection).
 
     @property
     def mean_image(self) -> NDArray[np.float32] | None:
@@ -190,8 +164,6 @@ class TrackingViewerData:
             return None
         return self._current_detection.correlation_map
 
-    # Channel 2 native-space images.
-
     @property
     def mean_image_channel_2(self) -> NDArray[np.float32] | None:
         """Returns the channel 2 native-space mean fluorescence image."""
@@ -220,8 +192,6 @@ class TrackingViewerData:
             return None
         return self._current_detection.correlation_map_channel_2
 
-    # Transformed-space background images (from multi-day registration).
-
     @property
     def transformed_mean_image(self) -> NDArray[np.float32] | None:
         """Returns the mean image in deformed (registered) space."""
@@ -236,8 +206,6 @@ class TrackingViewerData:
     def transformed_maximum_projection(self) -> NDArray[np.float32] | None:
         """Returns the maximum projection in deformed (registered) space."""
         return self._current_registration.transformed_maximum_projection
-
-    # Channel 2 transformed-space images.
 
     @property
     def transformed_mean_image_channel_2(self) -> NDArray[np.float32] | None:
@@ -254,21 +222,39 @@ class TrackingViewerData:
         """Returns the channel 2 maximum projection in deformed (registered) space."""
         return self._current_registration.transformed_maximum_projection_channel_2
 
-    # Mask sets.
-
     @property
     def original_masks(self) -> list[ROIStatistics] | None:
-        """Returns the original ROI masks from single-day extraction."""
+        """Returns the selected ROI masks that were used as input to forward deformation.
+
+        Filters the full single-day extraction ROI list to only the cells selected for multi-day tracking, giving a
+        1:1 correspondence with the deformed mask layer.
+        """
         if self._current_combined is None:
             return None
-        return self._current_combined.extraction.roi_statistics
+        all_masks = self._current_combined.extraction.roi_statistics
+        if all_masks is None:
+            return None
+        selected_indices = self._current_runtime.io.selected_cell_indices
+        if not selected_indices:
+            return all_masks
+        return [all_masks[i] for i in selected_indices]
 
     @property
     def original_masks_channel_2(self) -> list[ROIStatistics] | None:
-        """Returns the channel 2 original ROI masks from single-day extraction."""
+        """Returns the channel 2 selected ROI masks that were used as input to forward deformation.
+
+        Filters the full single-day extraction ROI list to only the cells selected for multi-day tracking, giving a
+        1:1 correspondence with the deformed mask layer.
+        """
         if self._current_combined is None:
             return None
-        return self._current_combined.extraction.roi_statistics_channel_2
+        all_masks = self._current_combined.extraction.roi_statistics_channel_2
+        if all_masks is None:
+            return None
+        selected_indices = self._current_runtime.io.selected_cell_indices_channel_2
+        if not selected_indices:
+            return all_masks
+        return [all_masks[i] for i in selected_indices]
 
     @property
     def deformed_masks(self) -> list[ROIStatistics] | None:
@@ -282,13 +268,40 @@ class TrackingViewerData:
 
     @property
     def template_masks(self) -> list[ROIStatistics] | None:
-        """Returns the consensus template masks from cross-session tracking."""
+        """Returns the consensus template masks from cross-recording tracking."""
         return self._current_tracking.template_masks
 
     @property
     def template_masks_channel_2(self) -> list[ROIStatistics] | None:
-        """Returns the channel 2 consensus template masks from cross-session tracking."""
+        """Returns the channel 2 consensus template masks from cross-recording tracking."""
         return self._current_tracking.template_masks_channel_2
+
+    @property
+    def tracked_masks(self) -> list[ROIStatistics] | None:
+        """Returns the template ROI masks backward-deformed to the current recording's native coordinate space."""
+        return self._current_runtime.extraction.roi_statistics
+
+    @property
+    def tracked_masks_channel_2(self) -> list[ROIStatistics] | None:
+        """Returns the channel 2 template ROI masks backward-deformed to native coordinate space."""
+        return self._current_runtime.extraction.roi_statistics_channel_2
+
+    @classmethod
+    def from_recording(cls, root_path: Path) -> TrackingViewerData:
+        """Loads all multi-day recordings from a dataset directory.
+
+        Args:
+            root_path: The path to any recording's root processed data directory. The loader searches recursively for
+                ``multiday_runtime_data.yaml`` and reconstructs the full dataset hierarchy.
+
+        Returns:
+            A fully populated TrackingViewerData instance.
+        """
+        contexts = MultiDayRuntimeContext.load(root_path=root_path, session_index=-1)
+        if not isinstance(contexts, list):
+            contexts = [contexts]
+
+        return cls(_contexts=contexts)
 
     def masks_for_layer(
         self,
@@ -300,7 +313,7 @@ class TrackingViewerData:
 
         Args:
             layer: The mask layer to retrieve.
-            channel_2: If True, returns channel 2 masks instead of channel 1.
+            channel_2: Determines whether to return channel 2 masks instead of channel 1.
 
         Returns:
             The list of ROIStatistics for the requested layer, or None if unavailable.
@@ -311,6 +324,8 @@ class TrackingViewerData:
             return self.deformed_masks_channel_2 if channel_2 else self.deformed_masks
         if layer == MaskLayer.TEMPLATE:
             return self.template_masks_channel_2 if channel_2 else self.template_masks
+        if layer == MaskLayer.TRACKED:
+            return self.tracked_masks_channel_2 if channel_2 else self.tracked_masks
         return None
 
     def background_image(
@@ -320,16 +335,15 @@ class TrackingViewerData:
         coordinate_space: CoordinateSpace = CoordinateSpace.NATIVE,
         channel_2: bool = False,
     ) -> NDArray[np.float32] | None:
-        """Returns the background image for the specified type, space, and channel.
+        """Returns the background image for the specified image type, coordinate space, and channel combination.
 
-        When the coordinate space is ``TRANSFORMED`` and transformed images are available,
-        returns the deformed (registered) image. Falls back to native-space images if
-        transformed variants are not available.
+        When the coordinate space is ``TRANSFORMED`` and transformed images are available, returns the deformed
+        (registered) image. Falls back to native-space images if transformed variants are not available.
 
         Args:
             image_type: The background image type to retrieve.
             coordinate_space: The coordinate space (native or transformed).
-            channel_2: If True, returns channel 2 images instead of channel 1.
+            channel_2: Determines whether to return channel 2 images instead of channel 1.
 
         Returns:
             The requested image array, or None if unavailable.
@@ -347,38 +361,22 @@ class TrackingViewerData:
             return self._native_background_image_channel_2(image_type=image_type)
         return self._native_background_image(image_type=image_type)
 
-    def switch_session(self, session_index: int) -> None:
-        """Switches the active session.
+    def switch_recording(self, recording_index: int) -> None:
+        """Switches the active recording.
 
         Args:
-            session_index: Zero-based index of the session to switch to.
+            recording_index: The index of the recording to switch to.
 
         Raises:
             ValueError: If the index is out of range.
         """
-        if session_index < 0 or session_index >= len(self._contexts):
-            message = f"Unable to switch to session {session_index}. Valid range is 0 to {len(self._contexts) - 1}."
-            raise ValueError(message)
-
-        self.current_session_index = session_index
-
-    @classmethod
-    def from_session(cls, root_path: Path) -> TrackingViewerData:
-        """Loads all multi-day sessions from a dataset directory.
-
-        Args:
-            root_path: Path to any session's root processed data directory. The loader
-                searches recursively for ``multiday_runtime_data.yaml`` and reconstructs
-                the full dataset hierarchy.
-
-        Returns:
-            A fully populated TrackingViewerData instance.
-        """
-        contexts = MultiDayRuntimeContext.load(root_path=root_path, session_index=-1)
-        if not isinstance(contexts, list):
-            contexts = [contexts]
-
-        return cls(_contexts=contexts)
+        if recording_index < 0 or recording_index >= len(self._contexts):
+            message = (
+                f"Unable to switch the tracking viewer to recording {recording_index}. Valid range is 0 to "
+                f"{len(self._contexts) - 1}."
+            )
+            console.error(message=message, error=ValueError)
+        self._current_recording_index = recording_index
 
     def _native_background_image(self, image_type: BackgroundImage) -> NDArray[np.float32] | None:
         """Returns the native-space channel 1 background image for the given type."""
@@ -423,3 +421,30 @@ class TrackingViewerData:
         if image_type == BackgroundImage.MAX_PROJECTION:
             return self.transformed_maximum_projection_channel_2
         return None
+
+    @property
+    def _current_runtime(self) -> MultiDayRuntimeData:
+        """Returns the runtime data for the current recording."""
+        return self._contexts[self._current_recording_index].runtime
+
+    @property
+    def _current_registration(self) -> MultiDayRegistrationData:
+        """Returns the registration data for the current recording."""
+        return self._current_runtime.registration
+
+    @property
+    def _current_tracking(self) -> MultiDayTrackingData:
+        """Returns the tracking data for the current recording."""
+        return self._current_runtime.tracking
+
+    @property
+    def _current_combined(self) -> CombinedData | None:
+        """Returns the combined single-day data for the current recording."""
+        return self._current_runtime.combined_data
+
+    @property
+    def _current_detection(self) -> DetectionData | None:
+        """Returns the combined detection data for the current recording."""
+        if self._current_combined is None:
+            return None
+        return self._current_combined.detection

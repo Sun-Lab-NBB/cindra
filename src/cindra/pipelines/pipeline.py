@@ -265,7 +265,7 @@ def run_multi_day_pipeline(
     )
 
     # Resolves MultiDayRuntimeContext instances to extract session IDs and the main session output path. This also
-    # validates that all session directories contain valid single-day outputs.
+    # validates that all session directories contain valid single-day outputs and handles relocated data.
     contexts = resolve_multiday_contexts(configuration=config)
     session_ids: list[str] = [ctx.runtime.io.session_id for ctx in contexts]
     main_session_path = contexts[0].runtime.output_path

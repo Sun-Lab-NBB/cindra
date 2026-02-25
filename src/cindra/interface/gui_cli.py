@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from ..gui import run
+from ..gui import run, run_tracking_viewer
 from ..gui.registration import run_registration_viewer
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
@@ -18,8 +18,8 @@ CONTEXT_SETTINGS = {"max_content_width": 120}
 def cindra_gui() -> None:
     """Launches cindra GUI applications for visualizing pipeline outputs.
 
-    Use this command group to launch the ROI viewer, registration quality viewer, or other GUI tools. At this time,
-    the GUI does not support the multi-day processing pipeline.
+    Use this command group to launch the ROI viewer, registration quality viewer, multi-day tracking viewer, or other
+    GUI tools.
     """
 
 
@@ -47,3 +47,16 @@ def gui_roi(session_path: Path | None) -> None:
 def gui_registration(recording_path: Path) -> None:
     """Launches the registration quality viewer for inspecting motion correction results."""
     run_registration_viewer(recording_path=recording_path)
+
+
+@cindra_gui.command("tracking")
+@click.option(
+    "-r",
+    "--recording-path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=True,
+    help="Path to any recording's cindra output directory that is part of a multi-day dataset.",
+)
+def gui_tracking(recording_path: Path) -> None:
+    """Launches the multi-day tracking quality viewer for inspecting across-day ROI tracking results."""
+    run_tracking_viewer(recording_path=recording_path)

@@ -352,7 +352,7 @@ class DiffeomorphicDemonsRegistration:
             self._set_cached(key=f"img_{image_index}", iteration_key=iteration_key, data=image)
 
         # Computes gradient using central differences.
-        gradient_kernel = np.array([0.5, 0, -0.5], dtype=np.float64)
+        gradient_kernel = np.array([0.5, 0, -0.5], dtype=np.float32)
         gradient_y = scipy.ndimage.convolve1d(input=image, weights=gradient_kernel, axis=0, mode="nearest")
         gradient_x = scipy.ndimage.convolve1d(input=image, weights=gradient_kernel, axis=1, mode="nearest")
 

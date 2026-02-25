@@ -72,6 +72,56 @@ def _compute_relocation_prefixes(old_path: Path, new_path: Path) -> tuple[Path, 
     return old_prefix, new_prefix
 
 
+def _relocate_cross_session_path(path: Path, old_prefix: Path, new_prefix: Path) -> Path:
+    """Relocates a dataset output path from a different session that does not share the entry session's prefix.
+
+    Multi-day datasets store output paths for all sessions in each session's runtime data. When the entry session's
+    prefix is used for relocation, paths belonging to other sessions fail ``relative_to`` because they contain a
+    different session-specific directory segment (e.g., a different timestamp-based session directory). This function
+    handles that case by splitting the cross-session path at the same depth as the entry prefix, substituting the
+    differing session-specific segments into the new prefix, and reattaching the trailing suffix.
+
+    Args:
+        path: The stale cross-session path to relocate.
+        old_prefix: The entry session's old prefix computed by ``_compute_relocation_prefixes``.
+        new_prefix: The entry session's new prefix computed by ``_compute_relocation_prefixes``.
+
+    Returns:
+        The relocated cross-session path with the correct new prefix and session-specific segments.
+
+    Raises:
+        ValueError: If the cross-session path has fewer segments than the entry session prefix, indicating an
+            incompatible directory structure.
+    """
+    path_parts = path.parts
+    old_prefix_parts = old_prefix.parts
+
+    if len(path_parts) < len(old_prefix_parts):
+        message = (
+            f"Unable to relocate cross-session path {path}. The path has {len(path_parts)} segments but the entry "
+            f"session prefix has {len(old_prefix_parts)} segments, indicating an incompatible directory structure."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Splits the cross-session path into a base (same depth as old_prefix) and a trailing suffix.
+    cross_base_parts = path_parts[: len(old_prefix_parts)]
+    suffix_parts = path_parts[len(old_prefix_parts) :]
+
+    # Identifies directory segments that differ between the entry session's old prefix and the cross-session base,
+    # then applies those differing segments to the new prefix at the corresponding positions. This preserves the
+    # structural transformation (e.g., directory insertion or rename) while swapping in the correct session-specific
+    # segments.
+    relocated_prefix_parts = list(new_prefix.parts)
+    for index, (old_part, cross_part) in enumerate(zip(old_prefix_parts, cross_base_parts, strict=False)):
+        if old_part != cross_part and index < len(relocated_prefix_parts):
+            relocated_prefix_parts[index] = cross_part
+
+    relocated_prefix = Path(*relocated_prefix_parts)
+    if suffix_parts:
+        return relocated_prefix / Path(*suffix_parts)
+    return relocated_prefix
+
+
 def _relocate_runtime_paths(
     runtime: SingleDayRuntimeData | MultiDayRuntimeData, old_prefix: Path, new_prefix: Path
 ) -> None:
@@ -86,21 +136,42 @@ def _relocate_runtime_paths(
     if runtime.output_path is not None:
         runtime.output_path = new_prefix / runtime.output_path.relative_to(old_prefix)
 
+    # Paths that already reside under new_prefix are skipped to prevent double-relocation. This occurs when some
+    # paths in the YAML were updated independently (e.g., single-day pipeline re-ran after a directory rename) while
+    # others remained stale.
     if isinstance(runtime, SingleDayRuntimeData):
-        if runtime.io.registered_binary_path is not None:
+        if runtime.io.registered_binary_path is not None and not runtime.io.registered_binary_path.is_relative_to(
+            new_prefix
+        ):
             runtime.io.registered_binary_path = new_prefix / runtime.io.registered_binary_path.relative_to(old_prefix)
-        if runtime.io.registered_binary_path_channel_2 is not None:
+        if (
+            runtime.io.registered_binary_path_channel_2 is not None
+            and not runtime.io.registered_binary_path_channel_2.is_relative_to(new_prefix)
+        ):
             runtime.io.registered_binary_path_channel_2 = (
                 new_prefix / runtime.io.registered_binary_path_channel_2.relative_to(old_prefix)
             )
-        if runtime.io.output_directory is not None:
+        if runtime.io.output_directory is not None and not runtime.io.output_directory.is_relative_to(new_prefix):
             runtime.io.output_directory = new_prefix / runtime.io.output_directory.relative_to(old_prefix)
     else:
-        if runtime.io.data_path is not None:
+        if runtime.io.data_path is not None and not runtime.io.data_path.is_relative_to(new_prefix):
             runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
-        runtime.io.dataset_output_paths = tuple(
-            new_prefix / path.relative_to(old_prefix) for path in runtime.io.dataset_output_paths
-        )
+
+        # Relocates dataset_output_paths with cross-session fallback. Multi-day datasets store paths for all
+        # sessions, but the prefix is session-specific. Paths from other sessions fail relative_to and are handled
+        # by _relocate_cross_session_path which substitutes the differing session-specific segments.
+        relocated_paths: list[Path] = []
+        for path in runtime.io.dataset_output_paths:
+            if path.is_relative_to(new_prefix):
+                relocated_paths.append(path)
+                continue
+            try:
+                relocated_paths.append(new_prefix / path.relative_to(old_prefix))
+            except ValueError:
+                relocated_paths.append(
+                    _relocate_cross_session_path(path=path, old_prefix=old_prefix, new_prefix=new_prefix)
+                )
+        runtime.io.dataset_output_paths = tuple(relocated_paths)
 
 
 @dataclass
@@ -378,9 +449,19 @@ class MultiDayRuntimeContext:
             for session_output_path in output_paths:
                 if session_output_path == resolved_output_path:
                     continue
+
+                # Computes per-session relocation prefixes instead of reusing the entry session's prefix. Each
+                # session has its own session-specific directory segment, so cross-session prefix substitution fails.
                 other_runtime = MultiDayRuntimeData.load(output_path=session_output_path)
-                _relocate_runtime_paths(runtime=other_runtime, old_prefix=old_prefix, new_prefix=new_prefix)
-                other_runtime.save(output_path=session_output_path)
+                if other_runtime.output_path is not None and other_runtime.output_path != session_output_path:
+                    session_old_prefix, session_new_prefix = _compute_relocation_prefixes(
+                        old_path=other_runtime.output_path, new_path=session_output_path
+                    )
+                    _relocate_runtime_paths(
+                        runtime=other_runtime, old_prefix=session_old_prefix, new_prefix=session_new_prefix
+                    )
+                    other_runtime.save(output_path=session_output_path)
+
                 if other_runtime.io.data_path is not None:
                     for plane_dir in other_runtime.io.data_path.glob("plane_*"):
                         if plane_dir.is_dir() and (plane_dir / "runtime_data.yaml").exists():

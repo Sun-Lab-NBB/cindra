@@ -106,7 +106,7 @@ class _PCViewerStyle:
 
 
 class BinaryPlayer(QMainWindow):
-    """Provides a UI window for viewing registered binary imaging data and evaluating the registration's quality.
+    """Displays a UI window for viewing registered binary imaging data and evaluating the registration's quality.
 
     Args:
         data: Pre-loaded registration data to display on startup.
@@ -600,7 +600,7 @@ class BinaryPlayer(QMainWindow):
 
 
 class PCViewer(QMainWindow):
-    """Provides a UI window for viewing the principal component registration metrics.
+    """Displays a UI window for viewing the principal component registration metrics.
 
     Args:
         data: Pre-loaded registration data to display on startup.

@@ -896,12 +896,12 @@ class ExtractionData:
             )
 
     def load_arrays(self, output_path: Path) -> None:
-        """Loads ROI statistics from disk.
+        """Loads ROI statistics and classification results from disk.
 
-        This method loads only ROI statistics, which are the only extraction data needed during pipeline processing
-        (specifically for multi-day cell tracking). Fluorescence traces, classification results, and colocalization
-        data are not loaded because they are never needed during pipeline execution and consume significant memory.
-        Use load_results() to load all result arrays when needed for analysis or visualization.
+        This method loads only ROI statistics and cell classification arrays, which are the extraction data needed
+        during pipeline processing (specifically for multi-day cell selection and tracking). Fluorescence traces and
+        colocalization data are not loaded because they are never needed during pipeline execution and consume
+        significant memory. Use load_results() to load all result arrays when needed for analysis or visualization.
 
         Args:
             output_path: The directory containing the extraction data files.
@@ -916,13 +916,26 @@ class ExtractionData:
         if self.roi_statistics_channel_2 is None and roi_stats_channel_2_path.exists():
             self.roi_statistics_channel_2 = ROIStatistics.load_list(roi_stats_channel_2_path)
 
+        # Channel 1 classification.
+        cell_classification_path = output_path / "cell_classification.npy"
+        if self.cell_classification is None and cell_classification_path.exists():
+            self.cell_classification = np.load(cell_classification_path, allow_pickle=False).astype(np.float32)
+
+        # Channel 2 classification.
+        cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
+        if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
+            self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, allow_pickle=False).astype(
+                np.float32
+            )
+
     def load_results(self, output_path: Path) -> None:
         """Loads all extraction result arrays from disk.
 
-        This method loads fluorescence traces, classification results, and colocalization data. These arrays are
-        not loaded by load_arrays() because they are never needed during pipeline processing (they are created
-        and saved but never re-loaded) and they consume significant memory. Call this method when result data
-        is needed for analysis or visualization.
+        This method loads fluorescence traces, classification results, and colocalization data. Classification arrays
+        may already be loaded by load_arrays() (which loads them for multi-day pipeline use), in which case the
+        guarded loading here is a no-op. Fluorescence traces and colocalization data are not loaded by load_arrays()
+        because they consume significant memory and are not needed during pipeline execution. Call this method when
+        result data is needed for analysis or visualization.
 
         Args:
             output_path: The directory containing the result .npy files.

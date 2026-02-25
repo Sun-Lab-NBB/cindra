@@ -966,7 +966,7 @@ class _ColorButton(QPushButton):
     Pressing emits the color_mode_changed signal.
 
     Args:
-        button_id: Zero-based index identifying this button's color mode.
+        button_id: Index identifying this button's color mode.
         text: Display label (with keyboard shortcut prefix).
         owner: The parent widget for ownership.
         button_group: The button group this button belongs to.
