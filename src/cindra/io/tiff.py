@@ -19,11 +19,11 @@ if TYPE_CHECKING:
 
     from ..dataclasses import RuntimeContext, AcquisitionParameters
 
-# Supported TIFF file extensions.
 _TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
+"""The supported TIFF file extensions."""
 
-# Determines the minimum number of image dimensions considered 'multidimensional'.
 _MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
+"""The minimum number of image dimensions considered 'multidimensional'."""
 
 
 def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:

@@ -119,7 +119,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         ValueError: If no valid planes with ROI statistics are found.
     """
     # Extracts plane directories from the RuntimeContext instances.
-    plane_directories = [context.runtime.io.output_directory for context in plane_contexts]
+    plane_directories = [context.runtime.io.output_path for context in plane_contexts]
 
     # Computes the y-axis and x-axis displacement for each plane. These displacement values are used to arrange
     # individual planes back into the original recording movie.

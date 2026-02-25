@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QLabel, QDialog, QWidget, QLineEdit, QGridLayout, 
 from ataraxis_base_utilities import LogLevel, console
 
 from .styles import STYLE, merge_label_font
-from .roi_geometry import compute_circle_mask
+from ...detection import compute_circle_mask
 from .roi_overlays import (
     add_roi,
     remove_roi,
@@ -27,20 +27,20 @@ if TYPE_CHECKING:
     from .viewer import MainWindow
     from .context_data import ContextData
 
-# Large sentinel distance used to initialize the distance matrix upper triangle.
 _SENTINEL_DISTANCE: float = 1e6
+"""The large sentinel distance used to initialize the distance matrix upper triangle."""
 
-# Small epsilon added to denominators to prevent division by zero.
 _CORRELATION_EPSILON: float = 1e-3
+"""The small epsilon added to denominators to prevent division by zero."""
 
-# Default correlation threshold for automated merge suggestions.
 _DEFAULT_CORRELATION_THRESHOLD: float = 0.8
+"""The default correlation threshold for automated merge suggestions."""
 
-# Default euclidean distance threshold for automated merge suggestions.
 _DEFAULT_DISTANCE_THRESHOLD: float = 100.0
+"""The default euclidean distance threshold for automated merge suggestions."""
 
-# Scatter plot pen width for merge suggestion visualization.
 _SCATTER_PEN_WIDTH: int = 3
+"""The scatter plot pen width for merge suggestion visualization."""
 
 
 def do_merge(parent: MainWindow) -> None:
@@ -93,12 +93,12 @@ def merge_activity_masks(parent: MainWindow) -> None:
     if context.has_channel_2:
         channel_2_fluorescence = np.zeros((0, context.frame_count), dtype=np.float32)
         channel_2_neuropil = np.zeros((0, context.frame_count), dtype=np.float32)
-        if context.cell_fluorescence_channel_2 is None and context.save_path is not None:
+        if context.cell_fluorescence_channel_2 is None and context.output_path is not None:
             context.cell_fluorescence_channel_2 = np.load(
-                str(context.save_path / "F_chan2.npy"),
+                str(context.output_path / "F_chan2.npy"),
             )
             context.neuropil_fluorescence_channel_2 = np.load(
-                str(context.save_path / "Fneu_chan2.npy"),
+                str(context.output_path / "Fneu_chan2.npy"),
             )
 
     probabilities = []
@@ -293,8 +293,8 @@ def merge_activity_masks(parent: MainWindow) -> None:
         radius=merged_roi.radius,
     )
     valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < context.frame_height) & (x_circle < context.frame_width)
-    merged_roi.circle_y_pixels = y_circle[valid]  # type: ignore[assignment]
-    merged_roi.circle_x_pixels = x_circle[valid]  # type: ignore[assignment]
+    merged_roi.circle_y_pixels = y_circle[valid]
+    merged_roi.circle_x_pixels = x_circle[valid]
 
     # Recomputes all color arrays and ROI maps.
     parent.color_arrays = compute_colors(context=context, state=state)

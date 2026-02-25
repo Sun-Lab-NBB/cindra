@@ -18,11 +18,11 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from pyqtgraph.GraphicsScene.mouseEvents import MouseClickEvent  # type: ignore[import-untyped]
 
-# Callback type for click events dispatched by a ViewBox to the orchestrator.
 type _ClickHandler = Callable[[int, int, ROIToolPanel, bool, bool], bool]
+"""The callback type for click events dispatched by a ViewBox to the orchestrator."""
 
-# Callback type for double-click zoom-to-fit events dispatched by a ViewBox to the orchestrator.
 type _ZoomHandler = Callable[[], None]
+"""The callback type for double-click zoom-to-fit events dispatched by a ViewBox to the orchestrator."""
 
 
 class TraceBox(pg.PlotItem):

@@ -13,8 +13,8 @@ from ..pipelines import run_multi_day_pipeline, run_single_day_pipeline
 from .mcp_server import run_server
 from ..dataclasses import MultiDayConfiguration, SingleDayConfiguration
 
-# Ensures that displayed CLICK help messages are formatted according to the lab standard.
 CONTEXT_SETTINGS = {"max_content_width": 120}
+"""The Click context settings that ensure displayed help messages are formatted according to the lab standard."""
 
 
 @click.group("cindra", context_settings=CONTEXT_SETTINGS)
@@ -43,7 +43,7 @@ def cindra_mcp(transport: str) -> None:
 @cindra_cli.group("configure")
 @click.option(
     "-od",
-    "--output-directory",
+    "--output-path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     required=True,
     help="The absolute path to the (existing) directory where to generate the requested configuration file.",
@@ -57,7 +57,7 @@ def cindra_mcp(transport: str) -> None:
     help="The name to use for the generated configuration file.",
 )
 @click.pass_context
-def cindra_config(ctx: click.Context, output_directory: Path, name: str) -> None:
+def cindra_config(ctx: click.Context, output_path: Path, name: str) -> None:
     """Generates the single-day or the multi-day processing pipeline configuration file.
 
     Commands from this group generate the configuration files for running processing pipelines.
@@ -66,7 +66,7 @@ def cindra_config(ctx: click.Context, output_directory: Path, name: str) -> None
     desired pipeline with the parameters specified inside the file.
     """
     ctx.ensure_object(dict)
-    ctx.obj["file_path"] = output_directory.joinpath(name).with_suffix(".yaml")
+    ctx.obj["file_path"] = output_path.joinpath(name).with_suffix(".yaml")
 
 
 # noinspection PyUnresolvedReferences
@@ -240,11 +240,11 @@ def cindra_run(
 )
 @click.option(
     "-s",
-    "--save-path",
+    "--output-path",
     type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
     required=False,
     default=None,
-    help="Overrides the configuration's file_io.save_path with the specified directory.",
+    help="Overrides the configuration's file_io.output_path with the specified directory.",
 )
 @click.pass_context
 def run_sd_pipeline(
@@ -255,7 +255,7 @@ def run_sd_pipeline(
     combine: bool,
     target: int,
     data_path: Path | None,
-    save_path: Path | None,
+    output_path: Path | None,
 ) -> None:
     """Runs the requested single-day pipeline step(s)."""
     # Extracts shared configuration parameters passed as the context dictionary.
@@ -269,8 +269,8 @@ def run_sd_pipeline(
     configuration.runtime.display_progress_bars = progress_bars
     if data_path is not None:
         configuration.file_io.data_path = data_path
-    if save_path is not None:
-        configuration.file_io.save_path = save_path
+    if output_path is not None:
+        configuration.file_io.output_path = output_path
     configuration.save(file_path=config_path)
 
     run_single_day_pipeline(

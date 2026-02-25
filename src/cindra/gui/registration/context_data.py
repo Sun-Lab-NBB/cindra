@@ -150,9 +150,9 @@ class RegistrationViewerData:
         return ""
 
     @property
-    def output_directory(self) -> Path | None:
+    def output_path(self) -> Path | None:
         """Returns the path to the plane-specific output directory where all results are saved."""
-        return self._current_io.output_directory
+        return self._current_io.output_path
 
     @property
     def rigid_y_offsets(self) -> NDArray[np.int32]:

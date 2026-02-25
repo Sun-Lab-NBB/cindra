@@ -7,10 +7,10 @@ from pathlib import Path
 
 import click
 
-from ..gui import run_roi_viewer, run_tracking_viewer, run_registration_viewer
+from ..gui import run_roi_viewer, run_tracking_viewer, run_registration_viewer, run_roi_viewer_standalone
 
-# Ensures that displayed CLICK help messages are formatted according to the lab standard.
 CONTEXT_SETTINGS = {"max_content_width": 120}
+"""The Click context settings that ensure displayed help messages are formatted according to the lab standard."""
 
 
 @click.group("cindra-gui", context_settings=CONTEXT_SETTINGS)
@@ -33,6 +33,19 @@ def cindra_gui() -> None:
 def gui_roi(session_path: Path | None) -> None:
     """Launches the ROI viewer and editor for single-day pipeline output."""
     run_roi_viewer(session_path=session_path)
+
+
+@cindra_gui.command("roi-viewer")
+@click.option(
+    "-s",
+    "--session-path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    default=None,
+    help="Path to a cindra output directory to load on startup.",
+)
+def gui_roi_viewer(session_path: Path | None) -> None:
+    """Launches the read-only ROI viewer for single-day pipeline output."""
+    run_roi_viewer_standalone(session_path=session_path)
 
 
 @cindra_gui.command("registration")

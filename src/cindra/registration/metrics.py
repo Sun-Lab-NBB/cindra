@@ -27,12 +27,17 @@ if TYPE_CHECKING:
 
     from ..dataclasses import RuntimeContext
 
-# Frame subsampling parameters for PC metrics computation. These control how many frames are sampled from the
-# recording to reduce memory overhead while maintaining statistical representativeness.
 _MINIMUM_SAMPLE_COUNT: int = 2000
+"""The minimum number of frames sampled from the recording for PC metrics computation."""
+
 _MAXIMUM_SAMPLE_COUNT: int = 5000
+"""The maximum number of frames sampled from the recording for PC metrics computation."""
+
 _MAXIMUM_HEIGHT_FOR_LARGE_SAMPLE: int = 700
+"""The maximum frame height below which the larger sample count is used for PC metrics computation."""
+
 _MAXIMUM_WIDTH_FOR_LARGE_SAMPLE: int = 700
+"""The maximum frame width below which the larger sample count is used for PC metrics computation."""
 
 
 def compute_pc_metrics(context: RuntimeContext) -> None:
@@ -94,11 +99,11 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
     maximum_shift_fraction = context.configuration.registration.maximum_shift_fraction
     parallel_workers = context.configuration.runtime.parallel_workers
 
-    # Extracts non-rigid registration parameters.
-    nonrigid_enabled = context.configuration.non_rigid_registration.enabled
-    block_size = context.configuration.non_rigid_registration.block_size
-    snr_threshold = context.configuration.non_rigid_registration.signal_to_noise_threshold
-    maximum_nonrigid_shift = context.configuration.non_rigid_registration.maximum_block_shift
+    # Extracts nonrigid registration parameters.
+    nonrigid_enabled = context.configuration.nonrigid_registration.enabled
+    block_size = context.configuration.nonrigid_registration.block_size
+    snr_threshold = context.configuration.nonrigid_registration.signal_to_noise_threshold
+    maximum_nonrigid_shift = context.configuration.nonrigid_registration.maximum_block_shift
 
     # Extracts one-photon registration parameters.
     one_photon_mode = context.configuration.one_photon_registration.enabled

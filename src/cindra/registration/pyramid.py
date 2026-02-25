@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING
 
 from .deformation import zoom, diffuse
 
-# Maximum zoom factor threshold below which downsampling is applied. A factor of 0.9 means downsampling occurs when
-# resolution would be reduced by more than 10%.
 _DOWNSAMPLE_ZOOM_THRESHOLD: float = 0.9
+"""The maximum zoom factor threshold below which downsampling is applied. A factor of 0.9 means downsampling occurs
+when resolution would be reduced by more than 10%."""
 
-# Minimum image dimension (in either axis) required before pyramid downsampling is applied.
 _MINIMUM_DOWNSAMPLE_DIMENSION: int = 8
+"""The minimum image dimension (in either axis) required before pyramid downsampling is applied."""
 
 if TYPE_CHECKING:
     import numpy as np

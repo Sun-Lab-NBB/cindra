@@ -24,29 +24,33 @@ if TYPE_CHECKING:
 
     from ..dataclasses import ROIDetection, ROIStatistics, RuntimeContext
 
-# Multiplier applied to the user-facing maximum_iterations parameter to determine the actual iteration limit used
-# by the sparse detection algorithm.
 _ITERATION_MULTIPLIER: int = 250
+"""The multiplier applied to the user-facing maximum_iterations parameter to determine the actual iteration limit used
+by the sparse detection algorithm."""
 
-# Spatial multiplier applied to the cell diameter to compute the median filter kernel size for background removal
-# in the enhanced mean image.
 _BACKGROUND_SCALE: int = 4
+"""The spatial multiplier applied to the cell diameter to compute the median filter kernel size for background removal
+in the enhanced mean image."""
 
-# Intensity clipping bounds applied after local contrast normalization when producing the enhanced mean image.
 _ENHANCED_MINIMUM_INTENSITY: float = -6.0
+"""The lower intensity clipping bound applied after local contrast normalization when producing the enhanced mean
+image."""
+
 _ENHANCED_MAXIMUM_INTENSITY: float = 6.0
+"""The upper intensity clipping bound applied after local contrast normalization when producing the enhanced mean
+image."""
 
-# Small constant added to local variance to avoid division by zero during contrast normalization.
 _VARIANCE_EPSILON: float = 1e-10
+"""The small constant added to local variance to avoid division by zero during contrast normalization."""
 
-# Default cell diameter in pixels, used when the estimated diameter is zero or negative.
 _DEFAULT_CELL_DIAMETER: int = 12
+"""The default cell diameter in pixels, used when the estimated diameter is zero or negative."""
 
-# Type alias for the _detect_channel return signature containing mean image, enhanced mean image, maximum projection,
-# correlation map, cell diameter, and ROI statistics.
 type _ChannelDetectionResult = tuple[
     NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int, list[ROIStatistics]
 ]
+"""The type alias for the _detect_channel return signature containing mean image, enhanced mean image, maximum
+projection, correlation map, cell diameter, and ROI statistics."""
 
 
 def detect_plane_rois(context: RuntimeContext) -> None:
@@ -71,7 +75,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
     # Extracts configuration.
     detection_config = context.configuration.roi_detection
     main_config = context.configuration.main
-    nonrigid_block_size = context.configuration.non_rigid_registration.block_size
+    nonrigid_block_size = context.configuration.nonrigid_registration.block_size
     custom_classifier_path = main_config.custom_classifier_path
 
     # Extracts runtime data.
@@ -357,7 +361,7 @@ def _detect_channel(
         bad_frames: A boolean array with shape (num_frames,) marking frames to exclude from binning, or None if no
             frames are excluded.
         detection_config: The ROIDetection configuration dataclass containing detection parameters.
-        nonrigid_block_size: The non-rigid registration block size (height, width), used to derive the PCA denoising
+        nonrigid_block_size: The nonrigid registration block size (height, width), used to derive the PCA denoising
             block dimensions.
         parallel_workers: The number of parallel threads for PCA denoising. Values of -1 or 0 use all available cores.
             A value of 1 disables parallelism.
