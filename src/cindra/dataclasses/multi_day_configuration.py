@@ -38,7 +38,7 @@ class SessionIO:
 
     dataset_name: str = ""
     """Specifies the name of the multiday dataset. This name is used to create the output directory under each
-    session's 'multiday' directory (e.g., session/multiday/{dataset_name}/) and to identify the dataset in the
+    session's cindra directory (e.g., session/cindra/multiday/{dataset_name}/) and to identify the dataset in the
     tracker file."""
 
     repeat_selection: bool = False

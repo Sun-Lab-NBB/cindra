@@ -146,7 +146,7 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
                         roi_lines = io_data.mroi_lines
                     else:
                         physical_plane_index = context_index % plane_number
-                        roi_lines = []
+                        roi_lines = ()
 
                     # Generates frame indices for this plane's functional channel, accounting for the interleave
                     # offset from previous files.

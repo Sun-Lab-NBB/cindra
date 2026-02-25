@@ -1,7 +1,7 @@
 """Provides the standalone multi-day cell tracking quality viewer GUI."""
 
-from .app import run
+from .app import run_tracking_viewer
 
 __all__ = [
-    "run",
+    "run_tracking_viewer",
 ]
