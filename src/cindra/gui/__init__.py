@@ -7,7 +7,9 @@ Sub-packages:
 """
 
 from .roi import run
+from .tracking import run_tracking_viewer
 
 __all__ = [
     "run",
+    "run_tracking_viewer",
 ]

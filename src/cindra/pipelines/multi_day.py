@@ -13,7 +13,7 @@ from ..extraction import extract_traces
 from ..registration import register_sessions, project_templates_to_sessions
 
 if TYPE_CHECKING:
-    from ..dataclasses import MultiDayConfiguration, MultiDayRuntimeContext
+    from ..dataclasses import MultiDayConfiguration
 
 
 def discover_multiday_cells(configuration: MultiDayConfiguration) -> None:
@@ -83,24 +83,10 @@ def extract_multiday_fluorescence(configuration: MultiDayConfiguration, session_
         RuntimeError: If backward-transformed ROI statistics are not available, indicating the discovery phase has
             not completed.
     """
-    # Reloads contexts from disk. The YAML files and arrays written during discovery are deserialized back into full
-    # MultiDayRuntimeContext instances.
-    contexts = resolve_multiday_contexts(configuration=configuration)
-
-    # Finds the context matching the requested session ID.
-    target_context: MultiDayRuntimeContext | None = None
-    for context in contexts:
-        if context.runtime.io.session_id == session_id:
-            target_context = context
-            break
-
-    if target_context is None:
-        available_ids = [ctx.runtime.io.session_id for ctx in contexts]
-        message = (
-            f"Unable to extract multi-day fluorescence for session '{session_id}'. The provided session_id does not "
-            f"match any resolved session context. Available session IDs: {available_ids}."
-        )
-        console.error(message=message, error=ValueError)
+    # Reloads only the target session's context from disk. The target_session_id parameter avoids loading CombinedData
+    # and runtime arrays for every other session in the dataset.
+    contexts = resolve_multiday_contexts(configuration=configuration, target_session_id=session_id)
+    target_context = contexts[0]
 
     # Validates that backward-transformed ROI statistics exist from the discovery phase.
     if target_context.runtime.extraction.roi_statistics is None:

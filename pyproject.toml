@@ -14,9 +14,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.14,<3.15"
 authors = [
     { name = "Ivan Kondratyev" },
-    { name = "Kushaan Gupta" },
-    { name = "Yuantao Deng" },
-    { name = "Elaine Wu" },
+    { name = "Natalie Yeung" },
 ]
 maintainers = [
     { name = "Ivan Kondratyev", email = "ik278@cornell.edu" },

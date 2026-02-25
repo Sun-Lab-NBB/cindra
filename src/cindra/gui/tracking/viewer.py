@@ -1,8 +1,9 @@
-"""Provides the main window for the multi-day tracking quality viewer."""
+"""Provides the multi-day tracking quality viewer window."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from dataclasses import dataclass
 
 import numpy as np
 from PySide6 import QtGui, QtCore
@@ -11,7 +12,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QSlider,
     QWidget,
-    QSpinBox,
     QComboBox,
     QGroupBox,
     QStatusBar,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
+    QButtonGroup,
 )
 
 from .context_data import MaskLayer, BackgroundImage, CoordinateSpace, TrackingViewerData
@@ -27,50 +28,54 @@ from .context_data import MaskLayer, BackgroundImage, CoordinateSpace, TrackingV
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ...dataclasses.single_day_data import ROIStatistics
+    from ...dataclasses import ROIStatistics
 
-# Millisecond interval for auto-cycling between sessions.
-_DEFAULT_CYCLE_INTERVAL: int = 2000
 
-# Minimum auto-cycle interval in milliseconds.
-_MINIMUM_CYCLE_INTERVAL: int = 200
+@dataclass(frozen=True, slots=True)
+class _TrackingViewerStyle:
+    """Encapsulates visual and behavioral constants for the TrackingViewer window."""
 
-# Maximum auto-cycle interval in milliseconds.
-_MAXIMUM_CYCLE_INTERVAL: int = 10000
+    cycle_interval: int = 500
+    """The millisecond interval for auto-cycling between recordings."""
 
-# Step size for the auto-cycle interval spin box.
-_CYCLE_INTERVAL_STEP: int = 200
+    default_mask_opacity: int = 127
+    """The default mask overlay opacity (0-255 uint8 range)."""
 
-# Default mask overlay opacity (0-255 uint8 range).
-_DEFAULT_MASK_OPACITY: int = 127
+    channel_1_mask_color: tuple[int, int, int] = (0, 255, 255)
+    """The mask outline color for channel 1 ROIs (cyan)."""
 
-# Mask outline color for channel 1 ROIs (cyan).
-_CHANNEL_1_MASK_COLOR: tuple[int, int, int] = (0, 255, 255)
+    channel_2_mask_color: tuple[int, int, int] = (255, 80, 80)
+    """The mask outline color for channel 2 ROIs (red)."""
 
-# Mask outline color for channel 2 ROIs (red).
-_CHANNEL_2_MASK_COLOR: tuple[int, int, int] = (255, 80, 80)
+    lower_percentile: float = 1.0
+    """The lower percentile value for normalizing background images."""
 
-# Percentile values for normalizing background images.
-_LOWER_PERCENTILE: float = 1.0
-_UPPER_PERCENTILE: float = 99.0
+    upper_percentile: float = 99.0
+    """The upper percentile value for normalizing background images."""
 
 
 class TrackingViewer(QMainWindow):
-    """Multi-day cell tracking quality viewer.
+    """Displays a UI window for viewing the quality of across-day ROI tracking.
 
-    Displays background images with ROI mask overlays for each session in a multi-day
-    dataset. Supports manual and automatic session cycling, coordinate space switching,
-    mask layer selection, channel toggling, and mask opacity control.
+    Displays background images with ROI mask overlays for each recording in a multi-day dataset. Supports manual and
+    automatic recording cycling, coordinate space switching, mask layer selection, channel toggling, and mask opacity
+    control.
+
+    Args:
+        data: The preloaded tracking data to display on startup.
     """
 
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+    _style: _TrackingViewerStyle = _TrackingViewerStyle()
+    """Frozen style constants for the tracking viewer window."""
+
+    def __init__(self, data: TrackingViewerData) -> None:
+        super().__init__()
         self.setWindowTitle("Multi-Day Tracking Viewer")
         self.resize(1200, 800)
 
-        self._data: TrackingViewerData | None = None
+        self.data: TrackingViewerData = data
         self._auto_cycle_timer: QtCore.QTimer = QtCore.QTimer(self)
-        self._auto_cycle_timer.timeout.connect(self._advance_session)
+        self._auto_cycle_timer.timeout.connect(self._advance_recording)
 
         # Builds the UI layout.
         central_widget = QWidget(self)
@@ -79,6 +84,7 @@ class TrackingViewer(QMainWindow):
 
         # Image display panel (pyqtgraph).
         self._graphics_widget = pg.GraphicsLayoutWidget()
+        # noinspection PyUnresolvedReferences
         self._view_box: pg.ViewBox = self._graphics_widget.addViewBox(row=0, col=0)
         self._view_box.setAspectLocked(True)
         self._view_box.invertY(True)
@@ -94,26 +100,49 @@ class TrackingViewer(QMainWindow):
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
 
+        # Populates the UI with the initial data.
+        self.load_data(data=data)
+
     def load_data(self, data: TrackingViewerData) -> None:
-        """Loads a multi-day dataset into the viewer.
+        """Caches the input TrackingViewerData instance and uses it to populate the managed UI window.
 
         Args:
-            data: The tracking viewer data model to display.
+            data: The TrackingViewerData instance that stores the visualized dataset's data.
         """
-        self._data = data
+        self.data = data
 
-        # Populates the session selector.
-        self._session_combo.blockSignals(True)
-        self._session_combo.clear()
-        for index, session_id in enumerate(data.session_ids):
-            self._session_combo.addItem(f"{index}: {session_id}", userData=index)
-        self._session_combo.setCurrentIndex(0)
-        self._session_combo.blockSignals(False)
+        # Populates the recording selector.
+        self._recording_combo.blockSignals(True)
+        self._recording_combo.clear()
+        for index, recording_id in enumerate(data.recording_ids):
+            self._recording_combo.addItem(f"{index}: {recording_id}", userData=index)
+        self._recording_combo.setCurrentIndex(0)
+        self._recording_combo.blockSignals(False)
 
         # Enables channel 2 toggle if available.
         self._channel_2_checkbox.setEnabled(data.has_channel_2)
 
         self._refresh_display()
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
+        """Handles keyboard navigation for recording stepping and auto-cycle control.
+
+        Notes:
+            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
+        """
+        # Left/right arrow keys step through recordings when auto-cycling is stopped.
+        if self._start_button.isEnabled():
+            if event.key() == QtCore.Qt.Key.Key_Left:
+                self._previous_recording()
+            elif event.key() == QtCore.Qt.Key.Key_Right:
+                self._next_recording()
+
+        # Spacebar toggles between start and stop.
+        if event.key() == QtCore.Qt.Key.Key_Space:
+            if self._start_button.isEnabled():
+                self._start_cycling()
+            else:
+                self._stop_cycling()
 
     def _build_control_panel(self) -> QWidget:
         """Constructs the right-side control panel with all viewer controls.
@@ -123,42 +152,43 @@ class TrackingViewer(QMainWindow):
         """
         panel = QWidget(self)
         layout = QVBoxLayout(panel)
-        panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
-        # Session navigation group.
-        session_group = QGroupBox("Session Navigation")
-        session_layout = QVBoxLayout(session_group)
+        # Recording navigation group.
+        recording_group = QGroupBox("Recording Navigation")
+        recording_layout = QVBoxLayout(recording_group)
 
-        self._session_combo = QComboBox()
-        self._session_combo.currentIndexChanged.connect(self._on_session_selected)
-        session_layout.addWidget(self._session_combo)
+        self._recording_combo = QComboBox()
+        self._recording_combo.currentIndexChanged.connect(self._on_recording_selected)
+        recording_layout.addWidget(self._recording_combo)
 
+        # Start and stop are grouped exclusively so only one can be active at a time.
         navigation_row = QHBoxLayout()
-        self._previous_button = QPushButton("<")
-        self._previous_button.clicked.connect(self._previous_session)
-        navigation_row.addWidget(self._previous_button)
+        self._start_button = QPushButton("Start")
+        self._start_button.setCheckable(True)
+        self._start_button.setToolTip("Start auto-cycling (Space).")
+        self._start_button.clicked.connect(self._start_cycling)
 
-        self._next_button = QPushButton(">")
-        self._next_button.clicked.connect(self._next_session)
-        navigation_row.addWidget(self._next_button)
+        self._stop_button = QPushButton("Stop")
+        self._stop_button.setCheckable(True)
+        self._stop_button.setToolTip("Stop auto-cycling (Space). Use Left/Right arrow keys to step through recordings.")
+        self._stop_button.clicked.connect(self._stop_cycling)
 
-        self._cycle_button = QPushButton("Auto Cycle")
-        self._cycle_button.setCheckable(True)
-        self._cycle_button.toggled.connect(self._toggle_auto_cycle)
-        navigation_row.addWidget(self._cycle_button)
-        session_layout.addLayout(navigation_row)
+        button_group = QButtonGroup(self)
+        button_group.addButton(self._start_button, 0)
+        button_group.addButton(self._stop_button, 1)
+        button_group.setExclusive(True)
 
-        interval_row = QHBoxLayout()
-        interval_row.addWidget(QLabel("Interval (ms):"))
-        self._interval_spin = QSpinBox()
-        self._interval_spin.setRange(_MINIMUM_CYCLE_INTERVAL, _MAXIMUM_CYCLE_INTERVAL)
-        self._interval_spin.setSingleStep(_CYCLE_INTERVAL_STEP)
-        self._interval_spin.setValue(_DEFAULT_CYCLE_INTERVAL)
-        self._interval_spin.valueChanged.connect(self._on_interval_changed)
-        interval_row.addWidget(self._interval_spin)
-        session_layout.addLayout(interval_row)
+        navigation_row.addWidget(self._start_button)
+        navigation_row.addWidget(self._stop_button)
 
-        layout.addWidget(session_group)
+        # Controls start with stop pre-selected, since there is no active cycling on startup.
+        self._start_button.setEnabled(True)
+        self._stop_button.setEnabled(False)
+        self._stop_button.setChecked(True)
+        recording_layout.addLayout(navigation_row)
+
+        layout.addWidget(recording_group)
 
         # Background image group.
         background_group = QGroupBox("Background Image")
@@ -199,9 +229,9 @@ class TrackingViewer(QMainWindow):
 
         opacity_row = QHBoxLayout()
         opacity_row.addWidget(QLabel("Opacity:"))
-        self._opacity_slider = QSlider(QtCore.Qt.Horizontal)
+        self._opacity_slider = QSlider(QtCore.Qt.Orientation.Horizontal)
         self._opacity_slider.setRange(0, 255)
-        self._opacity_slider.setValue(_DEFAULT_MASK_OPACITY)
+        self._opacity_slider.setValue(self._style.default_mask_opacity)
         self._opacity_slider.valueChanged.connect(self._refresh_display)
         opacity_row.addWidget(self._opacity_slider)
         mask_layout.addLayout(opacity_row)
@@ -225,9 +255,6 @@ class TrackingViewer(QMainWindow):
 
     def _refresh_display(self) -> None:
         """Redraws the image panel with the current background image and mask overlay."""
-        if self._data is None:
-            return
-
         coordinate_space = self._space_combo.currentData()
         background_type = self._background_combo.currentData()
         mask_layer = self._mask_combo.currentData()
@@ -235,183 +262,142 @@ class TrackingViewer(QMainWindow):
         opacity = self._opacity_slider.value()
 
         # Retrieves and normalizes the background image.
-        background = self._data.background_image(
+        background = self.data.background_image(
             image_type=background_type,
             coordinate_space=coordinate_space,
             channel_2=channel_2,
         )
-        display_image = _normalize_image(
-            image=background,
-            frame_height=self._data.frame_height,
-            frame_width=self._data.frame_width,
-        )
+        display_image = self._normalize_image(image=background)
 
         # Retrieves the mask set for the current layer and channel.
-        masks = self._data.masks_for_layer(layer=mask_layer, channel_2=channel_2)
+        masks = self.data.masks_for_layer(layer=mask_layer, channel_2=channel_2)
 
         # Composites the mask overlay onto the background.
         if masks:
-            mask_color = _CHANNEL_2_MASK_COLOR if channel_2 else _CHANNEL_1_MASK_COLOR
-            display_image = _overlay_masks(
+            mask_color = self._style.channel_2_mask_color if channel_2 else self._style.channel_1_mask_color
+            display_image = self._overlay_masks(
                 background=display_image,
                 masks=masks,
                 color=mask_color,
                 opacity=opacity,
-                frame_height=self._data.frame_height,
-                frame_width=self._data.frame_width,
             )
 
         self._image_item.setImage(display_image)
 
         # Updates the status bar.
-        session_id = self._data.current_session_id
+        recording_id = self.data.current_recording_id
         mask_count = len(masks) if masks else 0
         self._status_bar.showMessage(
-            f"Session: {session_id}  |  Masks: {mask_count}  |  "
-            f"Size: {self._data.frame_height} x {self._data.frame_width}"
+            f"Recording: {recording_id}  |  Masks: {mask_count}  |  "
+            f"Size: {self.data.frame_height} x {self.data.frame_width}"
         )
 
-    def _on_session_selected(self, index: int) -> None:
-        """Handles session combo box selection changes.
+    def _on_recording_selected(self, index: int) -> None:
+        """Handles recording combo box selection changes.
 
         Args:
             index: The newly selected combo box index.
         """
-        if self._data is None or index < 0:
+        if index < 0:
             return
-        self._data.switch_session(session_index=index)
+        self.data.switch_recording(recording_index=index)
         self._refresh_display()
 
-    def _previous_session(self) -> None:
-        """Navigates to the previous session, wrapping around to the last."""
-        if self._data is None:
-            return
-        new_index = (self._data.current_session_index - 1) % self._data.session_count
-        self._session_combo.setCurrentIndex(new_index)
+    def _previous_recording(self) -> None:
+        """Navigates to the previous recording, wrapping around to the last."""
+        new_index = (self.data.current_recording_index - 1) % self.data.recording_count
+        self._recording_combo.setCurrentIndex(new_index)
 
-    def _next_session(self) -> None:
-        """Navigates to the next session, wrapping around to the first."""
-        if self._data is None:
-            return
-        new_index = (self._data.current_session_index + 1) % self._data.session_count
-        self._session_combo.setCurrentIndex(new_index)
+    def _next_recording(self) -> None:
+        """Navigates to the next recording, wrapping around to the first."""
+        new_index = (self.data.current_recording_index + 1) % self.data.recording_count
+        self._recording_combo.setCurrentIndex(new_index)
 
-    def _advance_session(self) -> None:
-        """Advances to the next session during auto-cycling."""
-        self._next_session()
+    def _advance_recording(self) -> None:
+        """Advances to the next recording during auto-cycling."""
+        self._next_recording()
 
-    def _toggle_auto_cycle(self, enabled: bool) -> None:
-        """Starts or stops automatic session cycling.
+    def _start_cycling(self) -> None:
+        """Starts automatic recording cycling."""
+        self._start_button.setEnabled(False)
+        self._stop_button.setEnabled(True)
+        self._auto_cycle_timer.start(self._style.cycle_interval)
 
-        Args:
-            enabled: True to start cycling, False to stop.
-        """
-        if enabled:
-            self._auto_cycle_timer.start(self._interval_spin.value())
-            self._cycle_button.setText("Stop Cycle")
-        else:
-            self._auto_cycle_timer.stop()
-            self._cycle_button.setText("Auto Cycle")
+    def _stop_cycling(self) -> None:
+        """Stops automatic recording cycling and re-enables manual navigation."""
+        self._auto_cycle_timer.stop()
+        self._start_button.setEnabled(True)
+        self._stop_button.setEnabled(False)
 
-    def _on_interval_changed(self, interval: int) -> None:
-        """Updates the auto-cycle timer interval.
+    def _normalize_image(self, image: NDArray[np.float32] | None) -> NDArray[np.uint8]:
+        """Normalizes a float32 image to an uint8 RGB array using percentile clipping.
 
         Args:
-            interval: New interval in milliseconds.
+            image: The input float32 image, or None for a black fallback.
+
+        Returns:
+            Normalized RGB image of shape (height, width, 3) with uint8 values.
         """
-        if self._auto_cycle_timer.isActive():
-            self._auto_cycle_timer.setInterval(interval)
+        frame_height = self.data.frame_height
+        frame_width = self.data.frame_width
 
-    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
-        """Handles keyboard shortcuts for session navigation.
+        if image is None:
+            return np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
 
-        Left/Right arrows navigate between sessions. Space toggles auto-cycling.
+        percentile_low = np.percentile(image, self._style.lower_percentile)
+        percentile_high = np.percentile(image, self._style.upper_percentile)
+
+        if percentile_high <= percentile_low:
+            return np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+
+        normalized = (image - percentile_low) / (percentile_high - percentile_low)
+        normalized = np.clip(normalized, 0.0, 1.0)
+        grayscale = (normalized * 255).astype(np.uint8)
+
+        return np.stack([grayscale, grayscale, grayscale], axis=-1)
+
+    def _overlay_masks(
+        self,
+        background: NDArray[np.uint8],
+        masks: list[ROIStatistics],
+        color: tuple[int, int, int],
+        opacity: int,
+    ) -> NDArray[np.uint8]:
+        """Composites ROI mask outlines onto a background RGB image.
+
+        Renders each ROI as a filled semi-transparent region with the specified color and opacity. Pixels outside the
+        frame bounds are clipped.
+
+        Args:
+            background: The background RGB image of shape (height, width, 3).
+            masks: The list of ROIStatistics to overlay.
+            color: The RGB color tuple for mask pixels.
+            opacity: The alpha value (0-255) for mask blending.
+
+        Returns:
+            The composited RGB image with mask overlays.
         """
-        key = event.key()
-        if key == QtCore.Qt.Key_Left:
-            self._previous_session()
-        elif key == QtCore.Qt.Key_Right:
-            self._next_session()
-        elif key == QtCore.Qt.Key_Space:
-            self._cycle_button.toggle()
-        else:
-            super().keyPressEvent(event)
+        frame_height = self.data.frame_height
+        frame_width = self.data.frame_width
+        result = background.copy()
+        alpha = opacity / 255.0
 
+        for roi in masks:
+            y_pixels = roi.y_pixels
+            x_pixels = roi.x_pixels
 
-def _normalize_image(
-    image: NDArray[np.float32] | None,
-    frame_height: int,
-    frame_width: int,
-) -> NDArray[np.uint8]:
-    """Normalizes a float32 image to a uint8 RGB array using percentile clipping.
+            # Clips pixels to frame bounds.
+            valid = (y_pixels >= 0) & (y_pixels < frame_height) & (x_pixels >= 0) & (x_pixels < frame_width)
+            y_valid = y_pixels[valid]
+            x_valid = x_pixels[valid]
 
-    Args:
-        image: Input float32 image, or None for a black fallback.
-        frame_height: Height for the fallback image.
-        frame_width: Width for the fallback image.
+            if len(y_valid) == 0:
+                continue
 
-    Returns:
-        Normalized RGB image of shape (height, width, 3) with uint8 values.
-    """
-    if image is None:
-        return np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+            # Blends the mask color with the background.
+            for channel_index in range(3):
+                result[y_valid, x_valid, channel_index] = (
+                    alpha * color[channel_index] + (1.0 - alpha) * result[y_valid, x_valid, channel_index]
+                ).astype(np.uint8)
 
-    percentile_low = np.percentile(image, _LOWER_PERCENTILE)
-    percentile_high = np.percentile(image, _UPPER_PERCENTILE)
-
-    if percentile_high <= percentile_low:
-        return np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
-
-    normalized = (image - percentile_low) / (percentile_high - percentile_low)
-    normalized = np.clip(normalized, 0.0, 1.0)
-    grayscale = (normalized * 255).astype(np.uint8)
-
-    return np.stack([grayscale, grayscale, grayscale], axis=-1)
-
-
-def _overlay_masks(
-    background: NDArray[np.uint8],
-    masks: list[ROIStatistics],
-    color: tuple[int, int, int],
-    opacity: int,
-    frame_height: int,
-    frame_width: int,
-) -> NDArray[np.uint8]:
-    """Composites ROI mask outlines onto a background RGB image.
-
-    Renders each ROI as a filled semi-transparent region with the specified color
-    and opacity. Pixels outside the frame bounds are clipped.
-
-    Args:
-        background: The background RGB image of shape (height, width, 3).
-        masks: The list of ROIStatistics to overlay.
-        color: The RGB color tuple for mask pixels.
-        opacity: The alpha value (0-255) for mask blending.
-        frame_height: The image height for bounds checking.
-        frame_width: The image width for bounds checking.
-
-    Returns:
-        The composited RGB image with mask overlays.
-    """
-    result = background.copy()
-    alpha = opacity / 255.0
-
-    for roi in masks:
-        y_pixels = roi.y_pixels
-        x_pixels = roi.x_pixels
-
-        # Clips pixels to frame bounds.
-        valid = (y_pixels >= 0) & (y_pixels < frame_height) & (x_pixels >= 0) & (x_pixels < frame_width)
-        y_valid = y_pixels[valid]
-        x_valid = x_pixels[valid]
-
-        if len(y_valid) == 0:
-            continue
-
-        # Blends the mask color with the background.
-        for channel_index in range(3):
-            result[y_valid, x_valid, channel_index] = (
-                alpha * color[channel_index] + (1.0 - alpha) * result[y_valid, x_valid, channel_index]
-            ).astype(np.uint8)
-
-    return result
+        return result

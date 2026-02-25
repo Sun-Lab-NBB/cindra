@@ -23,7 +23,7 @@ def run_registration_viewer(recording_path: Path) -> None:
     same RegistrationViewerData instance for synchronized plane switching.
 
     Args:
-        recording_path: Path to a cindra output directory containing registration results.
+        recording_path: The Path to a cindra-processed recording's root data directory containing registration results.
     """
     # Reuses the existing QApplication if one is already running (e.g. when embedded in a larger GUI),
     # otherwise creates a new one.

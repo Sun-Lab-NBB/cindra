@@ -243,7 +243,7 @@ class _ViewButton(QPushButton):
     on the signal bus.
 
     Args:
-        button_id: Zero-based index identifying this button's view type.
+        button_id: Index identifying this button's view type.
         text: Display label for the button (with keyboard shortcut prefix).
         owner: The parent QWidget.
         button_group: The button group this button belongs to.

@@ -818,18 +818,22 @@ def get_multi_day_status(session_path: str) -> dict[str, Any]:
     if not session.exists():
         return {"success": False, "error": f"Session directory not found: {session_path}"}
 
-    multiday_base = session / "multiday"
-    if not multiday_base.exists():
-        parent_multiday = session.parent / "multiday"
-        if parent_multiday.exists():
-            multiday_base = parent_multiday
-        else:
-            return {
-                "success": True,
-                "session_path": str(session),
-                "status": "not_started",
-                "message": "No multiday output directory found",
-            }
+    # Finds the cindra directory first, using the same pattern as get_single_day_status.
+    cindra_path = session / "cindra"
+    if not cindra_path.exists():
+        matches = list(session.rglob("configuration.yaml"))
+        if matches:
+            cindra_path = matches[0].parent
+
+    multiday_base = cindra_path / "multiday" if cindra_path.exists() else None
+
+    if multiday_base is None or not multiday_base.exists():
+        return {
+            "success": True,
+            "session_path": str(session),
+            "status": "not_started",
+            "message": "No multiday output directory found",
+        }
 
     datasets = [d for d in multiday_base.iterdir() if d.is_dir()]
 

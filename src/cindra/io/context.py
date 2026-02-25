@@ -214,8 +214,11 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
     return contexts
 
 
-def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[MultiDayRuntimeContext]:
-    """Creates MultiDayRuntimeContext instances for all recording sessions processed by the target multi-day pipeline.
+def resolve_multiday_contexts(
+    configuration: MultiDayConfiguration,
+    target_session_id: str | None = None,
+) -> list[MultiDayRuntimeContext]:
+    """Creates MultiDayRuntimeContext instances for recording sessions processed by the target multi-day pipeline.
 
     This function performs the initial setup for multi-day processing: it discovers cindra output directories for each
     session, derives multiday output paths, and initializes MultiDayRuntimeContext instances.
@@ -228,40 +231,59 @@ def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[Mult
         The configuration is always saved to disk, ensuring it reflects the current settings passed to this function.
         Cell selection is performed as a separate step using select_session_cells(), not during context resolution.
 
+        When target_session_id is provided, only the matching session's CombinedData and runtime data are loaded.
+        Non-matching sessions are skipped entirely. This avoids the overhead of loading large arrays for sessions
+        that will not be used (e.g., during per-session extraction).
+
     Args:
         configuration: The multi-day pipeline configuration. Must have session_directories and dataset_name configured
             in session_io.
+        target_session_id: When provided, only resolves the context for the session matching this identifier. The
+            returned list contains a single element. When None (default), all sessions are resolved.
 
     Returns:
-        A list of MultiDayRuntimeContext instances, one per session. Each context contains references to the shared
-        configuration and a session-specific MultiDayRuntimeData instance with MultiDayIOData fields initialized.
+        A list of MultiDayRuntimeContext instances, one per session (or one element when target_session_id is set).
+        Each context contains references to the shared configuration and a session-specific MultiDayRuntimeData
+        instance with MultiDayIOData fields initialized.
 
     Raises:
         FileNotFoundError: If no combined_metadata.npz file is found in a session directory.
         RuntimeError: If multiple combined_metadata.npz files are found in a session directory, or if session paths
             do not contain unique identifying components.
+        ValueError: If target_session_id does not match any resolved session identifier.
     """
     session_directories = configuration.session_io.session_directories
     session_ids = _extract_unique_components(paths=session_directories)
     dataset_name = configuration.session_io.dataset_name
 
-    # Resolves all cindra directories (data_paths), output paths, and CombinedData upfront. Loading CombinedData
-    # here validates that single-day processing completed successfully for all sessions before proceeding.
+    # Resolves all cindra directories and output paths upfront. These are cheap path operations needed for every
+    # session regardless of target filtering, because dataset_output_paths stores the full set.
     data_paths: list[Path] = []
     output_paths: list[Path] = []
-    combined_data_list: list[CombinedData] = []
     for session_directory in session_directories:
         data_path = _find_cindra_directory(session_directory=session_directory)
         data_paths.append(data_path)
-        output_paths.append(data_path.parent / "multiday" / dataset_name)
-        combined_data_list.append(CombinedData.load(root_path=data_path))
+        output_paths.append(data_path / "multiday" / dataset_name)
+
+    # Validates the target session ID before performing expensive I/O.
+    if target_session_id is not None and target_session_id not in session_ids:
+        available_ids = list(session_ids)
+        message = (
+            f"Unable to resolve multi-day context for session '{target_session_id}'. The provided session_id does "
+            f"not match any resolved session identifier. Available session IDs: {available_ids}."
+        )
+        console.error(message=message, error=ValueError)
 
     contexts: list[MultiDayRuntimeContext] = []
 
     for index, session_id in enumerate(session_ids):
+        # Skips non-target sessions when a specific session is requested.
+        if target_session_id is not None and session_id != target_session_id:
+            continue
+
         data_path = data_paths[index]
         output_path = output_paths[index]
-        combined_data = combined_data_list[index]
+        combined_data = CombinedData.load(root_path=data_path)
 
         runtime_path = output_path / "multiday_runtime_data.yaml"
         if runtime_path.exists():
@@ -276,10 +298,6 @@ def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[Mult
 
             # Injects the preloaded CombinedData to ensure it's available regardless of __post_init__ behavior.
             runtime.combined_data = combined_data
-
-            console.echo(
-                message=f"Loaded existing multi-day runtime data for session {session_id}.", level=LogLevel.INFO
-            )
 
             contexts.append(MultiDayRuntimeContext(configuration=configuration, runtime=runtime))
             continue
@@ -302,10 +320,8 @@ def resolve_multiday_contexts(configuration: MultiDayConfiguration) -> list[Mult
         ensure_directory_exists(output_path)
 
         contexts.append(MultiDayRuntimeContext(configuration=configuration, runtime=runtime))
-        console.echo(
-            message=f"Initialized multi-day runtime for session {session_id}.",
-            level=LogLevel.SUCCESS,
-        )
+
+    console.echo(message=f"Loaded existing multi-day runtime data for {len(contexts)} session(s).", level=LogLevel.INFO)
 
     # Saves shared configuration once via the first context to ensure it is always up to date.
     contexts[0].save_shared()
