@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import math
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from pathlib import Path
 
 import numpy as np
 from scipy import stats
 from PySide6 import QtGui, QtCore
-import pyqtgraph as pg
+import pyqtgraph as pg  # type: ignore[import-untyped]
 from scipy.ndimage import rotate
 from PySide6.QtWidgets import (
     QLabel,
@@ -26,14 +26,7 @@ from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
 from ...io import BinaryFile
-from ..styles import (
-    SMALL_EDIT_WIDTH,
-    MEDIUM_EDIT_WIDTH,
-    WHITE_LABEL_STYLESHEET,
-    BUTTON_PRESSED_STYLESHEET,
-    BUTTON_UNPRESSED_STYLESHEET,
-    label_font_bold,
-)
+from .styles import STYLE, label_font_bold
 from ...extraction import (
     create_masks,
     apply_oasis_deconvolution,
@@ -44,6 +37,7 @@ from ...detection.roi_statistics import compute_roi_statistics
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+    from PySide6.QtGui import QKeyEvent, QCloseEvent
 
     from .viewer import MainWindow
 
@@ -109,14 +103,14 @@ def _extract_masks_and_traces(
         all_statistics.append(original_statistics[index])
 
     compute_roi_statistics(
-        all_statistics,
+        all_statistics,  # type: ignore[arg-type]
         ops["frame_height"],
         ops["frame_width"],
         aspect=ops.get("aspect_ratio"),
         diameter=ops["cell_diameter"],
     )
     per_roi_masks = create_masks(
-        roi_statistics=all_statistics,
+        roi_statistics=all_statistics,  # type: ignore[arg-type]
         height=ops["frame_height"],
         width=ops["frame_width"],
         neuropil=True,
@@ -147,7 +141,7 @@ def _extract_masks_and_traces(
         cell_fluorescence, neuropil_fluorescence = extract_fluorescence_traces(
             frames=binary,
             cell_masks=manual_cell_masks,
-            neuropil_masks=manual_neuropil_masks,
+            neuropil_masks=manual_neuropil_masks,  # type: ignore[arg-type]
             batch_size=ops["batch_size"],
             channel_label="manual ROI channel 1",
         )
@@ -162,7 +156,7 @@ def _extract_masks_and_traces(
             channel_2_fluorescence, channel_2_neuropil = extract_fluorescence_traces(
                 frames=binary,
                 cell_masks=manual_cell_masks,
-                neuropil_masks=manual_neuropil_masks,
+                neuropil_masks=manual_neuropil_masks,  # type: ignore[arg-type]
                 batch_size=ops["batch_size"],
                 channel_label="manual ROI channel 2",
             )
@@ -272,36 +266,36 @@ class ROIDraw(QMainWindow):
         self._plot_widget.scene().sigMouseClicked.connect(self._plot_clicked)
 
         add_label = QLabel("Add ROI: button / Alt+CLICK")
-        add_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        add_label.setStyleSheet(STYLE.white_label)
         self._grid_layout.addWidget(add_label, 0, 0, 1, 4)
         remove_label = QLabel("Remove last clicked ROI: D")
-        remove_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
+        remove_label.setStyleSheet(STYLE.white_label)
         self._grid_layout.addWidget(remove_label, 1, 0, 1, 4)
 
         self._add_roi_button = QPushButton("add ROI")
         self._add_roi_button.setFont(label_font_bold())
         self._add_roi_button.clicked.connect(lambda: self._add_roi(position=None))
         self._add_roi_button.setEnabled(True)
-        self._add_roi_button.setFixedWidth(MEDIUM_EDIT_WIDTH)
-        self._add_roi_button.setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
+        self._add_roi_button.setFixedWidth(STYLE.medium_edit_width)
+        self._add_roi_button.setStyleSheet(STYLE.button_unpressed)
         self._grid_layout.addWidget(self._add_roi_button, 2, 0, 1, 1)
         diameter_label = QLabel("diameter:")
         diameter_label.setFont(label_font_bold())
-        diameter_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
-        diameter_label.setFixedWidth(MEDIUM_EDIT_WIDTH)
+        diameter_label.setStyleSheet(STYLE.white_label)
+        diameter_label.setFixedWidth(STYLE.medium_edit_width)
         self._grid_layout.addWidget(diameter_label, 2, 1, 1, 1)
         self._diameter_edit = QLineEdit(self)
         self._diameter_edit.setValidator(QtGui.QIntValidator(0, 10000))
         self._diameter_edit.setText("12")
-        self._diameter_edit.setFixedWidth(SMALL_EDIT_WIDTH)
-        self._diameter_edit.setAlignment(QtCore.Qt.AlignRight)
+        self._diameter_edit.setFixedWidth(STYLE.small_edit_width)
+        self._diameter_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._grid_layout.addWidget(self._diameter_edit, 2, 2, 1, 1)
         self._roi_list: list[_EllipseROI] = []
         self._cell_positions: list = []
         self._extracted: bool = False
         self._extract_button = QPushButton("extract ROIs")
         self._extract_button.setFont(label_font_bold())
-        self._extract_button.setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
+        self._extract_button.setStyleSheet(STYLE.button_unpressed)
         self._extract_button.setCheckable(False)
         self._extract_button.clicked.connect(self._process_rois)
         self._grid_layout.addWidget(self._extract_button, 3, 0, 1, 3)
@@ -314,7 +308,7 @@ class ROIDraw(QMainWindow):
         self._save_button.clicked.connect(self._close_and_save)
         self._save_button.setEnabled(False)
         self._save_button.setFixedWidth(_SAVE_BUTTON_WIDTH)
-        self._save_button.setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
+        self._save_button.setStyleSheet(STYLE.button_unpressed)
         self._grid_layout.addWidget(self._save_button, 0, 5, 1, 1)
 
         # View selection buttons for switching reference images.
@@ -331,13 +325,13 @@ class ROIDraw(QMainWindow):
             self._grid_layout.addWidget(button, button_index, 4, 1, 1)
             button.setEnabled(True)
         self._view_buttons.button(0).setChecked(True)
-        self._view_buttons.button(0).setStyleSheet(BUTTON_PRESSED_STYLESHEET)
+        self._view_buttons.button(0).setStyleSheet(STYLE.button_pressed)
 
         self._grid_layout.addWidget(QLabel("neuropil"), 13, 13, 1, 1)
 
-        self._frame_height: int = self._parent.ops["frame_height"]
-        self._frame_width: int = self._parent.ops["frame_width"]
-        self._cell_classification_labels = self._parent.cell_classification
+        self._frame_height: int = self._parent.ops["frame_height"]  # type: ignore[attr-defined]
+        self._frame_width: int = self._parent.ops["frame_width"]  # type: ignore[attr-defined]
+        self._cell_classification_labels = self._parent.cell_classification  # type: ignore[attr-defined]
 
         self._masked_images = self._normalize_images_with_masks()
         self._image_item.setImage(self._masked_images[:, :, :, 0])
@@ -357,13 +351,13 @@ class ROIDraw(QMainWindow):
         self._y_minimum: float = 0.0
         self._y_maximum: float = 0.0
 
-    def closeEvent(self, event: object) -> None:  # noqa: N802
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Handles window close, prompting to save if needed."""
         console.echo(message="Closing manual ROI drawing GUI...")
         if not self._save_gui:
             self._check_save_prompt(event)
 
-    def _check_save_prompt(self, event: object) -> None:
+    def _check_save_prompt(self, event: QCloseEvent) -> None:
         """Prompts the user to save traces before closing.
 
         Args:
@@ -374,31 +368,32 @@ class ROIDraw(QMainWindow):
             "PROC",
             "Would you like to save traces before closing? "
             "(if you havent extracted the traces, click Cancel and extract!)",
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
         )
-        if result == QMessageBox.Yes:
+        if result == QMessageBox.StandardButton.Yes:
             self._close_and_save()
-        elif result == QMessageBox.Cancel:
+        elif result == QMessageBox.StandardButton.Cancel:
             event.ignore()
 
     def _close_and_save(self) -> None:
         """Saves all ROI data and closes the editor window."""
-        base_path = Path(self._parent.basename)
+        base_path = Path(self._parent.basename)  # type: ignore[attr-defined]
         console.echo(message="Saving original stat file...")
-        np.save(base_path / "stat_orig.npy", self._parent.stat)
+        np.save(base_path / "stat_orig.npy", self._parent.stat)  # type: ignore[attr-defined]
 
         console.echo(message=f"Number of manually drawn ROIs: {self._roi_count}")
 
         # Appends manual ROIs to existing stats and saves.
         console.echo(message="Saving new combined stat file...")
+        assert self._new_stat is not None
         stat_all = self._new_stat.copy()
-        for index in range(len(self._parent.stat)):
-            stat_all.append(self._parent.stat[index])
-        np.save(base_path / "stat.npy", stat_all)
+        for index in range(len(self._parent.stat)):  # type: ignore[attr-defined]
+            stat_all.append(self._parent.stat[index])  # type: ignore[attr-defined]
+        np.save(base_path / "stat.npy", stat_all)  # type: ignore[arg-type]
         existing_classification = np.concatenate(
             (
-                self._parent.cell_classification[:, np.newaxis],
-                self._parent.cell_classification_probabilities[:, np.newaxis],
+                self._parent.cell_classification[:, np.newaxis],  # type: ignore[attr-defined]
+                self._parent.cell_classification_probabilities[:, np.newaxis],  # type: ignore[attr-defined]
             ),
             axis=1,
         )
@@ -408,23 +403,31 @@ class ROIDraw(QMainWindow):
         np.save(base_path / "cell_classification.npy", new_classification)
 
         # Saves fluorescence traces.
-        combined_cell_fluorescence = np.concatenate(
-            (self._cell_fluorescence, self._parent.Fcell),
+        assert self._cell_fluorescence is not None
+        assert self._neuropil_fluorescence is not None
+        assert self._spikes is not None
+        combined_cell_fluorescence: NDArray = np.concatenate(
+            (self._cell_fluorescence, self._parent.Fcell),  # type: ignore[attr-defined]
             axis=0,
         )
-        combined_neuropil = np.concatenate(
-            (self._neuropil_fluorescence, self._parent.Fneu),
+        combined_neuropil: NDArray = np.concatenate(
+            (self._neuropil_fluorescence, self._parent.Fneu),  # type: ignore[attr-defined]
             axis=0,
         )
-        combined_spikes = np.concatenate((self._spikes, self._parent.Spks), axis=0)
+        combined_spikes: NDArray = np.concatenate(
+            (self._spikes, self._parent.Spks),  # type: ignore[attr-defined]
+            axis=0,
+        )
         np.save(base_path / "F.npy", combined_cell_fluorescence)
         np.save(base_path / "Fneu.npy", combined_neuropil)
         np.save(base_path / "spks.npy", combined_spikes)
 
-        if "registered_binary_path_channel_2" in self._parent.ops:
+        if "registered_binary_path_channel_2" in self._parent.ops:  # type: ignore[attr-defined]
             channel_2_fluorescence = np.load(base_path / "F_chan2.npy")
             channel_2_neuropil = np.load(base_path / "Fneu_chan2.npy")
             red_original = np.load(base_path / "cell_colocalization.npy")
+            assert self._channel_2_fluorescence is not None
+            assert self._channel_2_neuropil is not None
             channel_2_fluorescence = np.concatenate(
                 (self._channel_2_fluorescence, channel_2_fluorescence),
                 axis=0,
@@ -443,7 +446,7 @@ class ROIDraw(QMainWindow):
             message=(
                 f"Saved data shapes - Fcell: {np.shape(combined_cell_fluorescence)}, "
                 f"Fneu: {np.shape(combined_neuropil)}, Spks: {np.shape(combined_spikes)}, "
-                f"cell_classification: {np.shape(new_classification)}, stat: {np.shape(stat_all)}"
+                f"cell_classification: {np.shape(new_classification)}, stat: {np.shape(stat_all)}"  # type: ignore[arg-type]
             ),
         )
 
@@ -460,24 +463,24 @@ class ROIDraw(QMainWindow):
         """
         masked_images = np.zeros((self._frame_height, self._frame_width, 3, _VIEW_COUNT))
         valid_y = slice(
-            self._parent.ops["valid_y_range"][0],
-            self._parent.ops["valid_y_range"][1],
+            self._parent.ops["valid_y_range"][0],  # type: ignore[attr-defined]
+            self._parent.ops["valid_y_range"][1],  # type: ignore[attr-defined]
         )
         valid_x = slice(
-            self._parent.ops["valid_x_range"][0],
-            self._parent.ops["valid_x_range"][1],
+            self._parent.ops["valid_x_range"][0],  # type: ignore[attr-defined]
+            self._parent.ops["valid_x_range"][1],  # type: ignore[attr-defined]
         )
 
         for view_index in range(_VIEW_COUNT):
             reference_image = np.zeros((self._frame_height, self._frame_width), dtype=np.float32)
             if view_index == 0:
-                reference_image[valid_y, valid_x] = self._parent.ops["mean_image"][valid_y, valid_x]
+                reference_image[valid_y, valid_x] = self._parent.ops["mean_image"][valid_y, valid_x]  # type: ignore[attr-defined]
             elif view_index == 1:
-                reference_image[valid_y, valid_x] = self._parent.ops["enhanced_mean_image"][valid_y, valid_x]
+                reference_image[valid_y, valid_x] = self._parent.ops["enhanced_mean_image"][valid_y, valid_x]  # type: ignore[attr-defined]
             elif view_index == _CORRELATION_MAP_VIEW_INDEX:
-                reference_image[valid_y, valid_x] = self._parent.ops["correlation_map"]
-            elif "max_proj" in self._parent.ops:
-                reference_image[valid_y, valid_x] = self._parent.ops["maximum_projection"]
+                reference_image[valid_y, valid_x] = self._parent.ops["correlation_map"]  # type: ignore[attr-defined]
+            elif "max_proj" in self._parent.ops:  # type: ignore[attr-defined]
+                reference_image[valid_y, valid_x] = self._parent.ops["maximum_projection"]  # type: ignore[attr-defined]
 
             low_percentile = np.percentile(reference_image, _IMAGE_PERCENTILE_LOW)
             high_percentile = np.percentile(reference_image, _IMAGE_PERCENTILE_HIGH)
@@ -499,10 +502,10 @@ class ROIDraw(QMainWindow):
         hue = np.zeros_like(mean_image)
         saturation = np.zeros_like(mean_image)
 
-        for roi_index in range(self._parent.cell_classification.shape[0]):
-            if self._parent.cell_classification[roi_index] == 1:
-                y_pixels = self._parent.stat[roi_index]["y_pixels"].flatten()
-                x_pixels = self._parent.stat[roi_index]["x_pixels"].flatten()
+        for roi_index in range(self._parent.cell_classification.shape[0]):  # type: ignore[attr-defined]
+            if self._parent.cell_classification[roi_index] == 1:  # type: ignore[attr-defined]
+                y_pixels = self._parent.stat[roi_index]["y_pixels"].flatten()  # type: ignore[attr-defined]
+                x_pixels = self._parent.stat[roi_index]["x_pixels"].flatten()  # type: ignore[attr-defined]
                 hue[y_pixels, x_pixels] = _random_generator.random()
                 saturation[y_pixels, x_pixels] = 1
 
@@ -512,7 +515,7 @@ class ROIDraw(QMainWindow):
         )
         return hsv_to_rgb(hsv_image)
 
-    def _mouse_moved(self, position: object) -> None:
+    def _mouse_moved(self, position: Any) -> None:
         """Tracks mouse position over the trace plot for neuron identification.
 
         Args:
@@ -522,23 +525,23 @@ class ROIDraw(QMainWindow):
             y_value = self._trace_plot.vb.mapSceneToView(position).y()
             self._current_neuron_index = self._roi_count - y_value + 1
 
-    def keyPressEvent(self, event: object) -> None:  # noqa: N802
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         """Handles keyboard shortcuts for view switching and ROI deletion."""
-        if event.modifiers() not in (QtCore.Qt.AltModifier, QtCore.Qt.ShiftModifier):
-            if event.key() == QtCore.Qt.Key_D:
+        if event.modifiers() not in (QtCore.Qt.KeyboardModifier.AltModifier, QtCore.Qt.KeyboardModifier.ShiftModifier):
+            if event.key() == QtCore.Qt.Key.Key_D:
                 self._roi_list[self._current_roi_index].remove(parent=self)
-            elif event.key() == QtCore.Qt.Key_W:
+            elif event.key() == QtCore.Qt.Key.Key_W:
                 self._view_buttons.button(0).setChecked(True)
-                self._view_buttons.button(0).press(parent=self, button_index=0)
-            elif event.key() == QtCore.Qt.Key_E:
+                cast("_ViewButton", self._view_buttons.button(0)).press(parent=self, button_index=0)
+            elif event.key() == QtCore.Qt.Key.Key_E:
                 self._view_buttons.button(1).setChecked(True)
-                self._view_buttons.button(1).press(parent=self, button_index=1)
-            elif event.key() == QtCore.Qt.Key_R:
+                cast("_ViewButton", self._view_buttons.button(1)).press(parent=self, button_index=1)
+            elif event.key() == QtCore.Qt.Key.Key_R:
                 self._view_buttons.button(2).setChecked(True)
-                self._view_buttons.button(2).press(parent=self, button_index=2)
-            elif event.key() == QtCore.Qt.Key_T:
+                cast("_ViewButton", self._view_buttons.button(2)).press(parent=self, button_index=2)
+            elif event.key() == QtCore.Qt.Key.Key_T:
                 self._view_buttons.button(3).setChecked(True)
-                self._view_buttons.button(3).press(parent=self, button_index=3)
+                cast("_ViewButton", self._view_buttons.button(3)).press(parent=self, button_index=3)
 
     def _add_roi(self, position: NDArray | None = None) -> None:
         """Adds a new elliptical ROI to the editor.
@@ -561,7 +564,7 @@ class ROIDraw(QMainWindow):
         console.echo(message=f"{self._roi_count} cells added to manual ROI GUI.")
         self._save_button.setEnabled(False)
 
-    def _plot_clicked(self, event: object) -> None:
+    def _plot_clicked(self, event: Any) -> None:
         """Handles click events on the image and trace panels.
 
         Alt-click adds a new ROI at the cursor position. Double-click resets the view.
@@ -575,7 +578,7 @@ class ROIDraw(QMainWindow):
                 scene_position = self._image_view.mapSceneToView(event.scenePos())
                 click_x = scene_position.x()
                 click_y = scene_position.y()
-                if event.modifiers() == QtCore.Qt.AltModifier:
+                if event.modifiers() == QtCore.Qt.KeyboardModifier.AltModifier:
                     diameter = int(self._diameter_edit.text())
                     self._add_roi(
                         position=np.array(
@@ -592,6 +595,7 @@ class ROIDraw(QMainWindow):
                     self._image_view.setYRange(0, self._frame_height)
             elif item == self._trace_plot:
                 if event.double():
+                    assert self._frame_indices is not None
                     self._trace_plot.setXRange(0, self._frame_indices.size)
                     self._trace_plot.setYRange(self._y_minimum, self._y_maximum)
 
@@ -609,6 +613,8 @@ class ROIDraw(QMainWindow):
             y_range = self._roi_list[roi_index].y_range
             x_range = self._roi_list[roi_index].x_range
             centroid = self._roi_list[roi_index].centroid
+            assert x_range is not None
+            assert y_range is not None
             x_grid, y_grid = np.meshgrid(x_range, y_range)
             y_pixels = y_grid[ellipse].flatten()
             x_pixels = x_grid[ellipse].flatten()
@@ -635,14 +641,14 @@ class ROIDraw(QMainWindow):
             self._image_view.addItem(scatter)
             self._scatter_items.append(scatter)
 
-        binary_path = Path(self._parent.ops["registered_binary_path"])
+        binary_path = Path(self._parent.ops["registered_binary_path"])  # type: ignore[attr-defined]
         if not binary_path.is_file():
-            self._parent.ops["registered_binary_path"] = str(Path(self._parent.basename) / "data.bin")
-        if "registered_binary_path_channel_2" in self._parent.ops:
-            channel_2_path = Path(self._parent.ops["registered_binary_path_channel_2"])
+            self._parent.ops["registered_binary_path"] = str(Path(self._parent.basename) / "data.bin")  # type: ignore[attr-defined]
+        if "registered_binary_path_channel_2" in self._parent.ops:  # type: ignore[attr-defined]
+            channel_2_path = Path(self._parent.ops["registered_binary_path_channel_2"])  # type: ignore[attr-defined]
             if not channel_2_path.is_file():
-                self._parent.ops["registered_binary_path_channel_2"] = str(
-                    Path(self._parent.basename) / "data_chan2.bin",
+                self._parent.ops["registered_binary_path_channel_2"] = str(  # type: ignore[attr-defined]
+                    Path(self._parent.basename) / "data_chan2.bin",  # type: ignore[attr-defined]
                 )
 
         (
@@ -654,9 +660,9 @@ class ROIDraw(QMainWindow):
             _,
             new_stat,
         ) = _extract_masks_and_traces(
-            ops=self._parent.ops,
+            ops=self._parent.ops,  # type: ignore[attr-defined]
             manual_statistics=stat_list,
-            original_statistics=self._parent.stat,
+            original_statistics=self._parent.stat,  # type: ignore[attr-defined]
         )
         self._cell_fluorescence = cell_fluorescence
         self._neuropil_fluorescence = neuropil_fluorescence
@@ -670,6 +676,8 @@ class ROIDraw(QMainWindow):
 
     def _plot_traces(self) -> None:
         """Renders fluorescence traces for all drawn ROIs in the trace panel."""
+        assert self._cell_fluorescence is not None
+        assert self._neuropil_fluorescence is not None
         self._frame_indices = np.arange(0, self._cell_fluorescence.shape[1], dtype=np.int32)
         self._trace_plot.clear()
         vertical_spacing = 1.0
@@ -712,7 +720,7 @@ class _ViewButton(QPushButton):
         super().__init__(parent)
         self.setText(text)
         self.setCheckable(True)
-        self.setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
+        self.setStyleSheet(STYLE.button_unpressed)
         self.setFont(label_font_bold())
         self.resize(self.minimumSizeHint())
         self.clicked.connect(lambda: self.press(parent=parent, button_index=button_index))
@@ -727,8 +735,8 @@ class _ViewButton(QPushButton):
         """
         for index in range(len(parent._view_names)):
             if parent._view_buttons.button(index).isEnabled():
-                parent._view_buttons.button(index).setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
-        self.setStyleSheet(BUTTON_PRESSED_STYLESHEET)
+                parent._view_buttons.button(index).setStyleSheet(STYLE.button_unpressed)
+        self.setStyleSheet(STYLE.button_pressed)
         parent._image_item.setImage(parent._masked_images[:, :, :, button_index])
         parent._plot_widget.show()
         parent.show()
@@ -772,6 +780,7 @@ class _EllipseROI:
         else:
             self.color = color
 
+        assert parent is not None
         if position is None:
             view = parent._image_view.viewRange()
             center_x = (view[0][1] + view[0][0]) / 2
@@ -819,14 +828,14 @@ class _EllipseROI:
             height: Height of the ellipse.
             width: Width of the ellipse.
         """
-        pen = pg.mkPen(self.color, width=_ROI_PEN_WIDTH, style=QtCore.Qt.SolidLine)
+        pen = pg.mkPen(self.color, width=_ROI_PEN_WIDTH, style=QtCore.Qt.PenStyle.SolidLine)
         self._pyqtgraph_roi = pg.EllipseROI([origin_x, origin_y], [width, height], pen=pen, removable=True)
         self._pyqtgraph_roi.handleSize = 8
         self._pyqtgraph_roi.handlePen = pen
         self._pyqtgraph_roi.addScaleHandle([1, 0.5], [0.0, 0.5])
         self._pyqtgraph_roi.addScaleHandle([0.5, 0], [0.5, 1])
         self._pyqtgraph_roi.addRotateHandle([0.5, 1], [0.5, 0.5])
-        self._pyqtgraph_roi.setAcceptedMouseButtons(QtCore.Qt.LeftButton)
+        self._pyqtgraph_roi.setAcceptedMouseButtons(QtCore.Qt.MouseButton.LeftButton)
         self.centroid = [origin_y, origin_x]
         parent._image_view.addItem(self._pyqtgraph_roi)
 

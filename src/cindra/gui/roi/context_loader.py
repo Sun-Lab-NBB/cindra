@@ -10,12 +10,8 @@ import numpy as np
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from ataraxis_base_utilities import LogLevel, console
 
-from ..styles import (
-    BUTTON_PRESSED_STYLESHEET,
-    BUTTON_INACTIVE_STYLESHEET,
-    BUTTON_UNPRESSED_STYLESHEET,
-)
-from .view_state import ViewState
+from .styles import STYLE
+from .view_state import ViewState, ROIColorMode, BackgroundView
 from .trace_panel import plot_trace
 from .context_data import ContextData
 from .plot_widgets import initialize_ranges
@@ -55,8 +51,8 @@ def export_fig(parent: MainWindow) -> None:
     Args:
         parent: The main GUI window.
     """
-    parent.win.scene().contextMenuItem = parent.p1
-    parent.win.scene().showExportDialog()
+    parent._graphics_widget.scene().contextMenuItem = parent._cells_view_box
+    parent._graphics_widget.scene().showExportDialog()
 
 
 def save_cell_classification(parent: MainWindow) -> None:
@@ -85,8 +81,10 @@ def save_cell_classification(parent: MainWindow) -> None:
             axis=1,
         ),
     )
-    parent.lcell0.setText(f"{int(context.cell_classification_labels.sum())}")
-    parent.lcell1.setText(f"{int(context.cell_classification_labels.size - context.cell_classification_labels.sum())}")
+    parent._cell_toggle_controls.cell_count_label.setText(f"{int(context.cell_classification_labels.sum())}")
+    parent._cell_toggle_controls.noncell_count_label.setText(
+        f"{int(context.cell_classification_labels.size - context.cell_classification_labels.sum())}"
+    )
 
 
 def save_cell_colocalization(parent: MainWindow) -> None:
@@ -225,14 +223,14 @@ def _initialize_gui(parent: MainWindow) -> None:
         return
 
     # Resets display state.
-    state.roi_color_mode = 0
-    state.background_view = 0
+    state.roi_color_mode = ROIColorMode(0)
+    state.background_view = BackgroundView(0)
     state.selected_roi_index = 0
-    parent.checkBox.setChecked(True)
-    if parent.checkBoxN.isChecked():
+    parent._roi_visibility_checkbox.setChecked(True)
+    if parent._roi_labels_checkbox.isChecked():
         parent._roi_text(False)
-    parent.checkBoxN.setChecked(False)
-    parent.checkBoxN.setEnabled(True)
+    parent._roi_labels_checkbox.setChecked(False)
+    parent._roi_labels_checkbox.setEnabled(True)
     parent.saveMerge.setEnabled(True)
     parent.sugMerge.setEnabled(True)
     parent.manual.setEnabled(True)
@@ -243,9 +241,9 @@ def _initialize_gui(parent: MainWindow) -> None:
 
     # Computes default bin size from tau and sampling rate.
     state.temporal_bin_size = max(1, int(context.tau * context.sampling_rate / _BIN_SIZE_DIVISOR))
-    parent.binedit.setText(str(state.temporal_bin_size))
+    parent._color_controls.bin_edit.setText(str(state.temporal_bin_size))
     state.colocalization_threshold = _DEFAULT_CHANNEL_2_THRESHOLD
-    parent.chan2edit.setText(str(state.colocalization_threshold))
+    parent._color_controls.channel_2_edit.setText(str(state.colocalization_threshold))
 
     # Computes boundary and circle geometry for each ROI.
     _compute_roi_geometry(context=context)
@@ -277,10 +275,12 @@ def _initialize_gui(parent: MainWindow) -> None:
     state.merge_roi_indices = [first_cell]
     state.last_reclassified_index = first_cell
     parent._ichosen_stats()
-    parent.comboBox.setCurrentIndex(_DEFAULT_ACTIVITY_MODE)
+    parent._trace_controls.activity_combo.setCurrentIndex(_DEFAULT_ACTIVITY_MODE)
 
     # Draws the colorbar and initial mask overlays.
     parent.colorbar_image = draw_colorbar(colormap=state.roi_colormap)
+    if parent.colorbar_widgets is None or parent.colorbar_image is None:
+        return
     render_colorbar(
         state=state,
         color_arrays=parent.color_arrays,
@@ -296,34 +296,34 @@ def _initialize_gui(parent: MainWindow) -> None:
         roi_maps=parent.roi_maps,
     )
     display_masks(
-        color1=parent.color1,
-        color2=parent.color2,
+        color1=parent._cells_overlay,
+        color2=parent._noncells_overlay,
         masks=masks,
     )
     console.echo(message=f"Time to draw and plot masks: {time.time() - tic:.4f} sec")
 
     # Updates cell count labels.
-    parent.lcell0.setText(f"{int(context.cell_count)}")
-    parent.lcell1.setText(f"{int(context.roi_count - context.cell_count)}")
+    parent._cell_toggle_controls.cell_count_label.setText(f"{int(context.cell_count)}")
+    parent._cell_toggle_controls.noncell_count_label.setText(f"{int(context.roi_count - context.cell_count)}")
 
     # Initializes plot ranges and displays background views.
     parent.frame_indices = initialize_ranges(
-        cells_view=parent.p1,
-        noncells_view=parent.p2,
-        trace_box=parent.p3,
+        cells_view=parent._cells_view_box,
+        noncells_view=parent._noncells_view_box,
+        trace_box=parent._trace_box,
         frame_width=context.frame_width,
         frame_height=context.frame_height,
         frame_count=context.frame_count,
     )
     display_views(
-        view1=parent.view1,
-        view2=parent.view2,
+        view1=parent._cells_background,
+        view2=parent._noncells_background,
         views=parent.views,
         view_index=state.background_view,
         saturation=state.background_saturation,
     )
     plot_trace(
-        trace_box=parent.p3,
+        trace_box=parent._trace_box,
         cell_fluorescence=context.cell_fluorescence,
         neuropil_fluorescence=context.neuropil_fluorescence,
         spikes=context.spikes,
@@ -333,8 +333,8 @@ def _initialize_gui(parent: MainWindow) -> None:
     )
 
     # Sets aspect ratio on both panels.
-    parent.p1.setAspectLocked(lock=True, ratio=context.aspect_ratio)
-    parent.p2.setAspectLocked(lock=True, ratio=context.aspect_ratio)
+    parent._cells_view_box.setAspectLocked(lock=True, ratio=context.aspect_ratio)
+    parent._noncells_view_box.setAspectLocked(lock=True, ratio=context.aspect_ratio)
 
     state.session_loaded = True
 
@@ -358,56 +358,56 @@ def _enable_views_and_classifier(parent: MainWindow) -> None:
 
     # Enables quadrant buttons.
     for b in range(9):
-        parent.quadbtns.button(b).setEnabled(True)
-        parent.quadbtns.button(b).setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
+        parent._quadrant_controls.quadrant_buttons.button(b).setEnabled(True)
+        parent._quadrant_controls.quadrant_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
 
     # Enables view buttons.
-    for b in range(len(parent.view_names)):
-        parent.viewbtns.button(b).setEnabled(True)
-        parent.viewbtns.button(b).setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
+    for b in range(len(parent._view_controls.view_names)):
+        parent._view_controls.view_buttons.button(b).setEnabled(True)
+        parent._view_controls.view_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
         if b == 0:
-            parent.viewbtns.button(b).setChecked(True)
-            parent.viewbtns.button(b).setStyleSheet(BUTTON_PRESSED_STYLESHEET)
+            parent._view_controls.view_buttons.button(b).setChecked(True)
+            parent._view_controls.view_buttons.button(b).setStyleSheet(STYLE.button_pressed)
 
     # Disables channel 2 views if no channel 2 data is available.
     if context.corrected_structural_mean_image is None:
-        parent.viewbtns.button(5).setEnabled(False)
-        parent.viewbtns.button(5).setStyleSheet(BUTTON_INACTIVE_STYLESHEET)
+        parent._view_controls.view_buttons.button(5).setEnabled(False)
+        parent._view_controls.view_buttons.button(5).setStyleSheet(STYLE.button_inactive)
         if context.mean_image_channel_2 is None:
-            parent.viewbtns.button(6).setEnabled(False)
-            parent.viewbtns.button(6).setStyleSheet(BUTTON_INACTIVE_STYLESHEET)
+            parent._view_controls.view_buttons.button(6).setEnabled(False)
+            parent._view_controls.view_buttons.button(6).setStyleSheet(STYLE.button_inactive)
 
     # Enables color mode buttons.
-    color_button_count = len(parent.colorbtns.buttons())
+    color_button_count = len(parent._color_controls.color_buttons.buttons())
     for b in range(color_button_count):
         if b == _CHANNEL_2_COLOR_INDEX:
             if context.has_channel_2:
-                parent.colorbtns.button(b).setEnabled(True)
-                parent.colorbtns.button(b).setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
+                parent._color_controls.color_buttons.button(b).setEnabled(True)
+                parent._color_controls.color_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
         elif b == 0:
-            parent.colorbtns.button(b).setEnabled(True)
-            parent.colorbtns.button(b).setChecked(True)
-            parent.colorbtns.button(b).setStyleSheet(BUTTON_PRESSED_STYLESHEET)
+            parent._color_controls.color_buttons.button(b).setEnabled(True)
+            parent._color_controls.color_buttons.button(b).setChecked(True)
+            parent._color_controls.color_buttons.button(b).setStyleSheet(STYLE.button_pressed)
         elif b < _BASIC_COLOR_COUNT:
-            parent.colorbtns.button(b).setEnabled(True)
-            parent.colorbtns.button(b).setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
+            parent._color_controls.color_buttons.button(b).setEnabled(True)
+            parent._color_controls.color_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
 
     # Enables size toggle buttons.
-    for button_index, btn in enumerate(parent.sizebtns.buttons()):
-        btn.setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
+    for button_index, btn in enumerate(parent._cell_toggle_controls.size_buttons.buttons()):
+        btn.setStyleSheet(STYLE.button_unpressed)
         btn.setEnabled(True)
         if button_index == 0:
             btn.setChecked(True)
-            btn.setStyleSheet(BUTTON_PRESSED_STYLESHEET)
+            btn.setStyleSheet(STYLE.button_pressed)
 
     # Enables selection buttons (draw enabled, top/bottom disabled until data analyzed).
     for b in range(3):
         if b == 0:
-            parent.topbtns.button(b).setEnabled(True)
-            parent.topbtns.button(b).setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
+            parent._selection_controls.selection_buttons.button(b).setEnabled(True)
+            parent._selection_controls.selection_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
         else:
-            parent.topbtns.button(b).setEnabled(False)
-            parent.topbtns.button(b).setStyleSheet(BUTTON_INACTIVE_STYLESHEET)
+            parent._selection_controls.selection_buttons.button(b).setEnabled(False)
+            parent._selection_controls.selection_buttons.button(b).setStyleSheet(STYLE.button_inactive)
 
     # Enables classifier menu items.
     parent.loadClass.setEnabled(True)
@@ -429,7 +429,7 @@ def _compute_roi_geometry(context: ContextData) -> None:
     for roi in context.roi_statistics:
         y_pixels = roi.y_pixels.flatten()
         x_pixels = roi.x_pixels.flatten()
-        roi.boundary_y_pixels, roi.boundary_x_pixels = compute_boundary_mask(
+        roi.boundary_y_pixels, roi.boundary_x_pixels = compute_boundary_mask(  # type: ignore[assignment]
             y_pixels=y_pixels,
             x_pixels=x_pixels,
         )
@@ -439,8 +439,8 @@ def _compute_roi_geometry(context: ContextData) -> None:
             radius=roi.radius,
         )
         valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < context.frame_height) & (x_circle < context.frame_width)
-        roi.circle_y_pixels = y_circle[valid]
-        roi.circle_x_pixels = x_circle[valid]
+        roi.circle_y_pixels = y_circle[valid]  # type: ignore[assignment]
+        roi.circle_x_pixels = x_circle[valid]  # type: ignore[assignment]
 
 
 def _select_directory(parent: MainWindow) -> Path | None:
@@ -468,6 +468,6 @@ def _load_again(parent: MainWindow, text: str) -> None:
         parent: The main GUI window.
         text: The error message to display.
     """
-    result = QMessageBox.question(parent, "ERROR", text, QMessageBox.Yes | QMessageBox.No)
-    if result == QMessageBox.Yes:
+    result = QMessageBox.question(parent, "ERROR", text, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    if result == QMessageBox.StandardButton.Yes:
         load_dialog(parent=parent)

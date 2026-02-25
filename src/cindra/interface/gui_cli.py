@@ -7,8 +7,7 @@ from pathlib import Path
 
 import click
 
-from ..gui import run, run_tracking_viewer
-from ..gui.registration import run_registration_viewer
+from ..gui import run_roi_viewer, run_tracking_viewer, run_registration_viewer
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
 CONTEXT_SETTINGS = {"max_content_width": 120}
@@ -33,7 +32,7 @@ def cindra_gui() -> None:
 )
 def gui_roi(session_path: Path | None) -> None:
     """Launches the ROI viewer and editor for single-day pipeline output."""
-    run(session_path=session_path)
+    run_roi_viewer(session_path=session_path)
 
 
 @cindra_gui.command("registration")

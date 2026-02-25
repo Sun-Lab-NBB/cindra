@@ -53,15 +53,15 @@ class GUISignals(QObject):
     array. Subscribers that display or sort by classifier confidence should refresh their views."""
 
     # View change signals.
-    background_view_changed = Signal(int)
+    view_mode_changed = Signal(int)
     """Emitted when the background image displayed behind ROI overlays changes. The int argument is
     a ``BackgroundView`` member."""
 
-    roi_color_mode_changed = Signal(int)
+    color_mode_changed = Signal(int)
     """Emitted when the statistic used to color ROI overlays changes. The int argument is a
     ``ROIColorMode`` member."""
 
-    trace_mode_changed = Signal(int)
+    activity_mode_changed = Signal(int)
     """Emitted when the fluorescence trace type shown in the trace panel changes. The int argument
     is a ``TraceMode`` member."""
 

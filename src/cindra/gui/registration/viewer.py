@@ -440,7 +440,7 @@ class BinaryPlayer(QMainWindow):
         if shift_min == shift_max:
             shift_min -= 1
             shift_max += 1
-        shift_max += (shift_max - shift_min) * self._style.legend_headroom
+        shift_max += int((shift_max - shift_min) * self._style.legend_headroom)
         self._shift_plot.setLimits(xMin=0, xMax=last_frame)
         self._shift_plot.setRange(xRange=(0, last_frame), yRange=(shift_min, shift_max), padding=0.0)
         self._shift_scatter = pg.ScatterPlotItem()
@@ -959,9 +959,7 @@ class PCViewer(QMainWindow):
         self._projection_plot.clear()
         self._projection_plot.plot(self._pc_projections[:, pc_index])
         self._projection_plot.setTitle("PC Projection Weight", size=self._style.plot_title_size, bold=True)
-        self._projection_plot.setLabel(
-            "left", "Magnitude", **{"font-size": self._style.axis_label_size}
-        )
+        self._projection_plot.setLabel("left", "Magnitude", **{"font-size": self._style.axis_label_size})
         self._projection_plot.setLabel("bottom", "Sampled Frame", **{"font-size": self._style.axis_label_size})
         self._projection_plot.setXRange(0, self._pc_projections.shape[0] - 1)
         self._projection_plot.setYRange(*self._projection_y_range)

@@ -7,23 +7,14 @@ from dataclasses import field, dataclass
 
 import numpy as np
 from PySide6 import QtGui, QtCore
-from PySide6.QtWidgets import QLabel, QCheckBox, QComboBox, QLineEdit, QPushButton
+from PySide6.QtWidgets import QLabel, QCheckBox, QComboBox, QGroupBox, QLineEdit, QGridLayout, QPushButton
 
-from ..styles import (
-    COMBO_BOX_WIDTH,
-    SMALL_EDIT_WIDTH,
-    RED_LABEL_STYLESHEET,
-    CYAN_LABEL_STYLESHEET,
-    WHITE_LABEL_STYLESHEET,
-    SQUARE_BUTTON_MAX_WIDTH,
-    BUTTON_UNPRESSED_STYLESHEET,
-    arrow_button_font,
-)
+from .styles import STYLE, arrow_button_font
 
 if TYPE_CHECKING:
-    import pyqtgraph as pg
+    import pyqtgraph as pg  # type: ignore[import-untyped]
     from numpy.typing import NDArray
-    from PySide6.QtWidgets import QWidget, QGridLayout
+    from PySide6.QtWidgets import QWidget
 
     from .signals import GUISignals
     from .plot_widgets import TraceBox
@@ -196,11 +187,9 @@ def plot_trace(
 
 def create_trace_controls(
     owner: QWidget,
-    layout: QGridLayout,
-    row: int,
     signals: GUISignals,
-) -> tuple[TraceControls, int]:
-    """Creates trace panel controls and adds them to the layout.
+) -> tuple[QGroupBox, TraceControls]:
+    """Creates trace panel controls inside a group box.
 
     Builds the activity mode selector, trace resize buttons, scale buttons,
     max-plotted input, and trace visibility checkboxes. Connects all widget
@@ -208,21 +197,23 @@ def create_trace_controls(
 
     Args:
         owner: The parent widget for ownership of created widgets.
-        layout: The grid layout to add widgets to.
-        row: Starting row index in the layout.
         signals: The central signal bus for GUI events.
 
     Returns:
-        Tuple of (trace controls container, next available row index).
+        Tuple of (group box, trace controls container).
     """
+    group_box = QGroupBox("Trace Display")
+    group_box.setStyleSheet("QGroupBox { color: white; }")
+    layout = QGridLayout(group_box)
+
     # Activity mode label and combo box.
     activity_label = QLabel("Activity mode:")
-    activity_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
-    layout.addWidget(activity_label, row, 0, 1, 1)
+    activity_label.setStyleSheet(STYLE.white_label)
+    layout.addWidget(activity_label, 0, 0, 1, 1)
 
     activity_combo = QComboBox(owner)
-    activity_combo.setFixedWidth(COMBO_BOX_WIDTH)
-    layout.addWidget(activity_combo, row + 1, 0, 1, 1)
+    activity_combo.setFixedWidth(STYLE.combo_box_width)
+    layout.addWidget(activity_combo, 1, 0, 1, 1)
     activity_combo.addItem("F")
     activity_combo.addItem("Fneu")
     activity_combo.addItem("F - 0.7*Fneu")
@@ -236,10 +227,10 @@ def create_trace_controls(
     arrow_buttons = [arrow_up, arrow_down]
 
     for button_index, button in enumerate(arrow_buttons):
-        button.setMaximumWidth(SQUARE_BUTTON_MAX_WIDTH)
+        button.setMaximumWidth(STYLE.square_button_max_width)
         button.setFont(arrow_button_font())
-        button.setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
-        layout.addWidget(button, row + button_index, 1, 1, 1, QtCore.Qt.AlignRight)
+        button.setStyleSheet(STYLE.button_unpressed)
+        layout.addWidget(button, button_index, 1, 1, 1, QtCore.Qt.AlignmentFlag.AlignRight)
 
     # Scale adjustment buttons (+/-).
     scale_up = QPushButton(" +")
@@ -247,41 +238,38 @@ def create_trace_controls(
     scale_buttons = [scale_up, scale_down]
 
     for button_index, button in enumerate(scale_buttons):
-        button.setMaximumWidth(SQUARE_BUTTON_MAX_WIDTH)
+        button.setMaximumWidth(STYLE.square_button_max_width)
         button.setFont(arrow_button_font())
-        button.setStyleSheet(BUTTON_UNPRESSED_STYLESHEET)
-        layout.addWidget(button, row + button_index, 1, 1, 1)
+        button.setStyleSheet(STYLE.button_unpressed)
+        layout.addWidget(button, button_index, 2, 1, 1)
 
     # Max plotted count label and input.
     max_plotted_label = QLabel("max # plotted:")
-    max_plotted_label.setStyleSheet(WHITE_LABEL_STYLESHEET)
-    layout.addWidget(max_plotted_label, row + 2, 0, 1, 1)
-    row += 3
+    max_plotted_label.setStyleSheet(STYLE.white_label)
+    layout.addWidget(max_plotted_label, 2, 0, 1, 1)
 
     max_plotted_edit = QLineEdit(owner)
     max_plotted_edit.setValidator(QtGui.QIntValidator(0, _MAX_PLOTTED_COUNT))
     max_plotted_edit.setText(str(_DEFAULT_PLOTTED_COUNT))
-    max_plotted_edit.setFixedWidth(SMALL_EDIT_WIDTH)
-    max_plotted_edit.setAlignment(QtCore.Qt.AlignRight)
-    layout.addWidget(max_plotted_edit, row, 0, 1, 1)
+    max_plotted_edit.setFixedWidth(STYLE.small_edit_width)
+    max_plotted_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+    layout.addWidget(max_plotted_edit, 3, 0, 1, 1)
 
     # Trace visibility checkboxes.
-    layout.setVerticalSpacing(4)
-
     deconvolved_checkbox = QCheckBox("deconv [N]")
-    deconvolved_checkbox.setStyleSheet(WHITE_LABEL_STYLESHEET)
+    deconvolved_checkbox.setStyleSheet(STYLE.white_label)
     deconvolved_checkbox.toggle()
-    layout.addWidget(deconvolved_checkbox, row, 3, 1, 2)
+    layout.addWidget(deconvolved_checkbox, 3, 1, 1, 1)
 
     neuropil_checkbox = QCheckBox("neuropil [B]")
-    neuropil_checkbox.setStyleSheet(RED_LABEL_STYLESHEET)
+    neuropil_checkbox.setStyleSheet(STYLE.red_label)
     neuropil_checkbox.toggle()
-    layout.addWidget(neuropil_checkbox, row, 5, 1, 2)
+    layout.addWidget(neuropil_checkbox, 3, 2, 1, 1)
 
     traces_checkbox = QCheckBox("raw fluor [V]")
-    traces_checkbox.setStyleSheet(CYAN_LABEL_STYLESHEET)
+    traces_checkbox.setStyleSheet(STYLE.cyan_label)
     traces_checkbox.toggle()
-    layout.addWidget(traces_checkbox, row, 7, 1, 2)
+    layout.addWidget(traces_checkbox, 3, 3, 1, 1)
 
     # Assembles the controls container.
     controls = TraceControls(
@@ -304,7 +292,7 @@ def create_trace_controls(
     neuropil_checkbox.toggled.connect(lambda: _on_neuropil_toggle(controls=controls, signals=signals))
     traces_checkbox.toggled.connect(lambda: _on_traces_toggle(controls=controls, signals=signals))
 
-    return controls, row
+    return group_box, controls
 
 
 def _plot_single_trace(
