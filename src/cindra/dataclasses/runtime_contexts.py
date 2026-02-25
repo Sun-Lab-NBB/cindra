@@ -140,9 +140,8 @@ def _relocate_runtime_paths(
     # paths in the YAML were updated independently (e.g., single-day pipeline re-ran after a directory rename) while
     # others remained stale.
     if isinstance(runtime, SingleDayRuntimeData):
-        if (
-            runtime.io.registered_binary_path is not None
-            and not runtime.io.registered_binary_path.is_relative_to(new_prefix)
+        if runtime.io.registered_binary_path is not None and not runtime.io.registered_binary_path.is_relative_to(
+            new_prefix
         ):
             runtime.io.registered_binary_path = new_prefix / runtime.io.registered_binary_path.relative_to(old_prefix)
         if (
