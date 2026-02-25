@@ -72,6 +72,12 @@ class _BinaryPlayerStyle:
     legend_label_size: str = "12pt"
     """Font size for legend entries on the registration offset plots."""
 
+    legend_headroom: float = 0.25
+    """Fraction of the y-axis data range added as top padding so legends never overlap traces."""
+
+    axis_fixed_width: int = 50
+    """Fixed pixel width for the y-axis so the plot area stays stable when tick label digit counts change."""
+
 
 @dataclass(frozen=True, slots=True)
 class _PCViewerStyle:
@@ -104,6 +110,18 @@ class _PCViewerStyle:
     axis_label_size: str = "12pt"
     """Font size for axis labels on the metrics and projection plots."""
 
+    legend_label_size: str = "12pt"
+    """Font size for legend entry labels on the metrics plot."""
+
+    legend_headroom: float = 0.25
+    """Fraction of the y-axis data range added as top padding so legends never overlap traces."""
+
+    axis_fixed_width: int = 60
+    """Fixed pixel width for the y-axis so the plot area stays stable when tick label digit counts change."""
+
+    title_gutter_fraction: float = 0.08
+    """Fraction of image height added as black space below the image for title labels."""
+
 
 class BinaryPlayer(QMainWindow):
     """Displays a UI window for viewing registered binary imaging data and evaluating the registration's quality.
@@ -128,8 +146,6 @@ class BinaryPlayer(QMainWindow):
         _channel_2_button: Button for toggling channel 2 overlay.
         _shift_plot: Plot widget for rigid registration X-Y offsets.
         _shift_scatter: Scatter plot overlay indicating the current frame on the shift plot.
-        _nonrigid_plot: Plot widget for nonrigid RMS displacement.
-        _nonrigid_scatter: Scatter plot overlay indicating the current frame on the nonrigid plot.
         _movie_label: Label displaying the current recording path.
         _frame_number_label: Label displaying the current frame number.
         _frame_slider: Horizontal slider for frame navigation.
@@ -150,7 +166,7 @@ class BinaryPlayer(QMainWindow):
 
         # Adds the main UI window.
         pg.setConfigOptions(imageAxisOrder="row-major")
-        self.setGeometry(70, 70, 1070, 1070)
+        self.setGeometry(70, 70, 1400, 1070)
         self.setWindowTitle("Registered Recording")
         self._central_widget: QWidget = QWidget(self)
         self.setCentralWidget(self._central_widget)
@@ -216,35 +232,25 @@ class BinaryPlayer(QMainWindow):
         self._main_image: pg.ImageItem = pg.ImageItem()
         self._main_view_box.addItem(self._main_image)
 
-        # Configures rigid registration offset plot. The bottom axis tick labels are hidden since the
-        # x-axis is shared with the nonrigid plot below, which displays the "Frame" label.
+        # Configures rigid registration offset plot.
         # noinspection PyUnresolvedReferences
         self._shift_plot = self._graphics_widget.addPlot(name="plot_shift", row=1, col=0, colspan=2)
         self._shift_plot.setMouseEnabled(x=True, y=False)
         self._shift_plot.setMenuEnabled(False)
         self._shift_plot.setTitle("Rigid Registration Offsets", size=self._style.plot_title_size, bold=True)
         self._shift_plot.setLabel("left", "Shift (px)", **{"font-size": self._style.axis_label_size})
-        self._shift_plot.getAxis("bottom").setStyle(showValues=False)
-        self._shift_plot.getAxis("bottom").setHeight(0)
-        self._shift_plot.addLegend(horSpacing=20, colCount=2, labelTextSize=self._style.legend_label_size)
+        self._shift_plot.setLabel("bottom", "Frame", **{"font-size": self._style.axis_label_size})
+        self._shift_plot.getAxis("bottom").setHeight(self._style.axis_fixed_width)
+        self._shift_plot.addLegend(
+            horSpacing=20, colCount=2, offset=(-10, 1), labelTextSize=self._style.legend_label_size
+        )
         self._shift_scatter: pg.ScatterPlotItem = pg.ScatterPlotItem()
         self._shift_scatter.setData([0, 0], [0, 0])
         self._shift_plot.addItem(self._shift_scatter)
 
-        # Configures nonrigid RMS displacement plot. The x-axis is linked to the rigid plot so both
-        # share the same "Frame" range, with the label shown only on this bottom plot.
         # noinspection PyUnresolvedReferences
-        self._nonrigid_plot = self._graphics_widget.addPlot(name="plot_nonrigid", row=2, col=0, colspan=2)
-        self._nonrigid_plot.setMouseEnabled(x=True, y=False)
-        self._nonrigid_plot.setMenuEnabled(False)
-        self._nonrigid_plot.setTitle("Nonrigid RMS Displacement", size=self._style.plot_title_size, bold=True)
-        self._nonrigid_plot.setLabel("left", "RMS Shift (px)", **{"font-size": self._style.axis_label_size})
-        self._nonrigid_plot.setLabel("bottom", "Frame", **{"font-size": self._style.axis_label_size})
-        self._nonrigid_scatter: pg.ScatterPlotItem = pg.ScatterPlotItem()
-        self._nonrigid_plot.setXLink("plot_shift")
-
-        # noinspection PyUnresolvedReferences
-        self._graphics_widget.ci.layout.setRowStretchFactor(0, 12)
+        self._graphics_widget.ci.layout.setRowStretchFactor(0, 7)
+        self._graphics_widget.ci.layout.setRowStretchFactor(1, 3)
 
         # Row 2: Current frame label.
         self._frame_number_label: QLabel = QLabel("Current frame: 0")
@@ -275,6 +281,10 @@ class BinaryPlayer(QMainWindow):
             data: The RegistrationViewerData instance that stores the visualized recording's data.
         """
         self.data = data
+
+        # Fixes the y-axis width so the plot area does not shift when tick label digit counts change
+        # across planes (e.g. single-digit vs double-digit offsets).
+        self._shift_plot.getAxis("left").setWidth(self._style.axis_fixed_width)
 
         # Populates the plane selector without triggering _on_plane_changed yet. Signals are blocked so that
         # clearing and re-adding items does not fire redundant plane-switch callbacks.
@@ -393,13 +403,8 @@ class BinaryPlayer(QMainWindow):
 
     def _setup_views(self) -> None:
         """Configures all plot views and display parameters after loading data."""
-        # Temporarily breaks the x-link between plots so that clearing and re-populating one plot
-        # does not trigger auto-range propagation that corrupts the other plot's x-axis.
-        self._nonrigid_plot.setXLink(None)
         self._shift_plot.clear()
-        self._nonrigid_plot.clear()
         self._shift_plot.disableAutoRange()
-        self._nonrigid_plot.disableAutoRange()
 
         # Computes dynamic range from subsampled frames.
         frames = self.data.binary_file.subsample_movie(sample_count=self._style.subsample_frame_count)
@@ -432,11 +437,10 @@ class BinaryPlayer(QMainWindow):
         self._shift_plot.plot(x_values, rigid_x, pen="y", name="X")
         shift_min = min(int(rigid_y.min()), int(rigid_x.min()))
         shift_max = max(int(rigid_y.max()), int(rigid_x.max()))
-        # Prevents a zero-height range when all offsets are zero, which causes pyqtgraph to compute
-        # infinite scale factors that overflow on cast to integer pixel coordinates.
         if shift_min == shift_max:
             shift_min -= 1
             shift_max += 1
+        shift_max += (shift_max - shift_min) * self._style.legend_headroom
         self._shift_plot.setLimits(xMin=0, xMax=last_frame)
         self._shift_plot.setRange(xRange=(0, last_frame), yRange=(shift_min, shift_max), padding=0.0)
         self._shift_scatter = pg.ScatterPlotItem()
@@ -447,22 +451,6 @@ class BinaryPlayer(QMainWindow):
             size=self._style.scatter_point_size,
             brush=pg.mkBrush(255, 0, 0),
         )
-
-        # Plots per-frame nonrigid RMS displacement if available.
-        nonrigid_rms = self.data.nonrigid_rms
-        if self.data.has_nonrigid and nonrigid_rms is not None:
-            self._nonrigid_plot.plot(x_values, nonrigid_rms, pen=(180, 100, 255))
-            nonrigid_max = float(nonrigid_rms.max())
-            # Prevents a zero-height range when all nonrigid displacements are zero.
-            if nonrigid_max == 0.0:
-                nonrigid_max = 1.0
-            self._nonrigid_plot.setLimits(xMin=0, xMax=last_frame)
-            self._nonrigid_plot.setRange(xRange=(0, last_frame), yRange=(0.0, nonrigid_max), padding=0.0)
-            self._nonrigid_scatter = pg.ScatterPlotItem()
-            self._nonrigid_plot.addItem(self._nonrigid_scatter)
-
-        # Restores the x-link after both plots have their ranges set.
-        self._nonrigid_plot.setXLink("plot_shift")
 
         self._channel_2_button.setEnabled(self.data.has_channel_2)
 
@@ -505,17 +493,6 @@ class BinaryPlayer(QMainWindow):
             size=self._style.scatter_point_size,
             brush=pg.mkBrush(255, 0, 0),
         )
-
-        # Moves the red dot indicator on the nonrigid RMS plot to the current frame, if available.
-        nonrigid_rms = self.data.nonrigid_rms
-        if self.data.has_nonrigid and nonrigid_rms is not None:
-            # noinspection PyTypeChecker
-            self._nonrigid_scatter.setData(
-                [self._current_frame],
-                [float(nonrigid_rms[self._current_frame])],
-                size=self._style.scatter_point_size,
-                brush=pg.mkBrush(255, 0, 0),
-            )
 
     def _go_to_frame(self) -> None:
         """Seeks to the frame indicated by the frame slider position.
@@ -570,7 +547,7 @@ class BinaryPlayer(QMainWindow):
         seek_to_frame = False
         for item in items:
             # Click landed on a time-series plot: maps the scene position to a frame index.
-            if item in (self._shift_plot, self._nonrigid_plot):
+            if item == self._shift_plot:
                 view_box = self._shift_plot.vb
                 position = view_box.mapSceneToView(event.scenePos())  # type: ignore[attr-defined]
                 position_x = position.x()
@@ -591,7 +568,6 @@ class BinaryPlayer(QMainWindow):
         frame_count = self.data.frame_count
         if zoom:
             self._shift_plot.setRange(xRange=(0, frame_count - 1))
-            self._nonrigid_plot.setRange(xRange=(0, frame_count - 1))
 
         # Seeks to the clicked frame when playback is paused.
         if seek_to_frame and self._play_button.isEnabled():
@@ -636,7 +612,7 @@ class PCViewer(QMainWindow):
         _metrics_scatter: Scatter plot overlay indicating the selected PC on the metrics plot, or None.
         _legend: Legend item for the metrics plot, or None.
         _metrics_y_range: Global y-axis range for the metrics plot, computed across all PCs.
-        _projection_y_range: Global y-axis range for the projection plot, computed across all PCs.
+        _projection_y_range: Per-plane y-axis range for the projection plot, computed across all PCs.
     """
 
     _style: _PCViewerStyle = _PCViewerStyle()
@@ -674,11 +650,12 @@ class PCViewer(QMainWindow):
         self._layout.setRowStretch(0, 1)
         self._layout.setRowStretch(1, 0)
 
-        # Configures pixel shift metrics plot.
+        # Configures pixel shift metrics plot. Top content margin provides space for the legend row.
         # noinspection PyUnresolvedReferences
         self._metrics_plot = self._graphics_widget.addPlot(row=0, col=0)
         self._metrics_plot.setMouseEnabled(x=False, y=False)
         self._metrics_plot.setMenuEnabled(False)
+        self._metrics_plot.getAxis("left").setWidth(self._style.axis_fixed_width)
 
         # noinspection PyUnresolvedReferences
         self._difference_view_box = self._graphics_widget.addViewBox(
@@ -705,7 +682,8 @@ class PCViewer(QMainWindow):
         self._merged_view_box.addItem(self._merged_image)
         self._animated_view_box.addItem(self._animated_image)
 
-        # Title labels anchored inside each image view box so they follow zoom and pan.
+        # Title labels anchored inside each image ViewBox. Their position is set in _zoom_plot() and
+        # they serve as content anchors that stabilize the ViewBox bounds during animation.
         self._title_labels: list[pg.TextItem] = []
         for view_box in (self._difference_view_box, self._merged_view_box, self._animated_view_box):
             label = pg.TextItem("", color="w", anchor=(0.5, 0))
@@ -719,6 +697,7 @@ class PCViewer(QMainWindow):
         self._projection_plot = self._graphics_widget.addPlot(row=0, col=1, colspan=2)
         self._projection_plot.setMouseEnabled(x=False)
         self._projection_plot.setMenuEnabled(False)
+        self._projection_plot.getAxis("left").setWidth(self._style.axis_fixed_width)
 
         # Bottom control panel: PC selector, metric labels, title labels, playback controls.
         self._create_bottom_panel()
@@ -760,8 +739,10 @@ class PCViewer(QMainWindow):
         self._pc_count = self._pc_images.shape[1]
         self._pc_edit.setValidator(QtGui.QIntValidator(1, self._pc_count))
 
-        # Pre-computes global axis ranges so plots stay stable when cycling through PCs.
-        self._metrics_y_range = (float(self._pc_metrics.min()), float(self._pc_metrics.max()))
+        # Pre-computes per-plane y-ranges so axes stay stable when cycling through PCs.
+        metrics_min, metrics_max = float(self._pc_metrics.min()), float(self._pc_metrics.max())
+        metrics_max += (metrics_max - metrics_min) * self._style.legend_headroom
+        self._metrics_y_range = (metrics_min, metrics_max)
         self._projection_y_range = (float(self._pc_projections.min()), float(self._pc_projections.max()))
 
         # Renders the first PC and enables playback controls.
@@ -944,21 +925,19 @@ class PCViewer(QMainWindow):
         self._zoom_plot()
 
         # Metrics plot: shows rigid, nonrigid, and nonrigid-max shift magnitudes across all PCs.
-        # The legend is created once on the first call and reused on subsequent PC switches.
+        # The legend is recreated on every update because clear() removes it from the plot.
         self._metrics_plot.clear()
+        self._metrics_plot.disableAutoRange()
         colors = [(200, 200, 255), (255, 100, 100), (100, 50, 200)]
         metric_names = ["rigid", "nonrigid", "nonrigid max"]
-        if self._legend is None:
-            self._legend = self._metrics_plot.addLegend()
-            draw_legend = True
-        else:
-            draw_legend = False
+        self._legend = self._metrics_plot.addLegend(
+            horSpacing=20, colCount=3, offset=(-10, 1), labelTextSize=self._style.legend_label_size
+        )
         for index in range(3):
             curve = self._metrics_plot.plot(
                 np.arange(1, self._pc_count + 1, dtype=np.int32), self._pc_metrics[:, index], pen=colors[index]
             )
-            if draw_legend:
-                self._legend.addItem(curve, metric_names[index])
+            self._legend.addItem(curve, metric_names[index])
             self._metric_labels[index].setText(f"{metric_names[index]}: {self._pc_metrics[pc_index, index]:.3f}")
 
         # White scatter dots mark the selected PC's position on each metric curve.
@@ -970,20 +949,20 @@ class PCViewer(QMainWindow):
             size=self._style.scatter_point_size,
             brush=pg.mkBrush(255, 255, 255),
         )
-        self._metrics_plot.setTitle("PC Extreme Alignment Shifts", size=self._style.plot_title_size, bold=True)
+        self._metrics_plot.setTitle("PC Registration Shifts", size=self._style.plot_title_size, bold=True)
         self._metrics_plot.setLabel("left", "Shift (px)", **{"font-size": self._style.axis_label_size})
         self._metrics_plot.setLabel("bottom", "PC #", **{"font-size": self._style.axis_label_size})
-        self._metrics_plot.setXRange(1, self._pc_count)
-        self._metrics_plot.setYRange(*self._metrics_y_range)
+        self._metrics_plot.setXRange(1, self._pc_count, padding=0.0)
+        self._metrics_plot.setYRange(*self._metrics_y_range, padding=0.0)
 
         # Projection plot: shows the per-frame projection onto the selected PC over time.
         self._projection_plot.clear()
         self._projection_plot.plot(self._pc_projections[:, pc_index])
-        self._projection_plot.setTitle("PC Projection Time Course", size=self._style.plot_title_size, bold=True)
+        self._projection_plot.setTitle("PC Projection Weight", size=self._style.plot_title_size, bold=True)
         self._projection_plot.setLabel(
-            "left", "PC Projection Magnitude (x0.001)", **{"font-size": self._style.axis_label_size}
+            "left", "Magnitude", **{"font-size": self._style.axis_label_size}
         )
-        self._projection_plot.setLabel("bottom", "sampled frame", **{"font-size": self._style.axis_label_size})
+        self._projection_plot.setLabel("bottom", "Sampled Frame", **{"font-size": self._style.axis_label_size})
         self._projection_plot.setXRange(0, self._pc_projections.shape[0] - 1)
         self._projection_plot.setYRange(*self._projection_y_range)
 
@@ -991,14 +970,17 @@ class PCViewer(QMainWindow):
         self._zoom_plot()
 
     def _zoom_plot(self) -> None:
-        """Resets all PC image view ranges to fit the full image extent."""
+        """Resets all PC image view ranges to fit the full image extent plus a title gutter."""
+        gutter = self._image_height * self._style.title_gutter_fraction
+        y_max = self._image_height + gutter
         self._difference_view_box.setXRange(0, self._image_width)
-        self._difference_view_box.setYRange(0, self._image_height)
+        self._difference_view_box.setYRange(0, y_max)
         self._merged_view_box.setXRange(0, self._image_width)
-        self._merged_view_box.setYRange(0, self._image_height)
+        self._merged_view_box.setYRange(0, y_max)
         self._animated_view_box.setXRange(0, self._image_width)
-        self._animated_view_box.setYRange(0, self._image_height)
-        # Positions title labels at the bottom center of each image.
+        self._animated_view_box.setYRange(0, y_max)
+
+        # Positions title labels in the gutter below the image.
         center_x = self._image_width / 2
         for label in self._title_labels:
             label.setPos(center_x, self._image_height)
