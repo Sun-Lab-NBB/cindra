@@ -39,7 +39,7 @@ class MultiDayIOData:
 
     dataset_output_paths: tuple[Path, ...] = ()
     """The multiday output paths for every session in the dataset, stored in natural-sorted order. Each entry points
-    to a session's multiday output directory (e.g., {cindra_parent}/multiday/{dataset_name}/). Storing this tuple in
+    to a session's multiday output directory (e.g., {cindra_directory}/multiday/{dataset_name}/). Storing this tuple in
     every session enables full dataset hierarchy reconstruction from any single session's serialized YAML file."""
 
     selected_cell_indices: tuple[int, ...] = ()

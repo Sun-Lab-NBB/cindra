@@ -8,7 +8,7 @@ from itertools import compress
 import numpy as np
 from scipy.signal import medfilt2d
 from ataraxis_time import PrecisionTimer, TimerPrecisions
-from threadpoolctl import threadpool_limits
+from threadpoolctl import threadpool_limits  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
 from ..io import BinaryFile

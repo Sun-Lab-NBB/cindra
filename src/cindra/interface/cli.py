@@ -291,10 +291,11 @@ def run_sd_pipeline(
     "session_paths",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     multiple=True,
-    required=True,
+    required=False,
     help=(
-        "The absolute path to a session directory to include in multi-day processing. Specify this option multiple "
-        "times to include multiple sessions (at least two required)."
+        "Overrides the configuration's session_io.session_directories with the specified session directories. Specify "
+        "this option multiple times to include multiple sessions (at least two required). When not provided, the "
+        "pipeline uses the session directories already configured in the YAML configuration file."
     ),
 )
 @click.option(
@@ -357,7 +358,8 @@ def run_md_pipeline(
 
     # Writes CLI overrides into the configuration file before running the pipeline.
     configuration = MultiDayConfiguration.from_yaml(file_path=config_path)
-    configuration.session_io.session_directories = tuple(natsorted(session_paths))
+    if session_paths:
+        configuration.session_io.session_directories = tuple(natsorted(session_paths))
     configuration.runtime.parallel_workers = workers
     configuration.runtime.display_progress_bars = progress_bars
     configuration.save(file_path=config_path)

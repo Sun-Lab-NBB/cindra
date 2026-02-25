@@ -243,7 +243,7 @@ def apply_quadrant_zoom(
 
     Args:
         quadrant_buttons: The quadrant button group.
-        button_index: Zero-based index of the pressed button.
+        button_index: Index of the pressed button.
         frame_width: Width of the field of view in pixels.
         frame_height: Height of the field of view in pixels.
         set_view_range: Callback that sets the x/y range on both image panels. Called
@@ -275,7 +275,7 @@ class _QuadButton(QPushButton):
     emits the roi_selection_changed signal for the orchestrator to handle.
 
     Args:
-        button_id: Zero-based index identifying this button's grid position.
+        button_id: Index identifying this button's grid position.
         text: Display label for the button.
         owner: The parent widget for ownership.
         button_group: The button group this button belongs to.

@@ -83,7 +83,7 @@ def _compute_overlap(rois: list[ROIStatistics]) -> None:
         return
 
     # Computes cumulative offsets to track where each ROI's pixels start and end in the concatenated array.
-    mask_sizes = np.array([len(indices) for indices in mask_pixel_indices], dtype=np.uint32)
+    mask_sizes = np.array([len(indices) for indices in mask_pixel_indices], dtype=np.int32)
     mask_offsets = np.concatenate(([0], np.cumsum(mask_sizes)))
     all_pixel_indices = np.concatenate(mask_pixel_indices)
 
@@ -394,7 +394,8 @@ def _filter_templates(
         if mask.overlap_mask is None:
             filtered_templates.append(mask)
         else:
-            non_overlapping_pixels = len(mask.raveled_pixels or []) - int(np.sum(mask.overlap_mask))
+            pixel_count = len(mask.raveled_pixels) if mask.raveled_pixels is not None else 0
+            non_overlapping_pixels = pixel_count - int(np.sum(mask.overlap_mask))
             if non_overlapping_pixels >= minimum_size:
                 filtered_templates.append(mask)
     return filtered_templates
