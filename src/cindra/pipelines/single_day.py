@@ -13,7 +13,6 @@ from ..dataclasses import (
 )
 from ..registration import register_plane
 
-# Movie processing thresholds.
 _MINIMUM_PROCESSING_FRAMES: int = 50
 """The minimum number of frames in the processed movie to allow processing."""
 
@@ -43,12 +42,12 @@ def binarize_recording(configuration: SingleDayConfiguration) -> None:
         )
         console.error(message=message, error=ValueError)
 
-    # Defaults save_path to data_path if not explicitly set.
-    if configuration.file_io.save_path is None:
-        configuration.file_io.save_path = configuration.file_io.data_path
+    # Defaults output_path to data_path if not explicitly set.
+    if configuration.file_io.output_path is None:
+        configuration.file_io.output_path = configuration.file_io.data_path
 
     # Checks for existing valid binaries to allow early return.
-    root_path = configuration.file_io.save_path / "cindra"
+    root_path = configuration.file_io.output_path / "cindra"
     config_path = root_path / "configuration.yaml"
     if config_path.exists():
         console.echo(message=f"Found existing configuration at: {config_path}.", level=LogLevel.INFO)
@@ -115,16 +114,16 @@ def process_plane(configuration: SingleDayConfiguration, plane_index: int) -> No
         console.echo(message=f"Skipping processing the flyback plane {plane_index}.", level=LogLevel.SUCCESS)
         return
 
-    # Validates that save_path is configured.
-    if configuration.file_io.save_path is None:
+    # Validates that output_path is configured.
+    if configuration.file_io.output_path is None:
         message = (
-            "Unable to process the target plane. The save_path must be configured in the FileIO section of the "
+            "Unable to process the target plane. The output_path must be configured in the FileIO section of the "
             "configuration, but it is currently None."
         )
         console.error(message=message, error=ValueError)
 
     # Loads the RuntimeContext for the target plane from disk.
-    root_path = configuration.file_io.save_path / "cindra"
+    root_path = configuration.file_io.output_path / "cindra"
     context = RuntimeContext.load(root_path=root_path, plane_index=plane_index)
     if isinstance(context, list):
         message = (
@@ -203,10 +202,10 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
         console.error(message=message, error=ValueError)
 
     # Gets the root output path from the first context's configuration.
-    root_path = contexts[0].configuration.file_io.save_path
+    root_path = contexts[0].configuration.file_io.output_path
     if root_path is None:
         message = (
-            "Unable to save combined plane data. The save_path must be configured in the FileIO section of the "
+            "Unable to save combined plane data. The output_path must be configured in the FileIO section of the "
             "configuration, but it is currently None."
         )
         console.error(message=message, error=ValueError)

@@ -22,14 +22,16 @@ from ..dataclasses import ROIStatistics
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-# Fraction of the maximum weight below which pixels are excluded from the ROI.
 _MINIMUM_WEIGHT_FRACTION: float = 0.2
+"""The fraction of the maximum weight below which pixels are excluded from the ROI."""
 
-# Minimum valid spatial scale. Scale 0 is excluded because the base filter size already covers the finest resolution.
 _MINIMUM_SPATIAL_SCALE: int = 1
+"""The minimum valid spatial scale. Scale 0 is excluded because the base filter size already covers the finest
+resolution."""
 
-# Small epsilon added to denominators during alternating least squares normalization to prevent division by zero.
 _NORMALIZATION_EPSILON: float = 1e-6
+"""The small epsilon added to denominators during alternating least squares normalization to prevent division by
+zero."""
 
 
 def extend_roi(

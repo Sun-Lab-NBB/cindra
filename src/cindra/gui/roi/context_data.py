@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 def _memory_map_trace(
-    save_path: Path | None,
+    output_path: Path | None,
     file_name: str,
     fallback: NDArray[np.float32] | None,
     default_shape: tuple[int, ...],
@@ -35,7 +35,7 @@ def _memory_map_trace(
     of the given shape if neither source is available.
 
     Args:
-        save_path: Directory containing the .npy file.
+        output_path: Directory containing the .npy file.
         file_name: Name of the .npy file to memory-map.
         fallback: Array to copy if the file does not exist on disk.
         default_shape: Shape for a zero-initialized fallback array.
@@ -43,8 +43,8 @@ def _memory_map_trace(
     Returns:
         The memory-mapped, copied, or zero-initialized array.
     """
-    if save_path is not None:
-        path = save_path / file_name
+    if output_path is not None:
+        path = output_path / file_name
         if path.exists():
             mapped: NDArray[np.float32] = np.load(path, mmap_mode="c")
             return mapped
@@ -54,7 +54,7 @@ def _memory_map_trace(
 
 
 def _memory_map_optional_trace(
-    save_path: Path | None,
+    output_path: Path | None,
     file_name: str,
     fallback: NDArray[np.float32] | None,
 ) -> NDArray[np.float32] | None:
@@ -65,15 +65,15 @@ def _memory_map_optional_trace(
     source is available.
 
     Args:
-        save_path: Directory containing the .npy file.
+        output_path: Directory containing the .npy file.
         file_name: Name of the .npy file to memory-map.
         fallback: Array to copy if the file does not exist on disk.
 
     Returns:
         The memory-mapped or copied array, or None if unavailable.
     """
-    if save_path is not None:
-        path = save_path / file_name
+    if output_path is not None:
+        path = output_path / file_name
         if path.exists():
             mapped: NDArray[np.float32] = np.load(path, mmap_mode="c")
             return mapped
@@ -269,7 +269,7 @@ class ContextData:
         """Returns the memory-mapped baseline-and-neuropil-subtracted fluorescence traces."""
         if self._subtracted_fluorescence_map is not None:
             return self._subtracted_fluorescence_map
-        save = self.save_path
+        save = self.output_path
         if save is None:
             return None
         path = save / "subtracted_fluorescence.npy"
@@ -283,7 +283,7 @@ class ContextData:
         """Returns the memory-mapped channel 2 subtracted fluorescence traces."""
         if self._subtracted_fluorescence_channel_2_map is not None:
             return self._subtracted_fluorescence_channel_2_map
-        save = self.save_path
+        save = self.output_path
         if save is None:
             return None
         path = save / "subtracted_fluorescence_channel_2.npy"
@@ -450,10 +450,10 @@ class ContextData:
         return 350
 
     @property
-    def save_path(self) -> Path | None:
+    def output_path(self) -> Path | None:
         """Returns the root output directory path."""
         if self.contexts:
-            return self.contexts[0].configuration.file_io.save_path
+            return self.contexts[0].configuration.file_io.output_path
         return None
 
     @property
@@ -480,7 +480,7 @@ class ContextData:
     @property
     def basename(self) -> str:
         """Returns the output directory name for display and file operations."""
-        path = self.save_path
+        path = self.output_path
         if path is not None:
             return path.name
         return ""
@@ -529,7 +529,7 @@ class ContextData:
             return
 
         extraction = combined.extraction
-        save_path = self.save_path
+        output_path = self.output_path
 
         # Copies ROI statistics list (shallow copy; individual ROIStatistics are mutable).
         if extraction.roi_statistics is not None:
@@ -542,19 +542,19 @@ class ContextData:
 
         # Memory-maps fluorescence traces with copy-on-write access.
         self.cell_fluorescence = _memory_map_trace(
-            save_path=save_path,
+            output_path=output_path,
             file_name="cell_fluorescence.npy",
             fallback=extraction.cell_fluorescence,
             default_shape=default_trace_shape,
         )
         self.neuropil_fluorescence = _memory_map_trace(
-            save_path=save_path,
+            output_path=output_path,
             file_name="neuropil_fluorescence.npy",
             fallback=extraction.neuropil_fluorescence,
             default_shape=default_trace_shape,
         )
         self.spikes = _memory_map_trace(
-            save_path=save_path,
+            output_path=output_path,
             file_name="spikes.npy",
             fallback=extraction.spikes,
             default_shape=default_trace_shape,
@@ -562,12 +562,12 @@ class ContextData:
 
         # Memory-maps optional channel 2 traces.
         self.cell_fluorescence_channel_2 = _memory_map_optional_trace(
-            save_path=save_path,
+            output_path=output_path,
             file_name="cell_fluorescence_channel_2.npy",
             fallback=extraction.cell_fluorescence_channel_2,
         )
         self.neuropil_fluorescence_channel_2 = _memory_map_optional_trace(
-            save_path=save_path,
+            output_path=output_path,
             file_name="neuropil_fluorescence_channel_2.npy",
             fallback=extraction.neuropil_fluorescence_channel_2,
         )

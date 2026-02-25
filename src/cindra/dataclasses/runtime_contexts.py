@@ -151,8 +151,8 @@ def _relocate_runtime_paths(
             runtime.io.registered_binary_path_channel_2 = (
                 new_prefix / runtime.io.registered_binary_path_channel_2.relative_to(old_prefix)
             )
-        if runtime.io.output_directory is not None and not runtime.io.output_directory.is_relative_to(new_prefix):
-            runtime.io.output_directory = new_prefix / runtime.io.output_directory.relative_to(old_prefix)
+        if runtime.io.output_path is not None and not runtime.io.output_path.is_relative_to(new_prefix):
+            runtime.io.output_path = new_prefix / runtime.io.output_path.relative_to(old_prefix)
     else:
         if runtime.io.data_path is not None and not runtime.io.data_path.is_relative_to(new_prefix):
             runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
@@ -200,21 +200,21 @@ class RuntimeContext:
     def save_shared(self) -> None:
         """Saves shared configuration and acquisition parameters to the root output directory.
 
-        This method derives the root path from self.configuration.file_io.save_path and creates the cindra subdirectory
+        This method derives the root path from self.configuration.file_io.output_path and creates the cindra subdirectory
         if it does not exist. It should be called once at pipeline initialization to save the static data shared
         across all planes.
 
         Raises:
-            ValueError: If save_path is not configured in the configuration.
+            ValueError: If output_path is not configured in the configuration.
         """
-        if self.configuration.file_io.save_path is None:
+        if self.configuration.file_io.output_path is None:
             message = (
-                "Unable to save shared configuration data. The save_path must be configured in the FileIO section "
+                "Unable to save shared configuration data. The output_path must be configured in the FileIO section "
                 "of the configuration, but it is currently None."
             )
             console.error(message=message, error=ValueError)
 
-        root_path = self.configuration.file_io.save_path / "cindra"
+        root_path = self.configuration.file_io.output_path / "cindra"
         root_path.mkdir(parents=True, exist_ok=True)
 
         self.configuration.save(file_path=root_path / "configuration.yaml")
@@ -223,20 +223,20 @@ class RuntimeContext:
     def save_runtime(self) -> None:
         """Saves this plane's runtime data to its output directory.
 
-        This method uses self.runtime.io.output_directory as the save location. This directory is set during plane
+        This method uses self.runtime.io.output_path as the save location. This directory is set during plane
         initialization and is plane-specific (e.g., plane_0/).
 
         Raises:
-            ValueError: If output_directory is not set in the runtime IOData.
+            ValueError: If output_path is not set in the runtime IOData.
         """
-        if self.runtime.io.output_directory is None:
+        if self.runtime.io.output_path is None:
             message = (
-                "Unable to save runtime data. The output_directory must be set in the IOData section of the "
+                "Unable to save runtime data. The output_path must be set in the IOData section of the "
                 "runtime data, but it is currently None."
             )
             console.error(message=message, error=ValueError)
 
-        self.runtime.save(output_path=self.runtime.io.output_directory)
+        self.runtime.save(output_path=self.runtime.io.output_path)
 
     @classmethod
     def load(cls, root_path: Path, plane_index: int = -1) -> RuntimeContext | list[RuntimeContext]:

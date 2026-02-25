@@ -15,14 +15,14 @@ if TYPE_CHECKING:
 
     from ..dataclasses import ROIStatistics
 
-# The number of spatial blocks along each axis used for block-wise bleedthrough regression.
 _BLOCK_COUNT: int = 3
+"""The number of spatial blocks along each axis used for block-wise bleedthrough regression."""
 
-# The fraction of the mean block dimension used as the Gaussian smoothing sigma for quadrant masks.
 _SMOOTHING_FRACTION: float = 0.25
+"""The fraction of the mean block dimension used as the Gaussian smoothing sigma for quadrant masks."""
 
-# The minimum intensity floor used to prevent division by zero in colocalization probability computation.
 _INTENSITY_EPSILON: float = 1e-3
+"""The minimum intensity floor used to prevent division by zero in colocalization probability computation."""
 
 
 def compute_intensity_colocalization(
@@ -227,7 +227,7 @@ def _correct_bleedthrough(
 ) -> NDArray[np.float32]:
     """Corrects bleedthrough from the functional channel into the structural channel using local regression.
 
-    Performs non-rigid regression to subtract the contribution of functional channel signal that bleeds
+    Performs nonrigid regression to subtract the contribution of functional channel signal that bleeds
     into the structural channel. The image is divided into a 3x3 grid of blocks, and for each block a
     linear coefficient is computed to predict structural intensity from functional intensity. The predicted
     bleedthrough is then subtracted from the structural channel.

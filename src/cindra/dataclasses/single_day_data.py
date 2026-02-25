@@ -110,7 +110,7 @@ class IOData:
     registered_binary_path_channel_2: Path | None = None
     """The absolute path to the motion-corrected binary file for the second imaging channel."""
 
-    output_directory: Path | None = None
+    output_path: Path | None = None
     """The absolute path to the plane-specific output directory where all results are saved."""
 
     mroi_y_offset: int | None = None
@@ -168,13 +168,13 @@ class RegistrationData:
     """The phase correlation values from rigid registration, indicating alignment quality per frame."""
 
     nonrigid_y_offsets: NDArray[np.float32] | None = None
-    """The vertical (Y) translation offsets from non-rigid registration, per frame and per block."""
+    """The vertical (Y) translation offsets from nonrigid registration, per frame and per block."""
 
     nonrigid_x_offsets: NDArray[np.float32] | None = None
-    """The horizontal (X) translation offsets from non-rigid registration, per frame and per block."""
+    """The horizontal (X) translation offsets from nonrigid registration, per frame and per block."""
 
     nonrigid_correlations: NDArray[np.float32] | None = None
-    """The phase correlation values from non-rigid registration, indicating alignment quality per frame and block."""
+    """The phase correlation values from nonrigid registration, indicating alignment quality per frame and block."""
 
     principal_component_extreme_images: NDArray[np.float32] | None = None
     """The mean images from frames at extreme ends of each principal component of the registered recording movie, with
@@ -515,16 +515,16 @@ class ROIStatistics:
     """The number of sessions in which this cell was detected during multi-day tracking."""
 
     # GUI visualization data (computed on demand by the GUI, persisted for session continuity).
-    boundary_y_pixels: NDArray[np.float32] | None = None
+    boundary_y_pixels: NDArray[np.int32] | None = None
     """The y-coordinates of the ROI boundary pixels used for drawing the ROI outline in the GUI."""
 
-    boundary_x_pixels: NDArray[np.float32] | None = None
+    boundary_x_pixels: NDArray[np.int32] | None = None
     """The x-coordinates of the ROI boundary pixels used for drawing the ROI outline in the GUI."""
 
-    circle_y_pixels: NDArray[np.float32] | None = None
+    circle_y_pixels: NDArray[np.int32] | None = None
     """The y-coordinates of the circle drawn around the ROI centroid in the GUI."""
 
-    circle_x_pixels: NDArray[np.float32] | None = None
+    circle_x_pixels: NDArray[np.int32] | None = None
     """The x-coordinates of the circle drawn around the ROI centroid in the GUI."""
 
     merged_roi_indices: tuple[int, ...] | None = None
@@ -533,9 +533,6 @@ class ROIStatistics:
 
     merged_into_roi_index: int | None = None
     """The index of the merged ROI that this ROI was merged into. None indicates this ROI has not been merged."""
-
-    colocalization_probability: float | None = None
-    """The probability that this ROI is colocalized across imaging channels. None if not computed."""
 
     @staticmethod
     def save_list(roi_list: list[ROIStatistics], file_path: Path) -> None:
@@ -588,15 +585,6 @@ class ROIStatistics:
         cluster_id = np.array([roi.cluster_id for roi in roi_list], dtype=np.uint32)
         session_count = np.array([roi.session_count for roi in roi_list], dtype=np.uint16)
 
-        # Stores optional scalar float fields using NaN for missing values.
-        colocalization_probability = np.array(
-            [
-                roi.colocalization_probability if roi.colocalization_probability is not None else np.nan
-                for roi in roi_list
-            ],
-            dtype=np.float32,
-        )
-
         # Stores optional integer fields using -1 for missing values (since valid indices are non-negative).
         merged_into_roi_index = np.array(
             [roi.merged_into_roi_index if roi.merged_into_roi_index is not None else -1 for roi in roi_list],
@@ -626,7 +614,6 @@ class ROIStatistics:
             "plane_index": plane_index,
             "cluster_id": cluster_id,
             "session_count": session_count,
-            "colocalization_probability": colocalization_probability,
             "merged_into_roi_index": merged_into_roi_index,
         }
 
@@ -638,16 +625,16 @@ class ROIStatistics:
             "raveled_pixels", [roi.raveled_pixels for roi in roi_list], save_dict, dtype=np.int32
         )
         _save_optional_array_field(
-            "boundary_y_pixels", [roi.boundary_y_pixels for roi in roi_list], save_dict, dtype=np.float32
+            "boundary_y_pixels", [roi.boundary_y_pixels for roi in roi_list], save_dict, dtype=np.int32
         )
         _save_optional_array_field(
-            "boundary_x_pixels", [roi.boundary_x_pixels for roi in roi_list], save_dict, dtype=np.float32
+            "boundary_x_pixels", [roi.boundary_x_pixels for roi in roi_list], save_dict, dtype=np.int32
         )
         _save_optional_array_field(
-            "circle_y_pixels", [roi.circle_y_pixels for roi in roi_list], save_dict, dtype=np.float32
+            "circle_y_pixels", [roi.circle_y_pixels for roi in roi_list], save_dict, dtype=np.int32
         )
         _save_optional_array_field(
-            "circle_x_pixels", [roi.circle_x_pixels for roi in roi_list], save_dict, dtype=np.float32
+            "circle_x_pixels", [roi.circle_x_pixels for roi in roi_list], save_dict, dtype=np.int32
         )
         _save_optional_array_field(
             "merged_roi_indices", [roi.merged_roi_indices for roi in roi_list], save_dict, dtype=np.int32
@@ -696,7 +683,6 @@ class ROIStatistics:
         plane_index = data["plane_index"]
         cluster_id = data["cluster_id"]
         session_count = data["session_count"]
-        colocalization_probability = data["colocalization_probability"]
         merged_into_roi_index = data["merged_into_roi_index"]
 
         # Loads optional variable-length array fields.
@@ -704,10 +690,10 @@ class ROIStatistics:
         overlap_mask_list = _load_optional_array_field("overlap_mask", roi_count, data, dtype=np.bool_)
         neuropil_mask_list = _load_optional_array_field("neuropil_mask", roi_count, data, dtype=np.int32)
         raveled_pixels_list = _load_optional_array_field("raveled_pixels", roi_count, data, dtype=np.int32)
-        boundary_y_pixels_list = _load_optional_array_field("boundary_y_pixels", roi_count, data, dtype=np.float32)
-        boundary_x_pixels_list = _load_optional_array_field("boundary_x_pixels", roi_count, data, dtype=np.float32)
-        circle_y_pixels_list = _load_optional_array_field("circle_y_pixels", roi_count, data, dtype=np.float32)
-        circle_x_pixels_list = _load_optional_array_field("circle_x_pixels", roi_count, data, dtype=np.float32)
+        boundary_y_pixels_list = _load_optional_array_field("boundary_y_pixels", roi_count, data, dtype=np.int32)
+        boundary_x_pixels_list = _load_optional_array_field("boundary_x_pixels", roi_count, data, dtype=np.int32)
+        circle_y_pixels_list = _load_optional_array_field("circle_y_pixels", roi_count, data, dtype=np.int32)
+        circle_x_pixels_list = _load_optional_array_field("circle_x_pixels", roi_count, data, dtype=np.int32)
         merged_roi_indices_list = _load_optional_array_field("merged_roi_indices", roi_count, data, dtype=np.int32)
 
         # Reconstructs ROIStatistics instances.
@@ -748,9 +734,6 @@ class ROIStatistics:
                 circle_x_pixels=circle_x_pixels_list[i],  # type: ignore[arg-type]
                 merged_roi_indices=merged_indices_as_tuple,
                 merged_into_roi_index=None if merged_into_roi_index[i] < 0 else int(merged_into_roi_index[i]),
-                colocalization_probability=(
-                    None if np.isnan(colocalization_probability[i]) else float(colocalization_probability[i])
-                ),
             )
             roi_list.append(roi)
 

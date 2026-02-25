@@ -20,53 +20,53 @@ if TYPE_CHECKING:
     from .plot_widgets import TraceBox
 
 
-# Default activity mode index (deconvolved).
 _DEFAULT_ACTIVITY_MODE: int = 3
+"""The default activity mode index (deconvolved)."""
 
-# Maximum number of traces that can be plotted simultaneously.
 _MAX_PLOTTED_COUNT: int = 400
+"""The maximum number of traces that can be plotted simultaneously."""
 
-# Default number of traces plotted.
 _DEFAULT_PLOTTED_COUNT: int = 40
+"""The default number of traces plotted."""
 
-# Default vertical scale factor for multi-trace stacking.
 _DEFAULT_SCALE_FACTOR: float = 2.0
+"""The default vertical scale factor for multi-trace stacking."""
 
-# Scale factor adjustment step per button press.
 _SCALE_STEP: float = 0.5
+"""The scale factor adjustment step per button press."""
 
-# Minimum allowed scale factor.
 _MIN_SCALE: float = 0.5
+"""The minimum allowed scale factor."""
 
-# Maximum allowed scale factor.
 _MAX_SCALE: float = 10.0
+"""The maximum allowed scale factor."""
 
-# Default trace panel row stretch level.
 _DEFAULT_TRACE_LEVEL: int = 1
+"""The default trace panel row stretch level."""
 
-# Minimum trace panel stretch level.
 _MIN_TRACE_LEVEL: int = 1
+"""The minimum trace panel stretch level."""
 
-# Maximum trace panel stretch level.
 _MAX_TRACE_LEVEL: int = 5
+"""The maximum trace panel stretch level."""
 
-# Activity mode index for neuropil-subtracted fluorescence (F - 0.7*Fneu).
 _ACTIVITY_MODE_SUBTRACTED: int = 2
+"""The activity mode index for neuropil-subtracted fluorescence (F - 0.7*Fneu)."""
 
-# Neuropil subtraction coefficient for the F - 0.7*Fneu activity mode.
 _NEUROPIL_COEFFICIENT: float = 0.7
+"""The neuropil subtraction coefficient for the F - 0.7*Fneu activity mode."""
 
-# Alpha value for the deconvolved trace pen.
 _DECONVOLVED_ALPHA: int = 150
+"""The alpha value for the deconvolved trace pen."""
 
-# Gray intensity for the average trace pen.
 _AVERAGE_GRAY: int = 140
+"""The gray intensity for the average trace pen."""
 
-# Minimum number of selected cells before the average trace is displayed.
 _AVERAGE_THRESHOLD: int = 5
+"""The minimum number of selected cells before the average trace is displayed."""
 
-# Ratio of selected cells to determine average trace vertical scale.
 _AVERAGE_SCALE_DIVISOR: float = 25.0
+"""The ratio of selected cells to determine average trace vertical scale."""
 
 
 @dataclass

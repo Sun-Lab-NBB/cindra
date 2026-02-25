@@ -31,31 +31,30 @@ if TYPE_CHECKING:
     from .signals import GUISignals
 
 
-# Number of background view types available.
 _VIEW_COUNT: int = 7
+"""The number of background view types available."""
 
-# Index for the ROI overlay view (no background image).
 _VIEW_ROIS: int = 0
+"""The index for the ROI overlay view (no background image)."""
 
-# Index for the mean image view.
 _VIEW_MEAN: int = 1
+"""The index for the mean image view."""
 
-# Index for the enhanced mean image view.
 _VIEW_ENHANCED: int = 2
+"""The index for the enhanced mean image view."""
 
-# Index for the correlation map view.
 _VIEW_CORRELATION: int = 3
+"""The index for the correlation map view."""
 
-# Index for the maximum projection view.
 _VIEW_MAX_PROJECTION: int = 4
+"""The index for the maximum projection view."""
 
-# Index for the corrected channel 2 mean image view.
 _VIEW_CHAN2_CORRECTED: int = 5
+"""The index for the corrected channel 2 mean image view."""
 
-# Index for the raw channel 2 mean image view.
 _VIEW_CHAN2_RAW: int = 6
+"""The index for the raw channel 2 mean image view."""
 
-# Names displayed on view selection buttons, with keyboard shortcut prefixes.
 _VIEW_NAMES: list[str] = [
     "Q: ROIs",
     "W: mean img",
@@ -65,6 +64,7 @@ _VIEW_NAMES: list[str] = [
     "Y: mean img chan2, corr",
     "U: mean img chan2",
 ]
+"""The names displayed on view selection buttons, with keyboard shortcut prefixes."""
 
 
 @dataclass

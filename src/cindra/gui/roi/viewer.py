@@ -48,32 +48,32 @@ if TYPE_CHECKING:
     from .context_data import ContextData
     from .roi_overlays import ColorArrays, ROIIndexMaps, ColorbarWidgets
 
-# Path to the root of the cindra package directory.
 _CINDRA_DIR: Path = Path(cindra.__file__).parent
+"""The path to the root of the cindra package directory."""
 
-# String path to the application icon file.
 _ICON_PATH: str = str(_CINDRA_DIR / "logo" / "logo.png")
+"""The string path to the application icon file."""
 
-# Color index for correlation-based coloring mode.
 _CORRELATION_COLOR: int = 7
+"""The color index for correlation-based coloring mode."""
 
-# Stat display index for the centroid stat (formatted as coordinate pair).
 _CENTROID_STAT_INDEX: int = 1
+"""The stat display index for the centroid stat (formatted as coordinate pair)."""
 
-# Stat display index for the pixel-count stat (formatted as integer).
 _PIXEL_COUNT_STAT_INDEX: int = 2
+"""The stat display index for the pixel-count stat (formatted as integer)."""
 
-# Activity mode index for neuropil-corrected fluorescence (F - 0.7 * Fneu).
 _NEUROPIL_CORRECTED_MODE: int = 2
+"""The activity mode index for neuropil-corrected fluorescence (F - 0.7 * Fneu)."""
 
-# View plot index for the cells image panel.
 _CELLS_PLOT: int = 0
+"""The view plot index for the cells image panel."""
 
-# View plot index for the non-cells image panel.
 _NONCELLS_PLOT: int = 1
+"""The view plot index for the non-cells image panel."""
 
-# Epsilon for comparing floating-point threshold values.
 _THRESHOLD_EPSILON: float = 1e-3
+"""The epsilon for comparing floating-point threshold values."""
 
 
 class MainWindow(QMainWindow):
@@ -671,7 +671,7 @@ class MainWindow(QMainWindow):
             cell_count = int(self.context_data.cell_count)
             height = self.context_data.frame_height
             width = self.context_data.frame_width
-            session_name = str(self.context_data.save_path) if self.context_data.save_path is not None else "unknown"
+            session_name = str(self.context_data.output_path) if self.context_data.output_path is not None else "unknown"
             self._status_bar.showMessage(
                 f"Session: {session_name}  |  ROI: {roi_index}  |  Cells: {cell_count}  |  Size: {height} x {width}"
             )

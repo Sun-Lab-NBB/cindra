@@ -23,14 +23,14 @@ from ..dataclasses import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Preferred name for the acquisition parameters JSON file.
 _PREFERRED_PARAMETERS_FILENAME: str = "cindra_parameters.json"
+"""The preferred name for the acquisition parameters JSON file."""
 
-# Legacy name for the acquisition parameters JSON file (fallback).
 _LEGACY_PARAMETERS_FILENAME: str = "suite2p_parameters.json"
+"""The legacy name for the acquisition parameters JSON file (fallback)."""
 
-# Maximum number of imaging channels supported by the pipeline.
 _MAXIMUM_CHANNEL_COUNT: int = 2
+"""The maximum number of imaging channels supported by the pipeline."""
 
 
 def find_data_directory(data_path: Path) -> Path:
@@ -87,7 +87,7 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
         loaded from the saved output directory if available, allowing the pipeline to work without raw TIFF data.
 
     Args:
-        configuration: The single-day pipeline configuration. Must have save_path configured in file_io. The data_path
+        configuration: The single-day pipeline configuration. Must have output_path configured in file_io. The data_path
             is only required when raw data needs to be processed (rebinarization) or when no processed data exists.
 
     Returns:
@@ -96,20 +96,20 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
         instance with IOData fields initialized.
 
     Raises:
-        ValueError: If save_path is not configured, or if the acquisition parameters specify more than 2 channels.
+        ValueError: If output_path is not configured, or if the acquisition parameters specify more than 2 channels.
         FileNotFoundError: If neither processed data nor raw data with acquisition parameters is available.
     """
     # Validates that the save path is configured.
-    save_path_root = configuration.file_io.save_path
-    if save_path_root is None:
+    output_path_root = configuration.file_io.output_path
+    if output_path_root is None:
         message = (
-            "Unable to resolve single-day contexts. The save_path must be configured in the FileIO section of the "
+            "Unable to resolve single-day contexts. The output_path must be configured in the FileIO section of the "
             "configuration, but it is currently None."
         )
         console.error(message=message, error=ValueError)
 
     # Checks if processed data already exists with saved acquisition parameters.
-    saved_acquisition_path = save_path_root / "cindra" / "acquisition_parameters.yaml"
+    saved_acquisition_path = output_path_root / "cindra" / "acquisition_parameters.yaml"
     if saved_acquisition_path.exists():
         # Loads acquisition parameters from processed output (supports loading moved data without raw TIFFs).
         acquisition = AcquisitionParameters.from_yaml(file_path=saved_acquisition_path)
@@ -118,7 +118,7 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
         # Falls back to finding acquisition parameters from raw data path.
         if configuration.file_io.data_path is None:
             message = (
-                "Unable to resolve single-day contexts. No processed data exists at the save_path and data_path is "
+                "Unable to resolve single-day contexts. No processed data exists at the output_path and data_path is "
                 "not configured. Either provide processed data or configure data_path to point to raw TIFF data."
             )
             console.error(message=message, error=ValueError)
@@ -148,7 +148,7 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
     # Creates a RuntimeContext for each plane.
     for virtual_plane_index in range(plane_count):
         # Resolves the output directory for this plane. Always uses 'cindra' as the subdirectory.
-        plane_output_path = save_path_root / "cindra" / f"plane_{virtual_plane_index}"
+        plane_output_path = output_path_root / "cindra" / f"plane_{virtual_plane_index}"
 
         # Checks if existing runtime data exists for this plane.
         runtime_yaml_path = plane_output_path / "runtime_data.yaml"
@@ -170,7 +170,7 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
 
         # Initializes the IOData for this plane with binary file paths.
         io_data = IOData(
-            output_directory=plane_output_path,
+            output_path=plane_output_path,
             registered_binary_path=plane_output_path / "channel_1_data.bin",
             plane_index=virtual_plane_index,
             sampling_rate=sampling_rate,

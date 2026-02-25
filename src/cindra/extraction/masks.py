@@ -14,14 +14,14 @@ if TYPE_CHECKING:
 
     from ..dataclasses import ROIStatistics
 
-# The rate at which to expand the neuropil mask, in pixels per expansion step.
 _NEUROPIL_EXPANSION_STEP: int = 5
+"""The rate at which to expand the neuropil mask, in pixels per expansion step."""
 
-# The maximum number of neuropil expansion iterations before stopping.
 _MAXIMUM_NEUROPIL_EXPANSION_ITERATIONS: int = 100
+"""The maximum number of neuropil expansion iterations before stopping."""
 
-# The scaling factor applied to the median cell radius to determine the percentile filter neighborhood size.
 _RADIUS_TO_NEIGHBORHOOD_SCALE: int = 5
+"""The scaling factor applied to the median cell radius to determine the percentile filter neighborhood size."""
 
 
 def create_masks(

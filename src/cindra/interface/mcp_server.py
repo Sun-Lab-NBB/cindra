@@ -25,17 +25,17 @@ from ..dataclasses import (
     SingleDayConfiguration,
 )
 
-# Initializes the MCP server with JSON response mode for structured output.
 mcp = FastMCP(name="cindra-mcp", json_response=True)
+"""The MCP server instance initialized with JSON response mode for structured output."""
 
-# CPU cores reserved for system operations.
 _RESERVED_CORES: int = 4
+"""The number of CPU cores reserved for system operations."""
 
-# Maximum CPU cores any single job can use.
 _MAXIMUM_JOB_CORES: int = 30
+"""The maximum number of CPU cores any single job can use."""
 
-# Minimum number of sessions required for multi-day processing.
 _MINIMUM_SESSION_COUNT: int = 2
+"""The minimum number of sessions required for multi-day processing."""
 
 
 @dataclass
@@ -154,9 +154,11 @@ class _MultiDayBatchState:
     """Background manager thread."""
 
 
-# Module-level batch processing state.
 _single_day_batch_state: _SingleDayBatchState | None = None
+"""The module-level batch processing state for single-day operations."""
+
 _multi_day_batch_state: _MultiDayBatchState | None = None
+"""The module-level batch processing state for multi-day operations."""
 
 
 def _get_session_key(session_path: Path) -> str:
@@ -201,14 +203,14 @@ def _run_binarize_job(config_path: Path) -> tuple[bool, int, str | None]:
             combine=False,
         )
 
-        # Loads the configuration to find the save path, then counts planes via RuntimeContext.
+        # Loads the configuration to find the output path, then counts planes via RuntimeContext.
         config = SingleDayConfiguration.from_yaml(file_path=config_path)
-        effective_save_path = (
-            config.file_io.save_path if config.file_io.save_path is not None else config.file_io.data_path
+        effective_output_path = (
+            config.file_io.output_path if config.file_io.output_path is not None else config.file_io.data_path
         )
-        if effective_save_path is None:
-            return False, 0, "Configuration error: neither file_io.save_path nor file_io.data_path is set."
-        root_path = effective_save_path / "cindra"
+        if effective_output_path is None:
+            return False, 0, "Configuration error: neither file_io.output_path nor file_io.data_path is set."
+        root_path = effective_output_path / "cindra"
         contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
         if not isinstance(contexts, list):
             contexts = [contexts]
@@ -979,7 +981,7 @@ def start_batch_processing_tool(
     session_paths: list[str],
     config_path: str,
     *,
-    session_save_paths: list[str] | None = None,
+    session_output_paths: list[str] | None = None,
     workers_per_plane: int = -1,
     max_parallel_planes: int = -1,
     progress_bars: bool = False,
@@ -992,9 +994,9 @@ def start_batch_processing_tool(
     Args:
         session_paths: List of absolute paths to session data directories (used as file_io.data_path per session).
         config_path: The absolute path to the template configuration YAML file.
-        session_save_paths: Optional list of absolute paths for per-session output directories (used as
-            file_io.save_path). Must match the length of session_paths when provided. When not provided, each
-            session's save_path defaults to its data_path.
+        session_output_paths: Optional list of absolute paths for per-session output directories (used as
+            file_io.output_path). Must match the length of session_paths when provided. When not provided, each
+            session's output_path defaults to its data_path.
         workers_per_plane: CPU cores per plane job (-1 for automatic, max 30).
         max_parallel_planes: Max concurrent plane jobs (-1 for automatic).
         progress_bars: Determines whether to display progress bars during processing.
@@ -1004,9 +1006,9 @@ def start_batch_processing_tool(
     if not session_paths:
         return {"error": "At least one session path is required"}
 
-    if session_save_paths is not None and len(session_save_paths) != len(session_paths):
+    if session_output_paths is not None and len(session_output_paths) != len(session_paths):
         return {
-            "error": f"session_save_paths length ({len(session_save_paths)}) must match "
+            "error": f"session_output_paths length ({len(session_output_paths)}) must match "
             f"session_paths length ({len(session_paths)})."
         }
 
@@ -1033,13 +1035,13 @@ def start_batch_processing_tool(
     if not valid_paths:
         return {"error": "No valid session paths provided", "invalid_paths": invalid_paths}
 
-    # Resolves per-session save paths. Defaults to data_path when session_save_paths is not provided.
-    resolved_save_paths: list[Path] = []
+    # Resolves per-session output paths. Defaults to data_path when session_output_paths is not provided.
+    resolved_output_paths: list[Path] = []
     for index, data_path in zip(valid_indices, valid_paths, strict=True):
-        if session_save_paths is not None:
-            resolved_save_paths.append(Path(session_save_paths[index]))
+        if session_output_paths is not None:
+            resolved_output_paths.append(Path(session_output_paths[index]))
         else:
-            resolved_save_paths.append(data_path)
+            resolved_output_paths.append(data_path)
 
     # Checks if batch processing is already active.
     if _single_day_batch_state is not None:
@@ -1073,17 +1075,17 @@ def start_batch_processing_tool(
 
     # Creates per-session configuration copies with session-specific paths and runtime settings. Each session gets its
     # own config file so that concurrent workers do not interfere with one another. The config file is written to the
-    # save directory, which is guaranteed to be writable (the pipeline writes output there).
+    # output directory, which is guaranteed to be writable (the pipeline writes output there).
     session_config_paths: dict[str, Path] = {}
-    for data_path, save_path in zip(valid_paths, resolved_save_paths, strict=True):
+    for data_path, output_path in zip(valid_paths, resolved_output_paths, strict=True):
         session_key = _get_session_key(data_path)
         session_config = SingleDayConfiguration.from_yaml(file_path=config)
         session_config.file_io.data_path = data_path
-        session_config.file_io.save_path = save_path
+        session_config.file_io.output_path = output_path
         session_config.runtime.parallel_workers = actual_workers
         session_config.runtime.display_progress_bars = progress_bars
-        save_path.mkdir(parents=True, exist_ok=True)
-        session_config_path = save_path / "_batch_config.yaml"
+        output_path.mkdir(parents=True, exist_ok=True)
+        session_config_path = output_path / "_batch_config.yaml"
         session_config.save(file_path=session_config_path)
         session_config_paths[session_key] = session_config_path
 

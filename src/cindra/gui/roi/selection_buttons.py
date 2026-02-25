@@ -19,25 +19,29 @@ if TYPE_CHECKING:
     from .signals import GUISignals
 
 
-# Layout stretch factor applied when toggling single-panel vs dual-panel view.
 _STRETCH_FACTOR: int = 100
+"""The layout stretch factor applied when toggling single-panel vs dual-panel view."""
 
-# Maximum number of cells allowed in the top-n / bottom-n selection input.
 _MAX_TOP_N: int = 500
+"""The maximum number of cells allowed in the top-n / bottom-n selection input."""
 
-# Default number of cells selected by top-n / bottom-n.
 _DEFAULT_TOP_N: int = 40
+"""The default number of cells selected by top-n / bottom-n."""
 
-# Margin fraction added to quadrant zoom ranges to provide padding.
 _QUADRANT_ZOOM_MARGIN: float = 0.15
+"""The margin fraction added to quadrant zoom ranges to provide padding."""
 
-# Number of columns in the quadrant grid.
 _QUADRANT_COLUMNS: int = 3
+"""The number of columns in the quadrant grid."""
 
-# View mode indices for the size toggle buttons.
 _VIEW_CELLS_ONLY: int = 0
+"""The view mode index for displaying cells only."""
+
 _VIEW_BOTH: int = 1
+"""The view mode index for displaying both cells and non-cells."""
+
 _VIEW_NONCELLS_ONLY: int = 2
+"""The view mode index for displaying non-cells only."""
 
 
 @dataclass

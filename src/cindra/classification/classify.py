@@ -15,22 +15,22 @@ if TYPE_CHECKING:
     from ..dataclasses import ROIStatistics
 
 
-# Path to the built-in classifier bundled with cindra.
 _BUILTIN_CLASSIFIER_PATH: Path = Path(__file__).parent / "classifier.npz"
+"""The path to the built-in classifier bundled with cindra."""
 
-# The names of the ROI features used for full classification (after signal extraction), in the order they appear in
-# the feature matrix.
 _CLASSIFICATION_FEATURES: tuple[str, ...] = ("normalized_pixel_count", "compactness", "skewness")
+"""The names of the ROI features used for full classification (after signal extraction), in the order they appear in
+the feature matrix."""
 
-# The names of the ROI features used for preclassification (during detection, before signal extraction). This subset
-# excludes skewness which requires extracted fluorescence traces to compute.
 _PRECLASSIFICATION_FEATURES: tuple[str, ...] = ("normalized_pixel_count", "compactness")
+"""The names of the ROI features used for preclassification (during detection, before signal extraction). This subset
+excludes skewness which requires extracted fluorescence traces to compute."""
 
-# The number of grid nodes used for probability estimation during model fitting.
 _GRID_NODE_COUNT: int = 100
+"""The number of grid nodes used for probability estimation during model fitting."""
 
-# Small epsilon value added to probabilities to prevent log(0) errors.
 _LOG_EPSILON: float = 1e-6
+"""The small epsilon value added to probabilities to prevent log(0) errors."""
 
 
 class Classifier:

@@ -31,43 +31,48 @@ if TYPE_CHECKING:
     from .context_data import ContextData
     from ...dataclasses.single_day_data import ROIStatistics
 
-# Width for color panel edit fields and the colormap combo box.
 _COLOR_EDIT_WIDTH: int = 65
+"""The width for color panel edit fields and the colormap combo box."""
 
-# Number of overlap layers stored in the ROI index map.
 _OVERLAP_LAYERS: int = 3
+"""The number of overlap layers stored in the ROI index map."""
 
-# ROI weight normalization scale factor.
 _LAMBDA_NORM_SCALE: float = 0.75
+"""The ROI weight normalization scale factor."""
 
-# Minimum lambda value threshold for computing the mean weight.
 _LAMBDA_THRESHOLD: float = 1e-10
+"""The minimum lambda value threshold for computing the mean weight."""
 
-# Number of color statistics (random, skew, compact, footprint, aspect, chan2, class, corr).
 _COLOR_STAT_COUNT: int = 8
+"""The number of color statistics (random, skew, compact, footprint, aspect, chan2, class, corr)."""
 
-# Fixed colorbar range for statistics without computed percentiles.
 _FIXED_COLORBAR_RANGE: list[float] = [0.0, 0.5, 1.0]
+"""The fixed colorbar range for statistics without computed percentiles."""
 
-# Percentile values for computing istat normalization bounds.
 _LOWER_PERCENTILE: float = 2.0
+"""The lower percentile value for computing istat normalization bounds."""
+
 _UPPER_PERCENTILE: float = 98.0
+"""The upper percentile value for computing istat normalization bounds."""
 
-# Random color adjustment factors for channel 2 data.
 _CHAN2_COLOR_DIVISOR: float = 1.4
+"""The random color adjustment divisor for channel 2 data."""
+
 _CHAN2_COLOR_OFFSET: float = 0.1
+"""The random color adjustment offset for channel 2 data."""
 
-# HSV transform normalization constants.
 _HSV_DIVISOR: float = 1.4
+"""The HSV transform normalization divisor."""
+
 _HSV_OFFSET: float = 0.4
+"""The HSV transform normalization offset."""
 
-# Number of samples for the colorbar gradient.
 _COLORBAR_SAMPLE_COUNT: int = 101
+"""The number of samples for the colorbar gradient."""
 
-# Number of rows in the colorbar image.
 _COLORBAR_ROW_COUNT: int = 20
+"""The number of rows in the colorbar image."""
 
-# Available colormaps for the colormap chooser.
 _COLORMAPS: list[str] = [
     "hsv",
     "viridis",
@@ -81,8 +86,8 @@ _COLORMAPS: list[str] = [
     "magma_r",
     "cividis_r",
 ]
+"""The available colormaps for the colormap chooser."""
 
-# Color statistic names displayed on the color buttons.
 _COLOR_NAMES: list[str] = [
     "A: random",
     "S: skew",
@@ -93,36 +98,38 @@ _COLOR_NAMES: list[str] = [
     "J: classifier, cell prob=",
     "K: correlations, bin=",
 ]
+"""The color statistic names displayed on the color buttons."""
 
-# Short names extracted from the color buttons (after the prefix).
 _COLOR_SHORT_NAMES: list[str] = [name[3:] for name in _COLOR_NAMES]
+"""The short names extracted from the color buttons (after the keyboard shortcut prefix)."""
 
-# Color button indices that require the adjacent edit field column.
 _COLOR_NARROW_RANGE_START: int = 5
+"""The starting index of the color buttons that require the adjacent edit field column."""
+
 _COLOR_NARROW_RANGE_END: int = 8
+"""The ending index of the color buttons that require the adjacent edit field column."""
 
-# Channel 2 color index.
 _COLOR_CHAN2: int = 5
+"""The channel 2 color index."""
 
-# Classifier probability color index.
 _COLOR_CLASSIFIER: int = 6
+"""The classifier probability color index."""
 
-# Correlation color index.
 _COLOR_CORRELATION: int = 7
+"""The correlation color index."""
 
-# Minimum number of changed cells before incremental flip is used over full reinit.
 _FLIP_THRESHOLD: int = 100
+"""The minimum number of changed cells before incremental flip is used over full reinit."""
 
-# Minimum change in channel 2 threshold to trigger a recoloring update.
 _CHAN2_THRESHOLD_EPSILON: float = 1e-3
+"""The minimum change in channel 2 threshold to trigger a recoloring update."""
 
-# Font size for ROI text labels.
 _ROI_TEXT_SIZE: int = 8
+"""The font size for ROI text labels."""
 
-# Color for ROI text labels.
 _ROI_TEXT_COLOR: tuple[int, int, int] = (180, 180, 180)
+"""The color for ROI text labels."""
 
-# Maps color statistic display names to ROIStatistics attribute names.
 _STAT_FIELD_MAP: dict[str, str] = {
     "skew": "skewness",
     "compact": "compactness",
@@ -130,6 +137,7 @@ _STAT_FIELD_MAP: dict[str, str] = {
     "aspect_ratio": "aspect_ratio",
     "chan2_prob": "colocalization_probability",
 }
+"""The mapping from color statistic display names to ROIStatistics attribute names."""
 
 
 @dataclass

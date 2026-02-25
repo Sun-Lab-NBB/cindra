@@ -13,8 +13,8 @@ from .viewer import MainWindow
 if TYPE_CHECKING:
     from pathlib import Path
 
-# String path to the application icon file.
 _ICON_PATH: str = str(MainWindow.cindra_directory() / "logo" / "logo.png")
+"""The string path to the application icon file."""
 
 
 def run_roi_viewer(session_path: Path | None = None) -> None:

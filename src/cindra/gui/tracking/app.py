@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QApplication
 
-from .viewer import TrackingViewer
+from .tracking_viewer import TrackingViewer
 from .context_data import TrackingViewerData
 
 if TYPE_CHECKING:

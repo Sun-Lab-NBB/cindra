@@ -15,7 +15,6 @@ from .view_state import ViewState, ROIColorMode, BackgroundView
 from .trace_panel import plot_trace
 from .context_data import ContextData
 from .plot_widgets import initialize_ranges
-from .roi_geometry import compute_circle_mask, compute_boundary_mask
 from .roi_overlays import (
     draw_masks,
     display_masks,
@@ -29,20 +28,20 @@ from .background_views import build_views, display_views
 if TYPE_CHECKING:
     from .viewer import MainWindow
 
-# Default channel 2 probability threshold.
 _DEFAULT_CHANNEL_2_THRESHOLD: float = 0.6
+"""The default channel 2 probability threshold."""
 
-# Divisor for computing the default trace bin size from tau and sampling rate.
 _BIN_SIZE_DIVISOR: int = 2
+"""The divisor for computing the default trace bin size from tau and sampling rate."""
 
-# Index of the channel 2 color mode button in the color button group.
 _CHANNEL_2_COLOR_INDEX: int = 5
+"""The index of the channel 2 color mode button in the color button group."""
 
-# Number of basic (non-dynamic) color mode buttons.
 _BASIC_COLOR_COUNT: int = 8
+"""The number of basic (non-dynamic) color mode buttons."""
 
-# Default activity mode index (neuropil-corrected: F - 0.7*Fneu).
 _DEFAULT_ACTIVITY_MODE: int = 2
+"""The default activity mode index (neuropil-corrected: F - 0.7*Fneu)."""
 
 
 def export_fig(parent: MainWindow) -> None:
@@ -68,11 +67,11 @@ def save_cell_classification(parent: MainWindow) -> None:
     if parent.context_data is None:
         return
     context = parent.context_data
-    save_path = context.save_path
-    if save_path is None:
+    output_path = context.output_path
+    if output_path is None:
         return
     np.save(
-        str(save_path / "cell_classification.npy"),
+        str(output_path / "cell_classification.npy"),
         np.concatenate(
             (
                 np.expand_dims(context.cell_classification_labels[context.not_merged], axis=1),
@@ -96,11 +95,11 @@ def save_cell_colocalization(parent: MainWindow) -> None:
     if parent.context_data is None:
         return
     context = parent.context_data
-    save_path = context.save_path
-    if save_path is None:
+    output_path = context.output_path
+    if output_path is None:
         return
     np.save(
-        str(save_path / "cell_colocalization.npy"),
+        str(output_path / "cell_colocalization.npy"),
         np.concatenate(
             (
                 np.expand_dims(context.cell_colocalization_labels[context.not_merged], axis=1),
@@ -124,21 +123,21 @@ def save_merge(parent: MainWindow) -> None:
     if parent.context_data is None:
         return
     context = parent.context_data
-    save_path = context.save_path
-    if save_path is None:
+    output_path = context.output_path
+    if output_path is None:
         return
 
     console.echo(message="Saving to NPY files...", level=LogLevel.SUCCESS)
-    np.save(str(save_path / "F.npy"), context.cell_fluorescence)
-    np.save(str(save_path / "Fneu.npy"), context.neuropil_fluorescence)
-    np.save(str(save_path / "spks.npy"), context.spikes)
+    np.save(str(output_path / "F.npy"), context.cell_fluorescence)
+    np.save(str(output_path / "Fneu.npy"), context.neuropil_fluorescence)
+    np.save(str(output_path / "spks.npy"), context.spikes)
     if context.has_channel_2:
         if context.cell_fluorescence_channel_2 is not None:
-            np.save(str(save_path / "F_chan2.npy"), context.cell_fluorescence_channel_2)
+            np.save(str(output_path / "F_chan2.npy"), context.cell_fluorescence_channel_2)
         if context.neuropil_fluorescence_channel_2 is not None:
-            np.save(str(save_path / "Fneu_chan2.npy"), context.neuropil_fluorescence_channel_2)
+            np.save(str(output_path / "Fneu_chan2.npy"), context.neuropil_fluorescence_channel_2)
         np.save(
-            str(save_path / "cell_colocalization.npy"),
+            str(output_path / "cell_colocalization.npy"),
             np.concatenate(
                 (
                     np.expand_dims(context.cell_colocalization_labels, axis=1),
@@ -154,7 +153,7 @@ def save_merge(parent: MainWindow) -> None:
         ),
         axis=1,
     )
-    np.save(str(save_path / "cell_classification.npy"), cell_classification)
+    np.save(str(output_path / "cell_classification.npy"), cell_classification)
     context.not_merged = np.ones(context.cell_classification_labels.size, dtype=np.bool_)
 
 
@@ -211,8 +210,8 @@ def load_dialog_folder(parent: MainWindow) -> None:
 def _initialize_gui(parent: MainWindow) -> None:
     """Initializes all GUI components after loading context data.
 
-    Computes boundary and circle geometry for each ROI, builds background views and
-    color arrays, initializes plot ranges, and enables all interactive controls.
+    Builds background views and color arrays, initializes plot ranges, and enables
+    all interactive controls.
 
     Args:
         parent: The main GUI window with context_data and view_state already assigned.
@@ -236,7 +235,7 @@ def _initialize_gui(parent: MainWindow) -> None:
     parent.manual.setEnabled(True)
     parent._roi_remove()
 
-    session_title = str(context.save_path) if context.save_path is not None else "unknown session"
+    session_title = str(context.output_path) if context.output_path is not None else "unknown session"
     parent.setWindowTitle(session_title)
 
     # Computes default bin size from tau and sampling rate.
@@ -244,9 +243,6 @@ def _initialize_gui(parent: MainWindow) -> None:
     parent._color_controls.bin_edit.setText(str(state.temporal_bin_size))
     state.colocalization_threshold = _DEFAULT_CHANNEL_2_THRESHOLD
     parent._color_controls.channel_2_edit.setText(str(state.colocalization_threshold))
-
-    # Computes boundary and circle geometry for each ROI.
-    _compute_roi_geometry(context=context)
 
     # Enables buttons and menu items.
     _enable_views_and_classifier(parent=parent)
@@ -415,32 +411,6 @@ def _enable_views_and_classifier(parent: MainWindow) -> None:
     parent.loadUClass.setEnabled(True)
     parent.loadSClass.setEnabled(True)
     parent.resetDefault.setEnabled(True)
-
-
-def _compute_roi_geometry(context: ContextData) -> None:
-    """Computes boundary and circle geometry for each ROI in the context.
-
-    Populates the boundary_y_pixels, boundary_x_pixels, circle_y_pixels, and
-    circle_x_pixels fields on each ROIStatistics instance.
-
-    Args:
-        context: The loaded data context whose ROI statistics will be modified.
-    """
-    for roi in context.roi_statistics:
-        y_pixels = roi.y_pixels.flatten()
-        x_pixels = roi.x_pixels.flatten()
-        roi.boundary_y_pixels, roi.boundary_x_pixels = compute_boundary_mask(  # type: ignore[assignment]
-            y_pixels=y_pixels,
-            x_pixels=x_pixels,
-        )
-        y_circle, x_circle = compute_circle_mask(
-            centroid_y=roi.centroid[0],
-            centroid_x=roi.centroid[1],
-            radius=roi.radius,
-        )
-        valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < context.frame_height) & (x_circle < context.frame_width)
-        roi.circle_y_pixels = y_circle[valid]  # type: ignore[assignment]
-        roi.circle_x_pixels = x_circle[valid]  # type: ignore[assignment]
 
 
 def _select_directory(parent: MainWindow) -> Path | None:

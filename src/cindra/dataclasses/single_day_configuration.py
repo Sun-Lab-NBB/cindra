@@ -152,9 +152,9 @@ class FileIO:
     """The path to the root data directory containing the input TIFF files. The pipeline recursively searches this
     directory and all subdirectories for .tiff/.tif files to process."""
 
-    save_path: Path | None = None
-    """The path to the root output directory where to save the processing results. The pipeline automatically
-    creates a 'cindra' subdirectory under this path to store all output files."""
+    output_path: Path | None = None
+    """The path to the root output directory where processing results are saved. The pipeline automatically creates a
+    'cindra' subdirectory under this path to store all output files."""
 
     ignored_file_names: tuple[str, ...] = ()
     """The tuple of file names to ignore when searching for and loading raw data. Any file whose name exactly matches
@@ -277,17 +277,17 @@ class OnePhotonRegistration:
 
 
 @dataclass
-class NonRigidRegistration:
-    """Stores parameters for non-rigid registration, which is used to improve motion registration in complex
+class NonrigidRegistration:
+    """Stores parameters for nonrigid registration, which is used to improve motion registration in complex
     datasets by dividing frames into subregions and shifting each subregion independently of other subregions.
     """
 
     enabled: bool = True
-    """Determines whether to perform non-rigid registration to correct for local motion and deformation. This is
+    """Determines whether to perform nonrigid registration to correct for local motion and deformation. This is
     primarily used for correcting non-uniform motion."""
 
     block_size: tuple[int, int] = (128, 128)
-    """The block size, in pixels, for non-rigid registration, defining the dimensions of subregions used in
+    """The block size, in pixels, for nonrigid registration, defining the dimensions of subregions used in
     the correction. It is recommended to keep this size a power of 2 and/or 3 for more efficient FFT computation.
     During processing, each frame is split into sub-regions with these dimensions and the registration is applied
     to each region independently."""
@@ -463,8 +463,8 @@ class SingleDayConfiguration(YamlConfig):
     one_photon_registration: OnePhotonRegistration = field(default_factory=OnePhotonRegistration)
     """Stores parameters for additional pre-registration processing used to improve the registration of 1-photon
     datasets."""
-    non_rigid_registration: NonRigidRegistration = field(default_factory=NonRigidRegistration)
-    """Stores parameters for non-rigid registration, which is used to improve motion registration in complex
+    nonrigid_registration: NonrigidRegistration = field(default_factory=NonrigidRegistration)
+    """Stores parameters for nonrigid registration, which is used to improve motion registration in complex
     datasets."""
     roi_detection: ROIDetection = field(default_factory=ROIDetection)
     """Stores parameters for cell ROI detection and extraction."""

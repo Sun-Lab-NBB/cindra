@@ -41,38 +41,38 @@ if TYPE_CHECKING:
 
     from .viewer import MainWindow
 
-# Percentile range used for image normalization (lower bound).
 _IMAGE_PERCENTILE_LOW: int = 1
+"""The percentile range lower bound used for image normalization."""
 
-# Percentile range used for image normalization (upper bound).
 _IMAGE_PERCENTILE_HIGH: int = 99
+"""The percentile range upper bound used for image normalization."""
 
-# Number of reference images available (mean, enhanced, correlation, max projection).
 _VIEW_COUNT: int = 4
+"""The number of reference images available (mean, enhanced, correlation, max projection)."""
 
-# Maximum fraction of field of view used as default ROI diameter.
 _MAX_DIAMETER_FRACTION: float = 0.2
+"""The maximum fraction of field of view used as the default ROI diameter."""
 
-# Minimum ROI diameter in pixels.
 _MIN_DIAMETER: int = 3
+"""The minimum ROI diameter in pixels."""
 
-# Number of reference ROIs used for normalized pixel count computation.
 _REFERENCE_ROI_COUNT: int = 100
+"""The number of reference ROIs used for normalized pixel count computation."""
 
-# Pen width for ROI ellipse outlines.
 _ROI_PEN_WIDTH: int = 3
+"""The pen width for ROI ellipse outlines."""
 
-# Default initial position offset for the ROI ellipse.
 _ROI_POSITION_OFFSET: int = 5
+"""The default initial position offset for the ROI ellipse."""
 
-# View index for the correlation map in the reference image selector.
 _CORRELATION_MAP_VIEW_INDEX: int = 2
+"""The view index for the correlation map in the reference image selector."""
 
-# Random number generator for consistent ROI color assignment.
 _random_generator: np.random.Generator = np.random.default_rng()
+"""The random number generator for consistent ROI color assignment."""
 
-# Fixed width for the save-and-quit button.
 _SAVE_BUTTON_WIDTH: int = 100
+"""The fixed width for the save-and-quit button."""
 
 
 def _extract_masks_and_traces(

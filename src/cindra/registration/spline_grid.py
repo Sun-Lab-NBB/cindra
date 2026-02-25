@@ -11,8 +11,8 @@ import numpy as np
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-# Minimum number of knots required per dimension to freeze edges (2 on each side + 2 interior).
 _MINIMUM_KNOTS_FOR_FROZEN_EDGES: int = 6
+"""The minimum number of knots required per dimension to freeze edges (2 on each side + 2 interior)."""
 
 
 @numba.njit(cache=True, inline="always")

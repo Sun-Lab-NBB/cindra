@@ -33,11 +33,11 @@ if TYPE_CHECKING:
     from .viewer import MainWindow
     from .signals import GUISignals
 
-# Index of the classifier probability color mode in the color button group.
 _CLASSIFIER_COLOR_INDEX: int = 6
+"""The index of the classifier probability color mode in the color button group."""
 
-# Feature names used by the classifier, matching ROIStatistics attribute names.
 _CLASSIFICATION_FEATURES: tuple[str, ...] = ("normalized_pixel_count", "compactness", "skewness")
+"""The feature names used by the classifier, matching ROIStatistics attribute names."""
 
 
 @dataclass

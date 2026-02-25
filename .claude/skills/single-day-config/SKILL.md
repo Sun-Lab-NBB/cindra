@@ -50,7 +50,7 @@ These parameters are set automatically by the pipeline and should not be manuall
 | Parameter                 | Set By          | Value                                               |
 |---------------------------|-----------------|-----------------------------------------------------|
 | `file_io.data_path`       | `pipeline.py`   | Session's raw mesoscope data path                   |
-| `file_io.save_path`       | `pipeline.py`   | Session's processed mesoscope data path             |
+| `file_io.output_path`       | `pipeline.py`   | Session's processed mesoscope data path             |
 | `main.parallel_workers`   | CLI/MCP         | Number of workers (or auto-detected from CPU count) |
 | `main.progress_bars`      | CLI/MCP         | Whether to show progress bars                       |
 | `main.python_version`     | `single_day.py` | Current Python version                              |
@@ -88,7 +88,7 @@ I/O parameters for input data location and output directories.
 | Parameter            | Type      | Default | Description                                                                           |
 |----------------------|-----------|---------|---------------------------------------------------------------------------------------|
 | `data_path`          | str       | ""      | Root directory containing input TIFFs. Recursively searched. **Set by pipeline.**     |
-| `save_path`          | str       | ""      | Output directory root. Pipeline creates `cindra/` subdirectory. **Set by pipeline.** |
+| `output_path`          | str       | ""      | Output directory root. Pipeline creates `cindra/` subdirectory. **Set by pipeline.** |
 | `mesoscan`           | bool      | False   | **True for mesoscope data.** Triggers auto-overwrite of plane/ROI parameters.         |
 | `delete_bin`         | bool      | False   | Delete registered .bin files after processing. **Must be False for multi-day.**       |
 | `ignored_file_names` | list[str] | []      | Exact filenames to skip when loading TIFFs.                                           |
@@ -144,13 +144,13 @@ Additional processing for 1-photon data registration.
 
 ---
 
-## Section 6: non_rigid
+## Section 6: nonrigid
 
-Non-rigid registration for local motion correction.
+Nonrigid registration for local motion correction.
 
 | Parameter        | Type      | Default    | Description                                                  |
 |------------------|-----------|------------|--------------------------------------------------------------|
-| `nonrigid`       | bool      | True       | Enable non-rigid registration for non-uniform motion.        |
+| `nonrigid`       | bool      | True       | Enable nonrigid registration for non-uniform motion.         |
 | `block_size`     | list[int] | [128, 128] | Block dimensions (pixels). Power of 2/3 recommended for FFT. |
 | `snr_thresh`     | float     | 1.2        | SNR threshold for accepting block shifts.                    |
 | `maxregshift_nr` | float     | 5.0        | Max block shift (pixels) relative to rigid shift.            |

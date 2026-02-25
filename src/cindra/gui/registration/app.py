@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING
 from PySide6 import QtCore
 from PySide6.QtWidgets import QApplication
 
-from .viewer import PCViewer, BinaryPlayer
+from .binary_viewer import BinaryPlayer
+from .pc_viewer import PCViewer
 from .context_data import RegistrationViewerData
 
 if TYPE_CHECKING:

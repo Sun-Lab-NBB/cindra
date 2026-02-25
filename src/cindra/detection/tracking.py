@@ -16,9 +16,9 @@ from .roi_statistics import compute_roi_statistics, estimate_diameter_from_rois
 if TYPE_CHECKING:
     from ..dataclasses import MultiDayRuntimeContext
 
-# The default Jaccard distance value used to initialize the distance matrix. This large value ensures that ROI pairs
-# that are not evaluated (due to centroid distance filtering) are never clustered together.
 _DEFAULT_JACCARD_DISTANCE: float = 10000.0
+"""The default Jaccard distance value used to initialize the distance matrix. This large value ensures that ROI pairs
+that are not evaluated (due to centroid distance filtering) are never clustered together."""
 
 
 def track_rois_across_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
