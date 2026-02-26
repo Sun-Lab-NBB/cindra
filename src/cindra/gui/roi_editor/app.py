@@ -8,20 +8,20 @@ from typing import TYPE_CHECKING
 from PySide6 import QtGui, QtCore
 from PySide6.QtWidgets import QApplication
 
-from .viewer import MainWindow
+from .viewer import ROIEditor
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-_ICON_PATH: str = str(MainWindow.cindra_directory() / "logo" / "logo.png")
+_ICON_PATH: str = str(ROIEditor.cindra_directory() / "logo" / "logo.png")
 """The string path to the application icon file."""
 
 
-def run_roi_viewer(session_path: Path | None = None) -> None:
+def run_roi_editor(session_path: Path | None = None) -> None:
     """Launches the standalone ROI viewer and editor.
 
-    Creates a QApplication, shows the MainWindow, and enters the event loop.
-    If a session path is provided, the viewer loads cindra output data from that
+    Creates a QApplication, shows the ROIEditor window, and enters the event loop.
+    If a session path is provided, the editor loads cindra output data from that
     directory on startup.
 
     Args:
@@ -38,7 +38,7 @@ def run_roi_viewer(session_path: Path | None = None) -> None:
         app_icon.addFile(_ICON_PATH, QtCore.QSize(size, size))
     application.setWindowIcon(app_icon)
 
-    _window = MainWindow(session_path=session_path)
+    _window = ROIEditor(session_path=session_path)
 
     if owns_application:
         sys.exit(application.exec())

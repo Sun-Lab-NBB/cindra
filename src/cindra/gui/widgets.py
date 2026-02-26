@@ -1,12 +1,11 @@
-"""Provides custom Qt widgets and trace plotting helpers for the ROI viewer."""
+"""Provides custom Qt widgets, trace plotting helpers, and quadrant zoom shared by the ROI viewer and editor."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from collections.abc import Callable
 
 import numpy as np
-from PySide6 import QtGui, QtCore
+from PySide6 import QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
 from pyqtgraph import functions as fn
 from PySide6.QtGui import QPainter, QMouseEvent, QPaintEvent
@@ -14,28 +13,41 @@ from PySide6.QtWidgets import (
     QStyle,
     QSlider,
     QWidget,
+    QPushButton,
     QApplication,
+    QButtonGroup,
     QStyleOptionSlider,
 )
 from pyqtgraph.graphicsItems.ViewBox.ViewBoxMenu import ViewBoxMenu  # type: ignore[import-untyped]
 
-from .constants import STYLE, CONFIG
+from .constants import STYLE, CONFIG, ROIToolPanel
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from numpy.typing import NDArray
     from pyqtgraph.GraphicsScene.mouseEvents import MouseClickEvent  # type: ignore[import-untyped]
+
+type _ClickHandler = Callable[[int, int, ROIToolPanel, bool, bool], bool]
+"""The callback type for click events dispatched by a ViewBox to the orchestrator.
+
+Signature: (click_x, click_y, panel, is_right, is_multi) -> handled.
+"""
+
+type _ZoomHandler = Callable[[], None]
+"""The callback type for double-click zoom-to-fit events dispatched by a ViewBox to the orchestrator."""
 
 
 class RangeSlider(QSlider):
     """Dual-handle range slider for controlling image saturation levels.
 
-    Provides two independently movable slider handles that define a low-high range.
-    Dragging between the handles moves both together. Releasing the mouse invokes the
-    optional ``on_release`` callback so the viewer can refresh its display.
+    Provides two independently movable slider handles that define a low-high range. Dragging
+    between the handles moves both together. Releasing the mouse invokes the ``on_release``
+    callback.
 
     Args:
         owner: The parent QWidget.
-        on_release: Optional callback invoked when the user finishes dragging.
+        on_release: Callback invoked when the mouse is released after dragging.
     """
 
     def __init__(self, owner: QWidget | None = None, on_release: Callable[[], None] | None = None) -> None:
@@ -233,8 +245,8 @@ class RangeSlider(QSlider):
 class TraceBox(pg.PlotItem):
     """Displays fluorescence time series with support for custom mouse interactions.
 
-    Extends pyqtgraph's PlotItem class with stored trace range values that are updated after each call to
-    ``plot_trace`` via ``update_range``. Double-clicking the plot resets the view to the
+    Extends pyqtgraph's PlotItem class with stored trace range values that are updated after each
+    call to ``plot_trace`` via ``update_range``. Double-clicking the plot resets the view to the
     full data range.
 
     Attributes:
@@ -251,8 +263,6 @@ class TraceBox(pg.PlotItem):
 
     def update_range(self, frame_count: int, y_minimum: float, y_maximum: float) -> None:
         """Updates the axis limits used by double-click zoom-to-fit interaction.
-
-        This determines the behavior of the zoom-to-fit user-triggered interface transformation.
 
         Args:
             frame_count: Total number of frames in the trace data.
@@ -275,23 +285,13 @@ class TraceBox(pg.PlotItem):
         view_box.setYRange(self._y_minimum, self._y_maximum)
 
 
-type _ClickHandler = Callable[[int, int, int, bool], bool]
-"""The callback type for click events dispatched by a ViewBox to the orchestrator.
-
-Signature: (click_x, click_y, panel_index, is_multi) -> handled.
-"""
-
-type _ZoomHandler = Callable[[], None]
-"""The callback type for double-click zoom-to-fit events dispatched by a ViewBox to the orchestrator."""
-
-
 class ViewBox(pg.ViewBox):
-    """Displays field-of-view images with left-click ROI selection for the read-only viewer.
+    """Displays field-of-view images with support for custom keyboard and mouse interactions.
 
-    Extends pyqtgraph's ViewBox class with left-click ROI selection, shift/ctrl-click multi-ROI
-    selection, and double-click zoom-to-fit functionality. All click logic is delegated to the
-    orchestrator via installed callback handlers. Right-click reclassification is excluded
-    because this is a read-only viewer.
+    Extends pyqtgraph's ViewBox class with left-click ROI selection, right-click ROI
+    reclassification (cell / non-cell), shift/ctrl-click multi-ROI merge selection, and
+    double-click zoom-to-fit functionality. All click logic is delegated to the orchestrator via
+    installed callback handlers.
 
     Args:
         panel: Identifies which image panel this view box belongs to.
@@ -309,7 +309,7 @@ class ViewBox(pg.ViewBox):
     def __init__(
         self,
         *,
-        panel: int = 0,
+        panel: ROIToolPanel = ROIToolPanel.CELLS,
         border: object = None,
         invert_y: bool = False,
         enable_menu: bool = True,
@@ -320,7 +320,7 @@ class ViewBox(pg.ViewBox):
         if enable_menu:
             self.menu = ViewBoxMenu(self)
         self.name = name
-        self._panel: int = panel
+        self._panel: ROIToolPanel = panel
 
         # Configures view state.
         self.state["enableMenu"] = enable_menu
@@ -331,7 +331,7 @@ class ViewBox(pg.ViewBox):
         self._zoom_handler: _ZoomHandler | None = None
 
     def set_click_handler(self, handler: _ClickHandler) -> None:
-        """Configures the instance to use the provided click handler when the user clicks in this panel.
+        """Configures the instance to use the provided click handler when the user clicks.
 
         Args:
             handler: The callback instance to be invoked on each mouse click in this panel.
@@ -339,7 +339,7 @@ class ViewBox(pg.ViewBox):
         self._click_handler = handler
 
     def set_zoom_handler(self, handler: _ZoomHandler) -> None:
-        """Configures the instance to use the provided click handler on double-click zoom-to-fit user interactions.
+        """Configures the instance to use the provided zoom handler on double-click zoom-to-fit.
 
         Args:
             handler: The callback instance to be invoked on double-click to reset the view range.
@@ -357,11 +357,11 @@ class ViewBox(pg.ViewBox):
             self._zoom_handler()
 
     def mouseClickEvent(self, ev: MouseClickEvent) -> None:  # noqa: N802
-        """Dispatches left-click events to the installed click handler for ROI selection.
+        """Dispatches mouse click events to the installed click handler.
 
-        Left-click selects the targeted ROI. Shift/ctrl-click toggles multi-ROI selection.
-        Right-click is not handled (read-only viewer); unhandled right-clicks raise the default
-        context menu.
+        Left-click selects the targeted ROI. Shift/ctrl-click toggles multi-ROI merge selection.
+        Right-click reclassifies the ROI between the cell and non-cell panels. Unhandled
+        right-clicks raise the default context menu.
 
         Notes:
             Overrides the pyqtgraph/Qt virtual method. The camelCase name is required to match
@@ -370,24 +370,22 @@ class ViewBox(pg.ViewBox):
         if self._click_handler is None:
             return
 
-        # Only handles left-click in the read-only viewer.
-        if ev.button() != QtCore.Qt.MouseButton.LeftButton:
-            if ev.button() == QtCore.Qt.MouseButton.RightButton and self.menuEnabled():
-                self.raiseContextMenu(ev)
-            return
-
         # Converts the scene-space click position to image-space pixel coordinates.
         position = self.mapSceneToView(ev.scenePos())
         click_x = int(position.x())
         click_y = int(position.y())
 
         # Extracts modifier state for the click handler.
+        is_right = ev.button() == QtCore.Qt.MouseButton.RightButton
         is_multi = ev.modifiers() in (
             QtCore.Qt.KeyboardModifier.ShiftModifier,
             QtCore.Qt.KeyboardModifier.ControlModifier,
         )
 
-        self._click_handler(click_x, click_y, self._panel, is_multi)
+        # Falls back to the default context menu if the click handler did not consume the event.
+        handled = self._click_handler(click_x, click_y, self._panel, is_right, is_multi)
+        if not handled and is_right and self.menuEnabled():
+            self.raiseContextMenu(ev)
 
 
 def plot_trace(
@@ -409,8 +407,8 @@ def plot_trace(
     """Draws fluorescence traces for the selected ROIs.
 
     For a single selected ROI, displays the raw fluorescence, neuropil, and deconvolved
-    traces on the same axes. For multiple selected ROIs, stacks normalized traces
-    vertically with per-ROI coloring and an optional averaged summary at the bottom.
+    traces on the same axes. For multiple selected ROIs, stacks normalized traces vertically
+    with per-ROI coloring and an optional averaged summary at the bottom.
 
     Args:
         trace_box: The pyqtgraph PlotItem to draw traces on.
@@ -468,6 +466,318 @@ def plot_trace(
     )
     trace_box.setYRange(y_minimum, y_maximum)
     return y_minimum, y_maximum
+
+
+def initialize_ranges(
+    cells_view: ViewBox,
+    noncells_view: ViewBox,
+    trace_box: TraceBox,
+    frame_width: int,
+    frame_height: int,
+    frame_count: int,
+) -> NDArray[np.int32]:
+    """Initializes plot ranges for all panels after the UI loads the runtime context data.
+
+    Sets both cell and non-cell image panel view ranges to span the full field of view,
+    constrains the trace panel x-axis to the recording length, and returns a frame indices
+    array for trace plotting.
+
+    Args:
+        cells_view: The cell image panel view box.
+        noncells_view: The non-cell image panel view box.
+        trace_box: The fluorescence trace display panel.
+        frame_width: Width of the field of view in pixels.
+        frame_height: Height of the field of view in pixels.
+        frame_count: Total number of frames in the visualized recording.
+
+    Returns:
+        The monotonically increasing frame number array of shape (frame_count,) used as the
+        x-axis for trace plotting.
+    """
+    cells_view.setXRange(0, frame_width)
+    cells_view.setYRange(0, frame_height)
+    noncells_view.setXRange(0, frame_width)
+    noncells_view.setYRange(0, frame_height)
+    trace_box.getViewBox().setLimits(xMin=0, xMax=frame_count)
+    return np.arange(0, frame_count, dtype=np.int32)
+
+
+def apply_quadrant_zoom(
+    quadrant_buttons: QButtonGroup,
+    button_index: int,
+    frame_width: int,
+    frame_height: int,
+    set_view_range: Callable[[float, float, float, float], None],
+) -> None:
+    """Zooms the image views to the specified quadrant.
+
+    Args:
+        quadrant_buttons: The quadrant button group.
+        button_index: Index of the pressed button.
+        frame_width: Width of the field of view in pixels.
+        frame_height: Height of the field of view in pixels.
+        set_view_range: Callback that sets the x/y range on both image panels. Called
+            with (x_min, x_max, y_min, y_max).
+    """
+    for index in range(9):
+        if quadrant_buttons.button(index).isEnabled():
+            quadrant_buttons.button(index).setStyleSheet(STYLE.button_unpressed)
+    quadrant_buttons.button(button_index).setStyleSheet(STYLE.button_pressed)
+
+    columns = STYLE.quadrant_columns
+    margin = CONFIG.quadrant_zoom_margin
+    x_column = button_index % columns
+    y_row = button_index // columns
+    x_range = (
+        np.array([x_column - margin, x_column + 1 + margin])
+        * frame_width
+        / columns
+    )
+    y_range = (
+        np.array([y_row - margin, y_row + 1 + margin]) * frame_height / columns
+    )
+
+    set_view_range(float(x_range[0]), float(x_range[1]), float(y_range[0]), float(y_range[1]))
+
+
+class _ColorButton(QPushButton):
+    """Color statistic selection button for the ROI overlay panel.
+
+    Each button maps to a different color statistic mode (random, skew, compact, footprint,
+    etc.). On press, invokes the ``on_press`` callback with the button index.
+
+    Args:
+        button_id: Index identifying this button's color mode.
+        text: Display label (with keyboard shortcut prefix).
+        owner: The parent widget for ownership.
+        button_group: The button group this button belongs to.
+        on_press: Callback invoked with the button index when pressed.
+    """
+
+    def __init__(
+        self,
+        button_id: int,
+        text: str,
+        owner: QWidget,
+        button_group: QButtonGroup,  # noqa: ARG002
+        on_press: Callable[[int], None],
+    ) -> None:
+        super().__init__(owner)
+        self.setText(text)
+        self.setCheckable(True)
+        self.setStyleSheet(STYLE.button_inactive)
+        self.setFont(STYLE.label_font_bold())
+        self.resize(self.minimumSizeHint())
+        self._button_id: int = button_id
+        self._on_press: Callable[[int], None] = on_press
+        self.clicked.connect(self._press)
+        self.show()
+
+    def _press(self) -> None:
+        """Invokes the on_press callback with this button's index."""
+        self._on_press(self._button_id)
+
+
+class _ViewButton(QPushButton):
+    """Background view selection button.
+
+    Each button corresponds to a different background image type (mean image, enhanced mean,
+    correlation map, etc.). On press, invokes the ``on_press`` callback with the button index.
+
+    Args:
+        button_id: Index identifying this button's view type.
+        text: Display label for the button (with keyboard shortcut prefix).
+        owner: The parent QWidget.
+        button_group: The button group this button belongs to.
+        on_press: Callback invoked with the button index when pressed.
+    """
+
+    def __init__(
+        self,
+        button_id: int,
+        text: str,
+        owner: QWidget,
+        button_group: QButtonGroup,
+        on_press: Callable[[int], None],
+    ) -> None:
+        super().__init__(owner)
+        self.setText(text)
+        self.setCheckable(True)
+        self.setStyleSheet(STYLE.button_inactive)
+        self.setFont(STYLE.label_font_bold())
+        self.resize(self.minimumSizeHint())
+        self._button_id: int = button_id
+        self._button_group: QButtonGroup = button_group
+        self._on_press: Callable[[int], None] = on_press
+        self.clicked.connect(self._press)
+        self.show()
+
+    def _press(self) -> None:
+        """Switches the background view and invokes the on_press callback."""
+        for index in range(self._button_group.buttons().__len__()):
+            button = self._button_group.button(index)
+            if button is not None and button.isEnabled():
+                button.setStyleSheet(STYLE.button_unpressed)
+        self.setStyleSheet(STYLE.button_pressed)
+        self._on_press(self._button_id)
+
+
+class _QuadButton(QPushButton):
+    """Quadrant zoom button for navigating field-of-view subregions.
+
+    Each button maps to one of nine quadrant positions in a 3x3 grid. On press, invokes the
+    ``on_press`` callback.
+
+    Args:
+        button_id: Index identifying this button's grid position.
+        text: Display label for the button.
+        owner: The parent widget for ownership.
+        button_group: The button group this button belongs to.
+        on_press: Callback invoked when the button is pressed.
+    """
+
+    def __init__(
+        self,
+        button_id: int,
+        text: str,
+        owner: QWidget,
+        button_group: QButtonGroup,  # noqa: ARG002
+        on_press: Callable[[], None],
+    ) -> None:
+        super().__init__(owner)
+        self.setText(text)
+        self.setCheckable(True)
+        self.setStyleSheet(STYLE.button_inactive)
+        self.setFont(STYLE.label_font_bold())
+        self.resize(self.minimumSizeHint())
+        self.setMaximumWidth(STYLE.small_edit_width)
+        self._button_id: int = button_id
+        self._on_press: Callable[[], None] = on_press
+        self.clicked.connect(self._press)
+        self.show()
+
+    def _press(self) -> None:
+        """Invokes the on_press callback."""
+        self._on_press()
+
+
+class _SizeButton(QPushButton):
+    """View size toggle button for switching between cell/both/non-cell panels.
+
+    Controls which image panels are visible. On press, invokes the ``on_press`` callback.
+
+    Args:
+        button_id: View mode index (0=cells only, 1=both, 2=non-cells only).
+        text: Display label for the button.
+        owner: The parent widget for ownership.
+        button_group: The button group this button belongs to.
+        on_press: Callback invoked when the button is pressed.
+    """
+
+    def __init__(
+        self,
+        button_id: int,
+        text: str,
+        owner: QWidget,
+        button_group: QButtonGroup,  # noqa: ARG002
+        on_press: Callable[[], None],
+    ) -> None:
+        super().__init__(owner)
+        self.setText(text)
+        self.setCheckable(True)
+        self.setStyleSheet(STYLE.button_inactive)
+        self.setFont(STYLE.label_font_bold())
+        self.resize(self.minimumSizeHint())
+        self._button_id: int = button_id
+        self._on_press: Callable[[], None] = on_press
+        self.clicked.connect(self._press)
+        self.show()
+
+    def _press(self) -> None:
+        """Invokes the on_press callback."""
+        self._on_press()
+
+
+class _SelectionButton(QPushButton):
+    """Cell selection mode button (draw, top-n, bottom-n).
+
+    Controls the cell selection behavior in the main viewer. On press, invokes the
+    ``on_press`` callback.
+
+    Args:
+        button_id: Selection mode index (0=draw, 1=top n, 2=bottom n).
+        text: Display label for the button.
+        owner: The parent widget for ownership.
+        button_group: The button group this button belongs to.
+        on_press: Callback invoked when the button is pressed.
+    """
+
+    def __init__(
+        self,
+        button_id: int,
+        text: str,
+        owner: QWidget,
+        button_group: QButtonGroup,  # noqa: ARG002
+        on_press: Callable[[], None],
+    ) -> None:
+        super().__init__(owner)
+        self._button_id: int = button_id
+        self.setText(text)
+        self.setCheckable(True)
+        self.setStyleSheet(STYLE.button_inactive)
+        self.setFont(STYLE.label_font_bold())
+        self.resize(self.minimumSizeHint())
+        self._on_press: Callable[[], None] = on_press
+        self.clicked.connect(self._press)
+        self.show()
+
+    def _press(self) -> None:
+        """Invokes the on_press callback."""
+        self._on_press()
+
+
+class _DrawViewButton(QPushButton):
+    """Reference image selector button for the manual ROI draw editor.
+
+    Switches the displayed reference image in the draw editor window. On press, invokes the
+    ``on_press`` callback with the button index.
+
+    Args:
+        button_id: Index identifying this button's reference image.
+        text: Display label for the button.
+        owner: The parent widget for ownership.
+        button_group: The button group this button belongs to.
+        on_press: Callback invoked with the button index when pressed.
+    """
+
+    def __init__(
+        self,
+        button_id: int,
+        text: str,
+        owner: QWidget,
+        button_group: QButtonGroup,
+        on_press: Callable[[int], None],
+    ) -> None:
+        super().__init__(owner)
+        self.setText(text)
+        self.setCheckable(True)
+        self.setStyleSheet(STYLE.button_inactive)
+        self.setFont(STYLE.label_font_bold())
+        self.resize(self.minimumSizeHint())
+        self._button_id: int = button_id
+        self._button_group: QButtonGroup = button_group
+        self._on_press: Callable[[int], None] = on_press
+        self.clicked.connect(self._press)
+        self.show()
+
+    def _press(self) -> None:
+        """Switches the reference image and invokes the on_press callback."""
+        for index in range(self._button_group.buttons().__len__()):
+            button = self._button_group.button(index)
+            if button is not None and button.isEnabled():
+                button.setStyleSheet(STYLE.button_unpressed)
+        self.setStyleSheet(STYLE.button_pressed)
+        self._on_press(self._button_id)
 
 
 def _plot_single_trace(

@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from .context_data import RegistrationViewerData
+from .single_day_context import RegistrationViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

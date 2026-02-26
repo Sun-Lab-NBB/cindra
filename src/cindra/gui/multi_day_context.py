@@ -8,7 +8,7 @@ from dataclasses import field, dataclass
 
 from ataraxis_base_utilities import console
 
-from ...dataclasses import MultiDayRuntimeContext
+from ..dataclasses import MultiDayRuntimeContext
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
 
-    from ...dataclasses import (
+    from ..dataclasses import (
         CombinedData,
         DetectionData,
         ROIStatistics,

@@ -10,41 +10,25 @@ import numpy as np
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import STYLE
-from .view_state import ViewState, ROIColorMode, BackgroundView
-from .trace_panel import plot_trace
-from .context_data import ContextData
-from .plot_widgets import initialize_ranges
-from .roi_overlays import (
+from ..constants import STYLE, CONFIG, ROIColorMode, BackgroundView
+from ..widgets import plot_trace, initialize_ranges
+from ..single_day_context import ROIViewerData
+from ..overlays import (
+    build_views,
     draw_masks,
     display_masks,
+    display_views,
     draw_colorbar,
     init_roi_maps,
     compute_colors,
     render_colorbar,
 )
-from .background_views import build_views, display_views
 
 if TYPE_CHECKING:
-    from .viewer import MainWindow
-
-_DEFAULT_CHANNEL_2_THRESHOLD: float = 0.6
-"""The default channel 2 probability threshold."""
-
-_BIN_SIZE_DIVISOR: int = 2
-"""The divisor for computing the default trace bin size from tau and sampling rate."""
-
-_CHANNEL_2_COLOR_INDEX: int = 5
-"""The index of the channel 2 color mode button in the color button group."""
-
-_BASIC_COLOR_COUNT: int = 8
-"""The number of basic (non-dynamic) color mode buttons."""
-
-_DEFAULT_ACTIVITY_MODE: int = 2
-"""The default activity mode index (neuropil-corrected: F - 0.7*Fneu)."""
+    from .viewer import ROIEditor
 
 
-def export_fig(parent: MainWindow) -> None:
+def export_fig(parent: ROIEditor) -> None:
     """Opens the pyqtgraph export dialog for the current plot.
 
     Args:
@@ -54,7 +38,7 @@ def export_fig(parent: MainWindow) -> None:
     parent._graphics_widget.scene().showExportDialog()
 
 
-def save_cell_classification(parent: MainWindow) -> None:
+def save_cell_classification(parent: ROIEditor) -> None:
     """Saves the current cell classification labels to cell_classification.npy.
 
     Writes both the boolean classification and probability arrays, filtered by the
@@ -86,7 +70,7 @@ def save_cell_classification(parent: MainWindow) -> None:
     )
 
 
-def save_cell_colocalization(parent: MainWindow) -> None:
+def save_cell_colocalization(parent: ROIEditor) -> None:
     """Saves the current cell colocalization labels to cell_colocalization.npy.
 
     Args:
@@ -110,7 +94,7 @@ def save_cell_colocalization(parent: MainWindow) -> None:
     )
 
 
-def save_merge(parent: MainWindow) -> None:
+def save_merge(parent: ROIEditor) -> None:
     """Saves all session data arrays after a merge operation.
 
     Writes fluorescence traces, spike deconvolution, and classification arrays to the
@@ -157,11 +141,11 @@ def save_merge(parent: MainWindow) -> None:
     context.not_merged = np.ones(context.cell_classification_labels.size, dtype=np.bool_)
 
 
-def load_session(parent: MainWindow, session_path: Path | None = None) -> None:
+def load_session(parent: ROIEditor, session_path: Path | None = None) -> None:
     """Loads a pipeline output directory into the GUI.
 
     Detects whether the directory contains single-day or multi-day pipeline output and
-    creates the appropriate ContextData wrapper. Then initializes all GUI components
+    creates the appropriate ROIViewerData wrapper. Then initializes all GUI components
     with the loaded data.
 
     Args:
@@ -176,18 +160,39 @@ def load_session(parent: MainWindow, session_path: Path | None = None) -> None:
     console.echo(message=f"Loading session: {session_path}")
 
     try:
-        context_data = ContextData.from_single_day(root_path=session_path)
+        context_data = ROIViewerData.from_single_day(root_path=session_path, mutable=True)
     except Exception:
         console.echo(message="Failed to load session data.", level=LogLevel.ERROR)
         _load_again(parent=parent, text="Failed to load session. Try another directory?")
         return
 
     parent.context_data = context_data
-    parent.view_state = ViewState()
+
+    # Resets display state attributes to defaults.
+    parent.rois_visible = True
+    parent.roi_color_mode = ROIColorMode.RANDOM
+    parent.background_view = BackgroundView.ROIS_ONLY
+    parent.roi_opacity = [127, 255]
+    parent.background_saturation = [0, 255]
+    parent.roi_colormap = "hsv"
+    parent.selected_roi_index = 0
+    parent.merge_roi_indices = [0]
+    parent.last_reclassified_index = 0
+    parent.roi_tool_active = False
+    parent.trace_mode = 2
+    parent.temporal_bin_size = 1
+    parent.fluorescence_visible = True
+    parent.neuropil_visible = True
+    parent.deconvolved_visible = True
+    parent.auto_zoom_to_roi = False
+    parent.roi_labels_visible = False
+    parent.session_loaded = False
+    parent.colocalization_threshold = 0.6
+
     _initialize_gui(parent=parent)
 
 
-def load_dialog(parent: MainWindow) -> None:
+def load_dialog(parent: ROIEditor) -> None:
     """Opens a directory dialog to select and load a cindra output directory.
 
     Args:
@@ -196,7 +201,7 @@ def load_dialog(parent: MainWindow) -> None:
     load_session(parent=parent)
 
 
-def load_dialog_folder(parent: MainWindow) -> None:
+def load_dialog_folder(parent: ROIEditor) -> None:
     """Opens a directory dialog to select and load a cindra output directory.
 
     This is an alias for ``load_dialog`` maintained for menu bar compatibility.
@@ -207,24 +212,23 @@ def load_dialog_folder(parent: MainWindow) -> None:
     load_session(parent=parent)
 
 
-def _initialize_gui(parent: MainWindow) -> None:
+def _initialize_gui(parent: ROIEditor) -> None:
     """Initializes all GUI components after loading context data.
 
     Builds background views and color arrays, initializes plot ranges, and enables
     all interactive controls.
 
     Args:
-        parent: The main GUI window with context_data and view_state already assigned.
+        parent: The main GUI window with context_data and view state attributes already assigned.
     """
     context = parent.context_data
-    state = parent.view_state
     if context is None:
         return
 
     # Resets display state.
-    state.roi_color_mode = ROIColorMode(0)
-    state.background_view = BackgroundView(0)
-    state.selected_roi_index = 0
+    parent.roi_color_mode = ROIColorMode(0)
+    parent.background_view = BackgroundView(0)
+    parent.selected_roi_index = 0
     parent._roi_visibility_checkbox.setChecked(True)
     if parent._roi_labels_checkbox.isChecked():
         parent._roi_text(False)
@@ -239,10 +243,10 @@ def _initialize_gui(parent: MainWindow) -> None:
     parent.setWindowTitle(session_title)
 
     # Computes default bin size from tau and sampling rate.
-    state.temporal_bin_size = max(1, int(context.tau * context.sampling_rate / _BIN_SIZE_DIVISOR))
-    parent._color_controls.bin_edit.setText(str(state.temporal_bin_size))
-    state.colocalization_threshold = _DEFAULT_CHANNEL_2_THRESHOLD
-    parent._color_controls.channel_2_edit.setText(str(state.colocalization_threshold))
+    parent.temporal_bin_size = max(1, int(context.tau * context.sampling_rate / CONFIG.bin_size_divisor))
+    parent._color_controls.bin_edit.setText(str(parent.temporal_bin_size))
+    parent.colocalization_threshold = CONFIG.default_channel_2_threshold
+    parent._color_controls.channel_2_edit.setText(str(parent.colocalization_threshold))
 
     # Enables buttons and menu items.
     _enable_views_and_classifier(parent=parent)
@@ -262,23 +266,27 @@ def _initialize_gui(parent: MainWindow) -> None:
     )
 
     # Computes color statistics and builds ROI index maps.
-    parent.color_arrays = compute_colors(context=context, state=state)
+    parent.color_arrays = compute_colors(
+        context=context,
+        roi_colormap=parent.roi_colormap,
+        colocalization_threshold=parent.colocalization_threshold,
+    )
     parent.roi_maps = init_roi_maps(context=context, color_arrays=parent.color_arrays)
 
     # Selects the first classified cell as the initial selection.
     first_cell = int(np.nonzero(context.cell_classification_labels)[0][0]) if context.cell_count > 0 else 0
-    state.selected_roi_index = first_cell
-    state.merge_roi_indices = [first_cell]
-    state.last_reclassified_index = first_cell
+    parent.selected_roi_index = first_cell
+    parent.merge_roi_indices = [first_cell]
+    parent.last_reclassified_index = first_cell
     parent._ichosen_stats()
-    parent._trace_controls.activity_combo.setCurrentIndex(_DEFAULT_ACTIVITY_MODE)
+    parent._trace_controls.activity_combo.setCurrentIndex(CONFIG.default_context_activity_mode)
 
     # Draws the colorbar and initial mask overlays.
-    parent.colorbar_image = draw_colorbar(colormap=state.roi_colormap)
+    parent.colorbar_image = draw_colorbar(colormap=parent.roi_colormap)
     if parent.colorbar_widgets is None or parent.colorbar_image is None:
         return
     render_colorbar(
-        state=state,
+        roi_color_mode=parent.roi_color_mode,
         color_arrays=parent.color_arrays,
         colorbar_widgets=parent.colorbar_widgets,
         colorbar_image=parent.colorbar_image,
@@ -287,9 +295,13 @@ def _initialize_gui(parent: MainWindow) -> None:
     tic = time.time()
     masks = draw_masks(
         context=context,
-        state=state,
         color_arrays=parent.color_arrays,
         roi_maps=parent.roi_maps,
+        roi_color_mode=parent.roi_color_mode,
+        background_view=parent.background_view,
+        roi_opacity=parent.roi_opacity,
+        selected_roi_index=parent.selected_roi_index,
+        merge_roi_indices=parent.merge_roi_indices,
     )
     display_masks(
         color1=parent._cells_overlay,
@@ -315,8 +327,8 @@ def _initialize_gui(parent: MainWindow) -> None:
         view1=parent._cells_background,
         view2=parent._noncells_background,
         views=parent.views,
-        view_index=state.background_view,
-        saturation=state.background_saturation,
+        view_index=parent.background_view,
+        saturation=parent.background_saturation,
     )
     plot_trace(
         trace_box=parent._trace_box,
@@ -324,22 +336,22 @@ def _initialize_gui(parent: MainWindow) -> None:
         neuropil_fluorescence=context.neuropil_fluorescence,
         spikes=context.spikes,
         frame_indices=parent.frame_indices,
-        merge_indices=state.merge_roi_indices,
-        activity_mode=state.trace_mode,
+        merge_indices=parent.merge_roi_indices,
+        activity_mode=parent.trace_mode,
     )
 
     # Sets aspect ratio on both panels.
     parent._cells_view_box.setAspectLocked(lock=True, ratio=context.aspect_ratio)
     parent._noncells_view_box.setAspectLocked(lock=True, ratio=context.aspect_ratio)
 
-    state.session_loaded = True
+    parent.session_loaded = True
 
     # Computes binned activity and triggers initial full redraw.
-    parent.mode_change(_DEFAULT_ACTIVITY_MODE)
+    parent.mode_change(CONFIG.default_context_activity_mode)
     parent.show()
 
 
-def _enable_views_and_classifier(parent: MainWindow) -> None:
+def _enable_views_and_classifier(parent: ROIEditor) -> None:
     """Enables all view, color, and selection buttons after data loading.
 
     Configures button styles, enables channel 2 views if available, and activates the
@@ -376,7 +388,7 @@ def _enable_views_and_classifier(parent: MainWindow) -> None:
     # Enables color mode buttons.
     color_button_count = len(parent._color_controls.color_buttons.buttons())
     for b in range(color_button_count):
-        if b == _CHANNEL_2_COLOR_INDEX:
+        if b == CONFIG.color_channel_2:
             if context.has_channel_2:
                 parent._color_controls.color_buttons.button(b).setEnabled(True)
                 parent._color_controls.color_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
@@ -384,7 +396,7 @@ def _enable_views_and_classifier(parent: MainWindow) -> None:
             parent._color_controls.color_buttons.button(b).setEnabled(True)
             parent._color_controls.color_buttons.button(b).setChecked(True)
             parent._color_controls.color_buttons.button(b).setStyleSheet(STYLE.button_pressed)
-        elif b < _BASIC_COLOR_COUNT:
+        elif b < CONFIG.basic_color_count:
             parent._color_controls.color_buttons.button(b).setEnabled(True)
             parent._color_controls.color_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
 
@@ -413,7 +425,7 @@ def _enable_views_and_classifier(parent: MainWindow) -> None:
     parent.resetDefault.setEnabled(True)
 
 
-def _select_directory(parent: MainWindow) -> Path | None:
+def _select_directory(parent: ROIEditor) -> Path | None:
     """Opens a directory dialog to select a cindra output directory.
 
     Args:
@@ -431,7 +443,7 @@ def _select_directory(parent: MainWindow) -> Path | None:
     return Path(name)
 
 
-def _load_again(parent: MainWindow, text: str) -> None:
+def _load_again(parent: ROIEditor, text: str) -> None:
     """Shows an error dialog and optionally reopens the directory selection dialog.
 
     Args:

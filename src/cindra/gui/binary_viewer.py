@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
 )
 
-from .context_data import RegistrationViewerData
+from .single_day_context import RegistrationViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

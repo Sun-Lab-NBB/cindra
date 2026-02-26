@@ -1,23 +1,33 @@
-"""Provides the ContextData dataclass that wraps pipeline data for GUI consumption."""
+"""Provides data hierarchies for single-day pipeline viewers.
+
+Contains ``ROIViewerData`` for ROI viewer and ROI editor consumption, and ``RegistrationViewerData`` for the
+registration quality viewer. Both classes delegate to ``RuntimeContext`` and ``CombinedData`` objects loaded from
+cindra pipeline output directories.
+"""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
 import numpy as np
+from PySide6.QtWidgets import QFileDialog
+from ataraxis_base_utilities import console
 
-from ...dataclasses import CombinedData, RuntimeContext
+from ..io import BinaryFile
+from ..dataclasses import CombinedData, RuntimeContext
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from numpy.typing import NDArray
 
-    from ...dataclasses import (
+    from ..dataclasses import (
+        IOData,
         ROIStatistics,
         BaselineMethod,
+        DetectionData,
         ExtractionData,
+        RegistrationData,
         SingleDayConfiguration,
     )
 
@@ -27,28 +37,36 @@ def _memory_map_trace(
     file_name: str,
     fallback: NDArray[np.float32] | None,
     default_shape: tuple[int, ...],
+    *,
+    mmap_mode: str = "r",
 ) -> NDArray[np.float32]:
-    """Memory-maps a trace array from disk with copy-on-write access.
+    """Memory-maps a trace array from disk.
 
-    Attempts to open the specified .npy file as a copy-on-write memory map. Falls back
-    to copying the provided array if the file does not exist, or returns a zero array
-    of the given shape if neither source is available.
+    Attempts to open the specified .npy file as a memory map with the given mode. Falls back to
+    returning a view or copy of the provided array (depending on the mode) if the file does not
+    exist, or returns a zero array of the given shape if neither source is available.
 
     Args:
         output_path: Directory containing the .npy file.
         file_name: Name of the .npy file to memory-map.
-        fallback: Array to copy if the file does not exist on disk.
+        fallback: Array to use if the file does not exist on disk.
         default_shape: Shape for a zero-initialized fallback array.
+        mmap_mode: Memory-map mode passed to ``np.load``. Use ``"r"`` for read-only access or
+            ``"c"`` for copy-on-write access.
 
     Returns:
-        The memory-mapped, copied, or zero-initialized array.
+        The memory-mapped, viewed/copied, or zero-initialized array.
     """
     if output_path is not None:
         path = output_path / file_name
         if path.exists():
-            mapped: NDArray[np.float32] = np.load(path, mmap_mode="c")
+            mapped: NDArray[np.float32] = np.load(path, mmap_mode=mmap_mode)
             return mapped
     if fallback is not None:
+        if mmap_mode == "r":
+            result: NDArray[np.float32] = fallback.view()
+            result.flags.writeable = False
+            return result
         return fallback.copy()
     return np.zeros(default_shape, dtype=np.float32)
 
@@ -57,27 +75,35 @@ def _memory_map_optional_trace(
     output_path: Path | None,
     file_name: str,
     fallback: NDArray[np.float32] | None,
+    *,
+    mmap_mode: str = "r",
 ) -> NDArray[np.float32] | None:
-    """Memory-maps an optional trace array from disk with copy-on-write access.
+    """Memory-maps an optional trace array from disk.
 
-    Attempts to open the specified .npy file as a copy-on-write memory map. Falls back
-    to copying the provided array if the file does not exist. Returns None if neither
-    source is available.
+    Attempts to open the specified .npy file as a memory map with the given mode. Falls back to
+    returning a view or copy of the provided array (depending on the mode) if the file does not
+    exist. Returns None if neither source is available.
 
     Args:
         output_path: Directory containing the .npy file.
         file_name: Name of the .npy file to memory-map.
-        fallback: Array to copy if the file does not exist on disk.
+        fallback: Array to use if the file does not exist on disk.
+        mmap_mode: Memory-map mode passed to ``np.load``. Use ``"r"`` for read-only access or
+            ``"c"`` for copy-on-write access.
 
     Returns:
-        The memory-mapped or copied array, or None if unavailable.
+        The memory-mapped or viewed/copied array, or None if unavailable.
     """
     if output_path is not None:
         path = output_path / file_name
         if path.exists():
-            mapped: NDArray[np.float32] = np.load(path, mmap_mode="c")
+            mapped: NDArray[np.float32] = np.load(path, mmap_mode=mmap_mode)
             return mapped
     if fallback is not None:
+        if mmap_mode == "r":
+            result: NDArray[np.float32] = fallback.view()
+            result.flags.writeable = False
+            return result
         return fallback.copy()
     return None
 
@@ -85,8 +111,8 @@ def _memory_map_optional_trace(
 def _release_trace_arrays(extraction: ExtractionData) -> None:
     """Releases large trace arrays from the extraction object to free memory.
 
-    Called after memory-mapping the same data from disk, so the in-memory copies held
-    by the extraction object are no longer needed.
+    Called after memory-mapping the same data from disk, so the in-memory copies held by the extraction object are no
+    longer needed.
 
     Args:
         extraction: The extraction data whose trace arrays will be set to None.
@@ -101,30 +127,24 @@ def _release_trace_arrays(extraction: ExtractionData) -> None:
 
 
 @dataclass
-class ContextData:
-    """Wraps imported single-day pipeline data for GUI consumption.
+class ROIViewerData:
+    """Wraps imported single-day pipeline data for ROI viewer and editor consumption.
 
-    Holds mutable copies of GUI-editable arrays and delegates read-only access to the
-    underlying context objects. Large trace arrays are memory-mapped from disk with
-    copy-on-write access to minimize memory usage.
+    Holds references to pipeline arrays and delegates access to the underlying context objects. Large trace arrays are
+    memory-mapped from disk to minimize memory usage. The ``mutable`` flag controls whether arrays are opened with
+    read-only or copy-on-write access.
 
     Notes:
-        Single-day data comes from ``RuntimeContext.load()`` which provides ``CombinedData``
-        containing detection images and extraction results.
+        Single-day data comes from ``RuntimeContext.load()`` which provides ``CombinedData`` containing detection images
+        and extraction results. Construct via the ``from_single_day`` or ``from_dialog`` factory methods.
     """
 
-    # Underlying contexts for all planes.
     contexts: list[RuntimeContext] = field(default_factory=list)
     """Single-day runtime contexts for all processed recording's imaging planes."""
 
-    # Combined data from the cindra output directory.
     combined: CombinedData | None = None
     """The combined single-day data for the active view."""
 
-    # Mutable trace arrays. These are memory-mapped from disk with copy-on-write access
-    # so the OS pages data in on demand without loading entire arrays into RAM. Merge
-    # operations can write to these arrays (copy-on-write pages are allocated in memory
-    # for modified regions only), and save_merge persists the results explicitly.
     roi_statistics: list[ROIStatistics] = field(default_factory=list)
     """Spatial and shape statistics for each detected ROI."""
 
@@ -157,23 +177,22 @@ class ContextData:
     """Determines whether channel 2 data is available."""
 
     not_merged: NDArray[np.bool_] = field(default_factory=lambda: np.array([], dtype=np.bool_))
-    """Boolean mask tracking which ROIs have not been merged into other ROIs."""
+    """Boolean mask tracking which ROIs have not been merged into other ROIs. Only populated when mutable=True."""
 
-    # Channel 2 traces (optional, memory-mapped when available).
     cell_fluorescence_channel_2: NDArray[np.float32] | None = None
     """Channel 2 cell fluorescence traces. None if single-channel."""
 
     neuropil_fluorescence_channel_2: NDArray[np.float32] | None = None
     """Channel 2 neuropil fluorescence traces. None if single-channel."""
 
-    # Private caches for memory-mapped subtracted fluorescence arrays.
+    _mutable: bool = field(init=False, default=False, repr=False)
+    """Determines whether arrays are opened with copy-on-write (True) or read-only (False) access."""
+
     _subtracted_fluorescence_map: NDArray[np.float32] | None = field(init=False, default=None, repr=False)
     """Cached memory-mapped channel 1 subtracted fluorescence."""
 
     _subtracted_fluorescence_channel_2_map: NDArray[np.float32] | None = field(init=False, default=None, repr=False)
     """Cached memory-mapped channel 2 subtracted fluorescence."""
-
-    # Read-only properties delegated to the combined data object.
 
     @property
     def frame_height(self) -> int:
@@ -486,42 +505,59 @@ class ContextData:
         return ""
 
     @classmethod
-    def from_single_day(cls, root_path: Path) -> ContextData:
-        """Loads single-day pipeline data into a ContextData wrapper.
+    def from_single_day(cls, root_path: Path, *, mutable: bool = False) -> ROIViewerData:
+        """Loads single-day pipeline data into an ROIViewerData wrapper.
 
-        Loads all planes via ``RuntimeContext.load()`` and the combined data from the root
-        cindra directory. Large trace arrays are memory-mapped from disk with copy-on-write
-        access rather than copied into RAM.
+        Loads all planes via ``RuntimeContext.load()`` and the combined data from the root cindra directory. Large trace
+        arrays are memory-mapped from disk rather than copied into RAM.
 
         Args:
             root_path: Root cindra output directory containing configuration.yaml.
+            mutable: Determines whether arrays are opened with copy-on-write access (True, for the ROI editor) or
+                read-only access (False, for the read-only ROI viewer).
 
         Returns:
-            A fully populated ContextData instance in single-day mode.
+            A fully populated ROIViewerData instance.
         """
-        # Loads all planes.
         contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
         if not isinstance(contexts, list):
             contexts = [contexts]
 
-        # Loads combined data and its extraction results.
         combined = CombinedData.load(root_path=root_path)
         combined.load_results(root_path=root_path)
 
         instance = cls(contexts=contexts, combined=combined)
-        instance._reload_mutable_arrays(combined=combined)
+        instance._mutable = mutable
+        instance._load_arrays(combined=combined)
         return instance
 
-    def _reload_mutable_arrays(self, combined: CombinedData | None) -> None:
-        """Reloads mutable arrays from the given combined data.
-
-        Large trace arrays (fluorescence, spikes) are memory-mapped from disk with
-        copy-on-write access to minimize memory usage. Small arrays (classification,
-        colocalization) are copied eagerly. After memory-mapping, the extraction object's
-        in-memory trace copies are released to avoid double-storing the data.
+    @classmethod
+    def from_dialog(cls, *, mutable: bool = False) -> ROIViewerData | None:
+        """Opens a file dialog to select a cindra output directory and loads data from it.
 
         Args:
-            combined: The source combined data to copy arrays from.
+            mutable: Determines whether arrays are opened with copy-on-write access (True, for the ROI editor) or
+                read-only access (False, for the read-only ROI viewer).
+
+        Returns:
+            A fully populated ROIViewerData instance, or None if the dialog was canceled.
+        """
+        name = QFileDialog.getExistingDirectory(caption="Open cindra output directory")
+        if not name:
+            return None
+
+        return cls.from_single_day(root_path=Path(name), mutable=mutable)
+
+    def _load_arrays(self, combined: CombinedData | None) -> None:
+        """Loads arrays from the given combined data using the current mutability mode.
+
+        Large trace arrays (fluorescence, spikes) are memory-mapped from disk. When mutable is False, arrays receive
+        read-only access; when True, copy-on-write access. Small arrays (classification, colocalization) are copied.
+        After memory-mapping, the extraction object's in-memory trace copies are released to avoid double-storing the
+        data.
+
+        Args:
+            combined: The source combined data to load arrays from.
         """
         self.combined = combined
 
@@ -530,8 +566,9 @@ class ContextData:
 
         extraction = combined.extraction
         output_path = self.output_path
+        mmap_mode = "c" if self._mutable else "r"
 
-        # Copies ROI statistics list (shallow copy; individual ROIStatistics are mutable).
+        # Copies ROI statistics list (shallow copy).
         if extraction.roi_statistics is not None:
             self.roi_statistics = list(extraction.roi_statistics)
         else:
@@ -540,24 +577,27 @@ class ContextData:
         roi_count = len(self.roi_statistics)
         default_trace_shape = (roi_count, 0)
 
-        # Memory-maps fluorescence traces with copy-on-write access.
+        # Memory-maps fluorescence traces.
         self.cell_fluorescence = _memory_map_trace(
             output_path=output_path,
             file_name="cell_fluorescence.npy",
             fallback=extraction.cell_fluorescence,
             default_shape=default_trace_shape,
+            mmap_mode=mmap_mode,
         )
         self.neuropil_fluorescence = _memory_map_trace(
             output_path=output_path,
             file_name="neuropil_fluorescence.npy",
             fallback=extraction.neuropil_fluorescence,
             default_shape=default_trace_shape,
+            mmap_mode=mmap_mode,
         )
         self.spikes = _memory_map_trace(
             output_path=output_path,
             file_name="spikes.npy",
             fallback=extraction.spikes,
             default_shape=default_trace_shape,
+            mmap_mode=mmap_mode,
         )
 
         # Memory-maps optional channel 2 traces.
@@ -565,39 +605,336 @@ class ContextData:
             output_path=output_path,
             file_name="cell_fluorescence_channel_2.npy",
             fallback=extraction.cell_fluorescence_channel_2,
+            mmap_mode=mmap_mode,
         )
         self.neuropil_fluorescence_channel_2 = _memory_map_optional_trace(
             output_path=output_path,
             file_name="neuropil_fluorescence_channel_2.npy",
             fallback=extraction.neuropil_fluorescence_channel_2,
+            mmap_mode=mmap_mode,
         )
 
-        # Invalidates memory-mapped subtracted fluorescence caches so the properties
-        # re-resolve from the current session's save path on next access.
+        # Invalidates memory-mapped subtracted fluorescence caches.
         self._subtracted_fluorescence_map = None
         self._subtracted_fluorescence_channel_2_map = None
 
-        # Releases large trace arrays from the extraction object now that the data is
-        # memory-mapped. Prevents double-storing traces across multi-day session switches.
+        # Releases large trace arrays from the extraction object.
         _release_trace_arrays(extraction=extraction)
 
         # Copies classification arrays (small, one value per ROI).
         if extraction.cell_classification is not None:
             self.cell_classification_probabilities = extraction.cell_classification[:, 0].copy()
             self.cell_classification_labels = extraction.cell_classification[:, 1].astype(np.bool_).copy()
+            if not self._mutable:
+                self.cell_classification_probabilities.flags.writeable = False
+                self.cell_classification_labels.flags.writeable = False
         else:
             self.cell_classification_probabilities = np.ones(roi_count, dtype=np.float32)
             self.cell_classification_labels = np.ones(roi_count, dtype=np.bool_)
+            if not self._mutable:
+                self.cell_classification_probabilities.flags.writeable = False
+                self.cell_classification_labels.flags.writeable = False
 
         # Copies colocalization arrays (small, one value per ROI).
         if extraction.cell_colocalization is not None:
             self.cell_colocalization_probabilities = extraction.cell_colocalization[:, 0].copy()
             self.cell_colocalization_labels = extraction.cell_colocalization[:, 1].astype(np.bool_).copy()
             self.has_channel_2 = True
+            if not self._mutable:
+                self.cell_colocalization_probabilities.flags.writeable = False
+                self.cell_colocalization_labels.flags.writeable = False
         else:
             self.cell_colocalization_probabilities = np.zeros(roi_count, dtype=np.float32)
             self.cell_colocalization_labels = np.zeros(roi_count, dtype=np.bool_)
             self.has_channel_2 = combined.detection.mean_image_channel_2 is not None
+            if not self._mutable:
+                self.cell_colocalization_probabilities.flags.writeable = False
+                self.cell_colocalization_labels.flags.writeable = False
 
-        # Initializes the not-merged mask.
-        self.not_merged = np.ones(roi_count, dtype=np.bool_)
+        # Initializes the not-merged mask (only meaningful for mutable mode).
+        if self._mutable:
+            self.not_merged = np.ones(roi_count, dtype=np.bool_)
+
+
+@dataclass
+class RegistrationViewerData:
+    """Wraps single-day per-plane registration data and serves it to the registration viewer GUI.
+
+    Stores the data from all imaging planes of the processed recording and supports switching between planes for
+    independent registration quality review, since each plane is processed and registered independently.
+
+    Notes:
+        The backing ``RuntimeContext`` instances are stored privately. All public properties delegate to the current
+        plane's ``IOData``, ``RegistrationData``, and ``DetectionData`` without exposing extraction, timing, or
+        configuration internals.
+
+        This class manages ``BinaryFile`` handles for the current plane. Call ``close()`` to release file handles when
+        the instance is no longer needed.
+    """
+
+    _contexts: list[RuntimeContext] = field(repr=False)
+    """The RuntimeContext instances for each registered imaging plane of the processed recording."""
+
+    _current_plane_index: int = 0
+    """The index of the plane whose data is currently displayed by the GUI application."""
+
+    _binary_file: BinaryFile | None = field(default=None, repr=False)
+    """Lazily opened BinaryFile for the current plane's primary registered binary."""
+
+    _binary_file_channel_2: BinaryFile | None = field(default=None, repr=False)
+    """Lazily opened BinaryFile for the current plane's channel 2 registered binary, or None if absent."""
+
+    @property
+    def current_plane_index(self) -> int:
+        """Returns the index of the plane whose data is currently displayed by the GUI application."""
+        return self._current_plane_index
+
+    @property
+    def plane_count(self) -> int:
+        """Returns the total number of imaging planes in the processed recording."""
+        return len(self._contexts)
+
+    @property
+    def plane_labels(self) -> list[str]:
+        """Returns display labels for all planes in the processed recording."""
+        return [f"Plane {context.runtime.io.plane_index}" for context in self._contexts]
+
+    @property
+    def frame_height(self) -> int:
+        """Returns the height of each frame in pixels for the current plane."""
+        return self._current_io.frame_height
+
+    @property
+    def frame_width(self) -> int:
+        """Returns the width of each frame in pixels for the current plane."""
+        return self._current_io.frame_width
+
+    @property
+    def frame_count(self) -> int:
+        """Returns the total number of frames written to the binary file for the current plane."""
+        return self._current_io.frame_count
+
+    @property
+    def sampling_rate(self) -> float:
+        """Returns the per-plane sampling rate in Hertz for the current plane."""
+        return self._current_io.sampling_rate
+
+    @property
+    def binary_file(self) -> BinaryFile:
+        """Returns a read-only BinaryFile for the current plane's primary registered binary.
+
+        The file is opened lazily on first access and cached until the next plane switch.
+        """
+        if self._binary_file is None:
+            path = self._current_io.registered_binary_path
+            if path is None or not path.is_file():
+                message = "No registered binary found for this plane."
+                console.error(message=message, error=FileNotFoundError)
+            self._binary_file = BinaryFile(
+                height=self.frame_height,
+                width=self.frame_width,
+                file_path=path,
+                read_only=True,
+            )
+        return self._binary_file
+
+    @property
+    def binary_file_channel_2(self) -> BinaryFile | None:
+        """Returns a read-only BinaryFile for the current plane's channel 2 registered binary, or None if absent."""
+        if self._binary_file_channel_2 is None:
+            path = self._current_io.registered_binary_path_channel_2
+            if path is None or not path.is_file():
+                return None
+            self._binary_file_channel_2 = BinaryFile(
+                height=self.frame_height,
+                width=self.frame_width,
+                file_path=path,
+                read_only=True,
+            )
+        return self._binary_file_channel_2
+
+    @property
+    def has_channel_2(self) -> bool:
+        """Determines whether a channel 2 registered binary exists for the current plane."""
+        path = self._current_io.registered_binary_path_channel_2
+        return path is not None and path.is_file()
+
+    @property
+    def has_nonrigid(self) -> bool:
+        """Determines whether nonrigid registration data exists for the current plane."""
+        return (
+            self._current_registration.nonrigid_y_offsets is not None
+            and self._current_registration.nonrigid_x_offsets is not None
+        )
+
+    @property
+    def recording_label(self) -> str:
+        """Returns the trailing components of the recording data path for display labels.
+
+        Starts with the last 3 path components and progressively reduces to 2, then 1, if the label exceeds 45
+        characters.
+        """
+        data_path = self._contexts[self._current_plane_index].configuration.file_io.data_path
+        if data_path is not None:
+            parts = data_path.parts
+            max_characters = 45
+            # Tries 3, then 2, then 1 trailing component(s) until the label fits.
+            for count in (3, 2, 1):
+                if len(parts) >= count:
+                    label = str(Path(*parts[-count:]))
+                    if len(label) <= max_characters:
+                        return label
+            return str(data_path.name)
+        return ""
+
+    @property
+    def output_path(self) -> Path | None:
+        """Returns the path to the plane-specific output directory where all results are saved."""
+        return self._current_io.output_path
+
+    @property
+    def rigid_y_offsets(self) -> NDArray[np.int32]:
+        """Returns the vertical (Y) translation offsets from rigid registration, one value per frame.
+
+        Returns a zero array with shape (frame_count,) when the underlying data is None.
+        """
+        offsets = self._current_registration.rigid_y_offsets
+        if offsets is not None:
+            return offsets
+        return np.zeros((self.frame_count,), dtype=np.int32)
+
+    @property
+    def rigid_x_offsets(self) -> NDArray[np.int32]:
+        """Returns the horizontal (X) translation offsets from rigid registration, one value per frame.
+
+        Returns a zero array with shape (frame_count,) when the underlying data is None.
+        """
+        offsets = self._current_registration.rigid_x_offsets
+        if offsets is not None:
+            return offsets
+        return np.zeros((self.frame_count,), dtype=np.int32)
+
+    @property
+    def nonrigid_y_offsets(self) -> NDArray[np.float32] | None:
+        """Returns the vertical (Y) translation offsets from nonrigid registration, per frame and per block."""
+        return self._current_registration.nonrigid_y_offsets
+
+    @property
+    def nonrigid_x_offsets(self) -> NDArray[np.float32] | None:
+        """Returns the horizontal (X) translation offsets from nonrigid registration, per frame and per block."""
+        return self._current_registration.nonrigid_x_offsets
+
+    @property
+    def nonrigid_rms(self) -> NDArray[np.float32] | None:
+        """Returns the pre-computed Root Mean Square of nonrigid offsets, or None when no nonrigid data exists.
+
+        Computed as ``sqrt(mean(y^2 + x^2, axis=1))``.
+        """
+        nonrigid_y = self._current_registration.nonrigid_y_offsets
+        nonrigid_x = self._current_registration.nonrigid_x_offsets
+        if nonrigid_y is None or nonrigid_x is None:
+            return None
+        return np.sqrt(np.mean(nonrigid_y.astype(np.float32) ** 2 + nonrigid_x.astype(np.float32) ** 2, axis=1)).astype(
+            np.float32
+        )
+
+    @property
+    def principal_component_extreme_images(self) -> NDArray[np.float32] | None:
+        """Returns the mean images from frames at extreme ends of each principal component.
+
+        The returned array has shape (2, num_components, height, width). Index 0 contains low-projection means,
+        index 1 contains high-projection means.
+        """
+        return self._current_registration.principal_component_extreme_images
+
+    @property
+    def principal_component_shift_metrics(self) -> NDArray[np.float32] | None:
+        """Returns the registration shift metrics computed by aligning PC extreme images.
+
+        The returned array has shape (num_components, 3). Column 0 contains mean rigid shift magnitude, column 1
+        contains mean nonrigid shift magnitude, and column 2 contains maximum nonrigid shift magnitude.
+        """
+        return self._current_registration.principal_component_shift_metrics
+
+    @property
+    def principal_component_projections(self) -> NDArray[np.float32] | None:
+        """Returns the projection of each frame onto the principal components of the registered movie.
+
+        The returned array has shape (num_frames, num_components).
+        """
+        return self._current_registration.principal_component_projections
+
+    @property
+    def principal_component_count(self) -> int:
+        """Returns the number of principal components used for registration quality metrics."""
+        return self._contexts[
+            self._current_plane_index
+        ].configuration.registration.registration_metric_principal_components
+
+    @property
+    def aspect_ratio(self) -> float:
+        """Returns the aspect ratio of detected ROIs, computed as vertical to horizontal diameter ratio."""
+        return self._current_detection.aspect_ratio
+
+    @classmethod
+    def from_recording(cls, root_path: Path) -> RegistrationViewerData:
+        """Loads the registration data for all imaging planes of the target recording for registration review.
+
+        Args:
+            root_path: The path to the root single-day pipeline output directory for the processed recording.
+
+        Returns:
+            A fully populated RegistrationViewerData instance.
+        """
+        contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
+        if not isinstance(contexts, list):
+            contexts = [contexts]
+        return cls(_contexts=contexts)
+
+    def switch_plane(self, plane_index: int) -> None:
+        """Switches the data view to a different imaging plane.
+
+        Closes any open BinaryFile handles for the previous plane so they reopen lazily for the new plane.
+
+        Args:
+            plane_index: The index of the plane to switch to.
+
+        Raises:
+            ValueError: If the index is out of range.
+        """
+        if plane_index < 0 or plane_index >= len(self._contexts):
+            message = (
+                f"Unable to switch the registration viewer to plane {plane_index}. Valid range is 0 to "
+                f"{len(self._contexts) - 1}."
+            )
+            console.error(message=message, error=ValueError)
+        self._close_binary_files()
+        self._current_plane_index = plane_index
+
+    def close(self) -> None:
+        """Closes any open BinaryFile handles managed by this instance."""
+        self._close_binary_files()
+
+    def _close_binary_files(self) -> None:
+        """Closes and resets cached BinaryFile handles."""
+        if self._binary_file is not None:
+            self._binary_file.close()
+            self._binary_file = None
+        if self._binary_file_channel_2 is not None:
+            self._binary_file_channel_2.close()
+            self._binary_file_channel_2 = None
+
+    @property
+    def _current_io(self) -> IOData:
+        """Returns the IOData instance for the currently selected plane."""
+        return self._contexts[self._current_plane_index].runtime.io
+
+    @property
+    def _current_registration(self) -> RegistrationData:
+        """Returns the RegistrationData instance for the currently selected plane."""
+        return self._contexts[self._current_plane_index].runtime.registration
+
+    @property
+    def _current_detection(self) -> DetectionData:
+        """Returns the DetectionData instance for the currently selected plane."""
+        return self._contexts[self._current_plane_index].runtime.detection
