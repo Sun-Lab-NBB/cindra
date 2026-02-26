@@ -23,6 +23,7 @@ from .multi_day_configuration import ReferenceImageType, MultiDayConfiguration
 from .single_day_configuration import (
     Main,
     FileIO,
+    PipelineType,
     ROIDetection,
     Registration,
     BaselineMethod,
@@ -33,6 +34,7 @@ from .single_day_configuration import (
     AcquisitionParameters,
     OnePhotonRegistration,
     SingleDayConfiguration,
+    detect_pipeline_type,
 )
 
 __all__ = [
@@ -53,6 +55,7 @@ __all__ = [
     "MultiDayTrackingData",
     "NonrigidRegistration",
     "OnePhotonRegistration",
+    "PipelineType",
     "ROIDetection",
     "ROIStatistics",
     "ReferenceImageType",
@@ -65,6 +68,7 @@ __all__ = [
     "SingleDayRuntimeData",
     "SpikeDeconvolution",
     "TimingData",
+    "detect_pipeline_type",
     "python_version",
     "version",
 ]

@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 from matplotlib.colors import hsv_to_rgb
 
-from .context_data import MaskLayer, BackgroundImage, CoordinateSpace, TrackingViewerData
+from .multi_day_context import MaskLayer, BackgroundImage, CoordinateSpace, TrackingViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

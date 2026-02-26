@@ -1,9 +1,9 @@
-"""Provides constants, enumerations, and style definitions for the ROI viewer."""
+"""Provides constants, enumerations, and style definitions shared by the ROI viewer and ROI editor."""
 
 from __future__ import annotations
 
 from enum import IntEnum
-from dataclasses import dataclass, field
+from dataclasses import field, dataclass
 
 from PySide6 import QtGui
 
@@ -102,8 +102,8 @@ class ROIToolPanel(IntEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class _ROIViewerStyle:
-    """Encapsulates visual and dimensional constants for the ROI viewer window."""
+class _ViewerStyle:
+    """Encapsulates visual and dimensional constants shared by the ROI viewer and editor windows."""
 
     main_window: str = "QMainWindow {background: 'black';}"
     """Stylesheet applied to the main window background."""
@@ -167,6 +167,8 @@ class _ROIViewerStyle:
     """Number of rows in the colorbar image."""
     quadrant_columns: int = 3
     """Number of columns in the quadrant grid."""
+    save_button_width: int = 100
+    """Fixed width for the save-and-quit button in the ROI draw editor."""
 
     def label_font(self) -> QtGui.QFont:
         """Creates the standard label font (Arial 8pt).
@@ -213,7 +215,7 @@ class _ROIViewerStyle:
         # noinspection PyArgumentList
         return QtGui.QFont(family=self.alternative_font_family, pointSize=8, weight=QtGui.QFont.Weight.Bold)
 
-    def mergelabel_font(self) -> QtGui.QFont:
+    def merge_label_font(self) -> QtGui.QFont:
         """Creates the font for merge dialog parameter labels (Times bold).
 
         Returns:
@@ -223,13 +225,13 @@ class _ROIViewerStyle:
         return QtGui.QFont(family=self.alternative_font_family, weight=QtGui.QFont.Weight.Bold)
 
 
-STYLE: _ROIViewerStyle = _ROIViewerStyle()
-"""Module-level singleton providing all ROI viewer style constants."""
+STYLE: _ViewerStyle = _ViewerStyle()
+"""Module-level singleton providing all viewer style constants."""
 
 
 @dataclass(frozen=True, slots=True)
-class _ROIViewerConfig:
-    """Encapsulates behavioral and algorithmic constants for the ROI viewer."""
+class _ViewerConfig:
+    """Encapsulates behavioral and algorithmic constants shared by the ROI viewer and editor."""
 
     # Overlay constants.
     overlap_layers: int = 3
@@ -254,6 +256,8 @@ class _ROIViewerConfig:
     """HSV transform normalization divisor."""
     hsv_offset: float = 0.4
     """HSV transform normalization offset."""
+    flip_threshold: int = 100
+    """Minimum number of changed cells before incremental flip is used over full reinit."""
 
     # Color constants.
     colormaps: tuple[str, ...] = (
@@ -271,6 +275,17 @@ class _ROIViewerConfig:
     )
     """Available colormaps for the colormap chooser."""
     color_names: tuple[str, ...] = (
+        "A: random",
+        "S: skew",
+        "D: compact",
+        "F: footprint",
+        "G: aspect_ratio",
+        "H: chan2_prob",
+        "J: classifier, cell prob=",
+        "K: correlations, bin=",
+    )
+    """Color statistic names displayed on the color buttons (with keyboard shortcut prefixes)."""
+    color_short_names: tuple[str, ...] = (
         "random",
         "skew",
         "compact",
@@ -280,7 +295,7 @@ class _ROIViewerConfig:
         "classifier, cell prob=",
         "correlations, bin=",
     )
-    """Color statistic names displayed on the color buttons."""
+    """Short color statistic names without keyboard shortcut prefixes."""
     color_narrow_range_start: int = 5
     """Starting index of the color buttons that require the adjacent edit field column."""
     color_narrow_range_end: int = 8
@@ -306,6 +321,16 @@ class _ROIViewerConfig:
     view_count: int = 7
     """Number of background view types available."""
     view_names: tuple[str, ...] = (
+        "Q: ROIs",
+        "W: mean img",
+        "E: mean img (enhanced)",
+        "R: correlation map",
+        "T: max projection",
+        "Y: mean img chan2, corr",
+        "U: mean img chan2",
+    )
+    """Names displayed on view selection buttons (with keyboard shortcut prefixes)."""
+    view_short_names: tuple[str, ...] = (
         "ROIs",
         "mean img",
         "mean img (enhanced)",
@@ -314,7 +339,7 @@ class _ROIViewerConfig:
         "mean img chan2, corr",
         "mean img chan2",
     )
-    """Names displayed on view selection buttons."""
+    """Short view names without keyboard shortcut prefixes."""
 
     # Trace constants.
     default_activity_mode: int = 3
@@ -371,7 +396,49 @@ class _ROIViewerConfig:
     """Default colocalization threshold for channel 2 data."""
     bin_size_divisor: int = 2
     """Divisor for computing the temporal bin size from tau * sampling_rate."""
+    basic_color_count: int = 8
+    """Number of basic (non-dynamic) color mode buttons."""
+    default_context_activity_mode: int = 2
+    """Default activity mode index used during context loading (neuropil-corrected)."""
+
+    # Classifier constants.
+    classifier_color_index: int = 6
+    """Index of the classifier probability color mode in the color button group."""
+    classification_features: tuple[str, ...] = ("normalized_pixel_count", "compactness", "skewness")
+    """Feature names used by the classifier, matching ROIStatistics attribute names."""
+
+    # ROI draw editor constants.
+    image_percentile_low: int = 1
+    """Percentile range lower bound used for image normalization in the draw editor."""
+    image_percentile_high: int = 99
+    """Percentile range upper bound used for image normalization in the draw editor."""
+    draw_view_count: int = 4
+    """Number of reference images available in the draw editor (mean, enhanced, correlation, max projection)."""
+    max_diameter_fraction: float = 0.2
+    """Maximum fraction of field of view used as the default ROI diameter."""
+    min_diameter: int = 3
+    """Minimum ROI diameter in pixels."""
+    reference_roi_count: int = 100
+    """Number of reference ROIs used for normalized pixel count computation."""
+    roi_pen_width: int = 3
+    """Pen width for ROI ellipse outlines in the draw editor."""
+    roi_position_offset: int = 5
+    """Default initial position offset for the ROI ellipse in the draw editor."""
+    correlation_map_view_index: int = 2
+    """View index for the correlation map in the draw editor reference image selector."""
+
+    # Merge constants.
+    sentinel_distance: float = 1e6
+    """Large sentinel distance used to initialize the distance matrix upper triangle."""
+    correlation_epsilon: float = 1e-3
+    """Small epsilon added to denominators to prevent division by zero in merge computations."""
+    default_correlation_threshold: float = 0.8
+    """Default correlation threshold for automated merge suggestions."""
+    default_distance_threshold: float = 100.0
+    """Default euclidean distance threshold for automated merge suggestions."""
+    scatter_pen_width: int = 3
+    """Scatter plot pen width for merge suggestion visualization."""
 
 
-CONFIG: _ROIViewerConfig = _ROIViewerConfig()
-"""Module-level singleton providing all ROI viewer behavioral constants."""
+CONFIG: _ViewerConfig = _ViewerConfig()
+"""Module-level singleton providing all viewer behavioral constants."""

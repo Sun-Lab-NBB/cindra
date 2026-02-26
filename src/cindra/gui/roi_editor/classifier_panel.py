@@ -5,7 +5,6 @@ from __future__ import annotations
 import shutil
 from typing import TYPE_CHECKING
 from pathlib import Path
-from dataclasses import dataclass
 
 import numpy as np
 from PySide6.QtWidgets import (
@@ -23,69 +22,18 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import STYLE, label_font, label_font_bold
-from .roi_overlays import rgb_masks, istat_transform
+from ..constants import STYLE, CONFIG
+from ..overlays import rgb_masks, istat_transform
 from ...classification import Classifier
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from .viewer import MainWindow
-    from .signals import GUISignals
-
-_CLASSIFIER_COLOR_INDEX: int = 6
-"""The index of the classifier probability color mode in the color button group."""
-
-_CLASSIFICATION_FEATURES: tuple[str, ...] = ("normalized_pixel_count", "compactness", "skewness")
-"""The feature names used by the classifier, matching ROIStatistics attribute names."""
+    from .viewer import ROIEditor
+    from ..data_models import ClassifierControls
 
 
-@dataclass
-class ClassifierControls:
-    """Holds references to classifier section widgets.
-
-    Attributes:
-        classifier_label: Label displaying the current classifier name or status.
-        add_to_class_button: Button for adding the current session data to the classifier.
-    """
-
-    classifier_label: QLabel
-    add_to_class_button: QPushButton
-
-
-def create_classifier_controls(
-    owner: QWidget,  # noqa: ARG001
-    signals: GUISignals,  # noqa: ARG001
-) -> tuple[QGroupBox, ClassifierControls]:
-    """Creates the classifier section inside a group box.
-
-    Args:
-        owner: The parent widget for ownership of created widgets.
-        signals: The central signal bus for GUI events (reserved for future use).
-
-    Returns:
-        Tuple of (group box, classifier controls container).
-    """
-    group_box = QGroupBox("Classifier")
-    group_box.setStyleSheet("QGroupBox { color: white; }")
-    layout = QVBoxLayout(group_box)
-
-    classifier_label = QLabel("<font color='white'>not loaded (using prob from cell_classification.npy)</font>")
-    classifier_label.setFont(label_font())
-    layout.addWidget(classifier_label)
-
-    add_to_class_button = QPushButton(" add current data to classifier")
-    add_to_class_button.setFont(label_font_bold())
-    add_to_class_button.setStyleSheet(STYLE.button_inactive)
-    layout.addWidget(add_to_class_button)
-
-    return group_box, ClassifierControls(
-        classifier_label=classifier_label,
-        add_to_class_button=add_to_class_button,
-    )
-
-
-def load_classifier(parent: MainWindow) -> None:
+def load_classifier(parent: ROIEditor) -> None:
     """Opens a file dialog to load a custom classifier file.
 
     Args:
@@ -99,7 +47,7 @@ def load_classifier(parent: MainWindow) -> None:
         console.echo(message="No classifier file selected.", level=LogLevel.WARNING)
 
 
-def load_cindra_classifier(parent: MainWindow) -> None:
+def load_cindra_classifier(parent: ROIEditor) -> None:
     """Loads the built-in cindra classifier.
 
     Args:
@@ -110,7 +58,7 @@ def load_cindra_classifier(parent: MainWindow) -> None:
     parent.saveDefault.setEnabled(True)
 
 
-def load_default_classifier(parent: MainWindow) -> None:
+def load_default_classifier(parent: ROIEditor) -> None:
     """Loads the user's default classifier.
 
     Args:
@@ -120,7 +68,7 @@ def load_default_classifier(parent: MainWindow) -> None:
     _class_activated(parent=parent)
 
 
-def class_default(parent: MainWindow) -> None:
+def class_default(parent: ROIEditor) -> None:
     """Saves the current classifier as the user's default after confirmation.
 
     Args:
@@ -136,7 +84,7 @@ def class_default(parent: MainWindow) -> None:
         shutil.copy(parent.classfile, parent.classuser)
 
 
-def reset_default(parent: MainWindow) -> None:
+def reset_default(parent: ROIEditor) -> None:
     """Resets the user's default classifier to the built-in cindra version.
 
     Args:
@@ -152,7 +100,7 @@ def reset_default(parent: MainWindow) -> None:
         shutil.copy(parent.classorig, parent.classuser)
 
 
-def load_list(parent: MainWindow) -> None:
+def load_list(parent: ROIEditor) -> None:
     """Opens the classifier training file chooser dialog.
 
     Args:
@@ -162,7 +110,7 @@ def load_list(parent: MainWindow) -> None:
     _ = chooser.exec()
 
 
-def activate(parent: MainWindow, inactive: bool) -> None:
+def activate(parent: ROIEditor, inactive: bool) -> None:
     """Applies the loaded classifier to compute cell probabilities and update masks.
 
     Args:
@@ -176,7 +124,7 @@ def activate(parent: MainWindow, inactive: bool) -> None:
     parent.update_plot()
 
 
-def disable(parent: MainWindow) -> None:
+def disable(parent: ROIEditor) -> None:
     """Disables all classifier controls.
 
     Args:
@@ -200,7 +148,7 @@ class ListChooser(QDialog):
         parent: The parent widget.
     """
 
-    def __init__(self, text: str, parent: MainWindow | None = None) -> None:
+    def __init__(self, text: str, parent: ROIEditor | None = None) -> None:
         super().__init__(parent)
         self.setGeometry(300, 300, 500, 320)
         self.setWindowTitle(text)
@@ -277,7 +225,7 @@ class ListChooser(QDialog):
                 QMessageBox.information(self, "Error", "not a text file")
                 console.echo(message="Failed to load text file: invalid file format.", level=LogLevel.ERROR)
 
-    def _build_classifier(self, parent: MainWindow) -> None:
+    def _build_classifier(self, parent: ROIEditor) -> None:
         """Builds a classifier from the selected training files."""
         parent.trainfiles = []
         for item in self.list.selectedItems():
@@ -303,7 +251,7 @@ class ListChooser(QDialog):
                 "No valid datasets chosen to build classifier, classifier not built.",
             )
 
-    def _apply_class(self, parent: MainWindow) -> None:
+    def _apply_class(self, parent: ROIEditor) -> None:
         """Loads the built classifier into the GUI and applies it."""
         try:
             parent.model = Classifier(classifier_path=Path(parent.classfile))
@@ -311,7 +259,7 @@ class ListChooser(QDialog):
         except (ValueError, FileNotFoundError, OSError) as error:
             console.echo(message=f"Failed to load classifier: {error}", level=LogLevel.ERROR)
 
-    def _save_default(self, parent: MainWindow) -> None:
+    def _save_default(self, parent: ROIEditor) -> None:
         """Saves the current classifier as the user's default."""
         result = QMessageBox.question(
             self,
@@ -327,7 +275,7 @@ class ListChooser(QDialog):
         self.accept()
 
 
-def _class_file(parent: MainWindow) -> None:
+def _class_file(parent: ROIEditor) -> None:
     """Updates the classifier label text to show the current classifier name.
 
     Args:
@@ -342,7 +290,7 @@ def _class_file(parent: MainWindow) -> None:
     parent._classifier_controls.classifier_label.setText(f"<font color='white'>{classifier_name}</font>")
 
 
-def _class_activated(parent: MainWindow) -> None:
+def _class_activated(parent: ROIEditor) -> None:
     """Updates the GUI state after a classifier is loaded.
 
     Args:
@@ -354,7 +302,7 @@ def _class_activated(parent: MainWindow) -> None:
     parent._classifier_controls.add_to_class_button.setEnabled(True)
 
 
-def _load_model(parent: MainWindow, name: str) -> None:
+def _load_model(parent: ROIEditor, name: str) -> None:
     """Loads a classifier model from an .npz file.
 
     Args:
@@ -392,7 +340,7 @@ def _save_model(
 
 
 def _load_data(
-    parent: MainWindow,
+    parent: ROIEditor,
     trainfiles: list[str],
 ) -> bool:
     """Loads training data from multiple cell_classification.npy files and builds a classifier.
@@ -408,7 +356,7 @@ def _load_data(
     Returns:
         True if the classifier was successfully built and saved.
     """
-    feature_count = len(_CLASSIFICATION_FEATURES)
+    feature_count = len(CONFIG.classification_features)
     train_stats = np.zeros((0, feature_count), dtype=np.float32)
     train_labels = np.zeros((0,), dtype=np.bool_)
     trainfiles_good = []
@@ -444,7 +392,7 @@ def _load_data(
                     labels = classification_data[:, 0].astype(np.bool_)
                     stat_values = np.reshape(
                         np.array(
-                            [stat[j][k] for j in range(len(stat)) for k in _CLASSIFICATION_FEATURES],
+                            [stat[j][k] for j in range(len(stat)) for k in CONFIG.classification_features],
                         ),
                         (len(stat), -1),
                     ).astype(np.float32)
@@ -475,7 +423,7 @@ def _load_data(
     return loaded
 
 
-def _add_to(parent: MainWindow) -> None:
+def _add_to(parent: ROIEditor) -> None:
     """Adds the current session data to the loaded classifier.
 
     Extracts classification features from the current session's ROI statistics, appends them to
@@ -532,7 +480,7 @@ def _add_to(parent: MainWindow) -> None:
 
 
 def _save_classifier(
-    parent: MainWindow,
+    parent: ROIEditor,
     feature_matrix: NDArray[np.float32],
     training_labels: NDArray[np.bool_],
 ) -> tuple[str, bool]:
@@ -555,7 +503,7 @@ def _save_classifier(
             _save_model(
                 name=name,
                 training_labels=training_labels,
-                feature_names=_CLASSIFICATION_FEATURES,
+                feature_names=CONFIG.classification_features,
                 feature_matrix=feature_matrix,
             )
             saved = True
@@ -564,7 +512,7 @@ def _save_classifier(
     return name, saved
 
 
-def _save_list(parent: MainWindow) -> None:
+def _save_list(parent: ROIEditor) -> None:
     """Saves the list of training file paths to a text file.
 
     Args:
@@ -581,7 +529,7 @@ def _save_list(parent: MainWindow) -> None:
             console.echo(message="Failed to save list: incorrect filename.", level=LogLevel.ERROR)
 
 
-def _class_masks(parent: MainWindow) -> None:
+def _class_masks(parent: ROIEditor) -> None:
     """Computes and applies the classifier probability color overlay.
 
     Args:
@@ -590,7 +538,7 @@ def _class_masks(parent: MainWindow) -> None:
     if parent.context_data is None or parent.color_arrays is None or parent.roi_maps is None:
         return
     istat = parent.context_data.cell_classification_probabilities.copy()
-    parent.color_arrays.colorbar[_CLASSIFIER_COLOR_INDEX] = [
+    parent.color_arrays.colorbar[CONFIG.classifier_color_index] = [
         float(istat.min()),
         float((istat.max() - istat.min()) / 2),
         float(istat.max()),
@@ -599,12 +547,12 @@ def _class_masks(parent: MainWindow) -> None:
     istat_max = istat.max()
     if istat_max > 0:
         istat = istat / istat_max
-    color = istat_transform(istat=istat, colormap=parent.view_state.roi_colormap)
-    parent.color_arrays.cols[_CLASSIFIER_COLOR_INDEX] = color
-    parent.color_arrays.istat[_CLASSIFIER_COLOR_INDEX] = istat.flatten()
+    color = istat_transform(istat=istat, colormap=parent.roi_colormap)
+    parent.color_arrays.cols[CONFIG.classifier_color_index] = color
+    parent.color_arrays.istat[CONFIG.classifier_color_index] = istat.flatten()
     rgb_masks(
         color_arrays=parent.color_arrays,
         roi_maps=parent.roi_maps,
         color=color,
-        color_index=_CLASSIFIER_COLOR_INDEX,
+        color_index=CONFIG.classifier_color_index,
     )

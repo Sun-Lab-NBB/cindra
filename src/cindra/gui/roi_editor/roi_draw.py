@@ -26,7 +26,7 @@ from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
 from ...io import BinaryFile
-from .styles import STYLE, label_font_bold
+from ..constants import STYLE, CONFIG
 from ...extraction import (
     create_masks,
     apply_oasis_deconvolution,
@@ -34,45 +34,16 @@ from ...extraction import (
     extract_fluorescence_traces,
 )
 from ...detection.roi_statistics import compute_roi_statistics
+from ..widgets import _DrawViewButton
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
     from PySide6.QtGui import QKeyEvent, QCloseEvent
 
-    from .viewer import MainWindow
-
-_IMAGE_PERCENTILE_LOW: int = 1
-"""The percentile range lower bound used for image normalization."""
-
-_IMAGE_PERCENTILE_HIGH: int = 99
-"""The percentile range upper bound used for image normalization."""
-
-_VIEW_COUNT: int = 4
-"""The number of reference images available (mean, enhanced, correlation, max projection)."""
-
-_MAX_DIAMETER_FRACTION: float = 0.2
-"""The maximum fraction of field of view used as the default ROI diameter."""
-
-_MIN_DIAMETER: int = 3
-"""The minimum ROI diameter in pixels."""
-
-_REFERENCE_ROI_COUNT: int = 100
-"""The number of reference ROIs used for normalized pixel count computation."""
-
-_ROI_PEN_WIDTH: int = 3
-"""The pen width for ROI ellipse outlines."""
-
-_ROI_POSITION_OFFSET: int = 5
-"""The default initial position offset for the ROI ellipse."""
-
-_CORRELATION_MAP_VIEW_INDEX: int = 2
-"""The view index for the correlation map in the reference image selector."""
+    from .viewer import ROIEditor
 
 _random_generator: np.random.Generator = np.random.default_rng()
 """The random number generator for consistent ROI color assignment."""
-
-_SAVE_BUTTON_WIDTH: int = 100
-"""The fixed width for the save-and-quit button."""
 
 
 def _extract_masks_and_traces(
@@ -173,7 +144,7 @@ def _extract_masks_and_traces(
     )
     for index in range(len(manual_stat)):
         manual_stat[index]["normalized_pixel_count"] = manual_stat[index]["pixel_count"] / np.mean(
-            pixel_counts[:_REFERENCE_ROI_COUNT],
+            pixel_counts[:CONFIG.reference_roi_count],
         )
         manual_stat[index]["compactness"] = 1
         manual_stat[index]["footprint"] = 2
@@ -233,7 +204,7 @@ class ROIDraw(QMainWindow):
         parent: The main GUI window containing session data.
     """
 
-    def __init__(self, parent: MainWindow) -> None:
+    def __init__(self, parent: ROIEditor) -> None:
         super().__init__(parent)
         pg.setConfigOptions(imageAxisOrder="row-major")
         self._parent = parent
@@ -273,14 +244,14 @@ class ROIDraw(QMainWindow):
         self._grid_layout.addWidget(remove_label, 1, 0, 1, 4)
 
         self._add_roi_button = QPushButton("add ROI")
-        self._add_roi_button.setFont(label_font_bold())
+        self._add_roi_button.setFont(STYLE.label_font_bold())
         self._add_roi_button.clicked.connect(lambda: self._add_roi(position=None))
         self._add_roi_button.setEnabled(True)
         self._add_roi_button.setFixedWidth(STYLE.medium_edit_width)
         self._add_roi_button.setStyleSheet(STYLE.button_unpressed)
         self._grid_layout.addWidget(self._add_roi_button, 2, 0, 1, 1)
         diameter_label = QLabel("diameter:")
-        diameter_label.setFont(label_font_bold())
+        diameter_label.setFont(STYLE.label_font_bold())
         diameter_label.setStyleSheet(STYLE.white_label)
         diameter_label.setFixedWidth(STYLE.medium_edit_width)
         self._grid_layout.addWidget(diameter_label, 2, 1, 1, 1)
@@ -294,7 +265,7 @@ class ROIDraw(QMainWindow):
         self._cell_positions: list = []
         self._extracted: bool = False
         self._extract_button = QPushButton("extract ROIs")
-        self._extract_button.setFont(label_font_bold())
+        self._extract_button.setFont(STYLE.label_font_bold())
         self._extract_button.setStyleSheet(STYLE.button_unpressed)
         self._extract_button.setCheckable(False)
         self._extract_button.clicked.connect(self._process_rois)
@@ -304,10 +275,10 @@ class ROIDraw(QMainWindow):
 
         self._save_gui: bool = False
         self._save_button = QPushButton("Save and Quit")
-        self._save_button.setFont(label_font_bold())
+        self._save_button.setFont(STYLE.label_font_bold())
         self._save_button.clicked.connect(self._close_and_save)
         self._save_button.setEnabled(False)
-        self._save_button.setFixedWidth(_SAVE_BUTTON_WIDTH)
+        self._save_button.setFixedWidth(STYLE.save_button_width)
         self._save_button.setStyleSheet(STYLE.button_unpressed)
         self._grid_layout.addWidget(self._save_button, 0, 5, 1, 1)
 
@@ -320,7 +291,13 @@ class ROIDraw(QMainWindow):
         ]
         self._view_buttons = QButtonGroup(self)
         for button_index, name in enumerate(self._view_names):
-            button = _ViewButton(button_index=button_index, text=f"&{name}", parent=self)
+            button = _DrawViewButton(
+                button_id=button_index,
+                text=f"&{name}",
+                owner=self,
+                button_group=self._view_buttons,
+                on_press=self._on_view_change,
+            )
             self._view_buttons.addButton(button, button_index)
             self._grid_layout.addWidget(button, button_index, 4, 1, 1)
             button.setEnabled(True)
@@ -350,6 +327,16 @@ class ROIDraw(QMainWindow):
         self._frame_indices: NDArray | None = None
         self._y_minimum: float = 0.0
         self._y_maximum: float = 0.0
+
+    def _on_view_change(self, button_index: int) -> None:
+        """Switches the displayed reference image to the view at the given index.
+
+        Args:
+            button_index: Index of the view to display.
+        """
+        self._image_item.setImage(self._masked_images[:, :, :, button_index])
+        self._plot_widget.show()
+        self.show()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Handles window close, prompting to save if needed."""
@@ -451,7 +438,7 @@ class ROIDraw(QMainWindow):
         )
 
         # Reloads the session data after saving. Requires roi_editor modernization to use
-        # ContextData instead of the old dict-based self._parent.ops / self._parent.stat API.
+        # ROIViewerData instead of the old dict-based self._parent.ops / self._parent.stat API.
         self._save_gui = True
         self.close()
 
@@ -461,7 +448,7 @@ class ROIDraw(QMainWindow):
         Returns:
             Array of shape (height, width, 3, 4) containing RGBA images for each view.
         """
-        masked_images = np.zeros((self._frame_height, self._frame_width, 3, _VIEW_COUNT))
+        masked_images = np.zeros((self._frame_height, self._frame_width, 3, CONFIG.draw_view_count))
         valid_y = slice(
             self._parent.ops["valid_y_range"][0],  # type: ignore[attr-defined]
             self._parent.ops["valid_y_range"][1],  # type: ignore[attr-defined]
@@ -471,19 +458,19 @@ class ROIDraw(QMainWindow):
             self._parent.ops["valid_x_range"][1],  # type: ignore[attr-defined]
         )
 
-        for view_index in range(_VIEW_COUNT):
+        for view_index in range(CONFIG.draw_view_count):
             reference_image = np.zeros((self._frame_height, self._frame_width), dtype=np.float32)
             if view_index == 0:
                 reference_image[valid_y, valid_x] = self._parent.ops["mean_image"][valid_y, valid_x]  # type: ignore[attr-defined]
             elif view_index == 1:
                 reference_image[valid_y, valid_x] = self._parent.ops["enhanced_mean_image"][valid_y, valid_x]  # type: ignore[attr-defined]
-            elif view_index == _CORRELATION_MAP_VIEW_INDEX:
+            elif view_index == CONFIG.correlation_map_view_index:
                 reference_image[valid_y, valid_x] = self._parent.ops["correlation_map"]  # type: ignore[attr-defined]
             elif "max_proj" in self._parent.ops:  # type: ignore[attr-defined]
                 reference_image[valid_y, valid_x] = self._parent.ops["maximum_projection"]  # type: ignore[attr-defined]
 
-            low_percentile = np.percentile(reference_image, _IMAGE_PERCENTILE_LOW)
-            high_percentile = np.percentile(reference_image, _IMAGE_PERCENTILE_HIGH)
+            low_percentile = np.percentile(reference_image, CONFIG.image_percentile_low)
+            high_percentile = np.percentile(reference_image, CONFIG.image_percentile_high)
             reference_image = (reference_image - low_percentile) / (high_percentile - low_percentile)
             reference_image = np.maximum(0, np.minimum(1, reference_image))
             masked_images[:, :, :, view_index] = self._create_cell_overlay(mean_image=reference_image)
@@ -532,16 +519,16 @@ class ROIDraw(QMainWindow):
                 self._roi_list[self._current_roi_index].remove(parent=self)
             elif event.key() == QtCore.Qt.Key.Key_W:
                 self._view_buttons.button(0).setChecked(True)
-                cast("_ViewButton", self._view_buttons.button(0)).press(parent=self, button_index=0)
+                cast("_DrawViewButton", self._view_buttons.button(0))._press()
             elif event.key() == QtCore.Qt.Key.Key_E:
                 self._view_buttons.button(1).setChecked(True)
-                cast("_ViewButton", self._view_buttons.button(1)).press(parent=self, button_index=1)
+                cast("_DrawViewButton", self._view_buttons.button(1))._press()
             elif event.key() == QtCore.Qt.Key.Key_R:
                 self._view_buttons.button(2).setChecked(True)
-                cast("_ViewButton", self._view_buttons.button(2)).press(parent=self, button_index=2)
+                cast("_DrawViewButton", self._view_buttons.button(2))._press()
             elif event.key() == QtCore.Qt.Key.Key_T:
                 self._view_buttons.button(3).setChecked(True)
-                cast("_ViewButton", self._view_buttons.button(3)).press(parent=self, button_index=3)
+                cast("_DrawViewButton", self._view_buttons.button(3))._press()
 
     def _add_roi(self, position: NDArray | None = None) -> None:
         """Adds a new elliptical ROI to the editor.
@@ -583,8 +570,8 @@ class ROIDraw(QMainWindow):
                     self._add_roi(
                         position=np.array(
                             [
-                                click_y - _ROI_POSITION_OFFSET,
-                                click_x - _ROI_POSITION_OFFSET,
+                                click_y - CONFIG.roi_position_offset,
+                                click_x - CONFIG.roi_position_offset,
                                 diameter,
                                 diameter,
                             ]
@@ -707,41 +694,6 @@ class ROIDraw(QMainWindow):
         self._trace_plot.setXRange(0, self._cell_fluorescence.shape[1])
 
 
-class _ViewButton(QPushButton):
-    """Button for switching between reference image views in the ROI editor.
-
-    Args:
-        button_index: Index of the view this button controls.
-        text: Display text for the button.
-        parent: The ROI editor window.
-    """
-
-    def __init__(self, button_index: int, text: str, parent: ROIDraw) -> None:
-        super().__init__(parent)
-        self.setText(text)
-        self.setCheckable(True)
-        self.setStyleSheet(STYLE.button_unpressed)
-        self.setFont(label_font_bold())
-        self.resize(self.minimumSizeHint())
-        self.clicked.connect(lambda: self.press(parent=parent, button_index=button_index))
-        self.show()
-
-    def press(self, parent: ROIDraw, button_index: int) -> None:
-        """Switches the displayed reference image.
-
-        Args:
-            parent: The ROI editor window.
-            button_index: Index of the view to display.
-        """
-        for index in range(len(parent._view_names)):
-            if parent._view_buttons.button(index).isEnabled():
-                parent._view_buttons.button(index).setStyleSheet(STYLE.button_unpressed)
-        self.setStyleSheet(STYLE.button_pressed)
-        parent._image_item.setImage(parent._masked_images[:, :, :, button_index])
-        parent._plot_widget.show()
-        parent.show()
-
-
 class _EllipseROI:
     """Interactive elliptical ROI for manual cell boundary drawing.
 
@@ -787,12 +739,12 @@ class _EllipseROI:
             center_y = (view[1][1] + view[1][0]) / 2
             if diameter is None:
                 width = max(
-                    _MIN_DIAMETER,
-                    min((view[0][1] - view[0][0]) / 4, parent._frame_width * _MAX_DIAMETER_FRACTION),
+                    CONFIG.min_diameter,
+                    min((view[0][1] - view[0][0]) / 4, parent._frame_width * CONFIG.max_diameter_fraction),
                 )
                 height = max(
-                    _MIN_DIAMETER,
-                    min((view[1][1] - view[1][0]) / 4, parent._frame_height * _MAX_DIAMETER_FRACTION),
+                    CONFIG.min_diameter,
+                    min((view[1][1] - view[1][0]) / 4, parent._frame_height * CONFIG.max_diameter_fraction),
                 )
             else:
                 width = diameter
@@ -828,7 +780,7 @@ class _EllipseROI:
             height: Height of the ellipse.
             width: Width of the ellipse.
         """
-        pen = pg.mkPen(self.color, width=_ROI_PEN_WIDTH, style=QtCore.Qt.PenStyle.SolidLine)
+        pen = pg.mkPen(self.color, width=CONFIG.roi_pen_width, style=QtCore.Qt.PenStyle.SolidLine)
         self._pyqtgraph_roi = pg.EllipseROI([origin_x, origin_y], [width, height], pen=pen, removable=True)
         self._pyqtgraph_roi.handleSize = 8
         self._pyqtgraph_roi.handlePen = pen

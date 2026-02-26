@@ -1,4 +1,4 @@
-"""Provides background view construction and ROI overlay rendering for the ROI viewer."""
+"""Provides background view construction, ROI overlay rendering, and mask mutation shared by the ROI viewer and editor."""
 
 from __future__ import annotations
 
@@ -12,11 +12,14 @@ from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
 from .constants import STYLE, CONFIG, BackgroundView
-from .context_data import ROIViewerData
-from .data_models import ColorArrays, ColorbarWidgets, ROIIndexMaps
+from .data_models import ColorArrays, ROIIndexMaps
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+    from .data_models import ColorbarWidgets
+    from .single_day_context import ROIViewerData
+    from ..dataclasses import ROIStatistics
 
 
 def build_views(
@@ -101,26 +104,24 @@ def compute_colors(
     context: ROIViewerData,
     roi_colormap: str,
     colocalization_threshold: float,
-    has_channel_2: bool,
 ) -> ColorArrays:
     """Computes color statistics and RGB color arrays for all ROIs.
 
-    Initializes per-statistic color arrays and normalization values. The first color
-    channel uses random HSV coloring; subsequent channels use computed statistics (skew,
-    compact, footprint, aspect ratio, etc.).
+    Initializes per-statistic color arrays and normalization values. The first color channel
+    uses random HSV coloring; subsequent channels use computed statistics (skew, compact,
+    footprint, aspect ratio, etc.).
 
     Args:
         context: The loaded data context.
         roi_colormap: Name of the matplotlib colormap applied when mapping ROI statistics to overlay colors.
         colocalization_threshold: Display threshold applied to cell_colocalization_probabilities.
-        has_channel_2: Determines whether channel 2 data is available.
 
     Returns:
         Computed color arrays for all ROIs.
     """
     roi_statistics = context.roi_statistics
     cell_count = len(roi_statistics)
-    color_count = len(CONFIG.color_names)
+    color_count = CONFIG.color_stat_count
     colorbar: list[list[float]] = []
 
     cols = np.zeros((color_count, cell_count, 3), dtype=np.uint8)
@@ -129,7 +130,7 @@ def compute_colors(
     # Generates random colors, adjusting for channel 2 data if present.
     np.random.seed(seed=0)  # noqa: NPY002
     random_colors = np.random.random((cell_count,))  # noqa: NPY002
-    if has_channel_2:
+    if context.has_channel_2:
         random_colors = random_colors / CONFIG.channel_2_color_divisor + CONFIG.channel_2_color_offset
         is_channel_2 = context.cell_colocalization_probabilities > colocalization_threshold
         console.echo(message=f"Number of channel 2 cells: {int(is_channel_2.sum())}")
@@ -142,7 +143,7 @@ def compute_colors(
     cols[0] = hsv2rgb(random_colors)
 
     # Computes color arrays for each statistic.
-    for stat_index, name in enumerate(CONFIG.color_names[:-3]):
+    for stat_index, name in enumerate(CONFIG.color_short_names[:-3]):
         if stat_index > 0:
             stat_values = np.zeros((cell_count, 1))
             if stat_index < color_count - 2:
@@ -285,26 +286,27 @@ def draw_masks(
     context: ROIViewerData,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
+    *,
     roi_color_mode: int,
     background_view: int,
+    roi_opacity: list[int],
     selected_roi_index: int,
     merge_roi_indices: list[int],
-    roi_opacity: list[int],
 ) -> tuple[NDArray[np.uint8], NDArray[np.uint8]]:
     """Draws the current mask overlay for both cell and non-cell panels.
 
-    Computes transparency based on ROI weights, then highlights the currently
-    selected ROIs with full-white (ROI view) or colored circles (image views).
+    Computes transparency based on ROI weights, then highlights the currently selected ROIs
+    with full-white (ROI view) or colored circles (image views).
 
     Args:
         context: The loaded data context.
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
-        roi_color_mode: The active ROI color mode index.
-        background_view: The active background view index.
-        selected_roi_index: Index of the currently selected ROI.
-        merge_roi_indices: Indices of all ROIs staged for multi-selection.
-        roi_opacity: Alpha values for ROI overlays in [circle-view, filled-ROI-view] rendering modes.
+        roi_color_mode: Active color statistic index.
+        background_view: Active background view index.
+        roi_opacity: Alpha values for ROI overlays in [circle-view, filled-ROI-view] modes.
+        selected_roi_index: Index of the currently highlighted ROI.
+        merge_roi_indices: Indices of all ROIs staged for merge or multi-selection.
 
     Returns:
         Tuple of (cells_overlay, noncells_overlay) RGBA arrays.
@@ -557,6 +559,186 @@ def istat_transform(istat: NDArray[np.float32], colormap: str = "hsv") -> NDArra
         return _istat_hsv(istat)
 
 
+def flip_rois(
+    context: ROIViewerData,
+    color_arrays: ColorArrays,
+    roi_maps: ROIIndexMaps,
+    *,
+    selected_roi_index: int,
+    merge_roi_indices: list[int],
+    last_reclassified_index_out: list[int],
+) -> None:
+    """Flips selected ROIs between the cell and non-cell panels.
+
+    Toggles the ``cell_classification_labels`` for all ROIs in ``merge_roi_indices``, moves
+    them between panels. The caller is responsible for saving and updating the plot.
+
+    Args:
+        context: The loaded data context (cell_classification_labels is modified in place).
+        color_arrays: The computed color arrays.
+        roi_maps: The ROI index maps.
+        selected_roi_index: Index of the currently selected ROI.
+        merge_roi_indices: Indices of all ROIs to flip.
+        last_reclassified_index_out: Single-element list updated with the selected ROI index.
+    """
+    last_reclassified_index_out[0] = selected_roi_index
+    for roi_index in merge_roi_indices:
+        context.cell_classification_labels[roi_index] = ~context.cell_classification_labels[roi_index]
+        _flip_roi(
+            roi_maps=roi_maps,
+            color_arrays=color_arrays,
+            roi_statistics=context.roi_statistics,
+            cell_classification_labels=context.cell_classification_labels,
+            roi_index=roi_index,
+        )
+        merged = context.roi_statistics[roi_index].merged_roi_indices
+        if merged is not None:
+            for merged_index in merged:
+                context.cell_classification_labels[merged_index] = ~context.cell_classification_labels[merged_index]
+
+
+def flip_for_class(
+    context: ROIViewerData,
+    color_arrays: ColorArrays,
+    roi_maps: ROIIndexMaps,
+    new_classification_labels: NDArray[np.bool_],
+) -> bool:
+    """Applies new cell classification labels from the classifier.
+
+    For small numbers of changes, flips individual ROIs incrementally. For large changes,
+    returns False to signal the caller should reinitialize all masks.
+
+    Args:
+        context: The loaded data context.
+        color_arrays: The computed color arrays.
+        roi_maps: The ROI index maps.
+        new_classification_labels: New cell classification label array.
+
+    Returns:
+        True if changes were applied incrementally, False if full reinit is needed.
+    """
+    cell_count = new_classification_labels.size
+    if int((new_classification_labels == context.cell_classification_labels).sum()) < CONFIG.flip_threshold:
+        for roi_index in range(cell_count):
+            if new_classification_labels[roi_index] != context.cell_classification_labels[roi_index]:
+                context.cell_classification_labels[roi_index] = new_classification_labels[roi_index]
+                _flip_roi(
+                    roi_maps=roi_maps,
+                    color_arrays=color_arrays,
+                    roi_statistics=context.roi_statistics,
+                    cell_classification_labels=context.cell_classification_labels,
+                    roi_index=roi_index,
+                )
+        return True
+
+    context.cell_classification_labels[:] = new_classification_labels
+    return False
+
+
+def add_roi(
+    roi_maps: ROIIndexMaps,
+    roi_statistics: list[ROIStatistics],
+    roi_index: int,
+    panel: int,
+) -> None:
+    """Adds an ROI to a specific panel on top of existing layers.
+
+    Args:
+        roi_maps: The ROI index maps.
+        roi_statistics: The ROI statistics list.
+        roi_index: Index of the ROI to add.
+        panel: Panel index (0=cells, 1=non-cells).
+    """
+    y_pixels = roi_statistics[roi_index].y_pixels
+    x_pixels = roi_statistics[roi_index].x_pixels
+    weights = roi_statistics[roi_index].pixel_weights
+
+    # Pushes existing layers down.
+    roi_maps.iroi[panel, 2, y_pixels, x_pixels] = roi_maps.iroi[panel, 1, y_pixels, x_pixels]
+    roi_maps.iroi[panel, 1, y_pixels, x_pixels] = roi_maps.iroi[panel, 0, y_pixels, x_pixels]
+    roi_maps.iroi[panel, 0, y_pixels, x_pixels] = roi_index
+    roi_maps.lam[panel, 2, y_pixels, x_pixels] = roi_maps.lam[panel, 1, y_pixels, x_pixels]
+    roi_maps.lam[panel, 1, y_pixels, x_pixels] = roi_maps.lam[panel, 0, y_pixels, x_pixels]
+    roi_maps.lam[panel, 0, y_pixels, x_pixels] = weights
+
+    roi_maps.sroi[panel, y_pixels, x_pixels] = True
+    roi_maps.lam_norm[:, y_pixels, x_pixels] = np.maximum(
+        0,
+        np.minimum(1, CONFIG.lambda_norm_scale * roi_maps.lam[:, 0, y_pixels, x_pixels] / roi_maps.lam_mean),
+    )
+
+
+def remove_roi(
+    roi_maps: ROIIndexMaps,
+    roi_statistics: list[ROIStatistics],
+    roi_index: int,
+    panel: int,
+) -> None:
+    """Removes an ROI from a specific panel and shifts overlap layers up.
+
+    Args:
+        roi_maps: The ROI index maps.
+        roi_statistics: The ROI statistics list.
+        roi_index: Index of the ROI to remove.
+        panel: Panel index (0=cells, 1=non-cells).
+    """
+    y_pixels = roi_statistics[roi_index].y_pixels
+    x_pixels = roi_statistics[roi_index].x_pixels
+
+    # Finds pixels at each overlap layer where this ROI appears.
+    layer0_pixels = np.array((roi_maps.iroi[panel, 0, :, :] == roi_index).nonzero()).astype(np.int32)
+    layer1_pixels = np.array((roi_maps.iroi[panel, 1, :, :] == roi_index).nonzero()).astype(np.int32)
+    layer2_pixels = np.array((roi_maps.iroi[panel, 2, :, :] == roi_index).nonzero()).astype(np.int32)
+
+    # Shifts layers up to fill the gap.
+    roi_maps.lam[panel, 0, layer0_pixels[0], layer0_pixels[1]] = roi_maps.lam[
+        panel, 1, layer0_pixels[0], layer0_pixels[1]
+    ]
+    roi_maps.lam[panel, 1, layer0_pixels[0], layer0_pixels[1]] = 0
+    roi_maps.lam[panel, 1, layer1_pixels[0], layer1_pixels[1]] = roi_maps.lam[
+        panel, 2, layer1_pixels[0], layer1_pixels[1]
+    ]
+    roi_maps.lam[panel, 2, layer1_pixels[0], layer1_pixels[1]] = 0
+    roi_maps.lam[panel, 2, layer2_pixels[0], layer2_pixels[1]] = 0
+
+    roi_maps.iroi[panel, 0, layer0_pixels[0], layer0_pixels[1]] = roi_maps.iroi[
+        panel, 1, layer0_pixels[0], layer0_pixels[1]
+    ]
+    roi_maps.iroi[panel, 1, layer0_pixels[0], layer0_pixels[1]] = -1
+    roi_maps.iroi[panel, 1, layer1_pixels[0], layer1_pixels[1]] = roi_maps.iroi[
+        panel, 2, layer1_pixels[0], layer1_pixels[1]
+    ]
+    roi_maps.iroi[panel, 2, layer1_pixels[0], layer1_pixels[1]] = -1
+    roi_maps.iroi[panel, 2, layer2_pixels[0], layer2_pixels[1]] = -1
+
+    roi_maps.sroi[panel, y_pixels, x_pixels] = roi_maps.iroi[panel, 0, y_pixels, x_pixels] > 0
+    roi_maps.lam_norm[panel, y_pixels, x_pixels] = np.maximum(
+        0,
+        np.minimum(1, CONFIG.lambda_norm_scale * roi_maps.lam[panel, 0, y_pixels, x_pixels] / roi_maps.lam_mean),
+    )
+
+
+def redraw_masks(
+    color_arrays: ColorArrays,
+    roi_maps: ROIIndexMaps,
+    y_pixels: NDArray,
+    x_pixels: NDArray,
+) -> None:
+    """Redraws RGB mask colors at specific pixel locations after ROI changes.
+
+    Args:
+        color_arrays: The computed color arrays.
+        roi_maps: The ROI index maps.
+        y_pixels: Row coordinates of pixels to redraw.
+        x_pixels: Column coordinates of pixels to redraw.
+    """
+    for color_index in range(color_arrays.cols.shape[0]):
+        for panel in range(2):
+            color = color_arrays.cols[color_index]
+            rgb = color[roi_maps.iroi[panel, 0, y_pixels, x_pixels], :]
+            color_arrays.rgb[panel, color_index, y_pixels, x_pixels, :3] = rgb
+
+
 def _build_single_view(
     view_index: int,
     frame_height: int,
@@ -717,6 +899,33 @@ def _place_in_valid_region(
         output = normalized
 
     return np.clip(output, 0, 1).astype(np.float32)
+
+
+def _flip_roi(
+    roi_maps: ROIIndexMaps,
+    color_arrays: ColorArrays,
+    roi_statistics: list[ROIStatistics],
+    cell_classification_labels: NDArray[np.bool_],
+    roi_index: int,
+) -> None:
+    """Flips a single ROI between cell and non-cell panels.
+
+    Args:
+        roi_maps: The ROI index maps.
+        color_arrays: The computed color arrays.
+        roi_statistics: The ROI statistics list.
+        cell_classification_labels: The current cell classification label array.
+        roi_index: Index of the ROI to flip.
+    """
+    new_panel = int(1 - cell_classification_labels[roi_index])
+    old_panel = 1 - new_panel
+
+    remove_roi(roi_maps=roi_maps, roi_statistics=roi_statistics, roi_index=roi_index, panel=old_panel)
+    add_roi(roi_maps=roi_maps, roi_statistics=roi_statistics, roi_index=roi_index, panel=new_panel)
+
+    y_pixels = roi_statistics[roi_index].y_pixels
+    x_pixels = roi_statistics[roi_index].x_pixels
+    redraw_masks(color_arrays=color_arrays, roi_maps=roi_maps, y_pixels=y_pixels, x_pixels=x_pixels)
 
 
 def _istat_hsv(istat: NDArray[np.float32]) -> NDArray[np.uint8]:

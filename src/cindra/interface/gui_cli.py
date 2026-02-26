@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from ..gui import run_roi_viewer, run_tracking_viewer, run_registration_viewer, run_roi_viewer_standalone
+from ..gui import run_roi_editor, run_roi_viewer, run_tracking_viewer, run_registration_viewer, run_roi_viewer_standalone
 
 CONTEXT_SETTINGS = {"max_content_width": 120}
 """The Click context settings that ensure displayed help messages are formatted according to the lab standard."""

@@ -6,8 +6,19 @@ from enum import StrEnum
 from pathlib import Path  # noqa: TC003 - needed at runtime for dacite deserialization
 from dataclasses import field, dataclass
 
-from ataraxis_base_utilities import ensure_directory_exists
+from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
+
+
+class PipelineType(StrEnum):
+    """Defines the supported cindra processing pipeline types."""
+
+    SINGLE_DAY = "single-day"
+    """The within-session pipeline that processes a single recording session (binarize, process, combine)."""
+
+    MULTI_DAY = "multi-day"
+    """The across-session pipeline that tracks and extracts ROIs across multiple recording sessions (discover,
+    extract)."""
 
 
 class BaselineMethod(StrEnum):
@@ -22,6 +33,58 @@ class BaselineMethod(StrEnum):
 
     CONSTANT_PERCENTILE = "constant_percentile"
     """Uses a low percentile of the trace as a robust constant baseline, ignoring outliers."""
+
+
+@dataclass
+class _PipelineHeader(YamlConfig):
+    """Minimal dataclass for detecting the pipeline type from a configuration YAML file.
+
+    Declares only the ``pipeline_type`` field as a raw string. Extra keys present in the YAML are silently discarded by
+    dacite during deserialization, making this class safe to load against any cindra configuration file. The field
+    defaults to None so that a missing key is distinguishable from a valid value.
+    """
+
+    pipeline_type: str | None = None
+    """The raw pipeline type string read from the YAML file, or None if the key is absent."""
+
+
+def detect_pipeline_type(file_path: Path) -> PipelineType:
+    """Detects the pipeline type stored in the specified configuration YAML file.
+
+    Reads the ``pipeline_type`` discriminator field from the configuration file without loading the full configuration
+    dataclass.
+
+    Args:
+        file_path: The path to the configuration YAML file to inspect.
+
+    Returns:
+        The PipelineType member matching the ``pipeline_type`` value stored in the configuration file.
+
+    Raises:
+        FileNotFoundError: If the configuration file does not exist or does not have a '.yaml' extension.
+        ValueError: If the file does not contain a recognized ``pipeline_type`` value.
+    """
+    if not file_path.exists() or file_path.suffix != ".yaml":
+        message = (
+            f"Unable to detect the pipeline type from the specified configuration file. Expected an existing "
+            f"'.yaml' file, but received '{file_path}'."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    raw_type = _PipelineHeader.from_yaml(file_path=file_path).pipeline_type
+
+    try:
+        if raw_type is not None:
+            return PipelineType(raw_type)
+    except ValueError:
+        pass
+
+    expected = ", ".join(f"'{member.value}'" for member in PipelineType)
+    message = (
+        f"Unable to detect the pipeline type from the configuration file at '{file_path}'. The 'pipeline_type' "
+        f"field is missing or has an unrecognized value '{raw_type}'. Expected one of: {expected}."
+    )
+    console.error(message=message, error=ValueError)
 
 
 @dataclass
@@ -451,6 +514,8 @@ class SingleDayConfiguration(YamlConfig):
         For runtime data (computed by the pipeline), see SingleDayRuntimeData.
     """
 
+    pipeline_type: PipelineType = field(default=PipelineType.SINGLE_DAY, init=False)
+    """Identifies this configuration as a single-day pipeline configuration."""
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
     """Stores runtime behavior settings shared with the multi-day pipeline (parallel workers, progress bars)."""
     main: Main = field(default_factory=Main)

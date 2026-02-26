@@ -1,11 +1,4 @@
-"""Provides the self-contained read-only ROI viewer window for inspecting single-day pipeline results.
-
-Design constraints
-------------------
-* **Self-contained** -- zero imports from other ``gui.*`` packages.
-* **Read-only** -- no ROI mutation functions (flip, add, remove, redraw, merge).
-* **No signal bus** -- callbacks are wired directly; ``GUISignals`` is eliminated.
-"""
+"""Provides the read-only ROI viewer window for inspecting single-day pipeline results."""
 
 from __future__ import annotations
 
@@ -44,7 +37,7 @@ from .constants import (
     ROIToolPanel,
     TraceMode,
 )
-from .context_data import ROIViewerData
+from .single_day_context import ROIViewerData
 from .data_models import (
     CellToggleControls,
     ColorArrays,
@@ -1212,19 +1205,29 @@ class ROIViewer(QMainWindow):
         elif panel == CONFIG.noncells_plot:
             self._noncells_view_box.autoRange()
 
-    def _handle_click(self, click_x: int, click_y: int, panel_index: int, is_multi: bool) -> None:
+    def _handle_click(
+        self, click_x: int, click_y: int, panel: ROIToolPanel, is_right: bool, is_multi: bool
+    ) -> bool:
         """Handles mouse clicks on image panels.
 
         Left-click chooses a cell. Shift/ctrl-click adds or removes from the merge selection.
+        Right-clicks are not handled by the read-only viewer.
 
         Args:
             click_x: Column coordinate of the click.
             click_y: Row coordinate of the click.
-            panel_index: Panel index (0=cells, 1=non-cells).
+            panel: Identifies the image panel that received the click.
+            is_right: Determines whether the click was a right-click.
             is_multi: Determines whether shift or ctrl was held during the click.
+
+        Returns:
+            True if the click was consumed, False to allow the default context menu.
         """
+        if is_right:
+            return False
+
         if not self.session_loaded or self.roi_maps is None or self.context_data is None:
-            return
+            return False
 
         if (
             click_y < 0
@@ -1232,11 +1235,11 @@ class ROIViewer(QMainWindow):
             or click_x < 0
             or click_x >= self.context_data.frame_width
         ):
-            return
+            return False
 
-        ichosen = int(self.roi_maps.iroi[panel_index, 0, click_y, click_x])
+        ichosen = int(self.roi_maps.iroi[panel, 0, click_y, click_x])
         if ichosen < 0:
-            return
+            return False
 
         merged = False
         if is_multi and (
@@ -1262,6 +1265,7 @@ class ROIViewer(QMainWindow):
                 if btn.isChecked():
                     btn.setStyleSheet(STYLE.button_unpressed)
         self.update_plot()
+        return True
 
     def _on_roi_selection(self) -> None:
         """Draws a rectangular ROI selection on the active image panel."""

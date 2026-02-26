@@ -1,4 +1,4 @@
-"""Provides data and control dataclasses for the ROI viewer."""
+"""Provides widget-reference and rendering-state dataclasses shared by the ROI viewer and editor."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
 import numpy as np
-import pyqtgraph as pg  # type: ignore[import-untyped]
-from PySide6.QtWidgets import QLabel, QCheckBox, QComboBox, QLineEdit, QPushButton, QButtonGroup
 
 from .constants import CONFIG
 
 if TYPE_CHECKING:
+    import pyqtgraph as pg  # type: ignore[import-untyped]
     from numpy.typing import NDArray
+    from PySide6.QtWidgets import QLabel, QCheckBox, QComboBox, QLineEdit, QPushButton, QButtonGroup
 
     from .widgets import RangeSlider
 
@@ -178,3 +178,16 @@ class QuadrantControls:
     """
 
     quadrant_buttons: QButtonGroup
+
+
+@dataclass
+class ClassifierControls:
+    """Holds references to classifier section widgets.
+
+    Attributes:
+        classifier_label: Label displaying the current classifier name or status.
+        add_to_class_button: Button for adding the current session data to the classifier.
+    """
+
+    classifier_label: QLabel
+    add_to_class_button: QPushButton
