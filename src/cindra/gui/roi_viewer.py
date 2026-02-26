@@ -1,4 +1,4 @@
-"""Provides the read-only ROI viewer window for inspecting single-day pipeline results."""
+"""Provides the ROI viewer window for inspecting and reclassifying single-day pipeline results."""
 
 from __future__ import annotations
 
@@ -56,9 +56,9 @@ from .overlays import (
     display_views,
     draw_colorbar,
     draw_masks,
+    flip_rois,
     init_roi_maps,
     render_colorbar,
-    update_chan2_colors,
     update_colormap,
     update_correlation_masks,
 )
@@ -69,11 +69,11 @@ if TYPE_CHECKING:
 
 
 class ROIViewer(QMainWindow):
-    """Self-contained read-only viewer for single-day ROI pipeline outputs.
+    """Two-panel ROI viewer for single-day pipeline outputs with right-click reclassification.
 
     Displays ROI overlays, background images, and fluorescence traces. Supports left-click ROI
-    selection, shift/ctrl multi-select, keyboard shortcuts for view/color switching, and quadrant
-    zoom navigation. No data mutation — classification, merge, and manual ROI drawing are excluded.
+    selection, shift/ctrl multi-select, right-click cell/non-cell reclassification with auto-save,
+    keyboard shortcuts for view/color switching, and quadrant zoom navigation.
 
     Args:
         data: Pre-loaded viewer data. If None the viewer starts empty and the user can load
@@ -101,6 +101,7 @@ class ROIViewer(QMainWindow):
         self.roi_labels_visible: bool = False
         self.session_loaded: bool = False
         self.colocalization_threshold: float = 0.6
+        self.last_reclassified_index: int = -1
 
         # Core data objects.
         self.context_data: ROIViewerData | None = None
@@ -113,7 +114,7 @@ class ROIViewer(QMainWindow):
         # Binned activity state (used by correlation coloring).
         self.Fbin: NDArray[np.float32] | None = None
         self.Fstd: NDArray[np.float32] | None = None
-        self.frame_indices: NDArray | None = None
+        self.frame_indices: NDArray[np.intp] | None = None
 
         # Window geometry and title.
         self.setGeometry(50, 50, 1500, 800)
@@ -410,13 +411,6 @@ class ROIViewer(QMainWindow):
             button.setEnabled(False)
             button.clicked.connect(lambda _checked, idx=button_index: self._on_color_changed(idx))
 
-        channel_2_edit = QLineEdit(self)
-        channel_2_edit.setText("0.6")
-        channel_2_edit.setFixedWidth(STYLE.color_edit_width)
-        channel_2_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        layout.addWidget(channel_2_edit, len(CONFIG.color_names) - 4, 1, 1, 1)
-        channel_2_edit.returnPressed.connect(self.update_plot)
-
         classifier_edit = QLineEdit(self)
         classifier_edit.setText("0.5")
         classifier_edit.setFixedWidth(STYLE.color_edit_width)
@@ -439,7 +433,6 @@ class ROIViewer(QMainWindow):
         controls = ColorControls(
             color_buttons=color_buttons,
             colormap_chooser=colormap_chooser,
-            channel_2_edit=channel_2_edit,
             classifier_edit=classifier_edit,
             bin_edit=bin_edit,
         )
@@ -637,7 +630,7 @@ class ROIViewer(QMainWindow):
         console.echo(message=f"Loading session: {session_path}")
 
         try:
-            context_data = ROIViewerData.from_single_day(root_path=session_path)
+            context_data = ROIViewerData.from_single_day(root_path=session_path, mutable=True)
         except Exception:
             console.echo(message="Failed to load session data.", level=LogLevel.ERROR)
             result = QMessageBox.question(
@@ -672,6 +665,7 @@ class ROIViewer(QMainWindow):
         self.roi_labels_visible = False
         self.session_loaded = False
         self.colocalization_threshold = 0.6
+        self.last_reclassified_index = -1
 
     def _initialize_gui(self) -> None:
         """Initializes all GUI components after loading context data."""
@@ -694,7 +688,6 @@ class ROIViewer(QMainWindow):
         self.temporal_bin_size = max(1, int(context.tau * context.sampling_rate / CONFIG.bin_size_divisor))
         self._color_controls.bin_edit.setText(str(self.temporal_bin_size))
         self.colocalization_threshold = CONFIG.default_channel_2_threshold
-        self._color_controls.channel_2_edit.setText(str(self.colocalization_threshold))
 
         # Enables buttons.
         self._enable_controls()
@@ -718,7 +711,6 @@ class ROIViewer(QMainWindow):
             context=context,
             roi_colormap=self.roi_colormap,
             colocalization_threshold=self.colocalization_threshold,
-            has_channel_2=context.has_channel_2,
         )
         self.roi_maps = init_roi_maps(context=context, color_arrays=self.color_arrays)
 
@@ -894,18 +886,6 @@ class ROIViewer(QMainWindow):
                     color_arrays=self.color_arrays,
                     roi_maps=self.roi_maps,
                     colormap=colormap,
-                )
-            if (
-                self.context_data.has_channel_2
-                and abs(float(self._color_controls.channel_2_edit.text()) - self.colocalization_threshold)
-                > CONFIG.channel_2_threshold_epsilon
-            ):
-                self.colocalization_threshold = float(self._color_controls.channel_2_edit.text())
-                update_chan2_colors(
-                    context=self.context_data,
-                    colocalization_threshold=self.colocalization_threshold,
-                    color_arrays=self.color_arrays,
-                    roi_maps=self.roi_maps,
                 )
         self.update_plot()
 
@@ -1205,13 +1185,55 @@ class ROIViewer(QMainWindow):
         elif panel == CONFIG.noncells_plot:
             self._noncells_view_box.autoRange()
 
+    def save_cell_classification(self) -> None:
+        """Saves the current cell classification labels to cell_classification.npy."""
+        if self.context_data is None:
+            return
+        context = self.context_data
+        output_path = context.output_path
+        if output_path is None:
+            return
+        np.save(
+            str(output_path / "cell_classification.npy"),
+            np.concatenate(
+                (
+                    np.expand_dims(context.cell_classification_labels, axis=1),
+                    np.expand_dims(context.cell_classification_probabilities, axis=1),
+                ),
+                axis=1,
+            ),
+        )
+        self._cell_toggle_controls.cell_count_label.setText(
+            f"{int(context.cell_classification_labels.sum())}"
+        )
+        self._cell_toggle_controls.noncell_count_label.setText(
+            f"{int(context.cell_classification_labels.size - context.cell_classification_labels.sum())}"
+        )
+
+    def _flip_plot(self) -> None:
+        """Flips the selected ROIs between the cell and non-cell panels and saves the result."""
+        if self.context_data is None or self.color_arrays is None or self.roi_maps is None:
+            return
+        last_reclassified = [self.last_reclassified_index]
+        flip_rois(
+            context=self.context_data,
+            color_arrays=self.color_arrays,
+            roi_maps=self.roi_maps,
+            selected_roi_index=self.selected_roi_index,
+            merge_roi_indices=self.merge_roi_indices,
+            last_reclassified_index_out=last_reclassified,
+        )
+        self.last_reclassified_index = last_reclassified[0]
+        self.save_cell_classification()
+        self.update_plot()
+
     def _handle_click(
         self, click_x: int, click_y: int, panel: ROIToolPanel, is_right: bool, is_multi: bool
     ) -> bool:
         """Handles mouse clicks on image panels.
 
         Left-click chooses a cell. Shift/ctrl-click adds or removes from the merge selection.
-        Right-clicks are not handled by the read-only viewer.
+        Right-click flips the clicked ROI between cell and non-cell panels.
 
         Args:
             click_x: Column coordinate of the click.
@@ -1223,9 +1245,6 @@ class ROIViewer(QMainWindow):
         Returns:
             True if the click was consumed, False to allow the default context menu.
         """
-        if is_right:
-            return False
-
         if not self.session_loaded or self.roi_maps is None or self.context_data is None:
             return False
 
@@ -1240,6 +1259,14 @@ class ROIViewer(QMainWindow):
         ichosen = int(self.roi_maps.iroi[panel, 0, click_y, click_x])
         if ichosen < 0:
             return False
+
+        if is_right:
+            # Sets selection to the clicked ROI (if not already selected) and flips it.
+            if ichosen not in self.merge_roi_indices:
+                self.merge_roi_indices = [ichosen]
+                self.selected_roi_index = ichosen
+            self._flip_plot()
+            return True
 
         merged = False
         if is_multi and (

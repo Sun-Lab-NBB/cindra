@@ -24,14 +24,12 @@ class ColorControls:
     Attributes:
         color_buttons: Button group for selecting the active color statistic.
         colormap_chooser: Dropdown for selecting the active colormap.
-        channel_2_edit: Text input for the channel 2 probability threshold.
         classifier_edit: Text input for the classifier probability threshold.
         bin_edit: Text input for the binning size.
     """
 
     color_buttons: QButtonGroup
     colormap_chooser: QComboBox
-    channel_2_edit: QLineEdit
     classifier_edit: QLineEdit
     bin_edit: QLineEdit
 

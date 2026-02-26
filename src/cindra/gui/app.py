@@ -3,23 +3,21 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from PySide6 import QtGui, QtCore
 from PySide6.QtWidgets import QApplication
 
-from .tracking_viewer import TrackingViewer
-from .binary_viewer import BinaryPlayer
+import cindra
+
 from .pc_viewer import PCViewer
 from .roi_viewer import ROIViewer
-from .roi_editor.viewer import ROIEditor
+from .binary_viewer import BinaryPlayer
+from .tracking_viewer import TrackingViewer
 from .multi_day_context import TrackingViewerData
 from .single_day_context import ROIViewerData, RegistrationViewerData
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-_ICON_PATH: str = str(ROIEditor.cindra_directory() / "logo" / "logo.png")
+_ICON_PATH: str = str(Path(cindra.__file__).parent / "logo" / "logo.png")
 """The string path to the application icon file."""
 
 
@@ -106,7 +104,7 @@ def run_registration_viewer(recording_path: Path) -> None:
 
 
 def run_roi_viewer(session_path: Path | None = None) -> None:
-    """Launches the standalone read-only ROI viewer.
+    """Launches the standalone ROI viewer with right-click reclassification.
 
     Creates a QApplication, loads pipeline data from the given session directory (or opens a file
     dialog if no path is provided), shows the ROIViewer window, and enters the event loop.
@@ -119,29 +117,6 @@ def run_roi_viewer(session_path: Path | None = None) -> None:
     owns_application = application is None
     if owns_application:
         application = QApplication(sys.argv)
-
-    data = ROIViewerData.from_single_day(root_path=session_path) if session_path is not None else None
-
-    window = ROIViewer(data=data)
-    window.show()
-
-    if owns_application and application is not None:
-        sys.exit(application.exec())
-
-
-def run_roi_editor(session_path: Path | None = None) -> None:
-    """Launches the standalone ROI viewer and editor.
-
-    Creates a QApplication, shows the ROIEditor window, and enters the event loop. If a session
-    path is provided, the editor loads cindra output data from that directory on startup.
-
-    Args:
-        session_path: Path to a cindra output directory to load on startup.
-    """
-    application = QApplication.instance()
-    owns_application = application is None
-    if owns_application:
-        application = QApplication(sys.argv)
     assert isinstance(application, QApplication)
 
     app_icon = QtGui.QIcon()
@@ -149,7 +124,10 @@ def run_roi_editor(session_path: Path | None = None) -> None:
         app_icon.addFile(_ICON_PATH, QtCore.QSize(size, size))
     application.setWindowIcon(app_icon)
 
-    _window = ROIEditor(session_path=session_path)
+    data = ROIViewerData.from_single_day(root_path=session_path, mutable=True) if session_path is not None else None
+
+    window = ROIViewer(data=data)
+    window.show()
 
     if owns_application:
         sys.exit(application.exec())
