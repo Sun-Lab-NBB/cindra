@@ -279,10 +279,8 @@ class PCViewer(QMainWindow):
         Widgets keep their natural size; only the trailing stretch grows when the window is resized.
         Fixed spacing separates each logical group.
         """
-        bold_font = QtGui.QFont(
-            self._style.font_family, pointSize=self._style.metrics_font_size, weight=QtGui.QFont.Weight.Bold
-        )
-        big_font = QtGui.QFont(self._style.font_family, pointSize=self._style.metrics_font_size)
+        bold_font = QtGui.QFont(self._style.font_family, self._style.metrics_font_size, QtGui.QFont.Weight.Bold.value)
+        big_font = QtGui.QFont(self._style.font_family, self._style.metrics_font_size)
         panel = QHBoxLayout()
         group_spacing = 20
 
