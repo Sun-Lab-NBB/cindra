@@ -10,6 +10,7 @@ from .multi_day_data import (
 )
 from .single_day_data import (
     IOData,
+    ROIMask,
     TimingData,
     CombinedData,
     DetectionData,
@@ -57,6 +58,7 @@ __all__ = [
     "OnePhotonRegistration",
     "PipelineType",
     "ROIDetection",
+    "ROIMask",
     "ROIStatistics",
     "ReferenceImageType",
     "Registration",

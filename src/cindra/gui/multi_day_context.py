@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import IntEnum
 from typing import TYPE_CHECKING
+from collections.abc import Sequence
 from dataclasses import field, dataclass
 
 from ataraxis_base_utilities import console
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from ..dataclasses import (
+        ROIMask,
         CombinedData,
         DetectionData,
         ROIStatistics,
@@ -257,22 +259,22 @@ class TrackingViewerData:
         return [all_masks[i] for i in selected_indices]
 
     @property
-    def deformed_masks(self) -> list[ROIStatistics] | None:
+    def deformed_masks(self) -> list[ROIMask] | None:
         """Returns the ROI masks warped to the shared coordinate space."""
         return self._current_registration.deformed_cell_masks
 
     @property
-    def deformed_masks_channel_2(self) -> list[ROIStatistics] | None:
+    def deformed_masks_channel_2(self) -> list[ROIMask] | None:
         """Returns the channel 2 ROI masks warped to the shared coordinate space."""
         return self._current_registration.deformed_cell_masks_channel_2
 
     @property
-    def template_masks(self) -> list[ROIStatistics] | None:
+    def template_masks(self) -> list[ROIMask] | None:
         """Returns the consensus template masks from cross-recording tracking."""
         return self._current_tracking.template_masks
 
     @property
-    def template_masks_channel_2(self) -> list[ROIStatistics] | None:
+    def template_masks_channel_2(self) -> list[ROIMask] | None:
         """Returns the channel 2 consensus template masks from cross-recording tracking."""
         return self._current_tracking.template_masks_channel_2
 
@@ -308,7 +310,7 @@ class TrackingViewerData:
         layer: MaskLayer,
         *,
         channel_2: bool = False,
-    ) -> list[ROIStatistics] | None:
+    ) -> Sequence[ROIMask | ROIStatistics] | None:
         """Returns the mask set for the specified layer and channel.
 
         Args:
@@ -316,7 +318,7 @@ class TrackingViewerData:
             channel_2: Determines whether to return channel 2 masks instead of channel 1.
 
         Returns:
-            The list of ROIStatistics for the requested layer, or None if unavailable.
+            The list of ROIStatistics or ROIMask for the requested layer, or None if unavailable.
         """
         if layer == MaskLayer.ORIGINAL:
             return self.original_masks_channel_2 if channel_2 else self.original_masks

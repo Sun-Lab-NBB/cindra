@@ -13,10 +13,10 @@ from ataraxis_base_utilities import console
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ..dataclasses import ROIStatistics
+    from ..dataclasses import ROIMask, ROIStatistics
 
 
-def estimate_diameter_from_rois(rois: list[ROIStatistics], default_diameter: int = 10) -> int:
+def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10) -> int:
     """Estimates the cell diameter from the pixel counts of a list of ROIs.
 
     This function computes the median pixel count across all ROIs and derives an equivalent circular diameter. This is

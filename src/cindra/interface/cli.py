@@ -8,7 +8,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from ..pipelines import run_multi_day_pipeline, run_single_day_pipeline
 from .mcp_server import run_server
-from ..dataclasses import MultiDayConfiguration, PipelineType, SingleDayConfiguration, detect_pipeline_type
+from ..dataclasses import PipelineType, MultiDayConfiguration, SingleDayConfiguration, detect_pipeline_type
 
 CONTEXT_SETTINGS = {"max_content_width": 120}
 """The Click context settings that ensure displayed help messages are formatted according to the Sun lab standard."""

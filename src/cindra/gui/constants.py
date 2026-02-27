@@ -130,8 +130,6 @@ class _ViewerStyle:
     """Width for ROI index input fields."""
     medium_edit_width: int = 60
     """Width for medium-sized widgets in the ROI editor (add-ROI button, diameter label)."""
-    parameter_edit_width: int = 90
-    """Width for parameter input fields in the merge dialog."""
     combo_box_width: int = 100
     """Width for the activity mode combo box in the trace panel."""
     square_button_max_width: int = 22
@@ -142,8 +140,6 @@ class _ViewerStyle:
     """Maximum width for the colorbar widget."""
     font_family: str = "Arial"
     """Standard font family used throughout the GUI."""
-    alternative_font_family: str = "Times"
-    """Alternative font family used for colorbar and merge dialog labels."""
     color_edit_width: int = 65
     """Width for color panel edit fields and the colormap combo box."""
     roi_text_size: int = 8
@@ -192,22 +188,6 @@ class _ViewerStyle:
             The configured QFont instance.
         """
         return QtGui.QFont(self.font_family, 11, QtGui.QFont.Weight.Bold.value)
-
-    def colorbar_font(self) -> QtGui.QFont:
-        """Creates the font for colorbar tick labels (Times 8pt bold).
-
-        Returns:
-            The configured QFont instance.
-        """
-        return QtGui.QFont(self.alternative_font_family, 8, QtGui.QFont.Weight.Bold.value)
-
-    def merge_label_font(self) -> QtGui.QFont:
-        """Creates the font for merge dialog parameter labels (Times bold).
-
-        Returns:
-            The configured QFont instance.
-        """
-        return QtGui.QFont(self.alternative_font_family, -1, QtGui.QFont.Weight.Bold.value)
 
 
 STYLE: _ViewerStyle = _ViewerStyle()
@@ -301,13 +281,15 @@ class _ViewerConfig:
     """RGB color for non-cells in cell/non-cell mode."""
     channel_2_threshold_epsilon: float = 1e-3
     """Minimum change in channel 2 threshold to trigger a recoloring update."""
-    stat_field_map: dict[str, str] = field(default_factory=lambda: {
-        "skew": "skewness",
-        "compact": "compactness",
-        "footprint": "footprint",
-        "aspect_ratio": "aspect_ratio",
-        "chan2_prob": "colocalization_probability",
-    })
+    stat_field_map: dict[str, str] = field(
+        default_factory=lambda: {
+            "skew": "skewness",
+            "compact": "compactness",
+            "footprint": "footprint",
+            "aspect_ratio": "aspect_ratio",
+            "chan2_prob": "colocalization_probability",
+        }
+    )
     """Mapping from color statistic display names to ROIStatistics attribute names."""
 
     # View constants.
@@ -410,18 +392,6 @@ class _ViewerConfig:
     """Default initial position offset for the ROI ellipse in the draw editor."""
     correlation_map_view_index: int = 2
     """View index for the correlation map in the draw editor reference image selector."""
-
-    # Merge constants.
-    sentinel_distance: float = 1e6
-    """Large sentinel distance used to initialize the distance matrix upper triangle."""
-    correlation_epsilon: float = 1e-3
-    """Small epsilon added to denominators to prevent division by zero in merge computations."""
-    default_correlation_threshold: float = 0.8
-    """Default correlation threshold for automated merge suggestions."""
-    default_distance_threshold: float = 100.0
-    """Default euclidean distance threshold for automated merge suggestions."""
-    scatter_pen_width: int = 3
-    """Scatter plot pen width for merge suggestion visualization."""
 
 
 CONFIG: _ViewerConfig = _ViewerConfig()

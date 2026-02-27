@@ -11,7 +11,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from ..detection import compute_roi_statistics
 from .deformation import Deformation
-from ..dataclasses import ROIStatistics, ReferenceImageType, MultiDayRuntimeContext
+from ..dataclasses import ROIMask, ROIStatistics, ReferenceImageType, MultiDayRuntimeContext
 from .diffeomorphic import DiffeomorphicDemonsRegistration
 
 if TYPE_CHECKING:
@@ -193,103 +193,143 @@ def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> Non
     )
 
 
-def _deform_masks(
-    masks: list[ROIStatistics],
+def _warp_mask_pixels(
+    mask: ROIMask,
+    deformation: Deformation,
+) -> tuple[NDArray[np.int32], NDArray[np.int32], NDArray[np.float32], tuple[int, int]]:
+    """Applies a deformation field to transform a single ROI mask's pixel coordinates.
+
+    Extracts a local crop of the deformation field centered on the mask's bounding box, applies the deformation using
+    nearest-neighbor interpolation, and returns the transformed pixel coordinates, weights, and centroid.
+
+    Args:
+        mask: The ROIMask instance to transform.
+        deformation: The Deformation instance to apply.
+
+    Returns:
+        A tuple of (y_pixels, x_pixels, pixel_weights, centroid) for the transformed mask.
+    """
+    margin = 50
+    y_min, y_max = int(mask.y_pixels.min()) - margin, int(mask.y_pixels.max()) + margin + 1
+    x_min, x_max = int(mask.x_pixels.min()) - margin, int(mask.x_pixels.max()) + margin + 1
+    crop_height, crop_width = y_max - y_min, x_max - x_min
+
+    cropped_deform, adjusted_origin = deformation.crop(origin=(y_min, x_min), crop_size=(crop_height, crop_width))
+
+    local_y = mask.y_pixels - adjusted_origin[0]
+    local_x = mask.x_pixels - adjusted_origin[1]
+
+    actual_height, actual_width = cropped_deform.field_shape
+    weight_image = np.zeros((actual_height, actual_width), dtype=np.float32)
+
+    valid_mask = (local_y >= 0) & (local_y < actual_height) & (local_x >= 0) & (local_x < actual_width)
+    weight_image[local_y[valid_mask], local_x[valid_mask]] = mask.pixel_weights[valid_mask]
+
+    warped_weights = cropped_deform.apply_deformation(data=weight_image, interpolation=0)
+
+    new_local_y, new_local_x = np.nonzero(warped_weights)
+    new_weights = warped_weights[new_local_y, new_local_x]
+
+    new_global_y = (new_local_y + adjusted_origin[0]).astype(np.int32)
+    new_global_x = (new_local_x + adjusted_origin[1]).astype(np.int32)
+    new_centroid = (int(np.median(new_global_y)), int(np.median(new_global_x)))
+
+    return new_global_y, new_global_x, new_weights.astype(np.float32), new_centroid
+
+
+def _forward_deform_masks(
+    masks: list[ROIMask],
+    deformation: Deformation,
+    frame_width: int,
+) -> list[ROIMask]:
+    """Applies a forward deformation to transform ROI masks to shared visual space.
+
+    Creates lightweight ROIMask instances with transformed coordinates. No shape statistics are computed since the
+    multi-day pipeline only needs spatial data for tracking.
+
+    Args:
+        masks: The list of ROIMask instances to transform.
+        deformation: The Deformation instance to apply.
+        frame_width: The width of the image frame in pixels, stored in each ROIMask for raveled pixel computation.
+
+    Returns:
+        A list of new ROIMask instances with transformed coordinates.
+    """
+    transformed: list[ROIMask] = []
+    for mask in masks:
+        y_pixels, x_pixels, pixel_weights, centroid = _warp_mask_pixels(mask=mask, deformation=deformation)
+        transformed.append(
+            ROIMask(
+                y_pixels=y_pixels,
+                x_pixels=x_pixels,
+                pixel_weights=pixel_weights,
+                centroid=centroid,
+                frame_width=frame_width,
+                radius=float(np.sqrt(len(y_pixels) / np.pi)),
+            )
+        )
+    return transformed
+
+
+def _backward_deform_masks(
+    masks: list[ROIMask],
     deformation: Deformation,
     frame_height: int,
     frame_width: int,
     cell_diameter: int,
-    crop: bool = True,
-) -> list[ROIStatistics]:
-    """Applies the input deformation field to transform ROI mask coordinates and recomputes shape statistics.
+) -> tuple[list[ROIMask], list[ROIStatistics]]:
+    """Applies an inverse deformation to project template masks back to a session's native coordinate system.
 
-    For each mask, extracts a local crop of the deformation field centered on the mask's centroid, applies the
-    deformation using nearest-neighbor interpolation, and recomputes all shape statistics for the transformed ROI.
-    This approach reduces memory overhead compared to applying the full deformation field to each mask.
-
-    Notes:
-        This function creates new ROIStatistics instances with transformed coordinates and properly recomputed
-        statistics. The original masks are not modified. Shape statistics (compactness, solidity, mean_radius, etc.)
-        are recomputed using compute_roi_statistics since deformation changes the ROI geometry.
+    Creates both ROIMask instances (for spatial data persistence) and ROIStatistics instances (for downstream
+    extraction and GUI use) with full shape statistics computed via compute_roi_statistics.
 
     Args:
-        masks: The list of ROIStatistics instances to transform.
-        deformation: The Deformation instance to apply.
+        masks: The list of ROIMask instances (template masks) to transform.
+        deformation: The inverse Deformation instance to apply.
         frame_height: The height of the image frame in pixels, needed for statistics computation.
         frame_width: The width of the image frame in pixels, needed for statistics computation.
         cell_diameter: The estimated cell diameter in pixels, used for distance normalization in statistics.
-        crop: Determines whether to crop processed ROIs to the soma region before computing statistics. Should be
-            disabled for template masks that are already consensus masks from cross-session tracking.
 
     Returns:
-        A list of new ROIStatistics instances with transformed coordinates and recomputed statistics.
+        A tuple of (roi_masks, roi_statistics) where roi_masks contains the transformed spatial data and
+        roi_statistics contains full shape statistics for extraction and GUI use.
     """
-    transformed_masks: list[ROIStatistics] = []
+    roi_masks: list[ROIMask] = []
+    roi_statistics: list[ROIStatistics] = []
     for mask in masks:
-        # Computes crop region from mask bounding box with margin.
-        margin = 50
-        y_min, y_max = int(mask.y_pixels.min()) - margin, int(mask.y_pixels.max()) + margin + 1
-        x_min, x_max = int(mask.x_pixels.min()) - margin, int(mask.x_pixels.max()) + margin + 1
-        crop_height, crop_width = y_max - y_min, x_max - x_min
-
-        # Extracts the local deformation field crop.
-        cropped_deform, adjusted_origin = deformation.crop(origin=(y_min, x_min), crop_size=(crop_height, crop_width))
-
-        # Converts mask coordinates to local crop space.
-        local_y = mask.y_pixels - adjusted_origin[0]
-        local_x = mask.x_pixels - adjusted_origin[1]
-
-        # Creates a local weight image for the mask.
-        actual_height, actual_width = cropped_deform.field_shape
-        weight_image = np.zeros((actual_height, actual_width), dtype=np.float32)
-
-        # Clamps coordinates to valid crop bounds.
-        valid_mask = (local_y >= 0) & (local_y < actual_height) & (local_x >= 0) & (local_x < actual_width)
-        valid_local_y = local_y[valid_mask]
-        valid_local_x = local_x[valid_mask]
-        valid_weights = mask.pixel_weights[valid_mask]
-
-        weight_image[valid_local_y, valid_local_x] = valid_weights
-
-        # Applies the deformation using nearest-neighbor interpolation to preserve discrete pixel values.
-        warped_weights = cropped_deform.apply_deformation(data=weight_image, interpolation=0)
-
-        # Extracts transformed coordinates from non-zero pixels.
-        new_local_y, new_local_x = np.nonzero(warped_weights)
-        new_weights = warped_weights[new_local_y, new_local_x]
-
-        # Converts back to global coordinates.
-        new_global_y = new_local_y + adjusted_origin[0]
-        new_global_x = new_local_x + adjusted_origin[1]
-
-        # Computes new centroid from transformed coordinates.
-        new_centroid = (int(np.median(new_global_y)), int(np.median(new_global_x)))
-
-        # Computes raveled pixel indices for multi-day tracking. The raveled index is y * width + x in the deformed
-        # visual space.
-        raveled_pixels = (new_global_y * frame_width + new_global_x).astype(np.int32)
-
-        # Creates the transformed ROIStatistics with coordinate data. Statistics are recomputed below.
-        transformed = ROIStatistics(
-            y_pixels=new_global_y.astype(np.int32),
-            x_pixels=new_global_x.astype(np.int32),
-            pixel_weights=new_weights.astype(np.float32),
-            centroid=new_centroid,
-            footprint=mask.footprint,
-            raveled_pixels=raveled_pixels,
+        y_pixels, x_pixels, pixel_weights, centroid = _warp_mask_pixels(mask=mask, deformation=deformation)
+        roi_masks.append(
+            ROIMask(
+                y_pixels=y_pixels,
+                x_pixels=x_pixels,
+                pixel_weights=pixel_weights,
+                centroid=centroid,
+                frame_width=frame_width,
+                radius=float(np.sqrt(len(y_pixels) / np.pi)),
+                cluster_id=mask.cluster_id,
+                session_count=mask.session_count,
+            )
         )
-        transformed_masks.append(transformed)
+        roi_statistics.append(
+            ROIStatistics(
+                y_pixels=y_pixels,
+                x_pixels=x_pixels,
+                pixel_weights=pixel_weights,
+                centroid=centroid,
+                cluster_id=mask.cluster_id,
+                session_count=mask.session_count,
+            )
+        )
 
-    # Recomputes all shape statistics for the transformed masks.
     compute_roi_statistics(
-        rois=transformed_masks,
+        rois=roi_statistics,
         frame_height=frame_height,
         frame_width=frame_width,
         diameter=cell_diameter,
-        crop=crop,
+        crop=False,
     )
 
-    return transformed_masks
+    return roi_masks, roi_statistics
 
 
 def _apply_forward_deformation(context: MultiDayRuntimeContext, deformation: Deformation) -> None:
@@ -311,7 +351,6 @@ def _apply_forward_deformation(context: MultiDayRuntimeContext, deformation: Def
         )
         console.error(message=message, error=ValueError)
     detection = combined_data.detection
-    extraction = combined_data.extraction
 
     # Stores deformation field components.
     registration_data.deform_field_y = deformation.get_field(dimension=0)
@@ -345,35 +384,40 @@ def _apply_forward_deformation(context: MultiDayRuntimeContext, deformation: Def
             data=detection.maximum_projection_channel_2.astype(np.float32)
         )
 
-    # Gets frame dimensions and cell diameter for statistics computation.
-    frame_height = combined_data.combined_height
+    # Gets frame dimensions for deformation.
     frame_width = combined_data.combined_width
-    cell_diameter = detection.cell_diameter
 
-    # Transforms channel 1 selected cell masks.
+    # Loads single-day ROI masks and slices by selected cell indices for channel 1.
     selected_indices = context.runtime.io.selected_cell_indices
-    if selected_indices and extraction.roi_statistics is not None:
-        selected_masks = [extraction.roi_statistics[i] for i in selected_indices]
-        registration_data.deformed_cell_masks = _deform_masks(
-            masks=selected_masks,
-            deformation=deformation,
-            frame_height=frame_height,
-            frame_width=frame_width,
-            cell_diameter=cell_diameter,
-        )
+    single_day_output = context.runtime.io.data_path
+    if selected_indices and single_day_output is not None:
+        masks_path = single_day_output / "roi_masks.npz"
+        if masks_path.exists():
+            all_masks = ROIMask.load_list(masks_path)
+            # Updates frame_width on loaded masks to use the combined visual space width.
+            selected_masks = [all_masks[i] for i in selected_indices]
+            for mask in selected_masks:
+                mask.frame_width = frame_width
+            registration_data.deformed_cell_masks = _forward_deform_masks(
+                masks=selected_masks,
+                deformation=deformation,
+                frame_width=frame_width,
+            )
 
-    # Transforms channel 2 selected cell masks if available.
+    # Loads single-day ROI masks and slices by selected cell indices for channel 2.
     selected_indices_channel_2 = context.runtime.io.selected_cell_indices_channel_2
-    if selected_indices_channel_2 and extraction.roi_statistics_channel_2 is not None:
-        selected_masks_channel_2 = [extraction.roi_statistics_channel_2[i] for i in selected_indices_channel_2]
-        cell_diameter_channel_2 = detection.cell_diameter_channel_2 or cell_diameter
-        registration_data.deformed_cell_masks_channel_2 = _deform_masks(
-            masks=selected_masks_channel_2,
-            deformation=deformation,
-            frame_height=frame_height,
-            frame_width=frame_width,
-            cell_diameter=cell_diameter_channel_2,
-        )
+    if selected_indices_channel_2 and single_day_output is not None:
+        masks_path_channel_2 = single_day_output / "roi_masks_channel_2.npz"
+        if masks_path_channel_2.exists():
+            all_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
+            selected_masks_channel_2 = [all_masks_channel_2[i] for i in selected_indices_channel_2]
+            for mask in selected_masks_channel_2:
+                mask.frame_width = frame_width
+            registration_data.deformed_cell_masks_channel_2 = _forward_deform_masks(
+                masks=selected_masks_channel_2,
+                deformation=deformation,
+                frame_width=frame_width,
+            )
 
 
 def _apply_backward_deformation(context: MultiDayRuntimeContext) -> None:
@@ -423,25 +467,25 @@ def _apply_backward_deformation(context: MultiDayRuntimeContext) -> None:
     # lacks a stored template diameter.
     if tracking_data.template_masks is not None:
         template_diameter = tracking_data.template_diameter or detection.cell_diameter
-        context.runtime.extraction.roi_statistics = _deform_masks(
+        tracked_masks, tracked_stats = _backward_deform_masks(
             masks=tracking_data.template_masks,
             deformation=inverse_deformation,
             frame_height=frame_height,
             frame_width=frame_width,
             cell_diameter=template_diameter,
-            crop=False,
         )
+        context.runtime.extraction.roi_statistics = tracked_stats
 
     # Transforms channel 2 template masks if available.
     if tracking_data.template_masks_channel_2 is not None:
         template_diameter_channel_2 = (
             tracking_data.template_diameter_channel_2 or detection.cell_diameter_channel_2 or detection.cell_diameter
         )
-        context.runtime.extraction.roi_statistics_channel_2 = _deform_masks(
+        tracked_masks_channel_2, tracked_stats_channel_2 = _backward_deform_masks(
             masks=tracking_data.template_masks_channel_2,
             deformation=inverse_deformation,
             frame_height=frame_height,
             frame_width=frame_width,
             cell_diameter=template_diameter_channel_2,
-            crop=False,
         )
+        context.runtime.extraction.roi_statistics_channel_2 = tracked_stats_channel_2
