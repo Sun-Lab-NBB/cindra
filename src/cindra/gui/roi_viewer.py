@@ -11,6 +11,7 @@ from PySide6 import QtGui, QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
 from PySide6.QtWidgets import (
     QLabel,
+    QSlider,
     QWidget,
     QCheckBox,
     QComboBox,
@@ -25,41 +26,40 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
     QButtonGroup,
-    QSlider,
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from .constants import (
-    STYLE,
-    CONFIG,
-    BackgroundView,
-    ROIColorMode,
-    TraceMode,
-)
-from .single_day_context import ROIViewerData
-from .data_models import (
-    ColorArrays,
-    ColorbarWidgets,
-    ColorControls,
-    ROIIndexMaps,
-    SelectionControls,
-    TraceControls,
-    ViewControls,
-)
+from .widgets import ViewBox, TraceBox, RangeSlider, plot_trace
 from .overlays import (
+    flip_rois,
+    draw_masks,
     build_views,
-    compute_colors,
     display_masks,
     display_views,
     draw_colorbar,
-    draw_masks,
-    flip_rois,
     init_roi_maps,
+    compute_colors,
     render_colorbar,
     update_colormap,
     update_correlation_masks,
 )
-from .widgets import RangeSlider, TraceBox, ViewBox, plot_trace
+from .constants import (
+    STYLE,
+    CONFIG,
+    TraceMode,
+    ROIColorMode,
+    BackgroundView,
+)
+from .data_models import (
+    ColorArrays,
+    ROIIndexMaps,
+    ViewControls,
+    ColorControls,
+    TraceControls,
+    ColorbarWidgets,
+    SelectionControls,
+)
+from .single_day_context import SingleDayViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -78,7 +78,7 @@ class ROIViewer(QMainWindow):
             a session via the File menu or drag-and-drop.
     """
 
-    def __init__(self, data: ROIViewerData | None = None) -> None:
+    def __init__(self, data: SingleDayViewerData | None = None) -> None:
         super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
 
@@ -101,7 +101,7 @@ class ROIViewer(QMainWindow):
         self.last_reclassified_index: int = -1
 
         # Core data objects.
-        self.context_data: ROIViewerData | None = None
+        self.context_data: SingleDayViewerData | None = None
         self.color_arrays: ColorArrays | None = None
         self.roi_maps: ROIIndexMaps | None = None
         self.colorbar_widgets: ColorbarWidgets | None = None
@@ -173,6 +173,21 @@ class ROIViewer(QMainWindow):
         """
         panel = QWidget()
         layout = QVBoxLayout(panel)
+
+        # 0. View selector (Combined / Plane 0 / Plane 1 / ...).
+        view_box = QGroupBox("View")
+        view_box.setStyleSheet("QGroupBox { color: white; }")
+        view_layout = QHBoxLayout(view_box)
+        view_label = QLabel("View:")
+        view_label.setStyleSheet(STYLE.white_label)
+        view_layout.addWidget(view_label)
+        self._view_selector: QComboBox = QComboBox(self)
+        self._view_selector.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._view_selector.setEnabled(False)
+        self._view_selector.currentIndexChanged.connect(self._on_view_selector_changed)
+        view_layout.addWidget(self._view_selector)
+        view_layout.addStretch()
+        layout.addWidget(view_box)
 
         # 1. ROI Visibility.
         visibility_box = QGroupBox("ROI Visibility")
@@ -523,7 +538,7 @@ class ROIViewer(QMainWindow):
         console.echo(message=f"Loading session: {session_path}")
 
         try:
-            context_data = ROIViewerData.from_single_day(root_path=session_path, mutable=True)
+            context_data = SingleDayViewerData.from_single_day(root_path=session_path)
         except Exception:
             console.echo(message="Failed to load session data.", level=LogLevel.ERROR)
             result = QMessageBox.question(
@@ -564,6 +579,17 @@ class ROIViewer(QMainWindow):
         context = self.context_data
         if context is None:
             return
+
+        # Populates the view selector without triggering _on_view_selector_changed. Signals are
+        # blocked so that clearing and re-adding items does not fire redundant view-switch callbacks.
+        self._view_selector.blockSignals(True)
+        self._view_selector.clear()
+        for label in context.view_labels:
+            self._view_selector.addItem(label)
+        # Maps view_index to combo index: combo 0 = combined (-1), combo 1+ = planes.
+        self._view_selector.setCurrentIndex(context.view_index + 1)
+        self._view_selector.blockSignals(False)
+        self._view_selector.setEnabled(len(context.view_labels) > 1)
 
         # Resets display controls.
         self._roi_visibility_checkbox.setChecked(True)
@@ -607,7 +633,7 @@ class ROIViewer(QMainWindow):
         self.roi_maps = init_roi_maps(context=context, color_arrays=self.color_arrays)
 
         # Selects the first classified cell as the initial selection.
-        first_cell = int(np.nonzero(context.cell_classification_labels)[0][0]) if context.cell_count > 0 else 0
+        first_cell = int(np.nonzero(context.cell_classification[:, 1])[0][0]) if context.cell_count > 0 else 0
         self.selected_roi_index = first_cell
         self.merge_roi_indices = [first_cell]
         self._ichosen_stats()
@@ -693,7 +719,7 @@ class ROIViewer(QMainWindow):
         color_button_count = len(self._color_controls.color_buttons.buttons())
         for b in range(color_button_count):
             if b == CONFIG.color_channel_2:
-                if context.has_channel_2:
+                if context.two_channels:
                     self._color_controls.color_buttons.button(b).setEnabled(True)
                     self._color_controls.color_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
             elif b == 0:
@@ -806,6 +832,25 @@ class ROIViewer(QMainWindow):
             return
         self.auto_zoom_to_roi = QtCore.Qt.CheckState(state) == QtCore.Qt.CheckState.Checked
         self.update_plot()
+
+    def _on_view_selector_changed(self, combo_index: int) -> None:
+        """Handles view selector dropdown changes by switching to the selected view.
+
+        Maps the combo box index to a view index (accounting for the combined view offset) and
+        reloads all GUI components for the new view.
+
+        Args:
+            combo_index: The index selected in the view selector combo box.
+        """
+        if combo_index < 0 or self.context_data is None:
+            return
+
+        # Maps combo index to view_index: combo 0 maps to view_index -1 (combined), combo 1+ maps to planes.
+        view_index = combo_index - 1
+
+        self.context_data.switch_view(view_index=view_index)
+        self._reset_state()
+        self._initialize_gui()
 
     def _on_trace_toggle(self, which: str) -> None:
         """Handles trace visibility checkbox toggles."""
@@ -990,27 +1035,12 @@ class ROIViewer(QMainWindow):
         """Resets the view range for the image panel."""
         self._view_box.autoRange()
 
-    def save_cell_classification(self) -> None:
-        """Saves the current cell classification labels to cell_classification.npy."""
-        if self.context_data is None:
-            return
-        context = self.context_data
-        output_path = context.output_path
-        if output_path is None:
-            return
-        np.save(
-            str(output_path / "cell_classification.npy"),
-            np.concatenate(
-                (
-                    np.expand_dims(context.cell_classification_labels, axis=1),
-                    np.expand_dims(context.cell_classification_probabilities, axis=1),
-                ),
-                axis=1,
-            ),
-        )
-
     def _flip_plot(self) -> None:
-        """Flips the selected ROIs between cell and non-cell classification and saves the result."""
+        """Flips the selected ROIs between cell and non-cell classification.
+
+        Classification writes go directly through the r+ memory-mapped file, so no explicit save
+        is needed.
+        """
         if self.context_data is None or self.color_arrays is None or self.roi_maps is None:
             return
         self.last_reclassified_index = flip_rois(
@@ -1020,7 +1050,6 @@ class ROIViewer(QMainWindow):
             selected_roi_index=self.selected_roi_index,
             merge_roi_indices=self.merge_roi_indices,
         )
-        self.save_cell_classification()
         self.update_plot()
 
     def _handle_click(self, click_x: int, click_y: int, is_right: bool, is_multi: bool) -> bool:

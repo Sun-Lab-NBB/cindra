@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from .single_day_context import RegistrationViewerData
+from .single_day_context import SingleDayViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -79,7 +79,7 @@ class PCViewer(QMainWindow):
 
     Attributes:
         _style: Frozen style constants for the PC viewer window.
-        data: The RegistrationViewerData instance that stores the visualized recording's data.
+        data: The SingleDayViewerData instance that stores the visualized recording's data.
         _loaded: Determines whether PC data has been loaded and is ready for display.
         _current_frame: Animation toggle state for PC extreme image cycling.
         _pc_count: Number of principal components available.
@@ -114,7 +114,7 @@ class PCViewer(QMainWindow):
     _style: _PCViewerStyle = _PCViewerStyle()
     """Frozen style constants for the PC viewer window."""
 
-    def __init__(self, data: RegistrationViewerData) -> None:
+    def __init__(self, data: SingleDayViewerData) -> None:
         # Initializes the main viewer window.
         super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
@@ -126,7 +126,7 @@ class PCViewer(QMainWindow):
         self._central_widget.setLayout(self._layout)
 
         # Initializes state and data.
-        self.data: RegistrationViewerData = data
+        self.data: SingleDayViewerData = data
         self._loaded: bool = False
         self._current_frame: int = 0
         self._pc_count: int = data.principal_component_count
@@ -203,11 +203,11 @@ class PCViewer(QMainWindow):
 
         self.load_data(data=data)
 
-    def load_data(self, data: RegistrationViewerData) -> None:
-        """Loads principal component registration data from the RegistrationViewerData instance.
+    def load_data(self, data: SingleDayViewerData) -> None:
+        """Loads principal component registration data from the SingleDayViewerData instance.
 
         Args:
-            data: The RegistrationViewerData instance that stores the visualized recording's data.
+            data: The SingleDayViewerData instance that stores the visualized recording's data.
         """
         # Extracts PC arrays from the recording data.
         self.data = data

@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
 )
 
-from .single_day_context import RegistrationViewerData
+from .single_day_context import SingleDayViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -85,7 +85,7 @@ class BinaryPlayer(QMainWindow):
 
     Attributes:
         _style: Frozen style constants for the binary player window.
-        data: The RegistrationViewerData instance that stores the visualized recording's data.
+        data: The SingleDayViewerData instance that stores the visualized recording's data.
         _channel_2_visible: Determines whether the channel 2 overlay is currently displayed.
         _current_frame: Index of the currently displayed frame.
         _frame_delta: Frame step size for arrow key navigation.
@@ -115,7 +115,7 @@ class BinaryPlayer(QMainWindow):
     # Notifies listeners when the user selects a different imaging plane from the plane selector.
     plane_changed = QtCore.Signal(int)
 
-    def __init__(self, data: RegistrationViewerData) -> None:
+    def __init__(self, data: SingleDayViewerData) -> None:
         super().__init__()
 
         # Adds the main UI window.
@@ -128,7 +128,7 @@ class BinaryPlayer(QMainWindow):
         self._central_widget.setLayout(self._layout)
         # Initializes state flags and recording data.
         self._channel_2_visible: bool = False
-        self.data: RegistrationViewerData = data
+        self.data: SingleDayViewerData = data
 
         # Initializes playback state.
         self._current_frame: int = 0
@@ -228,11 +228,11 @@ class BinaryPlayer(QMainWindow):
 
         self.load_data(data=data)
 
-    def load_data(self, data: RegistrationViewerData) -> None:
-        """Caches the input RegistrationViewerData instance and uses it to populate the managed UI window.
+    def load_data(self, data: SingleDayViewerData) -> None:
+        """Caches the input SingleDayViewerData instance and uses it to populate the managed UI window.
 
         Args:
-            data: The RegistrationViewerData instance that stores the visualized recording's data.
+            data: The SingleDayViewerData instance that stores the visualized recording's data.
         """
         self.data = data
 
@@ -244,9 +244,9 @@ class BinaryPlayer(QMainWindow):
         # clearing and re-adding items does not fire redundant plane-switch callbacks.
         self._plane_selector.blockSignals(True)
         self._plane_selector.clear()
-        for label in data.plane_labels:
+        for label in data.view_labels[1:]:
             self._plane_selector.addItem(label)
-        self._plane_selector.setCurrentIndex(data.current_plane_index)
+        self._plane_selector.setCurrentIndex(data.view_index)
         self._plane_selector.blockSignals(False)
 
         # Only enables the plane selector when multiple planes are available.
@@ -336,7 +336,7 @@ class BinaryPlayer(QMainWindow):
                 start_dir = str(parent)
         directory = QFileDialog.getExistingDirectory(self, "Specify the recording directory to open.", start_dir)
         if directory:
-            data = RegistrationViewerData.from_recording(root_path=Path(directory))
+            data = SingleDayViewerData.from_recording(root_path=Path(directory))
             self.load_data(data=data)
 
     def _on_plane_changed(self, index: int) -> None:
@@ -347,7 +347,7 @@ class BinaryPlayer(QMainWindow):
         """
         if index < 0:
             return
-        self.data.switch_plane(plane_index=index)
+        self.data.switch_view(view_index=index)
         self._open_plane()
         self.plane_changed.emit(index)
 
@@ -361,7 +361,8 @@ class BinaryPlayer(QMainWindow):
         self._shift_plot.disableAutoRange()
 
         # Computes dynamic range from subsampled frames.
-        frames = self.data.binary_file.subsample_movie(sample_count=self._style.subsample_frame_count)
+        plane_binary = self.data.channel_1_binary
+        frames = plane_binary.subsample_movie(sample_count=self._style.subsample_frame_count)
         frame_mean = np.float32(frames.mean())
         frame_std = np.float32(frames.std())
         self._display_range = frame_mean + frame_std * np.array(
@@ -406,7 +407,7 @@ class BinaryPlayer(QMainWindow):
             brush=pg.mkBrush(255, 0, 0),
         )
 
-        self._channel_2_button.setEnabled(self.data.has_channel_2)
+        self._channel_2_button.setEnabled(self.data.two_channels)
 
         self._current_frame = -1
         self._next_frame()
@@ -420,18 +421,18 @@ class BinaryPlayer(QMainWindow):
             self._current_frame = 0
 
         # Reads the current frame from the registered binary.
-        self._image = np.asarray(self.data.binary_file[self._current_frame])
+        plane_binary = self.data.channel_1_binary
+        self._image = np.asarray(plane_binary[self._current_frame])
 
         # If channel 2 overlay is active, composites both channels into an RGB image with channel 1 in
         # the red plane and channel 2 in the green plane.
-        if self.data.has_channel_2 and self._channel_2_visible:
-            binary_channel_2 = self.data.binary_file_channel_2
-            if binary_channel_2 is not None:
-                channel_2_frame = np.asarray(binary_channel_2[self._current_frame])[:, :, np.newaxis]
-                self._image = np.concatenate(
-                    (self._image[:, :, np.newaxis], channel_2_frame, np.zeros_like(channel_2_frame)),
-                    axis=-1,
-                )
+        if self.data.two_channels and self._channel_2_visible:
+            plane_binary_channel_2 = self.data.channel_2_binary
+            channel_2_frame = np.asarray(plane_binary_channel_2[self._current_frame])[:, :, np.newaxis]
+            self._image = np.concatenate(
+                (self._image[:, :, np.newaxis], channel_2_frame, np.zeros_like(channel_2_frame)),
+                axis=-1,
+            )
 
         # Updates the main image display and frame navigation controls.
         self._main_image.setImage(self._image, levels=self._display_range)

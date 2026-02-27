@@ -10,8 +10,8 @@ from scipy.cluster import hierarchy
 from scipy.spatial.distance import pdist, squareform
 from ataraxis_base_utilities import LogLevel, console
 
-from ..dataclasses import ROIStatistics
-from .roi_statistics import compute_roi_statistics, estimate_diameter_from_rois
+from ..dataclasses import ROIMask
+from .roi_statistics import estimate_diameter_from_rois
 
 if TYPE_CHECKING:
     from ..dataclasses import MultiDayRuntimeContext
@@ -71,14 +71,14 @@ def track_rois_across_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
     console.echo(message=f"ROI tracking: complete. Time: {tracking_time} seconds.", level=LogLevel.SUCCESS)
 
 
-def _compute_overlap(rois: list[ROIStatistics]) -> None:
+def _compute_overlap(rois: list[ROIMask]) -> None:
     """Computes overlapping pixels across ROIs and updates each ROI's overlap_mask field in-place.
 
     Args:
-        rois: The list of ROIStatistics instances to process. Each ROI's ``overlap_mask`` field is updated in-place.
+        rois: The list of ROIMask instances to process. Each ROI's ``overlap_mask`` field is updated in-place.
     """
-    # Collects all valid pixel index arrays from the input ROIs.
-    mask_pixel_indices = [roi.raveled_pixels for roi in rois if roi.raveled_pixels is not None]
+    # Collects all pixel index arrays from the input ROIs.
+    mask_pixel_indices = [roi.raveled_pixels for roi in rois]
     if not mask_pixel_indices:
         return
 
@@ -93,11 +93,8 @@ def _compute_overlap(rois: list[ROIStatistics]) -> None:
     flat_overlap = counts[inverse] > 1
 
     # Slices the flat overlap array back into per-ROI segments using the precomputed offsets.
-    roi_index = 0
-    for roi in rois:
-        if roi.raveled_pixels is not None:
-            roi.overlap_mask = flat_overlap[mask_offsets[roi_index] : mask_offsets[roi_index + 1]]
-            roi_index += 1
+    for roi_index, roi in enumerate(rois):
+        roi.overlap_mask = flat_overlap[mask_offsets[roi_index] : mask_offsets[roi_index + 1]]
 
 
 def _compute_condensed_index(row_index: int, column_index: int, matrix_size: int) -> int:
@@ -123,15 +120,15 @@ def _compute_condensed_index(row_index: int, column_index: int, matrix_size: int
 
 
 def _cluster_rois_in_bin(
-    rois: list[ROIStatistics],
+    rois: list[ROIMask],
     roi_sessions: list[int],
     threshold: float,
     maximum_distance: int,
-) -> list[tuple[list[ROIStatistics], list[int]]]:
+) -> list[tuple[list[ROIMask], list[int]]]:
     """Clusters ROIs within a spatial bin using Jaccard distance and hierarchical clustering.
 
     Args:
-        rois: The ROIStatistics instances describing the ROIs within the spatial bin.
+        rois: The ROIMask instances describing the ROIs within the spatial bin.
         roi_sessions: The index of the imaging session that contributed each ROI in the 'rois' list.
         threshold: The Jaccard distance threshold for hierarchical clustering. ROI pairs with a Jaccard distance
             below this value (indicating higher spatial overlap) are clustered together. A value of 0 means
@@ -177,9 +174,6 @@ def _cluster_rois_in_bin(
         roi_1_pixels = rois[roi_1_index].raveled_pixels
         roi_2_pixels = rois[roi_2_index].raveled_pixels
 
-        if roi_1_pixels is None or roi_2_pixels is None:
-            continue
-
         intersection_size = np.intersect1d(roi_1_pixels, roi_2_pixels, assume_unique=True).shape[0]
         union_size = roi_1_pixels.shape[0] + roi_2_pixels.shape[0] - intersection_size
         jaccard_distance = 0.0 if union_size == 0 else 1 - intersection_size / union_size
@@ -196,7 +190,7 @@ def _cluster_rois_in_bin(
     cluster_labels = hierarchy.fcluster(Z=linkage_matrix, t=threshold, criterion="distance")
 
     # Groups ROIs by their cluster label.
-    clustered_rois: list[tuple[list[ROIStatistics], list[int]]] = []
+    clustered_rois: list[tuple[list[ROIMask], list[int]]] = []
     for cluster_id in np.unique(cluster_labels):
         member_indices = np.where(cluster_labels == cluster_id)[0]
         cluster_rois = [rois[i] for i in member_indices]
@@ -207,11 +201,11 @@ def _cluster_rois_in_bin(
 
 
 def _create_template_roi(
-    cluster_rois: list[ROIStatistics],
+    cluster_rois: list[ROIMask],
     cluster_id: int,
     image_shape: tuple[int, int],
     pixel_prevalence: int,
-) -> ROIStatistics | None:
+) -> ROIMask | None:
     """Creates a template ROI from a cluster of matched ROIs across sessions.
 
     Args:
@@ -222,9 +216,9 @@ def _create_template_roi(
             generated template mask.
 
     Returns:
-        A new ROIStatistics instance representing the template, or None if the template would be empty.
+        A new ROIMask instance representing the template, or None if the template would be empty.
     """
-    cluster_pixels = np.hstack([roi.raveled_pixels for roi in cluster_rois if roi.raveled_pixels is not None])
+    cluster_pixels = np.hstack([roi.raveled_pixels for roi in cluster_rois])
     cluster_weights = np.hstack([roi.pixel_weights for roi in cluster_rois])
 
     # Uses np.unique with return_inverse to enable efficient weight aggregation via bincount.
@@ -246,14 +240,14 @@ def _create_template_roi(
     centroid = (int(np.median(y_pixels)), int(np.median(x_pixels)))
     radius = float(np.mean([roi.radius for roi in cluster_rois]))
 
-    return ROIStatistics(
+    return ROIMask(
         y_pixels=y_pixels,
         x_pixels=x_pixels,
         pixel_weights=average_weights,
         centroid=centroid,
+        frame_width=image_shape[1],
         radius=radius,
         cluster_id=cluster_id,
-        raveled_pixels=filtered_pixels,
         session_count=len(cluster_rois),
     )
 
@@ -261,7 +255,7 @@ def _create_template_roi(
 def _collect_session_rois(
     contexts: list[MultiDayRuntimeContext],
     channel_2: bool,
-) -> tuple[list[ROIStatistics], list[int]]:
+) -> tuple[list[ROIMask], list[int]]:
     """Collects all unclustered ROIs from the registered sessions.
 
     Args:
@@ -269,9 +263,9 @@ def _collect_session_rois(
         channel_2: Determines whether to collect channel 2 ROIs instead of channel 1.
 
     Returns:
-        A tuple containing the list of ROIStatistics instances and their corresponding session indices.
+        A tuple containing the list of ROIMask instances and their corresponding session indices.
     """
-    all_rois: list[ROIStatistics] = []
+    all_rois: list[ROIMask] = []
     all_sessions: list[int] = []
 
     for session_index, context in enumerate(contexts):
@@ -292,21 +286,21 @@ def _collect_session_rois(
 
 
 def _build_roi_grid(
-    rois: list[ROIStatistics],
+    rois: list[ROIMask],
     sessions: list[int],
     grid_size: int,
-) -> dict[tuple[int, int], list[tuple[ROIStatistics, int]]]:
+) -> dict[tuple[int, int], list[tuple[ROIMask, int]]]:
     """Builds a spatial grid index for efficient ROI lookup by location.
 
     Args:
-        rois: The list of ROIStatistics instances to index.
+        rois: The list of ROIMask instances to index.
         sessions: The session index for each ROI.
         grid_size: The size of each grid cell in pixels.
 
     Returns:
         A dictionary mapping grid cell coordinates to lists of (ROI, session) tuples.
     """
-    roi_grid: dict[tuple[int, int], list[tuple[ROIStatistics, int]]] = {}
+    roi_grid: dict[tuple[int, int], list[tuple[ROIMask, int]]] = {}
     for roi, session in zip(rois, sessions, strict=True):
         grid_y = roi.centroid[0] // grid_size
         grid_x = roi.centroid[1] // grid_size
@@ -315,14 +309,14 @@ def _build_roi_grid(
 
 
 def _collect_bin_rois(
-    roi_grid: dict[tuple[int, int], list[tuple[ROIStatistics, int]]],
+    roi_grid: dict[tuple[int, int], list[tuple[ROIMask, int]]],
     bin_origin_y: int,
     bin_origin_x: int,
     bin_height: int,
     bin_width: int,
     overlap_margin: int,
     grid_cell_size: int,
-) -> tuple[list[ROIStatistics], list[int]]:
+) -> tuple[list[ROIMask], list[int]]:
     """Collects unclustered ROIs within a spatial bin including its overlap margins.
 
     Args:
@@ -351,7 +345,7 @@ def _collect_bin_rois(
     grid_col_start = search_x_min // grid_cell_size
     grid_col_end = search_x_max // grid_cell_size + 1
 
-    collected_rois: list[ROIStatistics] = []
+    collected_rois: list[ROIMask] = []
     collected_sessions: list[int] = []
 
     # Iterates over all grid cells that could contain ROIs within the search region.
@@ -377,25 +371,24 @@ def _collect_bin_rois(
 
 
 def _filter_templates(
-    template_masks: list[ROIStatistics],
+    template_masks: list[ROIMask],
     minimum_size: int,
-) -> list[ROIStatistics]:
+) -> list[ROIMask]:
     """Filters template masks by removing those that are too small after overlap removal.
 
     Args:
-        template_masks: The list of template ROIStatistics instances to filter.
+        template_masks: The list of template ROIMask instances to filter.
         minimum_size: The minimum number of non-overlapping pixels required to keep the mask for further processing.
 
     Returns:
         The filtered list of template masks that meet the size requirement.
     """
-    filtered_templates: list[ROIStatistics] = []
+    filtered_templates: list[ROIMask] = []
     for mask in template_masks:
         if mask.overlap_mask is None:
             filtered_templates.append(mask)
         else:
-            pixel_count = len(mask.raveled_pixels) if mask.raveled_pixels is not None else 0
-            non_overlapping_pixels = pixel_count - int(np.sum(mask.overlap_mask))
+            non_overlapping_pixels = len(mask.y_pixels) - int(np.sum(mask.overlap_mask))
             if non_overlapping_pixels >= minimum_size:
                 filtered_templates.append(mask)
     return filtered_templates
@@ -436,12 +429,6 @@ def _track_channel_rois(contexts: list[MultiDayRuntimeContext], channel_2: bool)
     if not all_rois:
         return
 
-    # Verifies that ROIs have pixel data available. If the first ROI lacks raveled_pixels, the deformed masks were
-    # not properly computed during registration.
-    first_roi = all_rois[0]
-    if first_roi.raveled_pixels is None:
-        return
-
     # Retrieves the combined image dimensions from the first context. These define the coordinate space for all
     # deformed ROI masks after diffeomorphic registration.
     combined_data = contexts[0].runtime.combined_data
@@ -465,7 +452,7 @@ def _track_channel_rois(contexts: list[MultiDayRuntimeContext], channel_2: bool)
             grid_x = x // grid_size
             grid_positions.add((grid_y, grid_x))
 
-    template_masks: list[ROIStatistics] = []
+    template_masks: list[ROIMask] = []
     cluster_counter = 0
 
     # Processes each spatial bin independently. Sorting ensures deterministic ordering across runs.
@@ -551,20 +538,12 @@ def _track_channel_rois(contexts: list[MultiDayRuntimeContext], channel_2: bool)
     # represent partial cells or segmentation artifacts.
     filtered_templates = _filter_templates(template_masks=template_masks, minimum_size=minimum_size)
 
-    # Computes shape statistics (compactness, solidity, radius, aspect ratio) for classification and quality
-    # assessment. The diameter is re-estimated from template pixel counts since templates only include the most
-    # stable pixels across sessions, which warps the effective diameter. Soma cropping is disabled since templates
-    # are already consensus masks.
+    # Estimates template diameter from pixel counts for use by _backward_deform_masks. Shape statistics are not
+    # computed here since templates are lightweight ROIMask instances; full statistics are only computed after
+    # backward deformation when ROIStatistics are needed for extraction and GUI.
     template_diameter = 0
     if filtered_templates:
         template_diameter = estimate_diameter_from_rois(rois=filtered_templates)
-        compute_roi_statistics(
-            rois=filtered_templates,
-            frame_height=image_height,
-            frame_width=image_width,
-            diameter=template_diameter,
-            crop=False,
-        )
 
     # Stores the same template mask list and the estimated template diameter in all session contexts. All sessions
     # share identical templates since they represent consensus ROIs in the common registered coordinate space.

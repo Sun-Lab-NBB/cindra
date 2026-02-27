@@ -1,14 +1,15 @@
 """Provides background view construction, ROI overlay rendering, and mask mutation shared by the ROI viewer and
-editor."""
+editor.
+"""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import numpy as np
+from PySide6 import QtGui
 import pyqtgraph as pg  # type: ignore[import-untyped]
 import matplotlib.cm
-from PySide6 import QtGui
 from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
@@ -19,8 +20,8 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from .data_models import ColorbarWidgets
-    from .single_day_context import ROIViewerData
     from ..dataclasses import ROIStatistics
+    from .single_day_context import SingleDayViewerData
 
 
 def build_views(
@@ -98,7 +99,7 @@ def display_views(
 
 
 def compute_colors(
-    context: ROIViewerData,
+    context: SingleDayViewerData,
     roi_colormap: str,
     colocalization_threshold: float,
 ) -> ColorArrays:
@@ -111,7 +112,7 @@ def compute_colors(
     Args:
         context: The loaded data context.
         roi_colormap: Name of the matplotlib colormap applied when mapping ROI statistics to overlay colors.
-        colocalization_threshold: Display threshold applied to cell_colocalization_probabilities.
+        colocalization_threshold: Display threshold applied to cell colocalization probabilities.
 
     Returns:
         Computed color arrays for all ROIs.
@@ -127,9 +128,9 @@ def compute_colors(
     # Generates random colors, adjusting for channel 2 data if present.
     np.random.seed(seed=0)  # noqa: NPY002
     random_colors = np.random.random((cell_count,))  # noqa: NPY002
-    if context.has_channel_2:
+    if context.two_channels:
         random_colors = random_colors / CONFIG.channel_2_color_divisor + CONFIG.channel_2_color_offset
-        is_channel_2 = context.cell_colocalization_probabilities > colocalization_threshold
+        is_channel_2 = context.cell_colocalization[:, 0] > colocalization_threshold
         console.echo(message=f"Number of channel 2 cells: {int(is_channel_2.sum())}")
         random_hues = random_colors.copy()
         random_colors[is_channel_2] = 0
@@ -168,7 +169,7 @@ def compute_colors(
         istat[stat_index] = stat_values.flatten()
 
     # Computes classifier probability colors.
-    classifier_values = np.expand_dims(context.cell_classification_probabilities, axis=1)
+    classifier_values = np.expand_dims(context.cell_classification[:, 0], axis=1)
     classifier_color = istat_transform(classifier_values.astype(np.float32), roi_colormap)
     cols[CONFIG.classifier_color_index] = classifier_color
     istat[CONFIG.classifier_color_index] = classifier_values.flatten()
@@ -179,11 +180,11 @@ def compute_colors(
 
     # Computes cell / non-cell classification colors.
     for roi_index in range(cell_count):
-        if context.cell_classification_labels[roi_index]:
+        if context.cell_classification[:, 1][roi_index]:
             cols[CONFIG.color_cell_non_cell, roi_index] = CONFIG.cell_color
         else:
             cols[CONFIG.color_cell_non_cell, roi_index] = CONFIG.noncell_color
-    istat[CONFIG.color_cell_non_cell] = context.cell_classification_labels.astype(np.float32)
+    istat[CONFIG.color_cell_non_cell] = context.cell_classification[:, 1]
     colorbar.append(list(CONFIG.fixed_colorbar_range))
 
     # Creates a placeholder RGB array (populated by init_roi_maps via rgb_masks).
@@ -199,7 +200,7 @@ def compute_colors(
 
 
 def init_roi_maps(
-    context: ROIViewerData,
+    context: SingleDayViewerData,
     color_arrays: ColorArrays,
 ) -> ROIIndexMaps:
     """Initializes ROI index maps, weight layers, and RGB overlay arrays.
@@ -225,19 +226,11 @@ def init_roi_maps(
     lam = np.zeros((CONFIG.overlap_layers, frame_height, frame_width), dtype=np.float32)
     iroi = -1 * np.ones((CONFIG.overlap_layers, frame_height, frame_width), dtype=np.int32)
 
-    # Ignores cells that are part of a merge group.
-    is_ignored = np.zeros(cell_count, dtype=bool)
     text_labels: list[pg.TextItem] = []
 
     for roi_index in np.arange(cell_count - 1, -1, -1, dtype=np.int32):
         y_pixels = roi_statistics[roi_index].y_pixels
-        if y_pixels is not None and not is_ignored[roi_index]:
-            merged = roi_statistics[roi_index].merged_roi_indices
-            if merged is not None:
-                for merged_index in merged:
-                    is_ignored[merged_index] = True
-                    console.echo(message=f"ROI {merged_index} in merged ROI")
-
+        if y_pixels is not None:
             x_pixels = roi_statistics[roi_index].x_pixels
             weights = roi_statistics[roi_index].pixel_weights
             weights = weights / weights.sum()
@@ -294,7 +287,7 @@ def init_roi_maps(
 
 
 def draw_masks(
-    context: ROIViewerData,
+    context: SingleDayViewerData,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
     *,
@@ -327,9 +320,9 @@ def draw_masks(
     opacity = roi_opacity
 
     # Resets transparency based on ROI weights.
-    color_arrays.rgb[color_index, :, :, 3] = (
-        opacity[view_index == 0] * roi_maps.sroi * roi_maps.lam_norm
-    ).astype(np.uint8)
+    color_arrays.rgb[color_index, :, :, 3] = (opacity[view_index == 0] * roi_maps.sroi * roi_maps.lam_norm).astype(
+        np.uint8
+    )
 
     overlay = np.array(color_arrays.rgb[color_index])
 
@@ -460,7 +453,7 @@ def update_colormap(
 
 
 def update_chan2_colors(
-    context: ROIViewerData,
+    context: SingleDayViewerData,
     colocalization_threshold: float,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
@@ -473,7 +466,7 @@ def update_chan2_colors(
         color_arrays: The computed color arrays (modified in place).
         roi_maps: The ROI index maps.
     """
-    is_channel_2 = context.cell_colocalization_probabilities > colocalization_threshold
+    is_channel_2 = context.cell_colocalization[:, 0] > colocalization_threshold
     color = color_arrays.random_hues.copy()
     color[is_channel_2] = 0
     color = color.flatten()
@@ -560,7 +553,7 @@ def istat_transform(istat: NDArray[np.float32], colormap: str = "hsv") -> NDArra
 
 
 def flip_rois(
-    context: ROIViewerData,
+    context: SingleDayViewerData,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
     *,
@@ -569,11 +562,11 @@ def flip_rois(
 ) -> int:
     """Reclassifies selected ROIs between cell and non-cell.
 
-    Toggles the ``cell_classification_labels`` for all ROIs in ``merge_roi_indices`` and
+    Toggles the classification labels (column 1) for all ROIs in ``merge_roi_indices`` and
     updates their overlay colors. The caller is responsible for saving and updating the plot.
 
     Args:
-        context: The loaded data context (cell_classification_labels is modified in place).
+        context: The loaded data context (cell_classification[:, 1] is modified in place).
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
         selected_roi_index: Index of the currently selected ROI.
@@ -582,28 +575,25 @@ def flip_rois(
     Returns:
         The selected ROI index, stored by the caller as the last reclassified index.
     """
+    labels = context.cell_classification[:, 1]
     for roi_index in merge_roi_indices:
-        context.cell_classification_labels[roi_index] = ~context.cell_classification_labels[roi_index]
+        labels[roi_index] = 1.0 - labels[roi_index]
         _flip_roi(
             roi_maps=roi_maps,
             color_arrays=color_arrays,
             roi_statistics=context.roi_statistics,
-            cell_classification_labels=context.cell_classification_labels,
+            cell_classification_labels=labels,
             roi_index=roi_index,
         )
-        merged = context.roi_statistics[roi_index].merged_roi_indices
-        if merged is not None:
-            for merged_index in merged:
-                context.cell_classification_labels[merged_index] = ~context.cell_classification_labels[merged_index]
 
     return selected_roi_index
 
 
 def flip_for_class(
-    context: ROIViewerData,
+    context: SingleDayViewerData,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
-    new_classification_labels: NDArray[np.bool_],
+    new_classification_labels: NDArray[np.float32],
 ) -> bool:
     """Applies new cell classification labels from the classifier.
 
@@ -619,21 +609,22 @@ def flip_for_class(
     Returns:
         True if changes were applied incrementally, False if full reinit is needed.
     """
+    labels = context.cell_classification[:, 1]
     cell_count = new_classification_labels.size
-    if int((new_classification_labels == context.cell_classification_labels).sum()) < CONFIG.flip_threshold:
+    if int((new_classification_labels == labels).sum()) < CONFIG.flip_threshold:
         for roi_index in range(cell_count):
-            if new_classification_labels[roi_index] != context.cell_classification_labels[roi_index]:
-                context.cell_classification_labels[roi_index] = new_classification_labels[roi_index]
+            if new_classification_labels[roi_index] != labels[roi_index]:
+                labels[roi_index] = new_classification_labels[roi_index]
                 _flip_roi(
                     roi_maps=roi_maps,
                     color_arrays=color_arrays,
                     roi_statistics=context.roi_statistics,
-                    cell_classification_labels=context.cell_classification_labels,
+                    cell_classification_labels=labels,
                     roi_index=roi_index,
                 )
         return True
 
-    context.cell_classification_labels[:] = new_classification_labels
+    labels[:] = new_classification_labels
     return False
 
 
@@ -877,7 +868,7 @@ def _place_in_valid_region(
     if valid_y_range is not None and valid_x_range is not None:
         try:
             output[valid_y_range[0] : valid_y_range[1], valid_x_range[0] : valid_x_range[1]] = normalized
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             if warn_on_error:
                 console.echo(
                     message="Max projection not in combined view",
@@ -893,7 +884,7 @@ def _flip_roi(
     roi_maps: ROIIndexMaps,
     color_arrays: ColorArrays,
     roi_statistics: list[ROIStatistics],
-    cell_classification_labels: NDArray[np.bool_],
+    cell_classification_labels: NDArray[np.float32],
     roi_index: int,
 ) -> None:
     """Updates the cell/non-cell overlay color for a reclassified ROI.

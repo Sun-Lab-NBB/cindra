@@ -12,7 +12,7 @@ from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from .version import version, python_version
-from .single_day_data import CombinedData, ROIStatistics, ExtractionData
+from .single_day_data import ROIMask, CombinedData, ExtractionData
 
 
 @dataclass
@@ -85,13 +85,13 @@ class MultiDayRegistrationData:
     """The channel 2 maximum projection transformed to the shared (deformed) visual space."""
 
     # Deformed cell masks (intermediate data for cell tracking).
-    deformed_cell_masks: list[ROIStatistics] | None = None
-    """The channel 1 cell ROI data after multi-day registration deform offsets have been applied to the spatial
-    coordinates of each ROI."""
+    deformed_cell_masks: list[ROIMask] | None = None
+    """The channel 1 cell ROI spatial data after multi-day registration deform offsets have been applied to the
+    spatial coordinates of each ROI."""
 
-    deformed_cell_masks_channel_2: list[ROIStatistics] | None = None
-    """The channel 2 cell ROI data after multi-day registration deform offsets have been applied to the spatial
-    coordinates of each ROI."""
+    deformed_cell_masks_channel_2: list[ROIMask] | None = None
+    """The channel 2 cell ROI spatial data after multi-day registration deform offsets have been applied to the
+    spatial coordinates of each ROI."""
 
     def is_registered(self) -> bool:
         """Checks whether registration data exists.
@@ -128,88 +128,115 @@ class MultiDayRegistrationData:
         self.deformed_cell_masks_channel_2 = None
 
     def save_arrays(self, output_path: Path) -> None:
-        """Saves registration data arrays to .npz files.
+        """Saves registration arrays as individual .npy files inside a ``registration_arrays/`` subdirectory.
+
+        Notes:
+            Deformed cell masks use the ROIStatistics variable-length serialization pattern and remain as .npz files
+            saved directly into ``output_path``.
 
         Args:
-            output_path: The directory where to save the registration data files.
+            output_path: The directory where to create the ``registration_arrays/`` subdirectory.
         """
+        registration_directory = output_path / "registration_arrays"
+        ensure_directory_exists(registration_directory)
+
         # Saves deformation fields.
-        if self.deform_field_y is not None and self.deform_field_x is not None:
-            np.savez(
-                output_path / "registration_deform.npz",
-                allow_pickle=False,
-                field_y=self.deform_field_y,
-                field_x=self.deform_field_x,
+        if self.deform_field_y is not None:
+            np.save(registration_directory / "deform_field_y.npy", self.deform_field_y)
+        if self.deform_field_x is not None:
+            np.save(registration_directory / "deform_field_x.npy", self.deform_field_x)
+
+        # Saves channel 1 transformed images.
+        if self.transformed_mean_image is not None:
+            np.save(registration_directory / "transformed_mean_image.npy", self.transformed_mean_image)
+        if self.transformed_enhanced_mean_image is not None:
+            np.save(
+                registration_directory / "transformed_enhanced_mean_image.npy", self.transformed_enhanced_mean_image
+            )
+        if self.transformed_maximum_projection is not None:
+            np.save(registration_directory / "transformed_maximum_projection.npy", self.transformed_maximum_projection)
+
+        # Saves channel 2 transformed images.
+        if self.transformed_mean_image_channel_2 is not None:
+            np.save(
+                registration_directory / "transformed_mean_image_channel_2.npy", self.transformed_mean_image_channel_2
+            )
+        if self.transformed_enhanced_mean_image_channel_2 is not None:
+            np.save(
+                registration_directory / "transformed_enhanced_mean_image_channel_2.npy",
+                self.transformed_enhanced_mean_image_channel_2,
+            )
+        if self.transformed_maximum_projection_channel_2 is not None:
+            np.save(
+                registration_directory / "transformed_maximum_projection_channel_2.npy",
+                self.transformed_maximum_projection_channel_2,
             )
 
-        # Saves transformed images.
-        images_dict: dict[str, NDArray[np.float32]] = {}
-        if self.transformed_mean_image is not None:
-            images_dict["mean_image"] = self.transformed_mean_image
-        if self.transformed_enhanced_mean_image is not None:
-            images_dict["enhanced_mean_image"] = self.transformed_enhanced_mean_image
-        if self.transformed_maximum_projection is not None:
-            images_dict["maximum_projection"] = self.transformed_maximum_projection
-        if self.transformed_mean_image_channel_2 is not None:
-            images_dict["mean_image_channel_2"] = self.transformed_mean_image_channel_2
-        if self.transformed_enhanced_mean_image_channel_2 is not None:
-            images_dict["enhanced_mean_image_channel_2"] = self.transformed_enhanced_mean_image_channel_2
-        if self.transformed_maximum_projection_channel_2 is not None:
-            images_dict["maximum_projection_channel_2"] = self.transformed_maximum_projection_channel_2
-        if images_dict:
-            np.savez(output_path / "registration_transformed_images.npz", allow_pickle=False, **images_dict)
-
-        # Saves channel 1 deformed cell masks.
+        # Saves channel 1 deformed cell masks (ROIMask .npz).
         if self.deformed_cell_masks is not None:
-            ROIStatistics.save_list(self.deformed_cell_masks, output_path / "registration_deformed_masks.npz")
+            ROIMask.save_list(self.deformed_cell_masks, output_path / "registration_deformed_masks.npz")
 
-        # Saves channel 2 deformed cell masks.
+        # Saves channel 2 deformed cell masks (ROIMask .npz).
         if self.deformed_cell_masks_channel_2 is not None:
-            ROIStatistics.save_list(
+            ROIMask.save_list(
                 self.deformed_cell_masks_channel_2, output_path / "registration_deformed_masks_channel_2.npz"
             )
 
     def load_arrays(self, output_path: Path) -> None:
-        """Loads registration data arrays from .npz files into this instance.
+        """Loads registration arrays from individual .npy files in the ``registration_arrays/`` subdirectory.
 
         Args:
-            output_path: The directory containing the registration data files.
+            output_path: The directory containing the ``registration_arrays/`` subdirectory.
         """
+        registration_directory = output_path / "registration_arrays"
+
         # Loads deformation fields.
-        deform_path = output_path / "registration_deform.npz"
-        if self.deform_field_y is None and deform_path.exists():
-            data = np.load(deform_path, allow_pickle=False)
-            self.deform_field_y = data["field_y"].astype(np.float32)
-            self.deform_field_x = data["field_x"].astype(np.float32)
+        if self.deform_field_y is None:
+            path = registration_directory / "deform_field_y.npy"
+            if path.exists():
+                self.deform_field_y = np.load(path).astype(np.float32)
+        if self.deform_field_x is None:
+            path = registration_directory / "deform_field_x.npy"
+            if path.exists():
+                self.deform_field_x = np.load(path).astype(np.float32)
 
-        # Loads transformed images.
-        transformed_path = output_path / "registration_transformed_images.npz"
-        if transformed_path.exists():
-            data = np.load(transformed_path, allow_pickle=False)
-            if self.transformed_mean_image is None and "mean_image" in data:
-                self.transformed_mean_image = data["mean_image"].astype(np.float32)
-            if self.transformed_enhanced_mean_image is None and "enhanced_mean_image" in data:
-                self.transformed_enhanced_mean_image = data["enhanced_mean_image"].astype(np.float32)
-            if self.transformed_maximum_projection is None and "maximum_projection" in data:
-                self.transformed_maximum_projection = data["maximum_projection"].astype(np.float32)
-            if self.transformed_mean_image_channel_2 is None and "mean_image_channel_2" in data:
-                self.transformed_mean_image_channel_2 = data["mean_image_channel_2"].astype(np.float32)
-            if self.transformed_enhanced_mean_image_channel_2 is None and "enhanced_mean_image_channel_2" in data:
-                self.transformed_enhanced_mean_image_channel_2 = data["enhanced_mean_image_channel_2"].astype(
-                    np.float32
-                )
-            if self.transformed_maximum_projection_channel_2 is None and "maximum_projection_channel_2" in data:
-                self.transformed_maximum_projection_channel_2 = data["maximum_projection_channel_2"].astype(np.float32)
+        # Loads channel 1 transformed images.
+        if self.transformed_mean_image is None:
+            path = registration_directory / "transformed_mean_image.npy"
+            if path.exists():
+                self.transformed_mean_image = np.load(path).astype(np.float32)
+        if self.transformed_enhanced_mean_image is None:
+            path = registration_directory / "transformed_enhanced_mean_image.npy"
+            if path.exists():
+                self.transformed_enhanced_mean_image = np.load(path).astype(np.float32)
+        if self.transformed_maximum_projection is None:
+            path = registration_directory / "transformed_maximum_projection.npy"
+            if path.exists():
+                self.transformed_maximum_projection = np.load(path).astype(np.float32)
 
-        # Loads channel 1 deformed cell masks.
+        # Loads channel 2 transformed images.
+        if self.transformed_mean_image_channel_2 is None:
+            path = registration_directory / "transformed_mean_image_channel_2.npy"
+            if path.exists():
+                self.transformed_mean_image_channel_2 = np.load(path).astype(np.float32)
+        if self.transformed_enhanced_mean_image_channel_2 is None:
+            path = registration_directory / "transformed_enhanced_mean_image_channel_2.npy"
+            if path.exists():
+                self.transformed_enhanced_mean_image_channel_2 = np.load(path).astype(np.float32)
+        if self.transformed_maximum_projection_channel_2 is None:
+            path = registration_directory / "transformed_maximum_projection_channel_2.npy"
+            if path.exists():
+                self.transformed_maximum_projection_channel_2 = np.load(path).astype(np.float32)
+
+        # Loads channel 1 deformed cell masks (ROIMask .npz).
         masks_path = output_path / "registration_deformed_masks.npz"
         if self.deformed_cell_masks is None and masks_path.exists():
-            self.deformed_cell_masks = ROIStatistics.load_list(masks_path)
+            self.deformed_cell_masks = ROIMask.load_list(masks_path)
 
-        # Loads channel 2 deformed cell masks.
+        # Loads channel 2 deformed cell masks (ROIMask .npz).
         masks_path_channel_2 = output_path / "registration_deformed_masks_channel_2.npz"
         if self.deformed_cell_masks_channel_2 is None and masks_path_channel_2.exists():
-            self.deformed_cell_masks_channel_2 = ROIStatistics.load_list(masks_path_channel_2)
+            self.deformed_cell_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
 
 
 @dataclass
@@ -266,11 +293,11 @@ class MultiDayTrackingData:
         appear across sessions.
     """
 
-    template_masks: list[ROIStatistics] | None = None
-    """The template cell masks in shared visual space coordinates. Each ROIStatistics represents a cell that can be
+    template_masks: list[ROIMask] | None = None
+    """The template cell masks in shared visual space coordinates. Each ROIMask represents a cell that can be
     tracked across sessions, with pixel coordinates and weights derived from the clustering consensus."""
 
-    template_masks_channel_2: list[ROIStatistics] | None = None
+    template_masks_channel_2: list[ROIMask] | None = None
     """The channel 2 template cell masks in shared visual space coordinates. Only present when tracking channel 2
     cells independently in dual-channel recordings."""
 
@@ -294,10 +321,10 @@ class MultiDayTrackingData:
             output_path: The directory where to save the tracking data files.
         """
         if self.template_masks is not None:
-            ROIStatistics.save_list(self.template_masks, output_path / "tracking_template_masks.npz")
+            ROIMask.save_list(self.template_masks, output_path / "tracking_template_masks.npz")
 
         if self.template_masks_channel_2 is not None:
-            ROIStatistics.save_list(
+            ROIMask.save_list(
                 self.template_masks_channel_2, output_path / "tracking_template_masks_channel_2.npz"
             )
 
@@ -309,11 +336,11 @@ class MultiDayTrackingData:
         """
         masks_path = output_path / "tracking_template_masks.npz"
         if self.template_masks is None and masks_path.exists():
-            self.template_masks = ROIStatistics.load_list(masks_path)
+            self.template_masks = ROIMask.load_list(masks_path)
 
         masks_path_channel_2 = output_path / "tracking_template_masks_channel_2.npz"
         if self.template_masks_channel_2 is None and masks_path_channel_2.exists():
-            self.template_masks_channel_2 = ROIStatistics.load_list(masks_path_channel_2)
+            self.template_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
 
 
 @dataclass
