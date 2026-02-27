@@ -34,16 +34,13 @@ from .constants import (
     CONFIG,
     BackgroundView,
     ROIColorMode,
-    ROIToolPanel,
     TraceMode,
 )
 from .single_day_context import ROIViewerData
 from .data_models import (
-    CellToggleControls,
     ColorArrays,
     ColorbarWidgets,
     ColorControls,
-    QuadrantControls,
     ROIIndexMaps,
     SelectionControls,
     TraceControls,
@@ -69,11 +66,12 @@ if TYPE_CHECKING:
 
 
 class ROIViewer(QMainWindow):
-    """Two-panel ROI viewer for single-day pipeline outputs with right-click reclassification.
+    """Single-panel ROI viewer for single-day pipeline outputs with right-click reclassification.
 
     Displays ROI overlays, background images, and fluorescence traces. Supports left-click ROI
-    selection, shift/ctrl multi-select, right-click cell/non-cell reclassification with auto-save,
-    keyboard shortcuts for view/color switching, and quadrant zoom navigation.
+    selection, shift/ctrl multi-select, right-click cell/non-cell reclassification (active only
+    in cell/non-cell color mode) with auto-save, keyboard shortcuts for view/color switching,
+    and double-click zoom-to-fit.
 
     Args:
         data: Pre-loaded viewer data. If None the viewer starts empty and the user can load
@@ -94,7 +92,6 @@ class ROIViewer(QMainWindow):
         self.selected_roi_index: int = 0
         self.merge_roi_indices: list[int] = [0]
         self.roi_tool_active: bool = False
-        self.roi_tool_panel: int = ROIToolPanel.CELLS
         self.trace_mode: int = TraceMode.NEUROPIL_CORRECTED
         self.temporal_bin_size: int = 1
         self.auto_zoom_to_roi: bool = False
@@ -164,25 +161,9 @@ class ROIViewer(QMainWindow):
         """Builds the File-only menu bar for the read-only viewer."""
         file_menu = self.menuBar().addMenu("&File")
 
-        load_action = file_menu.addAction("&Load processed data")
+        load_action = file_menu.addAction("&Load session")
         load_action.setShortcut("Ctrl+L")
-        load_action.triggered.connect(self._on_load_dialog)
-
-        load_folder_action = file_menu.addAction("Load &folder with planeX folders")
-        load_folder_action.setShortcut("Ctrl+F")
-        load_folder_action.triggered.connect(self._on_load_dialog)
-
-        export_action = file_menu.addAction("&Export as image (svg)")
-        export_action.triggered.connect(self._on_export_fig)
-
-    def _on_load_dialog(self) -> None:
-        """Opens a directory dialog and loads the selected session."""
-        self._load_session()
-
-    def _on_export_fig(self) -> None:
-        """Opens the pyqtgraph export dialog for the current plot."""
-        self._graphics_widget.scene().contextMenuItem = self._cells_view_box
-        self._graphics_widget.scene().showExportDialog()
+        load_action.triggered.connect(self._load_session)
 
     def _build_control_panel(self) -> QWidget:
         """Builds the right-side control panel with QGroupBox sections.
@@ -213,15 +194,11 @@ class ROIViewer(QMainWindow):
         selection_box, self._selection_controls = self._create_selection_buttons()
         layout.addWidget(selection_box)
 
-        # 3. View Toggle.
-        toggle_box, self._cell_toggle_controls = self._create_cell_toggle_buttons()
-        layout.addWidget(toggle_box)
-
-        # 4. Background Views.
+        # 3. Background Views.
         background_box, self._view_controls = self._create_view_controls()
         layout.addWidget(background_box)
 
-        # 5. ROI Colors + colorbar.
+        # 4. ROI Colors + colorbar.
         colors_box, self._color_controls = self._create_color_controls()
         self.colorbar_widgets = self._create_colorbar()
         colors_layout = colors_box.layout()
@@ -229,7 +206,7 @@ class ROIViewer(QMainWindow):
         colors_layout.addWidget(self.colorbar_widgets.widget)
         layout.addWidget(colors_box)
 
-        # 6. Selected ROI — ROI index edit + stat labels.
+        # 5. Selected ROI — ROI index edit + stat labels.
         roi_box = QGroupBox("Selected ROI")
         roi_box.setStyleSheet("QGroupBox { color: white; }")
         roi_layout = QVBoxLayout(roi_box)
@@ -259,7 +236,7 @@ class ROIViewer(QMainWindow):
             self._roi_stat_labels.append(stat_label)
         layout.addWidget(roi_box)
 
-        # 7. Trace Display.
+        # 6. Trace Display.
         trace_box, self._trace_controls = self._create_trace_controls()
         self._zoom_to_cell_checkbox = QCheckBox("zoom to cell")
         self._zoom_to_cell_checkbox.setStyleSheet(STYLE.white_label)
@@ -268,10 +245,6 @@ class ROIViewer(QMainWindow):
         assert trace_layout is not None
         trace_layout.addWidget(self._zoom_to_cell_checkbox)
         layout.addWidget(trace_box)
-
-        # 8. Navigation.
-        nav_box, self._quadrant_controls = self._create_quadrant_buttons()
-        layout.addWidget(nav_box)
 
         layout.addStretch()
         return panel
@@ -293,7 +266,7 @@ class ROIViewer(QMainWindow):
             selection_buttons.addButton(button, button_index)
             layout.addWidget(button, button_index, 0, 1, 1)
             button.setEnabled(False)
-            button.clicked.connect(lambda _checked, idx=button_index: self._on_selection_button(idx))
+            button.clicked.connect(self._on_roi_selection)
         selection_buttons.setExclusive(True)
 
         count_label = QLabel("n=")
@@ -312,41 +285,6 @@ class ROIViewer(QMainWindow):
 
         controls = SelectionControls(selection_buttons=selection_buttons, top_count_edit=top_count_edit)
         return group_box, controls
-
-    def _create_cell_toggle_buttons(self) -> tuple[QGroupBox, CellToggleControls]:
-        """Creates the cell / not-cell / both size-toggle buttons and ROI count labels."""
-        group_box = QGroupBox("View Toggle")
-        group_box.setStyleSheet("QGroupBox { color: white; }")
-        layout = QGridLayout(group_box)
-
-        cell_count_label = QLabel("")
-        cell_count_label.setStyleSheet(STYLE.white_label)
-        cell_count_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
-        layout.addWidget(cell_count_label, 0, 0, 1, 1)
-
-        noncell_count_label = QLabel("")
-        noncell_count_label.setStyleSheet(STYLE.white_label)
-        layout.addWidget(noncell_count_label, 0, 2, 1, 1)
-
-        size_buttons = QButtonGroup(self)
-        labels = [" cells", " both", " not cells"]
-        for button_index, label_text in enumerate(labels):
-            button = QPushButton(label_text, self)
-            button.setCheckable(True)
-            button.setStyleSheet(STYLE.button_inactive)
-            button.setFont(STYLE.label_font_bold())
-            button.resize(button.minimumSizeHint())
-            size_buttons.addButton(button, button_index)
-            layout.addWidget(button, 1, button_index, 1, 1)
-            button.setEnabled(button_index == CONFIG.view_both)
-            button.clicked.connect(lambda _checked: self.update_plot())
-        size_buttons.setExclusive(True)
-
-        return group_box, CellToggleControls(
-            size_buttons=size_buttons,
-            cell_count_label=cell_count_label,
-            noncell_count_label=noncell_count_label,
-        )
 
     def _create_view_controls(self) -> tuple[QGroupBox, ViewControls]:
         """Creates background view selection controls inside a group box."""
@@ -543,76 +481,31 @@ class ROIViewer(QMainWindow):
 
         return group_box, controls
 
-    def _create_quadrant_buttons(self) -> tuple[QGroupBox, QuadrantControls]:
-        """Creates the 3x3 quadrant zoom navigation buttons."""
-        group_box = QGroupBox("Navigation")
-        group_box.setStyleSheet("QGroupBox { color: white; }")
-        layout = QGridLayout(group_box)
-
-        quadrant_buttons = QButtonGroup(self)
-        for button_index in range(9):
-            button = QPushButton(" " + str(button_index + 1), self)
-            button.setCheckable(True)
-            button.setStyleSheet(STYLE.button_inactive)
-            button.setFont(STYLE.label_font_bold())
-            button.resize(button.minimumSizeHint())
-            button.setMaximumWidth(STYLE.small_edit_width)
-            quadrant_buttons.addButton(button, button_index)
-            row = button_index // STYLE.quadrant_columns
-            col = button_index % STYLE.quadrant_columns
-            layout.addWidget(button, row, col, 1, 1)
-            button.setEnabled(False)
-            button.clicked.connect(lambda _checked, idx=button_index: self._on_quadrant(idx))
-        quadrant_buttons.setExclusive(True)
-
-        return group_box, QuadrantControls(quadrant_buttons=quadrant_buttons)
-
     def _build_graphics(self) -> None:
-        """Creates the main plotting area with cells, non-cells, and trace panels."""
-        self._cells_view_box = ViewBox(panel=ROIToolPanel.CELLS, name="plot1", border=[100, 100, 100], invert_y=True)
-        self._graphics_widget.addItem(self._cells_view_box, 0, 0)
-        self._cells_view_box.setMenuEnabled(False)
-        self._cells_view_box.scene().contextMenuItem = self._cells_view_box
-        self._cells_background = pg.ImageItem(viewbox=self._cells_view_box, parent=self)
-        self._cells_background.autoDownsample = False
-        self._cells_overlay = pg.ImageItem(viewbox=self._cells_view_box, parent=self)
-        self._cells_overlay.autoDownsample = False
-        self._cells_view_box.addItem(self._cells_background)
-        self._cells_view_box.addItem(self._cells_overlay)
-        self._cells_background.setLevels([0, 255])
-        self._cells_overlay.setLevels([0, 255])
+        """Creates the main plotting area with image and trace panels."""
+        self._view_box = ViewBox(name="plot1", border=[100, 100, 100], invert_y=True)
+        self._graphics_widget.addItem(self._view_box, 0, 0)
+        self._view_box.setMenuEnabled(False)
+        self._view_box.scene().contextMenuItem = self._view_box
+        self._background = pg.ImageItem(viewbox=self._view_box, parent=self)
+        self._background.autoDownsample = False
+        self._overlay = pg.ImageItem(viewbox=self._view_box, parent=self)
+        self._overlay.autoDownsample = False
+        self._view_box.addItem(self._background)
+        self._view_box.addItem(self._overlay)
+        self._background.setLevels([0, 255])
+        self._overlay.setLevels([0, 255])
 
-        self._noncells_view_box = ViewBox(
-            panel=ROIToolPanel.NON_CELLS, name="plot2", border=[100, 100, 100], invert_y=True
-        )
-        self._graphics_widget.addItem(self._noncells_view_box, 0, 1)
-        self._noncells_view_box.setMenuEnabled(False)
-        self._noncells_view_box.scene().contextMenuItem = self._noncells_view_box
-        self._noncells_background = pg.ImageItem(viewbox=self._cells_view_box, parent=self)
-        self._noncells_background.autoDownsample = False
-        self._noncells_overlay = pg.ImageItem(viewbox=self._cells_view_box, parent=self)
-        self._noncells_overlay.autoDownsample = False
-        self._noncells_view_box.addItem(self._noncells_background)
-        self._noncells_view_box.addItem(self._noncells_overlay)
-        self._noncells_background.setLevels([0, 255])
-        self._noncells_overlay.setLevels([0, 255])
-
-        self._noncells_view_box.setXLink("plot1")
-        self._noncells_view_box.setYLink("plot1")
-
-        self._cells_view_box.set_click_handler(self._handle_click)
-        self._noncells_view_box.set_click_handler(self._handle_click)
-        self._cells_view_box.set_zoom_handler(lambda: self._zoom_plot(CONFIG.cells_plot))
-        self._noncells_view_box.set_zoom_handler(lambda: self._zoom_plot(CONFIG.noncells_plot))
+        self._view_box.set_click_handler(self._handle_click)
+        self._view_box.set_zoom_handler(self._zoom_plot)
 
         self._trace_box = TraceBox()
         self._trace_box.setMouseEnabled(x=True, y=False)
         self._trace_box.enableAutoRange(x=True, y=True)
-        self._graphics_widget.addItem(self._trace_box, row=1, col=0, colspan=2)
+        self._graphics_widget.addItem(self._trace_box, row=1, col=0)
         self._graphics_widget.ci.layout.setRowStretchFactor(0, 2)
         gl = self._graphics_widget.ci.layout
         gl.setColumnMinimumWidth(0, 1)
-        gl.setColumnMinimumWidth(1, 1)
         gl.setHorizontalSpacing(20)
 
     def _load_session(self, session_path: Path | None = None) -> None:
@@ -658,7 +551,6 @@ class ROIViewer(QMainWindow):
         self.selected_roi_index = 0
         self.merge_roi_indices = [0]
         self.roi_tool_active = False
-        self.roi_tool_panel = ROIToolPanel.CELLS
         self.trace_mode = TraceMode.NEUROPIL_CORRECTED
         self.temporal_bin_size = 1
         self.auto_zoom_to_roi = False
@@ -732,7 +624,7 @@ class ROIViewer(QMainWindow):
             colorbar_image=self.colorbar_image,
         )
 
-        masks = draw_masks(
+        mask = draw_masks(
             context=context,
             color_arrays=self.color_arrays,
             roi_maps=self.roi_maps,
@@ -742,23 +634,16 @@ class ROIViewer(QMainWindow):
             merge_roi_indices=self.merge_roi_indices,
             roi_opacity=self.roi_opacity,
         )
-        display_masks(color1=self._cells_overlay, color2=self._noncells_overlay, masks=masks)
-
-        # Updates cell count labels.
-        self._cell_toggle_controls.cell_count_label.setText(f"{int(context.cell_count)}")
-        self._cell_toggle_controls.noncell_count_label.setText(f"{int(context.roi_count - context.cell_count)}")
+        display_masks(overlay_item=self._overlay, mask=mask)
 
         # Initializes plot ranges.
-        self._cells_view_box.setXRange(0, context.frame_width)
-        self._cells_view_box.setYRange(0, context.frame_height)
-        self._noncells_view_box.setXRange(0, context.frame_width)
-        self._noncells_view_box.setYRange(0, context.frame_height)
+        self._view_box.setXRange(0, context.frame_width)
+        self._view_box.setYRange(0, context.frame_height)
         self._trace_box.getViewBox().setLimits(xMin=0, xMax=context.frame_count)
         self.frame_indices = np.arange(0, context.frame_count, dtype=np.int32)
 
         display_views(
-            view1=self._cells_background,
-            view2=self._noncells_background,
+            view=self._background,
             views=self.views,
             view_index=self.background_view,
             saturation=self.background_saturation,
@@ -773,9 +658,8 @@ class ROIViewer(QMainWindow):
             activity_mode=self.trace_mode,
         )
 
-        # Sets aspect ratio on both panels.
-        self._cells_view_box.setAspectLocked(lock=True, ratio=context.aspect_ratio)
-        self._noncells_view_box.setAspectLocked(lock=True, ratio=context.aspect_ratio)
+        # Sets aspect ratio on the image panel.
+        self._view_box.setAspectLocked(lock=True, ratio=context.aspect_ratio)
 
         self.session_loaded = True
 
@@ -788,11 +672,6 @@ class ROIViewer(QMainWindow):
         if self.context_data is None:
             return
         context = self.context_data
-
-        # Enables quadrant buttons.
-        for b in range(9):
-            self._quadrant_controls.quadrant_buttons.button(b).setEnabled(True)
-            self._quadrant_controls.quadrant_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
 
         # Enables view buttons.
         for b in range(len(self._view_controls.view_names)):
@@ -824,14 +703,6 @@ class ROIViewer(QMainWindow):
             elif b < CONFIG.color_stat_count:
                 self._color_controls.color_buttons.button(b).setEnabled(True)
                 self._color_controls.color_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
-
-        # Enables size toggle buttons.
-        for button_index, btn in enumerate(self._cell_toggle_controls.size_buttons.buttons()):
-            btn.setStyleSheet(STYLE.button_unpressed)
-            btn.setEnabled(True)
-            if button_index == 0:
-                btn.setChecked(True)
-                btn.setStyleSheet(STYLE.button_pressed)
 
         # Enables selection buttons (draw enabled, top/bottom disabled until data analyzed).
         for b in range(3):
@@ -920,37 +791,6 @@ class ROIViewer(QMainWindow):
         self.background_saturation = self._view_controls.range_slider.saturation_values()
         self.update_plot()
 
-    def _on_selection_button(self, index: int) -> None:
-        """Handles selection button presses."""
-        self._on_roi_selection()
-
-    def _on_quadrant(self, index: int) -> None:
-        """Handles quadrant zoom button presses.
-
-        Args:
-            index: The quadrant button index (0-8).
-        """
-        if self.context_data is None:
-            return
-        qb = self._quadrant_controls.quadrant_buttons
-        for i in range(9):
-            if qb.button(i).isEnabled():
-                qb.button(i).setStyleSheet(STYLE.button_unpressed)
-        qb.button(index).setStyleSheet(STYLE.button_pressed)
-
-        x_column = index % STYLE.quadrant_columns
-        y_row = index // STYLE.quadrant_columns
-        fw = self.context_data.frame_width
-        fh = self.context_data.frame_height
-        x_lo = (x_column - CONFIG.quadrant_zoom_margin) * fw / STYLE.quadrant_columns
-        x_hi = (x_column + 1 + CONFIG.quadrant_zoom_margin) * fw / STYLE.quadrant_columns
-        y_lo = (y_row - CONFIG.quadrant_zoom_margin) * fh / STYLE.quadrant_columns
-        y_hi = (y_row + 1 + CONFIG.quadrant_zoom_margin) * fh / STYLE.quadrant_columns
-        self._cells_view_box.setXRange(x_lo, x_hi)
-        self._cells_view_box.setYRange(y_lo, y_hi)
-        self._noncells_view_box.setXRange(x_lo, x_hi)
-        self._noncells_view_box.setYRange(y_lo, y_hi)
-
     def _on_number_chosen(self) -> None:
         """Jumps to the ROI number entered in the ROI edit field."""
         if self.session_loaded and self.context_data is not None:
@@ -959,7 +799,6 @@ class ROIViewer(QMainWindow):
                 self.selected_roi_index = self.context_data.roi_count - 1
             self.merge_roi_indices = [self.selected_roi_index]
             self.update_plot()
-            self.show()
 
     def _on_zoom_cell_toggled(self, state: int) -> None:
         """Toggles zoom-to-cell behavior based on checkbox state."""
@@ -1035,13 +874,12 @@ class ROIViewer(QMainWindow):
         )
         self._ichosen_stats()
         display_views(
-            view1=self._cells_background,
-            view2=self._noncells_background,
+            view=self._background,
             views=self.views,
             view_index=self.background_view,
             saturation=self.background_saturation,
         )
-        masks = draw_masks(
+        mask = draw_masks(
             context=self.context_data,
             color_arrays=self.color_arrays,
             roi_maps=self.roi_maps,
@@ -1051,27 +889,11 @@ class ROIViewer(QMainWindow):
             merge_roi_indices=self.merge_roi_indices,
             roi_opacity=self.roi_opacity,
         )
-        display_masks(color1=self._cells_overlay, color2=self._noncells_overlay, masks=masks)
-        assert self.frame_indices is not None
-        plot_trace(
-            trace_box=self._trace_box,
-            cell_fluorescence=self.context_data.cell_fluorescence,
-            neuropil_fluorescence=self.context_data.neuropil_fluorescence,
-            spikes=self.context_data.spikes,
-            frame_indices=self.frame_indices,
-            merge_indices=self.merge_roi_indices,
-            activity_mode=self.trace_mode,
-            roi_colors=self.color_arrays.cols[self.roi_color_mode],
-            traces_visible=self._trace_controls.traces_visible,
-            neuropil_visible=self._trace_controls.neuropil_visible,
-            deconvolved_visible=self._trace_controls.deconvolved_visible,
-            scale_factor=self._trace_controls.scale_factor,
-            max_plotted=int(self._trace_controls.max_plotted_edit.text() or "40"),
-        )
+        display_masks(overlay_item=self._overlay, mask=mask)
+        self._refresh_traces()
         if self.auto_zoom_to_roi:
             self._zoom_to_cell()
-        self._cells_view_box.show()
-        self._noncells_view_box.show()
+        self._view_box.show()
         self._graphics_widget.show()
         self.show()
 
@@ -1105,42 +927,33 @@ class ROIViewer(QMainWindow):
                 self._roi_stat_labels[k].setText(f"{key}: {ival:2.2f}")
 
     def _toggle_rois(self, state: int) -> None:
-        """Toggles ROI overlay visibility on both image panels."""
+        """Toggles ROI overlay visibility on the image panel."""
         if QtCore.Qt.CheckState(state) == QtCore.Qt.CheckState.Checked:
             self.rois_visible = True
-            self._cells_view_box.addItem(self._cells_overlay)
-            self._noncells_view_box.addItem(self._noncells_overlay)
+            self._view_box.addItem(self._overlay)
         else:
             self.rois_visible = False
-            self._cells_view_box.removeItem(self._cells_overlay)
-            self._noncells_view_box.removeItem(self._noncells_overlay)
+            self._view_box.removeItem(self._overlay)
         self._graphics_widget.show()
         self.show()
 
     def _roi_text(self, state: int) -> None:
-        """Toggles ROI number text labels on the image panels."""
+        """Toggles ROI number text labels on the image panel."""
         if self.roi_maps is None or self.context_data is None:
             return
 
         if QtCore.Qt.CheckState(state) == QtCore.Qt.CheckState.Checked:
-            for n in range(len(self.roi_maps.text_labels)):
-                if self.context_data.cell_classification_labels[n] == 1:
-                    self._cells_view_box.addItem(self.roi_maps.text_labels[n])
-                else:
-                    self._noncells_view_box.addItem(self.roi_maps.text_labels[n])
+            for label in self.roi_maps.text_labels:
+                self._view_box.addItem(label)
             self.roi_labels_visible = True
         else:
-            for n in range(len(self.roi_maps.text_labels)):
-                if self.context_data.cell_classification_labels[n] == 1:
-                    with suppress(Exception):
-                        self._cells_view_box.removeItem(self.roi_maps.text_labels[n])
-                else:
-                    with suppress(Exception):
-                        self._noncells_view_box.removeItem(self.roi_maps.text_labels[n])
+            for label in self.roi_maps.text_labels:
+                with suppress(Exception):
+                    self._view_box.removeItem(label)
             self.roi_labels_visible = False
 
     def _zoom_to_cell(self) -> None:
-        """Zooms both image panels to center on the currently selected cell."""
+        """Zooms the image panel to center on the currently selected cell."""
         if self.context_data is None:
             return
         irange = 0.1 * np.array([self.context_data.frame_height, self.context_data.frame_width]).max()
@@ -1170,20 +983,12 @@ class ROIViewer(QMainWindow):
             icent = np.array(roi_statistics[self.selected_roi_index].centroid)
             imin = icent - irange
             imax = icent + irange
-        self._cells_view_box.setYRange(imin[0], imax[0])
-        self._cells_view_box.setXRange(imin[1], imax[1])
-        self._noncells_view_box.setYRange(imin[0], imax[0])
-        self._noncells_view_box.setXRange(imin[1], imax[1])
-        self._graphics_widget.show()
-        self.show()
+        self._view_box.setYRange(imin[0], imax[0])
+        self._view_box.setXRange(imin[1], imax[1])
 
-    def _zoom_plot(self, panel: int) -> None:
-        """Resets the view range for the specified panel."""
-        if panel == CONFIG.cells_plot:
-            self._cells_view_box.autoRange()
-            self._noncells_view_box.autoRange()
-        elif panel == CONFIG.noncells_plot:
-            self._noncells_view_box.autoRange()
+    def _zoom_plot(self) -> None:
+        """Resets the view range for the image panel."""
+        self._view_box.autoRange()
 
     def save_cell_classification(self) -> None:
         """Saves the current cell classification labels to cell_classification.npy."""
@@ -1203,42 +1008,30 @@ class ROIViewer(QMainWindow):
                 axis=1,
             ),
         )
-        self._cell_toggle_controls.cell_count_label.setText(
-            f"{int(context.cell_classification_labels.sum())}"
-        )
-        self._cell_toggle_controls.noncell_count_label.setText(
-            f"{int(context.cell_classification_labels.size - context.cell_classification_labels.sum())}"
-        )
 
     def _flip_plot(self) -> None:
-        """Flips the selected ROIs between the cell and non-cell panels and saves the result."""
+        """Flips the selected ROIs between cell and non-cell classification and saves the result."""
         if self.context_data is None or self.color_arrays is None or self.roi_maps is None:
             return
-        last_reclassified = [self.last_reclassified_index]
-        flip_rois(
+        self.last_reclassified_index = flip_rois(
             context=self.context_data,
             color_arrays=self.color_arrays,
             roi_maps=self.roi_maps,
             selected_roi_index=self.selected_roi_index,
             merge_roi_indices=self.merge_roi_indices,
-            last_reclassified_index_out=last_reclassified,
         )
-        self.last_reclassified_index = last_reclassified[0]
         self.save_cell_classification()
         self.update_plot()
 
-    def _handle_click(
-        self, click_x: int, click_y: int, panel: ROIToolPanel, is_right: bool, is_multi: bool
-    ) -> bool:
-        """Handles mouse clicks on image panels.
+    def _handle_click(self, click_x: int, click_y: int, is_right: bool, is_multi: bool) -> bool:
+        """Handles mouse clicks on the image panel.
 
         Left-click chooses a cell. Shift/ctrl-click adds or removes from the merge selection.
-        Right-click flips the clicked ROI between cell and non-cell panels.
+        Right-click reclassifies the clicked ROI when the cell/non-cell color mode is active.
 
         Args:
             click_x: Column coordinate of the click.
             click_y: Row coordinate of the click.
-            panel: Identifies the image panel that received the click.
             is_right: Determines whether the click was a right-click.
             is_multi: Determines whether shift or ctrl was held during the click.
 
@@ -1256,12 +1049,14 @@ class ROIViewer(QMainWindow):
         ):
             return False
 
-        ichosen = int(self.roi_maps.iroi[panel, 0, click_y, click_x])
+        ichosen = int(self.roi_maps.iroi[0, click_y, click_x])
         if ichosen < 0:
             return False
 
         if is_right:
-            # Sets selection to the clicked ROI (if not already selected) and flips it.
+            # Reclassification is only available in cell/non-cell color mode.
+            if self.roi_color_mode != ROIColorMode.CELL_NON_CELL:
+                return False
             if ichosen not in self.merge_roi_indices:
                 self.merge_roi_indices = [ichosen]
                 self.selected_roi_index = ichosen
@@ -1269,10 +1064,7 @@ class ROIViewer(QMainWindow):
             return True
 
         merged = False
-        if is_multi and (
-            self.context_data.cell_classification_labels[self.merge_roi_indices[0]]
-            == self.context_data.cell_classification_labels[ichosen]
-        ):
+        if is_multi:
             if ichosen not in self.merge_roi_indices:
                 self.merge_roi_indices.append(ichosen)
                 self.selected_roi_index = ichosen
@@ -1287,69 +1079,44 @@ class ROIViewer(QMainWindow):
 
         if self.roi_tool_active:
             self._roi_remove()
-        if not self._cell_toggle_controls.size_buttons.button(1).isChecked():
-            for btn in self._selection_controls.selection_buttons.buttons():
-                if btn.isChecked():
-                    btn.setStyleSheet(STYLE.button_unpressed)
+        for btn in self._selection_controls.selection_buttons.buttons():
+            if btn.isChecked():
+                btn.setStyleSheet(STYLE.button_unpressed)
         self.update_plot()
         return True
 
     def _on_roi_selection(self) -> None:
-        """Draws a rectangular ROI selection on the active image panel."""
-        draw = False
-        if self._cell_toggle_controls.size_buttons.button(0).isChecked():
-            wplot = 0
-            view = self._cells_view_box.viewRange()
-            draw = True
-        elif self._cell_toggle_controls.size_buttons.button(2).isChecked():
-            wplot = 1
-            view = self._noncells_view_box.viewRange()
-            draw = True
-        if draw:
-            self._roi_remove()
-            self._selection_controls.selection_buttons.button(0).setStyleSheet(STYLE.button_pressed)
-            self.roi_tool_panel = ROIToolPanel(wplot)
-            imx = (view[0][1] + view[0][0]) / 2
-            imy = (view[1][1] + view[1][0]) / 2
-            dx = (view[0][1] - view[0][0]) / 4
-            dy = (view[1][1] - view[1][0]) / 4
-            dx = np.minimum(dx, 300)
-            dy = np.minimum(dy, 300)
-            imx = imx - dx / 2
-            imy = imy - dy / 2
-            self._active_roi_selection = pg.RectROI([imx, imy], [dx, dy], pen="w", sideScalers=True)
-            if wplot == 0:
-                self._cells_view_box.addItem(self._active_roi_selection)
-            else:
-                self._noncells_view_box.addItem(self._active_roi_selection)
-            self._roi_position()
-            self._active_roi_selection.sigRegionChangeFinished.connect(self._roi_position)
-            self.roi_tool_active = True
+        """Draws a rectangular ROI selection on the image panel."""
+        self._roi_remove()
+        self._selection_controls.selection_buttons.button(0).setStyleSheet(STYLE.button_pressed)
+        view = self._view_box.viewRange()
+        imx = (view[0][1] + view[0][0]) / 2
+        imy = (view[1][1] + view[1][0]) / 2
+        dx = (view[0][1] - view[0][0]) / 4
+        dy = (view[1][1] - view[1][0]) / 4
+        dx = np.minimum(dx, 300)
+        dy = np.minimum(dy, 300)
+        imx = imx - dx / 2
+        imy = imy - dy / 2
+        self._active_roi_selection = pg.RectROI([imx, imy], [dx, dy], pen="w", sideScalers=True)
+        self._view_box.addItem(self._active_roi_selection)
+        self._roi_position()
+        self._active_roi_selection.sigRegionChangeFinished.connect(self._roi_position)
+        self.roi_tool_active = True
 
     def _roi_remove(self) -> None:
         """Removes the current rectangular ROI selection and resets button styles."""
         if self.roi_tool_active:
-            if self.roi_tool_panel == 0:
-                self._cells_view_box.removeItem(self._active_roi_selection)
-            else:
-                self._noncells_view_box.removeItem(self._active_roi_selection)
+            self._view_box.removeItem(self._active_roi_selection)
             self.roi_tool_active = False
-        if self._cell_toggle_controls.size_buttons.button(1).isChecked():
-            self._selection_controls.selection_buttons.button(0).setStyleSheet(STYLE.button_inactive)
-            self._selection_controls.selection_buttons.button(0).setEnabled(False)
-        else:
-            self._selection_controls.selection_buttons.button(0).setStyleSheet(STYLE.button_unpressed)
+        self._selection_controls.selection_buttons.button(0).setStyleSheet(STYLE.button_unpressed)
 
     def _roi_position(self) -> None:
         """Computes the pixel region covered by the ROI and selects contained cells."""
         if self.context_data is None:
             return
         pos0 = self._active_roi_selection.getSceneHandlePositions()
-        pos = (
-            self._cells_view_box.mapSceneToView(pos0[0][1])
-            if self.roi_tool_panel == 0
-            else self._noncells_view_box.mapSceneToView(pos0[0][1])
-        )
+        pos = self._view_box.mapSceneToView(pos0[0][1])
         posy = pos.y()
         posx = pos.x()
         sizex, sizey = self._active_roi_selection.size()
@@ -1366,35 +1133,13 @@ class ROIViewer(QMainWindow):
         """Selects cells whose pixels overlap the given coordinate arrays."""
         if self.roi_maps is None or self.context_data is None:
             return
-        i = self.roi_tool_panel
-        roi_indices = self.roi_maps.iroi[i, 0, ypix, xpix]
+        roi_indices = self.roi_maps.iroi[0, ypix, xpix]
         icells = np.unique(roi_indices[roi_indices >= 0])
         self.merge_roi_indices = []
         for n in icells:
             pixel_count = self.context_data.roi_statistics[n].pixel_count
-            if (self.roi_maps.iroi[i, :, ypix, xpix] == n).sum() > 0.6 * pixel_count:
+            if (self.roi_maps.iroi[:, ypix, xpix] == n).sum() > 0.6 * pixel_count:
                 self.merge_roi_indices.append(n)
         if self.merge_roi_indices:
             self.selected_roi_index = self.merge_roi_indices[0]
             self.update_plot()
-            self.show()
-
-    def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # noqa: N802
-        """Accepts drag events that contain file URLs."""
-        if event.mimeData().hasUrls():
-            event.accept()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event: QtGui.QDropEvent) -> None:  # noqa: N802
-        """Handles dropped directories by loading session data."""
-        files = [u.toLocalFile() for u in event.mimeData().urls()]
-        console.echo(message=f"Files dropped: {files}")
-        dropped_path = Path(files[0])
-        if dropped_path.is_dir():
-            self._load_session(session_path=dropped_path)
-        else:
-            console.echo(
-                message=f"Invalid drop target '{dropped_path}'. Drop a cindra output directory.",
-                level=LogLevel.ERROR,
-            )

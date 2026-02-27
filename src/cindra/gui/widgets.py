@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 from pyqtgraph.graphicsItems.ViewBox.ViewBoxMenu import ViewBoxMenu  # type: ignore[import-untyped]
 
-from .constants import STYLE, CONFIG, ROIToolPanel
+from .constants import STYLE, CONFIG
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -28,10 +28,10 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from pyqtgraph.GraphicsScene.mouseEvents import MouseClickEvent  # type: ignore[import-untyped]
 
-type _ClickHandler = Callable[[int, int, ROIToolPanel, bool, bool], bool]
+type _ClickHandler = Callable[[int, int, bool, bool], bool]
 """The callback type for click events dispatched by a ViewBox to the orchestrator.
 
-Signature: (click_x, click_y, panel, is_right, is_multi) -> handled.
+Signature: (click_x, click_y, is_right, is_multi) -> handled.
 """
 
 type _ZoomHandler = Callable[[], None]
@@ -294,14 +294,12 @@ class ViewBox(pg.ViewBox):
     installed callback handlers.
 
     Args:
-        panel: Identifies which image panel this view box belongs to.
         border: The panel border frame pen specification forwarded to ``fn.mkPen``.
         invert_y: Determines whether to invert the Y axis.
         enable_menu: Determines whether the context menu is enabled.
         name: The unique name for the managed panel used by pyqtgraph's view-linking system.
 
     Attributes:
-        _panel: Cached panel identifier for click handler delegation.
         _click_handler: Callback installed by the orchestrator for click events.
         _zoom_handler: Callback installed by the orchestrator for double-click zoom.
     """
@@ -309,7 +307,6 @@ class ViewBox(pg.ViewBox):
     def __init__(
         self,
         *,
-        panel: ROIToolPanel = ROIToolPanel.CELLS,
         border: object = None,
         invert_y: bool = False,
         enable_menu: bool = True,
@@ -320,7 +317,6 @@ class ViewBox(pg.ViewBox):
         if enable_menu:
             self.menu = ViewBoxMenu(self)
         self.name = name
-        self._panel: ROIToolPanel = panel
 
         # Configures view state.
         self.state["enableMenu"] = enable_menu
@@ -383,7 +379,7 @@ class ViewBox(pg.ViewBox):
         )
 
         # Falls back to the default context menu if the click handler did not consume the event.
-        handled = self._click_handler(click_x, click_y, self._panel, is_right, is_multi)
+        handled = self._click_handler(click_x, click_y, is_right, is_multi)
         if not handled and is_right and self.menuEnabled():
             self.raiseContextMenu(ev)
 
@@ -466,78 +462,6 @@ def plot_trace(
     )
     trace_box.setYRange(y_minimum, y_maximum)
     return y_minimum, y_maximum
-
-
-def initialize_ranges(
-    cells_view: ViewBox,
-    noncells_view: ViewBox,
-    trace_box: TraceBox,
-    frame_width: int,
-    frame_height: int,
-    frame_count: int,
-) -> NDArray[np.int32]:
-    """Initializes plot ranges for all panels after the UI loads the runtime context data.
-
-    Sets both cell and non-cell image panel view ranges to span the full field of view,
-    constrains the trace panel x-axis to the recording length, and returns a frame indices
-    array for trace plotting.
-
-    Args:
-        cells_view: The cell image panel view box.
-        noncells_view: The non-cell image panel view box.
-        trace_box: The fluorescence trace display panel.
-        frame_width: Width of the field of view in pixels.
-        frame_height: Height of the field of view in pixels.
-        frame_count: Total number of frames in the visualized recording.
-
-    Returns:
-        The monotonically increasing frame number array of shape (frame_count,) used as the
-        x-axis for trace plotting.
-    """
-    cells_view.setXRange(0, frame_width)
-    cells_view.setYRange(0, frame_height)
-    noncells_view.setXRange(0, frame_width)
-    noncells_view.setYRange(0, frame_height)
-    trace_box.getViewBox().setLimits(xMin=0, xMax=frame_count)
-    return np.arange(0, frame_count, dtype=np.int32)
-
-
-def apply_quadrant_zoom(
-    quadrant_buttons: QButtonGroup,
-    button_index: int,
-    frame_width: int,
-    frame_height: int,
-    set_view_range: Callable[[float, float, float, float], None],
-) -> None:
-    """Zooms the image views to the specified quadrant.
-
-    Args:
-        quadrant_buttons: The quadrant button group.
-        button_index: Index of the pressed button.
-        frame_width: Width of the field of view in pixels.
-        frame_height: Height of the field of view in pixels.
-        set_view_range: Callback that sets the x/y range on both image panels. Called
-            with (x_min, x_max, y_min, y_max).
-    """
-    for index in range(9):
-        if quadrant_buttons.button(index).isEnabled():
-            quadrant_buttons.button(index).setStyleSheet(STYLE.button_unpressed)
-    quadrant_buttons.button(button_index).setStyleSheet(STYLE.button_pressed)
-
-    columns = STYLE.quadrant_columns
-    margin = CONFIG.quadrant_zoom_margin
-    x_column = button_index % columns
-    y_row = button_index // columns
-    x_range = (
-        np.array([x_column - margin, x_column + 1 + margin])
-        * frame_width
-        / columns
-    )
-    y_range = (
-        np.array([y_row - margin, y_row + 1 + margin]) * frame_height / columns
-    )
-
-    set_view_range(float(x_range[0]), float(x_range[1]), float(y_range[0]), float(y_range[1]))
 
 
 class _ColorButton(QPushButton):
@@ -651,43 +575,6 @@ class _QuadButton(QPushButton):
         self.setFont(STYLE.label_font_bold())
         self.resize(self.minimumSizeHint())
         self.setMaximumWidth(STYLE.small_edit_width)
-        self._button_id: int = button_id
-        self._on_press: Callable[[], None] = on_press
-        self.clicked.connect(self._press)
-        self.show()
-
-    def _press(self) -> None:
-        """Invokes the on_press callback."""
-        self._on_press()
-
-
-class _SizeButton(QPushButton):
-    """View size toggle button for switching between cell/both/non-cell panels.
-
-    Controls which image panels are visible. On press, invokes the ``on_press`` callback.
-
-    Args:
-        button_id: View mode index (0=cells only, 1=both, 2=non-cells only).
-        text: Display label for the button.
-        owner: The parent widget for ownership.
-        button_group: The button group this button belongs to.
-        on_press: Callback invoked when the button is pressed.
-    """
-
-    def __init__(
-        self,
-        button_id: int,
-        text: str,
-        owner: QWidget,
-        button_group: QButtonGroup,  # noqa: ARG002
-        on_press: Callable[[], None],
-    ) -> None:
-        super().__init__(owner)
-        self.setText(text)
-        self.setCheckable(True)
-        self.setStyleSheet(STYLE.button_inactive)
-        self.setFont(STYLE.label_font_bold())
-        self.resize(self.minimumSizeHint())
         self._button_id: int = button_id
         self._on_press: Callable[[], None] = on_press
         self.clicked.connect(self._press)

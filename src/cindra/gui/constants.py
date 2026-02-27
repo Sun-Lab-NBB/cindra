@@ -35,6 +35,9 @@ class ROIColorMode(IntEnum):
     CORRELATIONS = 7
     """Colors ROIs by pairwise activity correlation with the selected ROI."""
 
+    CELL_NON_CELL = 8
+    """Colors ROIs by their cell vs non-cell classification status."""
+
 
 class BackgroundView(IntEnum):
     """Selects the background image displayed behind ROI overlays in the image panels."""
@@ -89,16 +92,6 @@ class TraceMode(IntEnum):
 
     DECONVOLVED = 3
     """Displays the deconvolved spikes trace."""
-
-
-class ROIToolPanel(IntEnum):
-    """Identifies which image panel hosts the rectangular ROI selection tool."""
-
-    CELLS = 0
-    """The ROI selection tool is active on the cell image panel."""
-
-    NON_CELLS = 1
-    """The ROI selection tool is active on the non-cell image panel."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,8 +158,6 @@ class _ViewerStyle:
     """Number of samples for the colorbar gradient."""
     colorbar_row_count: int = 20
     """Number of rows in the colorbar image."""
-    quadrant_columns: int = 3
-    """Number of columns in the quadrant grid."""
     save_button_width: int = 100
     """Fixed width for the save-and-quit button in the ROI draw editor."""
 
@@ -176,8 +167,7 @@ class _ViewerStyle:
         Returns:
             The configured QFont instance.
         """
-        # noinspection PyArgumentList
-        return QtGui.QFont(family=self.font_family, pointSize=8)
+        return QtGui.QFont(self.font_family, 8)
 
     def label_font_bold(self) -> QtGui.QFont:
         """Creates the standard bold label font (Arial 8pt bold).
@@ -185,8 +175,7 @@ class _ViewerStyle:
         Returns:
             The configured QFont instance.
         """
-        # noinspection PyArgumentList
-        return QtGui.QFont(family=self.font_family, pointSize=8, weight=QtGui.QFont.Weight.Bold)
+        return QtGui.QFont(self.font_family, 8, QtGui.QFont.Weight.Bold.value)
 
     def header_font(self) -> QtGui.QFont:
         """Creates the section header font (Arial 10pt bold).
@@ -194,8 +183,7 @@ class _ViewerStyle:
         Returns:
             The configured QFont instance.
         """
-        # noinspection PyArgumentList
-        return QtGui.QFont(family=self.font_family, pointSize=10, weight=QtGui.QFont.Weight.Bold)
+        return QtGui.QFont(self.font_family, 10, QtGui.QFont.Weight.Bold.value)
 
     def arrow_button_font(self) -> QtGui.QFont:
         """Creates the font for trace expand/collapse arrow buttons (Arial 11pt bold).
@@ -203,8 +191,7 @@ class _ViewerStyle:
         Returns:
             The configured QFont instance.
         """
-        # noinspection PyArgumentList
-        return QtGui.QFont(family=self.font_family, pointSize=11, weight=QtGui.QFont.Weight.Bold)
+        return QtGui.QFont(self.font_family, 11, QtGui.QFont.Weight.Bold.value)
 
     def colorbar_font(self) -> QtGui.QFont:
         """Creates the font for colorbar tick labels (Times 8pt bold).
@@ -212,8 +199,7 @@ class _ViewerStyle:
         Returns:
             The configured QFont instance.
         """
-        # noinspection PyArgumentList
-        return QtGui.QFont(family=self.alternative_font_family, pointSize=8, weight=QtGui.QFont.Weight.Bold)
+        return QtGui.QFont(self.alternative_font_family, 8, QtGui.QFont.Weight.Bold.value)
 
     def merge_label_font(self) -> QtGui.QFont:
         """Creates the font for merge dialog parameter labels (Times bold).
@@ -221,8 +207,7 @@ class _ViewerStyle:
         Returns:
             The configured QFont instance.
         """
-        # noinspection PyArgumentList
-        return QtGui.QFont(family=self.alternative_font_family, weight=QtGui.QFont.Weight.Bold)
+        return QtGui.QFont(self.alternative_font_family, -1, QtGui.QFont.Weight.Bold.value)
 
 
 STYLE: _ViewerStyle = _ViewerStyle()
@@ -240,8 +225,8 @@ class _ViewerConfig:
     """ROI weight normalization scale factor."""
     lambda_threshold: float = 1e-10
     """Minimum lambda value threshold for computing the mean weight."""
-    color_stat_count: int = 8
-    """Number of color statistics (random, skew, compact, footprint, aspect, chan2, class, corr)."""
+    color_stat_count: int = 9
+    """Number of color statistics (random, skew, compact, footprint, aspect, chan2, class, corr, cell/non-cell)."""
     fixed_colorbar_range: tuple[float, ...] = (0.0, 0.5, 1.0)
     """Fixed colorbar range for statistics without computed percentiles."""
     lower_percentile: float = 2.0
@@ -283,6 +268,7 @@ class _ViewerConfig:
         "H: chan2_prob",
         "J: classifier, cell prob=",
         "K: correlations, bin=",
+        "L: cell / non-cell",
     )
     """Color statistic names displayed on the color buttons (with keyboard shortcut prefixes)."""
     color_short_names: tuple[str, ...] = (
@@ -294,11 +280,12 @@ class _ViewerConfig:
         "chan2_prob",
         "classifier, cell prob=",
         "correlations, bin=",
+        "cell / non-cell",
     )
     """Short color statistic names without keyboard shortcut prefixes."""
     color_narrow_range_start: int = 5
     """Starting index of the color buttons that require the adjacent edit field column."""
-    color_narrow_range_end: int = 8
+    color_narrow_range_end: int = 9
     """Ending index of the color buttons that require the adjacent edit field column."""
     color_channel_2: int = 5
     """Channel 2 color index."""
@@ -306,6 +293,12 @@ class _ViewerConfig:
     """Classifier probability color index."""
     color_correlation: int = 7
     """Correlation color index."""
+    color_cell_non_cell: int = 8
+    """Cell vs non-cell classification color index."""
+    cell_color: tuple[int, int, int] = (0, 200, 0)
+    """RGB color for classified cells in cell/non-cell mode."""
+    noncell_color: tuple[int, int, int] = (200, 0, 200)
+    """RGB color for non-cells in cell/non-cell mode."""
     channel_2_threshold_epsilon: float = 1e-3
     """Minimum change in channel 2 threshold to trigger a recoloring update."""
     stat_field_map: dict[str, str] = field(default_factory=lambda: {
@@ -376,16 +369,7 @@ class _ViewerConfig:
     """Maximum number of cells allowed in the top-n / bottom-n selection input."""
     default_top_n: int = 40
     """Default number of cells selected by top-n / bottom-n."""
-    quadrant_zoom_margin: float = 0.15
-    """Margin fraction added to quadrant zoom ranges to provide padding."""
-    view_both: int = 1
-    """View mode index for displaying both cells and non-cells."""
-
     # Viewer constants.
-    cells_plot: int = 0
-    """Panel index for the cells image panel."""
-    noncells_plot: int = 1
-    """Panel index for the non-cells image panel."""
     centroid_stat_index: int = 1
     """1-based stat index for the centroid field (used to display ROI position)."""
     pixel_count_stat_index: int = 2
@@ -396,7 +380,7 @@ class _ViewerConfig:
     """Default colocalization threshold for channel 2 data."""
     bin_size_divisor: int = 2
     """Divisor for computing the temporal bin size from tau * sampling_rate."""
-    basic_color_count: int = 8
+    basic_color_count: int = 9
     """Number of basic (non-dynamic) color mode buttons."""
     default_context_activity_mode: int = 2
     """Default activity mode index used during context loading (neuropil-corrected)."""

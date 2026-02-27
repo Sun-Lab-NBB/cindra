@@ -57,7 +57,7 @@ class ColorArrays:
         cols: Per-statistic RGB colors with shape (color_count, roi_count, 3).
         istat: Per-statistic normalized values with shape (color_count, roi_count).
         colorbar: Per-statistic colorbar range values as [low, mid, high] lists.
-        rgb: RGBA overlay arrays with shape (2, color_count, height, width, 4).
+        rgb: RGBA overlay arrays with shape (color_count, height, width, 4).
         random_hues: Per-ROI random hue values with shape (roi_count,).
     """
 
@@ -73,11 +73,11 @@ class ROIIndexMaps:
     """Holds the multi-layer ROI index and weight maps for overlay rendering.
 
     Attributes:
-        sroi: Boolean presence map with shape (2, height, width).
-        lam: Weight layers with shape (2, 3, height, width).
-        iroi: ROI index layers with shape (2, 3, height, width).
+        sroi: Boolean presence map with shape (height, width).
+        lam: Weight layers with shape (3, height, width).
+        iroi: ROI index layers with shape (3, height, width).
         lam_mean: Mean weight across all ROI pixels.
-        lam_norm: Normalized weights with shape (2, height, width).
+        lam_norm: Normalized weights with shape (height, width).
         text_labels: Per-ROI text label items for centroid display.
     """
 
@@ -150,32 +150,6 @@ class SelectionControls:
     selection_buttons: QButtonGroup
     top_count_edit: QLineEdit
     top_count: int = CONFIG.default_top_n
-
-
-@dataclass
-class CellToggleControls:
-    """Holds references to cell/non-cell/both toggle widgets and ROI count labels.
-
-    Attributes:
-        size_buttons: Button group with cells/both/non-cells toggle modes.
-        cell_count_label: Label showing the number of classified cells.
-        noncell_count_label: Label showing the number of non-cells.
-    """
-
-    size_buttons: QButtonGroup
-    cell_count_label: QLabel
-    noncell_count_label: QLabel
-
-
-@dataclass
-class QuadrantControls:
-    """Holds references to quadrant zoom navigation widgets.
-
-    Attributes:
-        quadrant_buttons: Button group with the 3x3 quadrant zoom buttons.
-    """
-
-    quadrant_buttons: QButtonGroup
 
 
 @dataclass
