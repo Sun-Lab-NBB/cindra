@@ -230,6 +230,9 @@ def register_plane(context: RuntimeContext) -> None:
     # Persists the final registration state (including metrics if computed) to disk.
     context.save_runtime()
 
+    # Releases registration arrays to free memory. The has_registration_data flag survives re-serialization.
+    context.runtime.registration.release_arrays()
+
 
 @dataclass(frozen=True, slots=True)
 class _ReferenceData:

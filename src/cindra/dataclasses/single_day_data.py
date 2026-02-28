@@ -139,6 +139,10 @@ class IOData:
 class RegistrationData:
     """Stores runtime data from the registration stage."""
 
+    has_registration_data: bool = False
+    """Indicates whether registration arrays have been saved to disk. When True, ``is_registered()`` returns True even
+    if array fields are None (released to free memory). Set to True by ``save_arrays()`` and reset by ``clear()``."""
+
     valid_y_range: tuple[int, int] = (0, 0)
     """The valid Y pixel range (start, end) defining the usable recording region after border cropping."""
 
@@ -201,14 +205,17 @@ class RegistrationData:
         """Checks whether registration data exists.
 
         Returns:
-            True if the plane has been registered (has reference image and offsets), False otherwise.
+            True if the plane has been registered (has reference image and offsets in memory, or arrays were previously
+            saved to disk), False otherwise.
         """
-        return (
+        arrays_loaded = (
             self.reference_image is not None and self.rigid_y_offsets is not None and self.rigid_x_offsets is not None
         )
+        return arrays_loaded or self.has_registration_data
 
     def clear(self) -> None:
         """Clears all registration data to prepare for re-registration."""
+        self.has_registration_data = False
         self.valid_y_range = (0, 0)
         self.valid_x_range = (0, 0)
         self.bad_frames = None
@@ -241,6 +248,25 @@ class RegistrationData:
         self.principal_component_projections = None
         self.principal_component_shift_metrics = None
 
+    def release_arrays(self) -> None:
+        """Releases all array fields to free memory without affecting ``has_registration_data``.
+
+        After calling this method, ``is_registered()`` continues to return True if arrays were previously saved,
+        because ``has_registration_data`` is preserved. Scalar fields (valid ranges, normalization bounds, etc.) are
+        also preserved. Use ``memory_map_arrays()`` or ``load_arrays()`` to re-acquire the data on demand.
+        """
+        self.bad_frames = None
+        self.reference_image = None
+        self.rigid_y_offsets = None
+        self.rigid_x_offsets = None
+        self.rigid_correlations = None
+        self.nonrigid_y_offsets = None
+        self.nonrigid_x_offsets = None
+        self.nonrigid_correlations = None
+        self.principal_component_extreme_images = None
+        self.principal_component_projections = None
+        self.principal_component_shift_metrics = None
+
     def save_arrays(self, output_path: Path) -> None:
         """Saves registration arrays as individual .npy files inside a ``registration_data/`` subdirectory.
 
@@ -254,6 +280,7 @@ class RegistrationData:
             np.save(registration_directory / "bad_frames.npy", self.bad_frames)
         if self.reference_image is not None and not is_memory_mapped(self.reference_image):
             np.save(registration_directory / "reference_image.npy", self.reference_image)
+            self.has_registration_data = True
         if self.rigid_y_offsets is not None and not is_memory_mapped(self.rigid_y_offsets):
             np.save(registration_directory / "rigid_y_offsets.npy", self.rigid_y_offsets)
         if self.rigid_x_offsets is not None and not is_memory_mapped(self.rigid_x_offsets):
@@ -266,25 +293,22 @@ class RegistrationData:
             np.save(registration_directory / "nonrigid_x_offsets.npy", self.nonrigid_x_offsets)
         if self.nonrigid_correlations is not None and not is_memory_mapped(self.nonrigid_correlations):
             np.save(registration_directory / "nonrigid_correlations.npy", self.nonrigid_correlations)
-        if (
-            self.principal_component_extreme_images is not None
-            and not is_memory_mapped(self.principal_component_extreme_images)
+        if self.principal_component_extreme_images is not None and not is_memory_mapped(
+            self.principal_component_extreme_images
         ):
             np.save(
                 registration_directory / "principal_component_extreme_images.npy",
                 self.principal_component_extreme_images,
             )
-        if (
-            self.principal_component_projections is not None
-            and not is_memory_mapped(self.principal_component_projections)
+        if self.principal_component_projections is not None and not is_memory_mapped(
+            self.principal_component_projections
         ):
             np.save(
                 registration_directory / "principal_component_projections.npy",
                 self.principal_component_projections,
             )
-        if (
-            self.principal_component_shift_metrics is not None
-            and not is_memory_mapped(self.principal_component_shift_metrics)
+        if self.principal_component_shift_metrics is not None and not is_memory_mapped(
+            self.principal_component_shift_metrics
         ):
             np.save(
                 registration_directory / "principal_component_shift_metrics.npy",
@@ -424,6 +448,20 @@ class DetectionData:
 
     def prepare_for_saving(self) -> None:
         """Sets all array fields to None for YAML serialization."""
+        self.mean_image = None
+        self.enhanced_mean_image = None
+        self.maximum_projection = None
+        self.correlation_map = None
+        self.mean_image_channel_2 = None
+        self.enhanced_mean_image_channel_2 = None
+        self.maximum_projection_channel_2 = None
+        self.correlation_map_channel_2 = None
+
+    def release_arrays(self) -> None:
+        """Releases all array fields to free memory.
+
+        Use ``memory_map_arrays()`` or ``load_arrays()`` to re-acquire the data on demand.
+        """
         self.mean_image = None
         self.enhanced_mean_image = None
         self.maximum_projection = None
@@ -691,6 +729,9 @@ class ROIStatistics:
     centroid: tuple[int, int]
     """The median (y, x) pixel position of the ROI, representing its approximate center."""
 
+    frame_width: int = 0
+    """The width of the image frame in pixels, used to compute raveled pixel indices."""
+
     footprint: int = 0
     """The spatial scale (hop size) used during sparse detection for this ROI."""
 
@@ -784,15 +825,14 @@ class ROIStatistics:
         if not roi_list:
             return
 
-        # Delegates spatial core to ROIMask.save_list. Uses frame_width=0 as a placeholder since single-day ROIs do
-        # not have a meaningful frame_width stored per-ROI (the value is only used for multi-day raveled_pixels).
+        # Delegates spatial core to ROIMask.save_list.
         mask_list = [
             ROIMask(
                 y_pixels=roi.y_pixels,
                 x_pixels=roi.x_pixels,
                 pixel_weights=roi.pixel_weights,
                 centroid=roi.centroid,
-                frame_width=0,
+                frame_width=roi.frame_width,
                 radius=roi.radius,
                 cluster_id=roi.cluster_id,
                 session_count=roi.session_count,
@@ -1030,6 +1070,31 @@ class ExtractionData:
         self.cell_colocalization = None
         self.corrected_structural_mean_image = None
 
+    def release_arrays(self) -> None:
+        """Releases all array and list fields to free memory.
+
+        Use ``memory_map_arrays()`` or ``load_arrays()`` to re-acquire the data on demand.
+        """
+        # Channel 1.
+        self.roi_statistics = None
+        self.cell_fluorescence = None
+        self.neuropil_fluorescence = None
+        self.subtracted_fluorescence = None
+        self.spikes = None
+        self.cell_classification = None
+
+        # Channel 2.
+        self.roi_statistics_channel_2 = None
+        self.cell_fluorescence_channel_2 = None
+        self.neuropil_fluorescence_channel_2 = None
+        self.subtracted_fluorescence_channel_2 = None
+        self.spikes_channel_2 = None
+        self.cell_classification_channel_2 = None
+
+        # Colocalization.
+        self.cell_colocalization = None
+        self.corrected_structural_mean_image = None
+
     def save_arrays(self, output_path: Path) -> None:
         """Saves all extraction arrays to .npy files and ROI statistics to .npz files.
 
@@ -1069,18 +1134,16 @@ class ExtractionData:
             np.save(
                 output_path / "cell_fluorescence_channel_2.npy", self.cell_fluorescence_channel_2, allow_pickle=False
             )
-        if (
-            self.neuropil_fluorescence_channel_2 is not None
-            and not is_memory_mapped(self.neuropil_fluorescence_channel_2)
+        if self.neuropil_fluorescence_channel_2 is not None and not is_memory_mapped(
+            self.neuropil_fluorescence_channel_2
         ):
             np.save(
                 output_path / "neuropil_fluorescence_channel_2.npy",
                 self.neuropil_fluorescence_channel_2,
                 allow_pickle=False,
             )
-        if (
-            self.subtracted_fluorescence_channel_2 is not None
-            and not is_memory_mapped(self.subtracted_fluorescence_channel_2)
+        if self.subtracted_fluorescence_channel_2 is not None and not is_memory_mapped(
+            self.subtracted_fluorescence_channel_2
         ):
             np.save(
                 output_path / "subtracted_fluorescence_channel_2.npy",
@@ -1099,9 +1162,8 @@ class ExtractionData:
         # Colocalization arrays.
         if self.cell_colocalization is not None and not is_memory_mapped(self.cell_colocalization):
             np.save(output_path / "cell_colocalization.npy", self.cell_colocalization, allow_pickle=False)
-        if (
-            self.corrected_structural_mean_image is not None
-            and not is_memory_mapped(self.corrected_structural_mean_image)
+        if self.corrected_structural_mean_image is not None and not is_memory_mapped(
+            self.corrected_structural_mean_image
         ):
             np.save(
                 output_path / "corrected_structural_mean_image.npy",
@@ -1146,9 +1208,9 @@ class ExtractionData:
         # Channel 2 classification.
         cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
-            self.cell_classification_channel_2 = np.load(
-                cell_classification_channel_2_path, allow_pickle=False
-            ).astype(np.float32)
+            self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, allow_pickle=False).astype(
+                np.float32
+            )
 
     def load_results(self, output_path: Path) -> None:
         """Loads all extraction result arrays from disk.
@@ -1187,9 +1249,9 @@ class ExtractionData:
         # Channel 2 traces.
         cell_fluorescence_channel_2_path = output_path / "cell_fluorescence_channel_2.npy"
         if self.cell_fluorescence_channel_2 is None and cell_fluorescence_channel_2_path.exists():
-            self.cell_fluorescence_channel_2 = np.load(
-                cell_fluorescence_channel_2_path, allow_pickle=False
-            ).astype(np.float32)
+            self.cell_fluorescence_channel_2 = np.load(cell_fluorescence_channel_2_path, allow_pickle=False).astype(
+                np.float32
+            )
 
         neuropil_fluorescence_channel_2_path = output_path / "neuropil_fluorescence_channel_2.npy"
         if self.neuropil_fluorescence_channel_2 is None and neuropil_fluorescence_channel_2_path.exists():
@@ -1210,9 +1272,9 @@ class ExtractionData:
         # Channel 2 classification.
         cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
-            self.cell_classification_channel_2 = np.load(
-                cell_classification_channel_2_path, allow_pickle=False
-            ).astype(np.float32)
+            self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, allow_pickle=False).astype(
+                np.float32
+            )
 
         # Colocalization arrays.
         cell_colocalization_path = output_path / "cell_colocalization.npy"
@@ -1403,6 +1465,16 @@ class SingleDayRuntimeData(YamlConfig):
 
     timing: TimingData = field(default_factory=TimingData)
     """The pipeline timing information."""
+
+    def release_arrays(self) -> None:
+        """Releases all array fields across registration, detection, and extraction to free memory.
+
+        Delegates to the ``release_arrays()`` method on each child dataclass. Scalar fields and the
+        ``has_registration_data`` flag are preserved so that ``is_registered()`` continues to work correctly.
+        """
+        self.registration.release_arrays()
+        self.detection.release_arrays()
+        self.extraction.release_arrays()
 
     def load_arrays(self) -> None:
         """Eagerly loads all NumPy arrays from .npy files on disk into memory.
@@ -1640,9 +1712,7 @@ class CombinedData:
             kwargs["plane_x_offsets"] = metadata["plane_x_offsets"].astype(np.int32)
 
         if "registered_binary_paths" in metadata:
-            kwargs["registered_binary_paths"] = tuple(
-                root_path / str(p) for p in metadata["registered_binary_paths"]
-            )
+            kwargs["registered_binary_paths"] = tuple(root_path / str(p) for p in metadata["registered_binary_paths"])
 
         if "registered_binary_paths_channel_2" in metadata:
             kwargs["registered_binary_paths_channel_2"] = tuple(

@@ -44,6 +44,12 @@ def track_rois_across_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
+    # Loads registration arrays (deformed cell masks) needed for tracking.
+    for context in contexts:
+        output_path = context.runtime.output_path
+        if output_path is not None:
+            context.runtime.registration.memory_map_arrays(output_path)
+
     # Determines which channels have data to process by checking the first context with available registration data.
     has_channel_1 = False
     has_channel_2 = False
@@ -67,6 +73,10 @@ def track_rois_across_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
     for context in contexts:
         context.runtime.timing.tracking_time = tracking_time
         context.save_runtime()
+
+    # Releases registration arrays to free memory. Tracking arrays are kept for the next pipeline step.
+    for context in contexts:
+        context.runtime.registration.release_arrays()
 
     console.echo(message=f"ROI tracking: complete. Time: {tracking_time} seconds.", level=LogLevel.SUCCESS)
 

@@ -5,11 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
-import numpy as np
-
 from .constants import CONFIG
 
 if TYPE_CHECKING:
+    import numpy as np
     import pyqtgraph as pg  # type: ignore[import-untyped]
     from numpy.typing import NDArray
     from PySide6.QtWidgets import QLabel, QCheckBox, QComboBox, QLineEdit, QPushButton, QButtonGroup

@@ -55,6 +55,10 @@ class MultiDayIOData:
 class MultiDayRegistrationData:
     """Stores runtime data from the registration stage."""
 
+    has_registration_data: bool = False
+    """Indicates whether registration arrays have been saved to disk. When True, ``is_registered()`` returns True even
+    if array fields are None (released to free memory). Set to True by ``save_arrays()`` and reset by ``clear()``."""
+
     # Deformation fields.
     deform_field_y: NDArray[np.float32] | None = None
     """The Y-dimension displacement field computed by DiffeomorphicDemonsRegistration. Combined with deform_field_x,
@@ -97,12 +101,15 @@ class MultiDayRegistrationData:
         """Checks whether registration data exists.
 
         Returns:
-            True if the session has been registered (has deformation fields and deformed cell masks), False otherwise.
+            True if the session has been registered (has deformation fields and deformed cell masks in memory, or
+            arrays were previously saved to disk), False otherwise.
         """
-        return self.deform_field_y is not None and self.deformed_cell_masks is not None
+        arrays_loaded = self.deform_field_y is not None and self.deformed_cell_masks is not None
+        return arrays_loaded or self.has_registration_data
 
     def clear(self) -> None:
         """Clears all registration data to prepare for re-registration."""
+        self.has_registration_data = False
         self.deform_field_y = None
         self.deform_field_x = None
         self.transformed_mean_image = None
@@ -116,6 +123,24 @@ class MultiDayRegistrationData:
 
     def prepare_for_saving(self) -> None:
         """Sets array fields to None for YAML serialization."""
+        self.deform_field_y = None
+        self.deform_field_x = None
+        self.transformed_mean_image = None
+        self.transformed_enhanced_mean_image = None
+        self.transformed_maximum_projection = None
+        self.transformed_mean_image_channel_2 = None
+        self.transformed_enhanced_mean_image_channel_2 = None
+        self.transformed_maximum_projection_channel_2 = None
+        self.deformed_cell_masks = None
+        self.deformed_cell_masks_channel_2 = None
+
+    def release_arrays(self) -> None:
+        """Releases all array fields to free memory without affecting ``has_registration_data``.
+
+        After calling this method, ``is_registered()`` continues to return True if arrays were previously saved,
+        because ``has_registration_data`` is preserved. Use ``memory_map_arrays()`` or ``load_arrays()`` to
+        re-acquire the data on demand.
+        """
         self.deform_field_y = None
         self.deform_field_x = None
         self.transformed_mean_image = None
@@ -143,44 +168,40 @@ class MultiDayRegistrationData:
         # Saves deformation fields.
         if self.deform_field_y is not None and not is_memory_mapped(self.deform_field_y):
             np.save(registration_directory / "deform_field_y.npy", self.deform_field_y)
+            self.has_registration_data = True
         if self.deform_field_x is not None and not is_memory_mapped(self.deform_field_x):
             np.save(registration_directory / "deform_field_x.npy", self.deform_field_x)
 
         # Saves channel 1 transformed images.
         if self.transformed_mean_image is not None and not is_memory_mapped(self.transformed_mean_image):
             np.save(registration_directory / "transformed_mean_image.npy", self.transformed_mean_image)
-        if (
-            self.transformed_enhanced_mean_image is not None
-            and not is_memory_mapped(self.transformed_enhanced_mean_image)
+        if self.transformed_enhanced_mean_image is not None and not is_memory_mapped(
+            self.transformed_enhanced_mean_image
         ):
             np.save(
                 registration_directory / "transformed_enhanced_mean_image.npy", self.transformed_enhanced_mean_image
             )
-        if (
-            self.transformed_maximum_projection is not None
-            and not is_memory_mapped(self.transformed_maximum_projection)
+        if self.transformed_maximum_projection is not None and not is_memory_mapped(
+            self.transformed_maximum_projection
         ):
             np.save(registration_directory / "transformed_maximum_projection.npy", self.transformed_maximum_projection)
 
         # Saves channel 2 transformed images.
-        if (
-            self.transformed_mean_image_channel_2 is not None
-            and not is_memory_mapped(self.transformed_mean_image_channel_2)
+        if self.transformed_mean_image_channel_2 is not None and not is_memory_mapped(
+            self.transformed_mean_image_channel_2
         ):
             np.save(
                 registration_directory / "transformed_mean_image_channel_2.npy", self.transformed_mean_image_channel_2
             )
-        if (
-            self.transformed_enhanced_mean_image_channel_2 is not None
-            and not is_memory_mapped(self.transformed_enhanced_mean_image_channel_2)
+        if self.transformed_enhanced_mean_image_channel_2 is not None and not is_memory_mapped(
+            self.transformed_enhanced_mean_image_channel_2
         ):
             np.save(
                 registration_directory / "transformed_enhanced_mean_image_channel_2.npy",
                 self.transformed_enhanced_mean_image_channel_2,
             )
-        if (
-            self.transformed_maximum_projection_channel_2 is not None
-            and not is_memory_mapped(self.transformed_maximum_projection_channel_2)
+        if self.transformed_maximum_projection_channel_2 is not None and not is_memory_mapped(
+            self.transformed_maximum_projection_channel_2
         ):
             np.save(
                 registration_directory / "transformed_maximum_projection_channel_2.npy",
@@ -388,6 +409,14 @@ class MultiDayTrackingData:
         self.template_masks = None
         self.template_masks_channel_2 = None
 
+    def release_arrays(self) -> None:
+        """Releases all list fields to free memory.
+
+        Use ``load_arrays()`` to re-acquire the data on demand.
+        """
+        self.template_masks = None
+        self.template_masks_channel_2 = None
+
     def save_arrays(self, output_path: Path) -> None:
         """Saves template mask arrays to .npz files.
 
@@ -398,9 +427,7 @@ class MultiDayTrackingData:
             ROIMask.save_list(self.template_masks, output_path / "tracking_template_masks.npz")
 
         if self.template_masks_channel_2 is not None:
-            ROIMask.save_list(
-                self.template_masks_channel_2, output_path / "tracking_template_masks_channel_2.npz"
-            )
+            ROIMask.save_list(self.template_masks_channel_2, output_path / "tracking_template_masks_channel_2.npz")
 
     def load_arrays(self, output_path: Path) -> None:
         """Loads template mask arrays from .npz files into this instance.
@@ -454,6 +481,20 @@ class MultiDayRuntimeData(YamlConfig):
     combined_data: CombinedData | None = None
     """The combined single-day processing data for this session, loaded from the session directory. This field is not
     serialized to YAML and is loaded on-demand from the single-day pipeline outputs."""
+
+    def release_arrays(self) -> None:
+        """Releases all array fields across registration, tracking, extraction, and combined_data to free memory.
+
+        Delegates to the ``release_arrays()`` method on each child dataclass. Also releases combined_data detection
+        and extraction arrays if combined_data is loaded. Scalar fields and the ``has_registration_data`` flag are
+        preserved so that ``is_registered()`` continues to work correctly.
+        """
+        self.registration.release_arrays()
+        self.tracking.release_arrays()
+        self.extraction.release_arrays()
+        if self.combined_data is not None:
+            self.combined_data.detection.release_arrays()
+            self.combined_data.extraction.release_arrays()
 
     def load_arrays(self) -> None:
         """Eagerly loads all multi-day NumPy arrays from disk into memory.

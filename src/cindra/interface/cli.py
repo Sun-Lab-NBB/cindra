@@ -73,11 +73,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     file_path = output_path.joinpath(resolved_name).with_suffix(".yaml")
 
     # Generates the precursor configuration file in the specified output directory.
-    config: SingleDayConfiguration | MultiDayConfiguration
-    if single_day:
-        config = SingleDayConfiguration()
-    else:
-        config = MultiDayConfiguration()
+    config = SingleDayConfiguration() if single_day else MultiDayConfiguration()
     config.save(file_path=file_path)
 
     message = (
@@ -289,12 +285,12 @@ def cindra_run(
         )
     else:
         # Writes CLI overrides into the configuration file before running the pipeline.
-        configuration = MultiDayConfiguration.from_yaml(file_path=input_path)
+        multi_day_configuration = MultiDayConfiguration.from_yaml(file_path=input_path)
         if recording_paths:
-            configuration.session_io.session_directories = tuple(natsorted(recording_paths))
-        configuration.runtime.parallel_workers = workers
-        configuration.runtime.display_progress_bars = progress_bars
-        configuration.save(file_path=input_path)
+            multi_day_configuration.session_io.session_directories = tuple(natsorted(recording_paths))
+        multi_day_configuration.runtime.parallel_workers = workers
+        multi_day_configuration.runtime.display_progress_bars = progress_bars
+        multi_day_configuration.save(file_path=input_path)
 
         run_multi_day_pipeline(
             configuration_path=input_path,

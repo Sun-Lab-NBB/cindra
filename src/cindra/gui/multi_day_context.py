@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from enum import IntEnum
 from typing import TYPE_CHECKING
-from collections.abc import Sequence
 from dataclasses import field, dataclass
 
 from ataraxis_base_utilities import console
@@ -13,6 +12,7 @@ from ..dataclasses import MultiDayRuntimeContext
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from collections.abc import Sequence
 
     import numpy as np
     from numpy.typing import NDArray
@@ -302,6 +302,18 @@ class TrackingViewerData:
         contexts = MultiDayRuntimeContext.load(root_path=root_path, session_index=-1)
         if not isinstance(contexts, list):
             contexts = [contexts]
+
+        # Explicitly loads arrays since context resolution no longer loads them eagerly.
+        for ctx in contexts:
+            output_path = ctx.runtime.output_path
+            if output_path is not None:
+                ctx.runtime.registration.memory_map_arrays(output_path)
+                ctx.runtime.tracking.load_arrays(output_path)
+                ctx.runtime.extraction.load_arrays(output_path)
+            combined = ctx.runtime.combined_data
+            if combined is not None and ctx.runtime.io.data_path is not None:
+                combined.detection.memory_map_arrays(ctx.runtime.io.data_path)
+                combined.extraction.memory_map_arrays(ctx.runtime.io.data_path)
 
         return cls(_contexts=contexts)
 

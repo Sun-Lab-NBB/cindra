@@ -85,6 +85,8 @@ def detect_pipeline_type(file_path: Path) -> PipelineType:
         f"field is missing or has an unrecognized value '{raw_type}'. Expected one of: {expected}."
     )
     console.error(message=message, error=ValueError)
+    # Unreachable fallback to work around faulty RUFF error checking.
+    raise ValueError(message)  # pragma: no cover
 
 
 @dataclass

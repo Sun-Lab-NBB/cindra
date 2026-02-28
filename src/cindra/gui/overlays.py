@@ -294,7 +294,6 @@ def draw_masks(
     roi_color_mode: int,
     background_view: int,
     roi_opacity: list[int],
-    selected_roi_index: int,
     merge_roi_indices: list[int],
 ) -> NDArray[np.uint8]:
     """Draws the current mask overlay for the image panel.
@@ -309,7 +308,6 @@ def draw_masks(
         roi_color_mode: Active color statistic index.
         background_view: Active background view index.
         roi_opacity: Alpha values for ROI overlays in [circle-view, filled-ROI-view] modes.
-        selected_roi_index: Index of the currently highlighted ROI.
         merge_roi_indices: Indices of all ROIs staged for merge or multi-selection.
 
     Returns:

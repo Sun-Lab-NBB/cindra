@@ -66,6 +66,12 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
         for context in contexts:
             context.runtime.registration.clear()
 
+    # Memory-maps combined detection arrays needed for registration (reference images, ROI masks).
+    for context in contexts:
+        combined = context.runtime.combined_data
+        if combined is not None and context.runtime.io.data_path is not None:
+            combined.detection.memory_map_arrays(context.runtime.io.data_path)
+
     # Collects reference images from all sessions based on configured image type.
     image_type = registration_config.image_type
     reference_images: list[NDArray[np.float32]] = []
@@ -138,6 +144,12 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
         context.runtime.timing.registration_time = registration_time
         context.save_runtime()
 
+    # Releases registration and combined detection arrays to free memory.
+    for context in contexts:
+        context.runtime.registration.release_arrays()
+        if context.runtime.combined_data is not None:
+            context.runtime.combined_data.detection.release_arrays()
+
     console.echo(
         message=f"Multi-day registration: complete. Time: {registration_time} seconds.", level=LogLevel.SUCCESS
     )
@@ -158,6 +170,13 @@ def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> Non
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
     runtime_config = contexts[0].configuration.runtime
+
+    # Loads registration and tracking arrays needed for backward deformation.
+    for context in contexts:
+        output_path = context.runtime.output_path
+        if output_path is not None:
+            context.runtime.registration.memory_map_arrays(output_path)
+            context.runtime.tracking.load_arrays(output_path)
 
     if runtime_config.parallel_workers > 1:
         with ThreadPoolExecutor(max_workers=runtime_config.parallel_workers) as executor:
@@ -187,6 +206,12 @@ def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> Non
     for context in contexts:
         context.runtime.timing.backward_transform_time = backward_transform_time
         context.save_runtime()
+
+    # Releases registration, tracking, and extraction arrays to free memory.
+    for context in contexts:
+        context.runtime.registration.release_arrays()
+        context.runtime.tracking.release_arrays()
+        context.runtime.extraction.release_arrays()
 
     console.echo(
         message=f"Template projection: complete. Time: {backward_transform_time} seconds.", level=LogLevel.SUCCESS
@@ -277,11 +302,11 @@ def _backward_deform_masks(
     frame_height: int,
     frame_width: int,
     cell_diameter: int,
-) -> tuple[list[ROIMask], list[ROIStatistics]]:
+) -> list[ROIStatistics]:
     """Applies an inverse deformation to project template masks back to a session's native coordinate system.
 
-    Creates both ROIMask instances (for spatial data persistence) and ROIStatistics instances (for downstream
-    extraction and GUI use) with full shape statistics computed via compute_roi_statistics.
+    Creates ROIStatistics instances with full shape statistics computed via compute_roi_statistics for downstream
+    extraction and GUI use.
 
     Args:
         masks: The list of ROIMask instances (template masks) to transform.
@@ -291,31 +316,18 @@ def _backward_deform_masks(
         cell_diameter: The estimated cell diameter in pixels, used for distance normalization in statistics.
 
     Returns:
-        A tuple of (roi_masks, roi_statistics) where roi_masks contains the transformed spatial data and
-        roi_statistics contains full shape statistics for extraction and GUI use.
+        A list of ROIStatistics instances with transformed coordinates and full shape statistics.
     """
-    roi_masks: list[ROIMask] = []
     roi_statistics: list[ROIStatistics] = []
     for mask in masks:
         y_pixels, x_pixels, pixel_weights, centroid = _warp_mask_pixels(mask=mask, deformation=deformation)
-        roi_masks.append(
-            ROIMask(
-                y_pixels=y_pixels,
-                x_pixels=x_pixels,
-                pixel_weights=pixel_weights,
-                centroid=centroid,
-                frame_width=frame_width,
-                radius=float(np.sqrt(len(y_pixels) / np.pi)),
-                cluster_id=mask.cluster_id,
-                session_count=mask.session_count,
-            )
-        )
         roi_statistics.append(
             ROIStatistics(
                 y_pixels=y_pixels,
                 x_pixels=x_pixels,
                 pixel_weights=pixel_weights,
                 centroid=centroid,
+                frame_width=frame_width,
                 cluster_id=mask.cluster_id,
                 session_count=mask.session_count,
             )
@@ -329,7 +341,7 @@ def _backward_deform_masks(
         crop=False,
     )
 
-    return roi_masks, roi_statistics
+    return roi_statistics
 
 
 def _apply_forward_deformation(context: MultiDayRuntimeContext, deformation: Deformation) -> None:
@@ -394,10 +406,7 @@ def _apply_forward_deformation(context: MultiDayRuntimeContext, deformation: Def
         masks_path = single_day_output / "roi_masks.npz"
         if masks_path.exists():
             all_masks = ROIMask.load_list(masks_path)
-            # Updates frame_width on loaded masks to use the combined visual space width.
             selected_masks = [all_masks[i] for i in selected_indices]
-            for mask in selected_masks:
-                mask.frame_width = frame_width
             registration_data.deformed_cell_masks = _forward_deform_masks(
                 masks=selected_masks,
                 deformation=deformation,
@@ -411,8 +420,6 @@ def _apply_forward_deformation(context: MultiDayRuntimeContext, deformation: Def
         if masks_path_channel_2.exists():
             all_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
             selected_masks_channel_2 = [all_masks_channel_2[i] for i in selected_indices_channel_2]
-            for mask in selected_masks_channel_2:
-                mask.frame_width = frame_width
             registration_data.deformed_cell_masks_channel_2 = _forward_deform_masks(
                 masks=selected_masks_channel_2,
                 deformation=deformation,
@@ -467,25 +474,23 @@ def _apply_backward_deformation(context: MultiDayRuntimeContext) -> None:
     # lacks a stored template diameter.
     if tracking_data.template_masks is not None:
         template_diameter = tracking_data.template_diameter or detection.cell_diameter
-        tracked_masks, tracked_stats = _backward_deform_masks(
+        context.runtime.extraction.roi_statistics = _backward_deform_masks(
             masks=tracking_data.template_masks,
             deformation=inverse_deformation,
             frame_height=frame_height,
             frame_width=frame_width,
             cell_diameter=template_diameter,
         )
-        context.runtime.extraction.roi_statistics = tracked_stats
 
     # Transforms channel 2 template masks if available.
     if tracking_data.template_masks_channel_2 is not None:
         template_diameter_channel_2 = (
             tracking_data.template_diameter_channel_2 or detection.cell_diameter_channel_2 or detection.cell_diameter
         )
-        tracked_masks_channel_2, tracked_stats_channel_2 = _backward_deform_masks(
+        context.runtime.extraction.roi_statistics_channel_2 = _backward_deform_masks(
             masks=tracking_data.template_masks_channel_2,
             deformation=inverse_deformation,
             frame_height=frame_height,
             frame_width=frame_width,
             cell_diameter=template_diameter_channel_2,
         )
-        context.runtime.extraction.roi_statistics_channel_2 = tracked_stats_channel_2
