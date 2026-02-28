@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QVBoxLayout,
-    QButtonGroup,
 )
 from ataraxis_base_utilities import LogLevel, console
 
@@ -43,8 +42,8 @@ from .overlays import (
     update_colormap,
     update_correlation_masks,
 )
+from .styles import STYLE, ROI_STYLE
 from .constants import (
-    STYLE,
     CONFIG,
     TraceMode,
     ROIColorMode,
@@ -193,7 +192,7 @@ class ROIViewer(QMainWindow):
         visibility_box = QGroupBox("ROI Visibility")
         visibility_box.setStyleSheet("QGroupBox { color: white; }")
         visibility_layout = QVBoxLayout(visibility_box)
-        self._roi_visibility_checkbox = QCheckBox("ROIs On [space bar]")
+        self._roi_visibility_checkbox = QCheckBox("ROIs On")
         self._roi_visibility_checkbox.setStyleSheet(STYLE.white_label)
         self._roi_visibility_checkbox.toggle()
         self._roi_visibility_checkbox.stateChanged.connect(self._toggle_rois)
@@ -237,7 +236,7 @@ class ROIViewer(QMainWindow):
         self._roi_index_edit = QLineEdit(self)
         self._roi_index_edit.setValidator(QtGui.QIntValidator(0, 10000))
         self._roi_index_edit.setText("0")
-        self._roi_index_edit.setFixedWidth(STYLE.roi_edit_width)
+        self._roi_index_edit.setFixedWidth(ROI_STYLE.roi_edit_width)
         self._roi_index_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._roi_index_edit.returnPressed.connect(self._on_number_chosen)
         roi_layout.addWidget(self._roi_index_edit)
@@ -265,64 +264,59 @@ class ROIViewer(QMainWindow):
         return panel
 
     def _create_selection_buttons(self) -> tuple[QGroupBox, SelectionControls]:
-        """Creates the cell selection buttons and top-n input field."""
+        """Creates the cell selection dropdown and top-n input field."""
         group_box = QGroupBox("Cell Selection")
         group_box.setStyleSheet("QGroupBox { color: white; }")
         layout = QGridLayout(group_box)
 
-        selection_buttons = QButtonGroup()
-        labels = [" draw selection", " select top n", " select bottom n"]
-        for button_index in range(3):
-            button = QPushButton(labels[button_index], self)
-            button.setCheckable(True)
-            button.setStyleSheet(STYLE.button_inactive)
-            button.setFont(STYLE.label_font_bold())
-            button.resize(button.minimumSizeHint())
-            selection_buttons.addButton(button, button_index)
-            layout.addWidget(button, button_index, 0, 1, 1)
-            button.setEnabled(False)
-            button.clicked.connect(self._on_roi_selection)
-        selection_buttons.setExclusive(True)
+        selection_combo = QComboBox(self)
+        selection_combo.addItems(["draw selection", "select top n", "select bottom n"])
+        selection_combo.setFont(STYLE.label_font_bold())
+        selection_combo.setEnabled(False)
+        selection_combo.activated.connect(lambda _: self._on_roi_selection())
+        layout.addWidget(selection_combo, 0, 0, 1, 1)
 
         count_label = QLabel("n=")
         count_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
         count_label.setStyleSheet(STYLE.white_label)
         count_label.setFont(STYLE.label_font_bold())
-        layout.addWidget(count_label, 1, 1, 1, 1)
+        layout.addWidget(count_label, 0, 1, 1, 1)
 
         top_count_edit = QLineEdit(self)
         top_count_edit.setValidator(QtGui.QIntValidator(0, CONFIG.max_top_n))
         top_count_edit.setText(str(CONFIG.default_top_n))
-        top_count_edit.setFixedWidth(STYLE.small_edit_width)
+        top_count_edit.setFixedWidth(ROI_STYLE.small_edit_width)
         top_count_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         top_count_edit.returnPressed.connect(self._on_roi_selection)
-        layout.addWidget(top_count_edit, 2, 1, 1, 1)
+        layout.addWidget(top_count_edit, 0, 2, 1, 1)
 
-        controls = SelectionControls(selection_buttons=selection_buttons, top_count_edit=top_count_edit)
+        controls = SelectionControls(selection_combo=selection_combo, top_count_edit=top_count_edit)
         return group_box, controls
 
     def _create_view_controls(self) -> tuple[QGroupBox, ViewControls]:
-        """Creates background view selection controls inside a group box."""
+        """Creates background view dropdown, channel 2 toggle, and saturation slider."""
         group_box = QGroupBox("Background")
         group_box.setStyleSheet("QGroupBox { color: white; }")
         layout = QGridLayout(group_box)
 
-        view_buttons = QButtonGroup(self)
-        for button_index, name in enumerate(CONFIG.view_names):
-            button = QPushButton("&" + name, self)
-            button.setCheckable(True)
-            button.setStyleSheet(STYLE.button_inactive)
-            button.setFont(STYLE.label_font_bold())
-            button.resize(button.minimumSizeHint())
-            view_buttons.addButton(button, button_index)
-            layout.addWidget(button, button_index, 0, 1, 1)
-            if button_index == 0:
-                saturation_label = QLabel("sat: ")
-                saturation_label.setStyleSheet(STYLE.white_label)
-                layout.addWidget(saturation_label, button_index, 1, 1, 1)
-            button.setEnabled(False)
-            button.clicked.connect(lambda _checked, idx=button_index: self._on_view_changed(idx))
-        view_buttons.setExclusive(True)
+        view_combo = QComboBox(self)
+        view_combo.addItems(CONFIG.view_names)
+        view_combo.setFont(STYLE.label_font_bold())
+        view_combo.setEnabled(False)
+        view_combo.activated.connect(self._on_view_changed)
+        layout.addWidget(view_combo, 0, 0, 1, 1)
+
+        channel_2_button = QPushButton("Channel 2", self)
+        channel_2_button.setCheckable(True)
+        channel_2_button.setFont(STYLE.label_font_bold())
+        channel_2_button.setStyleSheet(ROI_STYLE.button_inactive)
+        channel_2_button.setEnabled(False)
+        channel_2_button.toggled.connect(self._on_channel_2_toggled)
+        layout.addWidget(channel_2_button, 1, 0, 1, 1)
+
+        saturation_label = QLabel("sat:")
+        saturation_label.setStyleSheet(STYLE.white_label)
+        layout.addWidget(saturation_label, 0, 1, 1, 1)
 
         range_slider = RangeSlider(owner=self, on_release=self._on_saturation_changed)
         range_slider.setMinimum(0)
@@ -330,53 +324,52 @@ class ROIViewer(QMainWindow):
         range_slider.setLow(0)
         range_slider.setHigh(255)
         range_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        layout.addWidget(range_slider, 1, 1, len(CONFIG.view_names) - 2, 1)
+        layout.addWidget(range_slider, 1, 1, 1, 1)
 
-        controls = ViewControls(view_buttons=view_buttons, range_slider=range_slider)
+        controls = ViewControls(view_combo=view_combo, channel_2_button=channel_2_button, range_slider=range_slider)
         return group_box, controls
 
     def _create_color_controls(self) -> tuple[QGroupBox, ColorControls]:
-        """Creates color statistic selection buttons and their associated controls."""
+        """Creates color statistic dropdown and associated controls."""
         group_box = QGroupBox("ROI Colors")
         group_box.setStyleSheet("QGroupBox { color: white; }")
         layout = QGridLayout(group_box)
 
-        color_buttons = QButtonGroup(self)
+        color_combo = QComboBox(self)
+        color_combo.addItems(CONFIG.color_names)
+        color_combo.setFont(STYLE.label_font_bold())
+        color_combo.setEnabled(False)
+        color_combo.activated.connect(self._on_color_changed)
+        layout.addWidget(color_combo, 0, 0, 1, 1)
 
         colormap_chooser = QComboBox()
         colormap_chooser.addItems(CONFIG.colormaps)
         colormap_chooser.setCurrentIndex(0)
         colormap_chooser.setFont(STYLE.label_font())
-        colormap_chooser.setFixedWidth(STYLE.color_edit_width)
+        colormap_chooser.setFixedWidth(ROI_STYLE.color_edit_width)
         layout.addWidget(colormap_chooser, 0, 1, 1, 1)
 
-        for button_index, name in enumerate(CONFIG.color_names):
-            button = QPushButton("&" + name, self)
-            button.setCheckable(True)
-            button.setStyleSheet(STYLE.button_inactive)
-            button.setFont(STYLE.label_font_bold())
-            button.resize(button.minimumSizeHint())
-            color_buttons.addButton(button, button_index)
-            if CONFIG.color_narrow_range_start <= button_index < CONFIG.color_narrow_range_end:
-                layout.addWidget(button, button_index, 0, 1, 1)
-            else:
-                layout.addWidget(button, button_index, 0, 1, 2)
-            button.setEnabled(False)
-            button.clicked.connect(lambda _checked, idx=button_index: self._on_color_changed(idx))
+        classifier_label = QLabel("cell prob=")
+        classifier_label.setStyleSheet(STYLE.white_label)
+        layout.addWidget(classifier_label, 1, 0, 1, 1)
 
         classifier_edit = QLineEdit(self)
         classifier_edit.setText("0.5")
-        classifier_edit.setFixedWidth(STYLE.color_edit_width)
+        classifier_edit.setFixedWidth(ROI_STYLE.color_edit_width)
         classifier_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        layout.addWidget(classifier_edit, len(CONFIG.color_names) - 3, 1, 1, 1)
+        layout.addWidget(classifier_edit, 1, 1, 1, 1)
         classifier_edit.returnPressed.connect(self.update_plot)
+
+        bin_label = QLabel("bin=")
+        bin_label.setStyleSheet(STYLE.white_label)
+        layout.addWidget(bin_label, 2, 0, 1, 1)
 
         bin_edit = QLineEdit(self)
         bin_edit.setValidator(QtGui.QIntValidator(0, 500))
         bin_edit.setText("1")
-        bin_edit.setFixedWidth(STYLE.color_edit_width)
+        bin_edit.setFixedWidth(ROI_STYLE.color_edit_width)
         bin_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        layout.addWidget(bin_edit, len(CONFIG.color_names) - 2, 1, 1, 1)
+        layout.addWidget(bin_edit, 2, 1, 1, 1)
         bin_edit.returnPressed.connect(
             lambda: self._on_activity_changed(self._trace_controls.activity_combo.currentIndex())
         )
@@ -384,7 +377,7 @@ class ROIViewer(QMainWindow):
         colormap_chooser.activated.connect(lambda: self._on_color_changed(self.roi_color_mode))
 
         controls = ColorControls(
-            color_buttons=color_buttons,
+            color_combo=color_combo,
             colormap_chooser=colormap_chooser,
             classifier_edit=classifier_edit,
             bin_edit=bin_edit,
@@ -394,8 +387,8 @@ class ROIViewer(QMainWindow):
     def _create_colorbar(self) -> ColorbarWidgets:
         """Creates the colorbar widget displaying the current color mapping."""
         colorbar_widget = pg.GraphicsLayoutWidget(self)
-        colorbar_widget.setMaximumHeight(STYLE.colorbar_max_height)
-        colorbar_widget.setMaximumWidth(STYLE.colorbar_max_width)
+        colorbar_widget.setMaximumHeight(ROI_STYLE.colorbar_max_height)
+        colorbar_widget.setMaximumWidth(ROI_STYLE.colorbar_max_width)
         colorbar_widget.ci.layout.setRowStretchFactor(0, 2)
         colorbar_widget.ci.layout.setContentsMargins(0, 0, 0, 0)
 
@@ -422,7 +415,7 @@ class ROIViewer(QMainWindow):
         layout.addWidget(activity_label, 0, 0, 1, 1)
 
         activity_combo = QComboBox(self)
-        activity_combo.setFixedWidth(STYLE.combo_box_width)
+        activity_combo.setFixedWidth(ROI_STYLE.combo_box_width)
         layout.addWidget(activity_combo, 1, 0, 1, 1)
         activity_combo.addItem("F")
         activity_combo.addItem("Fneu")
@@ -435,18 +428,18 @@ class ROIViewer(QMainWindow):
         arrow_down = QPushButton(" \u25bc")
         arrow_buttons = [arrow_up, arrow_down]
         for button_index, button in enumerate(arrow_buttons):
-            button.setMaximumWidth(STYLE.square_button_max_width)
+            button.setMaximumWidth(ROI_STYLE.square_button_max_width)
             button.setFont(STYLE.arrow_button_font())
-            button.setStyleSheet(STYLE.button_unpressed)
+            button.setStyleSheet(ROI_STYLE.button_unpressed)
             layout.addWidget(button, button_index, 1, 1, 1, QtCore.Qt.AlignmentFlag.AlignRight)
 
         scale_up = QPushButton(" +")
         scale_down = QPushButton(" -")
         scale_buttons = [scale_up, scale_down]
         for button_index, button in enumerate(scale_buttons):
-            button.setMaximumWidth(STYLE.square_button_max_width)
+            button.setMaximumWidth(ROI_STYLE.square_button_max_width)
             button.setFont(STYLE.arrow_button_font())
-            button.setStyleSheet(STYLE.button_unpressed)
+            button.setStyleSheet(ROI_STYLE.button_unpressed)
             layout.addWidget(button, button_index, 2, 1, 1)
 
         max_plotted_label = QLabel("max # plotted:")
@@ -456,7 +449,7 @@ class ROIViewer(QMainWindow):
         max_plotted_edit = QLineEdit(self)
         max_plotted_edit.setValidator(QtGui.QIntValidator(0, CONFIG.max_plotted_count))
         max_plotted_edit.setText(str(CONFIG.default_plotted_count))
-        max_plotted_edit.setFixedWidth(STYLE.small_edit_width)
+        max_plotted_edit.setFixedWidth(ROI_STYLE.small_edit_width)
         max_plotted_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         layout.addWidget(max_plotted_edit, 3, 0, 1, 1)
 
@@ -466,12 +459,12 @@ class ROIViewer(QMainWindow):
         layout.addWidget(deconvolved_checkbox, 3, 1, 1, 1)
 
         neuropil_checkbox = QCheckBox("neuropil [B]")
-        neuropil_checkbox.setStyleSheet(STYLE.red_label)
+        neuropil_checkbox.setStyleSheet(ROI_STYLE.red_label)
         neuropil_checkbox.toggle()
         layout.addWidget(neuropil_checkbox, 3, 2, 1, 1)
 
         traces_checkbox = QCheckBox("raw fluor [V]")
-        traces_checkbox.setStyleSheet(STYLE.cyan_label)
+        traces_checkbox.setStyleSheet(ROI_STYLE.cyan_label)
         traces_checkbox.toggle()
         layout.addWidget(traces_checkbox, 3, 3, 1, 1)
 
@@ -610,6 +603,9 @@ class ROIViewer(QMainWindow):
         # Enables buttons.
         self._enable_controls()
 
+        # Resets channel 2 toggle state.
+        self._view_controls.channel_2_button.setChecked(False)
+
         # Builds background views from detection images.
         self.views = build_views(
             frame_height=context.frame_height,
@@ -618,8 +614,10 @@ class ROIViewer(QMainWindow):
             enhanced_mean_image=context.enhanced_mean_image,
             correlation_map=context.correlation_map,
             maximum_projection=context.maximum_projection,
-            corrected_channel_2_image=context.corrected_structural_mean_image,
+            corrected_structural_mean_image=context.corrected_structural_mean_image,
+            channel_2=False,
             channel_2_mean_image=context.mean_image_channel_2,
+            channel_2_enhanced_mean_image=context.enhanced_mean_image_channel_2,
             valid_y_range=context.valid_y_range,
             valid_x_range=context.valid_x_range,
         )
@@ -693,86 +691,63 @@ class ROIViewer(QMainWindow):
         self.show()
 
     def _enable_controls(self) -> None:
-        """Enables all view, color, and selection buttons after data loading."""
+        """Enables all view, color, and selection dropdowns after data loading."""
         if self.context_data is None:
             return
         context = self.context_data
 
-        # Enables view buttons.
-        for b in range(len(self._view_controls.view_names)):
-            self._view_controls.view_buttons.button(b).setEnabled(True)
-            self._view_controls.view_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
-            if b == 0:
-                self._view_controls.view_buttons.button(b).setChecked(True)
-                self._view_controls.view_buttons.button(b).setStyleSheet(STYLE.button_pressed)
+        # Enables view dropdown and sets initial selection.
+        self._view_controls.view_combo.setEnabled(True)
+        self._view_controls.view_combo.setCurrentIndex(0)
 
-        # Disables channel 2 views if no channel 2 data is available.
-        if context.corrected_structural_mean_image is None:
-            self._view_controls.view_buttons.button(5).setEnabled(False)
-            self._view_controls.view_buttons.button(5).setStyleSheet(STYLE.button_inactive)
-            if context.mean_image_channel_2 is None:
-                self._view_controls.view_buttons.button(6).setEnabled(False)
-                self._view_controls.view_buttons.button(6).setStyleSheet(STYLE.button_inactive)
+        # Disables corrected structural view item if not available.
+        view_model = self._view_controls.view_combo.model()
+        if view_model is not None:
+            structural_item = view_model.item(BackgroundView.CORRECTED_STRUCTURAL)
+            if structural_item is not None:
+                if context.corrected_structural_mean_image is None:
+                    structural_item.setEnabled(False)
+                else:
+                    structural_item.setEnabled(True)
 
-        # Enables color mode buttons.
-        color_button_count = len(self._color_controls.color_buttons.buttons())
-        for b in range(color_button_count):
-            if b == CONFIG.color_channel_2:
-                if context.two_channels:
-                    self._color_controls.color_buttons.button(b).setEnabled(True)
-                    self._color_controls.color_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
-            elif b == 0:
-                self._color_controls.color_buttons.button(b).setEnabled(True)
-                self._color_controls.color_buttons.button(b).setChecked(True)
-                self._color_controls.color_buttons.button(b).setStyleSheet(STYLE.button_pressed)
-            elif b < CONFIG.color_stat_count:
-                self._color_controls.color_buttons.button(b).setEnabled(True)
-                self._color_controls.color_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
+        # Enables channel 2 toggle if channel 2 data exists.
+        if context.two_channels:
+            self._view_controls.channel_2_button.setEnabled(True)
+            self._view_controls.channel_2_button.setStyleSheet(ROI_STYLE.button_unpressed)
+        else:
+            self._view_controls.channel_2_button.setEnabled(False)
+            self._view_controls.channel_2_button.setStyleSheet(ROI_STYLE.button_inactive)
 
-        # Enables selection buttons (draw enabled, top/bottom disabled until data analyzed).
-        for b in range(3):
-            if b == 0:
-                self._selection_controls.selection_buttons.button(b).setEnabled(True)
-                self._selection_controls.selection_buttons.button(b).setStyleSheet(STYLE.button_unpressed)
-            else:
-                self._selection_controls.selection_buttons.button(b).setEnabled(False)
-                self._selection_controls.selection_buttons.button(b).setStyleSheet(STYLE.button_inactive)
+        # Enables color dropdown.
+        self._color_controls.color_combo.setEnabled(True)
+        self._color_controls.color_combo.setCurrentIndex(0)
+
+        # Disables channel 2 color mode if not available.
+        color_model = self._color_controls.color_combo.model()
+        if color_model is not None:
+            ch2_item = color_model.item(CONFIG.color_channel_2)
+            if ch2_item is not None:
+                ch2_item.setEnabled(context.two_channels)
+
+        # Enables selection dropdown.
+        self._selection_controls.selection_combo.setEnabled(True)
+        self._selection_controls.selection_combo.setCurrentIndex(0)
 
     def _on_view_changed(self, index: int) -> None:
-        """Handles background view mode changes.
+        """Handles background view dropdown changes.
 
         Args:
             index: The background view index selected.
         """
-        # Updates button styles.
-        for i in range(len(CONFIG.view_names)):
-            btn = self._view_controls.view_buttons.button(i)
-            if btn is not None and btn.isEnabled():
-                btn.setStyleSheet(STYLE.button_unpressed)
-        btn = self._view_controls.view_buttons.button(index)
-        if btn is not None:
-            btn.setChecked(True)
-            btn.setStyleSheet(STYLE.button_pressed)
-
         self.background_view = BackgroundView(index)
         self.update_plot()
 
     def _on_color_changed(self, index: int) -> None:
-        """Handles ROI color mode changes.
+        """Handles ROI color mode dropdown changes.
 
         Args:
             index: The color mode index selected.
         """
-        # Updates button styles.
-        for i in range(len(CONFIG.color_names)):
-            btn = self._color_controls.color_buttons.button(i)
-            if btn is not None and btn.isEnabled():
-                btn.setStyleSheet(STYLE.button_unpressed)
-        btn = self._color_controls.color_buttons.button(index)
-        if btn is not None:
-            btn.setChecked(True)
-            btn.setStyleSheet(STYLE.button_pressed)
-
         self.roi_color_mode = ROIColorMode(index)
         if self.context_data is not None and self.color_arrays is not None and self.roi_maps is not None:
             colormap = self._color_controls.colormap_chooser.currentText()
@@ -815,6 +790,43 @@ class ROIViewer(QMainWindow):
         """Handles saturation range slider changes."""
         self.background_saturation = self._view_controls.range_slider.saturation_values()
         self.update_plot()
+
+    def _on_channel_2_toggled(self, checked: bool) -> None:
+        """Rebuilds the view stack when the channel 2 toggle changes.
+
+        Args:
+            checked: True when channel 2 is toggled on.
+        """
+        if self.context_data is None:
+            return
+        self._view_controls.channel_2_button.setStyleSheet(
+            ROI_STYLE.button_pressed if checked else ROI_STYLE.button_unpressed
+        )
+        context = self.context_data
+        self.views = build_views(
+            frame_height=context.frame_height,
+            frame_width=context.frame_width,
+            mean_image=context.mean_image,
+            enhanced_mean_image=context.enhanced_mean_image,
+            correlation_map=context.correlation_map,
+            maximum_projection=context.maximum_projection,
+            corrected_structural_mean_image=context.corrected_structural_mean_image,
+            channel_2=checked,
+            channel_2_mean_image=context.mean_image_channel_2,
+            channel_2_enhanced_mean_image=context.enhanced_mean_image_channel_2,
+            valid_y_range=context.valid_y_range,
+            valid_x_range=context.valid_x_range,
+        )
+        self.update_plot()
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
+        """Handles keyboard shortcuts.
+
+        Notes:
+            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
+        """
+        if event.key() == QtCore.Qt.Key.Key_Space:
+            self._roi_visibility_checkbox.toggle()
 
     def _on_number_chosen(self) -> None:
         """Jumps to the ROI number entered in the ROI edit field."""
@@ -1105,16 +1117,12 @@ class ROIViewer(QMainWindow):
 
         if self.roi_tool_active:
             self._roi_remove()
-        for btn in self._selection_controls.selection_buttons.buttons():
-            if btn.isChecked():
-                btn.setStyleSheet(STYLE.button_unpressed)
         self.update_plot()
         return True
 
     def _on_roi_selection(self) -> None:
         """Draws a rectangular ROI selection on the image panel."""
         self._roi_remove()
-        self._selection_controls.selection_buttons.button(0).setStyleSheet(STYLE.button_pressed)
         view = self._view_box.viewRange()
         imx = (view[0][1] + view[0][0]) / 2
         imy = (view[1][1] + view[1][0]) / 2
@@ -1131,11 +1139,10 @@ class ROIViewer(QMainWindow):
         self.roi_tool_active = True
 
     def _roi_remove(self) -> None:
-        """Removes the current rectangular ROI selection and resets button styles."""
+        """Removes the current rectangular ROI selection."""
         if self.roi_tool_active:
             self._view_box.removeItem(self._active_roi_selection)
             self.roi_tool_active = False
-        self._selection_controls.selection_buttons.button(0).setStyleSheet(STYLE.button_unpressed)
 
     def _roi_position(self) -> None:
         """Computes the pixel region covered by the ROI and selects contained cells."""

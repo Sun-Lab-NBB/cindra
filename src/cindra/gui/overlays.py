@@ -13,7 +13,8 @@ import matplotlib.cm
 from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
-from .constants import STYLE, CONFIG, BackgroundView
+from .styles import ROI_STYLE
+from .constants import CONFIG, BackgroundView
 from .data_models import ColorArrays, ROIIndexMaps
 
 if TYPE_CHECKING:
@@ -32,31 +33,40 @@ def build_views(
     enhanced_mean_image: NDArray[np.float32] | None = None,
     correlation_map: NDArray[np.float32] | None = None,
     maximum_projection: NDArray[np.float32] | None = None,
-    corrected_channel_2_image: NDArray[np.float32] | None = None,
+    corrected_structural_mean_image: NDArray[np.float32] | None = None,
+    channel_2: bool = False,
     channel_2_mean_image: NDArray[np.float32] | None = None,
+    channel_2_enhanced_mean_image: NDArray[np.float32] | None = None,
+    channel_2_correlation_map: NDArray[np.float32] | None = None,
+    channel_2_maximum_projection: NDArray[np.float32] | None = None,
     valid_y_range: tuple[int, int] | None = None,
     valid_x_range: tuple[int, int] | None = None,
 ) -> NDArray[np.uint8]:
     """Builds the background view stack from detection images.
 
-    Creates a stack of 7 RGB background images, each normalized to [0, 255] uint8 range.
+    Creates a stack of 6 RGB background images, each normalized to [0, 255] uint8 range.
     Views are indexed as: 0=ROIs (black), 1=mean, 2=enhanced mean, 3=correlation map,
-    4=max projection, 5=corrected channel 2, 6=raw channel 2.
+    4=max projection, 5=corrected structural. When ``channel_2`` is True, slots 1-4
+    use channel 2 images (falling back to black where unavailable).
 
     Args:
         frame_height: Height of the field of view in pixels.
         frame_width: Width of the field of view in pixels.
-        mean_image: Mean fluorescence image.
-        enhanced_mean_image: Contrast-enhanced mean image.
-        correlation_map: Pixel correlation map.
-        maximum_projection: Maximum intensity projection.
-        corrected_channel_2_image: Corrected channel 2 mean image.
-        channel_2_mean_image: Raw channel 2 mean image.
+        mean_image: Channel 1 mean fluorescence image.
+        enhanced_mean_image: Channel 1 contrast-enhanced mean image.
+        correlation_map: Channel 1 pixel correlation map.
+        maximum_projection: Channel 1 maximum intensity projection.
+        corrected_structural_mean_image: Corrected structural channel mean image.
+        channel_2: Determines whether to use channel 2 images for slots 1-4.
+        channel_2_mean_image: Channel 2 mean fluorescence image.
+        channel_2_enhanced_mean_image: Channel 2 contrast-enhanced mean image.
+        channel_2_correlation_map: Channel 2 pixel correlation map.
+        channel_2_maximum_projection: Channel 2 maximum intensity projection.
         valid_y_range: Tuple of (start, end) row indices for the valid image region.
         valid_x_range: Tuple of (start, end) column indices for the valid image region.
 
     Returns:
-        Array of shape (7, frame_height, frame_width, 3) containing uint8 RGB views.
+        Array of shape (6, frame_height, frame_width, 3) containing uint8 RGB views.
     """
     views = np.zeros((CONFIG.view_count, frame_height, frame_width, 3), dtype=np.float32)
 
@@ -69,8 +79,12 @@ def build_views(
             enhanced_mean_image=enhanced_mean_image,
             correlation_map=correlation_map,
             maximum_projection=maximum_projection,
-            corrected_channel_2_image=corrected_channel_2_image,
+            corrected_structural_mean_image=corrected_structural_mean_image,
+            channel_2=channel_2,
             channel_2_mean_image=channel_2_mean_image,
+            channel_2_enhanced_mean_image=channel_2_enhanced_mean_image,
+            channel_2_correlation_map=channel_2_correlation_map,
+            channel_2_maximum_projection=channel_2_maximum_projection,
             valid_y_range=valid_y_range,
             valid_x_range=valid_x_range,
         )
@@ -90,8 +104,8 @@ def display_views(
 
     Args:
         view: The background image item.
-        views: The full view stack of shape (7, height, width, 3).
-        view_index: Index of the view to display (0-6).
+        views: The full view stack of shape (6, height, width, 3).
+        view_index: Index of the view to display (0-5).
         saturation: Two-element list of [low, high] saturation levels.
     """
     view.setImage(views[view_index], levels=saturation)
@@ -141,7 +155,7 @@ def compute_colors(
     cols[0] = hsv2rgb(random_colors)
 
     # Computes color arrays for percentile-based statistics (skew, compact, footprint, aspect_ratio, chan2_prob).
-    for stat_index, name in enumerate(CONFIG.color_short_names[:-3]):
+    for stat_index, name in enumerate(CONFIG.color_names[:-3]):
         if stat_index == 0:
             colorbar.append(list(CONFIG.fixed_colorbar_range))
             continue
@@ -252,9 +266,9 @@ def init_roi_maps(
             label_text = ""
             centroid = (0, 0)
 
-        text_item = pg.TextItem(label_text, color=STYLE.roi_text_color, anchor=(0.5, 0.5))
+        text_item = pg.TextItem(label_text, color=ROI_STYLE.roi_text_color, anchor=(0.5, 0.5))
         text_item.setPos(centroid[1], centroid[0])
-        text_item.setFont(QtGui.QFont("Times", STYLE.roi_text_size, QtGui.QFont.Weight.Bold.value))
+        text_item.setFont(QtGui.QFont("Times", ROI_STYLE.roi_text_size, QtGui.QFont.Weight.Bold.value))
         text_labels.append(text_item)
 
     text_labels.reverse()
@@ -383,7 +397,7 @@ def render_colorbar(
     """
     color_index = roi_color_mode
     if color_index == 0:
-        colorbar_widgets.image.setImage(np.zeros((STYLE.colorbar_row_count, STYLE.colorbar_sample_count - 1, 3)))
+        colorbar_widgets.image.setImage(np.zeros((ROI_STYLE.colorbar_row_count, ROI_STYLE.colorbar_sample_count - 1, 3)))
     else:
         colorbar_widgets.image.setImage(colorbar_image)
 
@@ -400,10 +414,10 @@ def draw_colorbar(colormap: str = "hsv") -> NDArray[np.uint8]:
     Returns:
         Colorbar image array with shape (20, 101, 3) and dtype uint8.
     """
-    gradient = np.linspace(0, 1, STYLE.colorbar_sample_count).astype(np.float32)
+    gradient = np.linspace(0, 1, ROI_STYLE.colorbar_sample_count).astype(np.float32)
     rgb = istat_transform(gradient, colormap)
     colormat = np.expand_dims(rgb, axis=0)
-    return np.tile(colormat, (STYLE.colorbar_row_count, 1, 1))
+    return np.tile(colormat, (ROI_STYLE.colorbar_row_count, 1, 1))
 
 
 def rgb_masks(
@@ -724,23 +738,33 @@ def _build_single_view(
     enhanced_mean_image: NDArray[np.float32] | None,
     correlation_map: NDArray[np.float32] | None,
     maximum_projection: NDArray[np.float32] | None,
-    corrected_channel_2_image: NDArray[np.float32] | None,
+    corrected_structural_mean_image: NDArray[np.float32] | None,
+    channel_2: bool,
     channel_2_mean_image: NDArray[np.float32] | None,
+    channel_2_enhanced_mean_image: NDArray[np.float32] | None,
+    channel_2_correlation_map: NDArray[np.float32] | None,
+    channel_2_maximum_projection: NDArray[np.float32] | None,
     valid_y_range: tuple[int, int] | None,
     valid_x_range: tuple[int, int] | None,
 ) -> NDArray[np.float32]:
     """Builds a single background view image normalized to [0, 1].
 
+    When ``channel_2`` is True, slots 1-4 use channel 2 images (falling back to black).
+
     Args:
-        view_index: Index of the view to build (0-6).
+        view_index: Index of the view to build (0-5).
         frame_height: Height of the field of view in pixels.
         frame_width: Width of the field of view in pixels.
-        mean_image: Mean fluorescence image.
-        enhanced_mean_image: Contrast-enhanced mean image.
-        correlation_map: Pixel correlation map.
-        maximum_projection: Maximum intensity projection.
-        corrected_channel_2_image: Corrected channel 2 mean image.
-        channel_2_mean_image: Raw channel 2 mean image.
+        mean_image: Channel 1 mean fluorescence image.
+        enhanced_mean_image: Channel 1 contrast-enhanced mean image.
+        correlation_map: Channel 1 pixel correlation map.
+        maximum_projection: Channel 1 maximum intensity projection.
+        corrected_structural_mean_image: Corrected structural channel mean image.
+        channel_2: Determines whether to use channel 2 images for slots 1-4.
+        channel_2_mean_image: Channel 2 mean fluorescence image.
+        channel_2_enhanced_mean_image: Channel 2 contrast-enhanced mean image.
+        channel_2_correlation_map: Channel 2 pixel correlation map.
+        channel_2_maximum_projection: Channel 2 maximum intensity projection.
         valid_y_range: Tuple of (start, end) row indices for the valid image region.
         valid_x_range: Tuple of (start, end) column indices for the valid image region.
 
@@ -751,22 +775,17 @@ def _build_single_view(
         return np.zeros((frame_height, frame_width), dtype=np.float32)
 
     if view_index == BackgroundView.MEAN_IMAGE:
-        return _normalize_percentile(
-            image=mean_image,
-            frame_height=frame_height,
-            frame_width=frame_width,
-        )
+        image = channel_2_mean_image if channel_2 else mean_image
+        return _normalize_percentile(image=image, frame_height=frame_height, frame_width=frame_width)
 
     if view_index == BackgroundView.ENHANCED_MEAN_IMAGE:
-        return _normalize_percentile(
-            image=enhanced_mean_image,
-            frame_height=frame_height,
-            frame_width=frame_width,
-        )
+        image = channel_2_enhanced_mean_image if channel_2 else enhanced_mean_image
+        return _normalize_percentile(image=image, frame_height=frame_height, frame_width=frame_width)
 
     if view_index == BackgroundView.CORRELATION_MAP:
+        image = channel_2_correlation_map if channel_2 else correlation_map
         return _place_in_valid_region(
-            image=correlation_map,
+            image=image,
             frame_height=frame_height,
             frame_width=frame_width,
             valid_y_range=valid_y_range,
@@ -774,8 +793,9 @@ def _build_single_view(
         )
 
     if view_index == BackgroundView.MAXIMUM_PROJECTION:
+        image = channel_2_maximum_projection if channel_2 else maximum_projection
         return _place_in_valid_region(
-            image=maximum_projection,
+            image=image,
             frame_height=frame_height,
             frame_width=frame_width,
             valid_y_range=valid_y_range,
@@ -783,16 +803,9 @@ def _build_single_view(
             warn_on_error=True,
         )
 
-    if view_index == BackgroundView.MEAN_IMAGE_CHANNEL_2:
+    if view_index == BackgroundView.CORRECTED_STRUCTURAL:
         return _normalize_percentile(
-            image=corrected_channel_2_image,
-            frame_height=frame_height,
-            frame_width=frame_width,
-        )
-
-    if view_index == BackgroundView.ENHANCED_MEAN_IMAGE_CHANNEL_2:
-        return _normalize_percentile(
-            image=channel_2_mean_image,
+            image=corrected_structural_mean_image,
             frame_height=frame_height,
             frame_width=frame_width,
         )
@@ -913,8 +926,8 @@ def _istat_hsv(istat: NDArray[np.float32]) -> NDArray[np.uint8]:
     Returns:
         RGB color array with shape (..., 3) and dtype uint8.
     """
-    istat = istat / CONFIG.hsv_divisor
-    istat = istat + (CONFIG.hsv_offset / CONFIG.hsv_divisor)
+    istat /= CONFIG.hsv_divisor
+    istat += CONFIG.hsv_offset / CONFIG.hsv_divisor
     inverted = 1 - istat
     return hsv2rgb(inverted.flatten().astype(np.float64))
 

@@ -1,11 +1,9 @@
-"""Provides constants, enumerations, and style definitions shared by the ROI viewer and ROI editor."""
+"""Provides constants and enumerations shared across all GUI viewer windows."""
 
 from __future__ import annotations
 
 from enum import IntEnum
 from dataclasses import field, dataclass
-
-from PySide6 import QtGui
 
 
 class ROIColorMode(IntEnum):
@@ -40,41 +38,29 @@ class ROIColorMode(IntEnum):
 
 
 class BackgroundView(IntEnum):
-    """Selects the background image displayed behind ROI overlays in the image panels."""
+    """Selects the background image displayed behind ROI overlays in the image panels.
+
+    When channel 2 is toggled on, slots 1-4 display channel 2 images instead of channel 1.
+    """
 
     ROIS_ONLY = 0
     """Displays a blank background with ROI overlays only."""
 
-    # Channel 1 reference images.
     MEAN_IMAGE = 1
-    """Displays the temporal mean of all registered channel 1 frames."""
+    """Displays the temporal mean image (channel 1 or channel 2 depending on channel toggle)."""
 
     ENHANCED_MEAN_IMAGE = 2
-    """Displays the high-pass filtered channel 1 mean image used for cell boundary detection."""
+    """Displays the enhanced mean image (channel 1 or channel 2 depending on channel toggle)."""
 
     CORRELATION_MAP = 3
-    """Displays the pixel-wise activity correlation map computed during channel 1 detection."""
+    """Displays the pixel-wise activity correlation map (channel 1 or channel 2 depending on channel toggle)."""
 
     MAXIMUM_PROJECTION = 4
-    """Displays the maximum intensity projection across all channel 1 frames."""
+    """Displays the maximum intensity projection (channel 1 or channel 2 depending on channel toggle)."""
 
-    # Channel 2 reference images.
-    MEAN_IMAGE_CHANNEL_2 = 5
-    """Displays the temporal mean of all registered channel 2 frames."""
-
-    ENHANCED_MEAN_IMAGE_CHANNEL_2 = 6
-    """Displays the high-pass filtered channel 2 mean image used for cell boundary detection."""
-
-    CORRELATION_MAP_CHANNEL_2 = 7
-    """Displays the pixel-wise activity correlation map computed during channel 2 detection."""
-
-    MAXIMUM_PROJECTION_CHANNEL_2 = 8
-    """Displays the maximum intensity projection across all channel 2 frames."""
-
-    # Structural reference images.
-    CORRECTED_STRUCTURAL_MEAN_IMAGE = 9
+    CORRECTED_STRUCTURAL = 5
     """Displays the bleed-through-corrected structural channel mean image computed during
-    functional-to-structural channel colocalization."""
+    functional-to-structural channel colocalization. Only enabled when colocalization data exists."""
 
 
 class TraceMode(IntEnum):
@@ -94,104 +80,32 @@ class TraceMode(IntEnum):
     """Displays the deconvolved spikes trace."""
 
 
-@dataclass(frozen=True, slots=True)
-class _ViewerStyle:
-    """Encapsulates visual and dimensional constants shared by the ROI viewer and editor windows."""
+class MaskLayer(IntEnum):
+    """Selects the active ROI mask layer."""
 
-    main_window: str = "QMainWindow {background: 'black';}"
-    """Stylesheet applied to the main window background."""
-    button_pressed: str = "QPushButton {Text-align: left; background-color: rgb(100,50,100); color:white;}"
-    """Stylesheet for a button in the pressed (active/selected) state."""
-    button_unpressed: str = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:white;}"
-    """Stylesheet for a button in the unpressed (enabled, not selected) state."""
-    button_inactive: str = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:gray;}"
-    """Stylesheet for a button in the inactive (disabled/grayed-out) state."""
-    white_label: str = "color: white;"
-    """Stylesheet for white label text on a dark background."""
-    red_label: str = "color: red;"
-    """Stylesheet for red label text (used for neuropil trace indicators)."""
-    cyan_label: str = "color: cyan;"
-    """Stylesheet for cyan label text (used for raw fluorescence trace indicators)."""
-    range_slider: str = (
-        "QSlider::handle:horizontal {"
-        "background-color: white;"
-        "border: 1px solid #5c5c5c;"
-        "border-radius: 0px;"
-        "border-color: black;"
-        "height: 8px;"
-        "width: 6px;"
-        "margin: -8px 2;"
-        "}"
-    )
-    """Stylesheet for the dual-handle range slider used in saturation controls."""
-    small_edit_width: int = 35
-    """Width for small input fields and quadrant buttons (top-n count, diameter, max plotted count)."""
-    roi_edit_width: int = 45
-    """Width for ROI index input fields."""
-    medium_edit_width: int = 60
-    """Width for medium-sized widgets in the ROI editor (add-ROI button, diameter label)."""
-    combo_box_width: int = 100
-    """Width for the activity mode combo box in the trace panel."""
-    square_button_max_width: int = 22
-    """Maximum width for small square buttons (trace arrows, scale buttons)."""
-    colorbar_max_height: int = 60
-    """Maximum height for the colorbar widget."""
-    colorbar_max_width: int = 150
-    """Maximum width for the colorbar widget."""
-    font_family: str = "Arial"
-    """Standard font family used throughout the GUI."""
-    color_edit_width: int = 65
-    """Width for color panel edit fields and the colormap combo box."""
-    roi_text_size: int = 8
-    """Font size for ROI text labels."""
-    roi_text_color: tuple[int, int, int] = (180, 180, 180)
-    """Color for ROI text labels."""
-    deconvolved_alpha: int = 150
-    """Alpha value for the deconvolved trace pen."""
-    average_gray: int = 140
-    """Gray intensity for the average trace pen."""
-    colorbar_sample_count: int = 101
-    """Number of samples for the colorbar gradient."""
-    colorbar_row_count: int = 20
-    """Number of rows in the colorbar image."""
-    save_button_width: int = 100
-    """Fixed width for the save-and-quit button in the ROI draw editor."""
+    ORIGINAL = 0
+    """Displays the original ROI masks from single-day extraction in native recording coordinates."""
 
-    def label_font(self) -> QtGui.QFont:
-        """Creates the standard label font (Arial 8pt).
+    DEFORMED = 1
+    """Displays the original ROI masks warped to the shared cross-recording coordinate space via multi-day registration
+    deformation fields."""
 
-        Returns:
-            The configured QFont instance.
-        """
-        return QtGui.QFont(self.font_family, 8)
+    TEMPLATE = 2
+    """Displays the consensus template ROI masks derived from cross-recording clustering, defined in the shared
+    coordinate space."""
 
-    def label_font_bold(self) -> QtGui.QFont:
-        """Creates the standard bold label font (Arial 8pt bold).
-
-        Returns:
-            The configured QFont instance.
-        """
-        return QtGui.QFont(self.font_family, 8, QtGui.QFont.Weight.Bold.value)
-
-    def header_font(self) -> QtGui.QFont:
-        """Creates the section header font (Arial 10pt bold).
-
-        Returns:
-            The configured QFont instance.
-        """
-        return QtGui.QFont(self.font_family, 10, QtGui.QFont.Weight.Bold.value)
-
-    def arrow_button_font(self) -> QtGui.QFont:
-        """Creates the font for trace expand/collapse arrow buttons (Arial 11pt bold).
-
-        Returns:
-            The configured QFont instance.
-        """
-        return QtGui.QFont(self.font_family, 11, QtGui.QFont.Weight.Bold.value)
+    TRACKED = 3
+    """Displays the template ROI masks backward-deformed to each recording's native coordinate space."""
 
 
-STYLE: _ViewerStyle = _ViewerStyle()
-"""Module-level singleton providing all viewer style constants."""
+class CoordinateSpace(IntEnum):
+    """Selects the coordinate space for reference images."""
+
+    NATIVE = 0
+    """Displays reference images in the original recording coordinate space."""
+
+    TRANSFORMED = 1
+    """Displays reference images warped to align with the cross-recording template coordinate space."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,18 +154,6 @@ class _ViewerConfig:
     )
     """Available colormaps for the colormap chooser."""
     color_names: tuple[str, ...] = (
-        "A: random",
-        "S: skew",
-        "D: compact",
-        "F: footprint",
-        "G: aspect_ratio",
-        "H: chan2_prob",
-        "J: classifier, cell prob=",
-        "K: correlations, bin=",
-        "L: cell / non-cell",
-    )
-    """Color statistic names displayed on the color buttons (with keyboard shortcut prefixes)."""
-    color_short_names: tuple[str, ...] = (
         "random",
         "skew",
         "compact",
@@ -262,7 +164,7 @@ class _ViewerConfig:
         "correlations, bin=",
         "cell / non-cell",
     )
-    """Short color statistic names without keyboard shortcut prefixes."""
+    """Color statistic names displayed in the color mode dropdown."""
     color_narrow_range_start: int = 5
     """Starting index of the color buttons that require the adjacent edit field column."""
     color_narrow_range_end: int = 9
@@ -293,28 +195,17 @@ class _ViewerConfig:
     """Mapping from color statistic display names to ROIStatistics attribute names."""
 
     # View constants.
-    view_count: int = 7
+    view_count: int = 6
     """Number of background view types available."""
     view_names: tuple[str, ...] = (
-        "Q: ROIs",
-        "W: mean img",
-        "E: mean img (enhanced)",
-        "R: correlation map",
-        "T: max projection",
-        "Y: mean img chan2, corr",
-        "U: mean img chan2",
-    )
-    """Names displayed on view selection buttons (with keyboard shortcut prefixes)."""
-    view_short_names: tuple[str, ...] = (
         "ROIs",
         "mean img",
         "mean img (enhanced)",
         "correlation map",
         "max projection",
-        "mean img chan2, corr",
-        "mean img chan2",
+        "corrected structural",
     )
-    """Short view names without keyboard shortcut prefixes."""
+    """Names displayed in the background view dropdown."""
 
     # Trace constants.
     default_activity_mode: int = 3
@@ -396,3 +287,60 @@ class _ViewerConfig:
 
 CONFIG: _ViewerConfig = _ViewerConfig()
 """Module-level singleton providing all viewer behavioral constants."""
+
+
+@dataclass(frozen=True, slots=True)
+class _TrackingViewerConfig:
+    """Encapsulates behavioral constants for the tracking viewer window."""
+
+    cycle_interval: int = 500
+    """The millisecond interval for auto-cycling between recordings."""
+
+    lower_percentile: float = 1.0
+    """The lower percentile value for normalizing background images."""
+
+    upper_percentile: float = 99.0
+    """The upper percentile value for normalizing background images."""
+
+
+TRACKING_CONFIG: _TrackingViewerConfig = _TrackingViewerConfig()
+"""Module-level singleton providing tracking viewer behavioral constants."""
+
+
+@dataclass(frozen=True, slots=True)
+class _BinaryPlayerConfig:
+    """Encapsulates behavioral constants for the binary player window."""
+
+    playback_speed_multiplier: int = 5
+    """Factor by which the real-time frame period is divided to compute the playback timer interval."""
+
+    subsample_frame_count: int = 100
+    """Number of evenly-spaced frames subsampled for dynamic range estimation."""
+
+    min_frame_delta: int = 5
+    """Minimum frame increment for arrow key navigation."""
+
+    frame_delta_divisor: int = 200
+    """Divisor for computing frame slider step size from total frame count."""
+
+    display_range_low_sigma: float = 2.0
+    """Standard deviations below mean for display range lower bound."""
+
+    display_range_high_sigma: float = 5.0
+    """Standard deviations above mean for display range upper bound."""
+
+
+BINARY_CONFIG: _BinaryPlayerConfig = _BinaryPlayerConfig()
+"""Module-level singleton providing binary player behavioral constants."""
+
+
+@dataclass(frozen=True, slots=True)
+class _PCViewerConfig:
+    """Encapsulates behavioral constants for the PC viewer window."""
+
+    animation_interval_ms: int = 200
+    """Interval in milliseconds between PC extreme image animation updates."""
+
+
+PC_CONFIG: _PCViewerConfig = _PCViewerConfig()
+"""Module-level singleton providing PC viewer behavioral constants."""

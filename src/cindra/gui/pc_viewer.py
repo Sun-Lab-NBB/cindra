@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from dataclasses import dataclass
 
 import numpy as np
 from PySide6 import QtGui, QtCore
@@ -21,54 +20,13 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
+from .styles import STYLE, PC_STYLE
+from .constants import PC_CONFIG
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from .single_day_context import SingleDayViewerData
-
-
-@dataclass(frozen=True, slots=True)
-class _PCViewerStyle:
-    """Encapsulates visual and behavioral constants for the PCViewer window."""
-
-    font_family: str = "Arial"
-    """Font family used for metric labels and PC input field."""
-
-    white_label_stylesheet: str = "color: white;"
-    """Stylesheet for white label text on a dark background."""
-
-    scatter_point_size: int = 10
-    """Marker size in pixels for the selected PC indicator on the metrics plot."""
-
-    icon_size: int = 30
-    """Dimension in pixels for media control button icons."""
-
-    animation_interval_ms: int = 200
-    """Interval in milliseconds between PC extreme image animation updates."""
-
-    pc_edit_width: int = 40
-    """Width in pixels for the principal component number input field."""
-
-    metrics_font_size: int = 14
-    """Point size for metric value labels and PC input field font."""
-
-    plot_title_size: str = "14pt"
-    """Font size for plot titles above the metrics and projection plots."""
-
-    axis_label_size: str = "12pt"
-    """Font size for axis labels on the metrics and projection plots."""
-
-    legend_label_size: str = "12pt"
-    """Font size for legend entry labels on the metrics plot."""
-
-    legend_headroom: float = 0.25
-    """Fraction of the y-axis data range added as top padding so legends never overlap traces."""
-
-    axis_fixed_width: int = 60
-    """Fixed pixel width for the y-axis so the plot area stays stable when tick label digit counts change."""
-
-    title_gutter_fraction: float = 0.08
-    """Fraction of image height added as black space below the image for title labels."""
 
 
 class PCViewer(QMainWindow):
@@ -111,9 +69,6 @@ class PCViewer(QMainWindow):
         _projection_y_range: Per-plane y-axis range for the projection plot, computed across all PCs.
     """
 
-    _style: _PCViewerStyle = _PCViewerStyle()
-    """Frozen style constants for the PC viewer window."""
-
     def __init__(self, data: SingleDayViewerData) -> None:
         # Initializes the main viewer window.
         super().__init__()
@@ -151,7 +106,7 @@ class PCViewer(QMainWindow):
         self._metrics_plot = self._graphics_widget.addPlot(row=0, col=0)
         self._metrics_plot.setMouseEnabled(x=False, y=False)
         self._metrics_plot.setMenuEnabled(False)
-        self._metrics_plot.getAxis("left").setWidth(self._style.axis_fixed_width)
+        self._metrics_plot.getAxis("left").setWidth(PC_STYLE.axis_fixed_width)
 
         # noinspection PyUnresolvedReferences
         self._difference_view_box = self._graphics_widget.addViewBox(
@@ -193,7 +148,7 @@ class PCViewer(QMainWindow):
         self._projection_plot = self._graphics_widget.addPlot(row=0, col=1, colspan=2)
         self._projection_plot.setMouseEnabled(x=False)
         self._projection_plot.setMenuEnabled(False)
-        self._projection_plot.getAxis("left").setWidth(self._style.axis_fixed_width)
+        self._projection_plot.getAxis("left").setWidth(PC_STYLE.axis_fixed_width)
 
         # Bottom control panel: PC selector, metric labels, title labels, playback controls.
         self._create_bottom_panel()
@@ -237,7 +192,7 @@ class PCViewer(QMainWindow):
 
         # Pre-computes per-plane y-ranges so axes stay stable when cycling through PCs.
         metrics_min, metrics_max = float(self._pc_metrics.min()), float(self._pc_metrics.max())
-        metrics_max += (metrics_max - metrics_min) * self._style.legend_headroom
+        metrics_max += (metrics_max - metrics_min) * STYLE.legend_headroom
         self._metrics_y_range = (metrics_min, metrics_max)
         self._projection_y_range = (float(self._pc_projections.min()), float(self._pc_projections.max()))
 
@@ -279,18 +234,18 @@ class PCViewer(QMainWindow):
         Widgets keep their natural size; only the trailing stretch grows when the window is resized.
         Fixed spacing separates each logical group.
         """
-        bold_font = QtGui.QFont(self._style.font_family, self._style.metrics_font_size, QtGui.QFont.Weight.Bold.value)
-        big_font = QtGui.QFont(self._style.font_family, self._style.metrics_font_size)
+        bold_font = QtGui.QFont(STYLE.font_family, PC_STYLE.metrics_font_size, QtGui.QFont.Weight.Bold.value)
+        big_font = QtGui.QFont(STYLE.font_family, PC_STYLE.metrics_font_size)
         panel = QHBoxLayout()
         group_spacing = 20
 
         # PC selector: label and input field for the current principal component number.
         pc_label = QLabel("PC:")
         pc_label.setFont(bold_font)
-        pc_label.setStyleSheet(self._style.white_label_stylesheet)
+        pc_label.setStyleSheet(STYLE.white_label)
         self._pc_edit: QLineEdit = QLineEdit(self)
         self._pc_edit.setText("1")
-        self._pc_edit.setFixedWidth(self._style.pc_edit_width)
+        self._pc_edit.setFixedWidth(PC_STYLE.pc_edit_width)
         self._pc_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._pc_edit.setFont(big_font)
         self._pc_edit.setToolTip("Principal component number (Left/Right arrow keys to step).")
@@ -304,13 +259,13 @@ class PCViewer(QMainWindow):
         self._metric_labels: list[QLabel] = []
         for _ in range(3):
             metric_label = QLabel("")
-            metric_label.setStyleSheet(self._style.white_label_stylesheet)
+            metric_label.setStyleSheet(STYLE.white_label)
             panel.addWidget(metric_label)
             self._metric_labels.append(metric_label)
         panel.addSpacing(group_spacing)
 
         # Playback controls. Play and pause are grouped exclusively so only one can be active at a time.
-        icon_size = QtCore.QSize(self._style.icon_size, self._style.icon_size)
+        icon_size = QtCore.QSize(STYLE.icon_size, STYLE.icon_size)
         self._play_button: QToolButton = QToolButton()
         self._play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         self._play_button.setIconSize(icon_size)
@@ -350,7 +305,7 @@ class PCViewer(QMainWindow):
         if self._loaded:
             self._play_button.setEnabled(False)
             self._pause_button.setEnabled(True)
-            self._update_timer.start(self._style.animation_interval_ms)
+            self._update_timer.start(PC_CONFIG.animation_interval_ms)
 
     def _pause_animation(self) -> None:
         """Pauses PC animation playback."""
@@ -425,7 +380,7 @@ class PCViewer(QMainWindow):
         colors = [(200, 200, 255), (255, 100, 100), (100, 50, 200)]
         metric_names = ["rigid", "nonrigid", "nonrigid max"]
         self._legend = self._metrics_plot.addLegend(
-            horSpacing=20, colCount=3, offset=(-10, 1), labelTextSize=self._style.legend_label_size
+            horSpacing=20, colCount=3, offset=(-10, 1), labelTextSize=STYLE.legend_label_size
         )
         for index in range(3):
             curve = self._metrics_plot.plot(
@@ -440,21 +395,21 @@ class PCViewer(QMainWindow):
         self._metrics_scatter.setData(
             [pc_index + 1, pc_index + 1, pc_index + 1],
             np.asarray(self._pc_metrics[pc_index, :]).tolist(),
-            size=self._style.scatter_point_size,
+            size=STYLE.scatter_point_size,
             brush=pg.mkBrush(255, 255, 255),
         )
-        self._metrics_plot.setTitle("PC Registration Shifts", size=self._style.plot_title_size, bold=True)
-        self._metrics_plot.setLabel("left", "Shift (px)", **{"font-size": self._style.axis_label_size})
-        self._metrics_plot.setLabel("bottom", "PC #", **{"font-size": self._style.axis_label_size})
+        self._metrics_plot.setTitle("PC Registration Shifts", size=STYLE.plot_title_size, bold=True)
+        self._metrics_plot.setLabel("left", "Shift (px)", **{"font-size": STYLE.axis_label_size})
+        self._metrics_plot.setLabel("bottom", "PC #", **{"font-size": STYLE.axis_label_size})
         self._metrics_plot.setXRange(1, self._pc_count, padding=0.0)
         self._metrics_plot.setYRange(*self._metrics_y_range, padding=0.0)
 
         # Projection plot: shows the per-frame projection onto the selected PC over time.
         self._projection_plot.clear()
         self._projection_plot.plot(self._pc_projections[:, pc_index])
-        self._projection_plot.setTitle("PC Projection Weight", size=self._style.plot_title_size, bold=True)
-        self._projection_plot.setLabel("left", "Magnitude", **{"font-size": self._style.axis_label_size})
-        self._projection_plot.setLabel("bottom", "Sampled Frame", **{"font-size": self._style.axis_label_size})
+        self._projection_plot.setTitle("PC Projection Weight", size=STYLE.plot_title_size, bold=True)
+        self._projection_plot.setLabel("left", "Magnitude", **{"font-size": STYLE.axis_label_size})
+        self._projection_plot.setLabel("bottom", "Sampled Frame", **{"font-size": STYLE.axis_label_size})
         self._projection_plot.setXRange(0, self._pc_projections.shape[0] - 1)
         self._projection_plot.setYRange(*self._projection_y_range)
 
@@ -463,7 +418,7 @@ class PCViewer(QMainWindow):
 
     def _zoom_plot(self) -> None:
         """Resets all PC image view ranges to fit the full image extent plus a title gutter."""
-        gutter = self._image_height * self._style.title_gutter_fraction
+        gutter = self._image_height * PC_STYLE.title_gutter_fraction
         y_max = self._image_height + gutter
         self._difference_view_box.setXRange(0, self._image_width)
         self._difference_view_box.setYRange(0, y_max)
