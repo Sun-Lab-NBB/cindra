@@ -746,14 +746,13 @@ def _extract_functional_channel_2(
 
     # Computes spatial colocalization between channel 1 and channel 2 ROIs.
     if extraction_data.roi_statistics is not None:
-        channel_1_to_2, _channel_2_to_1 = compute_spatial_colocalization(
+        extraction_data.cell_colocalization = compute_spatial_colocalization(
             rois_channel_1=extraction_data.roi_statistics,
             rois_channel_2=roi_statistics_channel_2,
             frame_height=frame_height,
             frame_width=frame_width,
             colocalization_threshold=extraction_config.colocalization_threshold,
         )
-        extraction_data.cell_colocalization = channel_1_to_2
 
 
 def _extract_multiday_channel(
@@ -980,14 +979,13 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
         timing.extraction_time += int(timer.elapsed)
 
         # Computes spatial colocalization between channel 1 and channel 2 tracked ROIs.
-        channel_1_to_2, _channel_2_to_1 = compute_spatial_colocalization(
+        extraction_data.cell_colocalization = compute_spatial_colocalization(
             rois_channel_1=roi_statistics,
             rois_channel_2=roi_statistics_channel_2,
             frame_height=frame_height,
             frame_width=frame_width,
             colocalization_threshold=extraction_config.colocalization_threshold,
         )
-        extraction_data.cell_colocalization = channel_1_to_2
 
     # Saves updated runtime data to disk.
     context.save_runtime()

@@ -196,6 +196,17 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         if context.runtime.extraction.roi_statistics is None:
             continue
 
+        # Skips planes without fluorescence traces (extraction not completed). This check must precede ROI statistics
+        # collection to avoid adding ROI entries that lack corresponding fluorescence data.
+        if (
+            context.runtime.extraction.cell_fluorescence is None
+            or context.runtime.extraction.neuropil_fluorescence is None
+            or context.runtime.extraction.subtracted_fluorescence is None
+            or context.runtime.extraction.spikes is None
+            or context.runtime.extraction.cell_classification is None
+        ):
+            continue
+
         # Calculates the pixel ranges for placing this plane's data in the combined view.
         y_start = y_offsets[plane_index]
         y_end = y_offsets[plane_index] + heights[plane_index]
@@ -286,16 +297,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         plane_subtracted_fluorescence = context.runtime.extraction.subtracted_fluorescence
         plane_spikes = context.runtime.extraction.spikes
         plane_cell_classification = context.runtime.extraction.cell_classification
-
-        # Skips fluorescence processing if data is not available.
-        if (
-            plane_cell_fluorescence is None
-            or plane_neuropil_fluorescence is None
-            or plane_subtracted_fluorescence is None
-            or plane_spikes is None
-            or plane_cell_classification is None
-        ):
-            continue
 
         # Pads fluorescence data if this plane has fewer frames than the maximum.
         cell_count, frame_count = plane_cell_fluorescence.shape
