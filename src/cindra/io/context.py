@@ -153,8 +153,9 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
         # Checks if existing runtime data exists for this plane.
         runtime_yaml_path = plane_output_path / "runtime_data.yaml"
         if runtime_yaml_path.exists():
-            # Loads existing runtime data.
+            # Loads existing runtime data and eagerly loads all arrays for pipeline continuation.
             runtime_data = SingleDayRuntimeData.load(output_path=plane_output_path)
+            runtime_data.load_arrays()
             console.echo(message=f"Loaded existing runtime data for plane {virtual_plane_index}.", level=LogLevel.INFO)
 
             context = RuntimeContext(
@@ -283,12 +284,17 @@ def resolve_multiday_contexts(
 
         data_path = data_paths[index]
         output_path = output_paths[index]
+
+        # Loads single-day combined data and memory-maps its arrays for multi-day pipeline use.
         combined_data = CombinedData.load(root_path=data_path)
+        combined_data.detection.memory_map_arrays(data_path)
+        combined_data.extraction.memory_map_arrays(data_path)
 
         runtime_path = output_path / "multiday_runtime_data.yaml"
         if runtime_path.exists():
-            # Loads existing runtime data (pure deserialization from known output_path).
+            # Loads existing runtime data and eagerly loads multi-day arrays for pipeline continuation.
             runtime = MultiDayRuntimeData.load(output_path=output_path)
+            runtime.load_arrays()
 
             # Updates IO paths to reflect the current configuration's session directories. This handles cases where
             # session directories have changed or data was moved since the runtime was last saved.
@@ -296,7 +302,7 @@ def resolve_multiday_contexts(
             runtime.io.dataset_output_paths = tuple(output_paths)
             runtime.io.mroi_region_borders = _compute_mroi_region_borders(data_path=data_path)
 
-            # Injects the preloaded CombinedData to ensure it's available regardless of __post_init__ behavior.
+            # Injects the preloaded CombinedData.
             runtime.combined_data = combined_data
 
             contexts.append(MultiDayRuntimeContext(configuration=configuration, runtime=runtime))
