@@ -370,15 +370,18 @@ def _execute_single_day_job(
                 )
                 console.error(message=message, error=ValueError)
 
-            # Loads contexts from disk and combines all processed planes into a dataset. Extraction result
-            # arrays (fluorescence traces, classification) are not loaded automatically due to their memory
-            # footprint, so they must be loaded explicitly before combining.
+            # Loads contexts from disk and combines all processed planes into a dataset. Arrays are not
+            # loaded automatically due to their memory footprint, so they must be loaded explicitly before
+            # combining. Detection arrays provide background images; extraction arrays provide ROI statistics
+            # and fluorescence traces.
             root_path = configuration.file_io.output_path / "cindra"
             contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
             if not isinstance(contexts, list):
                 contexts = [contexts]
             for context in contexts:
                 if context.runtime.output_path is not None:
+                    context.runtime.detection.memory_map_arrays(context.runtime.output_path)
+                    context.runtime.extraction.memory_map_arrays(context.runtime.output_path)
                     context.runtime.extraction.memory_map_results(context.runtime.output_path)
             save_combined_data(contexts=contexts)
 

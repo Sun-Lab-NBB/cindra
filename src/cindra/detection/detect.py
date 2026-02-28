@@ -209,10 +209,10 @@ def detect_plane_rois(context: RuntimeContext) -> None:
     # Persists detection results to disk so that ROI statistics and detection images are not lost if extraction fails.
     context.save_runtime()
 
-    # Releases all arrays to free memory. Downstream stages will reload what they need.
+    # Releases registration and detection arrays to free memory. Extraction arrays (roi_statistics) are preserved
+    # because the caller checks them to decide whether to run trace extraction.
     context.runtime.registration.release_arrays()
     context.runtime.detection.release_arrays()
-    context.runtime.extraction.release_arrays()
 
 
 def _create_enhanced_mean_image(
