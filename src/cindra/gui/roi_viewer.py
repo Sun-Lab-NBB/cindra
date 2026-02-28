@@ -217,8 +217,8 @@ class ROIViewer(QMainWindow):
         colors_box, self._color_controls = self._create_color_controls()
         self.colorbar_widgets = self._create_colorbar()
         colors_layout = colors_box.layout()
-        assert colors_layout is not None
-        colors_layout.addWidget(self.colorbar_widgets.widget)
+        if colors_layout is not None:
+            colors_layout.addWidget(self.colorbar_widgets.widget)
         layout.addWidget(colors_box)
 
         # 5. Selected ROI — ROI index edit + stat labels.
@@ -257,8 +257,8 @@ class ROIViewer(QMainWindow):
         self._zoom_to_cell_checkbox.setStyleSheet(STYLE.white_label)
         self._zoom_to_cell_checkbox.stateChanged.connect(self._on_zoom_cell_toggled)
         trace_layout = trace_box.layout()
-        assert trace_layout is not None
-        trace_layout.addWidget(self._zoom_to_cell_checkbox)
+        if trace_layout is not None:
+            trace_layout.addWidget(self._zoom_to_cell_checkbox)
         layout.addWidget(trace_box)
 
         layout.addStretch()
@@ -656,7 +656,6 @@ class ROIViewer(QMainWindow):
             roi_maps=self.roi_maps,
             roi_color_mode=self.roi_color_mode,
             background_view=self.background_view,
-            selected_roi_index=self.selected_roi_index,
             merge_roi_indices=self.merge_roi_indices,
             roi_opacity=self.roi_opacity,
         )
@@ -901,8 +900,7 @@ class ROIViewer(QMainWindow):
             return
         if self.views is None or self.colorbar_widgets is None or self.colorbar_image is None:
             return
-        if self.roi_color_mode == CONFIG.color_correlation and self.Fbin is not None:
-            assert self.Fstd is not None
+        if self.roi_color_mode == CONFIG.color_correlation and self.Fbin is not None and self.Fstd is not None:
             update_correlation_masks(
                 color_arrays=self.color_arrays,
                 roi_maps=self.roi_maps,
@@ -930,7 +928,6 @@ class ROIViewer(QMainWindow):
             roi_maps=self.roi_maps,
             roi_color_mode=self.roi_color_mode,
             background_view=self.background_view,
-            selected_roi_index=self.selected_roi_index,
             merge_roi_indices=self.merge_roi_indices,
             roi_opacity=self.roi_opacity,
         )

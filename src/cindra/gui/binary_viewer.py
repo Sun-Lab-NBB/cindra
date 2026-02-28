@@ -336,7 +336,7 @@ class BinaryPlayer(QMainWindow):
                 start_dir = str(parent)
         directory = QFileDialog.getExistingDirectory(self, "Specify the recording directory to open.", start_dir)
         if directory:
-            data = SingleDayViewerData.from_recording(root_path=Path(directory))
+            data = SingleDayViewerData.from_single_day(root_path=Path(directory), view_index=0)
             self.load_data(data=data)
 
     def _on_plane_changed(self, index: int) -> None:

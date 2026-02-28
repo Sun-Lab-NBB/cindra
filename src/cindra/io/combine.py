@@ -263,6 +263,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
                 roi_copy.centroid[1] + int(x_offsets[plane_index]),
             )
             roi_copy.plane_index = plane_index
+            roi_copy.frame_width = combined_width
             combined_roi_stats.append(roi_copy)
 
         # Processes channel 2 ROI statistics if second channel is functional.
@@ -276,6 +277,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
                     roi_copy.centroid[1] + int(x_offsets[plane_index]),
                 )
                 roi_copy.plane_index = plane_index
+                roi_copy.frame_width = combined_width
                 combined_roi_stats_channel_2.append(roi_copy)
 
         # Extracts fluorescence and classification data from the RuntimeContext.

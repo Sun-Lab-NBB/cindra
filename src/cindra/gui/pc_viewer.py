@@ -21,10 +21,10 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from .single_day_context import SingleDayViewerData
-
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+    from .single_day_context import SingleDayViewerData
 
 
 @dataclass(frozen=True, slots=True)

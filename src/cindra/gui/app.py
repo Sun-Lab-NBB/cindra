@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PySide6 import QtGui, QtCore
 from PySide6.QtWidgets import QApplication
+from ataraxis_base_utilities import console
 
 import cindra
 
@@ -74,7 +75,7 @@ def run_registration_viewer(recording_path: Path) -> None:
     # Loads recording data upfront so both viewer windows share the same SingleDayViewerData
     # instance. This ensures plane switches in the binary player are reflected in the PC viewer
     # without reloading from disk.
-    data = SingleDayViewerData.from_recording(root_path=recording_path)
+    data = SingleDayViewerData.from_single_day(root_path=recording_path, view_index=0)
 
     # Creates both viewer windows with the shared SingleDayViewerData instance.
     binary_player = BinaryPlayer(data=data)
@@ -117,7 +118,9 @@ def run_roi_viewer(session_path: Path | None = None) -> None:
     owns_application = application is None
     if owns_application:
         application = QApplication(sys.argv)
-    assert isinstance(application, QApplication)
+    if not isinstance(application, QApplication):  # pragma: no cover
+        message = "Unable to launch the ROI viewer. Failed to obtain a QApplication instance."
+        console.error(message=message, error=RuntimeError)
 
     app_icon = QtGui.QIcon()
     for size in (16, 24, 32, 48, 64, 256):

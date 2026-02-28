@@ -40,8 +40,7 @@ def _load_single_day_runtime(plane_directory: Path) -> SingleDayRuntimeData:
         # Reloads the runtime from the corrected YAML so that arrays are resolved against the new paths.
         runtime = SingleDayRuntimeData.load(output_path=plane_directory)
 
-    # Memory-maps all arrays after YAML deserialization (and optional relocation).
-    runtime.memory_map_arrays()
+    # Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
     return runtime
 
 
@@ -177,18 +176,16 @@ def _relocate_runtime_paths(
 
 
 def _load_multiday_data(runtime: MultiDayRuntimeData) -> None:
-    """Memory-maps all multi-day arrays and CombinedData onto a deserialized MultiDayRuntimeData instance.
+    """Loads CombinedData metadata (scalars only) onto a deserialized MultiDayRuntimeData instance.
+
+    Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
 
     Args:
-        runtime: A MultiDayRuntimeData instance that has been deserialized from YAML but has not had arrays or
-            CombinedData loaded yet.
+        runtime: A MultiDayRuntimeData instance that has been deserialized from YAML but has not had CombinedData
+            loaded yet.
     """
-    runtime.memory_map_arrays()
     if runtime.combined_data is None and runtime.io.data_path is not None:
-        combined = CombinedData.load(root_path=runtime.io.data_path)
-        combined.detection.memory_map_arrays(runtime.io.data_path)
-        combined.extraction.memory_map_arrays(runtime.io.data_path)
-        runtime.combined_data = combined
+        runtime.combined_data = CombinedData.load(root_path=runtime.io.data_path)
 
 
 @dataclass

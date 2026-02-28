@@ -83,6 +83,11 @@ def detect_plane_rois(context: RuntimeContext) -> None:
     registration_data = context.runtime.registration
     detection_data = context.runtime.detection
 
+    # Memory-maps registration arrays from the previous stage (needed for bad_frames).
+    output_path = context.runtime.io.output_path
+    if output_path is not None and registration_data.bad_frames is None:
+        registration_data.memory_map_arrays(output_path)
+
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
     frame_height = io_data.frame_height
     frame_width = io_data.frame_width
@@ -140,6 +145,8 @@ def detect_plane_rois(context: RuntimeContext) -> None:
     detection_data.maximum_projection = maximum_projection
     detection_data.correlation_map = correlation_map
     detection_data.cell_diameter = cell_diameter
+    for roi in roi_statistics:
+        roi.frame_width = frame_width
     context.runtime.extraction.roi_statistics = roi_statistics
 
     # Records channel 1 detection time.
@@ -187,6 +194,8 @@ def detect_plane_rois(context: RuntimeContext) -> None:
         detection_data.maximum_projection_channel_2 = maximum_projection_channel_2
         detection_data.correlation_map_channel_2 = correlation_map_channel_2
         detection_data.cell_diameter_channel_2 = cell_diameter_channel_2
+        for roi in roi_statistics_channel_2:
+            roi.frame_width = frame_width
         context.runtime.extraction.roi_statistics_channel_2 = roi_statistics_channel_2
 
         # Records channel 2 detection time.
@@ -199,6 +208,11 @@ def detect_plane_rois(context: RuntimeContext) -> None:
 
     # Persists detection results to disk so that ROI statistics and detection images are not lost if extraction fails.
     context.save_runtime()
+
+    # Releases all arrays to free memory. Downstream stages will reload what they need.
+    context.runtime.registration.release_arrays()
+    context.runtime.detection.release_arrays()
+    context.runtime.extraction.release_arrays()
 
 
 def _create_enhanced_mean_image(
