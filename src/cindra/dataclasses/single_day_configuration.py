@@ -121,8 +121,8 @@ class AcquisitionParameters(YamlConfig):
         For single-ROI data, only frame_rate, plane_number, and channel_number are required. For MROI data,
         additional fields describe the geometry of each ROI.
 
-        The pipeline expects a cindra_parameters.json or suite2p_parameters.json file in the data directory containing
-        these parameters. Use the is_mroi property to determine whether the data uses multi-ROI acquisition.
+        The pipeline expects a cindra_parameters.json file in the data directory containing these parameters. Use the
+        is_mroi property to determine whether the data uses multi-ROI acquisition.
     """
 
     frame_rate: float

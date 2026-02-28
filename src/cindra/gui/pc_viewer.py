@@ -73,7 +73,7 @@ class PCViewer(QMainWindow):
         # Initializes the main viewer window.
         super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
-        self.setGeometry(70, 70, 1300, 800)
+        self.setGeometry(*PC_STYLE.window_geometry)
         self.setWindowTitle("Registration Quality Metrics")
         self._central_widget: QWidget = QWidget(self)
         self.setCentralWidget(self._central_widget)
@@ -237,7 +237,7 @@ class PCViewer(QMainWindow):
         bold_font = QtGui.QFont(STYLE.font_family, PC_STYLE.metrics_font_size, QtGui.QFont.Weight.Bold.value)
         big_font = QtGui.QFont(STYLE.font_family, PC_STYLE.metrics_font_size)
         panel = QHBoxLayout()
-        group_spacing = 20
+        group_spacing = PC_STYLE.group_spacing
 
         # PC selector: label and input field for the current principal component number.
         pc_label = QLabel("PC:")
@@ -377,10 +377,10 @@ class PCViewer(QMainWindow):
         # The legend is recreated on every update because clear() removes it from the plot.
         self._metrics_plot.clear()
         self._metrics_plot.disableAutoRange()
-        colors = [(200, 200, 255), (255, 100, 100), (100, 50, 200)]
+        colors = PC_STYLE.metric_colors
         metric_names = ["rigid", "nonrigid", "nonrigid max"]
         self._legend = self._metrics_plot.addLegend(
-            horSpacing=20, colCount=3, offset=(-10, 1), labelTextSize=STYLE.legend_label_size
+            horSpacing=STYLE.legend_horizontal_spacing, colCount=PC_STYLE.legend_column_count, offset=STYLE.legend_offset, labelTextSize=STYLE.legend_label_size
         )
         for index in range(3):
             curve = self._metrics_plot.plot(
@@ -396,7 +396,7 @@ class PCViewer(QMainWindow):
             [pc_index + 1, pc_index + 1, pc_index + 1],
             np.asarray(self._pc_metrics[pc_index, :]).tolist(),
             size=STYLE.scatter_point_size,
-            brush=pg.mkBrush(255, 255, 255),
+            brush=pg.mkBrush(*PC_STYLE.scatter_brush_color),
         )
         self._metrics_plot.setTitle("PC Registration Shifts", size=STYLE.plot_title_size, bold=True)
         self._metrics_plot.setLabel("left", "Shift (px)", **{"font-size": STYLE.axis_label_size})

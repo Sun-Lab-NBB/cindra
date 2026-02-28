@@ -113,7 +113,7 @@ class ROIViewer(QMainWindow):
         self.frame_indices: NDArray[np.intp] | None = None
 
         # Window geometry and title.
-        self.setGeometry(50, 50, 1500, 800)
+        self.setGeometry(*ROI_STYLE.window_geometry)
         self.setWindowTitle("cindra ROI Viewer (load session directory)")
 
         self.setStyleSheet(STYLE.main_window)
@@ -175,7 +175,7 @@ class ROIViewer(QMainWindow):
 
         # 0. View selector (Combined / Plane 0 / Plane 1 / ...).
         view_box = QGroupBox("View")
-        view_box.setStyleSheet("QGroupBox { color: white; }")
+        view_box.setStyleSheet(STYLE.group_box)
         view_layout = QHBoxLayout(view_box)
         view_label = QLabel("View:")
         view_label.setStyleSheet(STYLE.white_label)
@@ -190,7 +190,7 @@ class ROIViewer(QMainWindow):
 
         # 1. ROI Visibility.
         visibility_box = QGroupBox("ROI Visibility")
-        visibility_box.setStyleSheet("QGroupBox { color: white; }")
+        visibility_box.setStyleSheet(STYLE.group_box)
         visibility_layout = QVBoxLayout(visibility_box)
         self._roi_visibility_checkbox = QCheckBox("ROIs On")
         self._roi_visibility_checkbox.setStyleSheet(STYLE.white_label)
@@ -222,7 +222,7 @@ class ROIViewer(QMainWindow):
 
         # 5. Selected ROI — ROI index edit + stat labels.
         roi_box = QGroupBox("Selected ROI")
-        roi_box.setStyleSheet("QGroupBox { color: white; }")
+        roi_box.setStyleSheet(STYLE.group_box)
         roi_layout = QVBoxLayout(roi_box)
         self._stats_to_show = [
             "centroid",
@@ -266,7 +266,7 @@ class ROIViewer(QMainWindow):
     def _create_selection_buttons(self) -> tuple[QGroupBox, SelectionControls]:
         """Creates the cell selection dropdown and top-n input field."""
         group_box = QGroupBox("Cell Selection")
-        group_box.setStyleSheet("QGroupBox { color: white; }")
+        group_box.setStyleSheet(STYLE.group_box)
         layout = QGridLayout(group_box)
 
         selection_combo = QComboBox(self)
@@ -296,7 +296,7 @@ class ROIViewer(QMainWindow):
     def _create_view_controls(self) -> tuple[QGroupBox, ViewControls]:
         """Creates background view dropdown, channel 2 toggle, and saturation slider."""
         group_box = QGroupBox("Background")
-        group_box.setStyleSheet("QGroupBox { color: white; }")
+        group_box.setStyleSheet(STYLE.group_box)
         layout = QGridLayout(group_box)
 
         view_combo = QComboBox(self)
@@ -332,7 +332,7 @@ class ROIViewer(QMainWindow):
     def _create_color_controls(self) -> tuple[QGroupBox, ColorControls]:
         """Creates color statistic dropdown and associated controls."""
         group_box = QGroupBox("ROI Colors")
-        group_box.setStyleSheet("QGroupBox { color: white; }")
+        group_box.setStyleSheet(STYLE.group_box)
         layout = QGridLayout(group_box)
 
         color_combo = QComboBox(self)
@@ -407,7 +407,7 @@ class ROIViewer(QMainWindow):
     def _create_trace_controls(self) -> tuple[QGroupBox, TraceControls]:
         """Creates trace panel controls inside a group box."""
         group_box = QGroupBox("Trace Display")
-        group_box.setStyleSheet("QGroupBox { color: white; }")
+        group_box.setStyleSheet(STYLE.group_box)
         layout = QGridLayout(group_box)
 
         activity_label = QLabel("Activity mode:")
@@ -491,7 +491,7 @@ class ROIViewer(QMainWindow):
 
     def _build_graphics(self) -> None:
         """Creates the main plotting area with image and trace panels."""
-        self._view_box = ViewBox(name="plot1", border=[100, 100, 100], invert_y=True)
+        self._view_box = ViewBox(name="plot1", border=list(ROI_STYLE.view_box_border), invert_y=True)
         self._graphics_widget.addItem(self._view_box, 0, 0)
         self._view_box.setMenuEnabled(False)
         self._view_box.scene().contextMenuItem = self._view_box
@@ -1132,7 +1132,7 @@ class ROIViewer(QMainWindow):
         dy = np.minimum(dy, 300)
         imx = imx - dx / 2
         imy = imy - dy / 2
-        self._active_roi_selection = pg.RectROI([imx, imy], [dx, dy], pen="w", sideScalers=True)
+        self._active_roi_selection = pg.RectROI([imx, imy], [dx, dy], pen=ROI_STYLE.selection_pen, sideScalers=True)
         self._view_box.addItem(self._active_roi_selection)
         self._roi_position()
         self._active_roi_selection.sigRegionChangeFinished.connect(self._roi_position)

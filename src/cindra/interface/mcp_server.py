@@ -886,9 +886,9 @@ def get_multi_day_status(session_path: str) -> dict[str, Any]:
 def discover_single_day_sessions_tool(root_directory: str) -> dict[str, Any]:
     """Discovers sessions containing raw neural imaging data that can be processed by the single-day pipeline.
 
-    Searches recursively for cindra_parameters.json or suite2p_parameters.json files (created by sl-experiment),
-    which mark directories containing raw session data suitable for single-day processing. Returns the parent directory
-    of each match as a session candidate path.
+    Searches recursively for cindra_parameters.json files (created by sl-experiment), which mark directories containing
+    raw session data suitable for single-day processing. Returns the parent directory of each match as a session
+    candidate path.
 
     Args:
         root_directory: The absolute path to the root directory to search.
@@ -904,19 +904,12 @@ def discover_single_day_sessions_tool(root_directory: str) -> dict[str, Any]:
     session_paths: list[str] = []
     errors: list[str] = []
 
-    # Tracks discovered directories to avoid duplicates when both cindra and legacy parameter files exist.
-    discovered: set[str] = set()
-
     try:
-        for filename in ("cindra_parameters.json", "suite2p_parameters.json"):
-            for marker_file in root_path.rglob(filename):
-                try:
-                    parent = str(marker_file.parent)
-                    if parent not in discovered:
-                        discovered.add(parent)
-                        session_paths.append(parent)
-                except Exception as error:
-                    errors.append(f"{marker_file.parent}: {error}")
+        for marker_file in root_path.rglob("cindra_parameters.json"):
+            try:
+                session_paths.append(str(marker_file.parent))
+            except Exception as error:
+                errors.append(f"{marker_file.parent}: {error}")
     except PermissionError as error:
         errors.append(f"Access denied during search: {error}")
 

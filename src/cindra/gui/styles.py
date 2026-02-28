@@ -45,6 +45,18 @@ class _CommonStyle:
     """Alpha value for the deconvolved trace pen."""
     average_gray: int = 140
     """Gray intensity for the average trace pen."""
+    group_box: str = "QGroupBox { color: white; }"
+    """Stylesheet for QGroupBox title text on dark backgrounds."""
+    legend_horizontal_spacing: int = 20
+    """Horizontal spacing between legend entries in plot widgets."""
+    legend_offset: tuple[int, int] = (-10, 1)
+    """Position offset for the legend widget relative to the plot corner."""
+    fluorescence_pen: str = "c"
+    """Pen color for cell fluorescence traces (cyan)."""
+    neuropil_pen: str = "r"
+    """Pen color for neuropil fluorescence traces (red)."""
+    deconvolved_pen_color: tuple[int, int, int] = (255, 255, 255)
+    """RGB color for deconvolved spike traces (alpha handled separately via deconvolved_alpha)."""
 
     def label_font(self) -> QtGui.QFont:
         """Creates the standard label font (Arial 8pt).
@@ -119,6 +131,14 @@ class _ROIViewerStyle:
     """Number of rows in the colorbar image."""
     save_button_width: int = 100
     """Fixed width for the save-and-quit button in the ROI draw editor."""
+    window_geometry: tuple[int, int, int, int] = (50, 50, 1500, 800)
+    """Initial window position (x, y) and size (width, height) for the ROI viewer."""
+    view_box_border: tuple[int, int, int] = (100, 100, 100)
+    """RGB border color for the ROI image ViewBox."""
+    roi_text_font_family: str = "Times"
+    """Font family for ROI index text labels at centroids."""
+    selection_pen: str = "w"
+    """Pen color for the interactive ROI selection rectangle."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +149,10 @@ class _TrackingViewerStyle:
     """The default mask overlay opacity (0-255 uint8 range)."""
     roi_edit_width: int = 50
     """The fixed pixel width of the ROI index input field."""
+    window_size: tuple[int, int] = (1200, 800)
+    """Initial window size (width, height) for the tracking viewer."""
+    scale_button_width: int = 30
+    """Maximum pixel width for trace scale +/- buttons."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +161,16 @@ class _BinaryPlayerStyle:
 
     axis_fixed_width: int = 50
     """Fixed pixel width for the y-axis so the plot area stays stable when tick label digit counts change."""
+    window_geometry: tuple[int, int, int, int] = (70, 70, 1400, 1070)
+    """Initial window position (x, y) and size (width, height) for the binary player."""
+    y_offset_pen: str = "g"
+    """Pen color for the Y rigid registration offset trace (green)."""
+    x_offset_pen: str = "y"
+    """Pen color for the X rigid registration offset trace (yellow)."""
+    scatter_brush_color: tuple[int, int, int] = (255, 0, 0)
+    """RGB brush color for the current-frame scatter indicator (red)."""
+    legend_column_count: int = 2
+    """Number of columns in the registration offset plot legend."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +185,16 @@ class _PCViewerStyle:
     """Fixed pixel width for the y-axis so the plot area stays stable when tick label digit counts change."""
     title_gutter_fraction: float = 0.08
     """Fraction of image height added as black space below the image for title labels."""
+    window_geometry: tuple[int, int, int, int] = (70, 70, 1300, 800)
+    """Initial window position (x, y) and size (width, height) for the PC viewer."""
+    metric_colors: tuple[tuple[int, int, int], ...] = ((200, 200, 255), (255, 100, 100), (100, 50, 200))
+    """RGB pen colors for rigid, nonrigid, and nonrigid-max metric curves."""
+    scatter_brush_color: tuple[int, int, int] = (255, 255, 255)
+    """RGB brush color for the selected-PC scatter indicator (white)."""
+    group_spacing: int = 20
+    """Pixel spacing between widget groups in the bottom control panel."""
+    legend_column_count: int = 3
+    """Number of columns in the PC metrics plot legend."""
 
 
 STYLE: _CommonStyle = _CommonStyle()

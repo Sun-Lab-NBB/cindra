@@ -71,7 +71,7 @@ class BinaryPlayer(QMainWindow):
 
         # Adds the main UI window.
         pg.setConfigOptions(imageAxisOrder="row-major")
-        self.setGeometry(70, 70, 1400, 1070)
+        self.setGeometry(*BINARY_STYLE.window_geometry)
         self.setWindowTitle("Registered Recording")
         self._central_widget: QWidget = QWidget(self)
         self.setCentralWidget(self._central_widget)
@@ -147,7 +147,7 @@ class BinaryPlayer(QMainWindow):
         self._shift_plot.setLabel("bottom", "Frame", **{"font-size": STYLE.axis_label_size})
         self._shift_plot.getAxis("bottom").setHeight(BINARY_STYLE.axis_fixed_width)
         self._shift_plot.addLegend(
-            horSpacing=20, colCount=2, offset=(-10, 1), labelTextSize=STYLE.legend_label_size
+            horSpacing=STYLE.legend_horizontal_spacing, colCount=BINARY_STYLE.legend_column_count, offset=STYLE.legend_offset, labelTextSize=STYLE.legend_label_size
         )
         self._shift_scatter: pg.ScatterPlotItem = pg.ScatterPlotItem()
         self._shift_scatter.setData([0, 0], [0, 0])
@@ -339,8 +339,8 @@ class BinaryPlayer(QMainWindow):
         rigid_y = self.data.rigid_y_offsets
         rigid_x = self.data.rigid_x_offsets
         x_values = np.arange(frame_count)
-        self._shift_plot.plot(x_values, rigid_y, pen="g", name="Y")
-        self._shift_plot.plot(x_values, rigid_x, pen="y", name="X")
+        self._shift_plot.plot(x_values, rigid_y, pen=BINARY_STYLE.y_offset_pen, name="Y")
+        self._shift_plot.plot(x_values, rigid_x, pen=BINARY_STYLE.x_offset_pen, name="X")
         shift_min = min(int(rigid_y.min()), int(rigid_x.min()))
         shift_max = max(int(rigid_y.max()), int(rigid_x.max()))
         if shift_min == shift_max:
@@ -355,7 +355,7 @@ class BinaryPlayer(QMainWindow):
             [0, 0],
             [int(rigid_y[0]), int(rigid_x[0])],
             size=STYLE.scatter_point_size,
-            brush=pg.mkBrush(255, 0, 0),
+            brush=pg.mkBrush(*BINARY_STYLE.scatter_brush_color),
         )
 
         self._channel_2_button.setEnabled(self.data.two_channels)
@@ -397,7 +397,7 @@ class BinaryPlayer(QMainWindow):
             [self._current_frame, self._current_frame],
             [int(rigid_y[self._current_frame]), int(rigid_x[self._current_frame])],
             size=STYLE.scatter_point_size,
-            brush=pg.mkBrush(255, 0, 0),
+            brush=pg.mkBrush(*BINARY_STYLE.scatter_brush_color),
         )
 
     def _go_to_frame(self) -> None:
