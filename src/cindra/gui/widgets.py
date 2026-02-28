@@ -510,14 +510,14 @@ def _plot_single_trace(
     spike_trace *= y_maximum - y_minimum
 
     if traces_visible:
-        trace_box.plot(frame_indices, fluorescence, pen="c")
+        trace_box.plot(frame_indices, fluorescence, pen=STYLE.fluorescence_pen)
     if neuropil_visible:
-        trace_box.plot(frame_indices, neuropil, pen="r")
+        trace_box.plot(frame_indices, neuropil, pen=STYLE.neuropil_pen)
     if deconvolved_visible:
         trace_box.plot(
             frame_indices,
             spike_trace + y_minimum,
-            pen=(255, 255, 255, STYLE.deconvolved_alpha),
+            pen=(*STYLE.deconvolved_pen_color, STYLE.deconvolved_alpha),
         )
 
     axis.setTicks(None)

@@ -48,7 +48,7 @@ class TrackingViewer(QMainWindow):
     def __init__(self, data: TrackingViewerData) -> None:
         super().__init__()
         self.setWindowTitle("Multi-Day ROI Tracking")
-        self.resize(1200, 800)
+        self.resize(*TRACKING_STYLE.window_size)
 
         self.data: TrackingViewerData = data
         self._auto_cycle_timer: QtCore.QTimer = QtCore.QTimer(self)
@@ -328,11 +328,11 @@ class TrackingViewer(QMainWindow):
 
         scale_row = QHBoxLayout()
         scale_up = QPushButton("+")
-        scale_up.setMaximumWidth(30)
+        scale_up.setMaximumWidth(TRACKING_STYLE.scale_button_width)
         scale_up.clicked.connect(lambda: self._adjust_trace_scale(CONFIG.scale_step))
         scale_row.addWidget(scale_up)
         scale_down = QPushButton("-")
-        scale_down.setMaximumWidth(30)
+        scale_down.setMaximumWidth(TRACKING_STYLE.scale_button_width)
         scale_down.clicked.connect(lambda: self._adjust_trace_scale(-CONFIG.scale_step))
         scale_row.addWidget(scale_down)
 

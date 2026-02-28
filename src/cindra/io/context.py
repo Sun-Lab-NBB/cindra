@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
 from ..dataclasses import (
@@ -20,14 +22,8 @@ from ..dataclasses import (
     SingleDayConfiguration,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-_PREFERRED_PARAMETERS_FILENAME: str = "cindra_parameters.json"
-"""The preferred name for the acquisition parameters JSON file."""
-
-_LEGACY_PARAMETERS_FILENAME: str = "suite2p_parameters.json"
-"""The legacy name for the acquisition parameters JSON file (fallback)."""
+_PARAMETERS_FILENAME: str = "cindra_parameters.json"
+"""The name of the acquisition parameters JSON file expected in each session's data directory."""
 
 _MAXIMUM_CHANNEL_COUNT: int = 2
 """The maximum number of imaging channels supported by the pipeline."""
@@ -37,8 +33,8 @@ def find_data_directory(data_path: Path) -> Path:
     """Recursively searches for the directory containing the acquisition parameters JSON file.
 
     This function searches the data_path directory and all subdirectories for a file named 'cindra_parameters.json'
-    first, then falls back to 'suite2p_parameters.json' (created by sl-experiment). Returns the parent directory
-    containing the matched file. This directory is expected to also contain the TIFF files.
+    (created by sl-experiment). Returns the parent directory containing the matched file. This directory is expected
+    to also contain the TIFF files.
 
     Args:
         data_path: The root directory to search for the acquisition parameters file.
@@ -54,20 +50,69 @@ def find_data_directory(data_path: Path) -> Path:
         message = f"Unable to find data directory. The data_path is not a directory: {data_path}"
         console.error(message=message, error=ValueError)
 
-    # Searches for the preferred cindra parameters file first, then falls back to the legacy suite2p file.
-    parameter_files = list(data_path.rglob(_PREFERRED_PARAMETERS_FILENAME))
-    if not parameter_files:
-        parameter_files = list(data_path.rglob(_LEGACY_PARAMETERS_FILENAME))
+    parameter_files = list(data_path.rglob(_PARAMETERS_FILENAME))
 
     if not parameter_files:
         message = (
-            f"Unable to find '{_PREFERRED_PARAMETERS_FILENAME}' or '{_LEGACY_PARAMETERS_FILENAME}' in the data "
-            f"directory or its subdirectories: {data_path}. This file is required and must contain acquisition "
-            f"metadata."
+            f"Unable to find '{_PARAMETERS_FILENAME}' in the data directory or its subdirectories: {data_path}. "
+            f"This file is required and must contain acquisition metadata."
         )
         console.error(message=message, error=FileNotFoundError)
 
     return parameter_files[0].parent
+
+
+def discover_recordings(root_directory: Path) -> list[Path]:
+    """Discovers session root directories by searching for acquisition parameter marker files.
+
+    Recursively searches the root directory for ``cindra_parameters.json``. For each marker file found, derives the
+    session root directory by identifying the unique path component (e.g., the session timestamp) and truncating the
+    path at that component.
+
+    Args:
+        root_directory: The root directory to search for recording sessions.
+
+    Returns:
+        A naturally sorted list of unique recording session root Path objects. Returns an empty list if no sessions
+        are found.
+    """
+    if not root_directory.is_dir():
+        message = (
+            f"Unable to discover recordings. The value provided as the 'root_directory' argument is not a "
+            f"directory: {root_directory}"
+        )
+        console.error(message=message, error=ValueError)
+
+    parameter_files = list(root_directory.rglob(_PARAMETERS_FILENAME))
+
+    if not parameter_files:
+        console.echo(message=f"No recording sessions found under: {root_directory}.", level=LogLevel.WARNING)
+        return []
+
+    # Extracts the unique path component for each marker file's parent directory. The unique component identifies the
+    # session (e.g., a timestamp directory). The session root is then the path truncated at that component.
+    marker_parents = [f.parent for f in parameter_files]
+    unique_components = extract_unique_components(paths=marker_parents)
+
+    # Derives session roots by truncating each marker parent path at the unique component.
+    session_roots: list[Path] = []
+    for parent, component in zip(marker_parents, unique_components):
+        # Finds the index of the unique component in the path parts and truncates at (including) that component.
+        parts = parent.parts
+        component_index = parts.index(component)
+        session_root = Path(*parts[: component_index + 1])
+        if session_root not in session_roots:
+            session_roots.append(session_root)
+
+    # Natural-sorts the results for consistent ordering.
+    sorted_roots: list[Path] = list(natsorted(session_roots))
+
+    console.echo(
+        message=f"Discovered {len(sorted_roots)} recording session(s) under: {root_directory}.",
+        level=LogLevel.SUCCESS,
+    )
+
+    return sorted_roots
 
 
 def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[RuntimeContext]:
@@ -253,7 +298,7 @@ def resolve_multiday_contexts(
         ValueError: If target_session_id does not match any resolved session identifier.
     """
     session_directories = configuration.session_io.session_directories
-    session_ids = _extract_unique_components(paths=session_directories)
+    session_ids = extract_unique_components(paths=session_directories)
     dataset_name = configuration.session_io.dataset_name
 
     # Resolves all cindra directories and output paths upfront. These are cheap path operations needed for every
@@ -432,9 +477,6 @@ def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
 def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
     """Finds and loads acquisition parameters from the data directory.
 
-    Searches for the preferred 'cindra_parameters.json' first, then falls back to the legacy
-    'suite2p_parameters.json'.
-
     Args:
         data_path: The root directory to search for the acquisition parameters file.
 
@@ -446,11 +488,7 @@ def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
         ValueError: If the data_path is not a directory, or if required fields are missing from the JSON file.
     """
     data_directory = find_data_directory(data_path)
-
-    # Tries the preferred filename first, then falls back to the legacy filename.
-    parameters_path = data_directory / _PREFERRED_PARAMETERS_FILENAME
-    if not parameters_path.exists():
-        parameters_path = data_directory / _LEGACY_PARAMETERS_FILENAME
+    parameters_path = data_directory / _PARAMETERS_FILENAME
 
     message = f"Found acquisition parameters at: {parameters_path}."
     console.echo(message=message, level=LogLevel.SUCCESS)
@@ -458,7 +496,7 @@ def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
     return _load_acquisition_parameters(json_path=parameters_path)
 
 
-def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
+def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
     """Extracts the first component from the end of each input path that uniquely identifies each path globally.
 
     Notes:

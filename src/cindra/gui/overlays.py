@@ -268,7 +268,7 @@ def init_roi_maps(
 
         text_item = pg.TextItem(label_text, color=ROI_STYLE.roi_text_color, anchor=(0.5, 0.5))
         text_item.setPos(centroid[1], centroid[0])
-        text_item.setFont(QtGui.QFont("Times", ROI_STYLE.roi_text_size, QtGui.QFont.Weight.Bold.value))
+        text_item.setFont(QtGui.QFont(ROI_STYLE.roi_text_font_family, ROI_STYLE.roi_text_size, QtGui.QFont.Weight.Bold.value))
         text_labels.append(text_item)
 
     text_labels.reverse()
