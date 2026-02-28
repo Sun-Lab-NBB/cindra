@@ -9,7 +9,7 @@ from natsort import natsorted
 from ataraxis_base_utilities import console, ensure_directory_exists
 
 from .multi_day_data import MultiDayRuntimeData
-from .single_day_data import SingleDayRuntimeData
+from .single_day_data import CombinedData, SingleDayRuntimeData
 from .multi_day_configuration import MultiDayConfiguration
 from .single_day_configuration import AcquisitionParameters, SingleDayConfiguration
 
@@ -40,6 +40,8 @@ def _load_single_day_runtime(plane_directory: Path) -> SingleDayRuntimeData:
         # Reloads the runtime from the corrected YAML so that arrays are resolved against the new paths.
         runtime = SingleDayRuntimeData.load(output_path=plane_directory)
 
+    # Memory-maps all arrays after YAML deserialization (and optional relocation).
+    runtime.memory_map_arrays()
     return runtime
 
 
@@ -174,6 +176,21 @@ def _relocate_runtime_paths(
         runtime.io.dataset_output_paths = tuple(relocated_paths)
 
 
+def _load_multiday_data(runtime: MultiDayRuntimeData) -> None:
+    """Memory-maps all multi-day arrays and CombinedData onto a deserialized MultiDayRuntimeData instance.
+
+    Args:
+        runtime: A MultiDayRuntimeData instance that has been deserialized from YAML but has not had arrays or
+            CombinedData loaded yet.
+    """
+    runtime.memory_map_arrays()
+    if runtime.combined_data is None and runtime.io.data_path is not None:
+        combined = CombinedData.load(root_path=runtime.io.data_path)
+        combined.detection.memory_map_arrays(runtime.io.data_path)
+        combined.extraction.memory_map_arrays(runtime.io.data_path)
+        runtime.combined_data = combined
+
+
 @dataclass
 class RuntimeContext:
     """Combines configuration, acquisition parameters, and runtime data used in the single-day processing pipeline.
@@ -200,9 +217,9 @@ class RuntimeContext:
     def save_shared(self) -> None:
         """Saves shared configuration and acquisition parameters to the root output directory.
 
-        This method derives the root path from self.configuration.file_io.output_path and creates the cindra subdirectory
-        if it does not exist. It should be called once at pipeline initialization to save the static data shared
-        across all planes.
+        This method derives the root path from self.configuration.file_io.output_path and creates the cindra
+        subdirectory if it does not exist. It should be called once at pipeline initialization to save the static data
+        shared across all planes.
 
         Raises:
             ValueError: If output_path is not configured in the configuration.
@@ -467,8 +484,7 @@ class MultiDayRuntimeContext:
                         if plane_dir.is_dir() and (plane_dir / "runtime_data.yaml").exists():
                             _load_single_day_runtime(plane_directory=plane_dir)
 
-            # Reloads the entry runtime from the corrected YAML so that arrays are resolved against the new paths.
-            # This will fail if the single-day data is unavailable, as CombinedData is required.
+            # Reloads the entry runtime from the corrected YAML so that paths are resolved against the new location.
             entry_runtime = MultiDayRuntimeData.load(output_path=resolved_output_path)
             output_paths = entry_runtime.io.dataset_output_paths
 
@@ -482,6 +498,9 @@ class MultiDayRuntimeContext:
             console.error(message=message, error=FileNotFoundError)
         configuration = MultiDayConfiguration.load(file_path=config_path)
 
+        # Eagerly loads arrays and CombinedData onto the entry runtime before returning it.
+        _load_multiday_data(entry_runtime)
+
         if session_index == -1:
             # Loads all sessions. Reuses the already-loaded entry runtime to avoid redundant I/O.
             contexts: list[MultiDayRuntimeContext] = []
@@ -490,6 +509,7 @@ class MultiDayRuntimeContext:
                     contexts.append(cls(configuration=configuration, runtime=entry_runtime))
                 else:
                     runtime = MultiDayRuntimeData.load(output_path=output_path)
+                    _load_multiday_data(runtime)
                     contexts.append(cls(configuration=configuration, runtime=runtime))
             return contexts
 
@@ -507,4 +527,5 @@ class MultiDayRuntimeContext:
             return cls(configuration=configuration, runtime=entry_runtime)
 
         runtime = MultiDayRuntimeData.load(output_path=target_path)
+        _load_multiday_data(runtime)
         return cls(configuration=configuration, runtime=runtime)

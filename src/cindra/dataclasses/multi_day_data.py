@@ -8,11 +8,11 @@ from dataclasses import field, dataclass
 
 import numpy as np
 from numpy.typing import NDArray  # noqa: TC002 - needed at runtime for dacite deserialization
-from ataraxis_base_utilities import console, ensure_directory_exists
+from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from .version import version, python_version
-from .single_day_data import ROIMask, CombinedData, ExtractionData
+from .single_day_data import ROIMask, CombinedData, ExtractionData, is_memory_mapped
 
 
 @dataclass
@@ -141,32 +141,47 @@ class MultiDayRegistrationData:
         ensure_directory_exists(registration_directory)
 
         # Saves deformation fields.
-        if self.deform_field_y is not None:
+        if self.deform_field_y is not None and not is_memory_mapped(self.deform_field_y):
             np.save(registration_directory / "deform_field_y.npy", self.deform_field_y)
-        if self.deform_field_x is not None:
+        if self.deform_field_x is not None and not is_memory_mapped(self.deform_field_x):
             np.save(registration_directory / "deform_field_x.npy", self.deform_field_x)
 
         # Saves channel 1 transformed images.
-        if self.transformed_mean_image is not None:
+        if self.transformed_mean_image is not None and not is_memory_mapped(self.transformed_mean_image):
             np.save(registration_directory / "transformed_mean_image.npy", self.transformed_mean_image)
-        if self.transformed_enhanced_mean_image is not None:
+        if (
+            self.transformed_enhanced_mean_image is not None
+            and not is_memory_mapped(self.transformed_enhanced_mean_image)
+        ):
             np.save(
                 registration_directory / "transformed_enhanced_mean_image.npy", self.transformed_enhanced_mean_image
             )
-        if self.transformed_maximum_projection is not None:
+        if (
+            self.transformed_maximum_projection is not None
+            and not is_memory_mapped(self.transformed_maximum_projection)
+        ):
             np.save(registration_directory / "transformed_maximum_projection.npy", self.transformed_maximum_projection)
 
         # Saves channel 2 transformed images.
-        if self.transformed_mean_image_channel_2 is not None:
+        if (
+            self.transformed_mean_image_channel_2 is not None
+            and not is_memory_mapped(self.transformed_mean_image_channel_2)
+        ):
             np.save(
                 registration_directory / "transformed_mean_image_channel_2.npy", self.transformed_mean_image_channel_2
             )
-        if self.transformed_enhanced_mean_image_channel_2 is not None:
+        if (
+            self.transformed_enhanced_mean_image_channel_2 is not None
+            and not is_memory_mapped(self.transformed_enhanced_mean_image_channel_2)
+        ):
             np.save(
                 registration_directory / "transformed_enhanced_mean_image_channel_2.npy",
                 self.transformed_enhanced_mean_image_channel_2,
             )
-        if self.transformed_maximum_projection_channel_2 is not None:
+        if (
+            self.transformed_maximum_projection_channel_2 is not None
+            and not is_memory_mapped(self.transformed_maximum_projection_channel_2)
+        ):
             np.save(
                 registration_directory / "transformed_maximum_projection_channel_2.npy",
                 self.transformed_maximum_projection_channel_2,
@@ -234,6 +249,65 @@ class MultiDayRegistrationData:
             self.deformed_cell_masks = ROIMask.load_list(masks_path)
 
         # Loads channel 2 deformed cell masks (ROIMask .npz).
+        masks_path_channel_2 = output_path / "registration_deformed_masks_channel_2.npz"
+        if self.deformed_cell_masks_channel_2 is None and masks_path_channel_2.exists():
+            self.deformed_cell_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
+
+    def memory_map_arrays(self, output_path: Path) -> None:
+        """Memory-maps registration arrays from individual .npy files in ``r+`` mode.
+
+        This method mirrors load_arrays() but uses memory mapping for .npy files instead of eager loading.
+        ROIMask .npz files are still eagerly loaded because NumPy does not support memory mapping for .npz archives.
+
+        Args:
+            output_path: The directory containing the ``registration_arrays/`` subdirectory.
+        """
+        registration_directory = output_path / "registration_arrays"
+
+        # Memory-maps deformation fields.
+        if self.deform_field_y is None:
+            path = registration_directory / "deform_field_y.npy"
+            if path.exists():
+                self.deform_field_y = np.load(path, mmap_mode="r+")
+        if self.deform_field_x is None:
+            path = registration_directory / "deform_field_x.npy"
+            if path.exists():
+                self.deform_field_x = np.load(path, mmap_mode="r+")
+
+        # Memory-maps channel 1 transformed images.
+        if self.transformed_mean_image is None:
+            path = registration_directory / "transformed_mean_image.npy"
+            if path.exists():
+                self.transformed_mean_image = np.load(path, mmap_mode="r+")
+        if self.transformed_enhanced_mean_image is None:
+            path = registration_directory / "transformed_enhanced_mean_image.npy"
+            if path.exists():
+                self.transformed_enhanced_mean_image = np.load(path, mmap_mode="r+")
+        if self.transformed_maximum_projection is None:
+            path = registration_directory / "transformed_maximum_projection.npy"
+            if path.exists():
+                self.transformed_maximum_projection = np.load(path, mmap_mode="r+")
+
+        # Memory-maps channel 2 transformed images.
+        if self.transformed_mean_image_channel_2 is None:
+            path = registration_directory / "transformed_mean_image_channel_2.npy"
+            if path.exists():
+                self.transformed_mean_image_channel_2 = np.load(path, mmap_mode="r+")
+        if self.transformed_enhanced_mean_image_channel_2 is None:
+            path = registration_directory / "transformed_enhanced_mean_image_channel_2.npy"
+            if path.exists():
+                self.transformed_enhanced_mean_image_channel_2 = np.load(path, mmap_mode="r+")
+        if self.transformed_maximum_projection_channel_2 is None:
+            path = registration_directory / "transformed_maximum_projection_channel_2.npy"
+            if path.exists():
+                self.transformed_maximum_projection_channel_2 = np.load(path, mmap_mode="r+")
+
+        # Eagerly loads channel 1 deformed cell masks (ROIMask .npz; cannot be memory-mapped).
+        masks_path = output_path / "registration_deformed_masks.npz"
+        if self.deformed_cell_masks is None and masks_path.exists():
+            self.deformed_cell_masks = ROIMask.load_list(masks_path)
+
+        # Eagerly loads channel 2 deformed cell masks (ROIMask .npz; cannot be memory-mapped).
         masks_path_channel_2 = output_path / "registration_deformed_masks_channel_2.npz"
         if self.deformed_cell_masks_channel_2 is None and masks_path_channel_2.exists():
             self.deformed_cell_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
@@ -342,6 +416,17 @@ class MultiDayTrackingData:
         if self.template_masks_channel_2 is None and masks_path_channel_2.exists():
             self.template_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
 
+    def memory_map_arrays(self, output_path: Path) -> None:
+        """Loads template mask arrays from .npz files into this instance.
+
+        This method is identical to load_arrays() because template masks are stored as .npz archives, which do not
+        support memory mapping. It exists for API consistency with sibling dataclasses.
+
+        Args:
+            output_path: The directory containing the tracking data files.
+        """
+        self.load_arrays(output_path)
+
 
 @dataclass
 class MultiDayRuntimeData(YamlConfig):
@@ -370,34 +455,38 @@ class MultiDayRuntimeData(YamlConfig):
     """The combined single-day processing data for this session, loaded from the session directory. This field is not
     serialized to YAML and is loaded on-demand from the single-day pipeline outputs."""
 
-    def __post_init__(self) -> None:
-        """Loads arrays from existing output files."""
-        # Loads arrays from each child dataclass if output_path is set.
+    def load_arrays(self) -> None:
+        """Eagerly loads all multi-day NumPy arrays from disk into memory.
+
+        This is a convenience method that eagerly loads registration, tracking, and extraction arrays. CombinedData
+        (single-day data) is NOT loaded by this method and must be loaded separately by the caller. Use the individual
+        ``load_arrays()`` / ``memory_map_arrays()`` methods on each child dataclass for fine-grained control over
+        which arrays are loaded and how.
+        """
         if self.output_path is not None:
             self.registration.load_arrays(self.output_path)
             self.tracking.load_arrays(self.output_path)
             self.extraction.load_arrays(self.output_path)
 
-        # Loads CombinedData from the single-day data path if not already set. Multi-day functionality requires
-        # single-day data to be available, so this raises an error if the data cannot be loaded.
-        if self.combined_data is None and self.io.data_path is not None:
-            combined_metadata_path = self.io.data_path / "combined_metadata.npz"
-            if not combined_metadata_path.exists():
-                message = (
-                    f"Unable to load multi-day runtime data. The single-day combined_metadata.npz file does not exist "
-                    f"at the expected path: {combined_metadata_path}. Multi-day processing requires single-day data to "
-                    f"be available. Ensure the single-day pipeline completed successfully and the data has not been "
-                    f"moved or deleted."
-                )
-                console.error(message=message, error=FileNotFoundError)
-            self.combined_data = CombinedData.load(root_path=self.io.data_path)
+    def memory_map_arrays(self) -> None:
+        """Memory-maps all multi-day NumPy arrays from disk in ``r+`` mode.
+
+        This is a convenience method that memory-maps registration, tracking, and extraction arrays. CombinedData
+        (single-day data) is NOT loaded by this method and must be loaded separately by the caller. Use the individual
+        ``load_arrays()`` / ``memory_map_arrays()`` methods on each child dataclass for fine-grained control over
+        which arrays are loaded and how.
+        """
+        if self.output_path is not None:
+            self.registration.memory_map_arrays(self.output_path)
+            self.tracking.memory_map_arrays(self.output_path)
+            self.extraction.memory_map_arrays(self.output_path)
 
     def save(self, output_path: Path) -> None:
         """Saves the runtime data to a YAML file and arrays to .npz/.npy files.
 
         Notes:
-            The combined_data field is NOT saved since it references immutable single-day outputs. It is reloaded
-            from io.data_path during deserialization via __post_init__.
+            The combined_data field is NOT saved since it references immutable single-day outputs. It must be loaded
+            separately by the caller after deserialization.
 
         Args:
             output_path: The directory where to save the multiday_runtime_data.yaml file and array files.
@@ -410,9 +499,14 @@ class MultiDayRuntimeData(YamlConfig):
         self.tracking.save_arrays(output_path)
         self.extraction.save_arrays(output_path)
 
-        # Creates a deep copy for YAML serialization. The deep copy is still needed because array fields must be
-        # nulled for YAML serialization while keeping the originals intact in memory.
-        yaml_copy = copy.deepcopy(self)
+        # Creates a shallow copy for YAML serialization. Child dataclasses are shallow-copied individually so that
+        # prepare_for_saving() nulls array fields on the copies without affecting the originals in memory.
+        yaml_copy = copy.copy(self)
+        yaml_copy.registration = copy.copy(self.registration)
+        yaml_copy.tracking = copy.copy(self.tracking)
+        yaml_copy.extraction = copy.copy(self.extraction)
+        yaml_copy.io = copy.copy(self.io)
+        yaml_copy.timing = copy.copy(self.timing)
 
         # Nulls array fields in child dataclasses for YAML serialization.
         yaml_copy.registration.prepare_for_saving()
@@ -428,13 +522,18 @@ class MultiDayRuntimeData(YamlConfig):
 
     @classmethod
     def load(cls, output_path: Path) -> MultiDayRuntimeData:
-        """Loads runtime data from a YAML file and associated array files.
+        """Deserializes runtime data from a YAML file without loading any NumPy arrays or CombinedData.
+
+        After calling this method, multi-day arrays can be loaded using the ``load_arrays()`` or
+        ``memory_map_arrays()`` convenience methods, or individually per-child dataclass. CombinedData must be loaded
+        separately by the caller (e.g., ``runtime.combined_data = CombinedData.load(...)``).
 
         Args:
             output_path: The directory containing the multiday_runtime_data.yaml file.
 
         Returns:
-            A MultiDayRuntimeData instance with all data loaded, including arrays.
+            A MultiDayRuntimeData instance with all scalar fields deserialized. NumPy array fields and combined_data
+            remain None until explicitly loaded.
         """
         file_path = output_path / "multiday_runtime_data.yaml"
         return cls.from_yaml(file_path=file_path)

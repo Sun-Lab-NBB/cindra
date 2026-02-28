@@ -378,7 +378,8 @@ def _execute_single_day_job(
             if not isinstance(contexts, list):
                 contexts = [contexts]
             for context in contexts:
-                context.runtime.load_results()
+                if context.runtime.output_path is not None:
+                    context.runtime.extraction.memory_map_results(context.runtime.output_path)
             save_combined_data(contexts=contexts)
 
         else:

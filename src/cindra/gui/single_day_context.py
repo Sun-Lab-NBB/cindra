@@ -477,6 +477,8 @@ class SingleDayViewerData:
             contexts = [contexts]
 
         combined = CombinedData.load(root_path=root_path)
+        combined.detection.load_arrays(root_path)
+        combined.extraction.load_arrays(root_path)
         return cls(_contexts=contexts, _combined=combined, _view_index=-1)
 
     @classmethod
@@ -496,6 +498,8 @@ class SingleDayViewerData:
         if not isinstance(contexts, list):
             contexts = [contexts]
         combined = CombinedData.load(root_path=root_path)
+        combined.detection.load_arrays(root_path)
+        combined.extraction.load_arrays(root_path)
         return cls(_contexts=contexts, _combined=combined, _view_index=0)
 
     @classmethod
