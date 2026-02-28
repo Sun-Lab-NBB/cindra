@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from pathlib import Path
-from dataclasses import dataclass
 
 import numpy as np
 from PySide6 import QtGui, QtCore
@@ -24,57 +23,12 @@ from PySide6.QtWidgets import (
     QButtonGroup,
 )
 
+from .styles import STYLE, BINARY_STYLE
+from .constants import BINARY_CONFIG
 from .single_day_context import SingleDayViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-
-
-@dataclass(frozen=True, slots=True)
-class _BinaryPlayerStyle:
-    """Encapsulates visual and behavioral constants for the BinaryPlayer window."""
-
-    white_label_stylesheet: str = "color: white;"
-    """Stylesheet for white label text on a dark background."""
-
-    scatter_point_size: int = 10
-    """Marker size in pixels for red dot overlays on shift and nonrigid plots."""
-
-    icon_size: int = 30
-    """Dimension in pixels for media control button icons."""
-
-    playback_speed_multiplier: int = 5
-    """Factor by which the real-time frame period is divided to compute the playback timer interval."""
-
-    subsample_frame_count: int = 100
-    """Number of evenly-spaced frames subsampled for dynamic range estimation."""
-
-    min_frame_delta: int = 5
-    """Minimum frame increment for arrow key navigation."""
-
-    frame_delta_divisor: int = 200
-    """Divisor for computing frame slider step size from total frame count."""
-
-    display_range_low_sigma: float = 2.0
-    """Standard deviations below mean for display range lower bound."""
-
-    display_range_high_sigma: float = 5.0
-    """Standard deviations above mean for display range upper bound."""
-
-    plot_title_size: str = "14pt"
-    """Font size for plot titles above the registration offset plots."""
-
-    axis_label_size: str = "12pt"
-    """Font size for axis labels on the registration offset plots."""
-
-    legend_label_size: str = "12pt"
-    """Font size for legend entries on the registration offset plots."""
-
-    legend_headroom: float = 0.25
-    """Fraction of the y-axis data range added as top padding so legends never overlap traces."""
-
-    axis_fixed_width: int = 50
-    """Fixed pixel width for the y-axis so the plot area stays stable when tick label digit counts change."""
 
 
 class BinaryPlayer(QMainWindow):
@@ -109,9 +63,6 @@ class BinaryPlayer(QMainWindow):
         _update_timer: Timer driving frame advancement during playback.
     """
 
-    _style: _BinaryPlayerStyle = _BinaryPlayerStyle()
-    """Frozen style constants for the binary player window."""
-
     # Notifies listeners when the user selects a different imaging plane from the plane selector.
     plane_changed = QtCore.Signal(int)
 
@@ -142,7 +93,7 @@ class BinaryPlayer(QMainWindow):
         toolbar = QHBoxLayout()
 
         self._movie_label: QLabel = QLabel("Current Path: (none)")
-        self._movie_label.setStyleSheet(self._style.white_label_stylesheet)
+        self._movie_label.setStyleSheet(STYLE.white_label)
         toolbar.addWidget(self._movie_label)
 
         load_recording_button = QPushButton("Load New Recording")
@@ -153,7 +104,7 @@ class BinaryPlayer(QMainWindow):
 
         # Groups the plane label and dropdown tightly so there is no gap between them.
         plane_label = QLabel("Plane:")
-        plane_label.setStyleSheet(self._style.white_label_stylesheet)
+        plane_label.setStyleSheet(STYLE.white_label)
         self._plane_selector: QComboBox = QComboBox(self)
         self._plane_selector.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self._plane_selector.setEnabled(False)
@@ -191,12 +142,12 @@ class BinaryPlayer(QMainWindow):
         self._shift_plot = self._graphics_widget.addPlot(name="plot_shift", row=1, col=0, colspan=2)
         self._shift_plot.setMouseEnabled(x=True, y=False)
         self._shift_plot.setMenuEnabled(False)
-        self._shift_plot.setTitle("Rigid Registration Offsets", size=self._style.plot_title_size, bold=True)
-        self._shift_plot.setLabel("left", "Shift (px)", **{"font-size": self._style.axis_label_size})
-        self._shift_plot.setLabel("bottom", "Frame", **{"font-size": self._style.axis_label_size})
-        self._shift_plot.getAxis("bottom").setHeight(self._style.axis_fixed_width)
+        self._shift_plot.setTitle("Rigid Registration Offsets", size=STYLE.plot_title_size, bold=True)
+        self._shift_plot.setLabel("left", "Shift (px)", **{"font-size": STYLE.axis_label_size})
+        self._shift_plot.setLabel("bottom", "Frame", **{"font-size": STYLE.axis_label_size})
+        self._shift_plot.getAxis("bottom").setHeight(BINARY_STYLE.axis_fixed_width)
         self._shift_plot.addLegend(
-            horSpacing=20, colCount=2, offset=(-10, 1), labelTextSize=self._style.legend_label_size
+            horSpacing=20, colCount=2, offset=(-10, 1), labelTextSize=STYLE.legend_label_size
         )
         self._shift_scatter: pg.ScatterPlotItem = pg.ScatterPlotItem()
         self._shift_scatter.setData([0, 0], [0, 0])
@@ -208,7 +159,7 @@ class BinaryPlayer(QMainWindow):
 
         # Row 2: Current frame label.
         self._frame_number_label: QLabel = QLabel("Current frame: 0")
-        self._frame_number_label.setStyleSheet(self._style.white_label_stylesheet)
+        self._frame_number_label.setStyleSheet(STYLE.white_label)
         self._layout.addWidget(self._frame_number_label, 2, 0, 1, 6)
 
         # Row 3: Playback controls and frame slider.
@@ -238,7 +189,7 @@ class BinaryPlayer(QMainWindow):
 
         # Fixes the y-axis width so the plot area does not shift when tick label digit counts change
         # across planes (e.g. single-digit vs double-digit offsets).
-        self._shift_plot.getAxis("left").setWidth(self._style.axis_fixed_width)
+        self._shift_plot.getAxis("left").setWidth(BINARY_STYLE.axis_fixed_width)
 
         # Populates the plane selector without triggering _on_plane_changed yet. Signals are blocked so that
         # clearing and re-adding items does not fire redundant plane-switch callbacks.
@@ -282,7 +233,7 @@ class BinaryPlayer(QMainWindow):
 
     def _create_buttons(self) -> None:
         """Creates and lays out playback control buttons for the player window."""
-        icon_size = QtCore.QSize(self._style.icon_size, self._style.icon_size)
+        icon_size = QtCore.QSize(STYLE.icon_size, STYLE.icon_size)
 
         # Playback controls. Play and pause are grouped exclusively so only one can be active at a time.
         self._play_button: QToolButton = QToolButton()
@@ -362,11 +313,11 @@ class BinaryPlayer(QMainWindow):
 
         # Computes dynamic range from subsampled frames.
         plane_binary = self.data.channel_1_binary
-        frames = plane_binary.subsample_movie(sample_count=self._style.subsample_frame_count)
+        frames = plane_binary.subsample_movie(sample_count=BINARY_CONFIG.subsample_frame_count)
         frame_mean = np.float32(frames.mean())
         frame_std = np.float32(frames.std())
         self._display_range = frame_mean + frame_std * np.array(
-            [-self._style.display_range_low_sigma, self._style.display_range_high_sigma], dtype=np.float32
+            [-BINARY_CONFIG.display_range_low_sigma, BINARY_CONFIG.display_range_high_sigma], dtype=np.float32
         )
 
         self._movie_label.setText(f"Current Path: {self.data.recording_label}")
@@ -377,8 +328,8 @@ class BinaryPlayer(QMainWindow):
         # Configures the frame display slider.
         frame_count = self.data.frame_count
         last_frame = frame_count - 1
-        self._time_step = 1.0 / self.data.sampling_rate * 1000 / self._style.playback_speed_multiplier
-        self._frame_delta = max(self._style.min_frame_delta, int(frame_count / self._style.frame_delta_divisor))
+        self._time_step = 1.0 / self.data.sampling_rate * 1000 / BINARY_CONFIG.playback_speed_multiplier
+        self._frame_delta = max(BINARY_CONFIG.min_frame_delta, int(frame_count / BINARY_CONFIG.frame_delta_divisor))
         self._frame_slider.setSingleStep(self._frame_delta)
         if frame_count > 0:
             self._update_frame_slider()
@@ -395,7 +346,7 @@ class BinaryPlayer(QMainWindow):
         if shift_min == shift_max:
             shift_min -= 1
             shift_max += 1
-        shift_max += int((shift_max - shift_min) * self._style.legend_headroom)
+        shift_max += int((shift_max - shift_min) * STYLE.legend_headroom)
         self._shift_plot.setLimits(xMin=0, xMax=last_frame)
         self._shift_plot.setRange(xRange=(0, last_frame), yRange=(shift_min, shift_max), padding=0.0)
         self._shift_scatter = pg.ScatterPlotItem()
@@ -403,7 +354,7 @@ class BinaryPlayer(QMainWindow):
         self._shift_scatter.setData(
             [0, 0],
             [int(rigid_y[0]), int(rigid_x[0])],
-            size=self._style.scatter_point_size,
+            size=STYLE.scatter_point_size,
             brush=pg.mkBrush(255, 0, 0),
         )
 
@@ -445,7 +396,7 @@ class BinaryPlayer(QMainWindow):
         self._shift_scatter.setData(
             [self._current_frame, self._current_frame],
             [int(rigid_y[self._current_frame]), int(rigid_x[self._current_frame])],
-            size=self._style.scatter_point_size,
+            size=STYLE.scatter_point_size,
             brush=pg.mkBrush(255, 0, 0),
         )
 

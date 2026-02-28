@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from dataclasses import dataclass
 
 import numpy as np
 from PySide6 import QtGui, QtCore
@@ -12,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QSlider,
     QWidget,
+    QCheckBox,
     QComboBox,
     QGroupBox,
     QLineEdit,
@@ -25,30 +25,13 @@ from PySide6.QtWidgets import (
 )
 from matplotlib.colors import hsv_to_rgb
 
-from .multi_day_context import MaskLayer, BackgroundImage, CoordinateSpace, TrackingViewerData
+from .styles import STYLE, TRACKING_STYLE
+from .widgets import TraceBox, plot_trace
+from .constants import CONFIG, TRACKING_CONFIG, MaskLayer, BackgroundView, CoordinateSpace
+from .multi_day_context import TrackingViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-
-
-@dataclass(frozen=True, slots=True)
-class _TrackingViewerStyle:
-    """Encapsulates visual and behavioral constants for the TrackingViewer window."""
-
-    cycle_interval: int = 500
-    """The millisecond interval for auto-cycling between recordings."""
-
-    default_mask_opacity: int = 127
-    """The default mask overlay opacity (0-255 uint8 range)."""
-
-    lower_percentile: float = 1.0
-    """The lower percentile value for normalizing background images."""
-
-    upper_percentile: float = 99.0
-    """The upper percentile value for normalizing background images."""
-
-    roi_edit_width: int = 50
-    """The fixed pixel width of the ROI index input field."""
 
 
 class TrackingViewer(QMainWindow):
@@ -61,9 +44,6 @@ class TrackingViewer(QMainWindow):
     Args:
         data: The preloaded tracking data to display on startup.
     """
-
-    _style: _TrackingViewerStyle = _TrackingViewerStyle()
-    """Frozen style constants for the tracking viewer window."""
 
     def __init__(self, data: TrackingViewerData) -> None:
         super().__init__()
@@ -93,12 +73,20 @@ class TrackingViewer(QMainWindow):
         self._selection_was_template: bool = False
         self._selection_recording_index: int = -1
 
+        # Trace display state.
+        self._trace_activity_mode: int = CONFIG.default_activity_mode
+        self._trace_deconvolved_visible: bool = True
+        self._trace_neuropil_visible: bool = True
+        self._trace_raw_visible: bool = True
+        self._trace_scale_factor: float = CONFIG.default_scale_factor
+        self._trace_all_recordings: bool = False
+
         # Builds the UI layout.
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
 
-        # Image display panel (pyqtgraph).
+        # Image + trace display panel (pyqtgraph).
         self._graphics_widget = pg.GraphicsLayoutWidget()
         # noinspection PyUnresolvedReferences
         self._view_box: pg.ViewBox = self._graphics_widget.addViewBox(row=0, col=0)
@@ -106,6 +94,15 @@ class TrackingViewer(QMainWindow):
         self._view_box.invertY(True)
         self._image_item: pg.ImageItem = pg.ImageItem()
         self._view_box.addItem(self._image_item)
+        self._graphics_widget.ci.layout.setRowStretchFactor(0, 2)
+
+        # Trace panel below the image.
+        self._trace_box = TraceBox()
+        self._trace_box.setMouseEnabled(x=True, y=False)
+        self._trace_box.enableAutoRange(x=True, y=True)
+        self._graphics_widget.addItem(self._trace_box, row=1, col=0)
+        self._graphics_widget.ci.layout.setRowStretchFactor(1, 1)
+
         main_layout.addWidget(self._graphics_widget, stretch=3)
         # noinspection PyUnresolvedReferences
         self._graphics_widget.scene().sigMouseClicked.connect(self._on_image_clicked)
@@ -213,10 +210,10 @@ class TrackingViewer(QMainWindow):
         background_layout = QVBoxLayout(background_group)
 
         self._background_combo = QComboBox()
-        self._background_combo.addItem("Mean Image", userData=BackgroundImage.MEAN)
-        self._background_combo.addItem("Enhanced Mean", userData=BackgroundImage.ENHANCED_MEAN)
-        self._background_combo.addItem("Max Projection", userData=BackgroundImage.MAX_PROJECTION)
-        self._background_combo.addItem("Correlation Map", userData=BackgroundImage.CORRELATION_MAP)
+        self._background_combo.addItem("Mean Image", userData=BackgroundView.MEAN_IMAGE)
+        self._background_combo.addItem("Enhanced Mean", userData=BackgroundView.ENHANCED_MEAN_IMAGE)
+        self._background_combo.addItem("Max Projection", userData=BackgroundView.MAXIMUM_PROJECTION)
+        self._background_combo.addItem("Correlation Map", userData=BackgroundView.CORRELATION_MAP)
         self._background_combo.currentIndexChanged.connect(self._refresh_display)
         background_layout.addWidget(self._background_combo)
 
@@ -250,7 +247,7 @@ class TrackingViewer(QMainWindow):
         opacity_row.addWidget(QLabel("Opacity:"))
         self._opacity_slider = QSlider(QtCore.Qt.Orientation.Horizontal)
         self._opacity_slider.setRange(0, 255)
-        self._opacity_slider.setValue(self._style.default_mask_opacity)
+        self._opacity_slider.setValue(TRACKING_STYLE.default_mask_opacity)
         self._opacity_slider.setToolTip("Adjust mask opacity. Use the mouse wheel over the image to change quickly.")
         self._opacity_slider.valueChanged.connect(self._on_opacity_changed)
         opacity_row.addWidget(self._opacity_slider)
@@ -279,7 +276,7 @@ class TrackingViewer(QMainWindow):
         input_row = QHBoxLayout()
         input_row.addWidget(QLabel("ROI:"))
         self._roi_edit = QLineEdit()
-        self._roi_edit.setFixedWidth(self._style.roi_edit_width)
+        self._roi_edit.setFixedWidth(TRACKING_STYLE.roi_edit_width)
         self._roi_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._roi_edit.setReadOnly(True)
         self._roi_edit.setToolTip("Displays the index of the last clicked ROI.")
@@ -298,6 +295,57 @@ class TrackingViewer(QMainWindow):
         roi_layout.addLayout(button_row)
 
         layout.addWidget(roi_group)
+
+        # Trace display group.
+        trace_group = QGroupBox("Trace Display")
+        trace_layout = QVBoxLayout(trace_group)
+
+        activity_row = QHBoxLayout()
+        activity_row.addWidget(QLabel("Activity:"))
+        self._trace_activity_combo = QComboBox()
+        self._trace_activity_combo.addItems(["F", "Fneu", "F - 0.7*Fneu", "deconvolved"])
+        self._trace_activity_combo.setCurrentIndex(CONFIG.default_activity_mode)
+        self._trace_activity_combo.currentIndexChanged.connect(self._on_trace_activity_changed)
+        activity_row.addWidget(self._trace_activity_combo)
+        trace_layout.addLayout(activity_row)
+
+        checkbox_row = QHBoxLayout()
+        self._trace_deconvolved_checkbox = QCheckBox("deconv")
+        self._trace_deconvolved_checkbox.setChecked(True)
+        self._trace_deconvolved_checkbox.toggled.connect(self._on_trace_visibility_changed)
+        checkbox_row.addWidget(self._trace_deconvolved_checkbox)
+
+        self._trace_neuropil_checkbox = QCheckBox("neuropil")
+        self._trace_neuropil_checkbox.setChecked(True)
+        self._trace_neuropil_checkbox.toggled.connect(self._on_trace_visibility_changed)
+        checkbox_row.addWidget(self._trace_neuropil_checkbox)
+
+        self._trace_raw_checkbox = QCheckBox("raw")
+        self._trace_raw_checkbox.setChecked(True)
+        self._trace_raw_checkbox.toggled.connect(self._on_trace_visibility_changed)
+        checkbox_row.addWidget(self._trace_raw_checkbox)
+        trace_layout.addLayout(checkbox_row)
+
+        scale_row = QHBoxLayout()
+        scale_up = QPushButton("+")
+        scale_up.setMaximumWidth(30)
+        scale_up.clicked.connect(lambda: self._adjust_trace_scale(CONFIG.scale_step))
+        scale_row.addWidget(scale_up)
+        scale_down = QPushButton("-")
+        scale_down.setMaximumWidth(30)
+        scale_down.clicked.connect(lambda: self._adjust_trace_scale(-CONFIG.scale_step))
+        scale_row.addWidget(scale_down)
+
+        self._trace_all_recordings_button = QPushButton("All recordings")
+        self._trace_all_recordings_button.setCheckable(True)
+        self._trace_all_recordings_button.setToolTip(
+            "Show traces from all recordings stacked vertically for the selected ROI."
+        )
+        self._trace_all_recordings_button.toggled.connect(self._on_all_recordings_toggled)
+        scale_row.addWidget(self._trace_all_recordings_button)
+        trace_layout.addLayout(scale_row)
+
+        layout.addWidget(trace_group)
 
         layout.addStretch()
 
@@ -469,6 +517,7 @@ class TrackingViewer(QMainWindow):
             return
         self.data.switch_recording(recording_index=index)
         self._refresh_display()
+        self._refresh_traces()
 
     def _on_opacity_changed(self) -> None:
         """Handles opacity slider changes by re-compositing from cached data.
@@ -525,18 +574,21 @@ class TrackingViewer(QMainWindow):
 
         self._roi_edit.setText(str(roi_index))
         self._composite_and_display()
+        self._refresh_traces()
 
     def _select_all_rois(self) -> None:
         """Resets the selection to show all ROIs."""
         self._selected_rois = None
         self._roi_edit.clear()
         self._composite_and_display()
+        self._refresh_traces()
 
     def _deselect_all_rois(self) -> None:
         """Clears the selection so no ROIs are visible."""
         self._selected_rois = set()
         self._roi_edit.clear()
         self._composite_and_display()
+        self._refresh_traces()
 
     def _previous_recording(self) -> None:
         """Navigates to the previous recording, wrapping around to the last."""
@@ -556,7 +608,7 @@ class TrackingViewer(QMainWindow):
         """Starts automatic recording cycling."""
         self._start_button.setEnabled(False)
         self._stop_button.setEnabled(True)
-        self._auto_cycle_timer.start(self._style.cycle_interval)
+        self._auto_cycle_timer.start(TRACKING_CONFIG.cycle_interval)
 
     def _stop_cycling(self) -> None:
         """Stops automatic recording cycling and re-enables manual navigation."""
@@ -579,8 +631,8 @@ class TrackingViewer(QMainWindow):
         if image is None:
             return np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
 
-        percentile_low = np.percentile(image, self._style.lower_percentile)
-        percentile_high = np.percentile(image, self._style.upper_percentile)
+        percentile_low = np.percentile(image, TRACKING_CONFIG.lower_percentile)
+        percentile_high = np.percentile(image, TRACKING_CONFIG.upper_percentile)
 
         if percentile_high <= percentile_low:
             return np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
@@ -590,3 +642,161 @@ class TrackingViewer(QMainWindow):
         grayscale = (normalized * 255).astype(np.uint8)
 
         return np.stack([grayscale, grayscale, grayscale], axis=-1)
+
+    def _on_trace_activity_changed(self, index: int) -> None:
+        """Handles trace activity mode dropdown changes.
+
+        Args:
+            index: The activity mode index selected.
+        """
+        self._trace_activity_mode = index
+        self._refresh_traces()
+
+    def _on_trace_visibility_changed(self) -> None:
+        """Handles trace visibility checkbox toggles."""
+        self._trace_deconvolved_visible = self._trace_deconvolved_checkbox.isChecked()
+        self._trace_neuropil_visible = self._trace_neuropil_checkbox.isChecked()
+        self._trace_raw_visible = self._trace_raw_checkbox.isChecked()
+        self._refresh_traces()
+
+    def _adjust_trace_scale(self, delta: float) -> None:
+        """Adjusts the vertical scale factor for multi-trace stacking.
+
+        Args:
+            delta: The amount to change the scale factor by.
+        """
+        self._trace_scale_factor = max(CONFIG.min_scale, min(CONFIG.max_scale, self._trace_scale_factor + delta))
+        self._refresh_traces()
+
+    def _on_all_recordings_toggled(self, checked: bool) -> None:
+        """Handles the 'all recordings' toggle button.
+
+        Args:
+            checked: True when stacked all-recordings view is enabled.
+        """
+        self._trace_all_recordings = checked
+        self._refresh_traces()
+
+    def _refresh_traces(self) -> None:
+        """Refreshes the trace panel for the currently selected ROIs.
+
+        In single-recording mode, plots traces from the current recording's extraction data.
+        In all-recordings mode, stacks traces from every recording for the first selected ROI.
+        """
+        if self._trace_all_recordings and self._selected_rois is not None and len(self._selected_rois) == 1:
+            self._refresh_all_recording_traces()
+            return
+
+        if not self.data.has_traces:
+            self._trace_box.clear()
+            return
+
+        cell_fluorescence = self.data.cell_fluorescence
+        neuropil_fluorescence = self.data.neuropil_fluorescence
+        spikes = self.data.spikes
+
+        if cell_fluorescence is None or neuropil_fluorescence is None or spikes is None:
+            self._trace_box.clear()
+            return
+
+        # Determines which ROIs to plot.
+        if self._selected_rois is not None:
+            merge_indices = sorted(self._selected_rois)
+        else:
+            merge_indices = []
+
+        if not merge_indices:
+            self._trace_box.clear()
+            return
+
+        # Guards against out-of-range indices.
+        roi_count = cell_fluorescence.shape[0]
+        merge_indices = [i for i in merge_indices if i < roi_count]
+        if not merge_indices:
+            self._trace_box.clear()
+            return
+
+        frame_indices = np.arange(cell_fluorescence.shape[1], dtype=np.int32)
+        plot_trace(
+            trace_box=self._trace_box,
+            cell_fluorescence=cell_fluorescence,
+            neuropil_fluorescence=neuropil_fluorescence,
+            spikes=spikes,
+            frame_indices=frame_indices,
+            merge_indices=merge_indices,
+            activity_mode=self._trace_activity_mode,
+            traces_visible=self._trace_raw_visible,
+            neuropil_visible=self._trace_neuropil_visible,
+            deconvolved_visible=self._trace_deconvolved_visible,
+            scale_factor=self._trace_scale_factor,
+        )
+
+    def _refresh_all_recording_traces(self) -> None:
+        """Plots traces from all recordings stacked vertically for the first selected ROI.
+
+        Iterates over every recording in the dataset, extracts the selected ROI's trace from each,
+        and plots them stacked with recording-index labels on the y-axis.
+        """
+        self._trace_box.clear()
+        if self._selected_rois is None or len(self._selected_rois) == 0:
+            return
+
+        roi_index = next(iter(self._selected_rois))
+        axis = self._trace_box.getAxis("left")
+        tick_labels: list[tuple[float, str]] = []
+        k_space = 1.0 / self._trace_scale_factor
+        max_frames = 0
+        y_maximum = 0.0
+        stack_position = self.data.recording_count - 1
+
+        for recording_index in range(self.data.recording_count):
+            cell_fluorescence = self.data.cell_fluorescence_for_recording(recording_index)
+            neuropil_fluorescence = self.data.neuropil_fluorescence_for_recording(recording_index)
+            spikes = self.data.spikes_for_recording(recording_index)
+
+            if cell_fluorescence is None or cell_fluorescence.size == 0:
+                stack_position -= 1
+                continue
+            if roi_index >= cell_fluorescence.shape[0]:
+                stack_position -= 1
+                continue
+
+            # Selects trace based on activity mode.
+            if self._trace_activity_mode == 0:
+                trace = cell_fluorescence[roi_index, :]
+            elif self._trace_activity_mode == 1:
+                trace = neuropil_fluorescence[roi_index, :] if neuropil_fluorescence is not None else cell_fluorescence[roi_index, :]
+            elif self._trace_activity_mode == CONFIG.activity_mode_subtracted:
+                nf = neuropil_fluorescence[roi_index, :] if neuropil_fluorescence is not None else np.zeros_like(cell_fluorescence[roi_index, :])
+                trace = cell_fluorescence[roi_index, :] - CONFIG.neuropil_coefficient * nf
+            else:
+                trace = spikes[roi_index, :] if spikes is not None else cell_fluorescence[roi_index, :]
+
+            frame_indices = np.arange(len(trace), dtype=np.int32)
+            max_frames = max(max_frames, len(trace))
+
+            # Normalizes trace to [0, 1].
+            trace_max = float(trace.max())
+            trace_min = float(trace.min())
+            if trace_max > trace_min:
+                normalized = (trace - trace_min) / (trace_max - trace_min)
+            else:
+                normalized = np.zeros_like(trace)
+
+            # Generates a color for this recording.
+            hue = recording_index / max(self.data.recording_count, 1)
+            hsv = np.array([[hue, 1.0, 1.0]])
+            rgb = (255.0 * hsv_to_rgb(hsv)).astype(np.uint8)[0]
+            pen_color = (int(rgb[0]), int(rgb[1]), int(rgb[2]))
+
+            self._trace_box.plot(frame_indices, normalized + stack_position * k_space, pen=pen_color)
+            tick_labels.append((stack_position * k_space + float(normalized.mean()), str(recording_index)))
+            y_maximum = max(y_maximum, stack_position * k_space + 1)
+            stack_position -= 1
+
+        axis.setTicks([tick_labels])
+        self._trace_box.update_range(
+            frame_count=max_frames,
+            y_minimum=0.0,
+            y_maximum=y_maximum if y_maximum > 0 else 1.0,
+        )

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from enum import IntEnum
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
 from ataraxis_base_utilities import console
 
+from .constants import MaskLayer, BackgroundView, CoordinateSpace
 from ..dataclasses import MultiDayRuntimeContext
 
 if TYPE_CHECKING:
@@ -26,50 +26,6 @@ if TYPE_CHECKING:
         MultiDayTrackingData,
         MultiDayRegistrationData,
     )
-
-
-class MaskLayer(IntEnum):
-    """Selects the active ROI mask layer."""
-
-    ORIGINAL = 0
-    """Displays the original ROI masks from single-day extraction in native recording coordinates."""
-
-    DEFORMED = 1
-    """Displays the original ROI masks warped to the shared cross-recording coordinate space via multi-day registration
-    deformation fields."""
-
-    TEMPLATE = 2
-    """Displays the consensus template ROI masks derived from cross-recording clustering, defined in the shared
-    coordinate space."""
-
-    TRACKED = 3
-    """Displays the template ROI masks backward-deformed to each recording's native coordinate space."""
-
-
-class CoordinateSpace(IntEnum):
-    """Selects the coordinate space for reference images."""
-
-    NATIVE = 0
-    """Displays reference images in the original recording coordinate space."""
-
-    TRANSFORMED = 1
-    """Displays reference images warped to align with the cross-recording template coordinate space."""
-
-
-class BackgroundImage(IntEnum):
-    """Selects the background image type displayed behind mask overlays."""
-
-    MEAN = 0
-    """Selects the mean fluorescence image."""
-
-    ENHANCED_MEAN = 1
-    """Selects the contrast-enhanced mean image."""
-
-    MAX_PROJECTION = 2
-    """Selects the maximum intensity projection."""
-
-    CORRELATION_MAP = 3
-    """Selects the pixel correlation map."""
 
 
 @dataclass
@@ -310,6 +266,7 @@ class TrackingViewerData:
                 ctx.runtime.registration.memory_map_arrays(output_path)
                 ctx.runtime.tracking.load_arrays(output_path)
                 ctx.runtime.extraction.load_arrays(output_path)
+                ctx.runtime.extraction.memory_map_results(output_path)
             combined = ctx.runtime.combined_data
             if combined is not None and ctx.runtime.io.data_path is not None:
                 combined.detection.memory_map_arrays(ctx.runtime.io.data_path)
@@ -344,7 +301,7 @@ class TrackingViewerData:
 
     def background_image(
         self,
-        image_type: BackgroundImage,
+        image_type: BackgroundView,
         *,
         coordinate_space: CoordinateSpace = CoordinateSpace.NATIVE,
         channel_2: bool = False,
@@ -392,49 +349,118 @@ class TrackingViewerData:
             console.error(message=message, error=ValueError)
         self._current_recording_index = recording_index
 
-    def _native_background_image(self, image_type: BackgroundImage) -> NDArray[np.float32] | None:
+    def _native_background_image(self, image_type: BackgroundView) -> NDArray[np.float32] | None:
         """Returns the native-space channel 1 background image for the given type."""
-        if image_type == BackgroundImage.MEAN:
+        if image_type == BackgroundView.MEAN_IMAGE:
             return self.mean_image
-        if image_type == BackgroundImage.ENHANCED_MEAN:
+        if image_type == BackgroundView.ENHANCED_MEAN_IMAGE:
             return self.enhanced_mean_image
-        if image_type == BackgroundImage.MAX_PROJECTION:
+        if image_type == BackgroundView.MAXIMUM_PROJECTION:
             return self.maximum_projection
-        if image_type == BackgroundImage.CORRELATION_MAP:
+        if image_type == BackgroundView.CORRELATION_MAP:
             return self.correlation_map
         return None
 
-    def _native_background_image_channel_2(self, image_type: BackgroundImage) -> NDArray[np.float32] | None:
+    def _native_background_image_channel_2(self, image_type: BackgroundView) -> NDArray[np.float32] | None:
         """Returns the native-space channel 2 background image for the given type."""
-        if image_type == BackgroundImage.MEAN:
+        if image_type == BackgroundView.MEAN_IMAGE:
             return self.mean_image_channel_2
-        if image_type == BackgroundImage.ENHANCED_MEAN:
+        if image_type == BackgroundView.ENHANCED_MEAN_IMAGE:
             return self.enhanced_mean_image_channel_2
-        if image_type == BackgroundImage.MAX_PROJECTION:
+        if image_type == BackgroundView.MAXIMUM_PROJECTION:
             return self.maximum_projection_channel_2
-        if image_type == BackgroundImage.CORRELATION_MAP:
+        if image_type == BackgroundView.CORRELATION_MAP:
             return self.correlation_map_channel_2
         return None
 
-    def _transformed_background_image(self, image_type: BackgroundImage) -> NDArray[np.float32] | None:
+    def _transformed_background_image(self, image_type: BackgroundView) -> NDArray[np.float32] | None:
         """Returns the transformed-space channel 1 background image for the given type."""
-        if image_type == BackgroundImage.MEAN:
+        if image_type == BackgroundView.MEAN_IMAGE:
             return self.transformed_mean_image
-        if image_type == BackgroundImage.ENHANCED_MEAN:
+        if image_type == BackgroundView.ENHANCED_MEAN_IMAGE:
             return self.transformed_enhanced_mean_image
-        if image_type == BackgroundImage.MAX_PROJECTION:
+        if image_type == BackgroundView.MAXIMUM_PROJECTION:
             return self.transformed_maximum_projection
         return None
 
-    def _transformed_background_image_channel_2(self, image_type: BackgroundImage) -> NDArray[np.float32] | None:
+    def _transformed_background_image_channel_2(self, image_type: BackgroundView) -> NDArray[np.float32] | None:
         """Returns the transformed-space channel 2 background image for the given type."""
-        if image_type == BackgroundImage.MEAN:
+        if image_type == BackgroundView.MEAN_IMAGE:
             return self.transformed_mean_image_channel_2
-        if image_type == BackgroundImage.ENHANCED_MEAN:
+        if image_type == BackgroundView.ENHANCED_MEAN_IMAGE:
             return self.transformed_enhanced_mean_image_channel_2
-        if image_type == BackgroundImage.MAX_PROJECTION:
+        if image_type == BackgroundView.MAXIMUM_PROJECTION:
             return self.transformed_maximum_projection_channel_2
         return None
+
+    @property
+    def cell_fluorescence(self) -> NDArray[np.float32] | None:
+        """Returns the cell fluorescence array for the current recording's extraction."""
+        return self._current_runtime.extraction.cell_fluorescence
+
+    @property
+    def neuropil_fluorescence(self) -> NDArray[np.float32] | None:
+        """Returns the neuropil fluorescence array for the current recording's extraction."""
+        return self._current_runtime.extraction.neuropil_fluorescence
+
+    @property
+    def spikes(self) -> NDArray[np.float32] | None:
+        """Returns the deconvolved spikes array for the current recording's extraction."""
+        return self._current_runtime.extraction.spikes
+
+    @property
+    def has_traces(self) -> bool:
+        """Returns True if cell fluorescence trace data is available for the current recording."""
+        f = self.cell_fluorescence
+        return f is not None and f.size > 0
+
+    @property
+    def trace_frame_count(self) -> int:
+        """Returns the number of frames in the trace data for the current recording."""
+        f = self.cell_fluorescence
+        if f is None or f.size == 0:
+            return 0
+        return f.shape[1]
+
+    @property
+    def sampling_rate(self) -> float:
+        """Returns the sampling rate from the current recording's combined metadata."""
+        if self._current_combined is not None:
+            return self._current_combined.sampling_rate
+        return 0.0
+
+    def cell_fluorescence_for_recording(self, recording_index: int) -> NDArray[np.float32] | None:
+        """Returns the cell fluorescence array for a specific recording.
+
+        Args:
+            recording_index: The recording index.
+
+        Returns:
+            The cell fluorescence array, or None if unavailable.
+        """
+        return self._contexts[recording_index].runtime.extraction.cell_fluorescence
+
+    def neuropil_fluorescence_for_recording(self, recording_index: int) -> NDArray[np.float32] | None:
+        """Returns the neuropil fluorescence array for a specific recording.
+
+        Args:
+            recording_index: The recording index.
+
+        Returns:
+            The neuropil fluorescence array, or None if unavailable.
+        """
+        return self._contexts[recording_index].runtime.extraction.neuropil_fluorescence
+
+    def spikes_for_recording(self, recording_index: int) -> NDArray[np.float32] | None:
+        """Returns the deconvolved spikes array for a specific recording.
+
+        Args:
+            recording_index: The recording index.
+
+        Returns:
+            The spikes array, or None if unavailable.
+        """
+        return self._contexts[recording_index].runtime.extraction.spikes
 
     @property
     def _current_runtime(self) -> MultiDayRuntimeData:

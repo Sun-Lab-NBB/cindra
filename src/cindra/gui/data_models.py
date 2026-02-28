@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     import numpy as np
     import pyqtgraph as pg  # type: ignore[import-untyped]
     from numpy.typing import NDArray
-    from PySide6.QtWidgets import QLabel, QCheckBox, QComboBox, QLineEdit, QPushButton, QButtonGroup
+    from PySide6.QtWidgets import QLabel, QCheckBox, QComboBox, QLineEdit, QPushButton
 
     from .widgets import RangeSlider
 
@@ -21,13 +21,13 @@ class ColorControls:
     """Holds references to color statistic control widgets.
 
     Attributes:
-        color_buttons: Button group for selecting the active color statistic.
+        color_combo: Dropdown for selecting the active color statistic.
         colormap_chooser: Dropdown for selecting the active colormap.
         classifier_edit: Text input for the classifier probability threshold.
         bin_edit: Text input for the binning size.
     """
 
-    color_buttons: QButtonGroup
+    color_combo: QComboBox
     colormap_chooser: QComboBox
     classifier_edit: QLineEdit
     bin_edit: QLineEdit
@@ -93,14 +93,14 @@ class ViewControls:
     """Holds references to background view panel widgets.
 
     Attributes:
-        view_buttons: Button group for mutually exclusive view selection.
+        view_combo: Dropdown for selecting the active background view.
+        channel_2_button: Checkable push button for toggling channel 2 images.
         range_slider: Dual-handle slider controlling image saturation levels.
-        view_names: Display names for each view mode.
     """
 
-    view_buttons: QButtonGroup
+    view_combo: QComboBox
+    channel_2_button: QPushButton
     range_slider: RangeSlider
-    view_names: list[str] = field(default_factory=lambda: list(CONFIG.view_names))
 
 
 @dataclass
@@ -141,12 +141,12 @@ class SelectionControls:
     """Holds references to cell selection widgets and their mutable state.
 
     Attributes:
-        selection_buttons: Button group with draw/top-n/bottom-n selection modes.
+        selection_combo: Dropdown for selecting the cell selection mode.
         top_count_edit: Text input for the number of top/bottom cells to select.
         top_count: Current top-n/bottom-n count value.
     """
 
-    selection_buttons: QButtonGroup
+    selection_combo: QComboBox
     top_count_edit: QLineEdit
     top_count: int = CONFIG.default_top_n
 
