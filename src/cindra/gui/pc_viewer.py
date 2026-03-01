@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import FONTS, STYLE, COLORS, PC_STYLE
+from .styles import FONTS, STYLE, COLORS, PC_STYLE, PLOT_STYLE
+from .widgets import configure_plot, add_plot_legend
 from .constants import CONFIG, PC_CONFIG
 
 if TYPE_CHECKING:
@@ -104,9 +105,14 @@ class PCViewer(QMainWindow):
         # Configures pixel shift metrics plot. Top content margin provides space for the legend row.
         # noinspection PyUnresolvedReferences
         self._metrics_plot = self._graphics_widget.addPlot(row=0, col=0)
-        self._metrics_plot.setMouseEnabled(x=False, y=False)
-        self._metrics_plot.setMenuEnabled(False)
-        self._metrics_plot.getAxis("left").setWidth(STYLE.axis_fixed_width)
+        configure_plot(
+            self._metrics_plot,
+            mouse_x=False,
+            mouse_y=False,
+            title="PC Registration Shifts",
+            left_label="Shift (px)",
+            bottom_label="PC #",
+        )
 
         # noinspection PyUnresolvedReferences
         self._difference_view_box = self._graphics_widget.addViewBox(
@@ -147,9 +153,14 @@ class PCViewer(QMainWindow):
 
         # noinspection PyUnresolvedReferences
         self._projection_plot = self._graphics_widget.addPlot(row=0, col=1, colspan=2)
-        self._projection_plot.setMouseEnabled(x=False)
-        self._projection_plot.setMenuEnabled(False)
-        self._projection_plot.getAxis("left").setWidth(STYLE.axis_fixed_width)
+        configure_plot(
+            self._projection_plot,
+            mouse_x=False,
+            mouse_y=True,
+            title="PC Projection Weight",
+            left_label="Magnitude",
+            bottom_label="Sampled Frame",
+        )
 
         # Bottom control panel: PC selector, metric labels, title labels, playback controls.
         self._create_bottom_panel()
@@ -197,7 +208,7 @@ class PCViewer(QMainWindow):
 
         # Pre-computes per-plane y-ranges so axes stay stable when cycling through PCs.
         metrics_min, metrics_max = float(self._pc_metrics.min()), float(self._pc_metrics.max())
-        metrics_max += (metrics_max - metrics_min) * STYLE.legend_headroom
+        metrics_max += (metrics_max - metrics_min) * PLOT_STYLE.legend_headroom
         self._metrics_y_range = (metrics_min, metrics_max)
         self._projection_y_range = (float(self._pc_projections.min()), float(self._pc_projections.max()))
 
@@ -384,12 +395,7 @@ class PCViewer(QMainWindow):
         self._metrics_plot.disableAutoRange()
         colors = (COLORS.cyan, COLORS.red, COLORS.magenta)
         metric_names = ["rigid", "nonrigid", "nonrigid max"]
-        self._legend = self._metrics_plot.addLegend(
-            horSpacing=STYLE.legend_horizontal_spacing,
-            colCount=PC_STYLE.legend_column_count,
-            offset=STYLE.legend_offset,
-            labelTextSize=FONTS.label_size,
-        )
+        self._legend = add_plot_legend(self._metrics_plot, column_count=PC_STYLE.legend_column_count)
         for index in range(3):
             curve = self._metrics_plot.plot(
                 np.arange(1, self._pc_count + 1, dtype=np.int32), self._pc_metrics[:, index], pen=colors[index]
@@ -403,21 +409,15 @@ class PCViewer(QMainWindow):
         self._metrics_scatter.setData(
             [pc_index + 1, pc_index + 1, pc_index + 1],
             np.asarray(self._pc_metrics[pc_index, :]).tolist(),
-            size=STYLE.scatter_point_size,
+            size=PLOT_STYLE.scatter_point_size,
             brush=pg.mkBrush(*COLORS.white),
         )
-        self._metrics_plot.setTitle("PC Registration Shifts", size=FONTS.plot_title_size, bold=True)
-        self._metrics_plot.setLabel("left", "Shift (px)", **{"font-size": FONTS.label_size})
-        self._metrics_plot.setLabel("bottom", "PC #", **{"font-size": FONTS.label_size})
         self._metrics_plot.setXRange(1, self._pc_count, padding=0.0)
         self._metrics_plot.setYRange(*self._metrics_y_range, padding=0.0)
 
         # Projection plot: shows the per-frame projection onto the selected PC over time.
         self._projection_plot.clear()
         self._projection_plot.plot(self._pc_projections[:, pc_index])
-        self._projection_plot.setTitle("PC Projection Weight", size=FONTS.plot_title_size, bold=True)
-        self._projection_plot.setLabel("left", "Magnitude", **{"font-size": FONTS.label_size})
-        self._projection_plot.setLabel("bottom", "Sampled Frame", **{"font-size": FONTS.label_size})
         self._projection_plot.setXRange(0, self._pc_projections.shape[0] - 1)
         self._projection_plot.setYRange(*self._projection_y_range)
 

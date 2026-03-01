@@ -8,17 +8,9 @@ import numpy as np
 from PySide6 import QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
 from pyqtgraph import functions as fn
-from PySide6.QtGui import QPainter, QMouseEvent, QPaintEvent
-from PySide6.QtWidgets import (
-    QStyle,
-    QSlider,
-    QWidget,
-    QApplication,
-    QStyleOptionSlider,
-)
 from pyqtgraph.graphicsItems.ViewBox.ViewBoxMenu import ViewBoxMenu  # type: ignore[import-untyped]
 
-from .styles import STYLE, COLORS
+from .styles import FONTS, COLORS, PLOT_STYLE
 from .constants import CONFIG
 
 if TYPE_CHECKING:
@@ -37,208 +29,56 @@ type _ZoomHandler = Callable[[], None]
 """The callback type for double-click zoom-to-fit events dispatched by a ViewBox to the orchestrator."""
 
 
-class RangeSlider(QSlider):
-    """Dual-handle range slider for controlling image saturation levels.
+def configure_plot(
+    plot: pg.PlotItem,
+    *,
+    title: str | None = None,
+    left_label: str | None = None,
+    bottom_label: str | None = None,
+    mouse_x: bool = True,
+    mouse_y: bool = False,
+) -> None:
+    """Applies the shared pyqtgraph plot configuration backbone.
 
-    Provides two independently movable slider handles that define a low-high range. Dragging
-    between the handles moves both together. Releasing the mouse invokes the ``on_release``
-    callback.
+    Disables the context menu, sets mouse interaction axes, fixes axis widths to prevent layout
+    shifts, and optionally sets the plot title and axis labels.
 
     Args:
-        owner: The parent QWidget.
-        on_release: Callback invoked when the mouse is released after dragging.
+        plot: The pyqtgraph PlotItem to configure.
+        title: Optional plot title text.
+        left_label: Optional label for the left (y) axis.
+        bottom_label: Optional label for the bottom (x) axis.
+        mouse_x: Determines whether horizontal mouse interaction is enabled.
+        mouse_y: Determines whether vertical mouse interaction is enabled.
     """
+    plot.setMenuEnabled(False)
+    plot.setMouseEnabled(x=mouse_x, y=mouse_y)
+    plot.getAxis("left").setWidth(PLOT_STYLE.axis_fixed_width)
+    plot.getAxis("bottom").setHeight(PLOT_STYLE.axis_fixed_width)
+    if title:
+        plot.setTitle(title, size=FONTS.plot_title_size, bold=True)
+    if left_label:
+        plot.setLabel("left", left_label, **{"font-size": FONTS.label_size})
+    if bottom_label:
+        plot.setLabel("bottom", bottom_label, **{"font-size": FONTS.label_size})
 
-    def __init__(self, owner: QWidget | None = None, on_release: Callable[[], None] | None = None) -> None:
-        super().__init__(owner)
 
-        self._low: int = self.minimum()
-        self._high: int = self.maximum()
-        self._pressed_control = QStyle.SubControl.SC_None
-        self._hover_control = QStyle.SubControl.SC_None
-        self._click_offset: int = 0
+def add_plot_legend(plot: pg.PlotItem, *, column_count: int) -> pg.LegendItem:
+    """Adds a standardized legend to a pyqtgraph plot.
 
-        self.setOrientation(QtCore.Qt.Orientation.Vertical)
-        self.setTickPosition(QSlider.TickPosition.TicksRight)
-        self.setStyleSheet(STYLE.range_slider)
+    Args:
+        plot: The pyqtgraph PlotItem to add a legend to.
+        column_count: Number of columns in the legend layout.
 
-        # 0 for the low handle, 1 for the high handle, -1 for both.
-        self._active_slider: int = 0
-        self._on_release: Callable[[], None] | None = on_release
-
-    def low(self) -> int:
-        """Returns the current low handle value."""
-        return self._low
-
-    def setLow(self, low: int) -> None:  # noqa: N802
-        """Sets the low handle value.
-
-        Args:
-            low: New low handle position.
-        """
-        self._low = low
-        self.update()
-
-    def high(self) -> int:
-        """Returns the current high handle value."""
-        return self._high
-
-    def setHigh(self, high: int) -> None:  # noqa: N802
-        """Sets the high handle value.
-
-        Args:
-            high: New high handle position.
-        """
-        self._high = high
-        self.update()
-
-    def saturation_values(self) -> list[int]:
-        """Returns the current [low, high] saturation range."""
-        return [self._low, self._high]
-
-    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802, ARG002
-        """Paints both slider handles on the slider track."""
-        painter = QPainter(self)
-        style = QApplication.style()
-
-        for _handle_index, value in enumerate([self._low, self._high]):
-            option = QStyleOptionSlider()
-            self.initStyleOption(option)
-            option.subControls = QStyle.SubControl.SC_SliderHandle
-
-            if self.tickPosition() != QSlider.TickPosition.NoTicks:
-                option.subControls |= QStyle.SubControl.SC_SliderTickmarks
-
-            if self._pressed_control:
-                option.activeSubControls = self._pressed_control
-                option.state |= QStyle.StateFlag.State_Sunken
-            else:
-                option.activeSubControls = self._hover_control
-
-            option.sliderPosition = value
-            option.sliderValue = value
-            style.drawComplexControl(QStyle.ComplexControl.CC_Slider, option, painter, self)
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        """Handles mouse press to select and begin dragging a slider handle."""
-        event.accept()
-        style = QApplication.style()
-        button = event.button()
-
-        if button:
-            option = QStyleOptionSlider()
-            self.initStyleOption(option)
-            self._active_slider = -1
-
-            for handle_index, value in enumerate([self._low, self._high]):
-                option.sliderPosition = value
-                hit = style.hitTestComplexControl(QStyle.ComplexControl.CC_Slider, option, event.pos(), self)
-                if hit == QStyle.SubControl.SC_SliderHandle:
-                    self._active_slider = handle_index
-                    self._pressed_control = hit
-                    self.triggerAction(QSlider.SliderAction.SliderMove)
-                    self.setRepeatAction(QSlider.SliderAction.SliderNoAction)
-                    self.setSliderDown(True)
-                    break
-
-            if self._active_slider < 0:
-                self._pressed_control = QStyle.SubControl.SC_SliderHandle
-                self._click_offset = self._pixel_position_to_value(self._pick_coordinate(event.pos()))
-                self.triggerAction(QSlider.SliderAction.SliderMove)
-                self.setRepeatAction(QSlider.SliderAction.SliderNoAction)
-        else:
-            event.ignore()
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        """Handles mouse drag to move the active slider handle."""
-        if self._pressed_control != QStyle.SubControl.SC_SliderHandle:
-            event.ignore()
-            return
-
-        event.accept()
-        new_position = self._pixel_position_to_value(self._pick_coordinate(event.pos()))
-        option = QStyleOptionSlider()
-        self.initStyleOption(option)
-
-        if self._active_slider < 0:
-            # Moves both handles together.
-            offset = new_position - self._click_offset
-            self._high += offset
-            self._low += offset
-            if self._low < self.minimum():
-                difference = self.minimum() - self._low
-                self._low += difference
-                self._high += difference
-            if self._high > self.maximum():
-                difference = self.maximum() - self._high
-                self._low += difference
-                self._high += difference
-        elif self._active_slider == 0:
-            if new_position >= self._high:
-                new_position = self._high - 1
-            self._low = new_position
-        else:
-            if new_position <= self._low:
-                new_position = self._low + 1
-            self._high = new_position
-
-        self._click_offset = new_position
-        self.update()
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802, ARG002
-        """Invokes the on_release callback after the slider handles are released."""
-        if self._on_release is not None:
-            self._on_release()
-
-    def _pick_coordinate(self, point: QtCore.QPoint) -> int:
-        """Extracts the relevant coordinate from a point based on slider orientation.
-
-        Args:
-            point: The mouse position.
-
-        Returns:
-            The x or y coordinate depending on the slider orientation.
-        """
-        if self.orientation() == QtCore.Qt.Orientation.Horizontal:
-            return point.x()
-        return point.y()
-
-    def _pixel_position_to_value(self, pixel_position: int) -> int:
-        """Converts a pixel position to a slider value.
-
-        Args:
-            pixel_position: Pixel coordinate along the slider axis.
-
-        Returns:
-            The corresponding slider value.
-        """
-        option = QStyleOptionSlider()
-        self.initStyleOption(option)
-        style = QApplication.style()
-
-        groove_rect = style.subControlRect(
-            QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderGroove, self
-        )
-        handle_rect = style.subControlRect(
-            QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderHandle, self
-        )
-
-        if self.orientation() == QtCore.Qt.Orientation.Horizontal:
-            slider_length = handle_rect.width()
-            slider_min = groove_rect.x()
-            slider_max = groove_rect.right() - slider_length + 1
-        else:
-            slider_length = handle_rect.height()
-            slider_min = groove_rect.y()
-            slider_max = groove_rect.bottom() - slider_length + 1
-
-        return style.sliderValueFromPosition(
-            self.minimum(),
-            self.maximum(),
-            pixel_position - slider_min,
-            slider_max - slider_min,
-            option.upsideDown,
-        )
+    Returns:
+        The created LegendItem instance.
+    """
+    return plot.addLegend(
+        horSpacing=PLOT_STYLE.legend_horizontal_spacing,
+        colCount=column_count,
+        offset=PLOT_STYLE.legend_offset,
+        labelTextSize=FONTS.label_size,
+    )
 
 
 class TraceBox(pg.PlotItem):
@@ -256,6 +96,7 @@ class TraceBox(pg.PlotItem):
 
     def __init__(self) -> None:
         super().__init__()
+        configure_plot(self)
         self._frame_count: int = 0
         self._y_minimum: float = 0.0
         self._y_maximum: float = 0.0

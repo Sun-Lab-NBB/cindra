@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
-from ataraxis_base_utilities import console
+import numpy as np
+from ataraxis_base_utilities import LogLevel, console
 
 from .constants import MaskLayer, BackgroundView, CoordinateSpace
 from ..dataclasses import MultiDayRuntimeContext
@@ -14,7 +15,6 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Sequence
 
-    import numpy as np
     from numpy.typing import NDArray
 
     from ..dataclasses import (
@@ -26,6 +26,10 @@ if TYPE_CHECKING:
         MultiDayTrackingData,
         MultiDayRegistrationData,
     )
+    from .single_day_context import SingleDayViewerData
+
+_EMPTY: NDArray[np.float32] = np.empty(0, dtype=np.float32)
+"""Empty array sentinel returned for absent trace or classification data."""
 
 
 @dataclass
@@ -488,3 +492,385 @@ class TrackingViewerData:
         if self._current_combined is None:
             return None
         return self._current_combined.detection
+
+
+@dataclass
+class MultiDayViewerData:
+    """Wraps multi-day tracked ROI data for display in the ROI viewer.
+
+    Mirrors the ``SingleDayViewerData`` property interface so both classes can be used interchangeably by the ROI viewer
+    and overlay functions. Each instance represents one multi-day dataset that includes the loaded single-day session.
+    The consumer creates multiple instances — one per discovered dataset.
+    """
+
+    _contexts: list[MultiDayRuntimeContext] = field(repr=False)
+    """All recording contexts in the multi-day dataset."""
+
+    _single_day: SingleDayViewerData = field(repr=False)
+    """The single-day data for background images and frame dimensions."""
+
+    _session_recording_index: int = 0
+    """Index into ``_contexts`` for the loaded single-day session."""
+
+    dataset_name: str = ""
+    """Display label for the ROI Source dropdown."""
+
+    _current_recording_index: int = field(init=False, default=0)
+    """Index of the currently active recording for trace display."""
+
+    def __post_init__(self) -> None:
+        """Memory-maps arrays for all recordings in the dataset."""
+        self._current_recording_index = self._session_recording_index
+
+        for ctx in self._contexts:
+            output_path = ctx.runtime.output_path
+            if output_path is not None:
+                ctx.runtime.registration.memory_map_arrays(output_path)
+                ctx.runtime.tracking.load_arrays(output_path)
+                ctx.runtime.extraction.load_arrays(output_path)
+                ctx.runtime.extraction.memory_map_results(output_path)
+            combined = ctx.runtime.combined_data
+            if combined is not None and ctx.runtime.io.data_path is not None:
+                combined.detection.memory_map_arrays(ctx.runtime.io.data_path)
+                combined.extraction.memory_map_arrays(ctx.runtime.io.data_path)
+
+    # ------------------------------------------------------------------
+    # Property interface matching SingleDayViewerData
+    # ------------------------------------------------------------------
+
+    @property
+    def roi_statistics(self) -> list[ROIStatistics]:
+        """Returns the tracked ROI masks from the current recording's extraction data."""
+        statistics = self._current_runtime.extraction.roi_statistics
+        return list(statistics) if statistics is not None else []
+
+    @property
+    def roi_count(self) -> int:
+        """Returns the number of tracked ROIs."""
+        return len(self.roi_statistics)
+
+    @property
+    def cell_count(self) -> int:
+        """Returns the number of tracked ROIs (all tracked ROIs are classified cells)."""
+        return self.roi_count
+
+    @property
+    def frame_height(self) -> int:
+        """Returns the combined field-of-view height from the single-day data."""
+        return self._single_day.frame_height
+
+    @property
+    def frame_width(self) -> int:
+        """Returns the combined field-of-view width from the single-day data."""
+        return self._single_day.frame_width
+
+    @property
+    def frame_count(self) -> int:
+        """Returns the number of frames in the current recording's extraction data."""
+        f = self.cell_fluorescence
+        return int(f.shape[1]) if f.size > 0 else 0
+
+    @property
+    def cell_fluorescence(self) -> NDArray[np.float32]:
+        """Returns the cell fluorescence traces from the current recording's extraction."""
+        value = self._current_runtime.extraction.cell_fluorescence
+        return value if value is not None else _EMPTY
+
+    @property
+    def neuropil_fluorescence(self) -> NDArray[np.float32]:
+        """Returns the neuropil fluorescence traces from the current recording's extraction."""
+        value = self._current_runtime.extraction.neuropil_fluorescence
+        return value if value is not None else _EMPTY
+
+    @property
+    def spikes(self) -> NDArray[np.float32]:
+        """Returns the deconvolved spike traces from the current recording's extraction."""
+        value = self._current_runtime.extraction.spikes
+        return value if value is not None else _EMPTY
+
+    @property
+    def cell_classification(self) -> NDArray[np.float32]:
+        """Returns a synthetic classification array where all tracked ROIs are cells with probability 1.0."""
+        n = self.roi_count
+        if n == 0:
+            return _EMPTY
+        return np.column_stack([np.ones(n, dtype=np.float32), np.ones(n, dtype=np.float32)])
+
+    @property
+    def cell_colocalization(self) -> NDArray[np.float32]:
+        """Returns a synthetic colocalization array (not applicable in multi-day mode)."""
+        n = self.roi_count
+        if n == 0:
+            return _EMPTY
+        return np.zeros((n, 2), dtype=np.float32)
+
+    @property
+    def two_channels(self) -> bool:
+        """Returns True if channel 2 data is available in the current recording's combined detection data."""
+        detection = self._current_detection
+        if detection is None:
+            return False
+        return detection.mean_image_channel_2 is not None
+
+    @property
+    def mean_image(self) -> NDArray[np.float32] | None:
+        """Returns the mean image from the single-day data."""
+        return self._single_day.mean_image
+
+    @property
+    def enhanced_mean_image(self) -> NDArray[np.float32] | None:
+        """Returns the enhanced mean image from the single-day data."""
+        return self._single_day.enhanced_mean_image
+
+    @property
+    def maximum_projection(self) -> NDArray[np.float32] | None:
+        """Returns the maximum projection from the single-day data."""
+        return self._single_day.maximum_projection
+
+    @property
+    def correlation_map(self) -> NDArray[np.float32] | None:
+        """Returns the correlation map from the single-day data."""
+        return self._single_day.correlation_map
+
+    @property
+    def corrected_structural_mean_image(self) -> None:
+        """Returns None (corrected structural image is not available in multi-day mode)."""
+        return None
+
+    @property
+    def mean_image_channel_2(self) -> NDArray[np.float32] | None:
+        """Returns the channel 2 mean image from the single-day data."""
+        return self._single_day.mean_image_channel_2
+
+    @property
+    def enhanced_mean_image_channel_2(self) -> NDArray[np.float32] | None:
+        """Returns the channel 2 enhanced mean image from the single-day data."""
+        return self._single_day.enhanced_mean_image_channel_2
+
+    @property
+    def sampling_rate(self) -> float:
+        """Returns the sampling rate from the single-day data."""
+        return self._single_day.sampling_rate
+
+    @property
+    def tau(self) -> float:
+        """Returns the calcium indicator timescale from the single-day data."""
+        return self._single_day.tau
+
+    @property
+    def valid_y_range(self) -> tuple[int, int]:
+        """Returns the full frame Y range (no subregion in multi-day mode)."""
+        return (0, self.frame_height)
+
+    @property
+    def valid_x_range(self) -> tuple[int, int]:
+        """Returns the full frame X range (no subregion in multi-day mode)."""
+        return (0, self.frame_width)
+
+    @property
+    def output_path(self) -> Path | None:
+        """Returns the output directory path from the single-day data."""
+        return self._single_day.output_path
+
+    @property
+    def recording_label(self) -> str:
+        """Returns the session display label from the single-day data."""
+        return self._single_day.recording_label
+
+    @property
+    def view_labels(self) -> tuple[str, ...]:
+        """Returns the available view labels (multi-day only supports the combined view)."""
+        return ("Combined",)
+
+    @property
+    def view_index(self) -> int:
+        """Returns the active view index (always combined in multi-day mode)."""
+        return -1
+
+    @property
+    def plane_count(self) -> int:
+        """Returns the number of planes (always 1 in multi-day combined mode)."""
+        return 1
+
+    @property
+    def aspect_ratio(self) -> float:
+        """Returns the aspect ratio from the single-day data."""
+        return self._single_day.aspect_ratio
+
+    @property
+    def cell_diameter(self) -> int:
+        """Returns the estimated cell diameter from the single-day data."""
+        return self._single_day.cell_diameter
+
+    # ------------------------------------------------------------------
+    # Multi-day-specific properties and methods
+    # ------------------------------------------------------------------
+
+    @property
+    def recording_count(self) -> int:
+        """Returns the number of recordings in the dataset."""
+        return len(self._contexts)
+
+    @property
+    def recording_ids(self) -> tuple[str, ...]:
+        """Returns the recording identifier strings for all recordings."""
+        return tuple(ctx.runtime.io.session_id for ctx in self._contexts)
+
+    @property
+    def current_recording_index(self) -> int:
+        """Returns the index of the currently active recording."""
+        return self._current_recording_index
+
+    def cell_fluorescence_for_recording(self, recording_index: int) -> NDArray[np.float32] | None:
+        """Returns the cell fluorescence array for a specific recording.
+
+        Args:
+            recording_index: The recording index.
+
+        Returns:
+            The cell fluorescence array, or None if unavailable.
+        """
+        return self._contexts[recording_index].runtime.extraction.cell_fluorescence
+
+    def neuropil_fluorescence_for_recording(self, recording_index: int) -> NDArray[np.float32] | None:
+        """Returns the neuropil fluorescence array for a specific recording.
+
+        Args:
+            recording_index: The recording index.
+
+        Returns:
+            The neuropil fluorescence array, or None if unavailable.
+        """
+        return self._contexts[recording_index].runtime.extraction.neuropil_fluorescence
+
+    def spikes_for_recording(self, recording_index: int) -> NDArray[np.float32] | None:
+        """Returns the deconvolved spikes array for a specific recording.
+
+        Args:
+            recording_index: The recording index.
+
+        Returns:
+            The spikes array, or None if unavailable.
+        """
+        return self._contexts[recording_index].runtime.extraction.spikes
+
+    def switch_recording(self, recording_index: int) -> None:
+        """Switches the active recording for trace display.
+
+        Args:
+            recording_index: The index of the recording to switch to.
+        """
+        self._current_recording_index = recording_index
+
+    def switch_view(self, view_index: int) -> None:
+        """No-op since multi-day only supports the combined view.
+
+        Args:
+            view_index: Ignored.
+        """
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def _current_runtime(self) -> MultiDayRuntimeData:
+        """Returns the runtime data for the current recording."""
+        return self._contexts[self._current_recording_index].runtime
+
+    @property
+    def _current_combined(self) -> CombinedData | None:
+        """Returns the combined single-day data for the current recording."""
+        return self._current_runtime.combined_data
+
+    @property
+    def _current_detection(self) -> DetectionData | None:
+        """Returns the combined detection data for the current recording."""
+        if self._current_combined is None:
+            return None
+        return self._current_combined.detection
+
+    # ------------------------------------------------------------------
+    # Factory method
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def discover(cls, root_path: Path, single_day: SingleDayViewerData) -> list[MultiDayViewerData]:
+        """Discovers multi-day datasets that include the loaded single-day session.
+
+        Searches ``root_path`` for ``multiday_runtime_data.yaml`` files, loads all recording contexts for each
+        discovered dataset, identifies which recording corresponds to the loaded session, and returns one
+        ``MultiDayViewerData`` per dataset.
+
+        Args:
+            root_path: The cindra output root directory to search recursively.
+            single_day: The loaded single-day viewer data used to identify the session's recording index.
+
+        Returns:
+            A list of ``MultiDayViewerData`` instances, one per discovered dataset. Empty if no datasets are found.
+        """
+        matches = list(root_path.rglob("multiday_runtime_data.yaml"))
+        if not matches:
+            return []
+
+        # Groups YAML files by dataset. Each file lives at {cindra_root}/multiday/{dataset}/multiday_runtime_data.yaml.
+        # Multiple sessions in the same dataset share the same dataset_name but have different YAML file paths.
+        # We only need to load from one YAML per dataset since MultiDayRuntimeContext.load() resolves all sessions.
+        datasets: dict[Path, Path] = {}
+        for match in matches:
+            dataset_dir = match.parent
+            if dataset_dir not in datasets:
+                datasets[dataset_dir] = match
+
+        # Resolves the cindra root of the loaded single-day session for matching.
+        single_day_cindra_root = single_day.output_path.parent if single_day.output_path is not None else None
+        if single_day_cindra_root is None:
+            single_day_cindra_root = (
+                single_day._contexts[0].configuration.file_io.output_path.parent
+                if single_day._contexts[0].configuration.file_io.output_path is not None
+                else None
+            )
+
+        results: list[MultiDayViewerData] = []
+        for dataset_dir, yaml_path in datasets.items():
+            try:
+                contexts = MultiDayRuntimeContext.load(root_path=yaml_path.parent, session_index=-1)
+                if not isinstance(contexts, list):
+                    contexts = [contexts]
+            except Exception:
+                console.echo(
+                    message=f"Failed to load multi-day dataset at {dataset_dir}, skipping.",
+                    level=LogLevel.WARNING,
+                )
+                continue
+
+            # Finds the session recording index by comparing data_path against the single-day cindra root.
+            session_index: int | None = None
+            for index, ctx in enumerate(contexts):
+                ctx_data_path = ctx.runtime.io.data_path
+                if (
+                    ctx_data_path is not None
+                    and single_day_cindra_root is not None
+                    and ctx_data_path == single_day_cindra_root
+                ):
+                    session_index = index
+                    break
+
+            if session_index is None:
+                console.echo(
+                    message=f"Loaded session not found in multi-day dataset '{dataset_dir.name}', skipping.",
+                    level=LogLevel.WARNING,
+                )
+                continue
+
+            dataset_name = contexts[0].runtime.io.dataset_name or dataset_dir.name
+            results.append(
+                cls(
+                    _contexts=contexts,
+                    _single_day=single_day,
+                    _session_recording_index=session_index,
+                    dataset_name=dataset_name,
+                )
+            )
+
+        return results

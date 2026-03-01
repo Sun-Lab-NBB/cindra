@@ -11,9 +11,7 @@ if TYPE_CHECKING:
     import numpy as np
     import pyqtgraph as pg  # type: ignore[import-untyped]
     from numpy.typing import NDArray
-    from PySide6.QtWidgets import QLabel, QCheckBox, QComboBox, QLineEdit, QPushButton
-
-    from .widgets import RangeSlider
+    from PySide6.QtWidgets import QLabel, QSlider, QCheckBox, QComboBox, QLineEdit, QPushButton
 
 
 @dataclass
@@ -95,12 +93,12 @@ class ViewControls:
     Attributes:
         view_combo: Dropdown for selecting the active background view.
         channel_2_button: Checkable push button for toggling channel 2 images.
-        range_slider: Dual-handle slider controlling image saturation levels.
+        opacity_slider: Slider controlling ROI mask overlay opacity (0-255).
     """
 
     view_combo: QComboBox
     channel_2_button: QPushButton
-    range_slider: RangeSlider
+    opacity_slider: QSlider
 
 
 @dataclass
