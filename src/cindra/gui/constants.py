@@ -137,6 +137,8 @@ class _ViewerConfig:
     """HSV transform normalization offset."""
     flip_threshold: int = 100
     """Minimum number of changed cells before incremental flip is used over full reinit."""
+    random_color_seed: int = 0
+    """Seed for reproducible random ROI color generation."""
 
     # Color constants.
     colormaps: tuple[str, ...] = (
@@ -177,10 +179,10 @@ class _ViewerConfig:
     """Correlation color index."""
     color_cell_non_cell: int = 8
     """Cell vs non-cell classification color index."""
-    cell_color: tuple[int, int, int] = (0, 200, 0)
-    """RGB color for classified cells in cell/non-cell mode."""
-    noncell_color: tuple[int, int, int] = (200, 0, 200)
-    """RGB color for non-cells in cell/non-cell mode."""
+    cell_color: tuple[int, int, int] = (0, 255, 0)
+    """RGB color for classified cells in cell/non-cell mode (green)."""
+    noncell_color: tuple[int, int, int] = (255, 0, 255)
+    """RGB color for non-cells in cell/non-cell mode (magenta)."""
     channel_2_threshold_epsilon: float = 1e-3
     """Minimum change in channel 2 threshold to trigger a recoloring update."""
     stat_field_map: dict[str, str] = field(
@@ -232,6 +234,8 @@ class _ViewerConfig:
     """Activity mode index for neuropil-subtracted fluorescence (F - 0.7*Fneu)."""
     neuropil_coefficient: float = 0.7
     """Neuropil subtraction coefficient for the F - 0.7*Fneu activity mode."""
+    activity_mode_labels: tuple[str, ...] = ("Fluorescence", "Neuropil", "Neuropil Subtracted", "Spikes")
+    """Display labels for the activity mode combo box, indexed by TraceMode value."""
     average_threshold: int = 5
     """Minimum number of selected cells before the average trace is displayed."""
     average_scale_divisor: float = 25.0
@@ -242,6 +246,13 @@ class _ViewerConfig:
     """Maximum number of cells allowed in the top-n / bottom-n selection input."""
     default_top_n: int = 40
     """Default number of cells selected by top-n / bottom-n."""
+    roi_selection_overlap_threshold: float = 0.6
+    """Minimum fraction of an ROI's pixels that must fall inside the selection rectangle for it to be included."""
+    roi_selection_max_dimension: int = 300
+    """Maximum pixel dimension for the ROI selection rectangle."""
+    zoom_to_cell_fraction: float = 0.1
+    """Fraction of the maximum image dimension used as padding when zooming to a cell."""
+
     # Viewer constants.
     centroid_stat_index: int = 1
     """1-based stat index for the centroid field (used to display ROI position)."""
@@ -322,6 +333,10 @@ class _BinaryPlayerConfig:
 
     frame_delta_divisor: int = 200
     """Divisor for computing frame slider step size from total frame count."""
+
+    frame_slider_tick_interval: int = 5
+    """Tick interval for the frame navigation slider. Determines the number of frames represented by each tick of
+    the binary viewer slider."""
 
     display_range_low_sigma: float = 2.0
     """Standard deviations below mean for display range lower bound."""

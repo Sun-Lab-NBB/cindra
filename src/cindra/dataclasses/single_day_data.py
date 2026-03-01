@@ -10,6 +10,7 @@ from dataclasses import field, dataclass
 
 import numpy as np
 from numpy.typing import NDArray  # noqa: TC002 - needed at runtime for dacite deserialization
+from scipy.ndimage import binary_dilation, binary_fill_holes
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
@@ -621,6 +622,68 @@ class ROIMask:
         """Computes raveled pixel indices (y * frame_width + x) on first access."""
         return (self.y_pixels * self.frame_width + self.x_pixels).astype(np.int32)
 
+    @cached_property
+    def boundary_pixels(self) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
+        """Computes the exterior boundary mask of the ROI from its pixel coordinates.
+
+        Returns:
+            The (y_boundary, x_boundary) arrays containing the boundary mask pixel coordinates.
+        """
+        # Reshapes coordinate arrays into column vectors for 2D array indexing.
+        y_pixels = np.expand_dims(self.y_pixels.flatten(), axis=1)
+        x_pixels = np.expand_dims(self.x_pixels.flatten(), axis=1)
+        pixel_count = y_pixels.shape[0]
+
+        if not pixel_count:
+            return np.zeros((0,), dtype=np.int32), np.zeros((0,), dtype=np.int32)
+
+        # Builds a tight bounding box around the ROI with padding to ensure boundary pixels at the edges of the mask
+        # are not clipped during morphological operations.
+        boundary_padding = 3
+        y_min = y_pixels.min()
+        x_min = x_pixels.min()
+        mask = np.zeros(
+            (int(y_pixels.max() - y_min) + 2 * boundary_padding, int(x_pixels.max() - x_min) + 2 * boundary_padding),
+            dtype=np.bool_,
+        )
+
+        # Stamps the ROI pixels into the local coordinate system offset by the bounding box origin.
+        mask[y_pixels - y_min + boundary_padding, x_pixels - x_min + boundary_padding] = True
+
+        # Dilates the mask to close single-pixel gaps, then fills interior holes to produce a solid region.
+        mask = binary_dilation(mask)
+        mask = binary_fill_holes(mask)
+
+        # Uses a 4-connected structuring element (cross pattern) to find the exterior ring. Dilating the background
+        # into the foreground and intersecting with the original mask isolates the outermost pixel layer.
+        kernel = np.zeros((3, 3), dtype=np.int32)
+        kernel[1] = 1
+        kernel[:, 1] = 1
+        exterior = binary_dilation(mask == 0, structure=kernel) & mask
+
+        # Converts local bounding-box coordinates back to the original frame coordinate system.
+        y_boundary, x_boundary = np.nonzero(exterior)
+        y_boundary = y_boundary + y_min - boundary_padding
+        x_boundary = x_boundary + x_min - boundary_padding
+
+        return y_boundary, x_boundary
+
+    @cached_property
+    def circle_pixels(self) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
+        """Computes the pixel coordinates of a circle around the ROI centroid.
+
+        The circle uses ``1.25 * radius`` and 100 sample points. Coordinates are unclipped; consumers should clip to
+        frame bounds at the point of use.
+
+        Returns:
+            The (y_circle, x_circle) arrays containing the circle pixel coordinates.
+        """
+        scaled_radius = self.radius * 1.25
+        theta = np.linspace(0.0, 2 * np.pi, num=100)
+        y_circle = (scaled_radius * np.sin(theta) + self.centroid[0]).astype(np.int32)
+        x_circle = (scaled_radius * np.cos(theta) + self.centroid[1]).astype(np.int32)
+        return y_circle, x_circle
+
     @staticmethod
     def save_list(mask_list: list[ROIMask], file_path: Path) -> None:
         """Saves a list of ROIMask instances to a compressed .npz file without pickle.
@@ -716,21 +779,10 @@ class ROIStatistics:
         fields, then updated with computed shape statistics.
     """
 
-    # Core pixel data (required, from detection).
-    y_pixels: NDArray[np.int32]
-    """The y-coordinates (row indices) of all pixels belonging to this ROI."""
-
-    x_pixels: NDArray[np.int32]
-    """The x-coordinates (column indices) of all pixels belonging to this ROI."""
-
-    pixel_weights: NDArray[np.float32]
-    """The spatial filter weights (lambda values) for each pixel, indicating contribution to the ROI signal."""
-
-    centroid: tuple[int, int]
-    """The median (y, x) pixel position of the ROI, representing its approximate center."""
-
-    frame_width: int = 0
-    """The width of the image frame in pixels, used to compute raveled pixel indices."""
+    # Spatial data composed from ROIMask.
+    mask: ROIMask
+    """The underlying ROIMask containing pixel coordinates, weights, centroid, frame dimensions, and tracking
+    metadata."""
 
     footprint: int = 0
     """The spatial scale (hop size) used during sparse detection for this ROI."""
@@ -756,12 +808,6 @@ class ROIStatistics:
 
     soma_mask: NDArray[np.bool_] | None = None
     """The boolean mask indicating which pixels belong to the soma region."""
-
-    overlap_mask: NDArray[np.bool_] | None = None
-    """The boolean mask indicating which pixels overlap with other ROIs."""
-
-    radius: float = 0.0
-    """The fitted ellipse radius representing the approximate ROI size."""
 
     aspect_ratio: float = 0.0
     """The ratio of ellipse axes, indicating ROI elongation."""
@@ -789,26 +835,6 @@ class ROIStatistics:
     """The index of the imaging plane this ROI belongs to. This field is not set during detection. It is populated
     by the IO layer during multi-plane combination, when ROIs from individual planes are merged into a single list."""
 
-    # Multi-day tracking data. Zero values indicate the ROI has not been processed by multi-day tracking.
-    cluster_id: int = 0
-    """The multi-day cell cluster ID. Zero indicates unclustered, positive values indicate cluster membership."""
-
-    session_count: int = 0
-    """The number of sessions in which this cell was detected during multi-day tracking."""
-
-    # GUI visualization data (computed on demand by the GUI, persisted for session continuity).
-    boundary_y_pixels: NDArray[np.int32] | None = None
-    """The y-coordinates of the ROI boundary pixels used for drawing the ROI outline in the GUI."""
-
-    boundary_x_pixels: NDArray[np.int32] | None = None
-    """The x-coordinates of the ROI boundary pixels used for drawing the ROI outline in the GUI."""
-
-    circle_y_pixels: NDArray[np.int32] | None = None
-    """The y-coordinates of the circle drawn around the ROI centroid in the GUI."""
-
-    circle_x_pixels: NDArray[np.int32] | None = None
-    """The x-coordinates of the circle drawn around the ROI centroid in the GUI."""
-
     @staticmethod
     def save_list(roi_list: list[ROIStatistics], masks_path: Path, stats_path: Path) -> None:
         """Saves a list of ROIStatistics instances to two companion .npz files without pickle.
@@ -826,20 +852,7 @@ class ROIStatistics:
             return
 
         # Delegates spatial core to ROIMask.save_list.
-        mask_list = [
-            ROIMask(
-                y_pixels=roi.y_pixels,
-                x_pixels=roi.x_pixels,
-                pixel_weights=roi.pixel_weights,
-                centroid=roi.centroid,
-                frame_width=roi.frame_width,
-                radius=roi.radius,
-                cluster_id=roi.cluster_id,
-                session_count=roi.session_count,
-            )
-            for roi in roi_list
-        ]
-        ROIMask.save_list(mask_list, masks_path)
+        ROIMask.save_list([roi.mask for roi in roi_list], masks_path)
 
         # Stores scalar statistics fields.
         footprints = np.array([roi.footprint for roi in roi_list], dtype=np.uint16)
@@ -849,7 +862,6 @@ class ROIStatistics:
         solidity = np.array([roi.solidity for roi in roi_list], dtype=np.float32)
         pixel_count = np.array([roi.pixel_count for roi in roi_list], dtype=np.uint32)
         soma_pixel_count = np.array([roi.soma_pixel_count for roi in roi_list], dtype=np.uint32)
-        radius = np.array([roi.radius for roi in roi_list], dtype=np.float32)
         aspect_ratio = np.array([roi.aspect_ratio for roi in roi_list], dtype=np.float32)
         normalized_pixel_count = np.array([roi.normalized_pixel_count for roi in roi_list], dtype=np.float32)
         normalized_pixel_count_full = np.array([roi.normalized_pixel_count_full for roi in roi_list], dtype=np.float32)
@@ -863,8 +875,6 @@ class ROIStatistics:
         )
 
         plane_index = np.array([roi.plane_index for roi in roi_list], dtype=np.uint8)
-        cluster_id = np.array([roi.cluster_id for roi in roi_list], dtype=np.uint32)
-        session_count = np.array([roi.session_count for roi in roi_list], dtype=np.uint16)
 
         save_dict: dict[str, np.ndarray] = {
             "footprints": footprints,
@@ -874,32 +884,19 @@ class ROIStatistics:
             "solidity": solidity,
             "pixel_count": pixel_count,
             "soma_pixel_count": soma_pixel_count,
-            "radius": radius,
             "aspect_ratio": aspect_ratio,
             "normalized_pixel_count": normalized_pixel_count,
             "normalized_pixel_count_full": normalized_pixel_count_full,
             "skewness": skewness,
             "standard_deviation": standard_deviation,
             "plane_index": plane_index,
-            "cluster_id": cluster_id,
-            "session_count": session_count,
         }
 
         _save_optional_array_field("soma_mask", [roi.soma_mask for roi in roi_list], save_dict, dtype=np.bool_)
-        _save_optional_array_field("overlap_mask", [roi.overlap_mask for roi in roi_list], save_dict, dtype=np.bool_)
+        _save_optional_array_field(
+            "overlap_mask", [roi.mask.overlap_mask for roi in roi_list], save_dict, dtype=np.bool_
+        )
         _save_optional_array_field("neuropil_mask", [roi.neuropil_mask for roi in roi_list], save_dict, dtype=np.int32)
-        _save_optional_array_field(
-            "boundary_y_pixels", [roi.boundary_y_pixels for roi in roi_list], save_dict, dtype=np.int32
-        )
-        _save_optional_array_field(
-            "boundary_x_pixels", [roi.boundary_x_pixels for roi in roi_list], save_dict, dtype=np.int32
-        )
-        _save_optional_array_field(
-            "circle_y_pixels", [roi.circle_y_pixels for roi in roi_list], save_dict, dtype=np.int32
-        )
-        _save_optional_array_field(
-            "circle_x_pixels", [roi.circle_x_pixels for roi in roi_list], save_dict, dtype=np.int32
-        )
         np.savez(stats_path, allow_pickle=False, **save_dict)
 
     @staticmethod
@@ -925,32 +922,22 @@ class ROIStatistics:
         solidity = data["solidity"]
         pixel_count = data["pixel_count"]
         soma_pixel_count = data["soma_pixel_count"]
-        radius = data["radius"]
         aspect_ratio = data["aspect_ratio"]
         normalized_pixel_count = data["normalized_pixel_count"]
         normalized_pixel_count_full = data["normalized_pixel_count_full"]
         skewness = data["skewness"]
         standard_deviation = data["standard_deviation"]
         plane_index = data["plane_index"]
-        cluster_id = data["cluster_id"]
-        session_count = data["session_count"]
 
         soma_mask_list = _load_optional_array_field("soma_mask", roi_count, data, dtype=np.bool_)
         overlap_mask_list = _load_optional_array_field("overlap_mask", roi_count, data, dtype=np.bool_)
         neuropil_mask_list = _load_optional_array_field("neuropil_mask", roi_count, data, dtype=np.int32)
-        boundary_y_pixels_list = _load_optional_array_field("boundary_y_pixels", roi_count, data, dtype=np.int32)
-        boundary_x_pixels_list = _load_optional_array_field("boundary_x_pixels", roi_count, data, dtype=np.int32)
-        circle_y_pixels_list = _load_optional_array_field("circle_y_pixels", roi_count, data, dtype=np.int32)
-        circle_x_pixels_list = _load_optional_array_field("circle_x_pixels", roi_count, data, dtype=np.int32)
 
         roi_list: list[ROIStatistics] = []
         for i in range(roi_count):
-            mask = masks[i]
+            masks[i].overlap_mask = overlap_mask_list[i]  # type: ignore[assignment]
             roi = ROIStatistics(
-                y_pixels=mask.y_pixels,
-                x_pixels=mask.x_pixels,
-                pixel_weights=mask.pixel_weights,
-                centroid=mask.centroid,
+                mask=masks[i],
                 footprint=int(footprints[i]),
                 mean_radius=float(mean_radius[i]),
                 baseline_mean_radius=float(baseline_mean_radius[i]),
@@ -959,8 +946,6 @@ class ROIStatistics:
                 pixel_count=int(pixel_count[i]),
                 soma_pixel_count=int(soma_pixel_count[i]),
                 soma_mask=soma_mask_list[i],  # type: ignore[arg-type]
-                overlap_mask=overlap_mask_list[i],  # type: ignore[arg-type]
-                radius=float(radius[i]),
                 aspect_ratio=float(aspect_ratio[i]),
                 normalized_pixel_count=float(normalized_pixel_count[i]),
                 normalized_pixel_count_full=float(normalized_pixel_count_full[i]),
@@ -968,12 +953,6 @@ class ROIStatistics:
                 standard_deviation=None if np.isnan(standard_deviation[i]) else float(standard_deviation[i]),
                 neuropil_mask=neuropil_mask_list[i],  # type: ignore[arg-type]
                 plane_index=int(plane_index[i]),
-                cluster_id=int(cluster_id[i]),
-                session_count=int(session_count[i]),
-                boundary_y_pixels=boundary_y_pixels_list[i],  # type: ignore[arg-type]
-                boundary_x_pixels=boundary_x_pixels_list[i],  # type: ignore[arg-type]
-                circle_y_pixels=circle_y_pixels_list[i],  # type: ignore[arg-type]
-                circle_x_pixels=circle_x_pixels_list[i],  # type: ignore[arg-type]
             )
             roi_list.append(roi)
 

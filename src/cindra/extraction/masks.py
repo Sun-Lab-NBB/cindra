@@ -106,12 +106,12 @@ def _create_roi_pixels(
 
     for roi in roi_statistics:
         # Ensures that the cell likelihood is measured using positive numbers only for the percentile filter below.
-        cell_likelihood_map[roi.y_pixels, roi.x_pixels] = np.maximum(
-            cell_likelihood_map[roi.y_pixels, roi.x_pixels], roi.pixel_weights
+        cell_likelihood_map[roi.mask.y_pixels, roi.mask.x_pixels] = np.maximum(
+            cell_likelihood_map[roi.mask.y_pixels, roi.mask.x_pixels], roi.mask.pixel_weights
         )
 
     # Computes the median cell radius to determine the local neighborhood size for percentile filtering.
-    median_radius = np.median(np.array([roi.radius for roi in roi_statistics]))
+    median_radius = np.median(np.array([roi.mask.radius for roi in roi_statistics]))
 
     # Selects ROI pixels based on the specified percentile threshold if additional likelihood filtering is enabled.
     if cell_probability_percentile > 0:
@@ -151,15 +151,15 @@ def _create_roi_masks(
     for roi in roi_statistics:
         # Selects all pixels or excludes overlapping pixels depending on the include_overlap flag. Treats a missing
         # overlap mask as having no overlapping pixels.
-        if include_overlap or roi.overlap_mask is None:
+        if include_overlap or roi.mask.overlap_mask is None:
             pixel_mask: slice | NDArray[np.bool_] = slice(None)
         else:
-            pixel_mask = ~roi.overlap_mask
+            pixel_mask = ~roi.mask.overlap_mask
 
         # Computes flat pixel indices directly via arithmetic instead of np.ravel_multi_index to avoid function-call
         # overhead and bounds checking. Applies the pixel selection mask in the same step.
-        flat_indices = (roi.y_pixels * width + roi.x_pixels).astype(np.int32)[pixel_mask]
-        weights = roi.pixel_weights[pixel_mask]
+        flat_indices = (roi.mask.y_pixels * width + roi.mask.x_pixels).astype(np.int32)[pixel_mask]
+        weights = roi.mask.pixel_weights[pixel_mask]
 
         # Normalizes the weights to sum to 1.0, creating a probability distribution of each pixel belonging to a
         # cell ROI.
@@ -228,8 +228,8 @@ def _create_neuropil_masks(
         # Extends the ROI to get a ring of pixels around the ROI center. This is the inner border that separates the
         # neuropil region from the cell region.
         inner_y_pixels, inner_x_pixels = extend_roi(
-            y_pixels=roi.y_pixels,
-            x_pixels=roi.x_pixels,
+            y_pixels=roi.mask.y_pixels,
+            x_pixels=roi.mask.x_pixels,
             height=height,
             width=width,
             iterations=inner_neuropil_border_radius,

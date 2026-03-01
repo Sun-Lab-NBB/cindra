@@ -28,10 +28,11 @@ from matplotlib.colors import hsv_to_rgb
 from .styles import STYLE, TRACKING_STYLE
 from .widgets import TraceBox, plot_trace
 from .constants import CONFIG, TRACKING_CONFIG, MaskLayer, BackgroundView, CoordinateSpace
-from .multi_day_context import TrackingViewerData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+    from .multi_day_context import TrackingViewerData
 
 
 class TrackingViewer(QMainWindow):
@@ -48,7 +49,7 @@ class TrackingViewer(QMainWindow):
     def __init__(self, data: TrackingViewerData) -> None:
         super().__init__()
         self.setWindowTitle("Multi-Day ROI Tracking")
-        self.resize(*TRACKING_STYLE.window_size)
+        self.setGeometry(*TRACKING_STYLE.window_geometry)
 
         self.data: TrackingViewerData = data
         self._auto_cycle_timer: QtCore.QTimer = QtCore.QTimer(self)
@@ -276,7 +277,7 @@ class TrackingViewer(QMainWindow):
         input_row = QHBoxLayout()
         input_row.addWidget(QLabel("ROI:"))
         self._roi_edit = QLineEdit()
-        self._roi_edit.setFixedWidth(TRACKING_STYLE.roi_edit_width)
+        self._roi_edit.setFixedWidth(STYLE.roi_edit_width)
         self._roi_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._roi_edit.setReadOnly(True)
         self._roi_edit.setToolTip("Displays the index of the last clicked ROI.")
@@ -303,7 +304,7 @@ class TrackingViewer(QMainWindow):
         activity_row = QHBoxLayout()
         activity_row.addWidget(QLabel("Activity:"))
         self._trace_activity_combo = QComboBox()
-        self._trace_activity_combo.addItems(["F", "Fneu", "F - 0.7*Fneu", "deconvolved"])
+        self._trace_activity_combo.addItems(CONFIG.activity_mode_labels)
         self._trace_activity_combo.setCurrentIndex(CONFIG.default_activity_mode)
         self._trace_activity_combo.currentIndexChanged.connect(self._on_trace_activity_changed)
         activity_row.addWidget(self._trace_activity_combo)
@@ -328,11 +329,11 @@ class TrackingViewer(QMainWindow):
 
         scale_row = QHBoxLayout()
         scale_up = QPushButton("+")
-        scale_up.setMaximumWidth(TRACKING_STYLE.scale_button_width)
+        scale_up.setMaximumWidth(STYLE.square_button_width)
         scale_up.clicked.connect(lambda: self._adjust_trace_scale(CONFIG.scale_step))
         scale_row.addWidget(scale_up)
         scale_down = QPushButton("-")
-        scale_down.setMaximumWidth(TRACKING_STYLE.scale_button_width)
+        scale_down.setMaximumWidth(STYLE.square_button_width)
         scale_down.clicked.connect(lambda: self._adjust_trace_scale(-CONFIG.scale_step))
         scale_row.addWidget(scale_down)
 
@@ -419,7 +420,7 @@ class TrackingViewer(QMainWindow):
                 original_masks = self.data.masks_for_layer(layer=MaskLayer.ORIGINAL, channel_2=channel_2)
                 color_count = len(original_masks) if original_masks else len(masks)
 
-            rng = np.random.default_rng(seed=0)
+            rng = np.random.default_rng(seed=CONFIG.random_color_seed)
             hues = rng.random(color_count)
             hsv = np.stack([hues, np.ones_like(hues), np.ones_like(hues)], axis=-1)
             roi_colors = (255.0 * hsv_to_rgb(hsv)).astype(np.uint8)
@@ -432,7 +433,8 @@ class TrackingViewer(QMainWindow):
             pixel_counts: list[int] = []
             valid_roi_colors: list[NDArray[np.uint8]] = []
             valid_roi_indices: list[int] = []
-            for roi_index, roi in enumerate(masks):
+            for roi_index, item in enumerate(masks):
+                roi = item.mask if hasattr(item, "mask") else item
                 valid = (
                     (roi.y_pixels >= 0)
                     & (roi.y_pixels < frame_height)
@@ -700,10 +702,7 @@ class TrackingViewer(QMainWindow):
             return
 
         # Determines which ROIs to plot.
-        if self._selected_rois is not None:
-            merge_indices = sorted(self._selected_rois)
-        else:
-            merge_indices = []
+        merge_indices = sorted(self._selected_rois) if self._selected_rois is not None else []
 
         if not merge_indices:
             self._trace_box.clear()
@@ -765,9 +764,17 @@ class TrackingViewer(QMainWindow):
             if self._trace_activity_mode == 0:
                 trace = cell_fluorescence[roi_index, :]
             elif self._trace_activity_mode == 1:
-                trace = neuropil_fluorescence[roi_index, :] if neuropil_fluorescence is not None else cell_fluorescence[roi_index, :]
+                trace = (
+                    neuropil_fluorescence[roi_index, :]
+                    if neuropil_fluorescence is not None
+                    else cell_fluorescence[roi_index, :]
+                )
             elif self._trace_activity_mode == CONFIG.activity_mode_subtracted:
-                nf = neuropil_fluorescence[roi_index, :] if neuropil_fluorescence is not None else np.zeros_like(cell_fluorescence[roi_index, :])
+                nf = (
+                    neuropil_fluorescence[roi_index, :]
+                    if neuropil_fluorescence is not None
+                    else np.zeros_like(cell_fluorescence[roi_index, :])
+                )
                 trace = cell_fluorescence[roi_index, :] - CONFIG.neuropil_coefficient * nf
             else:
                 trace = spikes[roi_index, :] if spikes is not None else cell_fluorescence[roi_index, :]

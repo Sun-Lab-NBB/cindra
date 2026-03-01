@@ -146,7 +146,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
     detection_data.correlation_map = correlation_map
     detection_data.cell_diameter = cell_diameter
     for roi in roi_statistics:
-        roi.frame_width = frame_width
+        roi.mask.frame_width = frame_width
     context.runtime.extraction.roi_statistics = roi_statistics
 
     # Records channel 1 detection time.
@@ -195,7 +195,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
         detection_data.correlation_map_channel_2 = correlation_map_channel_2
         detection_data.cell_diameter_channel_2 = cell_diameter_channel_2
         for roi in roi_statistics_channel_2:
-            roi.frame_width = frame_width
+            roi.mask.frame_width = frame_width
         context.runtime.extraction.roi_statistics_channel_2 = roi_statistics_channel_2
 
         # Records channel 2 detection time.
@@ -497,9 +497,9 @@ def _detect_channel(
     y_pixel_offset = int(valid_y_range[0])
     x_pixel_offset = int(valid_x_range[0])
     for roi in roi_statistics:
-        roi.y_pixels += y_pixel_offset
-        roi.x_pixels += x_pixel_offset
-        roi.centroid = (roi.centroid[0] + y_pixel_offset, roi.centroid[1] + x_pixel_offset)
+        roi.mask.y_pixels += y_pixel_offset
+        roi.mask.x_pixels += x_pixel_offset
+        roi.mask.centroid = (roi.mask.centroid[0] + y_pixel_offset, roi.mask.centroid[1] + x_pixel_offset)
 
     # Applies optional preclassification filtering to remove unlikely cell candidates early.
     if detection_config.preclassification_threshold > 0:

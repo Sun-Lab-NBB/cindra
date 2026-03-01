@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, ClassVar
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.ndimage import binary_dilation, binary_fill_holes
 from scipy.spatial import ConvexHull, QhullError
 from ataraxis_base_utilities import console
 
@@ -64,94 +63,6 @@ def compute_median_pixel_position(y_pixels: NDArray[np.int32], x_pixels: NDArray
     return int(y_pixels[min_index]), int(x_pixels[min_index])
 
 
-_BOUNDARY_PADDING: int = 3
-"""The padding added around the mask bounding box for boundary computation."""
-
-_CIRCLE_RADIUS_SCALE: float = 1.25
-"""The scale factor applied to the cell radius for circle rendering."""
-
-_CIRCLE_POINT_COUNT: int = 100
-"""The number of points used to approximate the circle perimeter."""
-
-
-def compute_boundary_mask(
-    y_pixels: NDArray[np.int32],
-    x_pixels: NDArray[np.int32],
-) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
-    """Computes the exterior boundary mask of the ROI specified by the input pixel coordinates.
-
-    Args:
-        y_pixels: The row coordinates of the mask pixels.
-        x_pixels: The column coordinates of the mask pixels.
-
-    Returns:
-        The (y_boundary, x_boundary) arrays containing the boundary mask pixel coordinates.
-    """
-    # Reshapes the coordinate arrays into column vectors for 2D array indexing.
-    y_pixels = np.expand_dims(y_pixels.flatten(), axis=1)
-    x_pixels = np.expand_dims(x_pixels.flatten(), axis=1)
-    pixel_count = y_pixels.shape[0]
-
-    if not pixel_count:
-        return np.zeros((0,), dtype=np.int32), np.zeros((0,), dtype=np.int32)
-
-    # Builds a tight bounding box around the ROI with padding to ensure boundary pixels at the edges of the mask are
-    # not clipped during morphological operations.
-    y_min = y_pixels.min()
-    x_min = x_pixels.min()
-    mask = np.zeros(
-        (int(y_pixels.max() - y_min) + 2 * _BOUNDARY_PADDING, int(x_pixels.max() - x_min) + 2 * _BOUNDARY_PADDING),
-        dtype=np.bool_,
-    )
-
-    # Stamps the ROI pixels into the local coordinate system offset by the bounding box origin.
-    mask[
-        y_pixels - y_min + _BOUNDARY_PADDING,
-        x_pixels - x_min + _BOUNDARY_PADDING,
-    ] = True
-
-    # Dilates the mask to close single-pixel gaps, then fills interior holes to produce a solid region.
-    mask = binary_dilation(mask)
-    mask = binary_fill_holes(mask)
-
-    # Uses a 4-connected structuring element (cross pattern) to find the exterior ring. Dilating the background into
-    # the foreground and intersecting with the original mask isolates the outermost pixel layer.
-    kernel = np.zeros((3, 3), dtype=np.int32)
-    kernel[1] = 1
-    kernel[:, 1] = 1
-    exterior = binary_dilation(mask == 0, structure=kernel) & mask
-
-    # Converts local bounding-box coordinates back to the original frame coordinate system.
-    y_boundary, x_boundary = np.nonzero(exterior)
-    y_boundary = y_boundary + y_min - _BOUNDARY_PADDING
-    x_boundary = x_boundary + x_min - _BOUNDARY_PADDING
-
-    return y_boundary, x_boundary
-
-
-def compute_circle_mask(
-    centroid_y: int,
-    centroid_x: int,
-    radius: float,
-) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
-    """Computes the pixel coordinates of a circle around the ROI centroid specified by the input coordinates.
-
-    Args:
-        centroid_y: The row coordinate of the ROI's center.
-        centroid_x: The column coordinate of the ROI's center.
-        radius: The radius of the ROI in pixels.
-
-    Returns:
-        The (y_circle, x_circle) arrays containing the circle pixel coordinates.
-    """
-    # Scales the radius up to provide visual clearance around the ROI boundary.
-    scaled_radius = radius * _CIRCLE_RADIUS_SCALE
-    theta = np.linspace(0.0, 2 * np.pi, num=_CIRCLE_POINT_COUNT)
-    y_circle = (scaled_radius * np.sin(theta) + centroid_y).astype(np.int32)
-    x_circle = (scaled_radius * np.cos(theta) + centroid_x).astype(np.int32)
-    return y_circle, x_circle
-
-
 def compute_roi_statistics(
     rois: list[ROIStatistics],
     frame_height: int,
@@ -195,8 +106,8 @@ def compute_roi_statistics(
 
     # Initializes centroids for ROIs that lack them. The centroid is required for computing radial statistics.
     for roi in rois:
-        if not roi.centroid or roi.centroid == (0, 0):
-            roi.centroid = compute_median_pixel_position(y_pixels=roi.y_pixels, x_pixels=roi.x_pixels)
+        if not roi.mask.centroid or roi.mask.centroid == (0, 0):
+            roi.mask.centroid = compute_median_pixel_position(y_pixels=roi.mask.y_pixels, x_pixels=roi.mask.x_pixels)
 
     # Resolves the cell diameter for distance normalization. A sensible default is used when no diameter is provided.
     default_diameter = 10
@@ -235,29 +146,12 @@ def compute_roi_statistics(
         if not lightweight:
             data.solidity = wrapper.solidity
             # noinspection PyUnboundLocalVariable
-            data.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
+            data.mask.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
 
             # noinspection PyUnboundLocalVariable
             ellipse = wrapper.fit_ellipse(y_scale=y_scale, x_scale=x_scale)
-            data.radius = ellipse.radius
+            data.mask.radius = ellipse.radius
             data.aspect_ratio = ellipse.aspect_ratio
-
-            boundary_y, boundary_x = compute_boundary_mask(
-                y_pixels=data.y_pixels,
-                x_pixels=data.x_pixels,
-            )
-            data.boundary_y_pixels = boundary_y
-            data.boundary_x_pixels = boundary_x
-
-            y_circle, x_circle = compute_circle_mask(
-                centroid_y=data.centroid[0],
-                centroid_x=data.centroid[1],
-                radius=data.radius,
-            )
-            # Clips circle to frame bounds.
-            valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < frame_height) & (x_circle < frame_width)
-            data.circle_y_pixels = y_circle[valid]
-            data.circle_x_pixels = x_circle[valid]
 
         # Collects values for normalization to avoid re-iterating over ROIs.
         mean_radius_values[i] = data.mean_radius
@@ -295,7 +189,7 @@ def compute_roi_statistics(
         roi_wrappers = [_ROI(data=roi, diameter=effective_diameter, crop=crop) for roi in rois]
         overlap_counts = _ROI.get_overlap_count_image(rois=roi_wrappers, height=frame_height, width=frame_width)
         for wrapper in roi_wrappers:
-            wrapper.data.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
+            wrapper.data.mask.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
 
 
 @dataclass(frozen=True)
@@ -386,7 +280,10 @@ class _ROI:
     """Cache of sorted baseline distances keyed by diameter, avoiding recomputation across instances."""
 
     def __init__(self, data: ROIStatistics, diameter: int, crop: bool = True) -> None:
-        if data.x_pixels.shape != data.y_pixels.shape or data.x_pixels.shape != data.pixel_weights.shape:
+        if (
+            data.mask.x_pixels.shape != data.mask.y_pixels.shape
+            or data.mask.x_pixels.shape != data.mask.pixel_weights.shape
+        ):
             message = (
                 "Unable to initialize the ROI class. The x_pixels, y_pixels, and pixel_weights arrays in the input "
                 "ROIStatistics instance must have the same shape."
@@ -406,22 +303,22 @@ class _ROI:
     @property
     def y_pixels(self) -> NDArray[np.int32]:
         """Returns the y-coordinates of the ROI pixels."""
-        return self._data.y_pixels
+        return self._data.mask.y_pixels
 
     @property
     def x_pixels(self) -> NDArray[np.int32]:
         """Returns the x-coordinates of the ROI pixels."""
-        return self._data.x_pixels
+        return self._data.mask.x_pixels
 
     @property
     def pixel_weights(self) -> NDArray[np.float32]:
         """Returns the pixel weights (lambda values) for the ROI."""
-        return self._data.pixel_weights
+        return self._data.mask.pixel_weights
 
     @property
     def centroid(self) -> tuple[int, int]:
         """Returns the centroid (y, x) pixel position of the ROI."""
-        return self._data.centroid[0], self._data.centroid[1]
+        return self._data.mask.centroid[0], self._data.mask.centroid[1]
 
     @property
     def soma_mask(self) -> NDArray[np.bool_]:

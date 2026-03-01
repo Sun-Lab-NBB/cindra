@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 from pyqtgraph.graphicsItems.ViewBox.ViewBoxMenu import ViewBoxMenu  # type: ignore[import-untyped]
 
-from .styles import STYLE
+from .styles import STYLE, COLORS
 from .constants import CONFIG
 
 if TYPE_CHECKING:
@@ -412,7 +412,7 @@ def plot_trace(
         spikes: Deconvolved spike array with shape (roi_count, frame_count).
         frame_indices: Time axis array with shape (frame_count,).
         merge_indices: Indices of the selected ROIs to display.
-        activity_mode: Trace type index (0=F, 1=Fneu, 2=F-0.7*Fneu, 3=spks).
+        activity_mode: Trace type index (0=Fluorescence, 1=Neuropil, 2=Neuropil Subtracted, 3=Spikes).
         roi_colors: Per-ROI RGB colors with shape (roi_count, 3) for multi-trace coloring.
         traces_visible: Determines whether the raw fluorescence trace is drawn.
         neuropil_visible: Determines whether the neuropil trace is drawn.
@@ -510,15 +510,11 @@ def _plot_single_trace(
     spike_trace *= y_maximum - y_minimum
 
     if traces_visible:
-        trace_box.plot(frame_indices, fluorescence, pen=STYLE.fluorescence_pen)
+        trace_box.plot(frame_indices, fluorescence, pen=COLORS.cyan)
     if neuropil_visible:
-        trace_box.plot(frame_indices, neuropil, pen=STYLE.neuropil_pen)
+        trace_box.plot(frame_indices, neuropil, pen=COLORS.red)
     if deconvolved_visible:
-        trace_box.plot(
-            frame_indices,
-            spike_trace + y_minimum,
-            pen=(*STYLE.deconvolved_pen_color, STYLE.deconvolved_alpha),
-        )
+        trace_box.plot(frame_indices, spike_trace + y_minimum, pen=COLORS.silver)
 
     axis.setTicks(None)
     return y_minimum, y_maximum
@@ -547,7 +543,7 @@ def _plot_multi_trace(
         spikes: Deconvolved spike array with shape (roi_count, frame_count).
         frame_indices: Time axis array.
         merge_indices: Indices of selected ROIs.
-        activity_mode: Trace type index (0=F, 1=Fneu, 2=F-0.7*Fneu, 3=spks).
+        activity_mode: Trace type index (0=Fluorescence, 1=Neuropil, 2=Neuropil Subtracted, 3=Spikes).
         roi_colors: Per-ROI RGB colors with shape (roi_count, 3).
         scale_factor: Vertical spacing factor for trace stacking.
         max_plotted: Maximum number of traces to display.
@@ -583,7 +579,7 @@ def _plot_multi_trace(
             normalized = np.zeros_like(trace)
 
         # Determines pen color for this ROI.
-        pen_color = roi_colors[index, :] if roi_colors is not None else (255, 255, 255)
+        pen_color = roi_colors[index, :] if roi_colors is not None else COLORS.white
 
         trace_box.plot(frame_indices, normalized + stack_position * k_space, pen=pen_color)
         tick_labels.append((stack_position * k_space + float(normalized.mean()), str(index)))
@@ -597,7 +593,7 @@ def _plot_multi_trace(
         average /= average_max
 
     y_minimum = 0.0
-    average_pen = (STYLE.average_gray, STYLE.average_gray, STYLE.average_gray)
+    average_pen = COLORS.silver
 
     # Plots average trace at bottom when enough cells are selected.
     if len(selected) > CONFIG.average_threshold:

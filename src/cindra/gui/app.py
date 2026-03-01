@@ -11,6 +11,7 @@ from ataraxis_base_utilities import console
 
 import cindra
 
+from .styles import FONTS, PC_STYLE, BINARY_STYLE
 from .pc_viewer import PCViewer
 from .roi_viewer import ROIViewer
 from .binary_viewer import BinaryPlayer
@@ -39,6 +40,7 @@ def run_tracking_viewer(recording_path: Path) -> None:
     owns_application = application is None
     if owns_application:
         application = QApplication(sys.argv)
+        application.setFont(FONTS.small)
 
     # Loads recording data upfront so the viewer window receives a fully populated data instance.
     data = TrackingViewerData.from_recording(root_path=recording_path)
@@ -71,6 +73,7 @@ def run_registration_viewer(recording_path: Path) -> None:
     owns_application = application is None
     if owns_application:
         application = QApplication(sys.argv)
+        application.setFont(FONTS.small)
 
     # Loads recording data upfront so both viewer windows share the same SingleDayViewerData
     # instance. This ensures plane switches in the binary player are reflected in the PC viewer
@@ -80,6 +83,31 @@ def run_registration_viewer(recording_path: Path) -> None:
     # Creates both viewer windows with the shared SingleDayViewerData instance.
     binary_player = BinaryPlayer(data=data)
     pc_viewer = PCViewer(data=data)
+
+    # Computes screen-adaptive window positions. On large screens the two viewers sit side by side;
+    # on smaller screens they cascade with a visible offset so both title bars remain accessible.
+    screen = application.primaryScreen()  # type: ignore[union-attr]
+    available = screen.availableGeometry()
+
+    # Top-left corner of the binary viewer, in pixels from the screen's top-left corner.
+    binary_viewer_x, binary_viewer_y = 50, 50
+    # Default window dimensions from style constants.
+    binary_viewer_width = BINARY_STYLE.window_geometry[2]
+    binary_viewer_height = BINARY_STYLE.window_geometry[3]
+    pc_viewer_width = PC_STYLE.window_geometry[2]
+    pc_viewer_height = PC_STYLE.window_geometry[3]
+    # Horizontal pixel gap between adjacent windows when placed side by side.
+    viewer_gap = 10
+
+    if binary_viewer_x + binary_viewer_width + viewer_gap + pc_viewer_width <= available.width():
+        # Side by side: PC viewer sits immediately to the right of the binary viewer.
+        pc_viewer_x, pc_viewer_y = binary_viewer_x + binary_viewer_width + viewer_gap, 50
+    else:
+        # Cascade: offset so both title bars remain accessible on smaller screens.
+        pc_viewer_x, pc_viewer_y = binary_viewer_x + 30, binary_viewer_y + 30
+
+    binary_player.setGeometry(binary_viewer_x, binary_viewer_y, binary_viewer_width, binary_viewer_height)
+    pc_viewer.setGeometry(pc_viewer_x, pc_viewer_y, pc_viewer_width, pc_viewer_height)
 
     # When the user switches planes in the binary player, the shared SingleDayViewerData
     # instance is mutated in place (via switch_view). This signal connection triggers the PC
@@ -118,6 +146,7 @@ def run_roi_viewer(session_path: Path | None = None) -> None:
     owns_application = application is None
     if owns_application:
         application = QApplication(sys.argv)
+        application.setFont(FONTS.small)
     if not isinstance(application, QApplication):  # pragma: no cover
         message = "Unable to launch the ROI viewer. Failed to obtain a QApplication instance."
         console.error(message=message, error=RuntimeError)

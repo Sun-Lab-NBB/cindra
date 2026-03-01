@@ -20,8 +20,8 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import STYLE, PC_STYLE
-from .constants import PC_CONFIG
+from .styles import FONTS, STYLE, COLORS, PC_STYLE
+from .constants import CONFIG, PC_CONFIG
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -106,7 +106,7 @@ class PCViewer(QMainWindow):
         self._metrics_plot = self._graphics_widget.addPlot(row=0, col=0)
         self._metrics_plot.setMouseEnabled(x=False, y=False)
         self._metrics_plot.setMenuEnabled(False)
-        self._metrics_plot.getAxis("left").setWidth(PC_STYLE.axis_fixed_width)
+        self._metrics_plot.getAxis("left").setWidth(STYLE.axis_fixed_width)
 
         # noinspection PyUnresolvedReferences
         self._difference_view_box = self._graphics_widget.addViewBox(
@@ -137,7 +137,8 @@ class PCViewer(QMainWindow):
         # they serve as content anchors that stabilize the ViewBox bounds during animation.
         self._title_labels: list[pg.TextItem] = []
         for view_box in (self._difference_view_box, self._merged_view_box, self._animated_view_box):
-            label = pg.TextItem("", color="w", anchor=(0.5, 0))
+            label = pg.TextItem("", color=COLORS.white, anchor=(0.5, 0))
+            label.setFont(FONTS.small)
             view_box.addItem(label)
             self._title_labels.append(label)
 
@@ -148,7 +149,7 @@ class PCViewer(QMainWindow):
         self._projection_plot = self._graphics_widget.addPlot(row=0, col=1, colspan=2)
         self._projection_plot.setMouseEnabled(x=False)
         self._projection_plot.setMenuEnabled(False)
-        self._projection_plot.getAxis("left").setWidth(PC_STYLE.axis_fixed_width)
+        self._projection_plot.getAxis("left").setWidth(STYLE.axis_fixed_width)
 
         # Bottom control panel: PC selector, metric labels, title labels, playback controls.
         self._create_bottom_panel()
@@ -176,7 +177,11 @@ class PCViewer(QMainWindow):
             return
 
         # Clips extreme pixel values to the 1st-99th percentile range for stable image display.
-        self._pc_images = np.clip(pc_images, np.percentile(pc_images, 1), np.percentile(pc_images, 99))
+        self._pc_images = np.clip(
+            pc_images,
+            np.percentile(pc_images, CONFIG.image_percentile_low),
+            np.percentile(pc_images, CONFIG.image_percentile_high),
+        )
         self._image_height, self._image_width = self._pc_images.shape[2:]
         self._pc_metrics = pc_metrics
         # Falls back to a zero array when the recording has no per-frame PC projections.
@@ -234,10 +239,10 @@ class PCViewer(QMainWindow):
         Widgets keep their natural size; only the trailing stretch grows when the window is resized.
         Fixed spacing separates each logical group.
         """
-        bold_font = QtGui.QFont(STYLE.font_family, PC_STYLE.metrics_font_size, QtGui.QFont.Weight.Bold.value)
-        big_font = QtGui.QFont(STYLE.font_family, PC_STYLE.metrics_font_size)
+        bold_font = FONTS.large_bold
+        big_font = FONTS.large
         panel = QHBoxLayout()
-        group_spacing = PC_STYLE.group_spacing
+        group_spacing = STYLE.group_spacing
 
         # PC selector: label and input field for the current principal component number.
         pc_label = QLabel("PC:")
@@ -245,7 +250,7 @@ class PCViewer(QMainWindow):
         pc_label.setStyleSheet(STYLE.white_label)
         self._pc_edit: QLineEdit = QLineEdit(self)
         self._pc_edit.setText("1")
-        self._pc_edit.setFixedWidth(PC_STYLE.pc_edit_width)
+        self._pc_edit.setFixedWidth(STYLE.small_edit_width)
         self._pc_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._pc_edit.setFont(big_font)
         self._pc_edit.setToolTip("Principal component number (Left/Right arrow keys to step).")
@@ -377,10 +382,13 @@ class PCViewer(QMainWindow):
         # The legend is recreated on every update because clear() removes it from the plot.
         self._metrics_plot.clear()
         self._metrics_plot.disableAutoRange()
-        colors = PC_STYLE.metric_colors
+        colors = (COLORS.cyan, COLORS.red, COLORS.magenta)
         metric_names = ["rigid", "nonrigid", "nonrigid max"]
         self._legend = self._metrics_plot.addLegend(
-            horSpacing=STYLE.legend_horizontal_spacing, colCount=PC_STYLE.legend_column_count, offset=STYLE.legend_offset, labelTextSize=STYLE.legend_label_size
+            horSpacing=STYLE.legend_horizontal_spacing,
+            colCount=PC_STYLE.legend_column_count,
+            offset=STYLE.legend_offset,
+            labelTextSize=FONTS.label_size,
         )
         for index in range(3):
             curve = self._metrics_plot.plot(
@@ -396,20 +404,20 @@ class PCViewer(QMainWindow):
             [pc_index + 1, pc_index + 1, pc_index + 1],
             np.asarray(self._pc_metrics[pc_index, :]).tolist(),
             size=STYLE.scatter_point_size,
-            brush=pg.mkBrush(*PC_STYLE.scatter_brush_color),
+            brush=pg.mkBrush(*COLORS.white),
         )
-        self._metrics_plot.setTitle("PC Registration Shifts", size=STYLE.plot_title_size, bold=True)
-        self._metrics_plot.setLabel("left", "Shift (px)", **{"font-size": STYLE.axis_label_size})
-        self._metrics_plot.setLabel("bottom", "PC #", **{"font-size": STYLE.axis_label_size})
+        self._metrics_plot.setTitle("PC Registration Shifts", size=FONTS.plot_title_size, bold=True)
+        self._metrics_plot.setLabel("left", "Shift (px)", **{"font-size": FONTS.label_size})
+        self._metrics_plot.setLabel("bottom", "PC #", **{"font-size": FONTS.label_size})
         self._metrics_plot.setXRange(1, self._pc_count, padding=0.0)
         self._metrics_plot.setYRange(*self._metrics_y_range, padding=0.0)
 
         # Projection plot: shows the per-frame projection onto the selected PC over time.
         self._projection_plot.clear()
         self._projection_plot.plot(self._pc_projections[:, pc_index])
-        self._projection_plot.setTitle("PC Projection Weight", size=STYLE.plot_title_size, bold=True)
-        self._projection_plot.setLabel("left", "Magnitude", **{"font-size": STYLE.axis_label_size})
-        self._projection_plot.setLabel("bottom", "Sampled Frame", **{"font-size": STYLE.axis_label_size})
+        self._projection_plot.setTitle("PC Projection Weight", size=FONTS.plot_title_size, bold=True)
+        self._projection_plot.setLabel("left", "Magnitude", **{"font-size": FONTS.label_size})
+        self._projection_plot.setLabel("bottom", "Sampled Frame", **{"font-size": FONTS.label_size})
         self._projection_plot.setXRange(0, self._pc_projections.shape[0] - 1)
         self._projection_plot.setYRange(*self._projection_y_range)
 

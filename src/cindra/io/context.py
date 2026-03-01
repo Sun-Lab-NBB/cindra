@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
@@ -96,7 +95,7 @@ def discover_recordings(root_directory: Path) -> list[Path]:
 
     # Derives session roots by truncating each marker parent path at the unique component.
     session_roots: list[Path] = []
-    for parent, component in zip(marker_parents, unique_components):
+    for parent, component in zip(marker_parents, unique_components, strict=True):
         # Finds the index of the unique component in the path parts and truncates at (including) that component.
         parts = parent.parts
         component_index = parts.index(component)

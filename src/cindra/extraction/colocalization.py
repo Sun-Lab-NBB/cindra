@@ -307,7 +307,7 @@ def _build_sparse_roi_masks(
 
     for roi_index, roi in enumerate(rois):
         # Converts 2D pixel coordinates to flattened 1D indices via row-major arithmetic.
-        flat_pixels = (roi.y_pixels * frame_width + roi.x_pixels).astype(np.intp)
+        flat_pixels = (roi.mask.y_pixels * frame_width + roi.mask.x_pixels).astype(np.intp)
 
         # Assigns every pixel in this ROI to the same row (roi_index) in the sparse matrix.
         row_indices.append(np.full(len(flat_pixels), fill_value=roi_index, dtype=np.intp))

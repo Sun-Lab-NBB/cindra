@@ -17,7 +17,7 @@ from .utils import (
     apply_temporal_high_pass_filter,
     compute_temporal_standard_deviation,
 )
-from ..dataclasses import ROIStatistics
+from ..dataclasses import ROIMask, ROIStatistics
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -325,10 +325,13 @@ def detect(
         # on temporally-standardized frames.
         roi_statistics.append(
             ROIStatistics(
-                y_pixels=y_pixels.astype(np.int32),
-                x_pixels=x_pixels.astype(np.int32),
-                pixel_weights=pixel_weights * temporal_standard_deviation[y_pixels, x_pixels],
-                centroid=centroid,
+                mask=ROIMask(
+                    y_pixels=y_pixels.astype(np.int32),
+                    x_pixels=x_pixels.astype(np.int32),
+                    pixel_weights=pixel_weights * temporal_standard_deviation[y_pixels, x_pixels],
+                    centroid=centroid,
+                    frame_width=0,
+                ),
                 footprint=int(best_scale_index),
             )
         )

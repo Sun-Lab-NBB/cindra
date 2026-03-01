@@ -7,13 +7,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
-from PySide6 import QtGui
 import pyqtgraph as pg  # type: ignore[import-untyped]
 import matplotlib.cm
 from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import ROI_STYLE
+from .styles import FONTS, COLORS, ROI_STYLE
 from .constants import CONFIG, BackgroundView
 from .data_models import ColorArrays, ROIIndexMaps
 
@@ -140,7 +139,7 @@ def compute_colors(
     istat = np.zeros((color_count, cell_count), dtype=np.float32)
 
     # Generates random colors, adjusting for channel 2 data if present.
-    np.random.seed(seed=0)  # noqa: NPY002
+    np.random.seed(seed=CONFIG.random_color_seed)  # noqa: NPY002
     random_colors = np.random.random((cell_count,))  # noqa: NPY002
     if context.two_channels:
         random_colors = random_colors / CONFIG.channel_2_color_divisor + CONFIG.channel_2_color_offset
@@ -243,10 +242,10 @@ def init_roi_maps(
     text_labels: list[pg.TextItem] = []
 
     for roi_index in np.arange(cell_count - 1, -1, -1, dtype=np.int32):
-        y_pixels = roi_statistics[roi_index].y_pixels
+        y_pixels = roi_statistics[roi_index].mask.y_pixels
         if y_pixels is not None:
-            x_pixels = roi_statistics[roi_index].x_pixels
-            weights = roi_statistics[roi_index].pixel_weights
+            x_pixels = roi_statistics[roi_index].mask.x_pixels
+            weights = roi_statistics[roi_index].mask.pixel_weights
             weights = weights / weights.sum()
 
             # Pushes down existing layers and adds cell on top.
@@ -260,15 +259,15 @@ def init_roi_maps(
             sroi[y_pixels, x_pixels] = True
             lambda_all[y_pixels, x_pixels] = weights
 
-            centroid = roi_statistics[roi_index].centroid
+            centroid = roi_statistics[roi_index].mask.centroid
             label_text = str(roi_index)
         else:
             label_text = ""
             centroid = (0, 0)
 
-        text_item = pg.TextItem(label_text, color=ROI_STYLE.roi_text_color, anchor=(0.5, 0.5))
+        text_item = pg.TextItem(label_text, color=COLORS.silver, anchor=(0.5, 0.5))
         text_item.setPos(centroid[1], centroid[0])
-        text_item.setFont(QtGui.QFont(ROI_STYLE.roi_text_font_family, ROI_STYLE.roi_text_size, QtGui.QFont.Weight.Bold.value))
+        text_item.setFont(FONTS.small_bold)
         text_labels.append(text_item)
 
     text_labels.reverse()
@@ -342,27 +341,29 @@ def draw_masks(
     if view_index == 0:
         # ROI view: highlights selected ROIs with brightness based on overlap depth.
         for roi_index in merge_roi_indices:
-            y_pixels = roi_statistics[roi_index].y_pixels.flatten()
-            x_pixels = roi_statistics[roi_index].x_pixels.flatten()
+            y_pixels = roi_statistics[roi_index].mask.y_pixels.flatten()
+            x_pixels = roi_statistics[roi_index].mask.x_pixels.flatten()
             overlap_count = (roi_maps.iroi[:, y_pixels, x_pixels] > -1).sum(axis=0) - 1
             brightness = 1 - overlap_count / CONFIG.overlap_layers
             overlay = _make_chosen_roi(overlay, y_pixels, x_pixels, brightness)
     else:
         # Image view: highlights selected ROIs with colored circles.
         for roi_index in merge_roi_indices:
-            y_circle = roi_statistics[roi_index].circle_y_pixels
-            x_circle = roi_statistics[roi_index].circle_x_pixels
-            y_pixels = roi_statistics[roi_index].y_pixels.flatten()
-            x_pixels = roi_statistics[roi_index].x_pixels.flatten()
+            y_circle, x_circle = roi_statistics[roi_index].mask.circle_pixels
+            valid = (
+                (y_circle >= 0) & (x_circle >= 0) & (y_circle < context.frame_height) & (x_circle < context.frame_width)
+            )
+            y_circle, x_circle = y_circle[valid], x_circle[valid]
+            y_pixels = roi_statistics[roi_index].mask.y_pixels.flatten()
+            x_pixels = roi_statistics[roi_index].mask.x_pixels.flatten()
             overlay[y_pixels, x_pixels, 3] = 0
             roi_color = color_arrays.cols[color_index, roi_index]
-            if y_circle is not None and x_circle is not None:
-                overlay = _make_chosen_circle(
-                    overlay,
-                    y_circle,
-                    x_circle,
-                    roi_color,
-                )
+            overlay = _make_chosen_circle(
+                overlay,
+                y_circle,
+                x_circle,
+                roi_color,
+            )
 
     return overlay
 
@@ -397,7 +398,9 @@ def render_colorbar(
     """
     color_index = roi_color_mode
     if color_index == 0:
-        colorbar_widgets.image.setImage(np.zeros((ROI_STYLE.colorbar_row_count, ROI_STYLE.colorbar_sample_count - 1, 3)))
+        colorbar_widgets.image.setImage(
+            np.zeros((ROI_STYLE.colorbar_row_count, ROI_STYLE.colorbar_sample_count - 1, 3))
+        )
     else:
         colorbar_widgets.image.setImage(colorbar_image)
 
@@ -652,9 +655,9 @@ def add_roi(
         roi_statistics: The ROI statistics list.
         roi_index: Index of the ROI to add.
     """
-    y_pixels = roi_statistics[roi_index].y_pixels
-    x_pixels = roi_statistics[roi_index].x_pixels
-    weights = roi_statistics[roi_index].pixel_weights
+    y_pixels = roi_statistics[roi_index].mask.y_pixels
+    x_pixels = roi_statistics[roi_index].mask.x_pixels
+    weights = roi_statistics[roi_index].mask.pixel_weights
 
     # Pushes existing layers down.
     roi_maps.iroi[2, y_pixels, x_pixels] = roi_maps.iroi[1, y_pixels, x_pixels]
@@ -683,8 +686,8 @@ def remove_roi(
         roi_statistics: The ROI statistics list.
         roi_index: Index of the ROI to remove.
     """
-    y_pixels = roi_statistics[roi_index].y_pixels
-    x_pixels = roi_statistics[roi_index].x_pixels
+    y_pixels = roi_statistics[roi_index].mask.y_pixels
+    x_pixels = roi_statistics[roi_index].mask.x_pixels
 
     # Finds pixels at each overlap layer where this ROI appears.
     layer0_pixels = np.array((roi_maps.iroi[0, :, :] == roi_index).nonzero()).astype(np.int32)
@@ -831,8 +834,8 @@ def _normalize_percentile(
     if image is None:
         return np.zeros((frame_height, frame_width), dtype=np.float32)
 
-    percentile_1 = np.percentile(image, 1)
-    percentile_99 = np.percentile(image, 99)
+    percentile_1 = np.percentile(image, CONFIG.image_percentile_low)
+    percentile_99 = np.percentile(image, CONFIG.image_percentile_high)
 
     if percentile_99 <= percentile_1:
         return np.zeros((frame_height, frame_width), dtype=np.float32)
@@ -866,8 +869,8 @@ def _place_in_valid_region(
         return 0.5 * np.ones((frame_height, frame_width), dtype=np.float32)
 
     # Normalizes the image using percentile clipping.
-    percentile_1 = np.percentile(image, 1)
-    percentile_99 = np.percentile(image, 99)
+    percentile_1 = np.percentile(image, CONFIG.image_percentile_low)
+    percentile_99 = np.percentile(image, CONFIG.image_percentile_high)
 
     if percentile_99 <= percentile_1:
         return np.zeros((frame_height, frame_width), dtype=np.float32)
@@ -912,8 +915,8 @@ def _flip_roi(
     else:
         color_arrays.cols[CONFIG.color_cell_non_cell, roi_index] = CONFIG.noncell_color
 
-    y_pixels = roi_statistics[roi_index].y_pixels
-    x_pixels = roi_statistics[roi_index].x_pixels
+    y_pixels = roi_statistics[roi_index].mask.y_pixels
+    x_pixels = roi_statistics[roi_index].mask.x_pixels
     redraw_masks(color_arrays=color_arrays, roi_maps=roi_maps, y_pixels=y_pixels, x_pixels=x_pixels)
 
 

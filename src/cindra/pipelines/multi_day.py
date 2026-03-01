@@ -89,8 +89,8 @@ def extract_multiday_fluorescence(configuration: MultiDayConfiguration, session_
     target_context = contexts[0]
 
     # Memory-maps extraction arrays from disk. resolve_multiday_contexts() only loads YAML scalars, so roi_statistics
-    # will be None until arrays are explicitly loaded. Uses memory mapping because the data is only needed for validation
-    # here; extract_traces() reloads what it needs independently.
+    # will be None until arrays are explicitly loaded. Uses memory mapping because the data is only needed for
+    # validation here; extract_traces() reloads what it needs independently.
     if target_context.runtime.output_path is not None:
         target_context.runtime.extraction.memory_map_arrays(target_context.runtime.output_path)
 
