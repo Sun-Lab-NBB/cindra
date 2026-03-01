@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+import shutil
 from typing import TYPE_CHECKING
 
 from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
@@ -12,8 +13,6 @@ from ..io import resolve_multiday_contexts, resolve_single_day_contexts
 from .multi_day import discover_multiday_cells, extract_multiday_fluorescence
 from .single_day import process_plane, binarize_recording, save_combined_data
 from ..dataclasses import RuntimeContext, MultiDayConfiguration, SingleDayConfiguration
-
-import shutil
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -340,13 +339,15 @@ def run_single_day_batch(
     process: bool = False,
     combine: bool = False,
     target_plane: int = -1,
+    workers: int = -1,
+    progress_bars: bool = True,
 ) -> None:
     """Runs the single-day pipeline for each session in a batch, using a shared configuration template.
 
     For each session, copies the template configuration into the session root directory, updates it with
-    session-specific data and output paths, then runs the single-day pipeline against that local copy. This avoids
-    mutating the user's original template and eliminates race conditions when multiple batch processes run in parallel.
-    Failures for individual sessions do not abort the batch — processing continues to the next session.
+    session-specific data and output paths, then runs the single-day pipeline against that local copy. The original
+    template file is never modified. Failures for individual sessions do not abort the batch — processing continues
+    to the next session.
 
     Args:
         configuration_path: The path to the single-day configuration YAML template file. This file is never modified.
@@ -355,6 +356,8 @@ def run_single_day_batch(
         process: Determines whether to run the processing step (step 2).
         combine: Determines whether to run the combination step (step 3).
         target_plane: The index of the plane to process. Setting this to '-1' processes all available planes.
+        workers: The number of parallel workers to use per plane. Setting this to '-1' uses automatic detection.
+        progress_bars: Determines whether to display progress bars during processing.
     """
     total = len(session_paths)
     if total == 0:
@@ -371,14 +374,15 @@ def run_single_day_batch(
         )
 
         try:
-            # Creates a per-session config copy in the session root directory.
+            # Creates a per-session config copy in the session root directory with session-specific paths
+            # and runtime overrides applied.
             session_config_path = session_path / "single_day_config.yaml"
             shutil.copy2(configuration_path, session_config_path)
-
-            # Loads the local copy and updates paths for this session.
             configuration = SingleDayConfiguration.from_yaml(file_path=session_config_path)
             configuration.file_io.data_path = session_path
             configuration.file_io.output_path = session_path / "processed_data"
+            configuration.runtime.parallel_workers = workers
+            configuration.runtime.display_progress_bars = progress_bars
             configuration.save(file_path=session_config_path)
 
             run_single_day_pipeline(

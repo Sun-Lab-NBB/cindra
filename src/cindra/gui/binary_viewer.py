@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
 )
 
-from .styles import STYLE, BINARY_STYLE
+from .styles import FONTS, STYLE, COLORS, BINARY_STYLE
 from .constants import BINARY_CONFIG
 from .single_day_context import SingleDayViewerData
 
@@ -142,20 +142,23 @@ class BinaryPlayer(QMainWindow):
         self._shift_plot = self._graphics_widget.addPlot(name="plot_shift", row=1, col=0, colspan=2)
         self._shift_plot.setMouseEnabled(x=True, y=False)
         self._shift_plot.setMenuEnabled(False)
-        self._shift_plot.setTitle("Rigid Registration Offsets", size=STYLE.plot_title_size, bold=True)
-        self._shift_plot.setLabel("left", "Shift (px)", **{"font-size": STYLE.axis_label_size})
-        self._shift_plot.setLabel("bottom", "Frame", **{"font-size": STYLE.axis_label_size})
-        self._shift_plot.getAxis("bottom").setHeight(BINARY_STYLE.axis_fixed_width)
+        self._shift_plot.setTitle("Rigid Registration Offsets", size=FONTS.plot_title_size, bold=True)
+        self._shift_plot.setLabel("left", "Shift (px)", **{"font-size": FONTS.label_size})
+        self._shift_plot.setLabel("bottom", "Frame", **{"font-size": FONTS.label_size})
+        self._shift_plot.getAxis("bottom").setHeight(STYLE.axis_fixed_width)
         self._shift_plot.addLegend(
-            horSpacing=STYLE.legend_horizontal_spacing, colCount=BINARY_STYLE.legend_column_count, offset=STYLE.legend_offset, labelTextSize=STYLE.legend_label_size
+            horSpacing=STYLE.legend_horizontal_spacing,
+            colCount=BINARY_STYLE.legend_column_count,
+            offset=STYLE.legend_offset,
+            labelTextSize=FONTS.label_size,
         )
         self._shift_scatter: pg.ScatterPlotItem = pg.ScatterPlotItem()
         self._shift_scatter.setData([0, 0], [0, 0])
         self._shift_plot.addItem(self._shift_scatter)
 
         # noinspection PyUnresolvedReferences
-        self._graphics_widget.ci.layout.setRowStretchFactor(0, 7)
-        self._graphics_widget.ci.layout.setRowStretchFactor(1, 3)
+        self._graphics_widget.ci.layout.setRowStretchFactor(0, BINARY_STYLE.image_plot_stretch[0])
+        self._graphics_widget.ci.layout.setRowStretchFactor(1, BINARY_STYLE.image_plot_stretch[1])
 
         # Row 2: Current frame label.
         self._frame_number_label: QLabel = QLabel("Current frame: 0")
@@ -165,7 +168,7 @@ class BinaryPlayer(QMainWindow):
         # Row 3: Playback controls and frame slider.
         self._create_buttons()
         self._frame_slider: QSlider = QSlider(QtCore.Qt.Orientation.Horizontal)
-        self._frame_slider.setTickInterval(5)
+        self._frame_slider.setTickInterval(BINARY_CONFIG.frame_slider_tick_interval)
         self._frame_slider.setTracking(False)
         self._frame_slider.valueChanged.connect(self._go_to_frame)
         self._layout.addWidget(self._frame_slider, 3, 2, 1, 4)
@@ -189,7 +192,7 @@ class BinaryPlayer(QMainWindow):
 
         # Fixes the y-axis width so the plot area does not shift when tick label digit counts change
         # across planes (e.g. single-digit vs double-digit offsets).
-        self._shift_plot.getAxis("left").setWidth(BINARY_STYLE.axis_fixed_width)
+        self._shift_plot.getAxis("left").setWidth(STYLE.axis_fixed_width)
 
         # Populates the plane selector without triggering _on_plane_changed yet. Signals are blocked so that
         # clearing and re-adding items does not fire redundant plane-switch callbacks.
@@ -339,8 +342,8 @@ class BinaryPlayer(QMainWindow):
         rigid_y = self.data.rigid_y_offsets
         rigid_x = self.data.rigid_x_offsets
         x_values = np.arange(frame_count)
-        self._shift_plot.plot(x_values, rigid_y, pen=BINARY_STYLE.y_offset_pen, name="Y")
-        self._shift_plot.plot(x_values, rigid_x, pen=BINARY_STYLE.x_offset_pen, name="X")
+        self._shift_plot.plot(x_values, rigid_y, pen=COLORS.green, name="Y")
+        self._shift_plot.plot(x_values, rigid_x, pen=COLORS.gold, name="X")
         shift_min = min(int(rigid_y.min()), int(rigid_x.min()))
         shift_max = max(int(rigid_y.max()), int(rigid_x.max()))
         if shift_min == shift_max:
@@ -355,7 +358,7 @@ class BinaryPlayer(QMainWindow):
             [0, 0],
             [int(rigid_y[0]), int(rigid_x[0])],
             size=STYLE.scatter_point_size,
-            brush=pg.mkBrush(*BINARY_STYLE.scatter_brush_color),
+            brush=pg.mkBrush(*COLORS.red),
         )
 
         self._channel_2_button.setEnabled(self.data.two_channels)
@@ -397,7 +400,7 @@ class BinaryPlayer(QMainWindow):
             [self._current_frame, self._current_frame],
             [int(rigid_y[self._current_frame]), int(rigid_x[self._current_frame])],
             size=STYLE.scatter_point_size,
-            brush=pg.mkBrush(*BINARY_STYLE.scatter_brush_color),
+            brush=pg.mkBrush(*COLORS.red),
         )
 
     def _go_to_frame(self) -> None:

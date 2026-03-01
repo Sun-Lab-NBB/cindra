@@ -7,7 +7,7 @@ from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console
 
 from ..io import discover_recordings
-from ..pipelines import run_multi_day_pipeline, run_single_day_batch, run_single_day_pipeline
+from ..pipelines import run_single_day_batch, run_multi_day_pipeline, run_single_day_pipeline
 from .mcp_server import run_server
 from ..dataclasses import PipelineType, MultiDayConfiguration, SingleDayConfiguration, detect_pipeline_type
 
@@ -397,15 +397,6 @@ def cindra_batch(
         )
         console.error(message=message, error=ValueError)
 
-    # Applies worker and progress-bar overrides to the in-memory configuration template. The updated template is saved
-    # to a temporary file so the user's original config is never modified. Each session receives a local copy of this
-    # temporary file, eliminating race conditions when multiple batch processes run in parallel.
-    configuration = SingleDayConfiguration.from_yaml(file_path=input_path)
-    configuration.runtime.parallel_workers = workers
-    configuration.runtime.display_progress_bars = progress_bars
-    template_path = input_path.parent / ".batch_template.yaml"
-    configuration.save(file_path=template_path)
-
     # Discovers recording sessions across all specified root directories.
     all_sessions: list[Path] = []
     for directory in data_directories:
@@ -428,15 +419,13 @@ def cindra_batch(
     )
 
     # Runs the single-day pipeline for each discovered session.
-    try:
-        run_single_day_batch(
-            configuration_path=template_path,
-            session_paths=all_sessions,
-            binarize=binarize,
-            process=process,
-            combine=combine,
-            target_plane=target_plane,
-        )
-    finally:
-        if template_path.exists():
-            template_path.unlink()
+    run_single_day_batch(
+        configuration_path=input_path,
+        session_paths=all_sessions,
+        binarize=binarize,
+        process=process,
+        combine=combine,
+        target_plane=target_plane,
+        workers=workers,
+        progress_bars=progress_bars,
+    )

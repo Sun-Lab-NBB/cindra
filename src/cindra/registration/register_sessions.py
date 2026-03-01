@@ -323,13 +323,15 @@ def _backward_deform_masks(
         y_pixels, x_pixels, pixel_weights, centroid = _warp_mask_pixels(mask=mask, deformation=deformation)
         roi_statistics.append(
             ROIStatistics(
-                y_pixels=y_pixels,
-                x_pixels=x_pixels,
-                pixel_weights=pixel_weights,
-                centroid=centroid,
-                frame_width=frame_width,
-                cluster_id=mask.cluster_id,
-                session_count=mask.session_count,
+                mask=ROIMask(
+                    y_pixels=y_pixels,
+                    x_pixels=x_pixels,
+                    pixel_weights=pixel_weights,
+                    centroid=centroid,
+                    frame_width=frame_width,
+                    cluster_id=mask.cluster_id,
+                    session_count=mask.session_count,
+                ),
             )
         )
 

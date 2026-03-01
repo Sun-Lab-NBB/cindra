@@ -9,6 +9,7 @@ from contextlib import suppress
 import numpy as np
 from PySide6 import QtGui, QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
+from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import (
     QLabel,
     QSlider,
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
+from .styles import FONTS, STYLE, COLORS, ROI_STYLE
 from .widgets import ViewBox, TraceBox, RangeSlider, plot_trace
 from .overlays import (
     flip_rois,
@@ -42,7 +44,6 @@ from .overlays import (
     update_colormap,
     update_correlation_masks,
 )
-from .styles import STYLE, ROI_STYLE
 from .constants import (
     CONFIG,
     TraceMode,
@@ -85,9 +86,9 @@ class ROIViewer(QMainWindow):
         self.rois_visible: bool = True
         self.roi_color_mode: int = ROIColorMode.RANDOM
         self.background_view: int = BackgroundView.ROIS_ONLY
-        self.roi_opacity: list[int] = [127, 255]
-        self.background_saturation: list[int] = [0, 255]
-        self.roi_colormap: str = "hsv"
+        self.roi_opacity: list[int] = list(ROI_STYLE.default_roi_opacity)
+        self.background_saturation: list[int] = list(ROI_STYLE.default_saturation_range)
+        self.roi_colormap: str = CONFIG.colormaps[0]
         self.selected_roi_index: int = 0
         self.merge_roi_indices: list[int] = [0]
         self.roi_tool_active: bool = False
@@ -96,7 +97,7 @@ class ROIViewer(QMainWindow):
         self.auto_zoom_to_roi: bool = False
         self.roi_labels_visible: bool = False
         self.session_loaded: bool = False
-        self.colocalization_threshold: float = 0.6
+        self.colocalization_threshold: float = CONFIG.default_channel_2_threshold
         self.last_reclassified_index: int = -1
 
         # Core data objects.
@@ -232,18 +233,16 @@ class ROIViewer(QMainWindow):
             "footprint",
             "aspect_ratio",
         ]
-        lilfont = STYLE.label_font()
         self._roi_index_edit = QLineEdit(self)
         self._roi_index_edit.setValidator(QtGui.QIntValidator(0, 10000))
         self._roi_index_edit.setText("0")
-        self._roi_index_edit.setFixedWidth(ROI_STYLE.roi_edit_width)
+        self._roi_index_edit.setFixedWidth(STYLE.roi_edit_width)
         self._roi_index_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._roi_index_edit.returnPressed.connect(self._on_number_chosen)
         roi_layout.addWidget(self._roi_index_edit)
         self._roi_stat_labels: list[QLabel] = []
         for k in range(len(self._stats_to_show)):
             stat_label = QLabel(self._stats_to_show[k])
-            stat_label.setFont(lilfont)
             stat_label.setStyleSheet(STYLE.white_label)
             stat_label.resize(stat_label.minimumSizeHint())
             roi_layout.addWidget(stat_label)
@@ -271,7 +270,7 @@ class ROIViewer(QMainWindow):
 
         selection_combo = QComboBox(self)
         selection_combo.addItems(["draw selection", "select top n", "select bottom n"])
-        selection_combo.setFont(STYLE.label_font_bold())
+        selection_combo.setFont(FONTS.small_bold)
         selection_combo.setEnabled(False)
         selection_combo.activated.connect(lambda _: self._on_roi_selection())
         layout.addWidget(selection_combo, 0, 0, 1, 1)
@@ -279,13 +278,13 @@ class ROIViewer(QMainWindow):
         count_label = QLabel("n=")
         count_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
         count_label.setStyleSheet(STYLE.white_label)
-        count_label.setFont(STYLE.label_font_bold())
+        count_label.setFont(FONTS.small_bold)
         layout.addWidget(count_label, 0, 1, 1, 1)
 
         top_count_edit = QLineEdit(self)
         top_count_edit.setValidator(QtGui.QIntValidator(0, CONFIG.max_top_n))
         top_count_edit.setText(str(CONFIG.default_top_n))
-        top_count_edit.setFixedWidth(ROI_STYLE.small_edit_width)
+        top_count_edit.setFixedWidth(STYLE.small_edit_width)
         top_count_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         top_count_edit.returnPressed.connect(self._on_roi_selection)
         layout.addWidget(top_count_edit, 0, 2, 1, 1)
@@ -301,15 +300,15 @@ class ROIViewer(QMainWindow):
 
         view_combo = QComboBox(self)
         view_combo.addItems(CONFIG.view_names)
-        view_combo.setFont(STYLE.label_font_bold())
+        view_combo.setFont(FONTS.small_bold)
         view_combo.setEnabled(False)
         view_combo.activated.connect(self._on_view_changed)
         layout.addWidget(view_combo, 0, 0, 1, 1)
 
         channel_2_button = QPushButton("Channel 2", self)
         channel_2_button.setCheckable(True)
-        channel_2_button.setFont(STYLE.label_font_bold())
-        channel_2_button.setStyleSheet(ROI_STYLE.button_inactive)
+        channel_2_button.setFont(FONTS.small_bold)
+        channel_2_button.setStyleSheet(STYLE.button_inactive)
         channel_2_button.setEnabled(False)
         channel_2_button.toggled.connect(self._on_channel_2_toggled)
         layout.addWidget(channel_2_button, 1, 0, 1, 1)
@@ -337,7 +336,7 @@ class ROIViewer(QMainWindow):
 
         color_combo = QComboBox(self)
         color_combo.addItems(CONFIG.color_names)
-        color_combo.setFont(STYLE.label_font_bold())
+        color_combo.setFont(FONTS.small_bold)
         color_combo.setEnabled(False)
         color_combo.activated.connect(self._on_color_changed)
         layout.addWidget(color_combo, 0, 0, 1, 1)
@@ -345,7 +344,7 @@ class ROIViewer(QMainWindow):
         colormap_chooser = QComboBox()
         colormap_chooser.addItems(CONFIG.colormaps)
         colormap_chooser.setCurrentIndex(0)
-        colormap_chooser.setFont(STYLE.label_font())
+        colormap_chooser.setFont(FONTS.small_bold)
         colormap_chooser.setFixedWidth(ROI_STYLE.color_edit_width)
         layout.addWidget(colormap_chooser, 0, 1, 1, 1)
 
@@ -397,11 +396,14 @@ class ROIViewer(QMainWindow):
         colorbar_view.setMenuEnabled(False)
         colorbar_view.addItem(image)
 
-        labels = [
-            colorbar_widget.addLabel("0.0", color=[255, 255, 255], row=1, col=0),
-            colorbar_widget.addLabel("0.5", color=[255, 255, 255], row=1, col=1),
-            colorbar_widget.addLabel("1.0", color=[255, 255, 255], row=1, col=2),
-        ]
+        colorbar_font = FONTS.small
+        label_0 = colorbar_widget.addLabel("0.0", color=list(COLORS.white), row=1, col=0)
+        label_0.setFont(colorbar_font)
+        label_half = colorbar_widget.addLabel("0.5", color=list(COLORS.white), row=1, col=1)
+        label_half.setFont(colorbar_font)
+        label_1 = colorbar_widget.addLabel("1.0", color=list(COLORS.white), row=1, col=2)
+        label_1.setFont(colorbar_font)
+        labels = [label_0, label_half, label_1]
         return ColorbarWidgets(image=image, labels=labels, widget=colorbar_widget)
 
     def _create_trace_controls(self) -> tuple[QGroupBox, TraceControls]:
@@ -415,12 +417,10 @@ class ROIViewer(QMainWindow):
         layout.addWidget(activity_label, 0, 0, 1, 1)
 
         activity_combo = QComboBox(self)
-        activity_combo.setFixedWidth(ROI_STYLE.combo_box_width)
+        activity_combo.setFixedWidth(STYLE.combo_box_width)
         layout.addWidget(activity_combo, 1, 0, 1, 1)
-        activity_combo.addItem("F")
-        activity_combo.addItem("Fneu")
-        activity_combo.addItem("F - 0.7*Fneu")
-        activity_combo.addItem("deconvolved")
+        for label in CONFIG.activity_mode_labels:
+            activity_combo.addItem(label)
         activity_combo.setCurrentIndex(CONFIG.default_activity_mode)
         activity_combo.currentIndexChanged.connect(self._on_activity_changed)
 
@@ -428,18 +428,18 @@ class ROIViewer(QMainWindow):
         arrow_down = QPushButton(" \u25bc")
         arrow_buttons = [arrow_up, arrow_down]
         for button_index, button in enumerate(arrow_buttons):
-            button.setMaximumWidth(ROI_STYLE.square_button_max_width)
-            button.setFont(STYLE.arrow_button_font())
-            button.setStyleSheet(ROI_STYLE.button_unpressed)
+            button.setMaximumWidth(STYLE.square_button_width)
+            button.setFont(FONTS.medium_bold)
+            button.setStyleSheet(STYLE.button_unpressed)
             layout.addWidget(button, button_index, 1, 1, 1, QtCore.Qt.AlignmentFlag.AlignRight)
 
         scale_up = QPushButton(" +")
         scale_down = QPushButton(" -")
         scale_buttons = [scale_up, scale_down]
         for button_index, button in enumerate(scale_buttons):
-            button.setMaximumWidth(ROI_STYLE.square_button_max_width)
-            button.setFont(STYLE.arrow_button_font())
-            button.setStyleSheet(ROI_STYLE.button_unpressed)
+            button.setMaximumWidth(STYLE.square_button_width)
+            button.setFont(FONTS.medium_bold)
+            button.setStyleSheet(STYLE.button_unpressed)
             layout.addWidget(button, button_index, 2, 1, 1)
 
         max_plotted_label = QLabel("max # plotted:")
@@ -449,7 +449,7 @@ class ROIViewer(QMainWindow):
         max_plotted_edit = QLineEdit(self)
         max_plotted_edit.setValidator(QtGui.QIntValidator(0, CONFIG.max_plotted_count))
         max_plotted_edit.setText(str(CONFIG.default_plotted_count))
-        max_plotted_edit.setFixedWidth(ROI_STYLE.small_edit_width)
+        max_plotted_edit.setFixedWidth(STYLE.small_edit_width)
         max_plotted_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         layout.addWidget(max_plotted_edit, 3, 0, 1, 1)
 
@@ -459,12 +459,12 @@ class ROIViewer(QMainWindow):
         layout.addWidget(deconvolved_checkbox, 3, 1, 1, 1)
 
         neuropil_checkbox = QCheckBox("neuropil [B]")
-        neuropil_checkbox.setStyleSheet(ROI_STYLE.red_label)
+        neuropil_checkbox.setStyleSheet(STYLE.white_label)
         neuropil_checkbox.toggle()
         layout.addWidget(neuropil_checkbox, 3, 2, 1, 1)
 
         traces_checkbox = QCheckBox("raw fluor [V]")
-        traces_checkbox.setStyleSheet(ROI_STYLE.cyan_label)
+        traces_checkbox.setStyleSheet(STYLE.white_label)
         traces_checkbox.toggle()
         layout.addWidget(traces_checkbox, 3, 3, 1, 1)
 
@@ -491,7 +491,7 @@ class ROIViewer(QMainWindow):
 
     def _build_graphics(self) -> None:
         """Creates the main plotting area with image and trace panels."""
-        self._view_box = ViewBox(name="plot1", border=list(ROI_STYLE.view_box_border), invert_y=True)
+        self._view_box = ViewBox(name="plot1", border=list(COLORS.gray), invert_y=True)
         self._graphics_widget.addItem(self._view_box, 0, 0)
         self._view_box.setMenuEnabled(False)
         self._view_box.scene().contextMenuItem = self._view_box
@@ -553,9 +553,9 @@ class ROIViewer(QMainWindow):
         self.rois_visible = True
         self.roi_color_mode = ROIColorMode.RANDOM
         self.background_view = BackgroundView.ROIS_ONLY
-        self.roi_opacity = [127, 255]
-        self.background_saturation = [0, 255]
-        self.roi_colormap = "hsv"
+        self.roi_opacity = list(ROI_STYLE.default_roi_opacity)
+        self.background_saturation = list(ROI_STYLE.default_saturation_range)
+        self.roi_colormap = CONFIG.colormaps[0]
         self.selected_roi_index = 0
         self.merge_roi_indices = [0]
         self.roi_tool_active = False
@@ -564,7 +564,7 @@ class ROIViewer(QMainWindow):
         self.auto_zoom_to_roi = False
         self.roi_labels_visible = False
         self.session_loaded = False
-        self.colocalization_threshold = 0.6
+        self.colocalization_threshold = CONFIG.default_channel_2_threshold
         self.last_reclassified_index = -1
 
     def _initialize_gui(self) -> None:
@@ -702,7 +702,7 @@ class ROIViewer(QMainWindow):
 
         # Disables corrected structural view item if not available.
         view_model = self._view_controls.view_combo.model()
-        if view_model is not None:
+        if isinstance(view_model, QStandardItemModel):
             structural_item = view_model.item(BackgroundView.CORRECTED_STRUCTURAL)
             if structural_item is not None:
                 if context.corrected_structural_mean_image is None:
@@ -713,10 +713,10 @@ class ROIViewer(QMainWindow):
         # Enables channel 2 toggle if channel 2 data exists.
         if context.two_channels:
             self._view_controls.channel_2_button.setEnabled(True)
-            self._view_controls.channel_2_button.setStyleSheet(ROI_STYLE.button_unpressed)
+            self._view_controls.channel_2_button.setStyleSheet(STYLE.button_unpressed)
         else:
             self._view_controls.channel_2_button.setEnabled(False)
-            self._view_controls.channel_2_button.setStyleSheet(ROI_STYLE.button_inactive)
+            self._view_controls.channel_2_button.setStyleSheet(STYLE.button_inactive)
 
         # Enables color dropdown.
         self._color_controls.color_combo.setEnabled(True)
@@ -724,7 +724,7 @@ class ROIViewer(QMainWindow):
 
         # Disables channel 2 color mode if not available.
         color_model = self._color_controls.color_combo.model()
-        if color_model is not None:
+        if isinstance(color_model, QStandardItemModel):
             ch2_item = color_model.item(CONFIG.color_channel_2)
             if ch2_item is not None:
                 ch2_item.setEnabled(context.two_channels)
@@ -775,7 +775,10 @@ class ROIViewer(QMainWindow):
             elif i == 1:
                 f = self.context_data.neuropil_fluorescence
             elif i == CONFIG.activity_mode_subtracted:
-                f = self.context_data.cell_fluorescence - 0.7 * self.context_data.neuropil_fluorescence
+                f = (
+                    self.context_data.cell_fluorescence
+                    - CONFIG.neuropil_coefficient * self.context_data.neuropil_fluorescence
+                )
             else:
                 f = self.context_data.spikes
             ncells = self.context_data.roi_count
@@ -799,9 +802,7 @@ class ROIViewer(QMainWindow):
         """
         if self.context_data is None:
             return
-        self._view_controls.channel_2_button.setStyleSheet(
-            ROI_STYLE.button_pressed if checked else ROI_STYLE.button_unpressed
-        )
+        self._view_controls.channel_2_button.setStyleSheet(STYLE.button_pressed if checked else STYLE.button_unpressed)
         context = self.context_data
         self.views = build_views(
             frame_height=context.frame_height,
@@ -903,7 +904,7 @@ class ROIViewer(QMainWindow):
             neuropil_visible=self._trace_controls.neuropil_visible,
             deconvolved_visible=self._trace_controls.deconvolved_visible,
             scale_factor=self._trace_controls.scale_factor,
-            max_plotted=int(self._trace_controls.max_plotted_edit.text() or "40"),
+            max_plotted=int(self._trace_controls.max_plotted_edit.text() or str(CONFIG.default_plotted_count)),
         )
 
     def update_plot(self) -> None:
@@ -1010,7 +1011,10 @@ class ROIViewer(QMainWindow):
         """Zooms the image panel to center on the currently selected cell."""
         if self.context_data is None:
             return
-        irange = 0.1 * np.array([self.context_data.frame_height, self.context_data.frame_width]).max()
+        irange = (
+            CONFIG.zoom_to_cell_fraction
+            * np.array([self.context_data.frame_height, self.context_data.frame_width]).max()
+        )
         roi_statistics = self.context_data.roi_statistics
         if len(self.merge_roi_indices) > 1:
             apix = np.zeros((0, 2))
@@ -1019,8 +1023,8 @@ class ROIViewer(QMainWindow):
                     apix,
                     np.concatenate(
                         (
-                            roi_statistics[k].y_pixels.flatten()[:, np.newaxis],
-                            roi_statistics[k].x_pixels.flatten()[:, np.newaxis],
+                            roi_statistics[k].mask.y_pixels.flatten()[:, np.newaxis],
+                            roi_statistics[k].mask.x_pixels.flatten()[:, np.newaxis],
                         ),
                         axis=1,
                     ),
@@ -1034,7 +1038,7 @@ class ROIViewer(QMainWindow):
             imax[0] = max(icent[0] + irange, imax[0])
             imax[1] = max(icent[1] + irange, imax[1])
         else:
-            icent = np.array(roi_statistics[self.selected_roi_index].centroid)
+            icent = np.array(roi_statistics[self.selected_roi_index].mask.centroid)
             imin = icent - irange
             imax = icent + irange
         self._view_box.setYRange(imin[0], imax[0])
@@ -1128,11 +1132,11 @@ class ROIViewer(QMainWindow):
         imy = (view[1][1] + view[1][0]) / 2
         dx = (view[0][1] - view[0][0]) / 4
         dy = (view[1][1] - view[1][0]) / 4
-        dx = np.minimum(dx, 300)
-        dy = np.minimum(dy, 300)
+        dx = np.minimum(dx, CONFIG.roi_selection_max_dimension)
+        dy = np.minimum(dy, CONFIG.roi_selection_max_dimension)
         imx = imx - dx / 2
         imy = imy - dy / 2
-        self._active_roi_selection = pg.RectROI([imx, imy], [dx, dy], pen=ROI_STYLE.selection_pen, sideScalers=True)
+        self._active_roi_selection = pg.RectROI([imx, imy], [dx, dy], pen=COLORS.white, sideScalers=True)
         self._view_box.addItem(self._active_roi_selection)
         self._roi_position()
         self._active_roi_selection.sigRegionChangeFinished.connect(self._roi_position)
@@ -1171,7 +1175,7 @@ class ROIViewer(QMainWindow):
         self.merge_roi_indices = []
         for n in icells:
             pixel_count = self.context_data.roi_statistics[n].pixel_count
-            if (self.roi_maps.iroi[:, ypix, xpix] == n).sum() > 0.6 * pixel_count:
+            if (self.roi_maps.iroi[:, ypix, xpix] == n).sum() > CONFIG.roi_selection_overlap_threshold * pixel_count:
                 self.merge_roi_indices.append(n)
         if self.merge_roi_indices:
             self.selected_roi_index = self.merge_roi_indices[0]

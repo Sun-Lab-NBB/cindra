@@ -267,28 +267,28 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         # Creates deep copies of ROI statistics to avoid modifying the original and updates coordinates.
         for roi in context.runtime.extraction.roi_statistics:
             roi_copy = copy.deepcopy(roi)
-            roi_copy.x_pixels = roi_copy.x_pixels + x_offsets[plane_index]
-            roi_copy.y_pixels = roi_copy.y_pixels + y_offsets[plane_index]
-            roi_copy.centroid = (
-                roi_copy.centroid[0] + int(y_offsets[plane_index]),
-                roi_copy.centroid[1] + int(x_offsets[plane_index]),
+            roi_copy.mask.x_pixels = roi_copy.mask.x_pixels + x_offsets[plane_index]
+            roi_copy.mask.y_pixels = roi_copy.mask.y_pixels + y_offsets[plane_index]
+            roi_copy.mask.centroid = (
+                roi_copy.mask.centroid[0] + int(y_offsets[plane_index]),
+                roi_copy.mask.centroid[1] + int(x_offsets[plane_index]),
             )
             roi_copy.plane_index = plane_index
-            roi_copy.frame_width = combined_width
+            roi_copy.mask.frame_width = combined_width
             combined_roi_stats.append(roi_copy)
 
         # Processes channel 2 ROI statistics if second channel is functional.
         if second_channel_functional and context.runtime.extraction.roi_statistics_channel_2 is not None:
             for roi in context.runtime.extraction.roi_statistics_channel_2:
                 roi_copy = copy.deepcopy(roi)
-                roi_copy.x_pixels = roi_copy.x_pixels + x_offsets[plane_index]
-                roi_copy.y_pixels = roi_copy.y_pixels + y_offsets[plane_index]
-                roi_copy.centroid = (
-                    roi_copy.centroid[0] + int(y_offsets[plane_index]),
-                    roi_copy.centroid[1] + int(x_offsets[plane_index]),
+                roi_copy.mask.x_pixels = roi_copy.mask.x_pixels + x_offsets[plane_index]
+                roi_copy.mask.y_pixels = roi_copy.mask.y_pixels + y_offsets[plane_index]
+                roi_copy.mask.centroid = (
+                    roi_copy.mask.centroid[0] + int(y_offsets[plane_index]),
+                    roi_copy.mask.centroid[1] + int(x_offsets[plane_index]),
                 )
                 roi_copy.plane_index = plane_index
-                roi_copy.frame_width = combined_width
+                roi_copy.mask.frame_width = combined_width
                 combined_roi_stats_channel_2.append(roi_copy)
 
         # Extracts fluorescence and classification data from the RuntimeContext.

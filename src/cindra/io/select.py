@@ -141,7 +141,7 @@ def _filter_channel_cells(
 
         # Applies MROI region border filter if applicable.
         if mroi_region_borders and not all(
-            abs(roi.centroid[1] - border) > region_margin for border in mroi_region_borders
+            abs(roi.mask.centroid[1] - border) > region_margin for border in mroi_region_borders
         ):
             continue
 
