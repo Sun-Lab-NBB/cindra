@@ -12,51 +12,60 @@ class _CommonStyle:
     """Encapsulates visual constants shared by all viewer windows."""
 
     main_window: str = "QMainWindow {background: 'black';}"
-    """The stylesheet applied to the main window background."""
+    """The stylesheet applied to QMainWindow backgrounds. Every viewer (ROI, Tracking, Binary, PC) sets this on its
+    top-level window to produce a uniform dark canvas behind all child widgets."""
     white_label: str = "color: white;"
-    """The stylesheet for white label text on a dark background."""
-    scatter_point_size: int = 10
-    """The marker size in pixels for scatter plot overlays."""
+    """The stylesheet for QLabel text that sits on the dark window background. Applied to status labels, axis labels,
+    checkbox captions, and group headings across all viewer windows."""
     icon_size: int = 30
-    """The dimension in pixels for media control button icons."""
-    legend_headroom: float = 0.25
-    """The fraction of the y-axis data range added as top padding so legends never overlap traces."""
-    range_slider: str = (
-        "QSlider::handle:horizontal {"
-        "background-color: white;"
-        "border: 1px solid #5c5c5c;"
-        "border-radius: 0px;"
-        "border-color: black;"
-        "height: 8px;"
-        "width: 6px;"
-        "margin: -8px 2;"
-        "}"
-    )
-    """The stylesheet for the dual-handle range slider used in saturation controls."""
+    """The pixel dimension (width and height) for QIcon-based media control buttons (play, pause, step-forward,
+    step-backward) in the Binary, PC, and Tracking viewer playback toolbars."""
+    default_mask_opacity: int = 127
+    """The default mask overlay opacity (0-255 uint8 range). Determines the initial transparency of ROI masks rendered
+    over background images in the ROI viewer and Tracking viewer."""
     group_box: str = "QGroupBox { color: white; }"
-    """The stylesheet for QGroupBox title text on dark backgrounds."""
-    legend_horizontal_spacing: int = 20
-    """The horizontal spacing between legend entries in plot widgets."""
-    legend_offset: tuple[int, int] = (-10, 1)
-    """The position offset for the legend widget relative to the plot corner."""
-    axis_fixed_width: int = 60
-    """The fixed pixel width for the y-axis so the plot area stays stable when tick label digit counts change."""
+    """The stylesheet for QGroupBox title text. Applied to every collapsible section header in the ROI viewer sidebar
+    (view, visibility, ROI info, selection, color, classifier, trace panels) so titles read clearly on the dark
+    background."""
     roi_edit_width: int = 50
-    """The width for ROI index input fields."""
+    """The fixed pixel width for the ROI index QLineEdit input field in the ROI viewer and Tracking viewer sidebar
+    panels. Wide enough for four-digit ROI indices."""
     small_edit_width: int = 40
-    """The width for small numeric input fields (top-n count, max plotted count, PC number)."""
+    """The fixed pixel width for small numeric QLineEdit input fields: top-n count and max-plotted count in the ROI
+    viewer trace panel, and the PC number field in the PC viewer bottom panel."""
     square_button_width: int = 30
-    """The maximum width for small square buttons (trace arrows, scale +/- buttons)."""
+    """The maximum pixel width for compact square QPushButtons: the trace expand/collapse arrow buttons and scale +/-
+    buttons in the ROI viewer and Tracking viewer trace panels."""
     group_spacing: int = 20
-    """The pixel spacing between widget groups in control panels."""
+    """The pixel spacing inserted between logical widget groups in horizontal control panels. Used in the PC viewer
+    bottom panel to separate the PC selector, metric labels, title labels, and playback controls."""
     button_pressed: str = "QPushButton {Text-align: left; background-color: rgb(100,50,100); color:white;}"
-    """The stylesheet for a button in the pressed (active/selected) state."""
+    """The stylesheet for a QPushButton in the pressed (active/selected) state."""
     button_unpressed: str = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:white;}"
-    """The stylesheet for a button in the unpressed (enabled, not selected) state."""
+    """The stylesheet for a QPushButton in the unpressed (enabled but not selected) state."""
     button_inactive: str = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:gray;}"
-    """The stylesheet for a button in the inactive (disabled/grayed-out) state."""
+    """The stylesheet for a QPushButton in the inactive (disabled/grayed-out) state."""
     combo_box_width: int = 100
-    """The fixed width for combo box widgets."""
+    """The fixed pixel width for QComboBox dropdown widgets."""
+
+
+@dataclass(frozen=True, slots=True)
+class _PlotStyle:
+    """Encapsulates pyqtgraph plot configuration constants shared by all viewer windows."""
+
+    scatter_point_size: int = 10
+    """The marker diameter in pixels for pyqtgraph scatter plot overlays."""
+    legend_headroom: float = 0.25
+    """The fraction of the y-axis data range added as extra top padding when a plot contains a legend. Prevents
+    legend entries from overlapping the topmost data points."""
+    legend_horizontal_spacing: int = 20
+    """The horizontal pixel spacing between adjacent legend entries in pyqtgraph plot widgets."""
+    legend_offset: tuple[int, int] = (-10, 1)
+    """The (x, y) pixel offset that positions the pyqtgraph legend relative to the top-right corner of the plot area.
+    A negative x value pulls the legend inward from the right edge to avoid clipping."""
+    axis_fixed_width: int = 60
+    """The fixed pixel width assigned to y-axis tick regions in plot widgets. Prevents the plot area from shifting
+    horizontally when tick label digit counts change."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,10 +111,6 @@ class _ROIViewerStyle:
     """The number of samples for the colorbar gradient."""
     colorbar_row_count: int = 20
     """The number of rows in the colorbar image."""
-    default_roi_opacity: tuple[int, int] = (127, 255)
-    """Default (unselected, selected) ROI opacity range."""
-    default_saturation_range: tuple[int, int] = (0, 255)
-    """Default background saturation min/max range."""
     window_geometry: tuple[int, int, int, int] = (50, 50, 1500, 800)
     """The initial window position (x, y) and size (width, height) for the ROI viewer."""
 
@@ -114,9 +119,6 @@ class _ROIViewerStyle:
 class _TrackingViewerStyle:
     """Encapsulates visual constants specific to the tracking viewer window."""
 
-    default_mask_opacity: int = 127
-    """The default mask overlay opacity (0-255 uint8 range). This determines the initial transparency of the ROI masks 
-    rendered over the chosen background image in the Tracker GUI."""
     window_geometry: tuple[int, int, int, int] = (50, 50, 1200, 800)
     """The initial window position (x, y) and size (width, height) for the tracking viewer."""
 
@@ -182,6 +184,9 @@ COLORS: _Colors = _Colors()
 
 STYLE: _CommonStyle = _CommonStyle()
 """The module-level singleton providing all shared viewer style constants."""
+
+PLOT_STYLE: _PlotStyle = _PlotStyle()
+"""The module-level singleton providing all shared pyqtgraph plot style constants."""
 
 FONTS: _FontStyle = _FontStyle()
 """The module-level singleton providing all shared font and text size constants."""

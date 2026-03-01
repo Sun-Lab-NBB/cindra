@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
     from .data_models import ColorbarWidgets
     from ..dataclasses import ROIStatistics
+    from .multi_day_context import MultiDayViewerData
     from .single_day_context import SingleDayViewerData
 
 
@@ -97,7 +98,6 @@ def display_views(
     view: pg.ImageItem,
     views: NDArray[np.uint8],
     view_index: int,
-    saturation: list[int],
 ) -> None:
     """Displays the selected background view on the image panel.
 
@@ -105,14 +105,13 @@ def display_views(
         view: The background image item.
         views: The full view stack of shape (6, height, width, 3).
         view_index: Index of the view to display (0-5).
-        saturation: Two-element list of [low, high] saturation levels.
     """
-    view.setImage(views[view_index], levels=saturation)
+    view.setImage(views[view_index], levels=[0, 255])
     view.show()
 
 
 def compute_colors(
-    context: SingleDayViewerData,
+    context: SingleDayViewerData | MultiDayViewerData,
     roi_colormap: str,
     colocalization_threshold: float,
 ) -> ColorArrays:
@@ -213,7 +212,7 @@ def compute_colors(
 
 
 def init_roi_maps(
-    context: SingleDayViewerData,
+    context: SingleDayViewerData | MultiDayViewerData,
     color_arrays: ColorArrays,
 ) -> ROIIndexMaps:
     """Initializes ROI index maps, weight layers, and RGB overlay arrays.
@@ -300,13 +299,13 @@ def init_roi_maps(
 
 
 def draw_masks(
-    context: SingleDayViewerData,
+    context: SingleDayViewerData | MultiDayViewerData,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
     *,
     roi_color_mode: int,
     background_view: int,
-    roi_opacity: list[int],
+    roi_opacity: int,
     merge_roi_indices: list[int],
 ) -> NDArray[np.uint8]:
     """Draws the current mask overlay for the image panel.
@@ -320,7 +319,7 @@ def draw_masks(
         roi_maps: The ROI index maps.
         roi_color_mode: Active color statistic index.
         background_view: Active background view index.
-        roi_opacity: Alpha values for ROI overlays in [circle-view, filled-ROI-view] modes.
+        roi_opacity: Alpha value (0-255) for mask overlay opacity.
         merge_roi_indices: Indices of all ROIs staged for merge or multi-selection.
 
     Returns:
@@ -328,12 +327,13 @@ def draw_masks(
     """
     color_index = roi_color_mode
     view_index = background_view
-    opacity = roi_opacity
+
+    # The ROI-only view (view_index == 0, black background) always uses full opacity since partial transparency on
+    # black just dims the ROIs. All other views use the slider value.
+    effective_opacity = 255 if view_index == 0 else roi_opacity
 
     # Resets transparency based on ROI weights.
-    color_arrays.rgb[color_index, :, :, 3] = (opacity[view_index == 0] * roi_maps.sroi * roi_maps.lam_norm).astype(
-        np.uint8
-    )
+    color_arrays.rgb[color_index, :, :, 3] = (effective_opacity * roi_maps.sroi * roi_maps.lam_norm).astype(np.uint8)
 
     overlay = np.array(color_arrays.rgb[color_index])
 
@@ -468,7 +468,7 @@ def update_colormap(
 
 
 def update_chan2_colors(
-    context: SingleDayViewerData,
+    context: SingleDayViewerData | MultiDayViewerData,
     colocalization_threshold: float,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
@@ -568,7 +568,7 @@ def istat_transform(istat: NDArray[np.float32], colormap: str = "hsv") -> NDArra
 
 
 def flip_rois(
-    context: SingleDayViewerData,
+    context: SingleDayViewerData | MultiDayViewerData,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
     *,
@@ -605,7 +605,7 @@ def flip_rois(
 
 
 def flip_for_class(
-    context: SingleDayViewerData,
+    context: SingleDayViewerData | MultiDayViewerData,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
     new_classification_labels: NDArray[np.float32],

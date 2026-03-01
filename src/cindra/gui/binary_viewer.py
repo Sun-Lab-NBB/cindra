@@ -23,7 +23,8 @@ from PySide6.QtWidgets import (
     QButtonGroup,
 )
 
-from .styles import FONTS, STYLE, COLORS, BINARY_STYLE
+from .styles import STYLE, COLORS, PLOT_STYLE, BINARY_STYLE
+from .widgets import configure_plot, add_plot_legend
 from .constants import BINARY_CONFIG
 from .single_day_context import SingleDayViewerData
 
@@ -38,7 +39,6 @@ class BinaryPlayer(QMainWindow):
         data: Pre-loaded registration data to display on startup.
 
     Attributes:
-        _style: Frozen style constants for the binary player window.
         data: The SingleDayViewerData instance that stores the visualized recording's data.
         _channel_2_visible: Determines whether the channel 2 overlay is currently displayed.
         _current_frame: Index of the currently displayed frame.
@@ -140,18 +140,13 @@ class BinaryPlayer(QMainWindow):
         # Configures rigid registration offset plot.
         # noinspection PyUnresolvedReferences
         self._shift_plot = self._graphics_widget.addPlot(name="plot_shift", row=1, col=0, colspan=2)
-        self._shift_plot.setMouseEnabled(x=True, y=False)
-        self._shift_plot.setMenuEnabled(False)
-        self._shift_plot.setTitle("Rigid Registration Offsets", size=FONTS.plot_title_size, bold=True)
-        self._shift_plot.setLabel("left", "Shift (px)", **{"font-size": FONTS.label_size})
-        self._shift_plot.setLabel("bottom", "Frame", **{"font-size": FONTS.label_size})
-        self._shift_plot.getAxis("bottom").setHeight(STYLE.axis_fixed_width)
-        self._shift_plot.addLegend(
-            horSpacing=STYLE.legend_horizontal_spacing,
-            colCount=BINARY_STYLE.legend_column_count,
-            offset=STYLE.legend_offset,
-            labelTextSize=FONTS.label_size,
+        configure_plot(
+            self._shift_plot,
+            title="Rigid Registration Offsets",
+            left_label="Shift (px)",
+            bottom_label="Frame",
         )
+        add_plot_legend(self._shift_plot, column_count=BINARY_STYLE.legend_column_count)
         self._shift_scatter: pg.ScatterPlotItem = pg.ScatterPlotItem()
         self._shift_scatter.setData([0, 0], [0, 0])
         self._shift_plot.addItem(self._shift_scatter)
@@ -189,10 +184,6 @@ class BinaryPlayer(QMainWindow):
             data: The SingleDayViewerData instance that stores the visualized recording's data.
         """
         self.data = data
-
-        # Fixes the y-axis width so the plot area does not shift when tick label digit counts change
-        # across planes (e.g. single-digit vs double-digit offsets).
-        self._shift_plot.getAxis("left").setWidth(STYLE.axis_fixed_width)
 
         # Populates the plane selector without triggering _on_plane_changed yet. Signals are blocked so that
         # clearing and re-adding items does not fire redundant plane-switch callbacks.
@@ -349,7 +340,7 @@ class BinaryPlayer(QMainWindow):
         if shift_min == shift_max:
             shift_min -= 1
             shift_max += 1
-        shift_max += int((shift_max - shift_min) * STYLE.legend_headroom)
+        shift_max += int((shift_max - shift_min) * PLOT_STYLE.legend_headroom)
         self._shift_plot.setLimits(xMin=0, xMax=last_frame)
         self._shift_plot.setRange(xRange=(0, last_frame), yRange=(shift_min, shift_max), padding=0.0)
         self._shift_scatter = pg.ScatterPlotItem()
@@ -357,7 +348,7 @@ class BinaryPlayer(QMainWindow):
         self._shift_scatter.setData(
             [0, 0],
             [int(rigid_y[0]), int(rigid_x[0])],
-            size=STYLE.scatter_point_size,
+            size=PLOT_STYLE.scatter_point_size,
             brush=pg.mkBrush(*COLORS.red),
         )
 
@@ -399,7 +390,7 @@ class BinaryPlayer(QMainWindow):
         self._shift_scatter.setData(
             [self._current_frame, self._current_frame],
             [int(rigid_y[self._current_frame]), int(rigid_x[self._current_frame])],
-            size=STYLE.scatter_point_size,
+            size=PLOT_STYLE.scatter_point_size,
             brush=pg.mkBrush(*COLORS.red),
         )
 
