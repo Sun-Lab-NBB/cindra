@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from .styles import STYLE, COLORS, PLOT_STYLE, BINARY_STYLE
 from .widgets import configure_plot, add_plot_legend
 from .constants import BINARY_CONFIG
-from .single_day_context import SingleDayViewerData
+from .viewer_context import SingleDayData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -39,7 +39,7 @@ class BinaryPlayer(QMainWindow):
         data: Pre-loaded registration data to display on startup.
 
     Attributes:
-        data: The SingleDayViewerData instance that stores the visualized recording's data.
+        data: The SingleDayData instance that stores the visualized recording's data.
         _channel_2_visible: Determines whether the channel 2 overlay is currently displayed.
         _current_frame: Index of the currently displayed frame.
         _frame_delta: Frame step size for arrow key navigation.
@@ -66,7 +66,7 @@ class BinaryPlayer(QMainWindow):
     # Notifies listeners when the user selects a different imaging plane from the plane selector.
     plane_changed = QtCore.Signal(int)
 
-    def __init__(self, data: SingleDayViewerData) -> None:
+    def __init__(self, data: SingleDayData) -> None:
         super().__init__()
 
         # Adds the main UI window.
@@ -79,7 +79,7 @@ class BinaryPlayer(QMainWindow):
         self._central_widget.setLayout(self._layout)
         # Initializes state flags and recording data.
         self._channel_2_visible: bool = False
-        self.data: SingleDayViewerData = data
+        self.data: SingleDayData = data
 
         # Initializes playback state.
         self._current_frame: int = 0
@@ -116,6 +116,7 @@ class BinaryPlayer(QMainWindow):
         self._channel_2_button: QPushButton = QPushButton("View Channel 2")
         self._channel_2_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self._channel_2_button.setEnabled(False)
+        self._channel_2_button.setStyleSheet(STYLE.button_inactive)
         self._channel_2_button.clicked.connect(self._toggle_channel_2)
         toolbar.addWidget(self._channel_2_button)
 
@@ -177,11 +178,11 @@ class BinaryPlayer(QMainWindow):
 
         self.load_data(data=data)
 
-    def load_data(self, data: SingleDayViewerData) -> None:
-        """Caches the input SingleDayViewerData instance and uses it to populate the managed UI window.
+    def load_data(self, data: SingleDayData) -> None:
+        """Caches the input SingleDayData instance and uses it to populate the managed UI window.
 
         Args:
-            data: The SingleDayViewerData instance that stores the visualized recording's data.
+            data: The SingleDayData instance that stores the visualized recording's data.
         """
         self.data = data
 
@@ -281,7 +282,7 @@ class BinaryPlayer(QMainWindow):
                 start_dir = str(parent)
         directory = QFileDialog.getExistingDirectory(self, "Specify the recording directory to open.", start_dir)
         if directory:
-            data = SingleDayViewerData.from_single_day(root_path=Path(directory), view_index=0)
+            data = SingleDayData.from_data(root_path=Path(directory), view_index=0)
             self.load_data(data=data)
 
     def _on_plane_changed(self, index: int) -> None:
@@ -353,6 +354,9 @@ class BinaryPlayer(QMainWindow):
         )
 
         self._channel_2_button.setEnabled(self.data.two_channels)
+        self._channel_2_button.setStyleSheet(
+            STYLE.button_unpressed if self.data.two_channels else STYLE.button_inactive
+        )
 
         self._current_frame = -1
         self._next_frame()
@@ -430,6 +434,9 @@ class BinaryPlayer(QMainWindow):
         """Toggles channel 2 overlay and updates the button label accordingly."""
         self._channel_2_visible = not self._channel_2_visible
         self._channel_2_button.setText("Hide Channel 2" if self._channel_2_visible else "View Channel 2")
+        self._channel_2_button.setStyleSheet(
+            STYLE.button_pressed if self._channel_2_visible else STYLE.button_unpressed
+        )
         self._next_frame()
 
     def _zoom_image(self) -> None:

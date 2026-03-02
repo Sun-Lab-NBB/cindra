@@ -27,7 +27,7 @@ from .constants import CONFIG, PC_CONFIG
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from .single_day_context import SingleDayViewerData
+    from .viewer_context import SingleDayData
 
 
 class PCViewer(QMainWindow):
@@ -38,7 +38,7 @@ class PCViewer(QMainWindow):
 
     Attributes:
         _style: Frozen style constants for the PC viewer window.
-        data: The SingleDayViewerData instance that stores the visualized recording's data.
+        data: The SingleDayData instance that stores the visualized recording's data.
         _loaded: Determines whether PC data has been loaded and is ready for display.
         _current_frame: Animation toggle state for PC extreme image cycling.
         _pc_count: Number of principal components available.
@@ -70,7 +70,7 @@ class PCViewer(QMainWindow):
         _projection_y_range: Per-plane y-axis range for the projection plot, computed across all PCs.
     """
 
-    def __init__(self, data: SingleDayViewerData) -> None:
+    def __init__(self, data: SingleDayData) -> None:
         # Initializes the main viewer window.
         super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
@@ -82,7 +82,7 @@ class PCViewer(QMainWindow):
         self._central_widget.setLayout(self._layout)
 
         # Initializes state and data.
-        self.data: SingleDayViewerData = data
+        self.data: SingleDayData = data
         self._loaded: bool = False
         self._current_frame: int = 0
         self._pc_count: int = data.principal_component_count
@@ -170,11 +170,11 @@ class PCViewer(QMainWindow):
 
         self.load_data(data=data)
 
-    def load_data(self, data: SingleDayViewerData) -> None:
-        """Loads principal component registration data from the SingleDayViewerData instance.
+    def load_data(self, data: SingleDayData) -> None:
+        """Loads principal component registration data from the SingleDayData instance.
 
         Args:
-            data: The SingleDayViewerData instance that stores the visualized recording's data.
+            data: The SingleDayData instance that stores the visualized recording's data.
         """
         # Extracts PC arrays from the recording data.
         self.data = data
@@ -253,7 +253,7 @@ class PCViewer(QMainWindow):
         bold_font = FONTS.large_bold
         big_font = FONTS.large
         panel = QHBoxLayout()
-        group_spacing = STYLE.group_spacing
+        group_spacing = PC_STYLE.group_spacing
 
         # PC selector: label and input field for the current principal component number.
         pc_label = QLabel("PC:")
@@ -261,7 +261,7 @@ class PCViewer(QMainWindow):
         pc_label.setStyleSheet(STYLE.white_label)
         self._pc_edit: QLineEdit = QLineEdit(self)
         self._pc_edit.setText("1")
-        self._pc_edit.setFixedWidth(STYLE.small_edit_width)
+        self._pc_edit.setFixedWidth(STYLE.edit_width)
         self._pc_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._pc_edit.setFont(big_font)
         self._pc_edit.setToolTip("Principal component number (Left/Right arrow keys to step).")

@@ -30,9 +30,16 @@ def cindra_gui() -> None:
     default=None,
     help="Path to a cindra output directory to load on startup.",
 )
-def gui_roi(session_path: Path | None) -> None:
+@click.option(
+    "-d",
+    "--dataset",
+    type=str,
+    default=None,
+    help="Multi-day dataset name to load. Defaults to the first available dataset.",
+)
+def gui_roi(session_path: Path | None, dataset: str | None) -> None:
     """Launches the ROI viewer for single-day pipeline output."""
-    run_roi_viewer(session_path=session_path)
+    run_roi_viewer(session_path=session_path, dataset=dataset)
 
 
 @cindra_gui.command("registration")
@@ -56,6 +63,13 @@ def gui_registration(recording_path: Path) -> None:
     required=True,
     help="Path to any recording's cindra output directory that is part of a multi-day dataset.",
 )
-def gui_tracking(recording_path: Path) -> None:
+@click.option(
+    "-d",
+    "--dataset",
+    type=str,
+    default=None,
+    help="Multi-day dataset name to load. Defaults to the first available dataset.",
+)
+def gui_tracking(recording_path: Path, dataset: str | None) -> None:
     """Launches the multi-day tracking quality viewer for inspecting across-day ROI tracking results."""
-    run_tracking_viewer(recording_path=recording_path)
+    run_tracking_viewer(recording_path=recording_path, dataset=dataset)

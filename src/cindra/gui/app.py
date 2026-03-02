@@ -15,15 +15,14 @@ from .styles import FONTS, PC_STYLE, BINARY_STYLE
 from .pc_viewer import PCViewer
 from .roi_viewer import ROIViewer
 from .binary_viewer import BinaryPlayer
+from .viewer_context import ViewerData, SingleDayData
 from .tracking_viewer import TrackingViewer
-from .multi_day_context import TrackingViewerData
-from .single_day_context import SingleDayViewerData
 
 _ICON_PATH: str = str(Path(cindra.__file__).parent / "logo" / "logo.png")
 """The string path to the application icon file."""
 
 
-def run_tracking_viewer(recording_path: Path) -> None:
+def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> None:
     """Launches the standalone multi-day tracking viewer.
 
     Creates a QApplication, shows the TrackingViewer window, and enters the event loop. The viewer
@@ -33,6 +32,7 @@ def run_tracking_viewer(recording_path: Path) -> None:
         recording_path: The path to the root data directory for any cindra-processed recording that
             makes up the visualized multi-day dataset. The loader uses that recording's data to
             search and reconstruct the full dataset hierarchy.
+        dataset: Multi-day dataset name to load. Defaults to the first available dataset.
     """
     # Reuses the existing QApplication if one is already running (e.g. when embedded in a larger
     # GUI), otherwise creates a new one.
@@ -43,7 +43,7 @@ def run_tracking_viewer(recording_path: Path) -> None:
         application.setFont(FONTS.small)
 
     # Loads recording data upfront so the viewer window receives a fully populated data instance.
-    data = TrackingViewerData.from_recording(root_path=recording_path)
+    data = ViewerData.from_data(root_path=recording_path, dataset=dataset)
 
     # Creates the viewer window with the loaded data.
     window = TrackingViewer(data=data)
@@ -61,7 +61,7 @@ def run_registration_viewer(recording_path: Path) -> None:
 
     Creates a QApplication, shows the BinaryPlayer and PCViewer windows, and enters the event
     loop. Both viewers load registration data from the provided directory on startup and share the
-    same SingleDayViewerData instance for synchronized plane switching.
+    same SingleDayData instance for synchronized plane switching.
 
     Args:
         recording_path: The Path to a cindra-processed recording's root data directory containing
@@ -75,12 +75,12 @@ def run_registration_viewer(recording_path: Path) -> None:
         application = QApplication(sys.argv)
         application.setFont(FONTS.small)
 
-    # Loads recording data upfront so both viewer windows share the same SingleDayViewerData
+    # Loads recording data upfront so both viewer windows share the same SingleDayData
     # instance. This ensures plane switches in the binary player are reflected in the PC viewer
     # without reloading from disk.
-    data = SingleDayViewerData.from_single_day(root_path=recording_path, view_index=0)
+    data = SingleDayData.from_data(root_path=recording_path, view_index=0)
 
-    # Creates both viewer windows with the shared SingleDayViewerData instance.
+    # Creates both viewer windows with the shared SingleDayData instance.
     binary_player = BinaryPlayer(data=data)
     pc_viewer = PCViewer(data=data)
 
@@ -109,7 +109,7 @@ def run_registration_viewer(recording_path: Path) -> None:
     binary_player.setGeometry(binary_viewer_x, binary_viewer_y, binary_viewer_width, binary_viewer_height)
     pc_viewer.setGeometry(pc_viewer_x, pc_viewer_y, pc_viewer_width, pc_viewer_height)
 
-    # When the user switches planes in the binary player, the shared SingleDayViewerData
+    # When the user switches planes in the binary player, the shared SingleDayData
     # instance is mutated in place (via switch_view). This signal connection triggers the PC
     # viewer to re-read PC images and metrics from the updated recording data so both windows
     # stay synchronized.
@@ -132,7 +132,7 @@ def run_registration_viewer(recording_path: Path) -> None:
         sys.exit(application.exec())
 
 
-def run_roi_viewer(session_path: Path | None = None) -> None:
+def run_roi_viewer(session_path: Path | None = None, *, dataset: str | None = None) -> None:
     """Launches the standalone ROI viewer with right-click reclassification.
 
     Creates a QApplication, loads pipeline data from the given session directory (or opens a file
@@ -141,6 +141,7 @@ def run_roi_viewer(session_path: Path | None = None) -> None:
     Args:
         session_path: Path to a cindra output directory to load on startup. Opens a file dialog
             if None.
+        dataset: Multi-day dataset name to load. Defaults to the first available dataset.
     """
     application = QApplication.instance()
     owns_application = application is None
@@ -156,7 +157,7 @@ def run_roi_viewer(session_path: Path | None = None) -> None:
         app_icon.addFile(_ICON_PATH, QtCore.QSize(size, size))
     application.setWindowIcon(app_icon)
 
-    data = SingleDayViewerData.from_single_day(root_path=session_path) if session_path is not None else None
+    data = ViewerData.from_data(root_path=session_path, dataset=dataset) if session_path is not None else None
 
     window = ROIViewer(data=data)
     window.show()

@@ -111,10 +111,6 @@ class TraceControls:
         neuropil_checkbox: Checkbox toggling neuropil fluorescence trace visibility.
         traces_checkbox: Checkbox toggling raw fluorescence trace visibility.
         max_plotted_edit: Text input for the maximum number of plotted traces.
-        arrow_buttons: Up/down buttons for resizing the trace panel.
-        scale_buttons: +/- buttons for adjusting multi-trace vertical scale.
-        scale_factor: Current vertical scale factor for multi-trace stacking.
-        trace_level: Current row stretch factor for the trace panel.
         deconvolved_visible: Determines whether the deconvolved trace is drawn.
         neuropil_visible: Determines whether the neuropil trace is drawn.
         traces_visible: Determines whether the raw fluorescence trace is drawn.
@@ -125,10 +121,6 @@ class TraceControls:
     neuropil_checkbox: QCheckBox
     traces_checkbox: QCheckBox
     max_plotted_edit: QLineEdit
-    arrow_buttons: list[QPushButton] = field(default_factory=list)
-    scale_buttons: list[QPushButton] = field(default_factory=list)
-    scale_factor: float = CONFIG.default_scale_factor
-    trace_level: int = CONFIG.default_trace_level
     deconvolved_visible: bool = True
     neuropil_visible: bool = True
     traces_visible: bool = True
