@@ -22,7 +22,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from .styles import FONTS, STYLE, COLORS, PC_STYLE, PLOT_STYLE
 from .widgets import configure_plot, add_plot_legend
-from .constants import CONFIG, PC_CONFIG
+from .constants import COMMON_CONFIG, PC_CONFIG
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -190,8 +190,8 @@ class PCViewer(QMainWindow):
         # Clips extreme pixel values to the 1st-99th percentile range for stable image display.
         self._pc_images = np.clip(
             pc_images,
-            np.percentile(pc_images, CONFIG.image_percentile_low),
-            np.percentile(pc_images, CONFIG.image_percentile_high),
+            np.percentile(pc_images, COMMON_CONFIG.lower_percentile),
+            np.percentile(pc_images, COMMON_CONFIG.upper_percentile),
         )
         self._image_height, self._image_width = self._pc_images.shape[2:]
         self._pc_metrics = pc_metrics
@@ -321,7 +321,7 @@ class PCViewer(QMainWindow):
         if self._loaded:
             self._play_button.setEnabled(False)
             self._pause_button.setEnabled(True)
-            self._update_timer.start(PC_CONFIG.animation_interval_ms)
+            self._update_timer.start(PC_CONFIG.animation_interval_milliseconds)
 
     def _pause_animation(self) -> None:
         """Pauses PC animation playback."""

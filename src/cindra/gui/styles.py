@@ -9,7 +9,7 @@ from PySide6 import QtGui
 
 @dataclass(frozen=True, slots=True)
 class _CommonStyle:
-    """Encapsulates visual constants shared by all viewer windows."""
+    """Encapsulates static visual parameters shared by all viewer windows."""
 
     main_window: str = "QMainWindow {background: 'black';}"
     """The stylesheet applied to QMainWindow backgrounds. Every viewer sets this on its top-level window to produce a 
@@ -38,7 +38,7 @@ class _CommonStyle:
 
 @dataclass(frozen=True, slots=True)
 class _PlotStyle:
-    """Encapsulates pyqtgraph plot configuration constants shared by all viewer windows."""
+    """Encapsulates static pyqtgraph plot parameters shared by all viewer windows."""
 
     scatter_point_size: int = 10
     """The marker diameter in pixels for pyqtgraph scatter plot overlays."""
@@ -57,7 +57,7 @@ class _PlotStyle:
 
 @dataclass(frozen=True, slots=True)
 class _FontStyle:
-    """Encapsulates all font and text size constants shared by all viewer windows."""
+    """Encapsulates static font and text size parameters shared by all viewer windows."""
 
     family: str = "Arial"
     """The standard font family used throughout the GUI."""
@@ -83,7 +83,7 @@ class _FontStyle:
 
 @dataclass(frozen=True, slots=True)
 class _ROIViewerStyle:
-    """Encapsulates visual constants specific to the ROI viewer and editor windows."""
+    """Encapsulates static visual parameters for the ROI viewer and editor windows."""
 
     colorbar_max_height: int = 60
     """The maximum height for the colorbar widget."""
@@ -101,7 +101,7 @@ class _ROIViewerStyle:
 
 @dataclass(frozen=True, slots=True)
 class _TrackingViewerStyle:
-    """Encapsulates visual constants specific to the tracking viewer window."""
+    """Encapsulates static visual parameters for the tracking viewer window."""
 
     window_geometry: tuple[int, int, int, int] = (50, 50, 1200, 800)
     """The initial window position (x, y) and size (width, height) for the tracking viewer."""
@@ -109,7 +109,7 @@ class _TrackingViewerStyle:
 
 @dataclass(frozen=True, slots=True)
 class _BinaryPlayerStyle:
-    """Encapsulates visual constants specific to the binary player window."""
+    """Encapsulates static visual parameters for the binary player window."""
 
     image_plot_stretch: tuple[int, int] = (7, 3)
     """Row stretch factors for the image panel (index 0) and plot panel (index 1). A higher value gives that row
@@ -123,7 +123,7 @@ class _BinaryPlayerStyle:
 
 @dataclass(frozen=True, slots=True)
 class _PCViewerStyle:
-    """Encapsulates visual constants specific to the PC viewer window."""
+    """Encapsulates static visual parameters for the PC viewer window."""
 
     group_spacing: int = 20
     """The pixel spacing inserted between logical widget groups in the bottom control panel."""

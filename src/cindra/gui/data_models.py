@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
-from .constants import CONFIG
+from .constants import ROI_CONFIG
 
 if TYPE_CHECKING:
     import numpy as np
@@ -67,22 +67,16 @@ class ColorArrays:
 
 @dataclass
 class ROIIndexMaps:
-    """Holds the multi-layer ROI index and weight maps for overlay rendering.
+    """Holds the multi-layer ROI index maps for overlay rendering.
 
     Attributes:
         sroi: Boolean presence map with shape (height, width).
-        lam: Weight layers with shape (3, height, width).
-        iroi: ROI index layers with shape (3, height, width).
-        lam_mean: Mean weight across all ROI pixels.
-        lam_norm: Normalized weights with shape (height, width).
+        iroi: ROI index layers with shape (overlap_layers, height, width).
         text_labels: Per-ROI text label items for centroid display.
     """
 
     sroi: NDArray[np.bool_]
-    lam: NDArray[np.float32]
     iroi: NDArray[np.int32]
-    lam_mean: float
-    lam_norm: NDArray[np.float32]
     text_labels: list[pg.TextItem] = field(default_factory=list)
 
 
@@ -138,17 +132,20 @@ class SelectionControls:
 
     selection_combo: QComboBox
     top_count_edit: QLineEdit
-    top_count: int = CONFIG.default_top_n
+    top_count: int = ROI_CONFIG.default_top_count
 
 
 @dataclass
 class ClassifierControls:
-    """Holds references to classifier section widgets.
+    """Holds references to the classifier builder panel widgets.
 
     Attributes:
-        classifier_label: Label displaying the current classifier name or status.
-        add_to_class_button: Button for adding the current session data to the classifier.
+        new_button: Button to create a new classifier training dataset file.
+        add_button: Button to append samples to an existing classifier training dataset file.
+        status_label: Label showing the result of the last classifier operation.
     """
 
-    classifier_label: QLabel
-    add_to_class_button: QPushButton
+    new_button: QPushButton
+    add_button: QPushButton
+    status_label: QLabel
+

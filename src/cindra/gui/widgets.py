@@ -11,7 +11,7 @@ from pyqtgraph import functions as fn
 from pyqtgraph.graphicsItems.ViewBox.ViewBoxMenu import ViewBoxMenu  # type: ignore[import-untyped]
 
 from .styles import FONTS, COLORS, PLOT_STYLE
-from .constants import CONFIG
+from .constants import ROI_CONFIG, TraceMode
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -237,8 +237,8 @@ def plot_trace(
     traces_visible: bool = True,
     neuropil_visible: bool = True,
     deconvolved_visible: bool = True,
-    scale_factor: float = CONFIG.default_scale_factor,
-    max_plotted: int = CONFIG.default_plotted_count,
+    scale_factor: float = ROI_CONFIG.default_scale_factor,
+    max_plotted: int = ROI_CONFIG.default_plotted_count,
 ) -> tuple[float, float]:
     """Draws fluorescence traces for the selected ROIs.
 
@@ -404,8 +404,8 @@ def _plot_multi_trace(
             trace = cell_fluorescence[index, :]
         elif activity_mode == 1:
             trace = neuropil_fluorescence[index, :]
-        elif activity_mode == CONFIG.activity_mode_subtracted:
-            trace = cell_fluorescence[index, :] - CONFIG.neuropil_coefficient * neuropil_fluorescence[index, :]
+        elif activity_mode == TraceMode.NEUROPIL_CORRECTED:
+            trace = cell_fluorescence[index, :] - ROI_CONFIG.neuropil_coefficient * neuropil_fluorescence[index, :]
         else:
             trace = spikes[index, :]
 
@@ -427,7 +427,7 @@ def _plot_multi_trace(
         stack_position -= 1
 
     # Computes average trace scale.
-    average_scale = len(selected) / CONFIG.average_scale_divisor + 1
+    average_scale = len(selected) / ROI_CONFIG.average_scale_divisor + 1
     average -= average.min()
     average_max = average.max()
     if average_max > 0:
@@ -437,7 +437,7 @@ def _plot_multi_trace(
     average_pen = COLORS.silver
 
     # Plots average trace at bottom when enough cells are selected.
-    if len(selected) > CONFIG.average_threshold:
+    if len(selected) > ROI_CONFIG.average_threshold:
         trace_box.plot(
             frame_indices,
             -1 * average_scale + average * average_scale,
