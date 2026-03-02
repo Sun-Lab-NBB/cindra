@@ -27,7 +27,8 @@ from PySide6.QtWidgets import (
 from matplotlib.colors import hsv_to_rgb
 
 from .styles import STYLE, TRACKING_STYLE
-from .constants import CONFIG, TRACKING_CONFIG, MaskLayer, BackgroundView, CoordinateSpace
+from .constants import COMMON_CONFIG, ROI_CONFIG, TRACKING_CONFIG, MaskLayer, BackgroundView, CoordinateSpace
+from .viewer_context import EMPTY
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -245,6 +246,7 @@ class TrackingViewer(QMainWindow):
         background_layout = QVBoxLayout(background_group)
 
         self._background_combo = QComboBox()
+        self._background_combo.addItem("ROIs Only", userData=BackgroundView.ROIS_ONLY)
         self._background_combo.addItem("Mean Image", userData=BackgroundView.MEAN_IMAGE)
         self._background_combo.addItem("Enhanced Mean", userData=BackgroundView.ENHANCED_MEAN_IMAGE)
         self._background_combo.addItem("Max Projection", userData=BackgroundView.MAXIMUM_PROJECTION)
@@ -405,7 +407,7 @@ class TrackingViewer(QMainWindow):
                 original_masks = self._resolve_masks(rec, MaskLayer.ORIGINAL, channel_2)
                 color_count = len(original_masks) if original_masks else len(masks)
 
-            rng = np.random.default_rng(seed=CONFIG.random_color_seed)
+            rng = np.random.default_rng(seed=ROI_CONFIG.random_color_seed)
             hues = rng.random(color_count)
             hsv = np.stack([hues, np.ones_like(hues), np.ones_like(hues)], axis=-1)
             roi_colors = (255.0 * hsv_to_rgb(hsv)).astype(np.uint8)
@@ -641,8 +643,8 @@ class TrackingViewer(QMainWindow):
         if image.size == 0:
             return np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
 
-        percentile_low = np.percentile(image, TRACKING_CONFIG.lower_percentile)
-        percentile_high = np.percentile(image, TRACKING_CONFIG.upper_percentile)
+        percentile_low = np.percentile(image, COMMON_CONFIG.lower_percentile)
+        percentile_high = np.percentile(image, COMMON_CONFIG.upper_percentile)
 
         if percentile_high <= percentile_low:
             return np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
@@ -671,6 +673,9 @@ class TrackingViewer(QMainWindow):
         Returns:
             The resolved background image. Channel 2 variants return an empty array when single-channel.
         """
+        if image_type == BackgroundView.ROIS_ONLY:
+            return EMPTY
+
         if coordinate_space == CoordinateSpace.TRANSFORMED:
             if image_type == BackgroundView.MEAN_IMAGE:
                 return rec.transformed_mean_image_channel_2 if channel_2 else rec.transformed_mean_image

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 from dataclasses import field, dataclass
 
 
@@ -33,8 +33,8 @@ class ROIColorMode(IntEnum):
     CORRELATIONS = 7
     """Colors ROIs by pairwise activity correlation with the selected ROI."""
 
-    CELL_NON_CELL = 8
-    """Colors ROIs by their cell vs non-cell classification status."""
+    CLASSIFIER_LABEL = 8
+    """Colors ROIs by their classifier-assigned label (cell vs non-cell)."""
 
 
 class BackgroundView(IntEnum):
@@ -108,53 +108,65 @@ class CoordinateSpace(IntEnum):
     """Displays reference images warped to align with the cross-recording template coordinate space."""
 
 
+class Colormap(StrEnum):
+    """Defines the available colormaps for ROI overlay coloring."""
+
+    HSV = "hsv"
+    """The hue-saturation-value cyclic colormap."""
+    VIRIDIS = "viridis"
+    """The viridis perceptually uniform sequential colormap."""
+    PLASMA = "plasma"
+    """The plasma perceptually uniform sequential colormap."""
+    INFERNO = "inferno"
+    """The inferno perceptually uniform sequential colormap."""
+    MAGMA = "magma"
+    """The magma perceptually uniform sequential colormap."""
+    CIVIDIS = "cividis"
+    """The cividis colorblind-friendly sequential colormap."""
+    VIRIDIS_R = "viridis_r"
+    """The reversed viridis colormap."""
+    PLASMA_R = "plasma_r"
+    """The reversed plasma colormap."""
+    INFERNO_R = "inferno_r"
+    """The reversed inferno colormap."""
+    MAGMA_R = "magma_r"
+    """The reversed magma colormap."""
+    CIVIDIS_R = "cividis_r"
+    """The reversed cividis colormap."""
+
+
 @dataclass(frozen=True, slots=True)
-class _ViewerConfig:
-    """Encapsulates behavioral and algorithmic constants shared by the ROI viewer and editor."""
+class _CommonConstants:
+    """Encapsulates static runtime parameters shared by all viewer windows."""
 
-    # Overlay constants.
+    lower_percentile: float = 1.0
+    """The lower percentile bound for normalizing image data and ROI statistics."""
+    upper_percentile: float = 99.0
+    """The upper percentile bound for normalizing image data and ROI statistics."""
+
+
+@dataclass(frozen=True, slots=True)
+class _ROIViewerConstants:
+    """Encapsulates static runtime parameters for the ROI viewer and editor."""
+
     overlap_layers: int = 3
-    """Number of overlap layers stored in the ROI index map."""
-    lambda_norm_scale: float = 0.75
-    """ROI weight normalization scale factor."""
-    lambda_threshold: float = 1e-10
-    """Minimum lambda value threshold for computing the mean weight."""
-    color_stat_count: int = 9
-    """Number of color statistics (random, skew, compact, footprint, aspect, chan2, class, corr, cell/non-cell)."""
+    """The number of overlap layers stored in the ROI index map. Each pixel tracks up to this many overlapping ROIs in a
+    depth stack, enabling click-through selection and brightness-based overlap visualization. ROIs beyond this depth are
+    silently dropped."""
     fixed_colorbar_range: tuple[float, ...] = (0.0, 0.5, 1.0)
-    """Fixed colorbar range for statistics without computed percentiles."""
-    lower_percentile: float = 2.0
-    """Lower percentile value for computing istat normalization bounds."""
-    upper_percentile: float = 98.0
-    """Upper percentile value for computing istat normalization bounds."""
+    """The (low, mid, high) colorbar tick values used for color modes that lack data-driven percentile ranges. Applied
+    to the random, classifier probability, correlation, and classifier label modes where the statistic is either
+    categorical or already normalized to [0, 1]."""
     channel_2_color_divisor: float = 1.4
-    """Random color adjustment divisor for channel 2 data."""
+    """The random color adjustment divisor for channel 2 data."""
     channel_2_color_offset: float = 0.1
-    """Random color adjustment offset for channel 2 data."""
+    """The random color adjustment offset for channel 2 data."""
     hsv_divisor: float = 1.4
-    """HSV transform normalization divisor."""
+    """The HSV transform normalization divisor."""
     hsv_offset: float = 0.4
-    """HSV transform normalization offset."""
-    flip_threshold: int = 100
-    """Minimum number of changed cells before incremental flip is used over full reinit."""
+    """The HSV transform normalization offset."""
     random_color_seed: int = 0
-    """Seed for reproducible random ROI color generation."""
-
-    # Color constants.
-    colormaps: tuple[str, ...] = (
-        "hsv",
-        "viridis",
-        "plasma",
-        "inferno",
-        "magma",
-        "cividis",
-        "viridis_r",
-        "plasma_r",
-        "inferno_r",
-        "magma_r",
-        "cividis_r",
-    )
-    """Available colormaps for the colormap chooser."""
+    """The seed for reproducible random ROI color generation."""
     color_names: tuple[str, ...] = (
         "random",
         "skew",
@@ -166,26 +178,12 @@ class _ViewerConfig:
         "correlations, bin=",
         "cell / non-cell",
     )
-    """Color statistic names displayed in the color mode dropdown."""
-    color_narrow_range_start: int = 5
-    """Starting index of the color buttons that require the adjacent edit field column."""
-    color_narrow_range_end: int = 9
-    """Ending index of the color buttons that require the adjacent edit field column."""
-    color_channel_2: int = 5
-    """Channel 2 color index."""
-    color_classifier: int = 6
-    """Classifier probability color index."""
-    color_correlation: int = 7
-    """Correlation color index."""
-    color_cell_non_cell: int = 8
-    """Cell vs non-cell classification color index."""
+    """The color statistic names displayed in the color mode dropdown."""
     cell_color: tuple[int, int, int] = (0, 255, 0)
-    """RGB color for classified cells in cell/non-cell mode (green)."""
-    noncell_color: tuple[int, int, int] = (255, 0, 255)
-    """RGB color for non-cells in cell/non-cell mode (magenta)."""
-    channel_2_threshold_epsilon: float = 1e-3
-    """Minimum change in channel 2 threshold to trigger a recoloring update."""
-    stat_field_map: dict[str, str] = field(
+    """The RGB color for classified cells in cell/non-cell mode (green)."""
+    non_cell_color: tuple[int, int, int] = (255, 0, 255)
+    """The RGB color for non-cells in cell/non-cell mode (magenta)."""
+    statistic_field_map: dict[str, str] = field(
         default_factory=lambda: {
             "skew": "skewness",
             "compact": "compactness",
@@ -194,11 +192,7 @@ class _ViewerConfig:
             "chan2_prob": "colocalization_probability",
         }
     )
-    """Mapping from color statistic display names to ROIStatistics attribute names."""
-
-    # View constants.
-    view_count: int = 6
-    """Number of background view types available."""
+    """The mapping from color statistic display names to ROIStatistics attribute names."""
     view_names: tuple[str, ...] = (
         "ROIs",
         "mean img",
@@ -207,143 +201,97 @@ class _ViewerConfig:
         "max projection",
         "corrected structural",
     )
-    """Names displayed in the background view dropdown."""
-
-    # Trace constants.
-    default_activity_mode: int = 3
-    """Default activity mode index (deconvolved)."""
+    """The names displayed in the background view dropdown."""
     max_plotted_count: int = 400
-    """Maximum number of traces that can be plotted simultaneously."""
+    """The maximum number of traces that can be plotted simultaneously."""
     default_plotted_count: int = 40
-    """Default number of traces plotted."""
+    """The default number of traces plotted."""
     default_scale_factor: float = 2.0
-    """Default vertical scale factor for multi-trace stacking."""
-    activity_mode_subtracted: int = 2
-    """Activity mode index for neuropil-subtracted fluorescence (F - 0.7*Fneu)."""
+    """The default vertical scale factor for multi-trace stacking."""
     neuropil_coefficient: float = 0.7
-    """Neuropil subtraction coefficient for the F - 0.7*Fneu activity mode."""
+    """The neuropil subtraction coefficient for the F - 0.7*Fneu activity mode."""
     activity_mode_labels: tuple[str, ...] = ("Fluorescence", "Neuropil", "Neuropil Subtracted", "Spikes")
-    """Display labels for the activity mode combo box, indexed by TraceMode value."""
+    """The display labels for the activity mode combo box, indexed by TraceMode value."""
     average_threshold: int = 5
-    """Minimum number of selected cells before the average trace is displayed."""
+    """The minimum number of selected cells before the average trace is displayed."""
     average_scale_divisor: float = 25.0
-    """Ratio of selected cells to determine average trace vertical scale."""
-
-    # Selection constants.
-    max_top_n: int = 500
-    """Maximum number of cells allowed in the top-n / bottom-n selection input."""
-    default_top_n: int = 40
-    """Default number of cells selected by top-n / bottom-n."""
+    """The ratio of selected cells to determine average trace vertical scale."""
+    maximum_top_count: int = 500
+    """The maximum number of cells allowed in the top-n / bottom-n selection input."""
+    default_top_count: int = 40
+    """The default number of cells selected by top-n / bottom-n."""
     roi_selection_overlap_threshold: float = 0.6
-    """Minimum fraction of an ROI's pixels that must fall inside the selection rectangle for it to be included."""
+    """The minimum fraction of an ROI's pixels that must fall inside the selection rectangle for it to be included."""
     roi_selection_max_dimension: int = 300
-    """Maximum pixel dimension for the ROI selection rectangle."""
+    """The maximum pixel dimension for the ROI selection rectangle."""
     zoom_to_cell_fraction: float = 0.1
-    """Fraction of the maximum image dimension used as padding when zooming to a cell."""
-
-    # Viewer constants.
-    centroid_stat_index: int = 1
-    """1-based stat index for the centroid field (used to display ROI position)."""
-    pixel_count_stat_index: int = 2
-    """1-based stat index for the pixel count field."""
-
-    # Context loader constants.
+    """The fraction of the maximum image dimension used as padding when zooming to a cell."""
+    centroid_statistic_index: int = 1
+    """The 1-based stat index for the centroid field (used to display ROI position)."""
+    pixel_count_statistic_index: int = 2
+    """The 1-based stat index for the pixel count field."""
     default_channel_2_threshold: float = 0.6
-    """Default colocalization threshold for channel 2 data."""
+    """The default colocalization threshold for channel 2 data."""
+    default_classifier_threshold: float = 0.5
+    """The default probability threshold above which an ROI is labeled as a cell."""
     bin_size_divisor: int = 2
-    """Divisor for computing the temporal bin size from tau * sampling_rate."""
-    basic_color_count: int = 9
-    """Number of basic (non-dynamic) color mode buttons."""
-    default_context_activity_mode: int = 2
-    """Default activity mode index used during context loading (neuropil-corrected)."""
-
-    # Classifier constants.
-    classifier_color_index: int = 6
-    """Index of the classifier probability color mode in the color button group."""
-    classification_features: tuple[str, ...] = ("normalized_pixel_count", "compactness", "skewness")
-    """Feature names used by the classifier, matching ROIStatistics attribute names."""
-
-    # ROI draw editor constants.
-    image_percentile_low: int = 1
-    """Percentile range lower bound used for image normalization in the draw editor."""
-    image_percentile_high: int = 99
-    """Percentile range upper bound used for image normalization in the draw editor."""
-    draw_view_count: int = 4
-    """Number of reference images available in the draw editor (mean, enhanced, correlation, max projection)."""
-    max_diameter_fraction: float = 0.2
-    """Maximum fraction of field of view used as the default ROI diameter."""
-    min_diameter: int = 3
-    """Minimum ROI diameter in pixels."""
-    reference_roi_count: int = 100
-    """Number of reference ROIs used for normalized pixel count computation."""
-    roi_pen_width: int = 3
-    """Pen width for ROI ellipse outlines in the draw editor."""
-    roi_position_offset: int = 5
-    """Default initial position offset for the ROI ellipse in the draw editor."""
-    correlation_map_view_index: int = 2
-    """View index for the correlation map in the draw editor reference image selector."""
-
-
-CONFIG: _ViewerConfig = _ViewerConfig()
-"""Module-level singleton providing all viewer behavioral constants."""
+    """The divisor for computing the temporal bin size from tau * sampling_rate."""
 
 
 @dataclass(frozen=True, slots=True)
-class _TrackingViewerConfig:
-    """Encapsulates behavioral constants for the tracking viewer window."""
+class _TrackingViewerConstants:
+    """Encapsulates static runtime parameters for the tracking viewer window."""
 
     cycle_interval: int = 500
     """The millisecond interval for auto-cycling between recordings."""
 
-    lower_percentile: float = 1.0
-    """The lower percentile value for normalizing background images."""
-
-    upper_percentile: float = 99.0
-    """The upper percentile value for normalizing background images."""
-
-
-TRACKING_CONFIG: _TrackingViewerConfig = _TrackingViewerConfig()
-"""Module-level singleton providing tracking viewer behavioral constants."""
-
 
 @dataclass(frozen=True, slots=True)
-class _BinaryPlayerConfig:
-    """Encapsulates behavioral constants for the binary player window."""
+class _BinaryPlayerConstants:
+    """Encapsulates static runtime parameters for the binary player window."""
 
     playback_speed_multiplier: int = 5
-    """Factor by which the real-time frame period is divided to compute the playback timer interval."""
-
+    """The factor by which playback runs faster than the real time recording. A value of 5 means the binary viewer 
+    plays frames at 5x the original recording speed."""
     subsample_frame_count: int = 100
-    """Number of evenly-spaced frames subsampled for dynamic range estimation."""
-
-    min_frame_delta: int = 5
-    """Minimum frame increment for arrow key navigation."""
-
+    """The number of evenly-spaced frames subsampled from the recording for dynamic range estimation. These frames
+    are used to compute the mean and standard deviation that define the display intensity range."""
+    minimum_frame_delta: int = 5
+    """The minimum frame step size for arrow key navigation. When the recording is short enough that the computed
+    step (frame_count / frame_delta_divisor) falls below this value, this minimum is used instead."""
     frame_delta_divisor: int = 200
-    """Divisor for computing frame slider step size from total frame count."""
-
+    """The divisor applied to the total frame count to compute the arrow key frame step size. Larger values produce
+    smaller steps, giving finer frame-by-frame navigation in long recordings."""
     frame_slider_tick_interval: int = 5
-    """Tick interval for the frame navigation slider. Determines the number of frames represented by each tick of
-    the binary viewer slider."""
-
+    """The tick spacing for the frame navigation slider. Controls how many frame positions are represented by each
+    discrete tick mark on the slider widget."""
     display_range_low_sigma: float = 2.0
-    """Standard deviations below mean for display range lower bound."""
-
+    """The number of standard deviations below the subsampled mean used as the display intensity floor. Pixels below
+    this bound are clipped to black in the binary viewer image."""
     display_range_high_sigma: float = 5.0
-    """Standard deviations above mean for display range upper bound."""
-
-
-BINARY_CONFIG: _BinaryPlayerConfig = _BinaryPlayerConfig()
-"""Module-level singleton providing binary player behavioral constants."""
+    """The number of standard deviations above the subsampled mean used as the display intensity ceiling. Pixels above
+    this bound are clipped to white in the binary viewer image."""
 
 
 @dataclass(frozen=True, slots=True)
-class _PCViewerConfig:
-    """Encapsulates behavioral constants for the PC viewer window."""
+class _PCViewerConstants:
+    """Encapsulates static runtime parameters for the PC viewer window."""
 
-    animation_interval_ms: int = 200
-    """Interval in milliseconds between PC extreme image animation updates."""
+    animation_interval_milliseconds: int = 200
+    """The interval in milliseconds between PC extreme image animation updates."""
 
 
-PC_CONFIG: _PCViewerConfig = _PCViewerConfig()
-"""Module-level singleton providing PC viewer behavioral constants."""
+COMMON_CONFIG: _CommonConstants = _CommonConstants()
+"""The module-level singleton providing shared behavioral constants."""
+
+ROI_CONFIG: _ROIViewerConstants = _ROIViewerConstants()
+"""The module-level singleton providing ROI viewer behavioral constants."""
+
+TRACKING_CONFIG: _TrackingViewerConstants = _TrackingViewerConstants()
+"""The module-level singleton providing tracking viewer behavioral constants."""
+
+BINARY_CONFIG: _BinaryPlayerConstants = _BinaryPlayerConstants()
+"""The module-level singleton providing binary player behavioral constants."""
+
+PC_CONFIG: _PCViewerConstants = _PCViewerConstants()
+"""The module-level singleton providing PC viewer behavioral constants."""

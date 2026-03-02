@@ -324,7 +324,7 @@ class BinaryPlayer(QMainWindow):
         frame_count = self.data.frame_count
         last_frame = frame_count - 1
         self._time_step = 1.0 / self.data.sampling_rate * 1000 / BINARY_CONFIG.playback_speed_multiplier
-        self._frame_delta = max(BINARY_CONFIG.min_frame_delta, int(frame_count / BINARY_CONFIG.frame_delta_divisor))
+        self._frame_delta = max(BINARY_CONFIG.minimum_frame_delta, int(frame_count / BINARY_CONFIG.frame_delta_divisor))
         self._frame_slider.setSingleStep(self._frame_delta)
         if frame_count > 0:
             self._update_frame_slider()

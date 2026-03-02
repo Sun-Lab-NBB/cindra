@@ -46,7 +46,8 @@ from .overlays import (
     update_correlation_masks,
 )
 from .constants import (
-    CONFIG,
+    ROI_CONFIG,
+    Colormap,
     TraceMode,
     ROIColorMode,
     BackgroundView,
@@ -59,8 +60,10 @@ from .data_models import (
     TraceControls,
     ColorbarWidgets,
     SelectionControls,
+    ClassifierControls,
 )
 from .viewer_context import EMPTY, ViewerData
+from ..classification import Classifier
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -89,7 +92,7 @@ class ROIViewer(QMainWindow):
         self.rois_visible: bool = True
         self.roi_color_mode: int = ROIColorMode.RANDOM
         self.background_view: int = BackgroundView.ROIS_ONLY
-        self.roi_colormap: str = CONFIG.colormaps[0]
+        self.roi_colormap: str = Colormap.HSV
         self.selected_roi_index: int = 0
         self.merge_roi_indices: list[int] = [0]
         self.roi_tool_active: bool = False
@@ -98,7 +101,7 @@ class ROIViewer(QMainWindow):
         self.auto_zoom_to_roi: bool = False
         self.roi_labels_visible: bool = False
         self.session_loaded: bool = False
-        self.colocalization_threshold: float = CONFIG.default_channel_2_threshold
+        self.colocalization_threshold: float = ROI_CONFIG.default_channel_2_threshold
         self.last_reclassified_index: int = -1
 
         # Multi-day state. Persists across _reset_state calls.
@@ -294,6 +297,10 @@ class ROIViewer(QMainWindow):
             trace_layout.addWidget(self._zoom_to_cell_checkbox)
         layout.addWidget(trace_box)
 
+        # 7. Classifier Builder.
+        classifier_box, self._classifier_controls = self._create_classifier_controls()
+        layout.addWidget(classifier_box)
+
         layout.addStretch()
         return panel
 
@@ -317,8 +324,8 @@ class ROIViewer(QMainWindow):
         layout.addWidget(count_label, 0, 1, 1, 1)
 
         top_count_edit = QLineEdit(self)
-        top_count_edit.setValidator(QtGui.QIntValidator(0, CONFIG.max_top_n))
-        top_count_edit.setText(str(CONFIG.default_top_n))
+        top_count_edit.setValidator(QtGui.QIntValidator(0, ROI_CONFIG.maximum_top_count))
+        top_count_edit.setText(str(ROI_CONFIG.default_top_count))
         top_count_edit.setFixedWidth(STYLE.edit_width)
         top_count_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         top_count_edit.returnPressed.connect(self._on_roi_selection)
@@ -334,7 +341,7 @@ class ROIViewer(QMainWindow):
         layout = QGridLayout(group_box)
 
         view_combo = QComboBox(self)
-        view_combo.addItems(CONFIG.view_names)
+        view_combo.addItems(ROI_CONFIG.view_names)
         view_combo.setFont(FONTS.small_bold)
         view_combo.setEnabled(False)
         view_combo.activated.connect(self._on_view_changed)
@@ -369,14 +376,14 @@ class ROIViewer(QMainWindow):
         layout = QGridLayout(group_box)
 
         color_combo = QComboBox(self)
-        color_combo.addItems(CONFIG.color_names)
+        color_combo.addItems(ROI_CONFIG.color_names)
         color_combo.setFont(FONTS.small_bold)
         color_combo.setEnabled(False)
         color_combo.activated.connect(self._on_color_changed)
         layout.addWidget(color_combo, 0, 0, 1, 1)
 
         colormap_chooser = QComboBox()
-        colormap_chooser.addItems(CONFIG.colormaps)
+        colormap_chooser.addItems([cm.value for cm in Colormap])
         colormap_chooser.setCurrentIndex(0)
         colormap_chooser.setFont(FONTS.small_bold)
         colormap_chooser.setFixedWidth(ROI_STYLE.color_edit_width)
@@ -440,6 +447,33 @@ class ROIViewer(QMainWindow):
         labels = [label_0, label_half, label_1]
         return ColorbarWidgets(image=image, labels=labels, widget=colorbar_widget)
 
+    def _create_classifier_controls(self) -> tuple[QGroupBox, ClassifierControls]:
+        """Creates the classifier builder panel with New and Add to Existing buttons."""
+        group_box = QGroupBox("Classifier")
+        group_box.setStyleSheet(STYLE.group_box)
+        layout = QGridLayout(group_box)
+
+        new_button = QPushButton("New", self)
+        new_button.setFont(FONTS.small_bold)
+        new_button.setStyleSheet(STYLE.button_unpressed)
+        new_button.clicked.connect(self._on_classifier_new)
+        layout.addWidget(new_button, 0, 0, 1, 1)
+
+        add_button = QPushButton("Add to Existing", self)
+        add_button.setFont(FONTS.small_bold)
+        add_button.setStyleSheet(STYLE.button_unpressed)
+        add_button.clicked.connect(self._on_classifier_add_to_existing)
+        layout.addWidget(add_button, 0, 1, 1, 1)
+
+        status_label = QLabel("")
+        status_label.setStyleSheet(STYLE.white_label)
+        status_label.setFont(FONTS.small_bold)
+        status_label.setWordWrap(True)
+        layout.addWidget(status_label, 1, 0, 1, 2)
+
+        controls = ClassifierControls(new_button=new_button, add_button=add_button, status_label=status_label)
+        return group_box, controls
+
     def _create_trace_controls(self) -> tuple[QGroupBox, TraceControls]:
         """Creates trace panel controls inside a group box."""
         group_box = QGroupBox("Trace Display")
@@ -452,9 +486,9 @@ class ROIViewer(QMainWindow):
 
         activity_combo = QComboBox(self)
         layout.addWidget(activity_combo, 1, 0, 1, 1)
-        for label in CONFIG.activity_mode_labels:
+        for label in ROI_CONFIG.activity_mode_labels:
             activity_combo.addItem(label)
-        activity_combo.setCurrentIndex(CONFIG.default_activity_mode)
+        activity_combo.setCurrentIndex(TraceMode.DECONVOLVED)
         activity_combo.currentIndexChanged.connect(self._on_activity_changed)
 
         max_plotted_label = QLabel("max # plotted:")
@@ -462,8 +496,8 @@ class ROIViewer(QMainWindow):
         layout.addWidget(max_plotted_label, 2, 0, 1, 1)
 
         max_plotted_edit = QLineEdit(self)
-        max_plotted_edit.setValidator(QtGui.QIntValidator(0, CONFIG.max_plotted_count))
-        max_plotted_edit.setText(str(CONFIG.default_plotted_count))
+        max_plotted_edit.setValidator(QtGui.QIntValidator(0, ROI_CONFIG.max_plotted_count))
+        max_plotted_edit.setText(str(ROI_CONFIG.default_plotted_count))
         max_plotted_edit.setFixedWidth(STYLE.edit_width)
         max_plotted_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         layout.addWidget(max_plotted_edit, 3, 0, 1, 1)
@@ -594,7 +628,7 @@ class ROIViewer(QMainWindow):
         self.roi_color_mode = ROIColorMode.RANDOM
         self.background_view = BackgroundView.ROIS_ONLY
         self._view_controls.opacity_slider.setValue(STYLE.default_mask_opacity)
-        self.roi_colormap = CONFIG.colormaps[0]
+        self.roi_colormap = Colormap.HSV
         self.selected_roi_index = 0
         self.merge_roi_indices = [0]
         self.roi_tool_active = False
@@ -603,7 +637,7 @@ class ROIViewer(QMainWindow):
         self.auto_zoom_to_roi = False
         self.roi_labels_visible = False
         self.session_loaded = False
-        self.colocalization_threshold = CONFIG.default_channel_2_threshold
+        self.colocalization_threshold = ROI_CONFIG.default_channel_2_threshold
         self.last_reclassified_index = -1
         self._all_recordings_visible = False
 
@@ -670,9 +704,9 @@ class ROIViewer(QMainWindow):
         self.setWindowTitle(f"cindra ROI Viewer — {session_title}")
 
         # Computes default bin size from tau and sampling rate.
-        self.temporal_bin_size = max(1, int(sd.tau * sd.sampling_rate / CONFIG.bin_size_divisor))
+        self.temporal_bin_size = max(1, int(sd.tau * sd.sampling_rate / ROI_CONFIG.bin_size_divisor))
         self._color_controls.bin_edit.setText(str(self.temporal_bin_size))
-        self.colocalization_threshold = CONFIG.default_channel_2_threshold
+        self.colocalization_threshold = ROI_CONFIG.default_channel_2_threshold
 
         # Enables buttons.
         self._enable_controls()
@@ -688,7 +722,7 @@ class ROIViewer(QMainWindow):
                 for disabled_index in (
                     ROIColorMode.CLASSIFIER_PROBABILITY,
                     ROIColorMode.CORRELATIONS,
-                    ROIColorMode.CELL_NON_CELL,
+                    ROIColorMode.CLASSIFIER_LABEL,
                 ):
                     item = color_model.item(disabled_index)
                     if item is not None:
@@ -697,8 +731,20 @@ class ROIViewer(QMainWindow):
             # Shows the "All Recordings" toggle.
             self._all_recordings_button.setVisible(True)
             self._all_recordings_button.setChecked(False)
+
+            # Disables classifier builder (requires single-day classification state).
+            self._classifier_controls.new_button.setEnabled(False)
+            self._classifier_controls.new_button.setStyleSheet(STYLE.button_inactive)
+            self._classifier_controls.add_button.setEnabled(False)
+            self._classifier_controls.add_button.setStyleSheet(STYLE.button_inactive)
         else:
             self._all_recordings_button.setVisible(False)
+
+            # Enables classifier builder for single-day sessions.
+            self._classifier_controls.new_button.setEnabled(True)
+            self._classifier_controls.new_button.setStyleSheet(STYLE.button_unpressed)
+            self._classifier_controls.add_button.setEnabled(True)
+            self._classifier_controls.add_button.setStyleSheet(STYLE.button_unpressed)
 
         # Resets channel 2 toggle state.
         self._view_controls.channel_2_button.setChecked(False)
@@ -744,7 +790,7 @@ class ROIViewer(QMainWindow):
         self.selected_roi_index = first_cell
         self.merge_roi_indices = [first_cell]
         self._ichosen_stats()
-        self._trace_controls.activity_combo.setCurrentIndex(CONFIG.default_activity_mode)
+        self._trace_controls.activity_combo.setCurrentIndex(TraceMode.DECONVOLVED)
 
         # Draws the colorbar and initial mask overlays.
         self.colorbar_image = draw_colorbar(colormap=self.roi_colormap)
@@ -797,7 +843,7 @@ class ROIViewer(QMainWindow):
         self.session_loaded = True
 
         # Computes binned activity and triggers initial full redraw.
-        self._on_activity_changed(CONFIG.default_activity_mode)
+        self._on_activity_changed(TraceMode.DECONVOLVED)
         self.show()
 
     def _enable_controls(self) -> None:
@@ -835,7 +881,7 @@ class ROIViewer(QMainWindow):
         # Disables channel 2 color mode if not available.
         color_model = self._color_controls.color_combo.model()
         if isinstance(color_model, QStandardItemModel):
-            ch2_item = color_model.item(CONFIG.color_channel_2)
+            ch2_item = color_model.item(ROIColorMode.COLOCALIZATION_PROBABILITY)
             if ch2_item is not None:
                 ch2_item.setEnabled(self._two_channels)
 
@@ -884,8 +930,8 @@ class ROIViewer(QMainWindow):
                 f = self._cell_fluorescence
             elif i == 1:
                 f = self._neuropil_fluorescence
-            elif i == CONFIG.activity_mode_subtracted:
-                f = self._cell_fluorescence - CONFIG.neuropil_coefficient * self._neuropil_fluorescence
+            elif i == TraceMode.NEUROPIL_CORRECTED:
+                f = self._cell_fluorescence - ROI_CONFIG.neuropil_coefficient * self._neuropil_fluorescence
             else:
                 f = self._spikes
             ncells = len(self._roi_statistics)
@@ -1002,8 +1048,8 @@ class ROIViewer(QMainWindow):
             traces_visible=self._trace_controls.traces_visible,
             neuropil_visible=self._trace_controls.neuropil_visible,
             deconvolved_visible=self._trace_controls.deconvolved_visible,
-            scale_factor=CONFIG.default_scale_factor,
-            max_plotted=int(self._trace_controls.max_plotted_edit.text() or str(CONFIG.default_plotted_count)),
+            scale_factor=ROI_CONFIG.default_scale_factor,
+            max_plotted=int(self._trace_controls.max_plotted_edit.text() or str(ROI_CONFIG.default_plotted_count)),
         )
 
     def update_plot(self) -> None:
@@ -1012,7 +1058,7 @@ class ROIViewer(QMainWindow):
             return
         if self.views is None or self.colorbar_widgets is None or self.colorbar_image is None:
             return
-        if self.roi_color_mode == CONFIG.color_correlation and self.Fbin is not None and self.Fstd is not None:
+        if self.roi_color_mode == ROIColorMode.CORRELATIONS and self.Fbin is not None and self.Fstd is not None:
             update_correlation_masks(
                 color_arrays=self.color_arrays,
                 roi_maps=self.roi_maps,
@@ -1075,9 +1121,9 @@ class ROIViewer(QMainWindow):
             ival = getattr(roi, key, None)
             if ival is None:
                 continue
-            if k + 1 == CONFIG.centroid_stat_index:
+            if k + 1 == ROI_CONFIG.centroid_statistic_index:
                 self._roi_stat_labels[k].setText(f"{key}: [{ival[0]:d}, {ival[1]:d}]")
-            elif k + 1 == CONFIG.pixel_count_stat_index:
+            elif k + 1 == ROI_CONFIG.pixel_count_statistic_index:
                 self._roi_stat_labels[k].setText(f"{key}: {ival:d}")
             else:
                 self._roi_stat_labels[k].setText(f"{key}: {ival:2.2f}")
@@ -1113,7 +1159,7 @@ class ROIViewer(QMainWindow):
         if self.context_data is None:
             return
         sd = self.context_data.single_day
-        irange = CONFIG.zoom_to_cell_fraction * np.array([sd.frame_height, sd.frame_width]).max()
+        irange = ROI_CONFIG.zoom_to_cell_fraction * np.array([sd.frame_height, sd.frame_width]).max()
         roi_statistics = self._roi_statistics
         if len(self.merge_roi_indices) > 1:
             apix = np.zeros((0, 2))
@@ -1196,7 +1242,7 @@ class ROIViewer(QMainWindow):
             if self._is_multi_day:
                 return False
             # Reclassification is only available in cell/non-cell color mode.
-            if self.roi_color_mode != ROIColorMode.CELL_NON_CELL:
+            if self.roi_color_mode != ROIColorMode.CLASSIFIER_LABEL:
                 return False
             if ichosen not in self.merge_roi_indices:
                 self.merge_roi_indices = [ichosen]
@@ -1236,8 +1282,8 @@ class ROIViewer(QMainWindow):
         imy = (view[1][1] + view[1][0]) / 2
         dx = (view[0][1] - view[0][0]) / 4
         dy = (view[1][1] - view[1][0]) / 4
-        dx = np.minimum(dx, CONFIG.roi_selection_max_dimension)
-        dy = np.minimum(dy, CONFIG.roi_selection_max_dimension)
+        dx = np.minimum(dx, ROI_CONFIG.roi_selection_max_dimension)
+        dy = np.minimum(dy, ROI_CONFIG.roi_selection_max_dimension)
         imx = imx - dx / 2
         imy = imy - dy / 2
         self._active_roi_selection = pg.RectROI([imx, imy], [dx, dy], pen=COLORS.white, sideScalers=True)
@@ -1280,7 +1326,7 @@ class ROIViewer(QMainWindow):
         self.merge_roi_indices = []
         for n in icells:
             pixel_count = self._roi_statistics[n].pixel_count
-            if (self.roi_maps.iroi[:, ypix, xpix] == n).sum() > CONFIG.roi_selection_overlap_threshold * pixel_count:
+            if (self.roi_maps.iroi[:, ypix, xpix] == n).sum() > ROI_CONFIG.roi_selection_overlap_threshold * pixel_count:
                 self.merge_roi_indices.append(n)
         if self.merge_roi_indices:
             self.selected_roi_index = self.merge_roi_indices[0]
@@ -1336,7 +1382,7 @@ class ROIViewer(QMainWindow):
         roi_index = self.merge_roi_indices[0]
         axis = self._trace_box.getAxis("left")
         tick_labels: list[tuple[float, str]] = []
-        k_space = 1.0 / CONFIG.default_scale_factor
+        k_space = 1.0 / ROI_CONFIG.default_scale_factor
         max_frames = 0
         y_maximum = 0.0
         stack_position = self.context_data.recording_count - 1
@@ -1359,9 +1405,9 @@ class ROIViewer(QMainWindow):
                 trace = cell_fluorescence[roi_index, :]
             elif self.trace_mode == 1:
                 trace = neuropil_fluorescence[roi_index, :]
-            elif self.trace_mode == CONFIG.activity_mode_subtracted:
+            elif self.trace_mode == TraceMode.NEUROPIL_CORRECTED:
                 trace = (
-                    cell_fluorescence[roi_index, :] - CONFIG.neuropil_coefficient * neuropil_fluorescence[roi_index, :]
+                    cell_fluorescence[roi_index, :] - ROI_CONFIG.neuropil_coefficient * neuropil_fluorescence[roi_index, :]
                 )
             else:
                 trace = spikes[roi_index, :]
@@ -1394,3 +1440,102 @@ class ROIViewer(QMainWindow):
             y_minimum=0.0,
             y_maximum=y_maximum if y_maximum > 0 else 1.0,
         )
+
+    def _extract_classifier_data(
+        self,
+    ) -> tuple[NDArray[np.bool_], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]] | None:
+        """Extracts training labels and classification features from the current session state.
+
+        Returns:
+            A tuple of (training_labels, normalized_pixel_count, compactness, skewness) arrays, or None if no session
+            is loaded or no ROIs exist.
+        """
+        if not self.session_loaded or not self._roi_statistics:
+            return None
+
+        training_labels = (self._cell_classification[:, 1] > ROI_CONFIG.default_classifier_threshold).astype(np.bool_)
+        n = len(self._roi_statistics)
+        normalized_pixel_count = np.empty(n, dtype=np.float32)
+        compactness = np.empty(n, dtype=np.float32)
+        skewness = np.empty(n, dtype=np.float32)
+
+        for i, roi in enumerate(self._roi_statistics):
+            normalized_pixel_count[i] = roi.normalized_pixel_count
+            compactness[i] = roi.compactness
+            skewness[i] = np.nan if roi.skewness is None else roi.skewness
+
+        return training_labels, normalized_pixel_count, compactness, skewness
+
+    def _on_classifier_new(self) -> None:
+        """Handles the 'New' classifier button: saves current labels and features as a new training dataset."""
+        if self._is_multi_day:
+            return
+
+        result = self._extract_classifier_data()
+        if result is None:
+            return
+        training_labels, normalized_pixel_count, compactness, skewness = result
+
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Classifier Dataset", "", "NumPy files (*.npz)")
+        if not file_path:
+            return
+
+        Classifier.create_training_dataset(
+            file_path=Path(file_path),
+            training_labels=training_labels,
+            normalized_pixel_count=normalized_pixel_count,
+            compactness=compactness,
+            skewness=skewness,
+        )
+
+        n = len(training_labels)
+        filename = Path(file_path).name
+        self._classifier_controls.status_label.setText(f"Saved {n} samples to {filename}")
+
+    def _on_classifier_add_to_existing(self) -> None:
+        """Handles the 'Add to Existing' button: merges current session data into an existing training dataset."""
+        if self._is_multi_day:
+            return
+
+        result = self._extract_classifier_data()
+        if result is None:
+            return
+        new_labels, new_npc, new_comp, new_skew = result
+
+        source_path, _ = QFileDialog.getOpenFileName(
+            self, "Open Existing Classifier Dataset", "", "NumPy files (*.npz)"
+        )
+        if not source_path:
+            return
+
+        try:
+            data = np.load(source_path, allow_pickle=False)
+            existing_labels = data["training_labels"].astype(np.bool_)
+            existing_npc = data["normalized_pixel_count"].astype(np.float32)
+            existing_comp = data["compactness"].astype(np.float32)
+            existing_skew = data["skewness"].astype(np.float32)
+        except (KeyError, ValueError, FileNotFoundError) as exc:
+            self._classifier_controls.status_label.setText(f"Error loading file: {exc}")
+            return
+
+        merged_labels = np.concatenate([existing_labels, new_labels])
+        merged_npc = np.concatenate([existing_npc, new_npc])
+        merged_comp = np.concatenate([existing_comp, new_comp])
+        merged_skew = np.concatenate([existing_skew, new_skew])
+
+        save_path, _ = QFileDialog.getSaveFileName(self, "Save Merged Dataset", source_path, "NumPy files (*.npz)")
+        if not save_path:
+            return
+
+        Classifier.create_training_dataset(
+            file_path=Path(save_path),
+            training_labels=merged_labels,
+            normalized_pixel_count=merged_npc,
+            compactness=merged_comp,
+            skewness=merged_skew,
+        )
+
+        n_new = len(new_labels)
+        n_total = len(merged_labels)
+        filename = Path(save_path).name
+        self._classifier_controls.status_label.setText(f"Added {n_new} samples ({n_total} total) to {filename}")
