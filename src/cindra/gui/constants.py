@@ -218,18 +218,6 @@ class _ViewerConfig:
     """Default number of traces plotted."""
     default_scale_factor: float = 2.0
     """Default vertical scale factor for multi-trace stacking."""
-    scale_step: float = 0.5
-    """Scale factor adjustment step per button press."""
-    min_scale: float = 0.5
-    """Minimum allowed scale factor."""
-    max_scale: float = 10.0
-    """Maximum allowed scale factor."""
-    default_trace_level: int = 1
-    """Default trace panel row stretch level."""
-    min_trace_level: int = 1
-    """Minimum trace panel stretch level."""
-    max_trace_level: int = 5
-    """Maximum trace panel stretch level."""
     activity_mode_subtracted: int = 2
     """Activity mode index for neuropil-subtracted fluorescence (F - 0.7*Fneu)."""
     neuropil_coefficient: float = 0.7

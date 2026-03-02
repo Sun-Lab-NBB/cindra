@@ -21,24 +21,22 @@ if TYPE_CHECKING:
 
     from .data_models import ColorbarWidgets
     from ..dataclasses import ROIStatistics
-    from .multi_day_context import MultiDayViewerData
-    from .single_day_context import SingleDayViewerData
 
 
 def build_views(
     frame_height: int,
     frame_width: int,
     *,
-    mean_image: NDArray[np.float32] | None = None,
-    enhanced_mean_image: NDArray[np.float32] | None = None,
-    correlation_map: NDArray[np.float32] | None = None,
-    maximum_projection: NDArray[np.float32] | None = None,
-    corrected_structural_mean_image: NDArray[np.float32] | None = None,
+    mean_image: NDArray[np.float32],
+    enhanced_mean_image: NDArray[np.float32],
+    correlation_map: NDArray[np.float32],
+    maximum_projection: NDArray[np.float32],
+    corrected_structural_mean_image: NDArray[np.float32],
     channel_2: bool = False,
-    channel_2_mean_image: NDArray[np.float32] | None = None,
-    channel_2_enhanced_mean_image: NDArray[np.float32] | None = None,
-    channel_2_correlation_map: NDArray[np.float32] | None = None,
-    channel_2_maximum_projection: NDArray[np.float32] | None = None,
+    channel_2_mean_image: NDArray[np.float32],
+    channel_2_enhanced_mean_image: NDArray[np.float32],
+    channel_2_correlation_map: NDArray[np.float32],
+    channel_2_maximum_projection: NDArray[np.float32],
     valid_y_range: tuple[int, int] | None = None,
     valid_x_range: tuple[int, int] | None = None,
 ) -> NDArray[np.uint8]:
@@ -56,12 +54,12 @@ def build_views(
         enhanced_mean_image: Channel 1 contrast-enhanced mean image.
         correlation_map: Channel 1 pixel correlation map.
         maximum_projection: Channel 1 maximum intensity projection.
-        corrected_structural_mean_image: Corrected structural channel mean image.
+        corrected_structural_mean_image: Corrected structural channel mean image. Empty if unavailable.
         channel_2: Determines whether to use channel 2 images for slots 1-4.
-        channel_2_mean_image: Channel 2 mean fluorescence image.
-        channel_2_enhanced_mean_image: Channel 2 contrast-enhanced mean image.
-        channel_2_correlation_map: Channel 2 pixel correlation map.
-        channel_2_maximum_projection: Channel 2 maximum intensity projection.
+        channel_2_mean_image: Channel 2 mean fluorescence image. Empty if single-channel.
+        channel_2_enhanced_mean_image: Channel 2 contrast-enhanced mean image. Empty if single-channel.
+        channel_2_correlation_map: Channel 2 pixel correlation map. Empty if single-channel.
+        channel_2_maximum_projection: Channel 2 maximum intensity projection. Empty if single-channel.
         valid_y_range: Tuple of (start, end) row indices for the valid image region.
         valid_x_range: Tuple of (start, end) column indices for the valid image region.
 
@@ -111,9 +109,15 @@ def display_views(
 
 
 def compute_colors(
-    context: SingleDayViewerData | MultiDayViewerData,
+    roi_statistics: list[ROIStatistics],
+    frame_height: int,
+    frame_width: int,
+    cell_classification: NDArray[np.float32],
+    cell_colocalization: NDArray[np.float32],
     roi_colormap: str,
     colocalization_threshold: float,
+    *,
+    two_channels: bool = False,
 ) -> ColorArrays:
     """Computes color statistics and RGB color arrays for all ROIs.
 
@@ -122,14 +126,18 @@ def compute_colors(
     footprint, aspect ratio, etc.).
 
     Args:
-        context: The loaded data context.
+        roi_statistics: The ROI statistics for the current view.
+        frame_height: Height of the field of view in pixels.
+        frame_width: Width of the field of view in pixels.
+        cell_classification: Cell classification array with shape (cell_count, 2).
+        cell_colocalization: Cell colocalization array with shape (cell_count, 2).
         roi_colormap: Name of the matplotlib colormap applied when mapping ROI statistics to overlay colors.
         colocalization_threshold: Display threshold applied to cell colocalization probabilities.
+        two_channels: Determines whether channel 2 data is available.
 
     Returns:
         Computed color arrays for all ROIs.
     """
-    roi_statistics = context.roi_statistics
     cell_count = len(roi_statistics)
     color_count = CONFIG.color_stat_count
     colorbar: list[list[float]] = []
@@ -140,9 +148,9 @@ def compute_colors(
     # Generates random colors, adjusting for channel 2 data if present.
     np.random.seed(seed=CONFIG.random_color_seed)  # noqa: NPY002
     random_colors = np.random.random((cell_count,))  # noqa: NPY002
-    if context.two_channels:
+    if two_channels:
         random_colors = random_colors / CONFIG.channel_2_color_divisor + CONFIG.channel_2_color_offset
-        is_channel_2 = context.cell_colocalization[:, 0] > colocalization_threshold
+        is_channel_2 = cell_colocalization[:, 0] > colocalization_threshold
         console.echo(message=f"Number of channel 2 cells: {int(is_channel_2.sum())}")
         random_hues = random_colors.copy()
         random_colors[is_channel_2] = 0
@@ -181,7 +189,7 @@ def compute_colors(
         istat[stat_index] = stat_values.flatten()
 
     # Computes classifier probability colors.
-    classifier_values = np.expand_dims(context.cell_classification[:, 0], axis=1)
+    classifier_values = np.expand_dims(cell_classification[:, 0], axis=1)
     classifier_color = istat_transform(classifier_values.astype(np.float32), roi_colormap)
     cols[CONFIG.classifier_color_index] = classifier_color
     istat[CONFIG.classifier_color_index] = classifier_values.flatten()
@@ -192,15 +200,15 @@ def compute_colors(
 
     # Computes cell / non-cell classification colors.
     for roi_index in range(cell_count):
-        if context.cell_classification[:, 1][roi_index]:
+        if cell_classification[:, 1][roi_index]:
             cols[CONFIG.color_cell_non_cell, roi_index] = CONFIG.cell_color
         else:
             cols[CONFIG.color_cell_non_cell, roi_index] = CONFIG.noncell_color
-    istat[CONFIG.color_cell_non_cell] = context.cell_classification[:, 1]
+    istat[CONFIG.color_cell_non_cell] = cell_classification[:, 1]
     colorbar.append(list(CONFIG.fixed_colorbar_range))
 
     # Creates a placeholder RGB array (populated by init_roi_maps via rgb_masks).
-    rgb = np.zeros((color_count, context.frame_height, context.frame_width, 4), dtype=np.uint8)
+    rgb = np.zeros((color_count, frame_height, frame_width, 4), dtype=np.uint8)
 
     return ColorArrays(
         cols=cols,
@@ -212,7 +220,9 @@ def compute_colors(
 
 
 def init_roi_maps(
-    context: SingleDayViewerData | MultiDayViewerData,
+    roi_statistics: list[ROIStatistics],
+    frame_height: int,
+    frame_width: int,
     color_arrays: ColorArrays,
 ) -> ROIIndexMaps:
     """Initializes ROI index maps, weight layers, and RGB overlay arrays.
@@ -222,16 +232,15 @@ def init_roi_maps(
     color_arrays.
 
     Args:
-        context: The loaded data context.
+        roi_statistics: The ROI statistics for the current view.
+        frame_height: Height of the field of view in pixels.
+        frame_width: Width of the field of view in pixels.
         color_arrays: The computed color arrays (rgb field is populated in place).
 
     Returns:
         Initialized ROI index maps.
     """
-    roi_statistics = context.roi_statistics
     cell_count = len(roi_statistics)
-    frame_height = context.frame_height
-    frame_width = context.frame_width
 
     sroi = np.zeros((frame_height, frame_width), dtype=bool)
     lambda_all = np.zeros((frame_height, frame_width), dtype=np.float32)
@@ -299,7 +308,9 @@ def init_roi_maps(
 
 
 def draw_masks(
-    context: SingleDayViewerData | MultiDayViewerData,
+    roi_statistics: list[ROIStatistics],
+    frame_height: int,
+    frame_width: int,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
     *,
@@ -314,7 +325,9 @@ def draw_masks(
     with full-white (ROI view) or colored circles (image views).
 
     Args:
-        context: The loaded data context.
+        roi_statistics: The ROI statistics for the current view.
+        frame_height: Height of the field of view in pixels.
+        frame_width: Width of the field of view in pixels.
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
         roi_color_mode: Active color statistic index.
@@ -337,7 +350,6 @@ def draw_masks(
 
     overlay = np.array(color_arrays.rgb[color_index])
 
-    roi_statistics = context.roi_statistics
     if view_index == 0:
         # ROI view: highlights selected ROIs with brightness based on overlap depth.
         for roi_index in merge_roi_indices:
@@ -350,9 +362,7 @@ def draw_masks(
         # Image view: highlights selected ROIs with colored circles.
         for roi_index in merge_roi_indices:
             y_circle, x_circle = roi_statistics[roi_index].mask.circle_pixels
-            valid = (
-                (y_circle >= 0) & (x_circle >= 0) & (y_circle < context.frame_height) & (x_circle < context.frame_width)
-            )
+            valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < frame_height) & (x_circle < frame_width)
             y_circle, x_circle = y_circle[valid], x_circle[valid]
             y_pixels = roi_statistics[roi_index].mask.y_pixels.flatten()
             x_pixels = roi_statistics[roi_index].mask.x_pixels.flatten()
@@ -468,7 +478,7 @@ def update_colormap(
 
 
 def update_chan2_colors(
-    context: SingleDayViewerData | MultiDayViewerData,
+    cell_colocalization: NDArray[np.float32],
     colocalization_threshold: float,
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
@@ -476,12 +486,12 @@ def update_chan2_colors(
     """Recomputes the channel 2 random coloring after threshold change.
 
     Args:
-        context: The loaded data context.
+        cell_colocalization: Cell colocalization array with shape (cell_count, 2).
         colocalization_threshold: The current channel 2 display threshold.
         color_arrays: The computed color arrays (modified in place).
         roi_maps: The ROI index maps.
     """
-    is_channel_2 = context.cell_colocalization[:, 0] > colocalization_threshold
+    is_channel_2 = cell_colocalization[:, 0] > colocalization_threshold
     color = color_arrays.random_hues.copy()
     color[is_channel_2] = 0
     color = color.flatten()
@@ -568,7 +578,8 @@ def istat_transform(istat: NDArray[np.float32], colormap: str = "hsv") -> NDArra
 
 
 def flip_rois(
-    context: SingleDayViewerData | MultiDayViewerData,
+    roi_statistics: list[ROIStatistics],
+    cell_classification: NDArray[np.float32],
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
     *,
@@ -581,7 +592,8 @@ def flip_rois(
     updates their overlay colors. The caller is responsible for saving and updating the plot.
 
     Args:
-        context: The loaded data context (cell_classification[:, 1] is modified in place).
+        roi_statistics: The ROI statistics for the current view.
+        cell_classification: Cell classification array (column 1 is modified in place).
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
         selected_roi_index: Index of the currently selected ROI.
@@ -590,13 +602,13 @@ def flip_rois(
     Returns:
         The selected ROI index, stored by the caller as the last reclassified index.
     """
-    labels = context.cell_classification[:, 1]
+    labels = cell_classification[:, 1]
     for roi_index in merge_roi_indices:
         labels[roi_index] = 1.0 - labels[roi_index]
         _flip_roi(
             roi_maps=roi_maps,
             color_arrays=color_arrays,
-            roi_statistics=context.roi_statistics,
+            roi_statistics=roi_statistics,
             cell_classification_labels=labels,
             roi_index=roi_index,
         )
@@ -605,7 +617,8 @@ def flip_rois(
 
 
 def flip_for_class(
-    context: SingleDayViewerData | MultiDayViewerData,
+    roi_statistics: list[ROIStatistics],
+    cell_classification: NDArray[np.float32],
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
     new_classification_labels: NDArray[np.float32],
@@ -616,7 +629,8 @@ def flip_for_class(
     returns False to signal the caller should reinitialize all masks.
 
     Args:
-        context: The loaded data context.
+        roi_statistics: The ROI statistics for the current view.
+        cell_classification: Cell classification array (column 1 is modified in place).
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
         new_classification_labels: New cell classification label array.
@@ -624,7 +638,7 @@ def flip_for_class(
     Returns:
         True if changes were applied incrementally, False if full reinit is needed.
     """
-    labels = context.cell_classification[:, 1]
+    labels = cell_classification[:, 1]
     cell_count = new_classification_labels.size
     if int((new_classification_labels == labels).sum()) < CONFIG.flip_threshold:
         for roi_index in range(cell_count):
@@ -633,7 +647,7 @@ def flip_for_class(
                 _flip_roi(
                     roi_maps=roi_maps,
                     color_arrays=color_arrays,
-                    roi_statistics=context.roi_statistics,
+                    roi_statistics=roi_statistics,
                     cell_classification_labels=labels,
                     roi_index=roi_index,
                 )
@@ -737,16 +751,16 @@ def _build_single_view(
     view_index: int,
     frame_height: int,
     frame_width: int,
-    mean_image: NDArray[np.float32] | None,
-    enhanced_mean_image: NDArray[np.float32] | None,
-    correlation_map: NDArray[np.float32] | None,
-    maximum_projection: NDArray[np.float32] | None,
-    corrected_structural_mean_image: NDArray[np.float32] | None,
+    mean_image: NDArray[np.float32],
+    enhanced_mean_image: NDArray[np.float32],
+    correlation_map: NDArray[np.float32],
+    maximum_projection: NDArray[np.float32],
+    corrected_structural_mean_image: NDArray[np.float32],
     channel_2: bool,
-    channel_2_mean_image: NDArray[np.float32] | None,
-    channel_2_enhanced_mean_image: NDArray[np.float32] | None,
-    channel_2_correlation_map: NDArray[np.float32] | None,
-    channel_2_maximum_projection: NDArray[np.float32] | None,
+    channel_2_mean_image: NDArray[np.float32],
+    channel_2_enhanced_mean_image: NDArray[np.float32],
+    channel_2_correlation_map: NDArray[np.float32],
+    channel_2_maximum_projection: NDArray[np.float32],
     valid_y_range: tuple[int, int] | None,
     valid_x_range: tuple[int, int] | None,
 ) -> NDArray[np.float32]:
@@ -762,12 +776,12 @@ def _build_single_view(
         enhanced_mean_image: Channel 1 contrast-enhanced mean image.
         correlation_map: Channel 1 pixel correlation map.
         maximum_projection: Channel 1 maximum intensity projection.
-        corrected_structural_mean_image: Corrected structural channel mean image.
+        corrected_structural_mean_image: Corrected structural channel mean image. Empty if unavailable.
         channel_2: Determines whether to use channel 2 images for slots 1-4.
-        channel_2_mean_image: Channel 2 mean fluorescence image.
-        channel_2_enhanced_mean_image: Channel 2 contrast-enhanced mean image.
-        channel_2_correlation_map: Channel 2 pixel correlation map.
-        channel_2_maximum_projection: Channel 2 maximum intensity projection.
+        channel_2_mean_image: Channel 2 mean fluorescence image. Empty if single-channel.
+        channel_2_enhanced_mean_image: Channel 2 contrast-enhanced mean image. Empty if single-channel.
+        channel_2_correlation_map: Channel 2 pixel correlation map. Empty if single-channel.
+        channel_2_maximum_projection: Channel 2 maximum intensity projection. Empty if single-channel.
         valid_y_range: Tuple of (start, end) row indices for the valid image region.
         valid_x_range: Tuple of (start, end) column indices for the valid image region.
 
@@ -817,21 +831,21 @@ def _build_single_view(
 
 
 def _normalize_percentile(
-    image: NDArray[np.float32] | None,
+    image: NDArray[np.float32],
     frame_height: int,
     frame_width: int,
 ) -> NDArray[np.float32]:
     """Normalizes an image to [0, 1] using 1st and 99th percentile clipping.
 
     Args:
-        image: Input image to normalize, or None.
+        image: Input image to normalize. A size-0 array produces a zero fallback.
         frame_height: Height for the fallback zero image.
         frame_width: Width for the fallback zero image.
 
     Returns:
         Normalized image with values clipped to [0, 1].
     """
-    if image is None:
+    if image.size == 0:
         return np.zeros((frame_height, frame_width), dtype=np.float32)
 
     percentile_1 = np.percentile(image, CONFIG.image_percentile_low)
@@ -845,7 +859,7 @@ def _normalize_percentile(
 
 
 def _place_in_valid_region(
-    image: NDArray[np.float32] | None,
+    image: NDArray[np.float32],
     frame_height: int,
     frame_width: int,
     valid_y_range: tuple[int, int] | None,
@@ -855,7 +869,7 @@ def _place_in_valid_region(
     """Normalizes and places an image into the valid subregion of the full frame.
 
     Args:
-        image: Input image to normalize and place.
+        image: Input image to normalize and place. A size-0 array produces a gray fallback.
         frame_height: Height of the full frame.
         frame_width: Width of the full frame.
         valid_y_range: Row range (start, end) for the valid subregion.
@@ -865,7 +879,7 @@ def _place_in_valid_region(
     Returns:
         Full-frame image with the normalized data placed in the valid region.
     """
-    if image is None:
+    if image.size == 0:
         return 0.5 * np.ones((frame_height, frame_width), dtype=np.float32)
 
     # Normalizes the image using percentile clipping.

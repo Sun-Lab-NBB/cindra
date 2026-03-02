@@ -30,9 +30,12 @@ from .styles import STYLE, TRACKING_STYLE
 from .constants import CONFIG, TRACKING_CONFIG, MaskLayer, BackgroundView, CoordinateSpace
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from numpy.typing import NDArray
 
-    from .multi_day_context import TrackingViewerData
+    from ..dataclasses import ROIMask, ROIStatistics
+    from .viewer_context import ViewerData, MultiDayData
 
 
 class TrackingViewer(QMainWindow):
@@ -46,12 +49,12 @@ class TrackingViewer(QMainWindow):
         data: The preloaded tracking data to display on startup.
     """
 
-    def __init__(self, data: TrackingViewerData) -> None:
+    def __init__(self, data: ViewerData) -> None:
         super().__init__()
         self.setWindowTitle("Multi-Day ROI Tracking")
         self.setGeometry(*TRACKING_STYLE.window_geometry)
 
-        self.data: TrackingViewerData = data
+        self.data: ViewerData = data
         self._auto_cycle_timer: QtCore.QTimer = QtCore.QTimer(self)
         self._auto_cycle_timer.timeout.connect(self._advance_recording)
 
@@ -102,13 +105,26 @@ class TrackingViewer(QMainWindow):
         # Populates the UI with the initial data.
         self.load_data(data=data)
 
-    def load_data(self, data: TrackingViewerData) -> None:
-        """Caches the input TrackingViewerData instance and uses it to populate the managed UI window.
+    def load_data(self, data: ViewerData) -> None:
+        """Caches the input ViewerData instance and uses it to populate the managed UI window.
 
         Args:
-            data: The TrackingViewerData instance that stores the visualized dataset's data.
+            data: The ViewerData instance that stores the visualized dataset's data.
         """
         self.data = data
+
+        # Populates the dataset selector.
+        self._dataset_combo.blockSignals(True)
+        self._dataset_combo.clear()
+        for name in data.available_datasets:
+            self._dataset_combo.addItem(name, userData=name)
+        # Selects the active dataset in the combo box.
+        active = data.active_dataset_name
+        for i in range(self._dataset_combo.count()):
+            if self._dataset_combo.itemData(i) == active:
+                self._dataset_combo.setCurrentIndex(i)
+                break
+        self._dataset_combo.blockSignals(False)
 
         # Populates the recording selector.
         self._recording_combo.blockSignals(True)
@@ -119,7 +135,9 @@ class TrackingViewer(QMainWindow):
         self._recording_combo.blockSignals(False)
 
         # Enables channel 2 toggle if available.
-        self._channel_2_checkbox.setEnabled(data.has_channel_2)
+        has_channel_2 = data.current_recording.has_channel_2
+        self._channel_2_checkbox.setEnabled(has_channel_2)
+        self._channel_2_checkbox.setStyleSheet(STYLE.button_unpressed if has_channel_2 else STYLE.button_inactive)
 
         self._refresh_display()
 
@@ -153,8 +171,18 @@ class TrackingViewer(QMainWindow):
         layout = QVBoxLayout(panel)
         panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
+        # Dataset selector group. Lists all discovered multi-day datasets for runtime switching.
+        dataset_group = QGroupBox("Dataset")
+        dataset_group.setStyleSheet(STYLE.group_box)
+        dataset_layout = QVBoxLayout(dataset_group)
+        self._dataset_combo = QComboBox()
+        self._dataset_combo.currentIndexChanged.connect(self._on_dataset_selected)
+        dataset_layout.addWidget(self._dataset_combo)
+        layout.addWidget(dataset_group)
+
         # Recording navigation group.
         recording_group = QGroupBox("Recording Navigation")
+        recording_group.setStyleSheet(STYLE.group_box)
         recording_layout = QVBoxLayout(recording_group)
 
         self._recording_combo = QComboBox()
@@ -213,6 +241,7 @@ class TrackingViewer(QMainWindow):
 
         # Background image group.
         background_group = QGroupBox("Background Image")
+        background_group.setStyleSheet(STYLE.group_box)
         background_layout = QVBoxLayout(background_group)
 
         self._background_combo = QComboBox()
@@ -227,6 +256,7 @@ class TrackingViewer(QMainWindow):
 
         # Coordinate space group.
         space_group = QGroupBox("Coordinate Space")
+        space_group.setStyleSheet(STYLE.group_box)
         space_layout = QVBoxLayout(space_group)
 
         self._space_combo = QComboBox()
@@ -239,6 +269,7 @@ class TrackingViewer(QMainWindow):
 
         # Mask layer group.
         mask_group = QGroupBox("Mask Layer")
+        mask_group.setStyleSheet(STYLE.group_box)
         mask_layout = QVBoxLayout(mask_group)
 
         self._mask_combo = QComboBox()
@@ -263,18 +294,21 @@ class TrackingViewer(QMainWindow):
 
         # Channel group.
         channel_group = QGroupBox("Channel")
+        channel_group.setStyleSheet(STYLE.group_box)
         channel_layout = QVBoxLayout(channel_group)
 
         self._channel_2_checkbox = QPushButton("Channel 2")
         self._channel_2_checkbox.setCheckable(True)
         self._channel_2_checkbox.setEnabled(False)
-        self._channel_2_checkbox.toggled.connect(self._refresh_display)
+        self._channel_2_checkbox.setStyleSheet(STYLE.button_inactive)
+        self._channel_2_checkbox.toggled.connect(self._on_channel_2_toggled)
         channel_layout.addWidget(self._channel_2_checkbox)
 
         layout.addWidget(channel_group)
 
         # ROI selection group.
         roi_group = QGroupBox("ROI Selection")
+        roi_group.setStyleSheet(STYLE.group_box)
         roi_layout = QVBoxLayout(roi_group)
 
         roi_group.setToolTip("Click an ROI to select it. Ctrl-click or Shift-click to toggle individual ROIs.")
@@ -282,7 +316,7 @@ class TrackingViewer(QMainWindow):
         input_row = QHBoxLayout()
         input_row.addWidget(QLabel("ROI:"))
         self._roi_edit = QLineEdit()
-        self._roi_edit.setFixedWidth(STYLE.roi_edit_width)
+        self._roi_edit.setFixedWidth(STYLE.edit_width)
         self._roi_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._roi_edit.setReadOnly(True)
         self._roi_edit.setToolTip("Displays the index of the last clicked ROI.")
@@ -323,15 +357,12 @@ class TrackingViewer(QMainWindow):
         channel_2 = self._channel_2_checkbox.isChecked()
 
         # Retrieves and normalizes the background image into the cache.
-        background = self.data.background_image(
-            image_type=background_type,
-            coordinate_space=coordinate_space,
-            channel_2=channel_2,
-        )
+        rec = self.data.current_recording
+        background = self._resolve_background(rec, background_type, coordinate_space, channel_2)
         self._cached_background = self._normalize_image(image=background)
 
         # Pre-collects all valid mask pixel coordinates and per-ROI colors into the cache.
-        masks = self.data.masks_for_layer(layer=mask_layer, channel_2=channel_2)
+        masks = self._resolve_masks(rec, mask_layer, channel_2)
         self._cached_mask_count = len(masks) if masks else 0
         self._cached_mask_y = None
         self._cached_mask_x = None
@@ -357,8 +388,8 @@ class TrackingViewer(QMainWindow):
         self._selection_recording_index = recording_index
 
         if masks:
-            frame_height = self.data.frame_height
-            frame_width = self.data.frame_width
+            frame_height = self.data.single_day.frame_height
+            frame_width = self.data.single_day.frame_width
 
             # Generates deterministic per-ROI colors using random HSV hues with full saturation and value.
             # Original and Deformed layers use the Original mask count as the palette reference so both layers
@@ -368,10 +399,10 @@ class TrackingViewer(QMainWindow):
             # Template and Tracked layers share a color palette (same ROI identity set). Original and Deformed
             # layers share a separate palette (same single-day ROIs in different coordinate spaces).
             if mask_layer in (MaskLayer.TEMPLATE, MaskLayer.TRACKED):
-                template_masks = self.data.masks_for_layer(layer=MaskLayer.TEMPLATE, channel_2=channel_2)
+                template_masks = self._resolve_masks(rec, MaskLayer.TEMPLATE, channel_2)
                 color_count = len(template_masks) if template_masks else len(masks)
             else:
-                original_masks = self.data.masks_for_layer(layer=MaskLayer.ORIGINAL, channel_2=channel_2)
+                original_masks = self._resolve_masks(rec, MaskLayer.ORIGINAL, channel_2)
                 color_count = len(original_masks) if original_masks else len(masks)
 
             rng = np.random.default_rng(seed=CONFIG.random_color_seed)
@@ -460,7 +491,7 @@ class TrackingViewer(QMainWindow):
             selection_text = f"Masks: {self._cached_mask_count}"
         self._status_bar.showMessage(
             f"Recording: {recording_id}  |  {selection_text}  |  "
-            f"Size: {self.data.frame_height} x {self.data.frame_width}"
+            f"Size: {self.data.single_day.frame_height} x {self.data.single_day.frame_width}"
         )
 
     def _on_recording_selected(self, index: int) -> None:
@@ -472,6 +503,28 @@ class TrackingViewer(QMainWindow):
         if index < 0:
             return
         self.data.switch_recording(recording_index=index)
+        self._refresh_display()
+
+    def _on_dataset_selected(self, index: int) -> None:
+        """Handles dataset combo box selection changes by loading the selected dataset.
+
+        Args:
+            index: The newly selected combo box index.
+        """
+        if index < 0:
+            return
+        dataset_name = self._dataset_combo.itemData(index)
+        if dataset_name and dataset_name != self.data.active_dataset_name:
+            self.data.load_dataset(dataset_name=dataset_name)
+            self.load_data(data=self.data)
+
+    def _on_channel_2_toggled(self, checked: bool) -> None:
+        """Updates the channel 2 button style and refreshes the display.
+
+        Args:
+            checked: Determines whether channel 2 is toggled on.
+        """
+        self._channel_2_checkbox.setStyleSheet(STYLE.button_pressed if checked else STYLE.button_unpressed)
         self._refresh_display()
 
     def _on_opacity_changed(self) -> None:
@@ -501,7 +554,8 @@ class TrackingViewer(QMainWindow):
         click_y = int(view_position.y())
 
         # Bounds-checks against frame dimensions.
-        if click_y < 0 or click_y >= self.data.frame_height or click_x < 0 or click_x >= self.data.frame_width:
+        sd = self.data.single_day
+        if click_y < 0 or click_y >= sd.frame_height or click_x < 0 or click_x >= sd.frame_width:
             return
 
         # noinspection PyTypeChecker
@@ -572,19 +626,19 @@ class TrackingViewer(QMainWindow):
         self._skip_backward_button.setEnabled(True)
         self._skip_forward_button.setEnabled(True)
 
-    def _normalize_image(self, image: NDArray[np.float32] | None) -> NDArray[np.uint8]:
+    def _normalize_image(self, image: NDArray[np.float32]) -> NDArray[np.uint8]:
         """Normalizes a float32 image to an uint8 RGB array using percentile clipping.
 
         Args:
-            image: The input float32 image, or None for a black fallback.
+            image: The input float32 image. A size-0 array produces a black fallback.
 
         Returns:
             Normalized RGB image of shape (height, width, 3) with uint8 values.
         """
-        frame_height = self.data.frame_height
-        frame_width = self.data.frame_width
+        frame_height = self.data.single_day.frame_height
+        frame_width = self.data.single_day.frame_width
 
-        if image is None:
+        if image.size == 0:
             return np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
 
         percentile_low = np.percentile(image, TRACKING_CONFIG.lower_percentile)
@@ -598,3 +652,68 @@ class TrackingViewer(QMainWindow):
         grayscale = (normalized * 255).astype(np.uint8)
 
         return np.stack([grayscale, grayscale, grayscale], axis=-1)
+
+    @staticmethod
+    def _resolve_background(
+        rec: MultiDayData,
+        image_type: BackgroundView,
+        coordinate_space: CoordinateSpace,
+        channel_2: bool,
+    ) -> NDArray[np.float32]:
+        """Resolves the background image from a recording based on the active view settings.
+
+        Args:
+            rec: The multi-day recording to read from.
+            image_type: The selected background image type.
+            coordinate_space: Native or transformed coordinate space.
+            channel_2: Determines whether to return the channel 2 variant.
+
+        Returns:
+            The resolved background image. Channel 2 variants return an empty array when single-channel.
+        """
+        if coordinate_space == CoordinateSpace.TRANSFORMED:
+            if image_type == BackgroundView.MEAN_IMAGE:
+                return rec.transformed_mean_image_channel_2 if channel_2 else rec.transformed_mean_image
+            if image_type == BackgroundView.ENHANCED_MEAN_IMAGE:
+                return (
+                    rec.transformed_enhanced_mean_image_channel_2 if channel_2 else rec.transformed_enhanced_mean_image
+                )
+            if image_type == BackgroundView.MAXIMUM_PROJECTION:
+                return rec.transformed_maximum_projection_channel_2 if channel_2 else rec.transformed_maximum_projection
+            return rec.transformed_mean_image_channel_2 if channel_2 else rec.transformed_mean_image
+
+        if image_type == BackgroundView.MEAN_IMAGE:
+            return rec.mean_image_channel_2 if channel_2 else rec.mean_image
+        if image_type == BackgroundView.ENHANCED_MEAN_IMAGE:
+            return rec.enhanced_mean_image_channel_2 if channel_2 else rec.enhanced_mean_image
+        if image_type == BackgroundView.MAXIMUM_PROJECTION:
+            return rec.maximum_projection_channel_2 if channel_2 else rec.maximum_projection
+        if image_type == BackgroundView.CORRELATION_MAP:
+            return rec.correlation_map_channel_2 if channel_2 else rec.correlation_map
+        return rec.mean_image_channel_2 if channel_2 else rec.mean_image
+
+    @staticmethod
+    def _resolve_masks(
+        rec: MultiDayData,
+        layer: MaskLayer,
+        channel_2: bool,
+    ) -> Sequence[ROIMask | ROIStatistics]:
+        """Resolves the mask list from a recording based on the active mask layer and channel.
+
+        Args:
+            rec: The multi-day recording to read from.
+            layer: The selected mask layer.
+            channel_2: Determines whether to return the channel 2 variant.
+
+        Returns:
+            The resolved mask list. Channel 2 variants return an empty list when single-channel.
+        """
+        if layer == MaskLayer.ORIGINAL:
+            return rec.original_masks_channel_2 if channel_2 else rec.original_masks
+        if layer == MaskLayer.DEFORMED:
+            return rec.deformed_masks_channel_2 if channel_2 else rec.deformed_masks
+        if layer == MaskLayer.TEMPLATE:
+            return rec.template_masks_channel_2 if channel_2 else rec.template_masks
+        if layer == MaskLayer.TRACKED:
+            return rec.tracked_masks_channel_2 if channel_2 else rec.tracked_masks
+        return []

@@ -12,8 +12,8 @@ class _CommonStyle:
     """Encapsulates visual constants shared by all viewer windows."""
 
     main_window: str = "QMainWindow {background: 'black';}"
-    """The stylesheet applied to QMainWindow backgrounds. Every viewer (ROI, Tracking, Binary, PC) sets this on its
-    top-level window to produce a uniform dark canvas behind all child widgets."""
+    """The stylesheet applied to QMainWindow backgrounds. Every viewer sets this on its top-level window to produce a 
+    uniform dark canvas behind all child widgets."""
     white_label: str = "color: white;"
     """The stylesheet for QLabel text that sits on the dark window background. Applied to status labels, axis labels,
     checkbox captions, and group headings across all viewer windows."""
@@ -24,29 +24,16 @@ class _CommonStyle:
     """The default mask overlay opacity (0-255 uint8 range). Determines the initial transparency of ROI masks rendered
     over background images in the ROI viewer and Tracking viewer."""
     group_box: str = "QGroupBox { color: white; }"
-    """The stylesheet for QGroupBox title text. Applied to every collapsible section header in the ROI viewer sidebar
-    (view, visibility, ROI info, selection, color, classifier, trace panels) so titles read clearly on the dark
-    background."""
-    roi_edit_width: int = 50
-    """The fixed pixel width for the ROI index QLineEdit input field in the ROI viewer and Tracking viewer sidebar
-    panels. Wide enough for four-digit ROI indices."""
-    small_edit_width: int = 40
-    """The fixed pixel width for small numeric QLineEdit input fields: top-n count and max-plotted count in the ROI
-    viewer trace panel, and the PC number field in the PC viewer bottom panel."""
-    square_button_width: int = 30
-    """The maximum pixel width for compact square QPushButtons: the trace expand/collapse arrow buttons and scale +/-
-    buttons in the ROI viewer and Tracking viewer trace panels."""
-    group_spacing: int = 20
-    """The pixel spacing inserted between logical widget groups in horizontal control panels. Used in the PC viewer
-    bottom panel to separate the PC selector, metric labels, title labels, and playback controls."""
+    """The stylesheet for QGroupBox title text. Applied to every QGroupBox across all viewer windows so section titles
+    read clearly on the dark background."""
+    edit_width: int = 50
+    """The fixed pixel width for small numeric QLineEdit input fields across all viewer windows."""
     button_pressed: str = "QPushButton {Text-align: left; background-color: rgb(100,50,100); color:white;}"
     """The stylesheet for a QPushButton in the pressed (active/selected) state."""
     button_unpressed: str = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:white;}"
     """The stylesheet for a QPushButton in the unpressed (enabled but not selected) state."""
     button_inactive: str = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:gray;}"
     """The stylesheet for a QPushButton in the inactive (disabled/grayed-out) state."""
-    combo_box_width: int = 100
-    """The fixed pixel width for QComboBox dropdown widgets."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,9 +73,6 @@ class _FontStyle:
 
     small_bold: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 8, QtGui.QFont.Weight.Bold.value))
     """Small bold font (Arial 8pt bold) for combo boxes, buttons, and overlay text."""
-
-    medium_bold: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 11, QtGui.QFont.Weight.Bold.value))
-    """Medium bold font (Arial 11pt bold) for arrow and scale buttons."""
 
     large: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 14))
     """Large font (Arial 14pt) for prominent GUI input fields."""
@@ -141,6 +125,8 @@ class _BinaryPlayerStyle:
 class _PCViewerStyle:
     """Encapsulates visual constants specific to the PC viewer window."""
 
+    group_spacing: int = 20
+    """The pixel spacing inserted between logical widget groups in the bottom control panel."""
     title_gutter_fraction: float = 0.08
     """The fraction of image height added as black space below each Principal Component extreme image. This ensures 
     that the image titles anchored to the bottom of the image are not clipped by the image or any other GUI elements."""
