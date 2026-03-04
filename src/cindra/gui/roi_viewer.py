@@ -49,8 +49,11 @@ from .constants import (
     ROI_CONFIG,
     Colormap,
     TraceMode,
+    TraceModeLabel,
     ROIColorMode,
+    ROIColorModeLabel,
     BackgroundView,
+    BackgroundViewLabel,
 )
 from .data_models import (
     ColorArrays,
@@ -95,7 +98,6 @@ class ROIViewer(QMainWindow):
         self.roi_colormap: str = Colormap.HSV
         self.selected_roi_index: int = 0
         self.merge_roi_indices: list[int] = [0]
-        self.roi_tool_active: bool = False
         self.trace_mode: int = TraceMode.NEUROPIL_CORRECTED
         self.temporal_bin_size: int = 1
         self.auto_zoom_to_roi: bool = False
@@ -103,6 +105,7 @@ class ROIViewer(QMainWindow):
         self.session_loaded: bool = False
         self.colocalization_threshold: float = ROI_CONFIG.default_channel_2_threshold
         self.last_reclassified_index: int = -1
+        self.classification_label_mode: bool = False
 
         # Multi-day state. Persists across _reset_state calls.
         self._all_recordings_visible: bool = False
@@ -122,6 +125,7 @@ class ROIViewer(QMainWindow):
         self._two_channels: bool = False
         self._cell_fluorescence: NDArray[np.float32] = EMPTY
         self._neuropil_fluorescence: NDArray[np.float32] = EMPTY
+        self._subtracted_fluorescence: NDArray[np.float32] = EMPTY
         self._spikes: NDArray[np.float32] = EMPTY
         self._frame_count: int = 0
         self._cell_count: int = 0
@@ -311,10 +315,10 @@ class ROIViewer(QMainWindow):
         layout = QGridLayout(group_box)
 
         selection_combo = QComboBox(self)
-        selection_combo.addItems(["draw selection", "select top n", "select bottom n"])
+        selection_combo.addItems(["select top n", "select bottom n"])
         selection_combo.setFont(FONTS.small_bold)
         selection_combo.setEnabled(False)
-        selection_combo.activated.connect(lambda _: self._on_roi_selection())
+        selection_combo.activated.connect(lambda _: self._on_top_bottom_selection())
         layout.addWidget(selection_combo, 0, 0, 1, 1)
 
         count_label = QLabel("n=")
@@ -324,11 +328,11 @@ class ROIViewer(QMainWindow):
         layout.addWidget(count_label, 0, 1, 1, 1)
 
         top_count_edit = QLineEdit(self)
-        top_count_edit.setValidator(QtGui.QIntValidator(0, ROI_CONFIG.maximum_top_count))
-        top_count_edit.setText(str(ROI_CONFIG.default_top_count))
+        top_count_edit.setValidator(QtGui.QIntValidator(0, ROI_CONFIG.top_selection_count))
+        top_count_edit.setText(str(ROI_CONFIG.top_selection_count))
         top_count_edit.setFixedWidth(STYLE.edit_width)
         top_count_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        top_count_edit.returnPressed.connect(self._on_roi_selection)
+        top_count_edit.returnPressed.connect(self._on_top_bottom_selection)
         layout.addWidget(top_count_edit, 0, 2, 1, 1)
 
         controls = SelectionControls(selection_combo=selection_combo, top_count_edit=top_count_edit)
@@ -341,7 +345,7 @@ class ROIViewer(QMainWindow):
         layout = QGridLayout(group_box)
 
         view_combo = QComboBox(self)
-        view_combo.addItems(ROI_CONFIG.view_names)
+        view_combo.addItems(list(BackgroundViewLabel))
         view_combo.setFont(FONTS.small_bold)
         view_combo.setEnabled(False)
         view_combo.activated.connect(self._on_view_changed)
@@ -376,7 +380,7 @@ class ROIViewer(QMainWindow):
         layout = QGridLayout(group_box)
 
         color_combo = QComboBox(self)
-        color_combo.addItems(ROI_CONFIG.color_names)
+        color_combo.addItems(list(ROIColorModeLabel))
         color_combo.setFont(FONTS.small_bold)
         color_combo.setEnabled(False)
         color_combo.activated.connect(self._on_color_changed)
@@ -416,11 +420,20 @@ class ROIViewer(QMainWindow):
 
         colormap_chooser.activated.connect(lambda: self._on_color_changed(self.roi_color_mode))
 
+        classification_label_button = QPushButton("Cell / Non-Cell", self)
+        classification_label_button.setCheckable(True)
+        classification_label_button.setFont(FONTS.small_bold)
+        classification_label_button.setStyleSheet(STYLE.button_inactive)
+        classification_label_button.setEnabled(False)
+        classification_label_button.toggled.connect(self._on_classification_label_toggled)
+        layout.addWidget(classification_label_button, 3, 0, 1, 2)
+
         controls = ColorControls(
             color_combo=color_combo,
             colormap_chooser=colormap_chooser,
             classifier_edit=classifier_edit,
             bin_edit=bin_edit,
+            classification_label_button=classification_label_button,
         )
         return group_box, controls
 
@@ -486,8 +499,7 @@ class ROIViewer(QMainWindow):
 
         activity_combo = QComboBox(self)
         layout.addWidget(activity_combo, 1, 0, 1, 1)
-        for label in ROI_CONFIG.activity_mode_labels:
-            activity_combo.addItem(label)
+        activity_combo.addItems(list(TraceModeLabel))
         activity_combo.setCurrentIndex(TraceMode.DECONVOLVED)
         activity_combo.currentIndexChanged.connect(self._on_activity_changed)
 
@@ -496,8 +508,8 @@ class ROIViewer(QMainWindow):
         layout.addWidget(max_plotted_label, 2, 0, 1, 1)
 
         max_plotted_edit = QLineEdit(self)
-        max_plotted_edit.setValidator(QtGui.QIntValidator(0, ROI_CONFIG.max_plotted_count))
-        max_plotted_edit.setText(str(ROI_CONFIG.default_plotted_count))
+        max_plotted_edit.setValidator(QtGui.QIntValidator(0, ROI_CONFIG.plotted_trace_count))
+        max_plotted_edit.setText(str(ROI_CONFIG.plotted_trace_count))
         max_plotted_edit.setFixedWidth(STYLE.edit_width)
         max_plotted_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         layout.addWidget(max_plotted_edit, 3, 0, 1, 1)
@@ -631,7 +643,6 @@ class ROIViewer(QMainWindow):
         self.roi_colormap = Colormap.HSV
         self.selected_roi_index = 0
         self.merge_roi_indices = [0]
-        self.roi_tool_active = False
         self.trace_mode = TraceMode.NEUROPIL_CORRECTED
         self.temporal_bin_size = 1
         self.auto_zoom_to_roi = False
@@ -639,6 +650,8 @@ class ROIViewer(QMainWindow):
         self.session_loaded = False
         self.colocalization_threshold = ROI_CONFIG.default_channel_2_threshold
         self.last_reclassified_index = -1
+        self.classification_label_mode = False
+        self._color_controls.classification_label_button.setChecked(False)
         self._all_recordings_visible = False
 
     def _initialize_gui(self) -> None:
@@ -664,6 +677,7 @@ class ROIViewer(QMainWindow):
             self._two_channels = rec.has_channel_2
             self._cell_fluorescence = rec.cell_fluorescence
             self._neuropil_fluorescence = rec.neuropil_fluorescence
+            self._subtracted_fluorescence = rec.subtracted_fluorescence
             self._spikes = rec.spikes
             self._frame_count = int(self._cell_fluorescence.shape[1]) if self._cell_fluorescence.size > 0 else 0
             self._cell_count = n
@@ -674,6 +688,7 @@ class ROIViewer(QMainWindow):
             self._two_channels = sd.two_channels
             self._cell_fluorescence = sd.cell_fluorescence
             self._neuropil_fluorescence = sd.neuropil_fluorescence
+            self._subtracted_fluorescence = sd.subtracted_fluorescence
             self._spikes = sd.spikes
             self._frame_count = sd.frame_count
             self._cell_count = sd.cell_count
@@ -698,7 +713,6 @@ class ROIViewer(QMainWindow):
             self._roi_text(False)
         self._roi_labels_checkbox.setChecked(False)
         self._roi_labels_checkbox.setEnabled(True)
-        self._roi_remove()
 
         session_title = str(sd.output_path)
         self.setWindowTitle(f"cindra ROI Viewer — {session_title}")
@@ -713,16 +727,15 @@ class ROIViewer(QMainWindow):
 
         # Multi-day mode gating: disables inapplicable controls.
         if is_multi_day:
-            # Disables selection modes (draw selection, top-n, bottom-n).
+            # Disables selection modes (top-n, bottom-n).
             self._selection_controls.selection_combo.setEnabled(False)
 
-            # Disables inapplicable color modes: classifier probability, correlations, cell/non-cell.
+            # Disables inapplicable color modes: cell classification, correlations.
             color_model = self._color_controls.color_combo.model()
             if isinstance(color_model, QStandardItemModel):
                 for disabled_index in (
-                    ROIColorMode.CLASSIFIER_PROBABILITY,
+                    ROIColorMode.CELL_CLASSIFICATION,
                     ROIColorMode.CORRELATIONS,
-                    ROIColorMode.CLASSIFIER_LABEL,
                 ):
                     item = color_model.item(disabled_index)
                     if item is not None:
@@ -813,6 +826,7 @@ class ROIViewer(QMainWindow):
             background_view=self.background_view,
             merge_roi_indices=self.merge_roi_indices,
             roi_opacity=self._view_controls.opacity_slider.value(),
+            classification_label_mode=self.classification_label_mode,
         )
         display_masks(overlay_item=self._overlay, mask=mask)
 
@@ -831,6 +845,7 @@ class ROIViewer(QMainWindow):
             trace_box=self._trace_box,
             cell_fluorescence=self._cell_fluorescence,
             neuropil_fluorescence=self._neuropil_fluorescence,
+            subtracted_fluorescence=self._subtracted_fluorescence,
             spikes=self._spikes,
             frame_indices=self.frame_indices,
             merge_indices=self.merge_roi_indices,
@@ -874,9 +889,11 @@ class ROIViewer(QMainWindow):
             self._view_controls.channel_2_button.setEnabled(False)
             self._view_controls.channel_2_button.setStyleSheet(STYLE.button_inactive)
 
-        # Enables color dropdown.
+        # Enables color dropdown and classification label toggle.
         self._color_controls.color_combo.setEnabled(True)
         self._color_controls.color_combo.setCurrentIndex(0)
+        self._color_controls.classification_label_button.setEnabled(True)
+        self._color_controls.classification_label_button.setStyleSheet(STYLE.button_unpressed)
 
         # Disables channel 2 color mode if not available.
         color_model = self._color_controls.color_combo.model()
@@ -931,7 +948,7 @@ class ROIViewer(QMainWindow):
             elif i == 1:
                 f = self._neuropil_fluorescence
             elif i == TraceMode.NEUROPIL_CORRECTED:
-                f = self._cell_fluorescence - ROI_CONFIG.neuropil_coefficient * self._neuropil_fluorescence
+                f = self._subtracted_fluorescence
             else:
                 f = self._spikes
             ncells = len(self._roi_statistics)
@@ -967,6 +984,18 @@ class ROIViewer(QMainWindow):
             channel_2_maximum_projection=sd.maximum_projection_channel_2,
             valid_y_range=sd.valid_y_range,
             valid_x_range=sd.valid_x_range,
+        )
+        self.update_plot()
+
+    def _on_classification_label_toggled(self, checked: bool) -> None:
+        """Switches between probability gradient and binary cell/non-cell label views.
+
+        Args:
+            checked: True when the label view toggle is pressed.
+        """
+        self.classification_label_mode = checked
+        self._color_controls.classification_label_button.setStyleSheet(
+            STYLE.button_pressed if checked else STYLE.button_unpressed
         )
         self.update_plot()
 
@@ -1040,6 +1069,7 @@ class ROIViewer(QMainWindow):
             trace_box=self._trace_box,
             cell_fluorescence=self._cell_fluorescence,
             neuropil_fluorescence=self._neuropil_fluorescence,
+            subtracted_fluorescence=self._subtracted_fluorescence,
             spikes=self._spikes,
             frame_indices=self.frame_indices,
             merge_indices=self.merge_roi_indices,
@@ -1049,7 +1079,7 @@ class ROIViewer(QMainWindow):
             neuropil_visible=self._trace_controls.neuropil_visible,
             deconvolved_visible=self._trace_controls.deconvolved_visible,
             scale_factor=ROI_CONFIG.default_scale_factor,
-            max_plotted=int(self._trace_controls.max_plotted_edit.text() or str(ROI_CONFIG.default_plotted_count)),
+            max_plotted=int(self._trace_controls.max_plotted_edit.text() or str(ROI_CONFIG.plotted_trace_count)),
         )
 
     def update_plot(self) -> None:
@@ -1089,6 +1119,7 @@ class ROIViewer(QMainWindow):
             background_view=self.background_view,
             merge_roi_indices=self.merge_roi_indices,
             roi_opacity=self._view_controls.opacity_slider.value(),
+            classification_label_mode=self.classification_label_mode,
         )
         display_masks(overlay_item=self._overlay, mask=mask)
         self._refresh_traces()
@@ -1121,9 +1152,9 @@ class ROIViewer(QMainWindow):
             ival = getattr(roi, key, None)
             if ival is None:
                 continue
-            if k + 1 == ROI_CONFIG.centroid_statistic_index:
+            if isinstance(ival, tuple):
                 self._roi_stat_labels[k].setText(f"{key}: [{ival[0]:d}, {ival[1]:d}]")
-            elif k + 1 == ROI_CONFIG.pixel_count_statistic_index:
+            elif isinstance(ival, int):
                 self._roi_stat_labels[k].setText(f"{key}: {ival:d}")
             else:
                 self._roi_stat_labels[k].setText(f"{key}: {ival:2.2f}")
@@ -1241,8 +1272,8 @@ class ROIViewer(QMainWindow):
             # Reclassification is disabled in multi-day mode.
             if self._is_multi_day:
                 return False
-            # Reclassification is only available in cell/non-cell color mode.
-            if self.roi_color_mode != ROIColorMode.CLASSIFIER_LABEL:
+            # Reclassification is only available in cell classification label mode.
+            if self.roi_color_mode != ROIColorMode.CELL_CLASSIFICATION or not self.classification_label_mode:
                 return False
             if ichosen not in self.merge_roi_indices:
                 self.merge_roi_indices = [ichosen]
@@ -1269,65 +1300,23 @@ class ROIViewer(QMainWindow):
                 self.merge_roi_indices = [ichosen]
                 self.selected_roi_index = ichosen
 
-        if self.roi_tool_active:
-            self._roi_remove()
         self.update_plot()
         return True
 
-    def _on_roi_selection(self) -> None:
-        """Draws a rectangular ROI selection on the image panel."""
-        self._roi_remove()
-        view = self._view_box.viewRange()
-        imx = (view[0][1] + view[0][0]) / 2
-        imy = (view[1][1] + view[1][0]) / 2
-        dx = (view[0][1] - view[0][0]) / 4
-        dy = (view[1][1] - view[1][0]) / 4
-        dx = np.minimum(dx, ROI_CONFIG.roi_selection_max_dimension)
-        dy = np.minimum(dy, ROI_CONFIG.roi_selection_max_dimension)
-        imx = imx - dx / 2
-        imy = imy - dy / 2
-        self._active_roi_selection = pg.RectROI([imx, imy], [dx, dy], pen=COLORS.white, sideScalers=True)
-        self._view_box.addItem(self._active_roi_selection)
-        self._roi_position()
-        self._active_roi_selection.sigRegionChangeFinished.connect(self._roi_position)
-        self.roi_tool_active = True
-
-    def _roi_remove(self) -> None:
-        """Removes the current rectangular ROI selection."""
-        if self.roi_tool_active:
-            self._view_box.removeItem(self._active_roi_selection)
-            self.roi_tool_active = False
-
-    def _roi_position(self) -> None:
-        """Computes the pixel region covered by the ROI and selects contained cells."""
-        if self.context_data is None:
+    def _on_top_bottom_selection(self) -> None:
+        """Selects the top-n or bottom-n ROIs ranked by the active color statistic."""
+        if self.color_arrays is None:
             return
-        sd = self.context_data.single_day
-        pos0 = self._active_roi_selection.getSceneHandlePositions()
-        pos = self._view_box.mapSceneToView(pos0[0][1])
-        posy = pos.y()
-        posx = pos.x()
-        sizex, sizey = self._active_roi_selection.size()
-        xrange = (np.arange(-1 * int(sizex), 1) + int(posx)).astype(np.int32)
-        yrange = (np.arange(-1 * int(sizey), 1) + int(posy)).astype(np.int32)
-        xrange = xrange[xrange >= 0]
-        xrange = xrange[xrange < sd.frame_width]
-        yrange = yrange[yrange >= 0]
-        yrange = yrange[yrange < sd.frame_height]
-        ypix, xpix = np.meshgrid(yrange, xrange)
-        self._select_cells(ypix, xpix)
-
-    def _select_cells(self, ypix: np.ndarray, xpix: np.ndarray) -> None:
-        """Selects cells whose pixels overlap the given coordinate arrays."""
-        if self.roi_maps is None or self.context_data is None:
-            return
-        roi_indices = self.roi_maps.iroi[0, ypix, xpix]
-        icells = np.unique(roi_indices[roi_indices >= 0])
-        self.merge_roi_indices = []
-        for n in icells:
-            pixel_count = self._roi_statistics[n].pixel_count
-            if (self.roi_maps.iroi[:, ypix, xpix] == n).sum() > ROI_CONFIG.roi_selection_overlap_threshold * pixel_count:
-                self.merge_roi_indices.append(n)
+        count = int(self._selection_controls.top_count_edit.text() or str(ROI_CONFIG.top_selection_count))
+        count = min(count, ROI_CONFIG.top_selection_count)
+        values = self.color_arrays.istat[self.roi_color_mode]
+        ranked = np.argsort(values)
+        # Index 0 = "select top n", index 1 = "select bottom n".
+        if self._selection_controls.selection_combo.currentIndex() == 0:
+            selected = ranked[-count:][::-1]
+        else:
+            selected = ranked[:count]
+        self.merge_roi_indices = selected.tolist()
         if self.merge_roi_indices:
             self.selected_roi_index = self.merge_roi_indices[0]
             self.update_plot()
@@ -1391,6 +1380,7 @@ class ROIViewer(QMainWindow):
             rec = self.context_data.recording(recording_index)
             cell_fluorescence = rec.cell_fluorescence
             neuropil_fluorescence = rec.neuropil_fluorescence
+            subtracted_fluorescence = rec.subtracted_fluorescence
             spikes = rec.spikes
 
             if cell_fluorescence.size == 0:
@@ -1406,9 +1396,7 @@ class ROIViewer(QMainWindow):
             elif self.trace_mode == 1:
                 trace = neuropil_fluorescence[roi_index, :]
             elif self.trace_mode == TraceMode.NEUROPIL_CORRECTED:
-                trace = (
-                    cell_fluorescence[roi_index, :] - ROI_CONFIG.neuropil_coefficient * neuropil_fluorescence[roi_index, :]
-                )
+                trace = subtracted_fluorescence[roi_index, :]
             else:
                 trace = spikes[roi_index, :]
 

@@ -23,12 +23,15 @@ class ColorControls:
         colormap_chooser: Dropdown for selecting the active colormap.
         classifier_edit: Text input for the classifier probability threshold.
         bin_edit: Text input for the binning size.
+        classification_label_button: Checkable push button for toggling between probability gradient and binary
+            cell/non-cell label views in the cell classification color mode.
     """
 
     color_combo: QComboBox
     colormap_chooser: QComboBox
     classifier_edit: QLineEdit
     bin_edit: QLineEdit
+    classification_label_button: QPushButton
 
 
 @dataclass
@@ -56,6 +59,8 @@ class ColorArrays:
         colorbar: Per-statistic colorbar range values as [low, mid, high] lists.
         rgb: RGBA overlay arrays with shape (color_count, height, width, 4).
         random_hues: Per-ROI random hue values with shape (roi_count,).
+        classification_label_cols: Per-ROI binary cell/non-cell RGB colors with shape (roi_count, 3), used as the
+            secondary color set for the CELL_CLASSIFICATION slot when the label toggle is active.
     """
 
     cols: NDArray[np.uint8]
@@ -63,6 +68,7 @@ class ColorArrays:
     colorbar: list[list[float]]
     rgb: NDArray[np.uint8]
     random_hues: NDArray[np.float64]
+    classification_label_cols: NDArray[np.uint8]
 
 
 @dataclass
@@ -132,7 +138,7 @@ class SelectionControls:
 
     selection_combo: QComboBox
     top_count_edit: QLineEdit
-    top_count: int = ROI_CONFIG.default_top_count
+    top_count: int = ROI_CONFIG.top_selection_count
 
 
 @dataclass

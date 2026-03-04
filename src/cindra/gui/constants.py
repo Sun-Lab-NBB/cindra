@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import IntEnum, StrEnum
-from dataclasses import field, dataclass
+from dataclasses import dataclass
 
 
 class ROIColorMode(IntEnum):
@@ -27,14 +27,42 @@ class ROIColorMode(IntEnum):
     COLOCALIZATION_PROBABILITY = 5
     """Colors ROIs by their channel 2 colocalization probability."""
 
-    CLASSIFIER_PROBABILITY = 6
-    """Colors ROIs by the trained classifier's cell-probability estimate."""
+    CELL_CLASSIFICATION = 6
+    """Colors ROIs by the trained classifier's cell-probability estimate, with an optional toggle to show binary
+    cell vs non-cell labels."""
 
     CORRELATIONS = 7
     """Colors ROIs by pairwise activity correlation with the selected ROI."""
 
-    CLASSIFIER_LABEL = 8
-    """Colors ROIs by their classifier-assigned label (cell vs non-cell)."""
+
+class ROIColorModeLabel(StrEnum):
+    """Provides human-readable display labels for the ROIColorMode dropdown, indexed by ROIColorMode value."""
+
+    RANDOM = "Random"
+    """The display label for random hue-based ROI coloring."""
+
+    SKEWNESS = "Skewness"
+    """The display label for skewness-based ROI coloring."""
+
+    COMPACTNESS = "Compactness"
+    """The display label for compactness-based ROI coloring."""
+
+    FOOTPRINT = "Footprint"
+    """The display label for footprint-based ROI coloring."""
+
+    ASPECT_RATIO = "Aspect Ratio"
+    """The display label for aspect ratio-based ROI coloring."""
+
+    COLOCALIZATION_PROBABILITY = "Colocalization Probability"
+    """The display label for channel 2 colocalization probability-based ROI coloring."""
+
+    CELL_CLASSIFICATION = "Cell Classification"
+    """The display label for classifier-based ROI coloring, covering both probability gradient and binary label
+    views."""
+
+    CORRELATIONS = "Activity Correlation"
+    """The display label for pairwise correlation-based ROI coloring. The trailing '=' indicates the bin size value is
+    appended at runtime."""
 
 
 class BackgroundView(IntEnum):
@@ -73,11 +101,26 @@ class TraceMode(IntEnum):
     """Displays the neuropil_fluorescence trace."""
 
     NEUROPIL_CORRECTED = 2
-    """Displays the neuropil-corrected trace (cell_fluorescence - neuropil_coefficient *
-    neuropil_fluorescence)."""
+    """Displays the pre-computed baseline-and-neuropil-subtracted fluorescence trace."""
 
     DECONVOLVED = 3
     """Displays the deconvolved spikes trace."""
+
+
+class TraceModeLabel(StrEnum):
+    """Provides human-readable display labels for the TraceMode dropdown, indexed by TraceMode value."""
+
+    RAW_FLUORESCENCE = "Fluorescence"
+    """The display label for the raw fluorescence trace mode."""
+
+    NEUROPIL = "Neuropil"
+    """The display label for the neuropil fluorescence trace mode."""
+
+    NEUROPIL_CORRECTED = "Corrected"
+    """The display label for the neuropil-corrected trace mode."""
+
+    DECONVOLVED = "Spikes"
+    """The display label for the deconvolved spikes trace mode."""
 
 
 class MaskLayer(IntEnum):
@@ -106,6 +149,28 @@ class CoordinateSpace(IntEnum):
 
     TRANSFORMED = 1
     """Displays reference images warped to align with the cross-recording template coordinate space."""
+
+
+class BackgroundViewLabel(StrEnum):
+    """Provides human-readable display labels for the BackgroundView dropdown, indexed by BackgroundView value."""
+
+    ROIS_ONLY = "ROIs"
+    """The display label for the ROIs-only background mode."""
+
+    MEAN_IMAGE = "Mean Image"
+    """The display label for the temporal mean image background mode."""
+
+    ENHANCED_MEAN_IMAGE = "Mean Image (Enhanced)"
+    """The display label for the contrast-enhanced mean image background mode."""
+
+    CORRELATION_MAP = "Correlation Map"
+    """The display label for the pixel-wise activity correlation map background mode."""
+
+    MAXIMUM_PROJECTION = "Maximum Projection"
+    """The display label for the maximum intensity projection background mode."""
+
+    CORRECTED_STRUCTURAL = "Corrected Structural"
+    """The display label for the bleed-through-corrected structural channel background mode."""
 
 
 class Colormap(StrEnum):
@@ -155,87 +220,58 @@ class _ROIViewerConstants:
     silently dropped."""
     fixed_colorbar_range: tuple[float, ...] = (0.0, 0.5, 1.0)
     """The (low, mid, high) colorbar tick values used for color modes that lack data-driven percentile ranges. Applied
-    to the random, classifier probability, correlation, and classifier label modes where the statistic is either
-    categorical or already normalized to [0, 1]."""
+    to the random, cell classification, and correlation modes where the statistic is either categorical or already
+    normalized to [0, 1]."""
     channel_2_color_divisor: float = 1.4
-    """The random color adjustment divisor for channel 2 data."""
+    """The divisor applied to random hue values when channel 2 data is present. Compresses the hue range so that
+    channel 1 and channel 2 ROIs occupy visually distinct color bands in the random color overlay."""
     channel_2_color_offset: float = 0.1
-    """The random color adjustment offset for channel 2 data."""
+    """The offset added to random hue values after division when channel 2 data is present. Shifts the compressed hue
+    range away from zero, ensuring channel 2 ROIs are colored in a distinct hue band from channel 1 ROIs."""
     hsv_divisor: float = 1.4
-    """The HSV transform normalization divisor."""
+    """The normalization divisor for percentile-based statistic values before HSV color mapping. Scales the statistic
+    range to occupy a visually informative portion of the hue spectrum, preventing extreme hues from dominating the
+    overlay."""
     hsv_offset: float = 0.4
-    """The HSV transform normalization offset."""
+    """The normalization offset applied after HSV division for percentile-based statistics. Shifts the scaled statistic
+    values to center the color mapping within a perceptually useful region of the hue spectrum."""
     random_color_seed: int = 0
-    """The seed for reproducible random ROI color generation."""
-    color_names: tuple[str, ...] = (
-        "random",
-        "skew",
-        "compact",
-        "footprint",
-        "aspect_ratio",
-        "chan2_prob",
-        "classifier, cell prob=",
-        "correlations, bin=",
-        "cell / non-cell",
-    )
-    """The color statistic names displayed in the color mode dropdown."""
-    cell_color: tuple[int, int, int] = (0, 255, 0)
-    """The RGB color for classified cells in cell/non-cell mode (green)."""
-    non_cell_color: tuple[int, int, int] = (255, 0, 255)
-    """The RGB color for non-cells in cell/non-cell mode (magenta)."""
-    statistic_field_map: dict[str, str] = field(
-        default_factory=lambda: {
-            "skew": "skewness",
-            "compact": "compactness",
-            "footprint": "footprint",
-            "aspect_ratio": "aspect_ratio",
-            "chan2_prob": "colocalization_probability",
-        }
-    )
-    """The mapping from color statistic display names to ROIStatistics attribute names."""
-    view_names: tuple[str, ...] = (
-        "ROIs",
-        "mean img",
-        "mean img (enhanced)",
-        "correlation map",
-        "max projection",
-        "corrected structural",
-    )
-    """The names displayed in the background view dropdown."""
-    max_plotted_count: int = 400
-    """The maximum number of traces that can be plotted simultaneously."""
-    default_plotted_count: int = 40
-    """The default number of traces plotted."""
+    """The seed for the random number generator used to assign ROI hue values. Ensures reproducible color assignments
+    across sessions and viewer reloads, so the same ROI always receives the same random color."""
+    plotted_trace_count: int = 40
+    """The default and maximum number of simultaneously rendered fluorescence traces. Used as the initial value in the
+    max-plotted input field, the QIntValidator upper bound, and the fallback when the field is empty."""
     default_scale_factor: float = 2.0
-    """The default vertical scale factor for multi-trace stacking."""
-    neuropil_coefficient: float = 0.7
-    """The neuropil subtraction coefficient for the F - 0.7*Fneu activity mode."""
-    activity_mode_labels: tuple[str, ...] = ("Fluorescence", "Neuropil", "Neuropil Subtracted", "Spikes")
-    """The display labels for the activity mode combo box, indexed by TraceMode value."""
+    """The default vertical spacing multiplier used to separate stacked fluorescence traces. Controls the Y-axis
+    distance between adjacent traces in both single-day and multi-day trace plots, with larger values increasing
+    separation."""
     average_threshold: int = 5
-    """The minimum number of selected cells before the average trace is displayed."""
+    """The minimum number of selected ROIs required before an average trace is rendered at the bottom of the trace
+    plot. Below this count, only individual traces are shown to avoid displaying a noisy average from too few
+    samples."""
     average_scale_divisor: float = 25.0
-    """The ratio of selected cells to determine average trace vertical scale."""
-    maximum_top_count: int = 500
-    """The maximum number of cells allowed in the top-n / bottom-n selection input."""
-    default_top_count: int = 40
-    """The default number of cells selected by top-n / bottom-n."""
-    roi_selection_overlap_threshold: float = 0.6
-    """The minimum fraction of an ROI's pixels that must fall inside the selection rectangle for it to be included."""
-    roi_selection_max_dimension: int = 300
-    """The maximum pixel dimension for the ROI selection rectangle."""
+    """The divisor used to compute the vertical scale of the average trace relative to the number of selected ROIs.
+    The average scale is calculated as (selected_count / divisor) + 1, producing a gradually increasing amplitude as
+    more ROIs are selected."""
+    top_selection_count: int = 40
+    """The default and maximum number of ROIs selectable via top-n / bottom-n statistic ranking. Used as the initial
+    value in the selection input field, the QIntValidator upper bound, and the default in SelectionControls."""
     zoom_to_cell_fraction: float = 0.1
-    """The fraction of the maximum image dimension used as padding when zooming to a cell."""
-    centroid_statistic_index: int = 1
-    """The 1-based stat index for the centroid field (used to display ROI position)."""
-    pixel_count_statistic_index: int = 2
-    """The 1-based stat index for the pixel count field."""
+    """The fraction of the maximum image dimension used as padding around the target ROI when zooming to a cell. The
+    zoom window is centered on the ROI centroid with this fractional margin on each side, keeping surrounding context
+    visible."""
     default_channel_2_threshold: float = 0.6
-    """The default colocalization threshold for channel 2 data."""
+    """The default colocalization probability threshold for classifying ROIs as channel 2 positive. ROIs with a
+    colocalization probability above this value are assigned to channel 2, and the threshold resets to this default
+    on each session load."""
     default_classifier_threshold: float = 0.5
-    """The default probability threshold above which an ROI is labeled as a cell."""
+    """The default probability threshold above which an ROI is labeled as a cell during classifier training label
+    extraction. Applied to the second column of the cell classification array to produce binary training labels for
+    the classifier builder."""
     bin_size_divisor: int = 2
-    """The divisor for computing the temporal bin size from tau * sampling_rate."""
+    """The divisor applied to the product of tau and sampling rate when computing the default temporal bin size. The
+    bin size is calculated as max(1, int(tau * sampling_rate / divisor)) and controls the time window used for
+    correlation map computation."""
 
 
 @dataclass(frozen=True, slots=True)

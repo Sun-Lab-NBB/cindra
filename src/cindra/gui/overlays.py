@@ -22,6 +22,15 @@ if TYPE_CHECKING:
     from .data_models import ColorbarWidgets
     from ..dataclasses import ROIStatistics
 
+_STATISTIC_FIELD_MAP: dict[int, str] = {
+    ROIColorMode.SKEWNESS: "skewness",
+    ROIColorMode.COMPACTNESS: "compactness",
+    ROIColorMode.FOOTPRINT: "footprint",
+    ROIColorMode.ASPECT_RATIO: "aspect_ratio",
+    ROIColorMode.COLOCALIZATION_PROBABILITY: "colocalization_probability",
+}
+"""Maps ROIColorMode values to the corresponding ROIStatistics attribute names for percentile-based color modes."""
+
 
 def build_views(
     frame_height: int,
@@ -160,14 +169,16 @@ def compute_colors(
     istat[0] = random_hues
     cols[0] = hsv2rgb(random_colors)
 
-    # Computes color arrays for percentile-based statistics (skew, compact, footprint, aspect_ratio, chan2_prob).
-    for stat_index, name in enumerate(ROI_CONFIG.color_names[:-3]):
-        if stat_index == 0:
+    # Computes color arrays for percentile-based statistics (skewness, compactness, footprint, aspect_ratio, chan2_prob).
+    for color_mode in ROIColorMode:
+        if color_mode >= ROIColorMode.CELL_CLASSIFICATION:
+            break
+        if color_mode == ROIColorMode.RANDOM:
             colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
             continue
 
         stat_values = np.zeros((cell_count, 1))
-        field_name = ROI_CONFIG.statistic_field_map.get(name)
+        field_name = _STATISTIC_FIELD_MAP.get(color_mode)
         if field_name is not None:
             for roi_index in range(cell_count):
                 value = getattr(roi_statistics[roi_index], field_name, None)
@@ -185,27 +196,26 @@ def compute_colors(
             stat_values = np.zeros_like(stat_values)
 
         color = istat_transform(stat_values.astype(np.float32), roi_colormap)
-        cols[stat_index] = color
-        istat[stat_index] = stat_values.flatten()
+        cols[color_mode] = color
+        istat[color_mode] = stat_values.flatten()
 
-    # Computes classifier probability colors.
+    # Computes classifier probability colors into the CELL_CLASSIFICATION slot.
     classifier_values = np.expand_dims(cell_classification[:, 0], axis=1)
     classifier_color = istat_transform(classifier_values.astype(np.float32), roi_colormap)
-    cols[ROIColorMode.CLASSIFIER_PROBABILITY] = classifier_color
-    istat[ROIColorMode.CLASSIFIER_PROBABILITY] = classifier_values.flatten()
+    cols[ROIColorMode.CELL_CLASSIFICATION] = classifier_color
+    istat[ROIColorMode.CELL_CLASSIFICATION] = classifier_values.flatten()
     colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
 
     # Appends a fixed range for the correlation color channel.
     colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
 
-    # Computes cell / non-cell classification colors.
+    # Computes binary cell / non-cell label colors into the secondary classification_label_cols array.
+    classification_label_cols = np.zeros((cell_count, 3), dtype=np.uint8)
     for roi_index in range(cell_count):
         if cell_classification[:, 1][roi_index]:
-            cols[ROIColorMode.CLASSIFIER_LABEL, roi_index] = ROI_CONFIG.cell_color
+            classification_label_cols[roi_index] = COLORS.green
         else:
-            cols[ROIColorMode.CLASSIFIER_LABEL, roi_index] = ROI_CONFIG.non_cell_color
-    istat[ROIColorMode.CLASSIFIER_LABEL] = cell_classification[:, 1]
-    colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
+            classification_label_cols[roi_index] = COLORS.magenta
 
     # Creates a placeholder RGB array (populated by init_roi_maps via rgb_masks).
     rgb = np.zeros((color_count, frame_height, frame_width, 4), dtype=np.uint8)
@@ -216,6 +226,7 @@ def compute_colors(
         colorbar=colorbar,
         rgb=rgb,
         random_hues=random_hues,
+        classification_label_cols=classification_label_cols,
     )
 
 
@@ -299,6 +310,7 @@ def draw_masks(
     background_view: int,
     roi_opacity: int,
     merge_roi_indices: list[int],
+    classification_label_mode: bool = False,
 ) -> NDArray[np.uint8]:
     """Draws the current mask overlay for the image panel.
 
@@ -315,12 +327,24 @@ def draw_masks(
         background_view: Active background view index.
         roi_opacity: Alpha value (0-255) for mask overlay opacity.
         merge_roi_indices: Indices of all ROIs staged for merge or multi-selection.
+        classification_label_mode: Determines whether to use binary cell/non-cell label colors instead of probability
+            gradient colors when the cell classification color mode is active.
 
     Returns:
         RGBA overlay array.
     """
     color_index = roi_color_mode
     view_index = background_view
+
+    # When the cell classification mode is active, swaps between label colors and probability colors.
+    if roi_color_mode == ROIColorMode.CELL_CLASSIFICATION:
+        color = color_arrays.classification_label_cols if classification_label_mode else color_arrays.cols[color_index]
+        rgb_masks(
+            color_arrays=color_arrays,
+            roi_maps=roi_maps,
+            color=color,
+            color_index=color_index,
+        )
 
     # The ROI-only view (view_index == 0, black background) always uses full opacity since partial transparency on
     # black just dims the ROIs. All other views use the slider value.
@@ -753,9 +777,9 @@ def _flip_roi(
         roi_index: Index of the ROI to update.
     """
     if cell_classification_labels[roi_index]:
-        color_arrays.cols[ROIColorMode.CLASSIFIER_LABEL, roi_index] = ROI_CONFIG.cell_color
+        color_arrays.classification_label_cols[roi_index] = COLORS.green
     else:
-        color_arrays.cols[ROIColorMode.CLASSIFIER_LABEL, roi_index] = ROI_CONFIG.non_cell_color
+        color_arrays.classification_label_cols[roi_index] = COLORS.magenta
 
     y_pixels = roi_statistics[roi_index].mask.y_pixels
     x_pixels = roi_statistics[roi_index].mask.x_pixels
