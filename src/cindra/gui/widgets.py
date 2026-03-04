@@ -229,6 +229,7 @@ def plot_trace(
     *,
     cell_fluorescence: NDArray[np.float32],
     neuropil_fluorescence: NDArray[np.float32],
+    subtracted_fluorescence: NDArray[np.float32],
     spikes: NDArray[np.float32],
     frame_indices: NDArray,
     merge_indices: list[int],
@@ -238,7 +239,7 @@ def plot_trace(
     neuropil_visible: bool = True,
     deconvolved_visible: bool = True,
     scale_factor: float = ROI_CONFIG.default_scale_factor,
-    max_plotted: int = ROI_CONFIG.default_plotted_count,
+    max_plotted: int = ROI_CONFIG.plotted_trace_count,
 ) -> tuple[float, float]:
     """Draws fluorescence traces for the selected ROIs.
 
@@ -250,6 +251,8 @@ def plot_trace(
         trace_box: The pyqtgraph PlotItem to draw traces on.
         cell_fluorescence: Cell fluorescence array with shape (roi_count, frame_count).
         neuropil_fluorescence: Neuropil fluorescence array with shape (roi_count, frame_count).
+        subtracted_fluorescence: Pre-computed baseline-and-neuropil-subtracted fluorescence with shape
+            (roi_count, frame_count).
         spikes: Deconvolved spike array with shape (roi_count, frame_count).
         frame_indices: Time axis array with shape (frame_count,).
         merge_indices: Indices of the selected ROIs to display.
@@ -286,6 +289,7 @@ def plot_trace(
             axis=axis,
             cell_fluorescence=cell_fluorescence,
             neuropil_fluorescence=neuropil_fluorescence,
+            subtracted_fluorescence=subtracted_fluorescence,
             spikes=spikes,
             frame_indices=frame_indices,
             merge_indices=merge_indices,
@@ -366,6 +370,7 @@ def _plot_multi_trace(
     axis: pg.AxisItem,
     cell_fluorescence: NDArray[np.float32],
     neuropil_fluorescence: NDArray[np.float32],
+    subtracted_fluorescence: NDArray[np.float32],
     spikes: NDArray[np.float32],
     frame_indices: NDArray,
     merge_indices: list[int],
@@ -381,6 +386,8 @@ def _plot_multi_trace(
         axis: The left y-axis for tick configuration.
         cell_fluorescence: Cell fluorescence array with shape (roi_count, frame_count).
         neuropil_fluorescence: Neuropil fluorescence array with shape (roi_count, frame_count).
+        subtracted_fluorescence: Pre-computed baseline-and-neuropil-subtracted fluorescence with shape
+            (roi_count, frame_count).
         spikes: Deconvolved spike array with shape (roi_count, frame_count).
         frame_indices: Time axis array.
         merge_indices: Indices of selected ROIs.
@@ -405,7 +412,7 @@ def _plot_multi_trace(
         elif activity_mode == 1:
             trace = neuropil_fluorescence[index, :]
         elif activity_mode == TraceMode.NEUROPIL_CORRECTED:
-            trace = cell_fluorescence[index, :] - ROI_CONFIG.neuropil_coefficient * neuropil_fluorescence[index, :]
+            trace = subtracted_fluorescence[index, :]
         else:
             trace = spikes[index, :]
 

@@ -843,6 +843,18 @@ class MultiDayData:
         return value
 
     @property
+    def subtracted_fluorescence(self) -> NDArray[np.float32]:
+        """Returns the baseline-and-neuropil-subtracted fluorescence traces for this session's extraction."""
+        value = self._runtime.extraction.subtracted_fluorescence
+        if value is None:
+            console.error(
+                message=f"Unable to retrieve the subtracted fluorescence traces for multi-day session "
+                f"'{self.session_id}'. The pipeline data is incomplete or corrupt.",
+                error=RuntimeError,
+            )
+        return value
+
+    @property
     def spikes(self) -> NDArray[np.float32]:
         """Returns the deconvolved spikes array for this session's extraction."""
         value = self._runtime.extraction.spikes
