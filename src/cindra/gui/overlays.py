@@ -13,7 +13,7 @@ from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
 from .styles import FONTS, COLORS, ROI_STYLE
-from .constants import COMMON_CONFIG, ROI_CONFIG, ROIColorMode, BackgroundView
+from .constants import ROI_CONFIG, COMMON_CONFIG, ROIColorMode, BackgroundView
 from .data_models import ColorArrays, ROIIndexMaps
 
 if TYPE_CHECKING:
@@ -151,8 +151,8 @@ def compute_colors(
     color_count = len(ROIColorMode)
     colorbar: list[list[float]] = []
 
-    cols = np.zeros((color_count, cell_count, 3), dtype=np.uint8)
-    istat = np.zeros((color_count, cell_count), dtype=np.float32)
+    colors = np.zeros((color_count, cell_count, 3), dtype=np.uint8)
+    normalized_statistics = np.zeros((color_count, cell_count), dtype=np.float32)
 
     # Generates random colors, adjusting for channel 2 data if present.
     np.random.seed(seed=ROI_CONFIG.random_color_seed)  # noqa: NPY002
@@ -166,10 +166,10 @@ def compute_colors(
     else:
         random_hues = random_colors.copy()
 
-    istat[0] = random_hues
-    cols[0] = hsv2rgb(random_colors)
+    normalized_statistics[0] = random_hues
+    colors[0] = hsv2rgb(random_colors)
 
-    # Computes color arrays for percentile-based statistics (skewness, compactness, footprint, aspect_ratio, chan2_prob).
+    # Computes color arrays for percentile-based statistics (skewness, compactness, footprint, etc.).
     for color_mode in ROIColorMode:
         if color_mode >= ROIColorMode.CELL_CLASSIFICATION:
             break
@@ -196,14 +196,14 @@ def compute_colors(
             stat_values = np.zeros_like(stat_values)
 
         color = istat_transform(stat_values.astype(np.float32), roi_colormap)
-        cols[color_mode] = color
-        istat[color_mode] = stat_values.flatten()
+        colors[color_mode] = color
+        normalized_statistics[color_mode] = stat_values.flatten()
 
     # Computes classifier probability colors into the CELL_CLASSIFICATION slot.
     classifier_values = np.expand_dims(cell_classification[:, 0], axis=1)
     classifier_color = istat_transform(classifier_values.astype(np.float32), roi_colormap)
-    cols[ROIColorMode.CELL_CLASSIFICATION] = classifier_color
-    istat[ROIColorMode.CELL_CLASSIFICATION] = classifier_values.flatten()
+    colors[ROIColorMode.CELL_CLASSIFICATION] = classifier_color
+    normalized_statistics[ROIColorMode.CELL_CLASSIFICATION] = classifier_values.flatten()
     colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
 
     # Appends a fixed range for the correlation color channel.
@@ -221,8 +221,8 @@ def compute_colors(
     rgb = np.zeros((color_count, frame_height, frame_width, 4), dtype=np.uint8)
 
     return ColorArrays(
-        cols=cols,
-        istat=istat,
+        colors=colors,
+        normalized_statistics=normalized_statistics,
         colorbar=colorbar,
         rgb=rgb,
         random_hues=random_hues,
@@ -252,8 +252,8 @@ def init_roi_maps(
     """
     cell_count = len(roi_statistics)
 
-    sroi = np.zeros((frame_height, frame_width), dtype=bool)
-    iroi = -1 * np.ones((ROI_CONFIG.overlap_layers, frame_height, frame_width), dtype=np.int32)
+    roi_presence = np.zeros((frame_height, frame_width), dtype=bool)
+    roi_indices = -1 * np.ones((ROI_CONFIG.overlap_layers, frame_height, frame_width), dtype=np.int32)
 
     text_labels: list[pg.TextItem] = []
 
@@ -263,10 +263,10 @@ def init_roi_maps(
             x_pixels = roi_statistics[roi_index].mask.x_pixels
 
             # Pushes down existing layers and adds cell on top.
-            iroi[2, y_pixels, x_pixels] = iroi[1, y_pixels, x_pixels]
-            iroi[1, y_pixels, x_pixels] = iroi[0, y_pixels, x_pixels]
-            iroi[0, y_pixels, x_pixels] = roi_index
-            sroi[y_pixels, x_pixels] = True
+            roi_indices[2, y_pixels, x_pixels] = roi_indices[1, y_pixels, x_pixels]
+            roi_indices[1, y_pixels, x_pixels] = roi_indices[0, y_pixels, x_pixels]
+            roi_indices[0, y_pixels, x_pixels] = roi_index
+            roi_presence[y_pixels, x_pixels] = True
 
             centroid = roi_statistics[roi_index].mask.centroid
             label_text = str(roi_index)
@@ -282,17 +282,17 @@ def init_roi_maps(
     text_labels.reverse()
 
     roi_maps = ROIIndexMaps(
-        sroi=sroi,
-        iroi=iroi,
+        roi_presence=roi_presence,
+        roi_indices=roi_indices,
         text_labels=text_labels,
     )
 
     # Populates RGB overlays for all color channels.
-    for color_index in range(color_arrays.cols.shape[0]):
+    for color_index in range(color_arrays.colors.shape[0]):
         rgb_masks(
             color_arrays=color_arrays,
             roi_maps=roi_maps,
-            color=color_arrays.cols[color_index],
+            color=color_arrays.colors[color_index],
             color_index=color_index,
         )
 
@@ -338,7 +338,9 @@ def draw_masks(
 
     # When the cell classification mode is active, swaps between label colors and probability colors.
     if roi_color_mode == ROIColorMode.CELL_CLASSIFICATION:
-        color = color_arrays.classification_label_cols if classification_label_mode else color_arrays.cols[color_index]
+        color = (
+            color_arrays.classification_label_cols if classification_label_mode else color_arrays.colors[color_index]
+        )
         rgb_masks(
             color_arrays=color_arrays,
             roi_maps=roi_maps,
@@ -351,7 +353,7 @@ def draw_masks(
     effective_opacity = 255 if view_index == 0 else roi_opacity
 
     # Applies flat opacity to all ROI pixels.
-    color_arrays.rgb[color_index, :, :, 3] = (effective_opacity * roi_maps.sroi).astype(np.uint8)
+    color_arrays.rgb[color_index, :, :, 3] = (effective_opacity * roi_maps.roi_presence).astype(np.uint8)
 
     overlay = np.array(color_arrays.rgb[color_index])
 
@@ -360,7 +362,7 @@ def draw_masks(
         for roi_index in merge_roi_indices:
             y_pixels = roi_statistics[roi_index].mask.y_pixels.flatten()
             x_pixels = roi_statistics[roi_index].mask.x_pixels.flatten()
-            overlap_count = (roi_maps.iroi[:, y_pixels, x_pixels] > -1).sum(axis=0) - 1
+            overlap_count = (roi_maps.roi_indices[:, y_pixels, x_pixels] > -1).sum(axis=0) - 1
             brightness = 1 - overlap_count / ROI_CONFIG.overlap_layers
             overlay = _make_chosen_roi(overlay, y_pixels, x_pixels, brightness)
     else:
@@ -372,7 +374,7 @@ def draw_masks(
             y_pixels = roi_statistics[roi_index].mask.y_pixels.flatten()
             x_pixels = roi_statistics[roi_index].mask.x_pixels.flatten()
             overlay[y_pixels, x_pixels, 3] = 0
-            roi_color = color_arrays.cols[color_index, roi_index]
+            roi_color = color_arrays.colors[color_index, roi_index]
             overlay = _make_chosen_circle(
                 overlay,
                 y_circle,
@@ -452,7 +454,7 @@ def rgb_masks(
         color: Per-ROI RGB colors with shape (cell_count, 3).
         color_index: Index of the color channel to update.
     """
-    color_arrays.rgb[color_index, :, :, :3] = color[roi_maps.iroi[0], :]
+    color_arrays.rgb[color_index, :, :, :3] = color[roi_maps.roi_indices[0], :]
 
 
 def update_colormap(
@@ -471,12 +473,12 @@ def update_colormap(
         New colorbar gradient image.
     """
     console.echo(message=f"Colormap changed to {colormap}, loading...")
-    for color_index in range(1, color_arrays.istat.shape[0]):
-        color_arrays.cols[color_index] = istat_transform(color_arrays.istat[color_index], colormap)
+    for color_index in range(1, color_arrays.normalized_statistics.shape[0]):
+        color_arrays.colors[color_index] = istat_transform(color_arrays.normalized_statistics[color_index], colormap)
         rgb_masks(
             color_arrays=color_arrays,
             roi_maps=roi_maps,
-            color=color_arrays.cols[color_index],
+            color=color_arrays.colors[color_index],
             color_index=color_index,
         )
     return draw_colorbar(colormap)
@@ -517,8 +519,8 @@ def update_correlation_masks(
     istat = istat - istat.min()
     istat = istat / istat.max()
     color = istat_transform(istat, colormap)
-    color_arrays.cols[color_index] = color
-    color_arrays.istat[color_index] = istat.flatten()
+    color_arrays.colors[color_index] = color
+    color_arrays.normalized_statistics[color_index] = istat.flatten()
     rgb_masks(color_arrays=color_arrays, roi_maps=roi_maps, color=color, color_index=color_index)
 
 

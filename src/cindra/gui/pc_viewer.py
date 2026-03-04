@@ -22,7 +22,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from .styles import FONTS, STYLE, COLORS, PC_STYLE, PLOT_STYLE
 from .widgets import configure_plot, add_plot_legend
-from .constants import COMMON_CONFIG, PC_CONFIG
+from .constants import PC_CONFIG, COMMON_CONFIG
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
