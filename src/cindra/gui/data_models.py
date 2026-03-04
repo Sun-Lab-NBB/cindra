@@ -1,4 +1,4 @@
-"""Provides widget-reference and rendering-state dataclasses for the ROI Viewer GUI."""
+"""Provides widget-reference and rendering-state dataclasses for all GUI applications."""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ class ColorArrays:
     """The RGBA overlay arrays with shape (color_count, height, width, 4)."""
     random_hues: NDArray[np.float64]
     """The per-ROI random hue values with shape (roi_count,)."""
-    classification_label_cols: NDArray[np.uint8]
+    classification_label_colors: NDArray[np.uint8]
     """The per-ROI binary cell/non-cell RGB colors with shape (roi_count, 3), used as the secondary color set for the
     CELL_CLASSIFICATION slot when the label toggle is active."""
 

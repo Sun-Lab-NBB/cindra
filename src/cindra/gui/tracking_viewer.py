@@ -22,14 +22,14 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
-    QButtonGroup,
 )
 from matplotlib.colors import hsv_to_rgb
 
 from .styles import STYLE, TRACKING_STYLE
+from .widgets import create_play_pause_group
+from .overlays import normalize_percentile
 from .constants import (
     ROI_CONFIG,
-    COMMON_CONFIG,
     TRACKING_CONFIG,
     MaskLayer,
     BackgroundView,
@@ -208,20 +208,14 @@ class TrackingViewer(QMainWindow):
         self._skip_backward_button.setToolTip("Previous recording (Left arrow).")
         self._skip_backward_button.clicked.connect(self._previous_recording)
 
-        self._play_button: QToolButton = QToolButton()
-        self._play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        self._play_button.setIconSize(icon_size)
-        self._play_button.setCheckable(True)
-        self._play_button.setToolTip("Start auto-cycling (Space).")
-        self._play_button.clicked.connect(self._start_cycling)
-
-        self._pause_button: QToolButton = QToolButton()
-        self._pause_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
-        self._pause_button.setIconSize(icon_size)
-        self._pause_button.setCheckable(True)
-        self._pause_button.setToolTip(
-            "Stop auto-cycling (Space). Use Left/Right arrow keys to step through recordings."
+        playback = create_play_pause_group(
+            self,
+            play_tooltip="Start auto-cycling (Space).",
+            pause_tooltip="Stop auto-cycling (Space). Use Left/Right arrow keys to step through recordings.",
         )
+        self._play_button = playback.play_button
+        self._pause_button = playback.pause_button
+        self._play_button.clicked.connect(self._start_cycling)
         self._pause_button.clicked.connect(self._stop_cycling)
 
         self._skip_forward_button: QToolButton = QToolButton()
@@ -230,20 +224,13 @@ class TrackingViewer(QMainWindow):
         self._skip_forward_button.setToolTip("Next recording (Right arrow).")
         self._skip_forward_button.clicked.connect(self._next_recording)
 
-        button_group = QButtonGroup(self)
-        button_group.addButton(self._play_button, 0)
-        button_group.addButton(self._pause_button, 1)
-        button_group.setExclusive(True)
-
         navigation_row.addWidget(self._skip_backward_button)
         navigation_row.addWidget(self._play_button)
         navigation_row.addWidget(self._pause_button)
         navigation_row.addWidget(self._skip_forward_button)
 
-        # Controls start with pause pre-selected, since there is no active cycling on startup.
+        # Overrides the default disabled state: tracking viewer starts ready to auto-cycle.
         self._play_button.setEnabled(True)
-        self._pause_button.setEnabled(False)
-        self._pause_button.setChecked(True)
         recording_layout.addLayout(navigation_row)
 
         layout.addWidget(recording_group)
@@ -649,22 +636,12 @@ class TrackingViewer(QMainWindow):
         Returns:
             Normalized RGB image of shape (height, width, 3) with uint8 values.
         """
-        frame_height = self.data.single_day.frame_height
-        frame_width = self.data.single_day.frame_width
-
-        if image.size == 0:
-            return np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
-
-        percentile_low = np.percentile(image, COMMON_CONFIG.lower_percentile)
-        percentile_high = np.percentile(image, COMMON_CONFIG.upper_percentile)
-
-        if percentile_high <= percentile_low:
-            return np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
-
-        normalized = (image - percentile_low) / (percentile_high - percentile_low)
-        normalized = np.clip(normalized, 0.0, 1.0)
+        normalized = normalize_percentile(
+            image=image,
+            frame_height=self.data.single_day.frame_height,
+            frame_width=self.data.single_day.frame_width,
+        )
         grayscale = (normalized * 255).astype(np.uint8)
-
         return np.stack([grayscale, grayscale, grayscale], axis=-1)
 
     @staticmethod

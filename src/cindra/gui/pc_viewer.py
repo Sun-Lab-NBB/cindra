@@ -9,19 +9,16 @@ from PySide6 import QtGui, QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
 from PySide6.QtWidgets import (
     QLabel,
-    QStyle,
     QWidget,
     QLineEdit,
     QGridLayout,
     QHBoxLayout,
     QMainWindow,
-    QToolButton,
-    QButtonGroup,
 )
 from ataraxis_base_utilities import LogLevel, console
 
 from .styles import FONTS, STYLE, COLORS, PC_STYLE, PLOT_STYLE
-from .widgets import configure_plot, add_plot_legend
+from .widgets import configure_plot, add_plot_legend, create_play_pause_group
 from .constants import PC_CONFIG, COMMON_CONFIG
 
 if TYPE_CHECKING:
@@ -37,7 +34,6 @@ class PCViewer(QMainWindow):
         data: Pre-loaded registration data to display on startup.
 
     Attributes:
-        _style: Frozen style constants for the PC viewer window.
         data: The SingleDayData instance that stores the visualized recording's data.
         _loaded: Determines whether PC data has been loaded and is ready for display.
         _current_frame: Animation toggle state for PC extreme image cycling.
@@ -280,39 +276,23 @@ class PCViewer(QMainWindow):
             self._metric_labels.append(metric_label)
         panel.addSpacing(group_spacing)
 
-        # Playback controls. Play and pause are grouped exclusively so only one can be active at a time.
-        icon_size = QtCore.QSize(STYLE.icon_size, STYLE.icon_size)
-        self._play_button: QToolButton = QToolButton()
-        self._play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        self._play_button.setIconSize(icon_size)
-        self._play_button.setToolTip("Play (Space).")
-        self._play_button.setCheckable(True)
-        self._play_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        # Playback controls.
+        playback = create_play_pause_group(
+            self,
+            play_tooltip="Play (Space).",
+            pause_tooltip="Pause (Space). Use Left/Right arrow keys to step through PCs.",
+            no_focus=True,
+        )
+        self._play_button = playback.play_button
+        self._pause_button = playback.pause_button
         self._play_button.clicked.connect(self._start_animation)
-
-        self._pause_button: QToolButton = QToolButton()
-        self._pause_button.setCheckable(True)
-        self._pause_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
-        self._pause_button.setIconSize(icon_size)
-        self._pause_button.setToolTip("Pause (Space). Use Left/Right arrow keys to step through PCs.")
-        self._pause_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self._pause_button.clicked.connect(self._pause_animation)
 
-        button_group = QButtonGroup(self)
-        button_group.addButton(self._play_button, 0)
-        button_group.addButton(self._pause_button, 1)
-        button_group.setExclusive(True)
-
-        # Controls start disabled with pause pre-selected, since there is no active playback on startup.
         panel.addWidget(self._play_button)
         panel.addWidget(self._pause_button)
 
         # Trailing stretch absorbs extra horizontal space so widgets stay at their natural size.
         panel.addStretch()
-
-        self._play_button.setEnabled(False)
-        self._pause_button.setEnabled(False)
-        self._pause_button.setChecked(True)
 
         self._layout.addLayout(panel, 1, 0)
 

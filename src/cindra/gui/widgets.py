@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from dataclasses import dataclass
 
 import numpy as np
 from PySide6 import QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
 from pyqtgraph import functions as fn
+from PySide6.QtWidgets import QStyle, QWidget, QToolButton, QButtonGroup
 from pyqtgraph.graphicsItems.ViewBox.ViewBoxMenu import ViewBoxMenu  # type: ignore[import-untyped]
 
-from .styles import FONTS, COLORS, PLOT_STYLE
+from .styles import FONTS, STYLE, COLORS, PLOT_STYLE
 from .constants import ROI_CONFIG, TraceMode
 
 if TYPE_CHECKING:
@@ -234,7 +236,7 @@ def plot_trace(
     subtracted_fluorescence: NDArray[np.float32],
     spikes: NDArray[np.float32],
     frame_indices: NDArray[np.int32],
-    merge_indices: list[int],
+    selected_indices: list[int],
     activity_mode: int,
     roi_colors: NDArray[np.uint8] | None = None,
     traces_visible: bool = True,
@@ -257,7 +259,7 @@ def plot_trace(
             (roi_count, frame_count).
         spikes: Deconvolved spike array with shape (roi_count, frame_count).
         frame_indices: Time axis array with shape (frame_count,).
-        merge_indices: Indices of the selected ROIs to display.
+        selected_indices: Indices of the selected ROIs to display.
         activity_mode: Trace type index (0=Fluorescence, 1=Neuropil, 2=Neuropil Subtracted, 3=Spikes).
         roi_colors: Per-ROI RGB colors with shape (roi_count, 3) for multi-trace coloring.
         traces_visible: Determines whether the raw fluorescence trace is drawn.
@@ -272,7 +274,7 @@ def plot_trace(
     trace_box.clear()
     axis = trace_box.getAxis("left")
 
-    if len(merge_indices) == 1:
+    if len(selected_indices) == 1:
         y_minimum, y_maximum = _plot_single_trace(
             trace_box=trace_box,
             axis=axis,
@@ -280,7 +282,7 @@ def plot_trace(
             neuropil_fluorescence=neuropil_fluorescence,
             spikes=spikes,
             frame_indices=frame_indices,
-            roi_index=merge_indices[0],
+            roi_index=selected_indices[0],
             traces_visible=traces_visible,
             neuropil_visible=neuropil_visible,
             deconvolved_visible=deconvolved_visible,
@@ -294,7 +296,7 @@ def plot_trace(
             subtracted_fluorescence=subtracted_fluorescence,
             spikes=spikes,
             frame_indices=frame_indices,
-            merge_indices=merge_indices,
+            selected_indices=selected_indices,
             activity_mode=activity_mode,
             roi_colors=roi_colors,
             scale_factor=scale_factor,
@@ -376,7 +378,7 @@ def _plot_multi_trace(
     subtracted_fluorescence: NDArray[np.float32],
     spikes: NDArray[np.float32],
     frame_indices: NDArray[np.int32],
-    merge_indices: list[int],
+    selected_indices: list[int],
     activity_mode: int,
     roi_colors: NDArray[np.uint8] | None,
     scale_factor: float,
@@ -393,7 +395,7 @@ def _plot_multi_trace(
             (roi_count, frame_count).
         spikes: Deconvolved spike array with shape (roi_count, frame_count).
         frame_indices: Time axis array.
-        merge_indices: Indices of selected ROIs.
+        selected_indices: Indices of selected ROIs.
         activity_mode: Trace type index (0=Fluorescence, 1=Neuropil, 2=Neuropil Subtracted, 3=Spikes).
         roi_colors: Per-ROI RGB colors with shape (roi_count, 3).
         scale_factor: Vertical spacing factor for trace stacking.
@@ -402,7 +404,7 @@ def _plot_multi_trace(
     Returns:
         Tuple of (y_minimum, y_maximum) for the plotted range.
     """
-    selected = merge_indices[: min(len(merge_indices), max_plotted)]
+    selected = selected_indices[: min(len(selected_indices), max_plotted)]
     trace_spacing = 1.0 / scale_factor
     tick_labels: list[tuple[float, str]] = []
     stack_position = len(selected) - 1
@@ -458,3 +460,78 @@ def _plot_multi_trace(
     y_maximum = (len(selected) - 1) * trace_spacing + 1
     axis.setTicks([tick_labels])
     return y_minimum, y_maximum
+
+
+@dataclass(frozen=True)
+class PlayPauseGroup:
+    """Stores a play/pause button pair and their exclusive button group.
+
+    Attributes:
+        play_button: The play button.
+        pause_button: The pause button.
+        button_group: The exclusive button group containing both buttons.
+    """
+
+    play_button: QToolButton
+    """The play button."""
+
+    pause_button: QToolButton
+    """The pause button."""
+
+    button_group: QButtonGroup
+    """The exclusive button group containing both buttons."""
+
+
+def create_play_pause_group(
+    parent: QWidget,
+    *,
+    play_tooltip: str,
+    pause_tooltip: str,
+    no_focus: bool = False,
+) -> PlayPauseGroup:
+    """Creates a play/pause button pair with an exclusive button group.
+
+    Both buttons start disabled with pause pre-selected. Signal connections are not wired by this factory — each
+    viewer connects its own callbacks after construction.
+
+    Args:
+        parent: The parent widget that provides the icon style and owns the button group.
+        play_tooltip: Tooltip text for the play button.
+        pause_tooltip: Tooltip text for the pause button.
+        no_focus: Determines whether to disable keyboard focus on both buttons.
+
+    Returns:
+        The assembled play/pause button group.
+    """
+    icon_size = QtCore.QSize(STYLE.icon_size, STYLE.icon_size)
+
+    play_button = QToolButton()
+    play_button.setIcon(parent.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+    play_button.setIconSize(icon_size)
+    play_button.setToolTip(play_tooltip)
+    play_button.setCheckable(True)
+
+    pause_button = QToolButton()
+    pause_button.setIcon(parent.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+    pause_button.setIconSize(icon_size)
+    pause_button.setToolTip(pause_tooltip)
+    pause_button.setCheckable(True)
+
+    if no_focus:
+        play_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        pause_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
+    button_group = QButtonGroup(parent)
+    button_group.addButton(play_button, 0)
+    button_group.addButton(pause_button, 1)
+    button_group.setExclusive(True)
+
+    play_button.setEnabled(False)
+    pause_button.setEnabled(False)
+    pause_button.setChecked(True)
+
+    return PlayPauseGroup(
+        play_button=play_button,
+        pause_button=pause_button,
+        button_group=button_group,
+    )

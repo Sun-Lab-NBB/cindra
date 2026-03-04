@@ -39,10 +39,10 @@ from .overlays import (
     display_masks,
     display_views,
     draw_colorbar,
-    init_roi_maps,
     compute_colors,
     render_colorbar,
     update_colormap,
+    initialize_roi_maps,
     update_correlation_masks,
 )
 from .constants import (
@@ -97,7 +97,7 @@ class ROIViewer(QMainWindow):
         self.background_view: int = BackgroundView.ROIS_ONLY
         self.roi_colormap: str = Colormap.HSV
         self.selected_roi_index: int = 0
-        self.merge_roi_indices: list[int] = [0]
+        self.selected_roi_indices: list[int] = [0]
         self.trace_mode: int = TraceMode.NEUROPIL_CORRECTED
         self.temporal_bin_size: int = 1
         self.auto_zoom_to_roi: bool = False
@@ -642,7 +642,7 @@ class ROIViewer(QMainWindow):
         self._view_controls.opacity_slider.setValue(STYLE.default_mask_opacity)
         self.roi_colormap = Colormap.HSV
         self.selected_roi_index = 0
-        self.merge_roi_indices = [0]
+        self.selected_roi_indices = [0]
         self.trace_mode = TraceMode.NEUROPIL_CORRECTED
         self.temporal_bin_size = 1
         self.auto_zoom_to_roi = False
@@ -791,7 +791,7 @@ class ROIViewer(QMainWindow):
             colocalization_threshold=self.colocalization_threshold,
             two_channels=self._two_channels,
         )
-        self.roi_maps = init_roi_maps(
+        self.roi_maps = initialize_roi_maps(
             roi_statistics=self._roi_statistics,
             frame_height=sd.frame_height,
             frame_width=sd.frame_width,
@@ -801,7 +801,7 @@ class ROIViewer(QMainWindow):
         # Selects the first classified cell as the initial selection.
         first_cell = int(np.nonzero(self._cell_classification[:, 1])[0][0]) if self._cell_count > 0 else 0
         self.selected_roi_index = first_cell
-        self.merge_roi_indices = [first_cell]
+        self.selected_roi_indices = [first_cell]
         self._ichosen_stats()
         self._trace_controls.activity_combo.setCurrentIndex(TraceMode.DECONVOLVED)
 
@@ -824,7 +824,7 @@ class ROIViewer(QMainWindow):
             roi_maps=self.roi_maps,
             roi_color_mode=self.roi_color_mode,
             background_view=self.background_view,
-            merge_roi_indices=self.merge_roi_indices,
+            selected_roi_indices=self.selected_roi_indices,
             roi_opacity=self._view_controls.opacity_slider.value(),
             classification_label_mode=self.classification_label_mode,
         )
@@ -848,7 +848,7 @@ class ROIViewer(QMainWindow):
             subtracted_fluorescence=self._subtracted_fluorescence,
             spikes=self._spikes,
             frame_indices=self.frame_indices,
-            merge_indices=self.merge_roi_indices,
+            selected_indices=self.selected_roi_indices,
             activity_mode=self.trace_mode,
         )
 
@@ -1015,7 +1015,7 @@ class ROIViewer(QMainWindow):
             roi_count = len(self._roi_statistics)
             if self.selected_roi_index >= roi_count:
                 self.selected_roi_index = roi_count - 1
-            self.merge_roi_indices = [self.selected_roi_index]
+            self.selected_roi_indices = [self.selected_roi_index]
             self.update_plot()
 
     def _on_zoom_cell_toggled(self, state: int) -> None:
@@ -1061,7 +1061,7 @@ class ROIViewer(QMainWindow):
             return
 
         # In multi-day mode with "All Recordings" enabled and exactly one ROI selected, show stacked traces.
-        if self._is_multi_day and self._all_recordings_visible and len(self.merge_roi_indices) == 1:
+        if self._is_multi_day and self._all_recordings_visible and len(self.selected_roi_indices) == 1:
             self._refresh_all_recording_traces()
             return
 
@@ -1072,7 +1072,7 @@ class ROIViewer(QMainWindow):
             subtracted_fluorescence=self._subtracted_fluorescence,
             spikes=self._spikes,
             frame_indices=self.frame_indices,
-            merge_indices=self.merge_roi_indices,
+            selected_indices=self.selected_roi_indices,
             activity_mode=self.trace_mode,
             roi_colors=self.color_arrays.colors[self.roi_color_mode],
             traces_visible=self._trace_controls.traces_visible,
@@ -1093,8 +1093,8 @@ class ROIViewer(QMainWindow):
                 color_arrays=self.color_arrays,
                 roi_maps=self.roi_maps,
                 binned_fluorescence=self.Fbin,
-                fluorescence_std=self.Fstd,
-                merge_indices=self.merge_roi_indices,
+                fluorescence_standard_deviation=self.Fstd,
+                selected_indices=self.selected_roi_indices,
                 colormap=self.roi_colormap,
             )
         render_colorbar(
@@ -1117,7 +1117,7 @@ class ROIViewer(QMainWindow):
             roi_maps=self.roi_maps,
             roi_color_mode=self.roi_color_mode,
             background_view=self.background_view,
-            merge_roi_indices=self.merge_roi_indices,
+            selected_roi_indices=self.selected_roi_indices,
             roi_opacity=self._view_controls.opacity_slider.value(),
             classification_label_mode=self.classification_label_mode,
         )
@@ -1192,9 +1192,9 @@ class ROIViewer(QMainWindow):
         sd = self.context_data.single_day
         irange = ROI_CONFIG.zoom_to_cell_fraction * np.array([sd.frame_height, sd.frame_width]).max()
         roi_statistics = self._roi_statistics
-        if len(self.merge_roi_indices) > 1:
+        if len(self.selected_roi_indices) > 1:
             apix = np.zeros((0, 2))
-            for k in self.merge_roi_indices:
+            for k in self.selected_roi_indices:
                 apix = np.append(
                     apix,
                     np.concatenate(
@@ -1232,14 +1232,14 @@ class ROIViewer(QMainWindow):
         """
         if self.context_data is None or self.color_arrays is None or self.roi_maps is None:
             return
-        self.last_reclassified_index = flip_rois(
+        flip_rois(
             roi_statistics=self._roi_statistics,
             cell_classification=self._cell_classification,
             color_arrays=self.color_arrays,
             roi_maps=self.roi_maps,
-            selected_roi_index=self.selected_roi_index,
-            merge_roi_indices=self.merge_roi_indices,
+            selected_roi_indices=self.selected_roi_indices,
         )
+        self.last_reclassified_index = self.selected_roi_index
         self.update_plot()
 
     def _handle_click(self, click_x: int, click_y: int, is_right_button: bool, is_multi_select: bool) -> bool:
@@ -1275,29 +1275,29 @@ class ROIViewer(QMainWindow):
             # Reclassification is only available in cell classification label mode.
             if self.roi_color_mode != ROIColorMode.CELL_CLASSIFICATION or not self.classification_label_mode:
                 return False
-            if ichosen not in self.merge_roi_indices:
-                self.merge_roi_indices = [ichosen]
+            if ichosen not in self.selected_roi_indices:
+                self.selected_roi_indices = [ichosen]
                 self.selected_roi_index = ichosen
             self._flip_plot()
             return True
 
         # Multi-day mode restricts selection to a single ROI.
         if self._is_multi_day:
-            self.merge_roi_indices = [ichosen]
+            self.selected_roi_indices = [ichosen]
             self.selected_roi_index = ichosen
         else:
             merged = False
             if is_multi_select:
-                if ichosen not in self.merge_roi_indices:
-                    self.merge_roi_indices.append(ichosen)
+                if ichosen not in self.selected_roi_indices:
+                    self.selected_roi_indices.append(ichosen)
                     self.selected_roi_index = ichosen
                     merged = True
-                elif len(self.merge_roi_indices) > 1:
-                    self.merge_roi_indices.remove(ichosen)
-                    self.selected_roi_index = self.merge_roi_indices[0]
+                elif len(self.selected_roi_indices) > 1:
+                    self.selected_roi_indices.remove(ichosen)
+                    self.selected_roi_index = self.selected_roi_indices[0]
                     merged = True
             if not merged:
-                self.merge_roi_indices = [ichosen]
+                self.selected_roi_indices = [ichosen]
                 self.selected_roi_index = ichosen
 
         self.update_plot()
@@ -1316,9 +1316,9 @@ class ROIViewer(QMainWindow):
             selected = ranked[-count:][::-1]
         else:
             selected = ranked[:count]
-        self.merge_roi_indices = selected.tolist()
-        if self.merge_roi_indices:
-            self.selected_roi_index = self.merge_roi_indices[0]
+        self.selected_roi_indices = selected.tolist()
+        if self.selected_roi_indices:
+            self.selected_roi_index = self.selected_roi_indices[0]
             self.update_plot()
 
     def _on_dataset_source_changed(self, index: int) -> None:
@@ -1365,10 +1365,10 @@ class ROIViewer(QMainWindow):
             return
 
         self._trace_box.clear()
-        if not self.merge_roi_indices:
+        if not self.selected_roi_indices:
             return
 
-        roi_index = self.merge_roi_indices[0]
+        roi_index = self.selected_roi_indices[0]
         axis = self._trace_box.getAxis("left")
         tick_labels: list[tuple[float, str]] = []
         trace_spacing = 1.0 / ROI_CONFIG.default_scale_factor
