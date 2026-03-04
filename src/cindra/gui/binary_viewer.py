@@ -10,7 +10,6 @@ from PySide6 import QtGui, QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
 from PySide6.QtWidgets import (
     QLabel,
-    QStyle,
     QSlider,
     QWidget,
     QComboBox,
@@ -19,12 +18,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
     QPushButton,
-    QToolButton,
-    QButtonGroup,
 )
 
 from .styles import STYLE, COLORS, PLOT_STYLE, BINARY_STYLE
-from .widgets import configure_plot, add_plot_legend
+from .widgets import configure_plot, add_plot_legend, create_play_pause_group
 from .constants import BINARY_CONFIG
 from .viewer_context import SingleDayData
 
@@ -228,35 +225,19 @@ class BinaryPlayer(QMainWindow):
 
     def _create_buttons(self) -> None:
         """Creates and lays out playback control buttons for the player window."""
-        icon_size = QtCore.QSize(STYLE.icon_size, STYLE.icon_size)
-
-        # Playback controls. Play and pause are grouped exclusively so only one can be active at a time.
-        self._play_button: QToolButton = QToolButton()
-        self._play_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-        self._play_button.setIconSize(icon_size)
-        self._play_button.setToolTip("Play (Space).")
-        self._play_button.setCheckable(True)
+        playback = create_play_pause_group(
+            self,
+            play_tooltip="Play (Space).",
+            pause_tooltip="Pause (Space). Use left/right arrow keys to step through frames.",
+        )
+        self._play_button = playback.play_button
+        self._pause_button = playback.pause_button
         self._play_button.clicked.connect(self._start_playback)
-
-        self._pause_button: QToolButton = QToolButton()
-        self._pause_button.setCheckable(True)
-        self._pause_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
-        self._pause_button.setIconSize(icon_size)
-        self._pause_button.setToolTip("Pause (Space). Use left/right arrow keys to step through frames.")
         self._pause_button.clicked.connect(self._pause_playback)
 
-        button_group = QButtonGroup(self)
-        button_group.addButton(self._play_button, 0)
-        button_group.addButton(self._pause_button, 1)
-        button_group.setExclusive(True)
-
-        # Places play/pause buttons on row 3 alongside the frame slider. Controls start disabled with
-        # pause pre-selected, since there is no active playback on startup.
+        # Places play/pause buttons on row 3 alongside the frame slider.
         self._layout.addWidget(self._play_button, 3, 0, 1, 1)
         self._layout.addWidget(self._pause_button, 3, 1, 1, 1)
-        self._play_button.setEnabled(False)
-        self._pause_button.setEnabled(False)
-        self._pause_button.setChecked(True)
 
     def _update_frame_slider(self) -> None:
         """Configures the frame slider range and enables it."""

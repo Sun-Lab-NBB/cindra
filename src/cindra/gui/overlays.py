@@ -1,10 +1,9 @@
-"""Provides background view construction, ROI overlay rendering, and mask mutation shared by the ROI viewer and
-editor.
-"""
+"""Provides background view construction, ROI overlay rendering, and mask mutation for all GUI applications."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+import contextlib
 
 import numpy as np
 import pyqtgraph as pg  # type: ignore[import-untyped]
@@ -53,7 +52,7 @@ def build_views(
 
     Creates a stack of 6 RGB background images, each normalized to [0, 255] uint8 range.
     Views are indexed as: 0=ROIs (black), 1=mean, 2=enhanced mean, 3=correlation map,
-    4=max projection, 5=corrected structural. When ``channel_2`` is True, slots 1-4
+    4=maximum projection, 5=corrected structural. When ``channel_2`` is True, slots 1-4
     use channel 2 images (falling back to black where unavailable).
 
     Args:
@@ -151,25 +150,37 @@ def compute_colors(
     color_count = len(ROIColorMode)
     colorbar: list[list[float]] = []
 
+    # Allocates output arrays: one RGB triplet per (color_mode, cell) and one scalar per (color_mode, cell).
     colors = np.zeros((color_count, cell_count, 3), dtype=np.uint8)
     normalized_statistics = np.zeros((color_count, cell_count), dtype=np.float32)
 
-    # Generates random colors, adjusting for channel 2 data if present.
+    # Generates deterministic random hues (seeded for reproducibility across sessions).
     np.random.seed(seed=ROI_CONFIG.random_color_seed)  # noqa: NPY002
     random_colors = np.random.random((cell_count,))  # noqa: NPY002
     if two_channels:
+        # Shifts hues into the channel 2 color range so the two channels are visually distinct.
         random_colors = random_colors / ROI_CONFIG.channel_2_color_divisor + ROI_CONFIG.channel_2_color_offset
         is_channel_2 = cell_colocalization[:, 0] > colocalization_threshold
-        console.echo(message=f"Number of channel 2 cells: {int(is_channel_2.sum())}")
+        # Preserves the original hues for normalization before zeroing channel 2 ROIs.
         random_hues = random_colors.copy()
+        # Zeros channel 2 ROIs so they render as black in the random color view.
         random_colors[is_channel_2] = 0
     else:
         random_hues = random_colors.copy()
 
+    # Stores the random hues as the normalization values for the RANDOM color slot.
     normalized_statistics[0] = random_hues
-    colors[0] = hsv2rgb(random_colors)
+    colors[0] = _convert_hues_to_rgb(random_colors)
 
-    # Computes color arrays for percentile-based statistics (skewness, compactness, footprint, etc.).
+    # Pre-extracts per-field statistic arrays into column vectors to avoid repeated getattr loops inside the main
+    # color mode loop. Missing attributes default to 0.0.
+    precomputed_statistics: dict[str, NDArray[np.float32]] = {}
+    for field_name in _STATISTIC_FIELD_MAP.values():
+        values = np.array([getattr(roi, field_name, None) or 0.0 for roi in roi_statistics], dtype=np.float32)
+        precomputed_statistics[field_name] = values.reshape(-1, 1)
+
+    # Iterates over percentile-based color modes (SKEWNESS through COLOCALIZATION_PROBABILITY), skipping RANDOM
+    # and stopping before CELL_CLASSIFICATION which uses a different coloring strategy.
     for color_mode in ROIColorMode:
         if color_mode >= ROIColorMode.CELL_CLASSIFICATION:
             break
@@ -177,47 +188,54 @@ def compute_colors(
             colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
             continue
 
-        stat_values = np.zeros((cell_count, 1))
-        field_name = _STATISTIC_FIELD_MAP.get(color_mode)
-        if field_name is not None:
-            for roi_index in range(cell_count):
-                value = getattr(roi_statistics[roi_index], field_name, None)
-                if value is not None:
-                    stat_values[roi_index] = value
+        # Looks up the pre-extracted array for this color mode, falling back to zeros for unmapped modes.
+        mapped_field = _STATISTIC_FIELD_MAP.get(color_mode)
+        statistic_values = (
+            precomputed_statistics[mapped_field]
+            if mapped_field is not None
+            else np.zeros((cell_count, 1), dtype=np.float32)
+        )
 
-        stat_low = np.percentile(stat_values, COMMON_CONFIG.lower_percentile)
-        stat_high = np.percentile(stat_values, COMMON_CONFIG.upper_percentile)
-        colorbar.append([float(stat_low), float((stat_high - stat_low) / 2 + stat_low), float(stat_high)])
-        stat_range = stat_high - stat_low
-        if stat_range > 0:
-            stat_values = (stat_values - stat_low) / stat_range
-            stat_values = np.maximum(0, np.minimum(1, stat_values))
+        # Computes percentile bounds for min-max normalization and stores [low, mid, high] for colorbar labels.
+        statistic_low = np.percentile(statistic_values, COMMON_CONFIG.lower_percentile)
+        statistic_high = np.percentile(statistic_values, COMMON_CONFIG.upper_percentile)
+        colorbar.append(
+            [
+                float(statistic_low),
+                float((statistic_high - statistic_low) / 2 + statistic_low),
+                float(statistic_high),
+            ]
+        )
+
+        # Normalizes values to [0, 1] using the percentile range; collapses to zeros if the range is degenerate.
+        statistic_range = statistic_high - statistic_low
+        if statistic_range > 0:
+            statistic_values = np.clip((statistic_values - statistic_low) / statistic_range, 0, 1)
         else:
-            stat_values = np.zeros_like(stat_values)
+            statistic_values = np.zeros_like(statistic_values)
 
-        color = istat_transform(stat_values.astype(np.float32), roi_colormap)
-        colors[color_mode] = color
-        normalized_statistics[color_mode] = stat_values.flatten()
+        # Maps the normalized [0, 1] values to RGB through the active colormap.
+        colors[color_mode] = _apply_colormap(statistic_values, roi_colormap)
+        normalized_statistics[color_mode] = statistic_values.flatten()
 
-    # Computes classifier probability colors into the CELL_CLASSIFICATION slot.
-    classifier_values = np.expand_dims(cell_classification[:, 0], axis=1)
-    classifier_color = istat_transform(classifier_values.astype(np.float32), roi_colormap)
-    colors[ROIColorMode.CELL_CLASSIFICATION] = classifier_color
-    normalized_statistics[ROIColorMode.CELL_CLASSIFICATION] = classifier_values.flatten()
+    # Uses the classifier probability (column 0) directly as a pre-normalized [0, 1] value for colormap mapping.
+    classifier_values = cell_classification[:, 0:1]
+    colors[ROIColorMode.CELL_CLASSIFICATION] = _apply_colormap(classifier_values, roi_colormap)
+    normalized_statistics[ROIColorMode.CELL_CLASSIFICATION] = classifier_values.ravel()
     colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
 
-    # Appends a fixed range for the correlation color channel.
+    # The correlation slot colorbar is a placeholder; actual values are computed on-demand by
+    # update_correlation_masks when the user selects ROIs.
     colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
 
-    # Computes binary cell / non-cell label colors into the secondary classification_label_cols array.
-    classification_label_cols = np.zeros((cell_count, 3), dtype=np.uint8)
-    for roi_index in range(cell_count):
-        if cell_classification[:, 1][roi_index]:
-            classification_label_cols[roi_index] = COLORS.green
-        else:
-            classification_label_cols[roi_index] = COLORS.magenta
+    # Assigns binary cell/non-cell label colors: green for classified cells, magenta for non-cells. This secondary
+    # color set is used when the label toggle is active in the CELL_CLASSIFICATION color mode.
+    classification_label_colors = np.full((cell_count, 3), COLORS.magenta, dtype=np.uint8)
+    is_cell = cell_classification[:, 1].astype(bool)
+    classification_label_colors[is_cell] = COLORS.green
 
-    # Creates a placeholder RGB array (populated by init_roi_maps via rgb_masks).
+    # Creates a placeholder RGBA array; actual pixel colors are written by initialize_roi_maps via _update_rgb_masks
+    # once the ROI index maps are available.
     rgb = np.zeros((color_count, frame_height, frame_width, 4), dtype=np.uint8)
 
     return ColorArrays(
@@ -226,11 +244,11 @@ def compute_colors(
         colorbar=colorbar,
         rgb=rgb,
         random_hues=random_hues,
-        classification_label_cols=classification_label_cols,
+        classification_label_colors=classification_label_colors,
     )
 
 
-def init_roi_maps(
+def initialize_roi_maps(
     roi_statistics: list[ROIStatistics],
     frame_height: int,
     frame_width: int,
@@ -252,34 +270,41 @@ def init_roi_maps(
     """
     cell_count = len(roi_statistics)
 
+    # Tracks which pixels belong to any ROI (used for flat opacity application in draw_masks).
     roi_presence = np.zeros((frame_height, frame_width), dtype=bool)
-    roi_indices = -1 * np.ones((ROI_CONFIG.overlap_layers, frame_height, frame_width), dtype=np.int32)
+    # Multi-layer index map: layer 0 holds the topmost ROI at each pixel, layer 1 the next below, etc. Pixels
+    # with no ROI are -1. Used for overlap-aware rendering and selection highlighting.
+    roi_indices = np.full((ROI_CONFIG.overlap_layers, frame_height, frame_width), -1, dtype=np.int32)
 
-    text_labels: list[pg.TextItem] = []
+    # Pre-allocates the label list so each ROI's text item lands at its natural index without reversing.
+    text_labels: list[pg.TextItem | None] = [None] * cell_count
 
-    for roi_index in np.arange(cell_count - 1, -1, -1, dtype=np.int32):
-        y_pixels = roi_statistics[roi_index].mask.y_pixels
+    # Iterates from the last ROI to the first so that lower-indexed ROIs end up on top (layer 0). Each ROI
+    # shifts existing layers down before inserting itself at the top.
+    for roi_index in range(cell_count - 1, -1, -1):
+        roi = roi_statistics[roi_index]
+        y_pixels = roi.mask.y_pixels
         if y_pixels is not None:
-            x_pixels = roi_statistics[roi_index].mask.x_pixels
+            x_pixels = roi.mask.x_pixels
 
-            # Pushes down existing layers and adds cell on top.
-            roi_indices[2, y_pixels, x_pixels] = roi_indices[1, y_pixels, x_pixels]
-            roi_indices[1, y_pixels, x_pixels] = roi_indices[0, y_pixels, x_pixels]
+            # Shifts all existing layers down by one (layer N-1 → layer N) to make room at layer 0. NumPy
+            # evaluates the RHS into a temporary before assigning, so the copy order is safe.
+            roi_indices[1:, y_pixels, x_pixels] = roi_indices[:-1, y_pixels, x_pixels]
             roi_indices[0, y_pixels, x_pixels] = roi_index
             roi_presence[y_pixels, x_pixels] = True
 
-            centroid = roi_statistics[roi_index].mask.centroid
+            centroid = roi.mask.centroid
             label_text = str(roi_index)
         else:
+            # ROIs without pixel data (e.g. failed detection) get an invisible label at the origin.
             label_text = ""
             centroid = (0, 0)
 
+        # Creates a centered text label at the ROI centroid for the number overlay toggle.
         text_item = pg.TextItem(label_text, color=COLORS.silver, anchor=(0.5, 0.5))
         text_item.setPos(centroid[1], centroid[0])
         text_item.setFont(FONTS.small_bold)
-        text_labels.append(text_item)
-
-    text_labels.reverse()
+        text_labels[roi_index] = text_item
 
     roi_maps = ROIIndexMaps(
         roi_presence=roi_presence,
@@ -287,9 +312,9 @@ def init_roi_maps(
         text_labels=text_labels,
     )
 
-    # Populates RGB overlays for all color channels.
+    # Populates the RGBA overlay for every color mode using the topmost ROI index at each pixel.
     for color_index in range(color_arrays.colors.shape[0]):
-        rgb_masks(
+        _update_rgb_masks(
             color_arrays=color_arrays,
             roi_maps=roi_maps,
             color=color_arrays.colors[color_index],
@@ -309,7 +334,7 @@ def draw_masks(
     roi_color_mode: int,
     background_view: int,
     roi_opacity: int,
-    merge_roi_indices: list[int],
+    selected_roi_indices: list[int],
     classification_label_mode: bool = False,
 ) -> NDArray[np.uint8]:
     """Draws the current mask overlay for the image panel.
@@ -326,7 +351,7 @@ def draw_masks(
         roi_color_mode: Active color statistic index.
         background_view: Active background view index.
         roi_opacity: Alpha value (0-255) for mask overlay opacity.
-        merge_roi_indices: Indices of all ROIs staged for merge or multi-selection.
+        selected_roi_indices: Indices of all ROIs staged for merge or multi-selection.
         classification_label_mode: Determines whether to use binary cell/non-cell label colors instead of probability
             gradient colors when the cell classification color mode is active.
 
@@ -339,9 +364,9 @@ def draw_masks(
     # When the cell classification mode is active, swaps between label colors and probability colors.
     if roi_color_mode == ROIColorMode.CELL_CLASSIFICATION:
         color = (
-            color_arrays.classification_label_cols if classification_label_mode else color_arrays.colors[color_index]
+            color_arrays.classification_label_colors if classification_label_mode else color_arrays.colors[color_index]
         )
-        rgb_masks(
+        _update_rgb_masks(
             color_arrays=color_arrays,
             roi_maps=roi_maps,
             color=color,
@@ -352,30 +377,35 @@ def draw_masks(
     # black just dims the ROIs. All other views use the slider value.
     effective_opacity = 255 if view_index == 0 else roi_opacity
 
-    # Applies flat opacity to all ROI pixels.
-    color_arrays.rgb[color_index, :, :, 3] = (effective_opacity * roi_maps.roi_presence).astype(np.uint8)
+    # Sets alpha to zero everywhere, then writes the effective opacity only at ROI pixels. Avoids a full-frame
+    # multiply + cast by using boolean indexing on the sparse ROI presence mask.
+    alpha_channel = color_arrays.rgb[color_index, :, :, 3]
+    alpha_channel[:] = 0
+    alpha_channel[roi_maps.roi_presence] = effective_opacity
 
-    overlay = np.array(color_arrays.rgb[color_index])
+    overlay = color_arrays.rgb[color_index].copy()
 
     if view_index == 0:
         # ROI view: highlights selected ROIs with brightness based on overlap depth.
-        for roi_index in merge_roi_indices:
-            y_pixels = roi_statistics[roi_index].mask.y_pixels.flatten()
-            x_pixels = roi_statistics[roi_index].mask.x_pixels.flatten()
+        for roi_index in selected_roi_indices:
+            roi = roi_statistics[roi_index]
+            y_pixels = roi.mask.y_pixels.flatten()
+            x_pixels = roi.mask.x_pixels.flatten()
             overlap_count = (roi_maps.roi_indices[:, y_pixels, x_pixels] > -1).sum(axis=0) - 1
             brightness = 1 - overlap_count / ROI_CONFIG.overlap_layers
-            overlay = _make_chosen_roi(overlay, y_pixels, x_pixels, brightness)
+            overlay = _highlight_selected_roi(overlay, y_pixels, x_pixels, brightness)
     else:
         # Image view: highlights selected ROIs with colored circles.
-        for roi_index in merge_roi_indices:
-            y_circle, x_circle = roi_statistics[roi_index].mask.circle_pixels
+        for roi_index in selected_roi_indices:
+            roi = roi_statistics[roi_index]
+            y_circle, x_circle = roi.mask.circle_pixels
             valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < frame_height) & (x_circle < frame_width)
             y_circle, x_circle = y_circle[valid], x_circle[valid]
-            y_pixels = roi_statistics[roi_index].mask.y_pixels.flatten()
-            x_pixels = roi_statistics[roi_index].mask.x_pixels.flatten()
+            y_pixels = roi.mask.y_pixels.flatten()
+            x_pixels = roi.mask.x_pixels.flatten()
             overlay[y_pixels, x_pixels, 3] = 0
             roi_color = color_arrays.colors[color_index, roi_index]
-            overlay = _make_chosen_circle(
+            overlay = _highlight_selected_circle(
                 overlay,
                 y_circle,
                 x_circle,
@@ -435,26 +465,9 @@ def draw_colorbar(colormap: str = "hsv") -> NDArray[np.uint8]:
         Colorbar image array with shape (20, 101, 3) and dtype uint8.
     """
     gradient = np.linspace(0, 1, ROI_STYLE.colorbar_sample_count).astype(np.float32)
-    rgb = istat_transform(gradient, colormap)
-    colormat = np.expand_dims(rgb, axis=0)
-    return np.tile(colormat, (ROI_STYLE.colorbar_row_count, 1, 1))
-
-
-def rgb_masks(
-    color_arrays: ColorArrays,
-    roi_maps: ROIIndexMaps,
-    color: NDArray[np.uint8],
-    color_index: int,
-) -> None:
-    """Updates the RGB overlay array for a specific color channel.
-
-    Args:
-        color_arrays: The computed color arrays.
-        roi_maps: The ROI index maps.
-        color: Per-ROI RGB colors with shape (cell_count, 3).
-        color_index: Index of the color channel to update.
-    """
-    color_arrays.rgb[color_index, :, :, :3] = color[roi_maps.roi_indices[0], :]
+    rgb = _apply_colormap(gradient, colormap)
+    color_matrix = np.expand_dims(rgb, axis=0)
+    return np.tile(color_matrix, (ROI_STYLE.colorbar_row_count, 1, 1))
 
 
 def update_colormap(
@@ -472,10 +485,9 @@ def update_colormap(
     Returns:
         New colorbar gradient image.
     """
-    console.echo(message=f"Colormap changed to {colormap}, loading...")
     for color_index in range(1, color_arrays.normalized_statistics.shape[0]):
-        color_arrays.colors[color_index] = istat_transform(color_arrays.normalized_statistics[color_index], colormap)
-        rgb_masks(
+        color_arrays.colors[color_index] = _apply_colormap(color_arrays.normalized_statistics[color_index], colormap)
+        _update_rgb_masks(
             color_arrays=color_arrays,
             roi_maps=roi_maps,
             color=color_arrays.colors[color_index],
@@ -488,8 +500,8 @@ def update_correlation_masks(
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
     binned_fluorescence: NDArray[np.float32],
-    fluorescence_std: NDArray[np.float32],
-    merge_indices: list[int],
+    fluorescence_standard_deviation: NDArray[np.float32],
+    selected_indices: list[int],
     colormap: str,
 ) -> None:
     """Computes inter-ROI correlation coloring.
@@ -500,66 +512,50 @@ def update_correlation_masks(
         color_arrays: The computed color arrays (modified in place).
         roi_maps: The ROI index maps.
         binned_fluorescence: Binned fluorescence with shape (roi_count, bin_count).
-        fluorescence_std: Per-ROI standard deviation with shape (roi_count,).
-        merge_indices: Currently selected ROI indices.
+        fluorescence_standard_deviation: Per-ROI standard deviation with shape (roi_count,).
+        selected_indices: Currently selected ROI indices.
         colormap: Name of the active colormap.
     """
     color_index = ROIColorMode.CORRELATIONS
-    selected = np.array(merge_indices)
-    selected_mean = binned_fluorescence[selected].mean(axis=-2).squeeze()
-    selected_std = float((selected_mean**2).mean() ** 0.5)
-    denominator = binned_fluorescence.shape[-1] * fluorescence_std * selected_std
-    correlation = np.dot(binned_fluorescence, selected_mean.T) / denominator
-    correlation[selected] = correlation.mean()
 
-    istat = correlation
-    istat_min = float(istat.min())
-    istat_max = float(istat.max())
-    color_arrays.colorbar[color_index] = [istat_min, (istat_max - istat_min) / 2 + istat_min, istat_max]
-    istat = istat - istat.min()
-    istat = istat / istat.max()
-    color = istat_transform(istat, colormap)
+    # Averages the binned fluorescence traces of all selected ROIs into a single reference template.
+    selected_array = np.array(selected_indices, dtype=np.int32)
+    selected_mean = binned_fluorescence[selected_array].mean(axis=-2).squeeze()
+
+    # Computes the RMS of the reference template for Pearson-style normalization.
+    selected_standard_deviation = float((selected_mean**2).mean() ** 0.5)
+
+    # Builds the per-ROI normalization denominator: bin_count * per_roi_std * reference_std. This converts the
+    # dot product into an approximate Pearson correlation coefficient for each ROI.
+    denominator = binned_fluorescence.shape[-1] * fluorescence_standard_deviation * selected_standard_deviation
+
+    # Dot product of each ROI's trace against the reference template, normalized by the denominator.
+    correlation = np.dot(binned_fluorescence, selected_mean) / denominator
+
+    # Replaces the selected ROIs' self-correlation with the population mean to prevent them from dominating the
+    # color scale (they would otherwise always be the highest values).
+    correlation[selected_indices] = correlation.mean()
+
+    # Computes min/max once and reuses for both the colorbar [low, mid, high] labels and the [0, 1] normalization.
+    correlation_min = float(correlation.min())
+    correlation_max = float(correlation.max())
+    color_arrays.colorbar[color_index] = [
+        correlation_min,
+        (correlation_max - correlation_min) / 2 + correlation_min,
+        correlation_max,
+    ]
+
+    # Normalizes to [0, 1] for colormap mapping; falls back to zeros if all correlations are identical.
+    correlation_range = correlation_max - correlation_min
+    normalized = (
+        (correlation - correlation_min) / correlation_range if correlation_range > 0 else np.zeros_like(correlation)
+    )
+
+    # Maps normalized correlations to RGB and writes into the CORRELATIONS color slot and overlay.
+    color = _apply_colormap(normalized, colormap)
     color_arrays.colors[color_index] = color
-    color_arrays.normalized_statistics[color_index] = istat.flatten()
-    rgb_masks(color_arrays=color_arrays, roi_maps=roi_maps, color=color, color_index=color_index)
-
-
-def hsv2rgb(colors: NDArray[np.float64]) -> NDArray[np.uint8]:
-    """Converts HSV hue values to RGB uint8 colors.
-
-    Args:
-        colors: Array of hue values in [0, 1].
-
-    Returns:
-        RGB color array with shape (..., 3) and dtype uint8.
-    """
-    colors = np.nan_to_num(colors, nan=0.0)
-    colors = colors[:, np.newaxis]
-    colors = np.concatenate((colors, np.ones_like(colors), np.ones_like(colors)), axis=-1)
-    return (255 * hsv_to_rgb(colors)).astype(np.uint8)
-
-
-def istat_transform(istat: NDArray[np.float32], colormap: str = "hsv") -> NDArray[np.uint8]:
-    """Transforms a normalized statistic array into RGB colors using the given colormap.
-
-    Args:
-        istat: Statistic values normalized to [0, 1].
-        colormap: Name of the matplotlib colormap to use.
-
-    Returns:
-        RGB color array with shape (..., 3) and dtype uint8.
-    """
-    if colormap == "hsv":
-        return _istat_hsv(istat)
-
-    try:
-        cmap = matplotlib.cm.get_cmap(colormap)
-        mapped = cmap(istat)[:, :3]
-        mapped *= 255
-        return mapped.astype(np.uint8)
-    except Exception:
-        console.echo(message="Bad colormap, using hsv", level=LogLevel.WARNING)
-        return _istat_hsv(istat)
+    color_arrays.normalized_statistics[color_index] = normalized.ravel()
+    _update_rgb_masks(color_arrays=color_arrays, roi_maps=roi_maps, color=color, color_index=color_index)
 
 
 def flip_rois(
@@ -567,13 +563,11 @@ def flip_rois(
     cell_classification: NDArray[np.float32],
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
-    *,
-    selected_roi_index: int,
-    merge_roi_indices: list[int],
-) -> int:
+    selected_roi_indices: list[int],
+) -> None:
     """Reclassifies selected ROIs between cell and non-cell.
 
-    Toggles the classification labels (column 1) for all ROIs in ``merge_roi_indices`` and
+    Toggles the classification labels (column 1) for all ROIs in ``selected_roi_indices`` and
     updates their overlay colors. The caller is responsible for saving and updating the plot.
 
     Args:
@@ -581,14 +575,10 @@ def flip_rois(
         cell_classification: Cell classification array (column 1 is modified in place).
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
-        selected_roi_index: Index of the currently selected ROI.
-        merge_roi_indices: Indices of all ROIs to flip.
-
-    Returns:
-        The selected ROI index, stored by the caller as the last reclassified index.
+        selected_roi_indices: Indices of all ROIs to flip.
     """
     labels = cell_classification[:, 1]
-    for roi_index in merge_roi_indices:
+    for roi_index in selected_roi_indices:
         labels[roi_index] = 1.0 - labels[roi_index]
         _flip_roi(
             roi_maps=roi_maps,
@@ -598,7 +588,50 @@ def flip_rois(
             roi_index=roi_index,
         )
 
-    return selected_roi_index
+
+def normalize_percentile(
+    image: NDArray[np.float32],
+    frame_height: int,
+    frame_width: int,
+) -> NDArray[np.float32]:
+    """Normalizes an image to [0, 1] using 1st and 99th percentile clipping.
+
+    Args:
+        image: Input image to normalize. A size-0 array produces a zero fallback.
+        frame_height: Height for the fallback zero image.
+        frame_width: Width for the fallback zero image.
+
+    Returns:
+        Normalized image with values clipped to [0, 1].
+    """
+    if image.size == 0:
+        return np.zeros((frame_height, frame_width), dtype=np.float32)
+
+    lower_bound = np.percentile(image, COMMON_CONFIG.lower_percentile)
+    upper_bound = np.percentile(image, COMMON_CONFIG.upper_percentile)
+
+    if upper_bound <= lower_bound:
+        return np.zeros((frame_height, frame_width), dtype=np.float32)
+
+    normalized = (image - lower_bound) / (upper_bound - lower_bound)
+    return np.clip(normalized, 0, 1).astype(np.float32)
+
+
+def _update_rgb_masks(
+    color_arrays: ColorArrays,
+    roi_maps: ROIIndexMaps,
+    color: NDArray[np.uint8],
+    color_index: int,
+) -> None:
+    """Updates the RGB overlay array for a specific color channel.
+
+    Args:
+        color_arrays: The computed color arrays.
+        roi_maps: The ROI index maps.
+        color: Per-ROI RGB colors with shape (cell_count, 3).
+        color_index: Index of the color channel to update.
+    """
+    color_arrays.rgb[color_index, :, :, :3] = color[roi_maps.roi_indices[0], :]
 
 
 def _build_single_view(
@@ -647,11 +680,11 @@ def _build_single_view(
 
     if view_index == BackgroundView.MEAN_IMAGE:
         image = channel_2_mean_image if channel_2 else mean_image
-        return _normalize_percentile(image=image, frame_height=frame_height, frame_width=frame_width)
+        return normalize_percentile(image=image, frame_height=frame_height, frame_width=frame_width)
 
     if view_index == BackgroundView.ENHANCED_MEAN_IMAGE:
         image = channel_2_enhanced_mean_image if channel_2 else enhanced_mean_image
-        return _normalize_percentile(image=image, frame_height=frame_height, frame_width=frame_width)
+        return normalize_percentile(image=image, frame_height=frame_height, frame_width=frame_width)
 
     if view_index == BackgroundView.CORRELATION_MAP:
         image = channel_2_correlation_map if channel_2 else correlation_map
@@ -671,11 +704,10 @@ def _build_single_view(
             frame_width=frame_width,
             valid_y_range=valid_y_range,
             valid_x_range=valid_x_range,
-            warn_on_error=True,
         )
 
     if view_index == BackgroundView.CORRECTED_STRUCTURAL:
-        return _normalize_percentile(
+        return normalize_percentile(
             image=corrected_structural_mean_image,
             frame_height=frame_height,
             frame_width=frame_width,
@@ -684,41 +716,12 @@ def _build_single_view(
     return np.zeros((frame_height, frame_width), dtype=np.float32)
 
 
-def _normalize_percentile(
-    image: NDArray[np.float32],
-    frame_height: int,
-    frame_width: int,
-) -> NDArray[np.float32]:
-    """Normalizes an image to [0, 1] using 1st and 99th percentile clipping.
-
-    Args:
-        image: Input image to normalize. A size-0 array produces a zero fallback.
-        frame_height: Height for the fallback zero image.
-        frame_width: Width for the fallback zero image.
-
-    Returns:
-        Normalized image with values clipped to [0, 1].
-    """
-    if image.size == 0:
-        return np.zeros((frame_height, frame_width), dtype=np.float32)
-
-    percentile_1 = np.percentile(image, COMMON_CONFIG.lower_percentile)
-    percentile_99 = np.percentile(image, COMMON_CONFIG.upper_percentile)
-
-    if percentile_99 <= percentile_1:
-        return np.zeros((frame_height, frame_width), dtype=np.float32)
-
-    normalized = (image - percentile_1) / (percentile_99 - percentile_1)
-    return np.clip(normalized, 0, 1).astype(np.float32)
-
-
 def _place_in_valid_region(
     image: NDArray[np.float32],
     frame_height: int,
     frame_width: int,
     valid_y_range: tuple[int, int] | None,
     valid_x_range: tuple[int, int] | None,
-    warn_on_error: bool = False,
 ) -> NDArray[np.float32]:
     """Normalizes and places an image into the valid subregion of the full frame.
 
@@ -728,38 +731,85 @@ def _place_in_valid_region(
         frame_width: Width of the full frame.
         valid_y_range: Row range (start, end) for the valid subregion.
         valid_x_range: Column range (start, end) for the valid subregion.
-        warn_on_error: Determines whether to log a warning on placement failure.
 
     Returns:
         Full-frame image with the normalized data placed in the valid region.
     """
     if image.size == 0:
-        return 0.5 * np.ones((frame_height, frame_width), dtype=np.float32)
+        return np.full((frame_height, frame_width), 0.5, dtype=np.float32)
 
     # Normalizes the image using percentile clipping.
-    percentile_1 = np.percentile(image, COMMON_CONFIG.lower_percentile)
-    percentile_99 = np.percentile(image, COMMON_CONFIG.upper_percentile)
+    lower_bound = np.percentile(image, COMMON_CONFIG.lower_percentile)
+    upper_bound = np.percentile(image, COMMON_CONFIG.upper_percentile)
 
-    if percentile_99 <= percentile_1:
+    if upper_bound <= lower_bound:
         return np.zeros((frame_height, frame_width), dtype=np.float32)
 
-    normalized = (image - percentile_1) / (percentile_99 - percentile_1)
+    normalized = (image - lower_bound) / (upper_bound - lower_bound)
 
-    # Places in the valid subregion.
-    output = percentile_1 * np.ones((frame_height, frame_width), dtype=np.float32)
+    # Places in the valid subregion, filling the border with the lower percentile value.
     if valid_y_range is not None and valid_x_range is not None:
-        try:
+        output = np.full((frame_height, frame_width), lower_bound, dtype=np.float32)
+        with contextlib.suppress(ValueError, IndexError):
             output[valid_y_range[0] : valid_y_range[1], valid_x_range[0] : valid_x_range[1]] = normalized
-        except ValueError, IndexError:
-            if warn_on_error:
-                console.echo(
-                    message="Max projection not in combined view",
-                    level=LogLevel.WARNING,
-                )
-    else:
-        output = normalized
+        np.clip(output, 0, 1, out=output)
+        return output
 
-    return np.clip(output, 0, 1).astype(np.float32)
+    # No valid region specified; clips the normalized image in place and returns directly.
+    np.clip(normalized, 0, 1, out=normalized)
+    return normalized
+
+
+def _convert_hues_to_rgb(hues: NDArray[np.float64]) -> NDArray[np.uint8]:
+    """Converts HSV hue values to RGB uint8 colors with full saturation and value.
+
+    Args:
+        hues: Array of hue values in [0, 1].
+
+    Returns:
+        RGB color array with shape (..., 3) and dtype uint8.
+    """
+    hsv = np.empty((hues.size, 3), dtype=hues.dtype)
+    hsv[:, 0] = np.nan_to_num(hues.ravel(), nan=0.0)
+    hsv[:, 1] = 1.0
+    hsv[:, 2] = 1.0
+    return (255 * hsv_to_rgb(hsv)).astype(np.uint8)
+
+
+def _apply_colormap(values: NDArray[np.float32], colormap: str = "hsv") -> NDArray[np.uint8]:
+    """Transforms a normalized statistic array into RGB colors using the given colormap.
+
+    Args:
+        values: Statistic values normalized to [0, 1].
+        colormap: Name of the matplotlib colormap to use.
+
+    Returns:
+        RGB color array with shape (..., 3) and dtype uint8.
+    """
+    if colormap == "hsv":
+        return _apply_hsv_colormap(values)
+
+    try:
+        color_map = matplotlib.cm.get_cmap(colormap)
+        mapped = color_map(values)[:, :3]
+        mapped *= 255
+        return mapped.astype(np.uint8)
+    except ValueError:
+        console.echo(message="Unable to apply the requested colormap. Falling back to hsv.", level=LogLevel.WARNING)
+        return _apply_hsv_colormap(values)
+
+
+def _apply_hsv_colormap(values: NDArray[np.float32]) -> NDArray[np.uint8]:
+    """Applies the HSV color transform to a statistic array.
+
+    Args:
+        values: Normalized statistic values in [0, 1].
+
+    Returns:
+        RGB color array with shape (..., 3) and dtype uint8.
+    """
+    inverted = 1.0 - (values + ROI_CONFIG.hsv_offset) / ROI_CONFIG.hsv_divisor
+    return _convert_hues_to_rgb(inverted.ravel().astype(np.float64))
 
 
 def _flip_roi(
@@ -779,31 +829,18 @@ def _flip_roi(
         roi_index: Index of the ROI to update.
     """
     if cell_classification_labels[roi_index]:
-        color_arrays.classification_label_cols[roi_index] = COLORS.green
+        color_arrays.classification_label_colors[roi_index] = COLORS.green
     else:
-        color_arrays.classification_label_cols[roi_index] = COLORS.magenta
+        color_arrays.classification_label_colors[roi_index] = COLORS.magenta
 
     y_pixels = roi_statistics[roi_index].mask.y_pixels
     x_pixels = roi_statistics[roi_index].mask.x_pixels
-    redraw_masks(color_arrays=color_arrays, roi_maps=roi_maps, y_pixels=y_pixels, x_pixels=x_pixels)
+    for color_index in range(color_arrays.colors.shape[0]):
+        color = color_arrays.colors[color_index]
+        color_arrays.rgb[color_index, y_pixels, x_pixels, :3] = color[roi_maps.roi_indices[0, y_pixels, x_pixels], :]
 
 
-def _istat_hsv(istat: NDArray[np.float32]) -> NDArray[np.uint8]:
-    """Applies the HSV color transform to a statistic array.
-
-    Args:
-        istat: Normalized statistic values in [0, 1].
-
-    Returns:
-        RGB color array with shape (..., 3) and dtype uint8.
-    """
-    istat /= ROI_CONFIG.hsv_divisor
-    istat += ROI_CONFIG.hsv_offset / ROI_CONFIG.hsv_divisor
-    inverted = 1 - istat
-    return hsv2rgb(inverted.flatten().astype(np.float64))
-
-
-def _make_chosen_roi(
+def _highlight_selected_roi(
     overlay: NDArray[np.uint8],
     y_pixels: NDArray,
     x_pixels: NDArray,
@@ -820,11 +857,11 @@ def _make_chosen_roi(
     Returns:
         Modified overlay array.
     """
-    overlay[y_pixels, x_pixels, :] = np.tile((255 * brightness[:, np.newaxis]).astype(np.uint8), (1, 4))
+    overlay[y_pixels, x_pixels, :] = (255 * brightness).astype(np.uint8)[:, np.newaxis]
     return overlay
 
 
-def _make_chosen_circle(
+def _highlight_selected_circle(
     overlay: NDArray[np.uint8],
     y_circle: NDArray,
     x_circle: NDArray,
