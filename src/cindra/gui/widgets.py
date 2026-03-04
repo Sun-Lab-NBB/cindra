@@ -1,4 +1,4 @@
-"""Provides custom Qt widgets, trace plotting helpers, and quadrant zoom shared by the ROI viewer and editor."""
+"""Provides custom Qt widgets, trace plotting helpers, and quadrant zoom for all GUI applications."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 type _ClickHandler = Callable[[int, int, bool, bool], bool]
 """The callback type for click events dispatched by a ViewBox to the orchestrator.
 
-Signature: (click_x, click_y, is_right, is_multi) -> handled.
+Signature: (click_x, click_y, is_right_button, is_multi_select) -> handled.
 """
 
 type _ZoomHandler = Callable[[], None]
@@ -52,10 +52,12 @@ def configure_plot(
         mouse_y: Determines whether vertical mouse interaction is enabled.
     """
     plot.setMenuEnabled(False)
+    # noinspection PyUnresolvedReferences
     plot.setMouseEnabled(x=mouse_x, y=mouse_y)
     plot.getAxis("left").setWidth(PLOT_STYLE.axis_fixed_width)
     plot.getAxis("bottom").setHeight(PLOT_STYLE.axis_fixed_width)
     if title:
+        # noinspection PyTypeChecker
         plot.setTitle(title, size=FONTS.plot_title_size, bold=True)
     if left_label:
         plot.setLabel("left", left_label, **{"font-size": FONTS.label_size})
@@ -113,11 +115,11 @@ class TraceBox(pg.PlotItem):
         self._y_minimum = y_minimum
         self._y_maximum = y_maximum
 
-    def mouseDoubleClickEvent(self, ev: object) -> None:  # noqa: N802, ARG002
+    def mouseDoubleClickEvent(self, event: object) -> None:  # noqa: N802, ARG002
         """Zooms the managed trace plot to fit the full data range.
 
         Notes:
-            Overrides the pyqtgraph/Qt virtual method. The camelCase name and unused ``ev``
+            Overrides the pyqtgraph/Qt virtual method. The camelCase name and unused ``event``
             parameter are required to match the parent signature.
         """
         view_box = self.getViewBox()
@@ -182,17 +184,17 @@ class ViewBox(pg.ViewBox):
         """
         self._zoom_handler = handler
 
-    def mouseDoubleClickEvent(self, ev: object) -> None:  # noqa: N802, ARG002
+    def mouseDoubleClickEvent(self, event: object) -> None:  # noqa: N802, ARG002
         """Zooms the image view to fit the full field of view.
 
         Notes:
-            Overrides the pyqtgraph/Qt virtual method. The camelCase name and unused ``ev``
+            Overrides the pyqtgraph/Qt virtual method. The camelCase name and unused ``event``
             parameter are required to match the parent signature.
         """
         if self._zoom_handler is not None:
             self._zoom_handler()
 
-    def mouseClickEvent(self, ev: MouseClickEvent) -> None:  # noqa: N802
+    def mouseClickEvent(self, event: MouseClickEvent) -> None:  # noqa: N802
         """Dispatches mouse click events to the installed click handler.
 
         Left-click selects the targeted ROI. Shift/ctrl-click toggles multi-ROI merge selection.
@@ -207,21 +209,21 @@ class ViewBox(pg.ViewBox):
             return
 
         # Converts the scene-space click position to image-space pixel coordinates.
-        position = self.mapSceneToView(ev.scenePos())
+        position = self.mapSceneToView(event.scenePos())
         click_x = int(position.x())
         click_y = int(position.y())
 
         # Extracts modifier state for the click handler.
-        is_right = ev.button() == QtCore.Qt.MouseButton.RightButton
-        is_multi = ev.modifiers() in (
+        is_right_button = event.button() == QtCore.Qt.MouseButton.RightButton
+        is_multi_select = event.modifiers() in (
             QtCore.Qt.KeyboardModifier.ShiftModifier,
             QtCore.Qt.KeyboardModifier.ControlModifier,
         )
 
         # Falls back to the default context menu if the click handler did not consume the event.
-        handled = self._click_handler(click_x, click_y, is_right, is_multi)
-        if not handled and is_right and self.menuEnabled():
-            self.raiseContextMenu(ev)
+        handled = self._click_handler(click_x, click_y, is_right_button, is_multi_select)
+        if not handled and is_right_button and self.menuEnabled():
+            self.raiseContextMenu(event)
 
 
 def plot_trace(
@@ -231,10 +233,10 @@ def plot_trace(
     neuropil_fluorescence: NDArray[np.float32],
     subtracted_fluorescence: NDArray[np.float32],
     spikes: NDArray[np.float32],
-    frame_indices: NDArray,
+    frame_indices: NDArray[np.int32],
     merge_indices: list[int],
     activity_mode: int,
-    roi_colors: NDArray | None = None,
+    roi_colors: NDArray[np.uint8] | None = None,
     traces_visible: bool = True,
     neuropil_visible: bool = True,
     deconvolved_visible: bool = True,
@@ -304,6 +306,7 @@ def plot_trace(
         y_minimum=y_minimum,
         y_maximum=y_maximum,
     )
+    # noinspection PyUnresolvedReferences
     trace_box.setYRange(y_minimum, y_maximum)
     return y_minimum, y_maximum
 
@@ -314,7 +317,7 @@ def _plot_single_trace(
     cell_fluorescence: NDArray[np.float32],
     neuropil_fluorescence: NDArray[np.float32],
     spikes: NDArray[np.float32],
-    frame_indices: NDArray,
+    frame_indices: NDArray[np.int32],
     roi_index: int,
     traces_visible: bool,
     neuropil_visible: bool,
@@ -372,10 +375,10 @@ def _plot_multi_trace(
     neuropil_fluorescence: NDArray[np.float32],
     subtracted_fluorescence: NDArray[np.float32],
     spikes: NDArray[np.float32],
-    frame_indices: NDArray,
+    frame_indices: NDArray[np.int32],
     merge_indices: list[int],
     activity_mode: int,
-    roi_colors: NDArray | None,
+    roi_colors: NDArray[np.uint8] | None,
     scale_factor: float,
     max_plotted: int,
 ) -> tuple[float, float]:
@@ -400,10 +403,10 @@ def _plot_multi_trace(
         Tuple of (y_minimum, y_maximum) for the plotted range.
     """
     selected = merge_indices[: min(len(merge_indices), max_plotted)]
-    k_space = 1.0 / scale_factor
+    trace_spacing = 1.0 / scale_factor
     tick_labels: list[tuple[float, str]] = []
     stack_position = len(selected) - 1
-    average = np.zeros((cell_fluorescence.shape[1],))
+    average = np.zeros((cell_fluorescence.shape[1],), dtype=np.float64)
 
     for index in selected[::-1]:
         # Selects trace based on activity mode.
@@ -429,8 +432,8 @@ def _plot_multi_trace(
         # Determines pen color for this ROI.
         pen_color = roi_colors[index, :] if roi_colors is not None else COLORS.white
 
-        trace_box.plot(frame_indices, normalized + stack_position * k_space, pen=pen_color)
-        tick_labels.append((stack_position * k_space + float(normalized.mean()), str(index)))
+        trace_box.plot(frame_indices, normalized + stack_position * trace_spacing, pen=pen_color)
+        tick_labels.append((stack_position * trace_spacing + float(normalized.mean()), str(index)))
         stack_position -= 1
 
     # Computes average trace scale.
@@ -452,6 +455,6 @@ def _plot_multi_trace(
         )
         y_minimum = -1 * average_scale
 
-    y_maximum = (len(selected) - 1) * k_space + 1
+    y_maximum = (len(selected) - 1) * trace_spacing + 1
     axis.setTicks([tick_labels])
     return y_minimum, y_maximum

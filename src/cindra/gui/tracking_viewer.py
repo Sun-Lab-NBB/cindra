@@ -28,13 +28,13 @@ from matplotlib.colors import hsv_to_rgb
 
 from .styles import STYLE, TRACKING_STYLE
 from .constants import (
-    COMMON_CONFIG,
     ROI_CONFIG,
+    COMMON_CONFIG,
     TRACKING_CONFIG,
     MaskLayer,
     BackgroundView,
-    BackgroundViewLabel,
     CoordinateSpace,
+    BackgroundViewLabel,
 )
 from .viewer_context import EMPTY
 
@@ -256,8 +256,12 @@ class TrackingViewer(QMainWindow):
         self._background_combo = QComboBox()
         self._background_combo.addItem(BackgroundViewLabel.ROIS_ONLY, userData=BackgroundView.ROIS_ONLY)
         self._background_combo.addItem(BackgroundViewLabel.MEAN_IMAGE, userData=BackgroundView.MEAN_IMAGE)
-        self._background_combo.addItem(BackgroundViewLabel.ENHANCED_MEAN_IMAGE, userData=BackgroundView.ENHANCED_MEAN_IMAGE)
-        self._background_combo.addItem(BackgroundViewLabel.MAXIMUM_PROJECTION, userData=BackgroundView.MAXIMUM_PROJECTION)
+        self._background_combo.addItem(
+            BackgroundViewLabel.ENHANCED_MEAN_IMAGE, userData=BackgroundView.ENHANCED_MEAN_IMAGE
+        )
+        self._background_combo.addItem(
+            BackgroundViewLabel.MAXIMUM_PROJECTION, userData=BackgroundView.MAXIMUM_PROJECTION
+        )
         self._background_combo.addItem(BackgroundViewLabel.CORRELATION_MAP, userData=BackgroundView.CORRELATION_MAP)
         self._background_combo.currentIndexChanged.connect(self._refresh_display)
         background_layout.addWidget(self._background_combo)

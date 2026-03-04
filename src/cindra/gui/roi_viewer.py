@@ -49,10 +49,10 @@ from .constants import (
     ROI_CONFIG,
     Colormap,
     TraceMode,
-    TraceModeLabel,
     ROIColorMode,
-    ROIColorModeLabel,
     BackgroundView,
+    TraceModeLabel,
+    ROIColorModeLabel,
     BackgroundViewLabel,
 )
 from .data_models import (
@@ -432,7 +432,7 @@ class ROIViewer(QMainWindow):
             color_combo=color_combo,
             colormap_chooser=colormap_chooser,
             classifier_edit=classifier_edit,
-            bin_edit=bin_edit,
+            binning_edit=bin_edit,
             classification_label_button=classification_label_button,
         )
         return group_box, controls
@@ -719,7 +719,7 @@ class ROIViewer(QMainWindow):
 
         # Computes default bin size from tau and sampling rate.
         self.temporal_bin_size = max(1, int(sd.tau * sd.sampling_rate / ROI_CONFIG.bin_size_divisor))
-        self._color_controls.bin_edit.setText(str(self.temporal_bin_size))
+        self._color_controls.binning_edit.setText(str(self.temporal_bin_size))
         self.colocalization_threshold = ROI_CONFIG.default_channel_2_threshold
 
         # Enables buttons.
@@ -941,7 +941,7 @@ class ROIViewer(QMainWindow):
         """
         self.trace_mode = TraceMode(i)
         if self.session_loaded and self.context_data is not None:
-            self.temporal_bin_size = max(1, int(self._color_controls.bin_edit.text()))
+            self.temporal_bin_size = max(1, int(self._color_controls.binning_edit.text()))
             nb = int(np.floor(float(self._frame_count) / float(self.temporal_bin_size)))
             if i == 0:
                 f = self._cell_fluorescence
@@ -1074,7 +1074,7 @@ class ROIViewer(QMainWindow):
             frame_indices=self.frame_indices,
             merge_indices=self.merge_roi_indices,
             activity_mode=self.trace_mode,
-            roi_colors=self.color_arrays.cols[self.roi_color_mode],
+            roi_colors=self.color_arrays.colors[self.roi_color_mode],
             traces_visible=self._trace_controls.traces_visible,
             neuropil_visible=self._trace_controls.neuropil_visible,
             deconvolved_visible=self._trace_controls.deconvolved_visible,
@@ -1242,7 +1242,7 @@ class ROIViewer(QMainWindow):
         )
         self.update_plot()
 
-    def _handle_click(self, click_x: int, click_y: int, is_right: bool, is_multi: bool) -> bool:
+    def _handle_click(self, click_x: int, click_y: int, is_right_button: bool, is_multi_select: bool) -> bool:
         """Handles mouse clicks on the image panel.
 
         Left-click chooses a cell. Shift/ctrl-click adds or removes from the merge selection.
@@ -1251,8 +1251,8 @@ class ROIViewer(QMainWindow):
         Args:
             click_x: Column coordinate of the click.
             click_y: Row coordinate of the click.
-            is_right: Determines whether the click was a right-click.
-            is_multi: Determines whether shift or ctrl was held during the click.
+            is_right_button: Determines whether the click was a right-click.
+            is_multi_select: Determines whether shift or ctrl was held during the click.
 
         Returns:
             True if the click was consumed, False to allow the default context menu.
@@ -1264,11 +1264,11 @@ class ROIViewer(QMainWindow):
         if click_y < 0 or click_y >= sd.frame_height or click_x < 0 or click_x >= sd.frame_width:
             return False
 
-        ichosen = int(self.roi_maps.iroi[0, click_y, click_x])
+        ichosen = int(self.roi_maps.roi_indices[0, click_y, click_x])
         if ichosen < 0:
             return False
 
-        if is_right:
+        if is_right_button:
             # Reclassification is disabled in multi-day mode.
             if self._is_multi_day:
                 return False
@@ -1287,7 +1287,7 @@ class ROIViewer(QMainWindow):
             self.selected_roi_index = ichosen
         else:
             merged = False
-            if is_multi:
+            if is_multi_select:
                 if ichosen not in self.merge_roi_indices:
                     self.merge_roi_indices.append(ichosen)
                     self.selected_roi_index = ichosen
@@ -1309,7 +1309,7 @@ class ROIViewer(QMainWindow):
             return
         count = int(self._selection_controls.top_count_edit.text() or str(ROI_CONFIG.top_selection_count))
         count = min(count, ROI_CONFIG.top_selection_count)
-        values = self.color_arrays.istat[self.roi_color_mode]
+        values = self.color_arrays.normalized_statistics[self.roi_color_mode]
         ranked = np.argsort(values)
         # Index 0 = "select top n", index 1 = "select bottom n".
         if self._selection_controls.selection_combo.currentIndex() == 0:
@@ -1371,7 +1371,7 @@ class ROIViewer(QMainWindow):
         roi_index = self.merge_roi_indices[0]
         axis = self._trace_box.getAxis("left")
         tick_labels: list[tuple[float, str]] = []
-        k_space = 1.0 / ROI_CONFIG.default_scale_factor
+        trace_spacing = 1.0 / ROI_CONFIG.default_scale_factor
         max_frames = 0
         y_maximum = 0.0
         stack_position = self.context_data.recording_count - 1
@@ -1417,9 +1417,9 @@ class ROIViewer(QMainWindow):
             rgb = (255.0 * hsv_to_rgb(hsv)).astype(np.uint8)[0]
             pen_color = (int(rgb[0]), int(rgb[1]), int(rgb[2]))
 
-            self._trace_box.plot(frame_indices, normalized + stack_position * k_space, pen=pen_color)
-            tick_labels.append((stack_position * k_space + float(normalized.mean()), str(recording_index)))
-            y_maximum = max(y_maximum, stack_position * k_space + 1)
+            self._trace_box.plot(frame_indices, normalized + stack_position * trace_spacing, pen=pen_color)
+            tick_labels.append((stack_position * trace_spacing + float(normalized.mean()), str(recording_index)))
+            y_maximum = max(y_maximum, stack_position * trace_spacing + 1)
             stack_position -= 1
 
         axis.setTicks([tick_labels])
