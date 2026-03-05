@@ -10,7 +10,7 @@ import numpy as np
 from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console
 
-from ..io import BinaryFile
+from ..io import BinaryFile, BinaryFileCombined
 from ..dataclasses import CombinedData, RuntimeContext, MultiDayRuntimeContext
 
 if TYPE_CHECKING:
@@ -55,6 +55,12 @@ class SingleDayData:
     _channel_2_binaries: dict[int, BinaryFile] = field(init=False)
     """Per-plane channel 2 binary files keyed by plane index. Empty if single-channel."""
 
+    _combined_binary: BinaryFileCombined = field(init=False)
+    """Stitched multi-plane binary for channel 1, used by the binary viewer to display all planes at once."""
+
+    _combined_binary_channel_2: BinaryFileCombined | None = field(init=False)
+    """Stitched multi-plane binary for channel 2, or None when the recording is single-channel."""
+
     _view_labels: tuple[str, ...] = field(init=False)
     """Cached display labels for all available views including the combined view."""
 
@@ -79,6 +85,29 @@ class SingleDayData:
                     width=int(width),
                     file_path=channel_2_paths[index],
                 )
+
+        # Constructs stitched multi-plane binaries for combined frame display.
+        self._combined_binary = BinaryFileCombined(
+            height=self._combined.combined_height,
+            width=self._combined.combined_width,
+            plane_heights=self._combined.plane_heights,
+            plane_widths=self._combined.plane_widths,
+            plane_y_coordinates=self._combined.plane_y_offsets,
+            plane_x_coordinates=self._combined.plane_x_offsets,
+            file_paths=list(self._combined.registered_binary_paths),
+        )
+        if channel_2_paths is not None:
+            self._combined_binary_channel_2 = BinaryFileCombined(
+                height=self._combined.combined_height,
+                width=self._combined.combined_width,
+                plane_heights=self._combined.plane_heights,
+                plane_widths=self._combined.plane_widths,
+                plane_y_coordinates=self._combined.plane_y_offsets,
+                plane_x_coordinates=self._combined.plane_x_offsets,
+                file_paths=list(channel_2_paths),
+            )
+        else:
+            self._combined_binary_channel_2 = None
 
         # Memory-maps combined extraction data.
         combined_output = self._contexts[0].configuration.file_io.output_path
@@ -479,6 +508,42 @@ class SingleDayData:
     def valid_x_range(self) -> tuple[int, int]:
         """Returns the valid X pixel range from the first plane's registration."""
         return self._contexts[0].runtime.registration.valid_x_range
+
+    @property
+    def combined_binary(self) -> BinaryFileCombined:
+        """Returns the stitched multi-plane channel 1 binary used for combined frame display."""
+        return self._combined_binary
+
+    def read_stitched_frame(self, frame_index: int) -> NDArray[np.int16]:
+        """Returns a single stitched frame combining all planes for channel 1.
+
+        Uses slice indexing internally to avoid the integer-indexing shape bug in BinaryFileCombined.
+        """
+        return self._combined_binary[frame_index : frame_index + 1][0]
+
+    def read_stitched_frame_channel_2(self, frame_index: int) -> NDArray[np.int16]:
+        """Returns a single stitched frame combining all planes for channel 2.
+
+        Uses slice indexing internally to avoid the integer-indexing shape bug in BinaryFileCombined.
+        """
+        if self._combined_binary_channel_2 is None:
+            console.error(
+                message="Unable to read a stitched channel 2 frame. The recording is single-channel.",
+                error=RuntimeError,
+            )
+        return self._combined_binary_channel_2[frame_index : frame_index + 1][0]
+
+    def plane_rigid_offsets(self, plane_index: int) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
+        """Returns the rigid registration (y, x) offset arrays for a specific plane without mutating _view_index.
+
+        Falls back to zero arrays when the underlying registration data is None.
+        """
+        registration = self._contexts[plane_index].runtime.registration
+        frame_count = self._contexts[plane_index].runtime.io.frame_count
+        y = registration.rigid_y_offsets
+        x = registration.rigid_x_offsets
+        zeros = np.zeros(frame_count, dtype=np.int32)
+        return (y if y is not None else zeros, x if x is not None else zeros)
 
     def switch_view(self, view_index: int) -> None:
         """Switches the active data view to a different plane or the combined view.

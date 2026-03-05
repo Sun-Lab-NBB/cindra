@@ -12,13 +12,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QSlider,
     QWidget,
-    QComboBox,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QMainWindow,
+    QMessageBox,
     QPushButton,
 )
+from ataraxis_base_utilities import LogLevel, console
 
 from .styles import STYLE, COLORS, PLOT_STYLE, BINARY_STYLE
 from .widgets import configure_plot, add_plot_legend, create_play_pause_group
@@ -51,17 +52,16 @@ class BinaryPlayer(QMainWindow):
         _channel_2_button: Button for toggling channel 2 overlay.
         _shift_plot: Plot widget for rigid registration X-Y offsets.
         _shift_scatter: Scatter plot overlay indicating the current frame on the shift plot.
-        _movie_label: Label displaying the current recording path.
+
         _frame_number_label: Label displaying the current frame number.
         _frame_slider: Horizontal slider for frame navigation.
-        _plane_selector: Dropdown for selecting the imaging plane.
         _play_button: Button to start video playback.
         _pause_button: Button to pause video playback.
         _update_timer: Timer driving frame advancement during playback.
     """
 
-    # Notifies listeners when the user selects a different imaging plane from the plane selector.
-    plane_changed = QtCore.Signal(int)
+    # Notifies listeners when the user loads a new recording via the File menu.
+    recording_changed = QtCore.Signal()
 
     def __init__(self, data: SingleDayData) -> None:
         super().__init__()
@@ -72,6 +72,7 @@ class BinaryPlayer(QMainWindow):
         self.setWindowTitle("Registered Recording")
         self._central_widget: QWidget = QWidget(self)
         self.setCentralWidget(self._central_widget)
+        self._build_menus()
         self._layout: QGridLayout = QGridLayout()
         self._central_widget.setLayout(self._layout)
         # Initializes state flags and recording data.
@@ -88,26 +89,6 @@ class BinaryPlayer(QMainWindow):
         # Row 0: Toolbar with recording controls arranged in a horizontal layout. Widgets keep their
         # natural size; only the spacing between them grows when the window is resized.
         toolbar = QHBoxLayout()
-
-        self._movie_label: QLabel = QLabel("Current Path: (none)")
-        self._movie_label.setStyleSheet(STYLE.white_label)
-        toolbar.addWidget(self._movie_label)
-
-        load_recording_button = QPushButton("Load New Recording")
-        load_recording_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        load_recording_button.setToolTip("Opens a cindra-processed recording directory.")
-        load_recording_button.clicked.connect(self._load_recording)
-        toolbar.addWidget(load_recording_button)
-
-        # Groups the plane label and dropdown tightly so there is no gap between them.
-        plane_label = QLabel("Plane:")
-        plane_label.setStyleSheet(STYLE.white_label)
-        self._plane_selector: QComboBox = QComboBox(self)
-        self._plane_selector.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self._plane_selector.setEnabled(False)
-        self._plane_selector.currentIndexChanged.connect(self._on_plane_changed)
-        toolbar.addWidget(plane_label)
-        toolbar.addWidget(self._plane_selector)
 
         # Channel 2 toggle button. Disabled until a recording with two channels is loaded.
         self._channel_2_button: QPushButton = QPushButton("View Channel 2")
@@ -144,10 +125,6 @@ class BinaryPlayer(QMainWindow):
             left_label="Shift (px)",
             bottom_label="Frame",
         )
-        add_plot_legend(self._shift_plot, column_count=BINARY_STYLE.legend_column_count)
-        self._shift_scatter: pg.ScatterPlotItem = pg.ScatterPlotItem()
-        self._shift_scatter.setData([0, 0], [0, 0])
-        self._shift_plot.addItem(self._shift_scatter)
 
         # noinspection PyUnresolvedReferences
         self._graphics_widget.ci.layout.setRowStretchFactor(0, BINARY_STYLE.image_plot_stretch[0])
@@ -183,20 +160,14 @@ class BinaryPlayer(QMainWindow):
         """
         self.data = data
 
-        # Populates the plane selector without triggering _on_plane_changed yet. Signals are blocked so that
-        # clearing and re-adding items does not fire redundant plane-switch callbacks.
-        self._plane_selector.blockSignals(True)
-        self._plane_selector.clear()
-        for label in data.view_labels[1:]:
-            self._plane_selector.addItem(label)
-        self._plane_selector.setCurrentIndex(data.view_index)
-        self._plane_selector.blockSignals(False)
+        # Forces the combined view so the binary viewer always shows the stitched multi-plane movie.
+        data.switch_view(view_index=-1)
 
-        # Only enables the plane selector when multiple planes are available.
-        self._plane_selector.setEnabled(data.plane_count > 1)
+        # Updates the window title to reflect the loaded recording path.
+        self.setWindowTitle(f"Registered Recording — {data.recording_label}")
 
-        # Configures all plot views and display parameters for the initially selected plane.
-        self._open_plane()
+        # Configures all plot views and display parameters for the stitched display.
+        self._setup_views()
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
         """Handles keyboard navigation for frame stepping and playback control.
@@ -251,52 +222,66 @@ class BinaryPlayer(QMainWindow):
         self._pause_button.setEnabled(False)
         self._pause_button.setChecked(True)
 
+    def _build_menus(self) -> None:
+        """Builds the File-only menu bar for the viewer."""
+        file_menu = self.menuBar().addMenu("&File")
+
+        load_action = file_menu.addAction("&Load recording")
+        load_action.setShortcut("Ctrl+L")
+        load_action.triggered.connect(self._load_recording)
+
     def _load_recording(self) -> None:
         """Displays a file dialog that allows users to select a new recording to visualize."""
-        # Defaults the file dialog to the parent of the currently loaded recording's output directory,
-        # so the user can easily navigate to a sibling recording.
-        start_dir = ""
+        # Defaults the file dialog to the parent of the currently loaded recording's output
+        # directory, so the user can easily navigate to a sibling recording.
+        start_directory = ""
         output = self.data.output_path
         if output is not None:
             parent = output.parent
             if parent.is_dir():
-                start_dir = str(parent)
-        directory = QFileDialog.getExistingDirectory(self, "Specify the recording directory to open.", start_dir)
-        if directory:
-            data = SingleDayData.from_data(root_path=Path(directory), view_index=0)
-            self.load_data(data=data)
+                start_directory = str(parent)
 
-    def _on_plane_changed(self, index: int) -> None:
-        """Handles plane selector index changes by switching to the selected plane.
-
-        Args:
-            index: The index of the recording's plane to switch to.
-        """
-        if index < 0:
+        directory = QFileDialog.getExistingDirectory(self, "Specify the recording directory to load.", start_directory)
+        if not directory:
             return
-        self.data.switch_view(view_index=index)
-        self._open_plane()
-        self.plane_changed.emit(index)
 
-    def _open_plane(self) -> None:
-        """Configures views for the current plane's data."""
-        self._setup_views()
+        recording_path = Path(directory)
+        console.echo(message=f"Loading recording: {recording_path}")
+
+        try:
+            data = SingleDayData.from_data(root_path=recording_path, view_index=-1)
+        except Exception:
+            console.echo(message="Unable to load recording data.", level=LogLevel.ERROR)
+            result = QMessageBox.question(
+                self,
+                "ERROR",
+                "Unable to load recording. Try another directory?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if result == QMessageBox.StandardButton.Yes:
+                self._load_recording()
+            return
+
+        self.load_data(data=data)
+        self.recording_changed.emit()
 
     def _setup_views(self) -> None:
-        """Configures all plot views and display parameters after loading data."""
+        """Configures all plot views and display parameters for the stitched multi-plane display."""
         self._shift_plot.clear()
         self._shift_plot.disableAutoRange()
 
-        # Computes dynamic range from subsampled frames.
-        plane_binary = self.data.channel_1_binary
-        frames = plane_binary.subsample_movie(sample_count=BINARY_CONFIG.subsample_frame_count)
-        frame_mean = np.float32(frames.mean())
-        frame_std = np.float32(frames.std())
+        # Computes dynamic range from subsampled per-plane frames, avoiding zero-border bias from stitched frames.
+        all_frames = np.concatenate(
+            [
+                binary.subsample_movie(sample_count=BINARY_CONFIG.subsample_frame_count)
+                for binary in self.data.combined_binary.files
+            ]
+        )
+        frame_mean = np.float32(all_frames.mean())
+        frame_std = np.float32(all_frames.std())
         self._display_range = frame_mean + frame_std * np.array(
             [-BINARY_CONFIG.display_range_low_sigma, BINARY_CONFIG.display_range_high_sigma], dtype=np.float32
         )
-
-        self._movie_label.setText(f"Current Path: {self.data.recording_label}")
 
         # Loads aspect ratio from recording data.
         self._main_view_box.setAspectLocked(lock=True, ratio=self.data.aspect_ratio)
@@ -311,28 +296,33 @@ class BinaryPlayer(QMainWindow):
             self._update_frame_slider()
             self._update_buttons()
 
-        # Plots registration X-Y offsets. Explicit x values ensure the frame axis maps correctly.
-        rigid_y = self.data.rigid_y_offsets
-        rigid_x = self.data.rigid_x_offsets
+        # Plots per-plane registration X-Y offsets with distinct colors per plane.
+        plane_count = self.data.plane_count
+        shift_min = 0
+        shift_max = 0
         x_values = np.arange(frame_count)
-        self._shift_plot.plot(x_values, rigid_y, pen=COLORS.green, name="Y")
-        self._shift_plot.plot(x_values, rigid_x, pen=COLORS.gold, name="X")
-        shift_min = min(int(rigid_y.min()), int(rigid_x.min()))
-        shift_max = max(int(rigid_y.max()), int(rigid_x.max()))
+        for plane_index in range(plane_count):
+            rigid_y, rigid_x = self.data.plane_rigid_offsets(plane_index)
+            color = pg.intColor(plane_index, hues=max(plane_count, 2))
+            self._shift_plot.plot(x_values, rigid_y, pen=pg.mkPen(color), name=f"P{plane_index} Y")
+            self._shift_plot.plot(
+                x_values,
+                rigid_x,
+                pen=pg.mkPen(color, style=QtCore.Qt.PenStyle.DashLine),
+                name=f"P{plane_index} X",
+            )
+            shift_min = min(shift_min, int(rigid_y.min()), int(rigid_x.min()))
+            shift_max = max(shift_max, int(rigid_y.max()), int(rigid_x.max()))
         if shift_min == shift_max:
             shift_min -= 1
             shift_max += 1
         shift_max += int((shift_max - shift_min) * PLOT_STYLE.legend_headroom)
+        add_plot_legend(self._shift_plot, column_count=min(plane_count * 2, BINARY_STYLE.legend_column_count))
         self._shift_plot.setLimits(xMin=0, xMax=last_frame)
         self._shift_plot.setRange(xRange=(0, last_frame), yRange=(shift_min, shift_max), padding=0.0)
         self._shift_scatter = pg.ScatterPlotItem()
         self._shift_plot.addItem(self._shift_scatter)
-        self._shift_scatter.setData(
-            [0, 0],
-            [int(rigid_y[0]), int(rigid_x[0])],
-            size=PLOT_STYLE.scatter_point_size,
-            brush=pg.mkBrush(*COLORS.red),
-        )
+        self._update_shift_scatter(0)
 
         self._channel_2_button.setEnabled(self.data.two_channels)
         self._channel_2_button.setStyleSheet(
@@ -342,6 +332,25 @@ class BinaryPlayer(QMainWindow):
         self._current_frame = -1
         self._next_frame()
 
+    def _update_shift_scatter(self, frame_index: int) -> None:
+        """Updates the scatter overlay on the shift plot to mark the given frame across all planes.
+
+        Args:
+            frame_index: The frame index to highlight on the offset plot.
+        """
+        x_positions: list[int] = []
+        y_positions: list[int] = []
+        for plane_index in range(self.data.plane_count):
+            rigid_y, rigid_x = self.data.plane_rigid_offsets(plane_index)
+            x_positions.extend([frame_index, frame_index])
+            y_positions.extend([int(rigid_y[frame_index]), int(rigid_x[frame_index])])
+        self._shift_scatter.setData(
+            x_positions,
+            y_positions,
+            size=PLOT_STYLE.scatter_point_size,
+            brush=pg.mkBrush(*COLORS.red),
+        )
+
     def _next_frame(self) -> None:
         """Advances to the next frame and updates all display elements."""
         # Advances frame index, wrapping back to zero at the end of the recording.
@@ -350,15 +359,13 @@ class BinaryPlayer(QMainWindow):
         if self._current_frame > frame_count - 1:
             self._current_frame = 0
 
-        # Reads the current frame from the registered binary.
-        plane_binary = self.data.channel_1_binary
-        self._image = np.asarray(plane_binary[self._current_frame])
+        # Reads the current stitched frame combining all planes.
+        self._image = np.asarray(self.data.read_stitched_frame(self._current_frame))
 
         # If channel 2 overlay is active, composites both channels into an RGB image with channel 1 in
         # the red plane and channel 2 in the green plane.
         if self.data.two_channels and self._channel_2_visible:
-            plane_binary_channel_2 = self.data.channel_2_binary
-            channel_2_frame = np.asarray(plane_binary_channel_2[self._current_frame])[:, :, np.newaxis]
+            channel_2_frame = np.asarray(self.data.read_stitched_frame_channel_2(self._current_frame))[:, :, np.newaxis]
             self._image = np.concatenate(
                 (self._image[:, :, np.newaxis], channel_2_frame, np.zeros_like(channel_2_frame)),
                 axis=-1,
@@ -369,15 +376,8 @@ class BinaryPlayer(QMainWindow):
         self._frame_slider.setValue(self._current_frame)
         self._frame_number_label.setText(f"Current frame: {self._current_frame}")
 
-        # Moves the red dot indicator on the rigid registration offset plot to the current frame.
-        rigid_y = self.data.rigid_y_offsets
-        rigid_x = self.data.rigid_x_offsets
-        self._shift_scatter.setData(
-            [self._current_frame, self._current_frame],
-            [int(rigid_y[self._current_frame]), int(rigid_x[self._current_frame])],
-            size=PLOT_STYLE.scatter_point_size,
-            brush=pg.mkBrush(*COLORS.red),
-        )
+        # Moves the red dot indicators on the rigid registration offset plot to the current frame.
+        self._update_shift_scatter(self._current_frame)
 
     def _go_to_frame(self) -> None:
         """Seeks to the frame indicated by the frame slider position.

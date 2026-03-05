@@ -231,7 +231,7 @@ cindra/
 ```python
 {
     "session_paths": ["/path/session1", "/path/session2", ...],  # Required, minimum 1
-    "config_path": "/path/to/config.yaml",  # Required
+    "configuration_path": "/path/to/config.yaml",  # Required
     "workers_per_plane": -1,    # Optional, -1 for automatic (max 30)
     "max_parallel_planes": -1   # Optional, -1 for automatic
 }
@@ -427,7 +427,7 @@ The system automatically calculates optimal resource allocation:
 | Error Message                           | Cause                    | Resolution                        |
 |-----------------------------------------|--------------------------|-----------------------------------|
 | "At least one session path is required" | Empty session_paths list | Provide at least one session path |
-| "Configuration file not found"          | Invalid config_path      | Generate or verify configuration  |
+| "Configuration file not found"          | Invalid configuration_path | Generate or verify configuration  |
 | "Session directory not found"           | Invalid path for session | Verify path exists                |
 | "Batch processing already in progress"  | Batch already running    | Wait for current batch to complete|
 
