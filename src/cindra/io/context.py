@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
 from ..dataclasses import (
@@ -20,6 +19,10 @@ from ..dataclasses import (
     MultiDayRuntimeContext,
     SingleDayConfiguration,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 _PARAMETERS_FILENAME: str = "cindra_parameters.json"
 """The name of the acquisition parameters JSON file expected in each session's data directory."""
@@ -59,59 +62,6 @@ def find_data_directory(data_path: Path) -> Path:
         console.error(message=message, error=FileNotFoundError)
 
     return parameter_files[0].parent
-
-
-def discover_recordings(root_directory: Path) -> list[Path]:
-    """Discovers session root directories by searching for acquisition parameter marker files.
-
-    Recursively searches the root directory for ``cindra_parameters.json``. For each marker file found, derives the
-    session root directory by identifying the unique path component (e.g., the session timestamp) and truncating the
-    path at that component.
-
-    Args:
-        root_directory: The root directory to search for recording sessions.
-
-    Returns:
-        A naturally sorted list of unique recording session root Path objects. Returns an empty list if no sessions
-        are found.
-    """
-    if not root_directory.is_dir():
-        message = (
-            f"Unable to discover recordings. The value provided as the 'root_directory' argument is not a "
-            f"directory: {root_directory}"
-        )
-        console.error(message=message, error=ValueError)
-
-    parameter_files = list(root_directory.rglob(_PARAMETERS_FILENAME))
-
-    if not parameter_files:
-        console.echo(message=f"No recording sessions found under: {root_directory}.", level=LogLevel.WARNING)
-        return []
-
-    # Extracts the unique path component for each marker file's parent directory. The unique component identifies the
-    # session (e.g., a timestamp directory). The session root is then the path truncated at that component.
-    marker_parents = [f.parent for f in parameter_files]
-    unique_components = extract_unique_components(paths=marker_parents)
-
-    # Derives session roots by truncating each marker parent path at the unique component.
-    session_roots: list[Path] = []
-    for parent, component in zip(marker_parents, unique_components, strict=True):
-        # Finds the index of the unique component in the path parts and truncates at (including) that component.
-        parts = parent.parts
-        component_index = parts.index(component)
-        session_root = Path(*parts[: component_index + 1])
-        if session_root not in session_roots:
-            session_roots.append(session_root)
-
-    # Natural-sorts the results for consistent ordering.
-    sorted_roots: list[Path] = list(natsorted(session_roots))
-
-    console.echo(
-        message=f"Discovered {len(sorted_roots)} recording session(s) under: {root_directory}.",
-        level=LogLevel.SUCCESS,
-    )
-
-    return sorted_roots
 
 
 def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[RuntimeContext]:

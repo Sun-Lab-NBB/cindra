@@ -10,6 +10,7 @@ import pyqtgraph as pg  # type: ignore[import-untyped]
 from PySide6.QtWidgets import (
     QLabel,
     QWidget,
+    QComboBox,
     QLineEdit,
     QGridLayout,
     QHBoxLayout,
@@ -54,6 +55,7 @@ class PCViewer(QMainWindow):
         _merged_image: Image item for the merged PC overlay display.
         _animated_image: Image item for the animated PC extreme display.
         _projection_plot: Plot widget for the PC time-course projection.
+        _plane_selector: Dropdown for selecting the imaging plane.
         _pc_edit: Input field for the current principal component number.
         _metric_labels: Labels displaying per-PC registration shift values.
         _title_labels: Text items anchored inside each image view box, positioned at the bottom center.
@@ -92,11 +94,24 @@ class PCViewer(QMainWindow):
         self._metrics_y_range: tuple[float, float] = (0.0, 1.0)
         self._projection_y_range: tuple[float, float] = (0.0, 1.0)
 
-        # Row 0: Graphics widget spans the full width. Row stretch gives it all available vertical space.
+        # Row 0: Toolbar with plane selector.
+        toolbar = QHBoxLayout()
+        plane_label = QLabel("Plane:")
+        plane_label.setStyleSheet(STYLE.white_label)
+        self._plane_selector: QComboBox = QComboBox(self)
+        self._plane_selector.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._plane_selector.setEnabled(False)
+        self._plane_selector.currentIndexChanged.connect(self._on_plane_changed)
+        toolbar.addWidget(plane_label)
+        toolbar.addWidget(self._plane_selector)
+        toolbar.addStretch()
+        self._layout.addLayout(toolbar, 0, 0, 1, 1)
+
+        # Row 1: Graphics widget spans the full width. Row stretch gives it all available vertical space.
         self._graphics_widget: pg.GraphicsLayoutWidget = pg.GraphicsLayoutWidget()
-        self._layout.addWidget(self._graphics_widget, 0, 0, 1, 1)
-        self._layout.setRowStretch(0, 1)
-        self._layout.setRowStretch(1, 0)
+        self._layout.addWidget(self._graphics_widget, 1, 0, 1, 1)
+        self._layout.setRowStretch(1, 1)
+        self._layout.setRowStretch(2, 0)
 
         # Configures pixel shift metrics plot. Top content margin provides space for the legend row.
         # noinspection PyUnresolvedReferences
@@ -169,14 +184,46 @@ class PCViewer(QMainWindow):
     def load_data(self, data: SingleDayData) -> None:
         """Loads principal component registration data from the SingleDayData instance.
 
+        Populates the plane selector from the recording's view labels and switches to the appropriate plane before
+        loading PC data.
+
         Args:
             data: The SingleDayData instance that stores the visualized recording's data.
         """
-        # Extracts PC arrays from the recording data.
         self.data = data
-        pc_images = data.principal_component_extreme_images
-        pc_metrics = data.principal_component_shift_metrics
-        pc_projections = data.principal_component_projections
+
+        # Populates the plane selector without triggering _on_plane_changed yet.
+        self._plane_selector.blockSignals(True)
+        self._plane_selector.clear()
+        for label in data.view_labels[1:]:
+            self._plane_selector.addItem(label)
+        self._plane_selector.setCurrentIndex(max(0, data.view_index))
+        self._plane_selector.blockSignals(False)
+        self._plane_selector.setEnabled(data.plane_count > 1)
+
+        # Ensures the data points at a valid per-plane view for PC metric access.
+        data.switch_view(view_index=max(0, data.view_index))
+
+        self._reload_pc_data()
+
+    def _on_plane_changed(self, index: int) -> None:
+        """Handles plane selector index changes by switching to the selected plane.
+
+        Args:
+            index: The index of the recording's plane to switch to.
+        """
+        if index < 0:
+            return
+        self.data.switch_view(view_index=index)
+        self._reload_pc_data()
+
+    def _reload_pc_data(self) -> None:
+        """Loads and renders PC registration data for the currently selected plane."""
+        # Updates the window title to reflect the loaded recording path.
+        self.setWindowTitle(f"Registration Quality Metrics — {self.data.recording_label}")
+        pc_images = self.data.principal_component_extreme_images
+        pc_metrics = self.data.principal_component_shift_metrics
+        pc_projections = self.data.principal_component_projections
 
         # Aborts if the recording has no PC registration metrics (e.g. registration was skipped).
         if pc_images is None or pc_metrics is None:
@@ -294,7 +341,7 @@ class PCViewer(QMainWindow):
         # Trailing stretch absorbs extra horizontal space so widgets stay at their natural size.
         panel.addStretch()
 
-        self._layout.addLayout(panel, 1, 0)
+        self._layout.addLayout(panel, 2, 0)
 
     def _start_animation(self) -> None:
         """Starts PC animation playback."""

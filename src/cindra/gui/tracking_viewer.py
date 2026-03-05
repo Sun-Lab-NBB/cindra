@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from pathlib import Path
 
 import numpy as np
 from PySide6 import QtGui, QtCore
@@ -16,14 +17,17 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QLineEdit,
     QStatusBar,
+    QFileDialog,
     QHBoxLayout,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
 )
 from matplotlib.colors import hsv_to_rgb
+from ataraxis_base_utilities import LogLevel, console
 
 from .styles import STYLE, TRACKING_STYLE
 from .widgets import create_play_pause_group
@@ -36,7 +40,7 @@ from .constants import (
     CoordinateSpace,
     BackgroundViewLabel,
 )
-from .viewer_context import EMPTY
+from .viewer_context import EMPTY, ViewerData
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -44,7 +48,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from ..dataclasses import ROIMask, ROIStatistics
-    from .viewer_context import ViewerData, MultiDayData
+    from .viewer_context import MultiDayData
 
 
 class TrackingViewer(QMainWindow):
@@ -56,6 +60,36 @@ class TrackingViewer(QMainWindow):
 
     Args:
         data: The preloaded tracking data to display on startup.
+
+    Attributes:
+        data: The ViewerData instance that stores the visualized dataset's data.
+        _auto_cycle_timer: Timer driving automatic recording cycling.
+        _cached_background: Normalized background image cache, or None.
+        _cached_mask_y: Cached Y pixel coordinates for all valid mask pixels, or None.
+        _cached_mask_x: Cached X pixel coordinates for all valid mask pixels, or None.
+        _cached_mask_colors: Cached per-pixel RGB colors for all valid mask pixels, or None.
+        _cached_mask_roi_indices: Cached per-pixel ROI index for all valid mask pixels, or None.
+        _cached_roi_map: ROI ownership map for O(1) click-to-ROI lookup, or None.
+        _cached_mask_count: Number of masks in the current layer.
+        _selected_rois: Set of selected ROI indices, or None when all ROIs are visible.
+        _selection_was_template: Determines whether the last valid selection used a template-group layer.
+        _selection_recording_index: Recording index when the selection was last valid.
+        _graphics_widget: PyQtGraph graphics layout for image display.
+        _view_box: View box for the primary image display.
+        _image_item: Image item for the composited background and mask display.
+        _status_bar: Status bar displaying recording info and selection state.
+        _dataset_combo: Dropdown for selecting the active multi-day dataset.
+        _recording_combo: Dropdown for selecting the active recording.
+        _skip_backward_button: Button for navigating to the previous recording.
+        _play_button: Button to start automatic recording cycling.
+        _pause_button: Button to stop automatic recording cycling.
+        _skip_forward_button: Button for navigating to the next recording.
+        _background_combo: Dropdown for selecting the background image type.
+        _space_combo: Dropdown for selecting the coordinate space.
+        _mask_combo: Dropdown for selecting the mask layer.
+        _opacity_slider: Slider for adjusting mask overlay opacity.
+        _channel_2_checkbox: Toggle button for channel 2 overlay display.
+        _roi_edit: Read-only input field displaying the index of the last clicked ROI.
     """
 
     def __init__(self, data: ViewerData) -> None:
@@ -103,6 +137,9 @@ class TrackingViewer(QMainWindow):
         # noinspection PyUnresolvedReferences
         self._graphics_widget.scene().sigMouseClicked.connect(self._on_image_clicked)
 
+        # File menu.
+        self._build_menus()
+
         # Control panel (right sidebar).
         control_panel = self._build_control_panel()
         main_layout.addWidget(control_panel, stretch=1)
@@ -148,6 +185,9 @@ class TrackingViewer(QMainWindow):
         self._channel_2_checkbox.setEnabled(has_channel_2)
         self._channel_2_checkbox.setStyleSheet(STYLE.button_unpressed if has_channel_2 else STYLE.button_inactive)
 
+        # Updates the window title to reflect the active dataset.
+        self.setWindowTitle(f"Multi-Day ROI Tracking — {data.dataset_name}")
+
         self._refresh_display()
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
@@ -169,6 +209,47 @@ class TrackingViewer(QMainWindow):
                 self._start_cycling()
             else:
                 self._stop_cycling()
+
+    def _build_menus(self) -> None:
+        """Builds the File-only menu bar for the viewer."""
+        file_menu = self.menuBar().addMenu("&File")
+
+        load_action = file_menu.addAction("&Load recording")
+        load_action.setShortcut("Ctrl+L")
+        load_action.triggered.connect(self._load_recording)
+
+    def _load_recording(self) -> None:
+        """Displays a file dialog that allows users to select a new recording to visualize."""
+        # Defaults the file dialog to the parent of the currently loaded recording's output
+        # directory, so the user can easily navigate to a sibling recording.
+        start_directory = ""
+        output = self.data.single_day.output_path
+        parent = output.parent
+        if parent.is_dir():
+            start_directory = str(parent)
+
+        directory = QFileDialog.getExistingDirectory(self, "Open cindra output directory", start_directory)
+        if not directory:
+            return
+
+        recording_path = Path(directory)
+        console.echo(message=f"Loading recording: {recording_path}")
+
+        try:
+            data = ViewerData.from_data(root_path=recording_path)
+        except Exception:
+            console.echo(message="Unable to load recording data.", level=LogLevel.ERROR)
+            result = QMessageBox.question(
+                self,
+                "ERROR",
+                "Unable to load recording. Try another directory?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if result == QMessageBox.StandardButton.Yes:
+                self._load_recording()
+            return
+
+        self.load_data(data=data)
 
     def _build_control_panel(self) -> QWidget:
         """Constructs the right-side control panel with all viewer controls.

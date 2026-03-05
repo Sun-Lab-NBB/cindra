@@ -27,7 +27,7 @@ def cindra_gui() -> None:
     "-s",
     "--session-path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    default=None,
+    required=True,
     help="Path to a cindra output directory to load on startup.",
 )
 @click.option(
@@ -37,7 +37,7 @@ def cindra_gui() -> None:
     default=None,
     help="Multi-day dataset name to load. Defaults to the first available dataset.",
 )
-def gui_roi(session_path: Path | None, dataset: str | None) -> None:
+def gui_roi(session_path: Path, dataset: str | None) -> None:
     """Launches the ROI viewer for single-day pipeline output."""
     run_roi_viewer(session_path=session_path, dataset=dataset)
 
