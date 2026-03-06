@@ -279,6 +279,15 @@ class PCViewer(QMainWindow):
                 pc_number = min(pc_number + 1, self._pc_count)
                 self._pc_edit.setText(str(pc_number))
                 self._plot_frame()
+            # Up/down arrow keys cycle through imaging planes.
+            elif event.key() == QtCore.Qt.Key.Key_Up:
+                index = self._plane_selector.currentIndex()
+                if index > 0:
+                    self._plane_selector.setCurrentIndex(index - 1)
+            elif event.key() == QtCore.Qt.Key.Key_Down:
+                index = self._plane_selector.currentIndex()
+                if index < self._plane_selector.count() - 1:
+                    self._plane_selector.setCurrentIndex(index + 1)
             # Spacebar toggles between play and pause for the PC extreme image animation.
             elif event.key() == QtCore.Qt.Key.Key_Space:
                 if self._play_button.isEnabled():

@@ -109,14 +109,15 @@ class SingleDayData:
         else:
             self._combined_binary_channel_2 = None
 
-        # Memory-maps combined extraction data.
-        combined_output = self._contexts[0].configuration.file_io.output_path
+        # Memory-maps combined extraction data. Derives the cindra output root from the first available plane output
+        # path, which is always corrected for relocated datasets by RuntimeContext.load().
+        combined_output = self._contexts[0].runtime.io.output_path
         if combined_output is None:
             message = (
-                "Unable to load combined trace arrays. The output path is not set in the recording's single-day "
-                "configuration data."
+                "Unable to load combined trace arrays. The output path is not set in the plane's IO data."
             )
             console.error(message=message, error=FileNotFoundError)
+        combined_output = combined_output.parent
         self._combined.extraction.memory_map_arrays(combined_output)
         self._combined.extraction.memory_map_results(combined_output)
 
@@ -489,15 +490,15 @@ class SingleDayData:
 
     @property
     def output_path(self) -> Path:
-        """Returns the output directory path from the first plane's configuration."""
-        value = self._contexts[0].configuration.file_io.output_path
+        """Returns the cindra output directory path derived from the first plane's runtime IO data."""
+        value = self._contexts[0].runtime.io.output_path
         if value is None:
             console.error(
                 message="Unable to retrieve the output path for the single-day recording. The pipeline "
                 "data is incomplete or corrupt.",
                 error=RuntimeError,
             )
-        return value
+        return value.parent
 
     @property
     def valid_y_range(self) -> tuple[int, int]:
@@ -570,7 +571,8 @@ class SingleDayData:
         trace arrays are memory-mapped from disk at initialization.
 
         Args:
-            root_path: Root cindra output directory containing configuration.yaml.
+            root_path: The path to the session's root processed data directory. The method searches recursively for the
+                cindra output directory via ``RuntimeContext.load()``.
             view_index: The initial view index. -1 selects the combined view, 0+ selects a per-plane view.
 
         Returns:
@@ -580,16 +582,27 @@ class SingleDayData:
         if not isinstance(contexts, list):
             contexts = [contexts]
 
-        # Explicitly memory-maps per-plane arrays since context resolution no longer loads them eagerly.
+        # Explicitly memory-maps per-plane arrays since context resolution no longer loads them eagerly. Also resolves
+        # the cindra output root from the first available plane output path, since RuntimeContext.load() already
+        # searched root_path recursively for the output directory.
+        cindra_root: Path | None = None
         for context in contexts:
             plane_output = context.runtime.io.output_path
             if plane_output is not None:
+                if cindra_root is None:
+                    cindra_root = plane_output.parent
                 context.runtime.registration.memory_map_arrays(plane_output)
                 context.runtime.detection.memory_map_arrays(plane_output)
                 context.runtime.extraction.memory_map_arrays(plane_output)
 
-        combined = CombinedData.load(root_path=root_path)
-        combined.detection.load_arrays(root_path)
+        if cindra_root is None:
+            message = (
+                "Unable to load single-day data. No plane output path was found in any loaded RuntimeContext."
+            )
+            console.error(message=message, error=FileNotFoundError)
+
+        combined = CombinedData.load(root_path=cindra_root)
+        combined.detection.load_arrays(cindra_root)
         return cls(_contexts=contexts, _combined=combined, _view_index=view_index)
 
     @property
