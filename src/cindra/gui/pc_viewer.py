@@ -104,6 +104,10 @@ class PCViewer(QMainWindow):
         self._plane_selector.currentIndexChanged.connect(self._on_plane_changed)
         toolbar.addWidget(plane_label)
         toolbar.addWidget(self._plane_selector)
+        hint_label = QLabel("Hint: Use arrows to navigate planes / PCs, use space to toggle top / bottom PC image cycling.")
+        hint_label.setStyleSheet(STYLE.white_label)
+        hint_label.setFont(FONTS.small_bold)
+        toolbar.addWidget(hint_label)
         toolbar.addStretch()
         self._layout.addLayout(toolbar, 0, 0, 1, 1)
 
@@ -296,6 +300,17 @@ class PCViewer(QMainWindow):
                 else:
                     self._pause_animation()
 
+    def eventFilter(self, source: QtCore.QObject, event: QtCore.QEvent) -> bool:  # noqa: N802
+        """Returns focus to the main window when Escape is pressed inside an edit field.
+
+        Notes:
+            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
+        """
+        if event.type() == QtCore.QEvent.Type.KeyPress and event.key() == QtCore.Qt.Key.Key_Escape:
+            self.setFocus()
+            return True
+        return super().eventFilter(source, event)
+
     def _create_bottom_panel(self) -> None:
         """Creates the bottom control panel with the PC selector, metric labels, and playback controls.
 
@@ -318,7 +333,9 @@ class PCViewer(QMainWindow):
         self._pc_edit.setFont(big_font)
         self._pc_edit.setToolTip("Principal component number (Left/Right arrow keys to step).")
         self._pc_edit.returnPressed.connect(self._plot_frame)
+        self._pc_edit.returnPressed.connect(lambda: self.setFocus())
         self._pc_edit.textEdited.connect(self._pause_animation)
+        self._pc_edit.installEventFilter(self)
         panel.addWidget(pc_label)
         panel.addWidget(self._pc_edit)
         panel.addSpacing(group_spacing)
@@ -459,6 +476,8 @@ class PCViewer(QMainWindow):
 
         self.show()
         self._zoom_plot()
+        # Defers a second zoom call so the ViewBoxes recalculate after Qt finalizes the window geometry.
+        QtCore.QTimer.singleShot(0, self._zoom_plot)
 
     def _zoom_plot(self) -> None:
         """Resets all PC image view ranges to fit the full image extent plus a title gutter."""

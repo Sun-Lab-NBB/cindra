@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from PySide6 import QtCore
 from PySide6.QtWidgets import QApplication
-from ataraxis_base_utilities import console
+from ataraxis_base_utilities import LogLevel, console
 
 from .styles import FONTS, PC_STYLE, BINARY_STYLE
 from .pc_viewer import PCViewer
@@ -68,6 +68,7 @@ def run_registration_viewer(recording_path: Path) -> None:
     """
     # Reuses the existing QApplication if one is already running (e.g. when embedded in a larger
     # GUI), otherwise creates a new one.
+    console.echo(message="Initializing the Registration GUI...")
     application = QApplication.instance()
     owns_application = application is None
     if owns_application:
@@ -82,7 +83,9 @@ def run_registration_viewer(recording_path: Path) -> None:
     pc_data.switch_view(view_index=0)
 
     # Creates both viewer windows with independent SingleDayData copies.
+    console.echo(message="Initializing Registered Recording viewer...")
     binary_player = BinaryPlayer(data=data)
+    console.echo(message="Initializing Registration Quality Metrics viewer...")
     pc_viewer = PCViewer(data=pc_data)
 
     # Computes screen-adaptive window positions. On large screens the two viewers sit side by side;
@@ -135,6 +138,7 @@ def run_registration_viewer(recording_path: Path) -> None:
 
     binary_player.show()
     pc_viewer.show()
+    console.echo(message="Registration viewers: ready.", level=LogLevel.SUCCESS)
 
     # Only enters the event loop if this function created the QApplication. When embedded in a
     # larger GUI, the caller is responsible for running the event loop.

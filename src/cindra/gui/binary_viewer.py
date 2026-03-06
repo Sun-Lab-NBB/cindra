@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QSlider,
     QWidget,
+    QLineEdit,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -56,6 +57,7 @@ class BinaryPlayer(QMainWindow):
         _average_rigid_y_offsets: Average rigid Y offsets across all planes.
         _average_rigid_x_offsets: Average rigid X offsets across all planes.
 
+        _step_edit: Input field for the frame step size.
         _frame_number_label: Label displaying the current frame number.
         _frame_slider: Horizontal slider for frame navigation.
         _play_button: Button to start video playback.
@@ -83,7 +85,7 @@ class BinaryPlayer(QMainWindow):
 
         # Initializes playback state.
         self._current_frame: int = 0
-        self._frame_delta: int = 10
+        self._frame_delta: int = 100
         self._display_range: NDArray[np.float32] = np.zeros((2,), dtype=np.float32)
         self._time_step: float = 0.0
         self._image: NDArray[np.int16] | None = None
@@ -112,7 +114,14 @@ class BinaryPlayer(QMainWindow):
         self._channel_2_button.clicked.connect(self._toggle_channel_2)
         toolbar.addWidget(self._channel_2_button)
 
-        # Trailing stretch absorbs extra horizontal space so widgets stay at their natural size.
+        # Hint label for keyboard shortcuts.
+        hint_label = QLabel(
+            "Hint: Use arrows to navigate recording's frames / adjust frame step size,"
+            " use space to toggle recording playback."
+        )
+        hint_label.setStyleSheet(STYLE.white_label)
+        hint_label.setFont(FONTS.small_bold)
+        toolbar.addWidget(hint_label)
         toolbar.addStretch()
         self._layout.addLayout(toolbar, 0, 0, 1, 6)
 
@@ -144,14 +153,35 @@ class BinaryPlayer(QMainWindow):
         self._graphics_widget.ci.layout.setRowStretchFactor(0, BINARY_STYLE.image_plot_stretch[0])
         self._graphics_widget.ci.layout.setRowStretchFactor(1, BINARY_STYLE.image_plot_stretch[1])
 
-        # Row 2: Current frame label.
+        # Row 2: Frame navigation step editor and current frame label.
+        info_bar = QHBoxLayout()
+        bold_font = FONTS.large_bold
+        big_font = FONTS.large
+        step_label = QLabel("Frame Navigation Step:")
+        step_label.setFont(bold_font)
+        step_label.setStyleSheet(STYLE.white_label)
+        self._step_edit: QLineEdit = QLineEdit(self)
+        self._step_edit.setText(str(self._frame_delta))
+        self._step_edit.setFixedWidth(STYLE.edit_width)
+        self._step_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+        self._step_edit.setFont(big_font)
+        self._step_edit.setValidator(QtGui.QIntValidator(1, 10000))
+        self._step_edit.returnPressed.connect(self._apply_step)
+        self._step_edit.returnPressed.connect(lambda: self.setFocus())
+        self._step_edit.installEventFilter(self)
+        info_bar.addWidget(step_label)
+        info_bar.addWidget(self._step_edit)
+        info_bar.addSpacing(20)
         self._frame_number_label: QLabel = QLabel("Current frame: 0")
         self._frame_number_label.setStyleSheet(STYLE.white_label)
-        self._layout.addWidget(self._frame_number_label, 2, 0, 1, 6)
+        info_bar.addWidget(self._frame_number_label)
+        info_bar.addStretch()
+        self._layout.addLayout(info_bar, 2, 0, 1, 6)
 
         # Row 3: Playback controls and frame slider.
         self._create_buttons()
         self._frame_slider: QSlider = QSlider(QtCore.Qt.Orientation.Horizontal)
+        self._frame_slider.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self._frame_slider.setTickInterval(BINARY_CONFIG.frame_slider_tick_interval)
         self._frame_slider.setTracking(False)
         self._frame_slider.valueChanged.connect(self._go_to_frame)
@@ -201,12 +231,34 @@ class BinaryPlayer(QMainWindow):
                 self._current_frame = max(0, min(self.data.frame_count - 1, self._current_frame))
                 self._frame_slider.setValue(self._current_frame)
 
+        # Up/down arrow keys adjust the frame step size.
+        if event.modifiers() != QtCore.Qt.KeyboardModifier.ShiftModifier:
+            if event.key() == QtCore.Qt.Key.Key_Up:
+                self._frame_delta = min(self._frame_delta + 1, 10000)
+                self._step_edit.setText(str(self._frame_delta))
+                self._frame_slider.setSingleStep(self._frame_delta)
+            elif event.key() == QtCore.Qt.Key.Key_Down:
+                self._frame_delta = max(self._frame_delta - 1, 1)
+                self._step_edit.setText(str(self._frame_delta))
+                self._frame_slider.setSingleStep(self._frame_delta)
+
         # Spacebar toggles between play and pause.
         if event.modifiers() != QtCore.Qt.KeyboardModifier.ShiftModifier and event.key() == QtCore.Qt.Key.Key_Space:
             if self._play_button.isEnabled():
                 self._start_playback()
             else:
                 self._pause_playback()
+
+    def eventFilter(self, source: QtCore.QObject, event: QtCore.QEvent) -> bool:  # noqa: N802
+        """Returns focus to the main window when Escape is pressed inside an edit field.
+
+        Notes:
+            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
+        """
+        if event.type() == QtCore.QEvent.Type.KeyPress and event.key() == QtCore.Qt.Key.Key_Escape:
+            self.setFocus()
+            return True
+        return super().eventFilter(source, event)
 
     def _create_buttons(self) -> None:
         """Creates and lays out playback control buttons for the player window."""
@@ -236,6 +288,13 @@ class BinaryPlayer(QMainWindow):
         self._pause_button.setEnabled(False)
         self._pause_button.setChecked(True)
 
+    def _apply_step(self) -> None:
+        """Applies the frame step size from the step edit field to the frame delta and slider."""
+        text = self._step_edit.text()
+        if text:
+            self._frame_delta = max(1, int(text))
+            self._frame_slider.setSingleStep(self._frame_delta)
+
     def _load_recording(self) -> None:
         """Displays a file dialog that allows users to select a new recording to visualize."""
         # Defaults the file dialog to the parent of the currently loaded recording's output
@@ -252,8 +311,6 @@ class BinaryPlayer(QMainWindow):
             return
 
         recording_path = Path(directory)
-        console.echo(message=f"Loading recording: {recording_path}")
-
         try:
             data = SingleDayData.from_data(root_path=recording_path, view_index=-1)
         except Exception:
@@ -297,7 +354,8 @@ class BinaryPlayer(QMainWindow):
         frame_count = self.data.frame_count
         last_frame = frame_count - 1
         self._time_step = 1.0 / self.data.sampling_rate * 1000 / BINARY_CONFIG.playback_speed_multiplier
-        self._frame_delta = max(BINARY_CONFIG.minimum_frame_delta, int(frame_count / BINARY_CONFIG.frame_delta_divisor))
+        self._frame_delta = min(BINARY_CONFIG.default_frame_delta, max(1, last_frame))
+        self._step_edit.setText(str(self._frame_delta))
         self._frame_slider.setSingleStep(self._frame_delta)
         if frame_count > 0:
             self._update_frame_slider()
@@ -338,8 +396,8 @@ class BinaryPlayer(QMainWindow):
             STYLE.button_unpressed if self.data.two_channels else STYLE.button_inactive
         )
 
-        self._current_frame = -1
-        self._next_frame()
+        self._current_frame = 0
+        self._render_frame()
 
     def _update_shift_scatter(self, frame_index: int) -> None:
         """Updates the scatter overlay on the shift plot to mark the current frame on the average offset curves.
@@ -355,13 +413,15 @@ class BinaryPlayer(QMainWindow):
         )
 
     def _next_frame(self) -> None:
-        """Advances to the next frame and updates all display elements."""
-        # Advances frame index, wrapping back to zero at the end of the recording.
-        self._current_frame += 1
-        frame_count = self.data.frame_count
-        if self._current_frame > frame_count - 1:
+        """Advances to the next frame by the current step size and updates all display elements."""
+        self._current_frame += self._frame_delta
+        last_frame = self.data.frame_count - 1
+        if self._current_frame > last_frame:
             self._current_frame = 0
+        self._render_frame()
 
+    def _render_frame(self) -> None:
+        """Reads and displays the frame at ``_current_frame`` and updates all navigation controls."""
         # Reads the current stitched frame combining all planes.
         self._image = np.asarray(self.data.read_stitched_frame(self._current_frame))
 
@@ -389,15 +449,13 @@ class BinaryPlayer(QMainWindow):
             Serves as a callback target for the position update signal.
         """
         self._current_frame = int(self._frame_slider.value())
-        self._jump_to_frame()
+        self._render_frame()
 
     def _jump_to_frame(self) -> None:
-        """Jumps to the current frame position and displays it."""
+        """Clamps and displays the frame at the current ``_current_frame`` position."""
         if self._play_button.isEnabled():
             self._current_frame = max(0, min(self.data.frame_count - 1, self._current_frame))
-            self._current_frame = int(self._current_frame)
-            self._current_frame -= 1
-            self._next_frame()
+            self._render_frame()
 
     def _start_playback(self) -> None:
         """Starts video playback by enabling the frame update timer."""
