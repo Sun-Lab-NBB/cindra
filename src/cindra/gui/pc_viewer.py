@@ -104,7 +104,9 @@ class PCViewer(QMainWindow):
         self._plane_selector.currentIndexChanged.connect(self._on_plane_changed)
         toolbar.addWidget(plane_label)
         toolbar.addWidget(self._plane_selector)
-        hint_label = QLabel("Hint: Use arrows to navigate planes / PCs, use space to toggle top / bottom PC image cycling.")
+        hint_label = QLabel(
+            "Hint: Use arrows to navigate planes / PCs, use space to toggle top / bottom PC image cycling."
+        )
         hint_label.setStyleSheet(STYLE.white_label)
         hint_label.setFont(FONTS.small_bold)
         toolbar.addWidget(hint_label)
@@ -306,6 +308,7 @@ class PCViewer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
+        # noinspection PyUnresolvedReferences
         if event.type() == QtCore.QEvent.Type.KeyPress and event.key() == QtCore.Qt.Key.Key_Escape:
             self.setFocus()
             return True

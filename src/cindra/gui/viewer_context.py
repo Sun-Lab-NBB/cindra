@@ -113,9 +113,7 @@ class SingleDayData:
         # path, which is always corrected for relocated datasets by RuntimeContext.load().
         combined_output = self._contexts[0].runtime.io.output_path
         if combined_output is None:
-            message = (
-                "Unable to load combined trace arrays. The output path is not set in the plane's IO data."
-            )
+            message = "Unable to load combined trace arrays. The output path is not set in the plane's IO data."
             console.error(message=message, error=FileNotFoundError)
         combined_output = combined_output.parent
         self._combined.extraction.memory_map_arrays(combined_output)
@@ -285,7 +283,7 @@ class SingleDayData:
     def cell_classification(self) -> NDArray[np.float32]:
         """Returns the cell classification array with shape (roi_count, 2) for the current view.
 
-        Column 0 holds classifier probabilities, column 1 holds labels (0.0/1.0). The array is memory-mapped
+        Column 0 holds binary labels (0.0/1.0), column 1 holds classifier probabilities. The array is memory-mapped
         read-write so label modifications propagate directly to disk.
         """
         value = self._current_extraction.cell_classification
@@ -305,18 +303,11 @@ class SingleDayData:
 
     @property
     def cell_colocalization(self) -> NDArray[np.float32]:
-        """Returns the cell colocalization array with shape (roi_count, 2) for the current view.
-
-        Column 0 holds classifier probabilities, column 1 holds labels (0.0/1.0). Read-only memory-mapped.
+        """Returns the cell colocalization array with shape (roi_count, 2) for the current view, or an empty array if
+        colocalization data is unavailable.
         """
         value = self._current_extraction.cell_colocalization
-        if value is None:
-            console.error(
-                message="Unable to retrieve the cell colocalization for the current single-day view. "
-                "The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
-            )
-        return value
+        return value if value is not None else EMPTY
 
     @property
     def mean_image(self) -> NDArray[np.float32]:
@@ -348,8 +339,8 @@ class SingleDayData:
         value = self._current_detection.maximum_projection
         if value is None:
             console.error(
-                message="Unable to retrieve the maximum projection for the current single-day view. The "
-                "pipeline data is incomplete or corrupt.",
+                message="Unable to retrieve the maximum projection for the current single-day view. The pipeline "
+                "data is incomplete or corrupt.",
                 error=RuntimeError,
             )
         return value
@@ -501,16 +492,6 @@ class SingleDayData:
         return value.parent
 
     @property
-    def valid_y_range(self) -> tuple[int, int]:
-        """Returns the valid Y pixel range from the first plane's registration."""
-        return self._contexts[0].runtime.registration.valid_y_range
-
-    @property
-    def valid_x_range(self) -> tuple[int, int]:
-        """Returns the valid X pixel range from the first plane's registration."""
-        return self._contexts[0].runtime.registration.valid_x_range
-
-    @property
     def combined_binary(self) -> BinaryFileCombined:
         """Returns the stitched multi-plane channel 1 binary used for combined frame display."""
         return self._combined_binary
@@ -544,7 +525,7 @@ class SingleDayData:
         y = registration.rigid_y_offsets
         x = registration.rigid_x_offsets
         zeros = np.zeros(frame_count, dtype=np.int32)
-        return (y if y is not None else zeros, x if x is not None else zeros)
+        return y if y is not None else zeros, x if x is not None else zeros
 
     def switch_view(self, view_index: int) -> None:
         """Switches the active data view to a different plane or the combined view.
@@ -599,9 +580,7 @@ class SingleDayData:
                 context.runtime.extraction.memory_map_arrays(plane_output)
 
         if cindra_root is None:
-            message = (
-                "Unable to load single-day data. No plane output path was found in any loaded RuntimeContext."
-            )
+            message = "Unable to load single-day data. No plane output path was found in any loaded RuntimeContext."
             console.error(message=message, error=FileNotFoundError)
 
         console.echo(message="Loading combined plane data...")
@@ -798,7 +777,7 @@ class MultiDayData:
         if value is None:
             console.error(
                 message=f"Unable to retrieve the transformed maximum projection for multi-day session "
-                f"'{self.session_id}'. This indicates incomplete or corrupt pipeline data.",
+                f"'{self.session_id}'. The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
         return value
@@ -1008,6 +987,10 @@ class ViewerData:
     _current_recording_index: int = 0
     """The index into ``_recordings`` for the currently active recording."""
 
+    _loaded_dataset_name: str = ""
+    """The dataset name whose data is currently held in ``_recordings``. Persists across Original/Dataset toggles so
+    that re-activating the same dataset is instant."""
+
     dataset_name: str = ""
     """Display label for the active multi-day dataset."""
 
@@ -1065,10 +1048,10 @@ class ViewerData:
         return self._recordings[index]
 
     def load_dataset(self, dataset_name: str) -> None:
-        """Unloads current multi-day data and loads the named dataset.
+        """Activates the named multi-day dataset, loading from disk only when switching to a different dataset.
 
-        Constructs ``MultiDayData`` per session in the target dataset. Failed sessions are logged as warnings and
-        excluded. Resolves the anchor session index for the loaded single-day data.
+        If the requested dataset is already in memory, re-activates it without reloading. Only one dataset is held in
+        memory at a time.
 
         Args:
             dataset_name: The name of the dataset to load (must be in ``available_datasets``).
@@ -1080,13 +1063,17 @@ class ViewerData:
             )
             return
 
-        # Determines the root path to search from. Uses the single-day output path's parent.
+        # Re-activates the already loaded dataset without reloading from disk.
+        if dataset_name == self._loaded_dataset_name and self._recordings:
+            self._active_dataset_name = dataset_name
+            return
+
+        # Loads a different dataset from disk, replacing the previous one.
         search_root = self.single_day.output_path.parent
         self._load_dataset_from_root(dataset_name=dataset_name, search_root=search_root)
 
     def unload_dataset(self) -> None:
-        """Drops multi-day data and switches to single-day mode."""
-        self._recordings = []
+        """Deactivates multi-day mode without dropping the loaded dataset from memory."""
         self._active_dataset_name = ""
         self._current_recording_index = 0
         self.dataset_name = ""
@@ -1110,15 +1097,15 @@ class ViewerData:
 
     @classmethod
     def from_data(cls, root_path: Path, *, dataset: str | None = None) -> ViewerData:
-        """Loads single-day data and optionally a multi-day dataset.
+        """Loads single-day data and discovers available multi-day datasets.
 
         Loads single-day pipeline data from ``root_path``, then discovers available multi-day dataset names
-        (lightweight). If ``dataset`` is provided, loads that dataset; otherwise loads the first natsorted dataset if
-        any exist. Starts in multi-day mode if a dataset was loaded.
+        (lightweight). A dataset is only loaded when explicitly requested via the ``dataset`` parameter; otherwise
+        the instance starts in single-day mode and consumers can load a dataset later via the dropdown.
 
         Args:
             root_path: Root cindra output directory.
-            dataset: Explicit dataset name to load. Loads first available if None.
+            dataset: Explicit dataset name to load. Stays in single-day mode if None.
 
         Returns:
             A fully populated ViewerData instance.
@@ -1131,10 +1118,8 @@ class ViewerData:
             _available_datasets=available,
         )
 
-        # Determines which dataset to load.
-        target = dataset if dataset is not None else (available[0] if available else None)
-        if target is not None:
-            instance._load_dataset_from_root(dataset_name=target, search_root=root_path)
+        if dataset is not None:
+            instance._load_dataset_from_root(dataset_name=dataset, search_root=root_path)
 
         return instance
 
@@ -1209,6 +1194,7 @@ class ViewerData:
         )
 
         self._recordings = recordings
+        self._loaded_dataset_name = dataset_name
         self._active_dataset_name = dataset_name
         self._current_recording_index = 0
 

@@ -938,6 +938,14 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
             sampling_rate=sampling_rate,
         )
 
+    # Computes neuropil-corrected skewness and standard deviation for channel 1 tracked ROIs.
+    _update_roi_extraction_statistics(
+        roi_statistics=roi_statistics,
+        cell_fluorescence=extraction_data.cell_fluorescence,
+        neuropil_fluorescence=extraction_data.neuropil_fluorescence,
+        neuropil_coefficient=deconvolution_config.neuropil_coefficient,
+    )
+
     timing = context.runtime.timing
     timing.extraction_time = int(timer.elapsed)
 
@@ -975,6 +983,14 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
                 tau=tau,
                 sampling_rate=sampling_rate,
             )
+
+        # Computes neuropil-corrected skewness and standard deviation for channel 2 tracked ROIs.
+        _update_roi_extraction_statistics(
+            roi_statistics=roi_statistics_channel_2,
+            cell_fluorescence=extraction_data.cell_fluorescence_channel_2,
+            neuropil_fluorescence=extraction_data.neuropil_fluorescence_channel_2,
+            neuropil_coefficient=deconvolution_config.neuropil_coefficient,
+        )
 
         timing.extraction_time += int(timer.elapsed)
 
