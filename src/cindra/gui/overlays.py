@@ -124,6 +124,7 @@ def compute_colors(
     cell_colocalization: NDArray[np.float32],
     roi_colormap: str,
     colocalization_threshold: float,
+    classifier_threshold: float = 0.5,
     *,
     two_channels: bool = False,
 ) -> ColorArrays:
@@ -141,6 +142,7 @@ def compute_colors(
         cell_colocalization: Cell colocalization array with shape (cell_count, 2).
         roi_colormap: Name of the matplotlib colormap applied when mapping ROI statistics to overlay colors.
         colocalization_threshold: Display threshold applied to cell colocalization probabilities.
+        classifier_threshold: Probability cutoff for initial binary cell/non-cell label assignment.
         two_channels: Determines whether channel 2 data is available.
 
     Returns:
@@ -180,9 +182,9 @@ def compute_colors(
         precomputed_statistics[field_name] = values.reshape(-1, 1)
 
     # Iterates over percentile-based color modes (SKEWNESS through COLOCALIZATION_PROBABILITY), skipping RANDOM
-    # and stopping before CELL_CLASSIFICATION which uses a different coloring strategy.
+    # and stopping before CELL_PROBABILITY which uses a different coloring strategy.
     for color_mode in ROIColorMode:
-        if color_mode >= ROIColorMode.CELL_CLASSIFICATION:
+        if color_mode >= ROIColorMode.CELL_PROBABILITY:
             break
         if color_mode == ROIColorMode.RANDOM:
             colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
@@ -218,21 +220,26 @@ def compute_colors(
         colors[color_mode] = _apply_colormap(statistic_values, roi_colormap)
         normalized_statistics[color_mode] = statistic_values.flatten()
 
-    # Uses the classifier probability (column 0) directly as a pre-normalized [0, 1] value for colormap mapping.
-    classifier_values = cell_classification[:, 0:1]
-    colors[ROIColorMode.CELL_CLASSIFICATION] = _apply_colormap(classifier_values, roi_colormap)
-    normalized_statistics[ROIColorMode.CELL_CLASSIFICATION] = classifier_values.ravel()
+    # Uses the classifier probability (column 1) directly as a pre-normalized [0, 1] value for colormap mapping.
+    classifier_values = cell_classification[:, 1:2]
+    colors[ROIColorMode.CELL_PROBABILITY] = _apply_colormap(classifier_values, roi_colormap)
+    normalized_statistics[ROIColorMode.CELL_PROBABILITY] = classifier_values.ravel()
     colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
 
     # The correlation slot colorbar is a placeholder; actual values are computed on-demand by
     # update_correlation_masks when the user selects ROIs.
     colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
 
-    # Assigns binary cell/non-cell label colors: green for classified cells, magenta for non-cells. This secondary
-    # color set is used when the label toggle is active in the CELL_CLASSIFICATION color mode.
-    classification_label_colors = np.full((cell_count, 3), COLORS.magenta, dtype=np.uint8)
-    is_cell = cell_classification[:, 1].astype(bool)
-    classification_label_colors[is_cell] = COLORS.green
+    # Assigns binary cell/non-cell colors by thresholding classifier probabilities (column 1). The Classify toggle
+    # starts OFF, so initial binary colors reflect the probability threshold rather than the original labels.
+    # Uses the active colormap endpoints for non-cell (low) and cell (high) colors.
+    non_cell_color, cell_color = _classification_endpoint_colors(roi_colormap)
+    is_cell = cell_classification[:, 1] >= classifier_threshold
+    binary_colors = np.full((cell_count, 3), non_cell_color, dtype=np.uint8)
+    binary_colors[is_cell] = cell_color
+    colors[ROIColorMode.CELL_CLASSIFICATION] = binary_colors
+    normalized_statistics[ROIColorMode.CELL_CLASSIFICATION] = is_cell.astype(np.float32)
+    colorbar.append(list(ROI_CONFIG.fixed_colorbar_range))
 
     # Creates a placeholder RGBA array; actual pixel colors are written by initialize_roi_maps via _update_rgb_masks
     # once the ROI index maps are available.
@@ -244,7 +251,6 @@ def compute_colors(
         colorbar=colorbar,
         rgb=rgb,
         random_hues=random_hues,
-        classification_label_colors=classification_label_colors,
     )
 
 
@@ -335,7 +341,6 @@ def draw_masks(
     background_view: int,
     roi_opacity: int,
     selected_roi_indices: list[int],
-    classification_label_mode: bool = False,
 ) -> NDArray[np.uint8]:
     """Draws the current mask overlay for the image panel.
 
@@ -352,26 +357,12 @@ def draw_masks(
         background_view: Active background view index.
         roi_opacity: Alpha value (0-255) for mask overlay opacity.
         selected_roi_indices: Indices of all ROIs staged for merge or multi-selection.
-        classification_label_mode: Determines whether to use binary cell/non-cell label colors instead of probability
-            gradient colors when the cell classification color mode is active.
 
     Returns:
         RGBA overlay array.
     """
     color_index = roi_color_mode
     view_index = background_view
-
-    # When the cell classification mode is active, swaps between label colors and probability colors.
-    if roi_color_mode == ROIColorMode.CELL_CLASSIFICATION:
-        color = (
-            color_arrays.classification_label_colors if classification_label_mode else color_arrays.colors[color_index]
-        )
-        _update_rgb_masks(
-            color_arrays=color_arrays,
-            roi_maps=roi_maps,
-            color=color,
-            color_index=color_index,
-        )
 
     # The ROI-only view (view_index == 0, black background) always uses full opacity since partial transparency on
     # black just dims the ROIs. All other views use the slider value.
@@ -443,6 +434,21 @@ def render_colorbar(
         colorbar_widgets: The colorbar display widgets.
         colorbar_image: The colorbar gradient image from ``draw_colorbar``.
     """
+    if roi_color_mode == ROIColorMode.CELL_CLASSIFICATION:
+        # Renders a two-color bar using the active colormap endpoints: low (non-cell) on the left, high (cell) on
+        # the right.
+        sample_count = ROI_STYLE.colorbar_sample_count - 1
+        row_count = ROI_STYLE.colorbar_row_count
+        midpoint = sample_count // 2
+        binary_bar = np.zeros((row_count, sample_count, 3), dtype=np.uint8)
+        binary_bar[:, :midpoint] = colorbar_image[0, 0]
+        binary_bar[:, midpoint:] = colorbar_image[0, -1]
+        colorbar_widgets.image.setImage(binary_bar)
+        colorbar_widgets.labels[0].setText("Non-Cell")
+        colorbar_widgets.labels[1].setText("")
+        colorbar_widgets.labels[2].setText("Cell")
+        return
+
     color_index = roi_color_mode
     if color_index == 0:
         colorbar_widgets.image.setImage(
@@ -486,6 +492,20 @@ def update_colormap(
         New colorbar gradient image.
     """
     for color_index in range(1, color_arrays.normalized_statistics.shape[0]):
+        if color_index == ROIColorMode.CELL_CLASSIFICATION:
+            # Recolors the binary classification slot using the new colormap endpoints.
+            non_cell_color, cell_color = _classification_endpoint_colors(colormap)
+            is_cell = color_arrays.normalized_statistics[color_index] > 0
+            binary_colors = color_arrays.colors[color_index]
+            binary_colors[:] = non_cell_color
+            binary_colors[is_cell] = cell_color
+            _update_rgb_masks(
+                color_arrays=color_arrays,
+                roi_maps=roi_maps,
+                color=binary_colors,
+                color_index=color_index,
+            )
+            continue
         color_arrays.colors[color_index] = _apply_colormap(color_arrays.normalized_statistics[color_index], colormap)
         _update_rgb_masks(
             color_arrays=color_arrays,
@@ -517,6 +537,10 @@ def update_correlation_masks(
         colormap: Name of the active colormap.
     """
     color_index = ROIColorMode.CORRELATIONS
+
+    # Skips computation when no ROIs are selected; there is no reference trace to correlate against.
+    if not selected_indices:
+        return
 
     # Averages the binned fluorescence traces of all selected ROIs into a single reference template.
     selected_array = np.array(selected_indices, dtype=np.int32)
@@ -564,20 +588,24 @@ def flip_rois(
     color_arrays: ColorArrays,
     roi_maps: ROIIndexMaps,
     selected_roi_indices: list[int],
+    colormap: str,
 ) -> None:
     """Reclassifies selected ROIs between cell and non-cell.
 
-    Toggles the classification labels (column 1) for all ROIs in ``selected_roi_indices`` and
-    updates their overlay colors. The caller is responsible for saving and updating the plot.
+    Toggles the classification labels (column 0) for all ROIs in ``selected_roi_indices`` and
+    updates their overlay colors using the active colormap endpoints. The caller is responsible
+    for saving and updating the plot.
 
     Args:
         roi_statistics: The ROI statistics for the current view.
-        cell_classification: Cell classification array (column 1 is modified in place).
+        cell_classification: Cell classification array (column 0 labels are modified in place).
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
         selected_roi_indices: Indices of all ROIs to flip.
+        colormap: Name of the active colormap for endpoint color derivation.
     """
-    labels = cell_classification[:, 1]
+    non_cell_color, cell_color = _classification_endpoint_colors(colormap)
+    labels = cell_classification[:, 0]
     for roi_index in selected_roi_indices:
         labels[roi_index] = 1.0 - labels[roi_index]
         _flip_roi(
@@ -586,7 +614,46 @@ def flip_rois(
             roi_statistics=roi_statistics,
             cell_classification_labels=labels,
             roi_index=roi_index,
+            cell_color=cell_color,
+            non_cell_color=non_cell_color,
         )
+
+
+def recompute_binary_classification(
+    cell_classification: NDArray[np.float32],
+    color_arrays: ColorArrays,
+    roi_maps: ROIIndexMaps,
+    colormap: str,
+    threshold: float | None = None,
+) -> None:
+    """Recomputes the binary cell/non-cell label colors and updates the CELL_CLASSIFICATION overlay.
+
+    When a threshold is provided, classifies ROIs by thresholding the probability column (column 1). When threshold
+    is None, uses the original binary labels from column 0 directly. Colors are derived from the active colormap
+    endpoints.
+
+    Args:
+        cell_classification: Cell classification array with shape (cell_count, 2).
+        color_arrays: The computed color arrays (modified in place).
+        roi_maps: The ROI index maps.
+        colormap: Name of the active colormap for endpoint color derivation.
+        threshold: Probability cutoff for cell/non-cell assignment. Uses original labels when None.
+    """
+    non_cell_color, cell_color = _classification_endpoint_colors(colormap)
+    if threshold is not None:
+        is_cell = cell_classification[:, 1] >= threshold
+    else:
+        is_cell = cell_classification[:, 0] > 0
+    binary_colors = color_arrays.colors[ROIColorMode.CELL_CLASSIFICATION]
+    binary_colors[:] = non_cell_color
+    binary_colors[is_cell] = cell_color
+    color_arrays.normalized_statistics[ROIColorMode.CELL_CLASSIFICATION] = is_cell.astype(np.float32)
+    _update_rgb_masks(
+        color_arrays=color_arrays,
+        roi_maps=roi_maps,
+        color=binary_colors,
+        color_index=ROIColorMode.CELL_CLASSIFICATION,
+    )
 
 
 def normalize_percentile(
@@ -812,12 +879,27 @@ def _apply_hsv_colormap(values: NDArray[np.float32]) -> NDArray[np.uint8]:
     return _convert_hues_to_rgb(inverted.ravel().astype(np.float64))
 
 
+def _classification_endpoint_colors(colormap: str) -> tuple[NDArray[np.uint8], NDArray[np.uint8]]:
+    """Computes the non-cell and cell endpoint colors from the given colormap.
+
+    Args:
+        colormap: Name of the matplotlib colormap.
+
+    Returns:
+        A tuple of (non_cell_color, cell_color), each a uint8 array of shape (3,).
+    """
+    endpoints = _apply_colormap(np.array([0.0, 1.0], dtype=np.float32), colormap)
+    return endpoints[0], endpoints[1]
+
+
 def _flip_roi(
     roi_maps: ROIIndexMaps,
     color_arrays: ColorArrays,
     roi_statistics: list[ROIStatistics],
     cell_classification_labels: NDArray[np.float32],
     roi_index: int,
+    cell_color: NDArray[np.uint8],
+    non_cell_color: NDArray[np.uint8],
 ) -> None:
     """Updates the cell/non-cell overlay color for a reclassified ROI.
 
@@ -827,12 +909,15 @@ def _flip_roi(
         roi_statistics: The ROI statistics list.
         cell_classification_labels: The current cell classification label array.
         roi_index: Index of the ROI to update.
+        cell_color: RGB color for cell ROIs derived from the active colormap high endpoint.
+        non_cell_color: RGB color for non-cell ROIs derived from the active colormap low endpoint.
     """
-    if cell_classification_labels[roi_index]:
-        color_arrays.classification_label_colors[roi_index] = COLORS.green
-    else:
-        color_arrays.classification_label_colors[roi_index] = COLORS.magenta
+    # Updates the binary classification color and normalized statistic for the flipped ROI.
+    is_cell = bool(cell_classification_labels[roi_index])
+    color_arrays.colors[ROIColorMode.CELL_CLASSIFICATION, roi_index] = cell_color if is_cell else non_cell_color
+    color_arrays.normalized_statistics[ROIColorMode.CELL_CLASSIFICATION, roi_index] = float(is_cell)
 
+    # Refreshes the precomputed RGB overlay pixels for every color slot including the binary classification slot.
     y_pixels = roi_statistics[roi_index].mask.y_pixels
     x_pixels = roi_statistics[roi_index].mask.x_pixels
     for color_index in range(color_arrays.colors.shape[0]):

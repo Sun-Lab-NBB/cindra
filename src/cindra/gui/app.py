@@ -43,7 +43,10 @@ def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> 
         application.setFont(FONTS.small)
 
     # Loads recording data upfront so the viewer window receives a fully populated data instance.
+    # The tracking viewer requires a loaded dataset, so defaults to the first available one.
     data = ViewerData.from_data(root_path=recording_path, dataset=dataset)
+    if not data.is_multi_day and data.available_datasets:
+        data.load_dataset(dataset_name=data.available_datasets[0])
 
     # Creates the viewer window with the loaded data.
     console.echo(message="Initializing Multi-Day Tracking viewer...")
@@ -149,16 +152,17 @@ def run_registration_viewer(recording_path: Path) -> None:
         sys.exit(application.exec())
 
 
-def run_roi_viewer(session_path: Path, *, dataset: str | None = None) -> None:
+def run_roi_viewer(recording_path: Path, *, dataset: str | None = None) -> None:
     """Launches the standalone ROI viewer with right-click reclassification.
 
     Creates a QApplication, loads pipeline data from the given session directory, shows the ROIViewer window, and
     enters the event loop.
 
     Args:
-        session_path: Path to a cindra output directory to load on startup.
-        dataset: Multi-day dataset name to load. Defaults to the first available dataset.
+        recording_path: Path to a cindra output directory to load on startup.
+        dataset: Multi-day dataset name to load. Stays in single-day mode if not provided.
     """
+    console.echo(message="Initializing the ROI GUI...")
     application = QApplication.instance()
     owns_application = application is None
     if owns_application:
@@ -169,10 +173,12 @@ def run_roi_viewer(session_path: Path, *, dataset: str | None = None) -> None:
         console.error(message=message, error=RuntimeError)
 
     # Loads recording data upfront so the viewer window receives a fully populated data instance.
-    data = ViewerData.from_data(root_path=session_path, dataset=dataset)
+    data = ViewerData.from_data(root_path=recording_path, dataset=dataset)
 
+    console.echo(message="Initializing ROI viewer...")
     window = ROIViewer(data=data)
     window.show()
+    console.echo(message="ROI viewer: ready.", level=LogLevel.SUCCESS)
 
     if owns_application:
         sys.exit(application.exec())

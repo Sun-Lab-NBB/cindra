@@ -131,8 +131,8 @@ class TrackingViewer(QMainWindow):
         toolbar = QHBoxLayout()
         self._file_button: QPushButton = QPushButton("File")
         self._file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self._file_button.setStyleSheet(STYLE.button_unpressed)
         file_menu = QMenu(self)
+        file_menu.setStyleSheet(STYLE.menu)
         load_action = file_menu.addAction("&Load dataset")
         load_action.setShortcut("Ctrl+L")
         load_action.triggered.connect(self._load_dataset)
@@ -162,7 +162,7 @@ class TrackingViewer(QMainWindow):
 
         # Control panel (right sidebar).
         control_panel = self._build_control_panel()
-        main_layout.addWidget(control_panel, stretch=1)
+        main_layout.addWidget(control_panel, stretch=0)
 
         outer_layout.addLayout(main_layout, stretch=1)
 
@@ -205,7 +205,6 @@ class TrackingViewer(QMainWindow):
         # Enables channel 2 toggle if available.
         has_channel_2 = data.current_recording.has_channel_2
         self._channel_2_checkbox.setEnabled(has_channel_2)
-        self._channel_2_checkbox.setStyleSheet(STYLE.button_unpressed if has_channel_2 else STYLE.button_inactive)
 
         # Updates the window title to reflect the active dataset.
         self.setWindowTitle(f"Multi-Day ROI Tracking — {data.dataset_name}")
@@ -248,6 +247,7 @@ class TrackingViewer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
+        # noinspection PyUnresolvedReferences
         if event.type() == QtCore.QEvent.Type.KeyPress and event.key() == QtCore.Qt.Key.Key_Escape:
             self.setFocus()
             return True
@@ -270,10 +270,12 @@ class TrackingViewer(QMainWindow):
             return
 
         recording_path = Path(directory)
-        console.echo(message=f"Loading dataset from recording: {recording_path}")
+        console.echo(message=f"Loading dataset from recording: {recording_path}.")
 
         try:
             data = ViewerData.from_data(root_path=recording_path)
+            if not data.is_multi_day and data.available_datasets:
+                data.load_dataset(dataset_name=data.available_datasets[0])
         except Exception:
             console.echo(message="Unable to load dataset.", level=LogLevel.ERROR)
             result = QMessageBox.question(
@@ -419,7 +421,6 @@ class TrackingViewer(QMainWindow):
         self._channel_2_checkbox = QPushButton("Channel 2")
         self._channel_2_checkbox.setCheckable(True)
         self._channel_2_checkbox.setEnabled(False)
-        self._channel_2_checkbox.setStyleSheet(STYLE.button_inactive)
         self._channel_2_checkbox.toggled.connect(self._on_channel_2_toggled)
         channel_layout.addWidget(self._channel_2_checkbox)
 

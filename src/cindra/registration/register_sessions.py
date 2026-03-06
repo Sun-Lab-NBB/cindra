@@ -343,6 +343,10 @@ def _backward_deform_masks(
         crop=False,
     )
 
+    # Sets footprint to pixel_count for tracked ROIs since they bypass multi-scale detection.
+    for roi in roi_statistics:
+        roi.footprint = roi.pixel_count
+
     return roi_statistics
 
 

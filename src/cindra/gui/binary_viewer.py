@@ -98,8 +98,8 @@ class BinaryPlayer(QMainWindow):
         # File menu button with dropdown for loading recordings.
         self._file_button: QPushButton = QPushButton("File")
         self._file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self._file_button.setStyleSheet(STYLE.button_unpressed)
         file_menu = QMenu(self)
+        file_menu.setStyleSheet(STYLE.menu)
         load_action = file_menu.addAction("&Load recording")
         load_action.setShortcut("Ctrl+L")
         load_action.triggered.connect(self._load_recording)
@@ -110,7 +110,6 @@ class BinaryPlayer(QMainWindow):
         self._channel_2_button: QPushButton = QPushButton("View Channel 2")
         self._channel_2_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self._channel_2_button.setEnabled(False)
-        self._channel_2_button.setStyleSheet(STYLE.button_inactive)
         self._channel_2_button.clicked.connect(self._toggle_channel_2)
         toolbar.addWidget(self._channel_2_button)
 
@@ -392,9 +391,6 @@ class BinaryPlayer(QMainWindow):
         self._update_shift_scatter(0)
 
         self._channel_2_button.setEnabled(self.data.two_channels)
-        self._channel_2_button.setStyleSheet(
-            STYLE.button_unpressed if self.data.two_channels else STYLE.button_inactive
-        )
 
         self._current_frame = 0
         self._render_frame()

@@ -56,8 +56,8 @@ def configure_plot(
     plot.setMenuEnabled(False)
     # noinspection PyUnresolvedReferences
     plot.setMouseEnabled(x=mouse_x, y=mouse_y)
-    plot.getAxis("left").setWidth(PLOT_STYLE.axis_fixed_width)
-    plot.getAxis("bottom").setHeight(PLOT_STYLE.axis_fixed_width)
+    plot.getAxis("left").setWidth(PLOT_STYLE.left_axis_width)
+    plot.getAxis("bottom").setHeight(PLOT_STYLE.bottom_axis_height)
     if title:
         # noinspection PyTypeChecker
         plot.setTitle(title, size=FONTS.plot_title_size, bold=True)
@@ -100,7 +100,12 @@ class TraceBox(pg.PlotItem):
 
     def __init__(self) -> None:
         super().__init__()
-        configure_plot(self)
+        configure_plot(
+            self,
+            title="Fluorescence Traces",
+            left_label="Intensity (a.u.)",
+            bottom_label="Frame",
+        )
         self._frame_count: int = 0
         self._y_minimum: float = 0.0
         self._y_maximum: float = 0.0
@@ -239,17 +244,18 @@ def plot_trace(
     selected_indices: list[int],
     activity_mode: int,
     roi_colors: NDArray[np.uint8] | None = None,
-    traces_visible: bool = True,
+    fluorescence_visible: bool = True,
     neuropil_visible: bool = True,
-    deconvolved_visible: bool = True,
+    corrected_visible: bool = True,
+    spikes_visible: bool = True,
     scale_factor: float = ROI_CONFIG.default_scale_factor,
-    max_plotted: int = ROI_CONFIG.plotted_trace_count,
+    maximum_trace_count: int = ROI_CONFIG.plotted_trace_count,
 ) -> tuple[float, float]:
     """Draws fluorescence traces for the selected ROIs.
 
-    For a single selected ROI, displays the raw fluorescence, neuropil, and deconvolved
-    traces on the same axes. For multiple selected ROIs, stacks normalized traces vertically
-    with per-ROI coloring and an optional averaged summary at the bottom.
+    For a single selected ROI, overlays the enabled trace types on the same axes using the
+    visibility flags. For multiple selected ROIs, stacks normalized traces vertically using a
+    single exclusive trace type determined by activity_mode.
 
     Args:
         trace_box: The pyqtgraph PlotItem to draw traces on.
@@ -262,32 +268,42 @@ def plot_trace(
         selected_indices: Indices of the selected ROIs to display.
         activity_mode: Trace type index (0=Fluorescence, 1=Neuropil, 2=Neuropil Subtracted, 3=Spikes).
         roi_colors: Per-ROI RGB colors with shape (roi_count, 3) for multi-trace coloring.
-        traces_visible: Determines whether the raw fluorescence trace is drawn.
-        neuropil_visible: Determines whether the neuropil trace is drawn.
-        deconvolved_visible: Determines whether the deconvolved spike trace is drawn.
+        fluorescence_visible: Determines whether the raw fluorescence trace is drawn in single-ROI mode.
+        neuropil_visible: Determines whether the neuropil trace is drawn in single-ROI mode.
+        corrected_visible: Determines whether the neuropil-corrected trace is drawn in single-ROI mode.
+        spikes_visible: Determines whether the deconvolved spike trace is drawn in single-ROI mode.
         scale_factor: Vertical spacing factor for stacked multi-trace display.
-        max_plotted: Maximum number of traces to plot in multi-ROI mode.
+        maximum_trace_count: Maximum number of traces to plot in multi-ROI mode.
 
     Returns:
         Tuple of (y_minimum, y_maximum) defining the plotted y-axis range.
     """
     trace_box.clear()
+    # Removes any stale legend from a previous plot cycle before re-adding.
+    if trace_box.legend is not None:
+        trace_box.legend.scene().removeItem(trace_box.legend)
+        trace_box.legend = None
     axis = trace_box.getAxis("left")
 
     if len(selected_indices) == 1:
+        trace_box.setLabel("left", "Intensity (a.u.)", **{"font-size": FONTS.label_size})
         y_minimum, y_maximum = _plot_single_trace(
             trace_box=trace_box,
             axis=axis,
             cell_fluorescence=cell_fluorescence,
             neuropil_fluorescence=neuropil_fluorescence,
+            subtracted_fluorescence=subtracted_fluorescence,
             spikes=spikes,
             frame_indices=frame_indices,
             roi_index=selected_indices[0],
-            traces_visible=traces_visible,
+            fluorescence_visible=fluorescence_visible,
             neuropil_visible=neuropil_visible,
-            deconvolved_visible=deconvolved_visible,
+            corrected_visible=corrected_visible,
+            spikes_visible=spikes_visible,
         )
     else:
+        trace_box.setLabel("left", "ROI", **{"font-size": FONTS.label_size})
+        add_plot_legend(trace_box, column_count=1)
         y_minimum, y_maximum = _plot_multi_trace(
             trace_box=trace_box,
             axis=axis,
@@ -300,7 +316,7 @@ def plot_trace(
             activity_mode=activity_mode,
             roi_colors=roi_colors,
             scale_factor=scale_factor,
-            max_plotted=max_plotted,
+            maximum_trace_count=maximum_trace_count,
         )
 
     trace_box.update_range(
@@ -308,8 +324,9 @@ def plot_trace(
         y_minimum=y_minimum,
         y_maximum=y_maximum,
     )
-    # noinspection PyUnresolvedReferences
-    trace_box.setYRange(y_minimum, y_maximum)
+    # Rescales both axes to fit the new data range.
+    view_box = trace_box.getViewBox()
+    view_box.autoRange()
     return y_minimum, y_maximum
 
 
@@ -318,34 +335,43 @@ def _plot_single_trace(
     axis: pg.AxisItem,
     cell_fluorescence: NDArray[np.float32],
     neuropil_fluorescence: NDArray[np.float32],
+    subtracted_fluorescence: NDArray[np.float32],
     spikes: NDArray[np.float32],
     frame_indices: NDArray[np.int32],
     roi_index: int,
-    traces_visible: bool,
+    fluorescence_visible: bool,
     neuropil_visible: bool,
-    deconvolved_visible: bool,
+    corrected_visible: bool,
+    spikes_visible: bool,
 ) -> tuple[float, float]:
-    """Plots traces for a single selected ROI.
+    """Plots overlaid traces for a single selected ROI.
+
+    Draws each enabled trace type on the same axes, allowing the user to compare raw fluorescence,
+    neuropil, neuropil-corrected, and deconvolved spike signals simultaneously.
 
     Args:
         trace_box: The plot item to draw on.
         axis: The left y-axis for tick configuration.
         cell_fluorescence: Cell fluorescence array with shape (roi_count, frame_count).
         neuropil_fluorescence: Neuropil fluorescence array with shape (roi_count, frame_count).
+        subtracted_fluorescence: Neuropil-corrected fluorescence array with shape (roi_count, frame_count).
         spikes: Deconvolved spike array with shape (roi_count, frame_count).
         frame_indices: Time axis array.
         roi_index: Index of the ROI to plot.
-        traces_visible: Determines whether the raw fluorescence trace is drawn.
+        fluorescence_visible: Determines whether the raw fluorescence trace is drawn.
         neuropil_visible: Determines whether the neuropil trace is drawn.
-        deconvolved_visible: Determines whether the deconvolved spike trace is drawn.
+        corrected_visible: Determines whether the neuropil-corrected trace is drawn.
+        spikes_visible: Determines whether the deconvolved spike trace is drawn.
 
     Returns:
         Tuple of (y_minimum, y_maximum) for the plotted range.
     """
     fluorescence = cell_fluorescence[roi_index, :]
     neuropil = neuropil_fluorescence[roi_index, :]
+    corrected = subtracted_fluorescence[roi_index, :]
     spike_trace = spikes[roi_index, :].copy()
 
+    # Computes the y-range from fluorescence and neuropil bounds.
     if np.ptp(neuropil) == 0:
         y_maximum = float(fluorescence.max())
         y_minimum = float(fluorescence.min())
@@ -359,11 +385,13 @@ def _plot_single_trace(
         spike_trace /= spike_maximum
     spike_trace *= y_maximum - y_minimum
 
-    if traces_visible:
+    if fluorescence_visible:
         trace_box.plot(frame_indices, fluorescence, pen=COLORS.cyan)
     if neuropil_visible:
         trace_box.plot(frame_indices, neuropil, pen=COLORS.red)
-    if deconvolved_visible:
+    if corrected_visible:
+        trace_box.plot(frame_indices, corrected, pen=COLORS.green)
+    if spikes_visible:
         trace_box.plot(frame_indices, spike_trace + y_minimum, pen=COLORS.silver)
 
     axis.setTicks(None)
@@ -382,7 +410,7 @@ def _plot_multi_trace(
     activity_mode: int,
     roi_colors: NDArray[np.uint8] | None,
     scale_factor: float,
-    max_plotted: int,
+    maximum_trace_count: int,
 ) -> tuple[float, float]:
     """Plots stacked traces for multiple selected ROIs.
 
@@ -399,12 +427,12 @@ def _plot_multi_trace(
         activity_mode: Trace type index (0=Fluorescence, 1=Neuropil, 2=Neuropil Subtracted, 3=Spikes).
         roi_colors: Per-ROI RGB colors with shape (roi_count, 3).
         scale_factor: Vertical spacing factor for trace stacking.
-        max_plotted: Maximum number of traces to display.
+        maximum_trace_count: Maximum number of traces to display.
 
     Returns:
         Tuple of (y_minimum, y_maximum) for the plotted range.
     """
-    selected = selected_indices[: min(len(selected_indices), max_plotted)]
+    selected = selected_indices[: min(len(selected_indices), maximum_trace_count)]
     trace_spacing = 1.0 / scale_factor
     tick_labels: list[tuple[float, str]] = []
     stack_position = len(selected) - 1
@@ -412,9 +440,9 @@ def _plot_multi_trace(
 
     for index in selected[::-1]:
         # Selects trace based on activity mode.
-        if activity_mode == 0:
+        if activity_mode == TraceMode.RAW_FLUORESCENCE:
             trace = cell_fluorescence[index, :]
-        elif activity_mode == 1:
+        elif activity_mode == TraceMode.NEUROPIL:
             trace = neuropil_fluorescence[index, :]
         elif activity_mode == TraceMode.NEUROPIL_CORRECTED:
             trace = subtracted_fluorescence[index, :]
@@ -454,6 +482,7 @@ def _plot_multi_trace(
             frame_indices,
             -1 * average_scale + average * average_scale,
             pen=average_pen,
+            name="Average",
         )
         y_minimum = -1 * average_scale
 

@@ -27,12 +27,14 @@ class ROIColorMode(IntEnum):
     COLOCALIZATION_PROBABILITY = 5
     """Colors ROIs by their channel 2 colocalization probability."""
 
-    CELL_CLASSIFICATION = 6
-    """Colors ROIs by the trained classifier's cell-probability estimate, with an optional toggle to show binary
-    cell vs non-cell labels."""
+    CELL_PROBABILITY = 6
+    """Colors ROIs by the trained classifier's cell-probability estimate using a colormap gradient."""
 
     CORRELATIONS = 7
     """Colors ROIs by pairwise activity correlation with the selected ROI."""
+
+    CELL_CLASSIFICATION = 8
+    """Colors ROIs by binary cell/non-cell labels (green for cell, magenta for non-cell)."""
 
 
 class ROIColorModeLabel(StrEnum):
@@ -53,16 +55,17 @@ class ROIColorModeLabel(StrEnum):
     ASPECT_RATIO = "Aspect Ratio"
     """The display label for aspect ratio-based ROI coloring."""
 
-    COLOCALIZATION_PROBABILITY = "Colocalization Probability"
+    COLOCALIZATION_PROBABILITY = "Colocalization"
     """The display label for channel 2 colocalization probability-based ROI coloring."""
 
-    CELL_CLASSIFICATION = "Cell Classification"
-    """The display label for classifier-based ROI coloring, covering both probability gradient and binary label
-    views."""
+    CELL_PROBABILITY = "Cell Probability"
+    """The display label for classifier probability gradient ROI coloring."""
 
     CORRELATIONS = "Activity Correlation"
-    """The display label for pairwise correlation-based ROI coloring. The trailing '=' indicates the bin size value is
-    appended at runtime."""
+    """The display label for pairwise correlation-based ROI coloring."""
+
+    CELL_CLASSIFICATION = "Classification"
+    """The display label for binary cell/non-cell label ROI coloring."""
 
 
 class BackgroundView(IntEnum):
@@ -255,19 +258,11 @@ class _ROIViewerConstants:
     more ROIs are selected."""
     top_selection_count: int = 40
     """The default and maximum number of ROIs selectable via top-n / bottom-n statistic ranking. Used as the initial
-    value in the selection input field, the QIntValidator upper bound, and the default in SelectionControls."""
-    zoom_to_cell_fraction: float = 0.1
-    """The fraction of the maximum image dimension used as padding around the target ROI when zooming to a cell. The
-    zoom window is centered on the ROI centroid with this fractional margin on each side, keeping surrounding context
-    visible."""
+    value in the ranked count input field and the QIntValidator upper bound."""
     default_channel_2_threshold: float = 0.6
     """The default colocalization probability threshold for classifying ROIs as channel 2 positive. ROIs with a
     colocalization probability above this value are assigned to channel 2, and the threshold resets to this default
     on each session load."""
-    default_classifier_threshold: float = 0.5
-    """The default probability threshold above which an ROI is labeled as a cell during classifier training label
-    extraction. Applied to the second column of the cell classification array to produce binary training labels for
-    the classifier builder."""
     bin_size_divisor: int = 2
     """The divisor applied to the product of tau and sampling rate when computing the default temporal bin size. The
     bin size is calculated as max(1, int(tau * sampling_rate / divisor)) and controls the time window used for

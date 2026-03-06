@@ -11,9 +11,6 @@ from PySide6 import QtGui
 class _CommonStyle:
     """Encapsulates static visual parameters shared by all viewer windows."""
 
-    main_window: str = "QMainWindow {background: 'black';}"
-    """The stylesheet applied to QMainWindow backgrounds. Every viewer sets this on its top-level window to produce a 
-    uniform dark canvas behind all child widgets."""
     white_label: str = "color: white;"
     """The stylesheet for QLabel text that sits on the dark window background. Applied to status labels, axis labels,
     checkbox captions, and group headings across all viewer windows."""
@@ -28,12 +25,21 @@ class _CommonStyle:
     read clearly on the dark background."""
     edit_width: int = 50
     """The fixed pixel width for small numeric QLineEdit input fields across all viewer windows."""
-    button_pressed: str = "QPushButton {Text-align: left; background-color: rgb(100,50,100); color:white;}"
-    """The stylesheet for a QPushButton in the pressed (active/selected) state."""
-    button_unpressed: str = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:white;}"
-    """The stylesheet for a QPushButton in the unpressed (enabled but not selected) state."""
-    button_inactive: str = "QPushButton {Text-align: left; background-color: rgb(50,50,50); color:gray;}"
-    """The stylesheet for a QPushButton in the inactive (disabled/grayed-out) state."""
+    button_pressed: str = (
+        "QPushButton { text-align: left; background-color: rgb(100,50,100); color: white; }"
+        "QPushButton:disabled { background-color: rgb(50,50,50); color: gray; }"
+    )
+    """The stylesheet for a QPushButton in the pressed (active/selected) state with a disabled fallback."""
+    button_unpressed: str = (
+        "QPushButton { text-align: left; background-color: rgb(50,50,50); color: white; }"
+        "QPushButton:disabled { background-color: rgb(50,50,50); color: gray; }"
+    )
+    """The stylesheet for a QPushButton in the unpressed (enabled but not selected) state with a disabled fallback."""
+    menu: str = (
+        "QMenu { background-color: rgb(50,50,50); color: white; }"
+        "QMenu::item:selected { background-color: rgb(100,50,100); }"
+    )
+    """The stylesheet for QMenu dropdowns to match the dark viewer theme."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,9 +56,12 @@ class _PlotStyle:
     legend_offset: tuple[int, int] = (-10, 1)
     """The (x, y) pixel offset that positions the pyqtgraph legend relative to the top-right corner of the plot area.
     A negative x value pulls the legend inward from the right edge to avoid clipping."""
-    axis_fixed_width: int = 60
-    """The fixed pixel width assigned to y-axis tick regions in plot widgets. Prevents the plot area from shifting
-    horizontally when tick label digit counts change."""
+    left_axis_width: int = 80
+    """The fixed pixel width for the left (y) axis in plot widgets. Provides consistent spacing between the axis label
+    and tick labels across all viewers."""
+    bottom_axis_height: int = 50
+    """The fixed pixel height for the bottom (x) axis in plot widgets. Provides consistent spacing between the axis
+    label and tick labels across all viewers."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,8 +96,6 @@ class _ROIViewerStyle:
 
     colorbar_max_height: int = 60
     """The maximum height for the colorbar widget."""
-    colorbar_max_width: int = 150
-    """The maximum width for the colorbar widget."""
     color_edit_width: int = 65
     """The width for color panel edit fields and the colormap combo box."""
     colorbar_sample_count: int = 101
