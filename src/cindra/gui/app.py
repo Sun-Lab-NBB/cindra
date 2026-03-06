@@ -35,6 +35,7 @@ def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> 
     """
     # Reuses the existing QApplication if one is already running (e.g. when embedded in a larger
     # GUI), otherwise creates a new one.
+    console.echo(message="Initializing the Tracking GUI...")
     application = QApplication.instance()
     owns_application = application is None
     if owns_application:
@@ -45,9 +46,11 @@ def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> 
     data = ViewerData.from_data(root_path=recording_path, dataset=dataset)
 
     # Creates the viewer window with the loaded data.
+    console.echo(message="Initializing Multi-Day Tracking viewer...")
     window = TrackingViewer(data=data)
 
     window.show()
+    console.echo(message="Tracking viewer: ready.", level=LogLevel.SUCCESS)
 
     # Only enters the event loop if this function created the QApplication. When embedded in a
     # larger GUI, the caller is responsible for running the event loop.
