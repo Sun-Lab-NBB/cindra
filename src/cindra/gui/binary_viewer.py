@@ -9,6 +9,7 @@ import numpy as np
 from PySide6 import QtGui, QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
 from PySide6.QtWidgets import (
+    QMenu,
     QLabel,
     QSlider,
     QWidget,
@@ -21,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import STYLE, COLORS, PLOT_STYLE, BINARY_STYLE
+from .styles import FONTS, STYLE, COLORS, PLOT_STYLE, BINARY_STYLE
 from .widgets import configure_plot, add_plot_legend, create_play_pause_group
 from .constants import BINARY_CONFIG
 from .viewer_context import SingleDayData
@@ -52,6 +53,8 @@ class BinaryPlayer(QMainWindow):
         _channel_2_button: Button for toggling channel 2 overlay.
         _shift_plot: Plot widget for rigid registration X-Y offsets.
         _shift_scatter: Scatter plot overlay indicating the current frame on the shift plot.
+        _average_rigid_y_offsets: Average rigid Y offsets across all planes.
+        _average_rigid_x_offsets: Average rigid X offsets across all planes.
 
         _frame_number_label: Label displaying the current frame number.
         _frame_slider: Horizontal slider for frame navigation.
@@ -72,7 +75,6 @@ class BinaryPlayer(QMainWindow):
         self.setWindowTitle("Registered Recording")
         self._central_widget: QWidget = QWidget(self)
         self.setCentralWidget(self._central_widget)
-        self._build_menus()
         self._layout: QGridLayout = QGridLayout()
         self._central_widget.setLayout(self._layout)
         # Initializes state flags and recording data.
@@ -85,10 +87,22 @@ class BinaryPlayer(QMainWindow):
         self._display_range: NDArray[np.float32] = np.zeros((2,), dtype=np.float32)
         self._time_step: float = 0.0
         self._image: NDArray[np.int16] | None = None
+        self._average_rigid_y_offsets: NDArray[np.float32] = np.zeros(1, dtype=np.float32)
+        self._average_rigid_x_offsets: NDArray[np.float32] = np.zeros(1, dtype=np.float32)
 
-        # Row 0: Toolbar with recording controls arranged in a horizontal layout. Widgets keep their
-        # natural size; only the spacing between them grows when the window is resized.
+        # Row 0: Toolbar with file menu and recording controls on a single line.
         toolbar = QHBoxLayout()
+
+        # File menu button with dropdown for loading recordings.
+        self._file_button: QPushButton = QPushButton("File")
+        self._file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._file_button.setStyleSheet(STYLE.button_unpressed)
+        file_menu = QMenu(self)
+        load_action = file_menu.addAction("&Load recording")
+        load_action.setShortcut("Ctrl+L")
+        load_action.triggered.connect(self._load_recording)
+        self._file_button.setMenu(file_menu)
+        toolbar.addWidget(self._file_button)
 
         # Channel 2 toggle button. Disabled until a recording with two channels is loaded.
         self._channel_2_button: QPushButton = QPushButton("View Channel 2")
@@ -222,14 +236,6 @@ class BinaryPlayer(QMainWindow):
         self._pause_button.setEnabled(False)
         self._pause_button.setChecked(True)
 
-    def _build_menus(self) -> None:
-        """Builds the File-only menu bar for the viewer."""
-        file_menu = self.menuBar().addMenu("&File")
-
-        load_action = file_menu.addAction("&Load recording")
-        load_action.setShortcut("Ctrl+L")
-        load_action.triggered.connect(self._load_recording)
-
     def _load_recording(self) -> None:
         """Displays a file dialog that allows users to select a new recording to visualize."""
         # Defaults the file dialog to the parent of the currently loaded recording's output
@@ -271,9 +277,10 @@ class BinaryPlayer(QMainWindow):
         self._shift_plot.disableAutoRange()
 
         # Computes dynamic range from subsampled per-plane frames, avoiding zero-border bias from stitched frames.
+        # Ravels each plane's samples before concatenation since planes may have different FOV dimensions.
         all_frames = np.concatenate(
             [
-                binary.subsample_movie(sample_count=BINARY_CONFIG.subsample_frame_count)
+                binary.subsample_movie(sample_count=BINARY_CONFIG.subsample_frame_count).ravel()
                 for binary in self.data.combined_binary.files
             ]
         )
@@ -296,28 +303,30 @@ class BinaryPlayer(QMainWindow):
             self._update_frame_slider()
             self._update_buttons()
 
-        # Plots per-plane registration X-Y offsets with distinct colors per plane.
+        # Computes average rigid registration offsets across all planes.
         plane_count = self.data.plane_count
-        shift_min = 0
-        shift_max = 0
         x_values = np.arange(frame_count)
+        average_y = np.zeros(frame_count, dtype=np.float64)
+        average_x = np.zeros(frame_count, dtype=np.float64)
         for plane_index in range(plane_count):
             rigid_y, rigid_x = self.data.plane_rigid_offsets(plane_index)
-            color = pg.intColor(plane_index, hues=max(plane_count, 2))
-            self._shift_plot.plot(x_values, rigid_y, pen=pg.mkPen(color), name=f"P{plane_index} Y")
-            self._shift_plot.plot(
-                x_values,
-                rigid_x,
-                pen=pg.mkPen(color, style=QtCore.Qt.PenStyle.DashLine),
-                name=f"P{plane_index} X",
-            )
-            shift_min = min(shift_min, int(rigid_y.min()), int(rigid_x.min()))
-            shift_max = max(shift_max, int(rigid_y.max()), int(rigid_x.max()))
+            average_y += rigid_y
+            average_x += rigid_x
+        average_y = np.asarray(average_y / plane_count, dtype=np.float32)
+        average_x = np.asarray(average_x / plane_count, dtype=np.float32)
+        self._average_rigid_y_offsets = average_y
+        self._average_rigid_x_offsets = average_x
+
+        # Plots average Y (gold) and X (green) offset curves with a horizontal legend.
+        add_plot_legend(self._shift_plot, column_count=BINARY_STYLE.legend_column_count)
+        self._shift_plot.plot(x_values, average_y, pen=pg.mkPen(COLORS.gold), name="Average Y offset")
+        self._shift_plot.plot(x_values, average_x, pen=pg.mkPen(COLORS.green), name="Average X offset")
+        shift_min = min(float(average_y.min()), float(average_x.min()))
+        shift_max = max(float(average_y.max()), float(average_x.max()))
         if shift_min == shift_max:
             shift_min -= 1
             shift_max += 1
-        shift_max += int((shift_max - shift_min) * PLOT_STYLE.legend_headroom)
-        add_plot_legend(self._shift_plot, column_count=min(plane_count * 2, BINARY_STYLE.legend_column_count))
+        shift_max += (shift_max - shift_min) * PLOT_STYLE.legend_headroom
         self._shift_plot.setLimits(xMin=0, xMax=last_frame)
         self._shift_plot.setRange(xRange=(0, last_frame), yRange=(shift_min, shift_max), padding=0.0)
         self._shift_scatter = pg.ScatterPlotItem()
@@ -333,20 +342,14 @@ class BinaryPlayer(QMainWindow):
         self._next_frame()
 
     def _update_shift_scatter(self, frame_index: int) -> None:
-        """Updates the scatter overlay on the shift plot to mark the given frame across all planes.
+        """Updates the scatter overlay on the shift plot to mark the current frame on the average offset curves.
 
         Args:
             frame_index: The frame index to highlight on the offset plot.
         """
-        x_positions: list[int] = []
-        y_positions: list[int] = []
-        for plane_index in range(self.data.plane_count):
-            rigid_y, rigid_x = self.data.plane_rigid_offsets(plane_index)
-            x_positions.extend([frame_index, frame_index])
-            y_positions.extend([int(rigid_y[frame_index]), int(rigid_x[frame_index])])
         self._shift_scatter.setData(
-            x_positions,
-            y_positions,
+            [frame_index, frame_index],
+            [float(self._average_rigid_y_offsets[frame_index]), float(self._average_rigid_x_offsets[frame_index])],
             size=PLOT_STYLE.scatter_point_size,
             brush=pg.mkBrush(*COLORS.red),
         )

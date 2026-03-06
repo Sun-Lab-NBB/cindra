@@ -107,6 +107,12 @@ def run_registration_viewer(recording_path: Path) -> None:
         # Cascade: offset so both title bars remain accessible on smaller screens.
         pc_viewer_x, pc_viewer_y = binary_viewer_x + 30, binary_viewer_y + 30
 
+    # Clamps window dimensions to fit within the available screen area.
+    binary_viewer_height = min(binary_viewer_height, available.height() - binary_viewer_y)
+    binary_viewer_width = min(binary_viewer_width, available.width() - binary_viewer_x)
+    pc_viewer_height = min(pc_viewer_height, available.height() - pc_viewer_y)
+    pc_viewer_width = min(pc_viewer_width, available.width() - pc_viewer_x)
+
     binary_player.setGeometry(binary_viewer_x, binary_viewer_y, binary_viewer_width, binary_viewer_height)
     pc_viewer.setGeometry(pc_viewer_x, pc_viewer_y, pc_viewer_width, pc_viewer_height)
 

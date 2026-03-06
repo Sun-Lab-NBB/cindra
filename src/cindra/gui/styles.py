@@ -68,17 +68,17 @@ class _FontStyle:
     label_size: str = "12pt"
     """The font size for axis labels and legend entry labels."""
 
-    small: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 8))
-    """Small font (Arial 8pt) for ROI statistic display."""
+    small: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 14))
+    """Small font (Arial 14pt) for general GUI widgets and the application default."""
 
-    small_bold: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 8, QtGui.QFont.Weight.Bold.value))
-    """Small bold font (Arial 8pt bold) for combo boxes, buttons, and overlay text."""
+    small_bold: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 14, QtGui.QFont.Weight.Bold.value))
+    """Small bold font (Arial 14pt bold) for combo boxes, buttons, and overlay text."""
 
-    large: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 14))
-    """Large font (Arial 14pt) for prominent GUI input fields."""
+    large: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 16))
+    """Large font (Arial 16pt) for prominent GUI input fields."""
 
-    large_bold: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 14, QtGui.QFont.Weight.Bold.value))
-    """Large bold font (Arial 14pt bold) for prominent GUI labels."""
+    large_bold: QtGui.QFont = field(default_factory=lambda: QtGui.QFont("Arial", 16, QtGui.QFont.Weight.Bold.value))
+    """Large bold font (Arial 16pt bold) for prominent GUI labels."""
 
 
 @dataclass(frozen=True, slots=True)

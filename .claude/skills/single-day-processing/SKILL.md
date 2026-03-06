@@ -350,7 +350,7 @@ Summary: 10/30 sessions complete | 2 processing | 18 queued | 0 failed
 
 **CRITICAL**: You MUST ask the user about configuration before processing. Never skip this step.
 
-For complete parameter documentation, invoke `/single-day-config`.
+For complete parameter documentation, invoke `/single-day-data`.
 
 ### Step 1: Ask About Existing Configuration
 
@@ -386,7 +386,7 @@ When `mesoscan=True`, these parameters are **automatically overwritten** from `c
 - `fs` - Set to `frame_rate`
 - ROI geometry (`lines`, `dx`, `dy`, `nrois`)
 
-User-specified values for these parameters are ignored. See `/single-day-config` for complete details.
+User-specified values for these parameters are ignored. See `/single-day-data` for complete details.
 
 ### Multi-Day Compatibility
 
