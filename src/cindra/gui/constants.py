@@ -292,12 +292,8 @@ class _BinaryPlayerConstants:
     subsample_frame_count: int = 100
     """The number of evenly-spaced frames subsampled from the recording for dynamic range estimation. These frames
     are used to compute the mean and standard deviation that define the display intensity range."""
-    minimum_frame_delta: int = 5
-    """The minimum frame step size for arrow key navigation. When the recording is short enough that the computed
-    step (frame_count / frame_delta_divisor) falls below this value, this minimum is used instead."""
-    frame_delta_divisor: int = 200
-    """The divisor applied to the total frame count to compute the arrow key frame step size. Larger values produce
-    smaller steps, giving finer frame-by-frame navigation in long recordings."""
+    default_frame_delta: int = 100
+    """The default frame step size for arrow key navigation, playback advancement, and slider single-step."""
     frame_slider_tick_interval: int = 5
     """The tick spacing for the frame navigation slider. Controls how many frame positions are represented by each
     discrete tick mark on the slider widget."""

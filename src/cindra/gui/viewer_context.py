@@ -578,6 +578,8 @@ class SingleDayData:
         Returns:
             A fully populated SingleDayData instance.
         """
+        console.echo(message=f"Loading a single recording's data from: {root_path}.")
+        console.echo(message="Resolving runtime contexts...")
         contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
         if not isinstance(contexts, list):
             contexts = [contexts]
@@ -585,6 +587,7 @@ class SingleDayData:
         # Explicitly memory-maps per-plane arrays since context resolution no longer loads them eagerly. Also resolves
         # the cindra output root from the first available plane output path, since RuntimeContext.load() already
         # searched root_path recursively for the output directory.
+        console.echo(message="Memory-mapping per-plane data...")
         cindra_root: Path | None = None
         for context in contexts:
             plane_output = context.runtime.io.output_path
@@ -601,8 +604,10 @@ class SingleDayData:
             )
             console.error(message=message, error=FileNotFoundError)
 
+        console.echo(message="Loading combined plane data...")
         combined = CombinedData.load(root_path=cindra_root)
         combined.detection.load_arrays(cindra_root)
+        console.echo(message="Recording's data: loaded.", level=LogLevel.SUCCESS)
         return cls(_contexts=contexts, _combined=combined, _view_index=view_index)
 
     @property
