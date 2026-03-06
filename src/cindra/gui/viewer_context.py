@@ -1191,15 +1191,22 @@ class ViewerData:
             return
 
         # Constructs MultiDayData per session, skipping failures.
+        console.echo(message=f"Loading multi-day dataset '{dataset_name}' ({len(contexts)} recording(s))...")
         recordings: list[MultiDayData] = []
-        for context in contexts:
+        for index, context in enumerate(contexts):
+            session_id = context.runtime.io.session_id
             try:
+                console.echo(message=f"  Loading recording {index + 1}/{len(contexts)}: {session_id}...")
                 recordings.append(MultiDayData(_context=context))
             except Exception:
                 console.echo(
-                    message=f"Failed to load multi-day session '{context.runtime.io.session_id}', skipping.",
+                    message=f"Failed to load multi-day session '{session_id}', skipping.",
                     level=LogLevel.WARNING,
                 )
+        console.echo(
+            message=f"Dataset '{dataset_name}' with {len(recordings)} recording(s): loaded.",
+            level=LogLevel.SUCCESS,
+        )
 
         self._recordings = recordings
         self._active_dataset_name = dataset_name

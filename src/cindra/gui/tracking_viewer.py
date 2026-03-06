@@ -9,6 +9,7 @@ import numpy as np
 from PySide6 import QtGui, QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
 from PySide6.QtWidgets import (
+    QMenu,
     QLabel,
     QStyle,
     QSlider,
@@ -29,7 +30,7 @@ from PySide6.QtWidgets import (
 from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
-from .styles import STYLE, TRACKING_STYLE
+from .styles import FONTS, STYLE, TRACKING_STYLE
 from .widgets import create_play_pause_group
 from .overlays import normalize_percentile
 from .constants import (
@@ -74,6 +75,7 @@ class TrackingViewer(QMainWindow):
         _selected_rois: Set of selected ROI indices, or None when all ROIs are visible.
         _selection_was_template: Determines whether the last valid selection used a template-group layer.
         _selection_recording_index: Recording index when the selection was last valid.
+        _file_button: File menu button with dropdown for loading recordings.
         _graphics_widget: PyQtGraph graphics layout for image display.
         _view_box: View box for the primary image display.
         _image_item: Image item for the composited background and mask display.
@@ -123,7 +125,28 @@ class TrackingViewer(QMainWindow):
         # Builds the UI layout.
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
-        main_layout = QHBoxLayout(central_widget)
+        outer_layout = QVBoxLayout(central_widget)
+
+        # Toolbar row with file menu button.
+        toolbar = QHBoxLayout()
+        self._file_button: QPushButton = QPushButton("File")
+        self._file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._file_button.setStyleSheet(STYLE.button_unpressed)
+        file_menu = QMenu(self)
+        load_action = file_menu.addAction("&Load dataset")
+        load_action.setShortcut("Ctrl+L")
+        load_action.triggered.connect(self._load_dataset)
+        self._file_button.setMenu(file_menu)
+        toolbar.addWidget(self._file_button)
+        hint_label = QLabel("Hint: Use arrows to navigate recordings / mask layers, use space to toggle auto-cycling.")
+        hint_label.setStyleSheet(STYLE.white_label)
+        hint_label.setFont(FONTS.small_bold)
+        toolbar.addWidget(hint_label)
+        toolbar.addStretch()
+        outer_layout.addLayout(toolbar)
+
+        # Main content row: image panel + control panel sidebar.
+        main_layout = QHBoxLayout()
 
         # Image + trace display panel (pyqtgraph).
         self._graphics_widget = pg.GraphicsLayoutWidget()
@@ -137,12 +160,11 @@ class TrackingViewer(QMainWindow):
         # noinspection PyUnresolvedReferences
         self._graphics_widget.scene().sigMouseClicked.connect(self._on_image_clicked)
 
-        # File menu.
-        self._build_menus()
-
         # Control panel (right sidebar).
         control_panel = self._build_control_panel()
         main_layout.addWidget(control_panel, stretch=1)
+
+        outer_layout.addLayout(main_layout, stretch=1)
 
         # Status bar.
         self._status_bar = QStatusBar(self)
@@ -203,6 +225,16 @@ class TrackingViewer(QMainWindow):
             elif event.key() == QtCore.Qt.Key.Key_Right:
                 self._next_recording()
 
+        # Up/down arrow keys cycle through mask layers.
+        if event.key() == QtCore.Qt.Key.Key_Up:
+            index = self._mask_combo.currentIndex()
+            if index > 0:
+                self._mask_combo.setCurrentIndex(index - 1)
+        elif event.key() == QtCore.Qt.Key.Key_Down:
+            index = self._mask_combo.currentIndex()
+            if index < self._mask_combo.count() - 1:
+                self._mask_combo.setCurrentIndex(index + 1)
+
         # Spacebar toggles between play and pause.
         if event.key() == QtCore.Qt.Key.Key_Space:
             if self._play_button.isEnabled():
@@ -210,16 +242,19 @@ class TrackingViewer(QMainWindow):
             else:
                 self._stop_cycling()
 
-    def _build_menus(self) -> None:
-        """Builds the File-only menu bar for the viewer."""
-        file_menu = self.menuBar().addMenu("&File")
+    def eventFilter(self, source: QtCore.QObject, event: QtCore.QEvent) -> bool:  # noqa: N802
+        """Returns focus to the main window when Escape is pressed inside an edit field.
 
-        load_action = file_menu.addAction("&Load recording")
-        load_action.setShortcut("Ctrl+L")
-        load_action.triggered.connect(self._load_recording)
+        Notes:
+            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
+        """
+        if event.type() == QtCore.QEvent.Type.KeyPress and event.key() == QtCore.Qt.Key.Key_Escape:
+            self.setFocus()
+            return True
+        return super().eventFilter(source, event)
 
-    def _load_recording(self) -> None:
-        """Displays a file dialog that allows users to select a new recording to visualize."""
+    def _load_dataset(self) -> None:
+        """Displays a file dialog that allows users to select a new multi-day dataset to visualize."""
         # Defaults the file dialog to the parent of the currently loaded recording's output
         # directory, so the user can easily navigate to a sibling recording.
         start_directory = ""
@@ -228,25 +263,27 @@ class TrackingViewer(QMainWindow):
         if parent.is_dir():
             start_directory = str(parent)
 
-        directory = QFileDialog.getExistingDirectory(self, "Open cindra output directory", start_directory)
+        directory = QFileDialog.getExistingDirectory(
+            self, "Select any recording directory from the dataset", start_directory
+        )
         if not directory:
             return
 
         recording_path = Path(directory)
-        console.echo(message=f"Loading recording: {recording_path}")
+        console.echo(message=f"Loading dataset from recording: {recording_path}")
 
         try:
             data = ViewerData.from_data(root_path=recording_path)
         except Exception:
-            console.echo(message="Unable to load recording data.", level=LogLevel.ERROR)
+            console.echo(message="Unable to load dataset.", level=LogLevel.ERROR)
             result = QMessageBox.question(
                 self,
                 "ERROR",
-                "Unable to load recording. Try another directory?",
+                "Unable to load dataset. Try another directory?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if result == QMessageBox.StandardButton.Yes:
-                self._load_recording()
+                self._load_dataset()
             return
 
         self.load_data(data=data)
@@ -399,10 +436,13 @@ class TrackingViewer(QMainWindow):
         input_row.addWidget(QLabel("ROI:"))
         self._roi_edit = QLineEdit()
         self._roi_edit.setFixedWidth(STYLE.edit_width)
-        self._roi_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        self._roi_edit.setReadOnly(True)
-        self._roi_edit.setToolTip("Displays the index of the last clicked ROI.")
+        self._roi_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        self._roi_edit.setToolTip("Enter an ROI index to select it. Click an ROI or use Ctrl/Shift-click to toggle.")
+        self._roi_edit.returnPressed.connect(self._on_roi_entered)
+        self._roi_edit.returnPressed.connect(self.setFocus)
+        self._roi_edit.installEventFilter(self)
         input_row.addWidget(self._roi_edit)
+        input_row.addStretch()
         roi_layout.addLayout(input_row)
 
         button_row = QHBoxLayout()
@@ -421,9 +461,10 @@ class TrackingViewer(QMainWindow):
         layout.addStretch()
 
         # Prevents control panel widgets from capturing keyboard focus so spacebar and arrow keys always reach the
-        # main window's keyPressEvent.
+        # main window's keyPressEvent. The ROI edit field is re-enabled so users can type ROI indices.
         for child in panel.findChildren(QWidget):
             child.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._roi_edit.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
 
         return panel
 
@@ -446,6 +487,7 @@ class TrackingViewer(QMainWindow):
         # Pre-collects all valid mask pixel coordinates and per-ROI colors into the cache.
         masks = self._resolve_masks(rec, mask_layer, channel_2)
         self._cached_mask_count = len(masks) if masks else 0
+        self._roi_edit.setValidator(QtGui.QIntValidator(0, max(0, self._cached_mask_count - 1)))
         self._cached_mask_y = None
         self._cached_mask_x = None
         self._cached_mask_colors = None
@@ -665,6 +707,20 @@ class TrackingViewer(QMainWindow):
 
         self._roi_edit.setText(str(roi_index))
         self._composite_and_display()
+
+    def _on_roi_entered(self) -> None:
+        """Selects the ROI whose index was typed into the ROI edit field."""
+        text = self._roi_edit.text().strip()
+        if not text:
+            return
+        try:
+            roi_index = int(text)
+        except ValueError:
+            return
+        if 0 <= roi_index < self._cached_mask_count:
+            self._selected_rois = {roi_index}
+            self._roi_edit.setText(str(roi_index))
+            self._composite_and_display()
 
     def _select_all_rois(self) -> None:
         """Resets the selection to show all ROIs."""
