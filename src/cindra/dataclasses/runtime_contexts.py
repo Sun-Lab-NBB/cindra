@@ -9,7 +9,7 @@ from natsort import natsorted
 from ataraxis_base_utilities import console, ensure_directory_exists
 
 from .multi_day_data import MultiDayRuntimeData
-from .single_day_data import SingleDayRuntimeData
+from .single_day_data import CombinedData, SingleDayRuntimeData
 from .multi_day_configuration import MultiDayConfiguration
 from .single_day_configuration import AcquisitionParameters, SingleDayConfiguration
 
@@ -40,6 +40,7 @@ def _load_single_day_runtime(plane_directory: Path) -> SingleDayRuntimeData:
         # Reloads the runtime from the corrected YAML so that arrays are resolved against the new paths.
         runtime = SingleDayRuntimeData.load(output_path=plane_directory)
 
+    # Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
     return runtime
 
 
@@ -151,8 +152,8 @@ def _relocate_runtime_paths(
             runtime.io.registered_binary_path_channel_2 = (
                 new_prefix / runtime.io.registered_binary_path_channel_2.relative_to(old_prefix)
             )
-        if runtime.io.output_directory is not None and not runtime.io.output_directory.is_relative_to(new_prefix):
-            runtime.io.output_directory = new_prefix / runtime.io.output_directory.relative_to(old_prefix)
+        if runtime.io.output_path is not None and not runtime.io.output_path.is_relative_to(new_prefix):
+            runtime.io.output_path = new_prefix / runtime.io.output_path.relative_to(old_prefix)
     else:
         if runtime.io.data_path is not None and not runtime.io.data_path.is_relative_to(new_prefix):
             runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
@@ -172,6 +173,19 @@ def _relocate_runtime_paths(
                     _relocate_cross_session_path(path=path, old_prefix=old_prefix, new_prefix=new_prefix)
                 )
         runtime.io.dataset_output_paths = tuple(relocated_paths)
+
+
+def _load_multiday_data(runtime: MultiDayRuntimeData) -> None:
+    """Loads CombinedData metadata (scalars only) onto a deserialized MultiDayRuntimeData instance.
+
+    Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
+
+    Args:
+        runtime: A MultiDayRuntimeData instance that has been deserialized from YAML but has not had CombinedData
+            loaded yet.
+    """
+    if runtime.combined_data is None and runtime.io.data_path is not None:
+        runtime.combined_data = CombinedData.load(root_path=runtime.io.data_path)
 
 
 @dataclass
@@ -200,21 +214,21 @@ class RuntimeContext:
     def save_shared(self) -> None:
         """Saves shared configuration and acquisition parameters to the root output directory.
 
-        This method derives the root path from self.configuration.file_io.save_path and creates the cindra subdirectory
-        if it does not exist. It should be called once at pipeline initialization to save the static data shared
-        across all planes.
+        This method derives the root path from self.configuration.file_io.output_path and creates the cindra
+        subdirectory if it does not exist. It should be called once at pipeline initialization to save the static data
+        shared across all planes.
 
         Raises:
-            ValueError: If save_path is not configured in the configuration.
+            ValueError: If output_path is not configured in the configuration.
         """
-        if self.configuration.file_io.save_path is None:
+        if self.configuration.file_io.output_path is None:
             message = (
-                "Unable to save shared configuration data. The save_path must be configured in the FileIO section "
+                "Unable to save shared configuration data. The output_path must be configured in the FileIO section "
                 "of the configuration, but it is currently None."
             )
             console.error(message=message, error=ValueError)
 
-        root_path = self.configuration.file_io.save_path / "cindra"
+        root_path = self.configuration.file_io.output_path / "cindra"
         root_path.mkdir(parents=True, exist_ok=True)
 
         self.configuration.save(file_path=root_path / "configuration.yaml")
@@ -223,20 +237,20 @@ class RuntimeContext:
     def save_runtime(self) -> None:
         """Saves this plane's runtime data to its output directory.
 
-        This method uses self.runtime.io.output_directory as the save location. This directory is set during plane
+        This method uses self.runtime.io.output_path as the save location. This directory is set during plane
         initialization and is plane-specific (e.g., plane_0/).
 
         Raises:
-            ValueError: If output_directory is not set in the runtime IOData.
+            ValueError: If output_path is not set in the runtime IOData.
         """
-        if self.runtime.io.output_directory is None:
+        if self.runtime.io.output_path is None:
             message = (
-                "Unable to save runtime data. The output_directory must be set in the IOData section of the "
+                "Unable to save runtime data. The output_path must be set in the IOData section of the "
                 "runtime data, but it is currently None."
             )
             console.error(message=message, error=ValueError)
 
-        self.runtime.save(output_path=self.runtime.io.output_directory)
+        self.runtime.save(output_path=self.runtime.io.output_path)
 
     @classmethod
     def load(cls, root_path: Path, plane_index: int = -1) -> RuntimeContext | list[RuntimeContext]:
@@ -467,8 +481,7 @@ class MultiDayRuntimeContext:
                         if plane_dir.is_dir() and (plane_dir / "runtime_data.yaml").exists():
                             _load_single_day_runtime(plane_directory=plane_dir)
 
-            # Reloads the entry runtime from the corrected YAML so that arrays are resolved against the new paths.
-            # This will fail if the single-day data is unavailable, as CombinedData is required.
+            # Reloads the entry runtime from the corrected YAML so that paths are resolved against the new location.
             entry_runtime = MultiDayRuntimeData.load(output_path=resolved_output_path)
             output_paths = entry_runtime.io.dataset_output_paths
 
@@ -482,6 +495,9 @@ class MultiDayRuntimeContext:
             console.error(message=message, error=FileNotFoundError)
         configuration = MultiDayConfiguration.load(file_path=config_path)
 
+        # Eagerly loads arrays and CombinedData onto the entry runtime before returning it.
+        _load_multiday_data(entry_runtime)
+
         if session_index == -1:
             # Loads all sessions. Reuses the already-loaded entry runtime to avoid redundant I/O.
             contexts: list[MultiDayRuntimeContext] = []
@@ -490,6 +506,7 @@ class MultiDayRuntimeContext:
                     contexts.append(cls(configuration=configuration, runtime=entry_runtime))
                 else:
                     runtime = MultiDayRuntimeData.load(output_path=output_path)
+                    _load_multiday_data(runtime)
                     contexts.append(cls(configuration=configuration, runtime=runtime))
             return contexts
 
@@ -507,4 +524,5 @@ class MultiDayRuntimeContext:
             return cls(configuration=configuration, runtime=entry_runtime)
 
         runtime = MultiDayRuntimeData.load(output_path=target_path)
+        _load_multiday_data(runtime)
         return cls(configuration=configuration, runtime=runtime)

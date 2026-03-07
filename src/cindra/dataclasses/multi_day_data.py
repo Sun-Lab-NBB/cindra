@@ -8,11 +8,11 @@ from dataclasses import field, dataclass
 
 import numpy as np
 from numpy.typing import NDArray  # noqa: TC002 - needed at runtime for dacite deserialization
-from ataraxis_base_utilities import console, ensure_directory_exists
+from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from .version import version, python_version
-from .single_day_data import CombinedData, ROIStatistics, ExtractionData
+from .single_day_data import ROIMask, CombinedData, ExtractionData, is_memory_mapped
 
 
 @dataclass
@@ -55,6 +55,10 @@ class MultiDayIOData:
 class MultiDayRegistrationData:
     """Stores runtime data from the registration stage."""
 
+    has_registration_data: bool = False
+    """Indicates whether registration arrays have been saved to disk. When True, ``is_registered()`` returns True even
+    if array fields are None (released to free memory). Set to True by ``save_arrays()`` and reset by ``clear()``."""
+
     # Deformation fields.
     deform_field_y: NDArray[np.float32] | None = None
     """The Y-dimension displacement field computed by DiffeomorphicDemonsRegistration. Combined with deform_field_x,
@@ -85,24 +89,27 @@ class MultiDayRegistrationData:
     """The channel 2 maximum projection transformed to the shared (deformed) visual space."""
 
     # Deformed cell masks (intermediate data for cell tracking).
-    deformed_cell_masks: list[ROIStatistics] | None = None
-    """The channel 1 cell ROI data after multi-day registration deform offsets have been applied to the spatial
-    coordinates of each ROI."""
+    deformed_cell_masks: list[ROIMask] | None = None
+    """The channel 1 cell ROI spatial data after multi-day registration deform offsets have been applied to the
+    spatial coordinates of each ROI."""
 
-    deformed_cell_masks_channel_2: list[ROIStatistics] | None = None
-    """The channel 2 cell ROI data after multi-day registration deform offsets have been applied to the spatial
-    coordinates of each ROI."""
+    deformed_cell_masks_channel_2: list[ROIMask] | None = None
+    """The channel 2 cell ROI spatial data after multi-day registration deform offsets have been applied to the
+    spatial coordinates of each ROI."""
 
     def is_registered(self) -> bool:
         """Checks whether registration data exists.
 
         Returns:
-            True if the session has been registered (has deformation fields and deformed cell masks), False otherwise.
+            True if the session has been registered (has deformation fields and deformed cell masks in memory, or
+            arrays were previously saved to disk), False otherwise.
         """
-        return self.deform_field_y is not None and self.deformed_cell_masks is not None
+        arrays_loaded = self.deform_field_y is not None and self.deformed_cell_masks is not None
+        return arrays_loaded or self.has_registration_data
 
     def clear(self) -> None:
         """Clears all registration data to prepare for re-registration."""
+        self.has_registration_data = False
         self.deform_field_y = None
         self.deform_field_x = None
         self.transformed_mean_image = None
@@ -127,89 +134,204 @@ class MultiDayRegistrationData:
         self.deformed_cell_masks = None
         self.deformed_cell_masks_channel_2 = None
 
+    def release_arrays(self) -> None:
+        """Releases all array fields to free memory without affecting ``has_registration_data``.
+
+        After calling this method, ``is_registered()`` continues to return True if arrays were previously saved,
+        because ``has_registration_data`` is preserved. Use ``memory_map_arrays()`` or ``load_arrays()`` to
+        re-acquire the data on demand.
+        """
+        self.deform_field_y = None
+        self.deform_field_x = None
+        self.transformed_mean_image = None
+        self.transformed_enhanced_mean_image = None
+        self.transformed_maximum_projection = None
+        self.transformed_mean_image_channel_2 = None
+        self.transformed_enhanced_mean_image_channel_2 = None
+        self.transformed_maximum_projection_channel_2 = None
+        self.deformed_cell_masks = None
+        self.deformed_cell_masks_channel_2 = None
+
     def save_arrays(self, output_path: Path) -> None:
-        """Saves registration data arrays to .npz files.
+        """Saves registration arrays as individual .npy files inside a ``registration_arrays/`` subdirectory.
+
+        Notes:
+            Deformed cell masks use the ROIStatistics variable-length serialization pattern and remain as .npz files
+            saved directly into ``output_path``.
 
         Args:
-            output_path: The directory where to save the registration data files.
+            output_path: The directory where to create the ``registration_arrays/`` subdirectory.
         """
+        registration_directory = output_path / "registration_arrays"
+        ensure_directory_exists(registration_directory)
+
         # Saves deformation fields.
-        if self.deform_field_y is not None and self.deform_field_x is not None:
-            np.savez(
-                output_path / "registration_deform.npz",
-                allow_pickle=False,
-                field_y=self.deform_field_y,
-                field_x=self.deform_field_x,
+        if self.deform_field_y is not None and not is_memory_mapped(self.deform_field_y):
+            np.save(registration_directory / "deform_field_y.npy", self.deform_field_y)
+            self.has_registration_data = True
+        if self.deform_field_x is not None and not is_memory_mapped(self.deform_field_x):
+            np.save(registration_directory / "deform_field_x.npy", self.deform_field_x)
+
+        # Saves channel 1 transformed images.
+        if self.transformed_mean_image is not None and not is_memory_mapped(self.transformed_mean_image):
+            np.save(registration_directory / "transformed_mean_image.npy", self.transformed_mean_image)
+        if self.transformed_enhanced_mean_image is not None and not is_memory_mapped(
+            self.transformed_enhanced_mean_image
+        ):
+            np.save(
+                registration_directory / "transformed_enhanced_mean_image.npy", self.transformed_enhanced_mean_image
+            )
+        if self.transformed_maximum_projection is not None and not is_memory_mapped(
+            self.transformed_maximum_projection
+        ):
+            np.save(registration_directory / "transformed_maximum_projection.npy", self.transformed_maximum_projection)
+
+        # Saves channel 2 transformed images.
+        if self.transformed_mean_image_channel_2 is not None and not is_memory_mapped(
+            self.transformed_mean_image_channel_2
+        ):
+            np.save(
+                registration_directory / "transformed_mean_image_channel_2.npy", self.transformed_mean_image_channel_2
+            )
+        if self.transformed_enhanced_mean_image_channel_2 is not None and not is_memory_mapped(
+            self.transformed_enhanced_mean_image_channel_2
+        ):
+            np.save(
+                registration_directory / "transformed_enhanced_mean_image_channel_2.npy",
+                self.transformed_enhanced_mean_image_channel_2,
+            )
+        if self.transformed_maximum_projection_channel_2 is not None and not is_memory_mapped(
+            self.transformed_maximum_projection_channel_2
+        ):
+            np.save(
+                registration_directory / "transformed_maximum_projection_channel_2.npy",
+                self.transformed_maximum_projection_channel_2,
             )
 
-        # Saves transformed images.
-        images_dict: dict[str, NDArray[np.float32]] = {}
-        if self.transformed_mean_image is not None:
-            images_dict["mean_image"] = self.transformed_mean_image
-        if self.transformed_enhanced_mean_image is not None:
-            images_dict["enhanced_mean_image"] = self.transformed_enhanced_mean_image
-        if self.transformed_maximum_projection is not None:
-            images_dict["maximum_projection"] = self.transformed_maximum_projection
-        if self.transformed_mean_image_channel_2 is not None:
-            images_dict["mean_image_channel_2"] = self.transformed_mean_image_channel_2
-        if self.transformed_enhanced_mean_image_channel_2 is not None:
-            images_dict["enhanced_mean_image_channel_2"] = self.transformed_enhanced_mean_image_channel_2
-        if self.transformed_maximum_projection_channel_2 is not None:
-            images_dict["maximum_projection_channel_2"] = self.transformed_maximum_projection_channel_2
-        if images_dict:
-            np.savez(output_path / "registration_transformed_images.npz", allow_pickle=False, **images_dict)
-
-        # Saves channel 1 deformed cell masks.
+        # Saves channel 1 deformed cell masks (ROIMask .npz).
         if self.deformed_cell_masks is not None:
-            ROIStatistics.save_list(self.deformed_cell_masks, output_path / "registration_deformed_masks.npz")
+            ROIMask.save_list(self.deformed_cell_masks, output_path / "registration_deformed_masks.npz")
 
-        # Saves channel 2 deformed cell masks.
+        # Saves channel 2 deformed cell masks (ROIMask .npz).
         if self.deformed_cell_masks_channel_2 is not None:
-            ROIStatistics.save_list(
+            ROIMask.save_list(
                 self.deformed_cell_masks_channel_2, output_path / "registration_deformed_masks_channel_2.npz"
             )
 
     def load_arrays(self, output_path: Path) -> None:
-        """Loads registration data arrays from .npz files into this instance.
+        """Loads registration arrays from individual .npy files in the ``registration_arrays/`` subdirectory.
 
         Args:
-            output_path: The directory containing the registration data files.
+            output_path: The directory containing the ``registration_arrays/`` subdirectory.
         """
+        registration_directory = output_path / "registration_arrays"
+
         # Loads deformation fields.
-        deform_path = output_path / "registration_deform.npz"
-        if self.deform_field_y is None and deform_path.exists():
-            data = np.load(deform_path, allow_pickle=False)
-            self.deform_field_y = data["field_y"].astype(np.float32)
-            self.deform_field_x = data["field_x"].astype(np.float32)
+        if self.deform_field_y is None:
+            path = registration_directory / "deform_field_y.npy"
+            if path.exists():
+                self.deform_field_y = np.load(path).astype(np.float32)
+        if self.deform_field_x is None:
+            path = registration_directory / "deform_field_x.npy"
+            if path.exists():
+                self.deform_field_x = np.load(path).astype(np.float32)
 
-        # Loads transformed images.
-        transformed_path = output_path / "registration_transformed_images.npz"
-        if transformed_path.exists():
-            data = np.load(transformed_path, allow_pickle=False)
-            if self.transformed_mean_image is None and "mean_image" in data:
-                self.transformed_mean_image = data["mean_image"].astype(np.float32)
-            if self.transformed_enhanced_mean_image is None and "enhanced_mean_image" in data:
-                self.transformed_enhanced_mean_image = data["enhanced_mean_image"].astype(np.float32)
-            if self.transformed_maximum_projection is None and "maximum_projection" in data:
-                self.transformed_maximum_projection = data["maximum_projection"].astype(np.float32)
-            if self.transformed_mean_image_channel_2 is None and "mean_image_channel_2" in data:
-                self.transformed_mean_image_channel_2 = data["mean_image_channel_2"].astype(np.float32)
-            if self.transformed_enhanced_mean_image_channel_2 is None and "enhanced_mean_image_channel_2" in data:
-                self.transformed_enhanced_mean_image_channel_2 = data["enhanced_mean_image_channel_2"].astype(
-                    np.float32
-                )
-            if self.transformed_maximum_projection_channel_2 is None and "maximum_projection_channel_2" in data:
-                self.transformed_maximum_projection_channel_2 = data["maximum_projection_channel_2"].astype(np.float32)
+        # Loads channel 1 transformed images.
+        if self.transformed_mean_image is None:
+            path = registration_directory / "transformed_mean_image.npy"
+            if path.exists():
+                self.transformed_mean_image = np.load(path).astype(np.float32)
+        if self.transformed_enhanced_mean_image is None:
+            path = registration_directory / "transformed_enhanced_mean_image.npy"
+            if path.exists():
+                self.transformed_enhanced_mean_image = np.load(path).astype(np.float32)
+        if self.transformed_maximum_projection is None:
+            path = registration_directory / "transformed_maximum_projection.npy"
+            if path.exists():
+                self.transformed_maximum_projection = np.load(path).astype(np.float32)
 
-        # Loads channel 1 deformed cell masks.
+        # Loads channel 2 transformed images.
+        if self.transformed_mean_image_channel_2 is None:
+            path = registration_directory / "transformed_mean_image_channel_2.npy"
+            if path.exists():
+                self.transformed_mean_image_channel_2 = np.load(path).astype(np.float32)
+        if self.transformed_enhanced_mean_image_channel_2 is None:
+            path = registration_directory / "transformed_enhanced_mean_image_channel_2.npy"
+            if path.exists():
+                self.transformed_enhanced_mean_image_channel_2 = np.load(path).astype(np.float32)
+        if self.transformed_maximum_projection_channel_2 is None:
+            path = registration_directory / "transformed_maximum_projection_channel_2.npy"
+            if path.exists():
+                self.transformed_maximum_projection_channel_2 = np.load(path).astype(np.float32)
+
+        # Loads channel 1 deformed cell masks (ROIMask .npz).
         masks_path = output_path / "registration_deformed_masks.npz"
         if self.deformed_cell_masks is None and masks_path.exists():
-            self.deformed_cell_masks = ROIStatistics.load_list(masks_path)
+            self.deformed_cell_masks = ROIMask.load_list(masks_path)
 
-        # Loads channel 2 deformed cell masks.
+        # Loads channel 2 deformed cell masks (ROIMask .npz).
         masks_path_channel_2 = output_path / "registration_deformed_masks_channel_2.npz"
         if self.deformed_cell_masks_channel_2 is None and masks_path_channel_2.exists():
-            self.deformed_cell_masks_channel_2 = ROIStatistics.load_list(masks_path_channel_2)
+            self.deformed_cell_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
+
+    def memory_map_arrays(self, output_path: Path) -> None:
+        """Memory-maps registration arrays from individual .npy files in ``r+`` mode.
+
+        This method mirrors load_arrays() but uses memory mapping for .npy files instead of eager loading.
+        ROIMask .npz files are still eagerly loaded because NumPy does not support memory mapping for .npz archives.
+
+        Args:
+            output_path: The directory containing the ``registration_arrays/`` subdirectory.
+        """
+        registration_directory = output_path / "registration_arrays"
+
+        # Memory-maps deformation fields.
+        if self.deform_field_y is None:
+            path = registration_directory / "deform_field_y.npy"
+            if path.exists():
+                self.deform_field_y = np.load(path, mmap_mode="r+")
+        if self.deform_field_x is None:
+            path = registration_directory / "deform_field_x.npy"
+            if path.exists():
+                self.deform_field_x = np.load(path, mmap_mode="r+")
+
+        # Memory-maps channel 1 transformed images.
+        if self.transformed_mean_image is None:
+            path = registration_directory / "transformed_mean_image.npy"
+            if path.exists():
+                self.transformed_mean_image = np.load(path, mmap_mode="r+")
+        if self.transformed_enhanced_mean_image is None:
+            path = registration_directory / "transformed_enhanced_mean_image.npy"
+            if path.exists():
+                self.transformed_enhanced_mean_image = np.load(path, mmap_mode="r+")
+        if self.transformed_maximum_projection is None:
+            path = registration_directory / "transformed_maximum_projection.npy"
+            if path.exists():
+                self.transformed_maximum_projection = np.load(path, mmap_mode="r+")
+
+        # Memory-maps channel 2 transformed images.
+        if self.transformed_mean_image_channel_2 is None:
+            path = registration_directory / "transformed_mean_image_channel_2.npy"
+            if path.exists():
+                self.transformed_mean_image_channel_2 = np.load(path, mmap_mode="r+")
+        if self.transformed_enhanced_mean_image_channel_2 is None:
+            path = registration_directory / "transformed_enhanced_mean_image_channel_2.npy"
+            if path.exists():
+                self.transformed_enhanced_mean_image_channel_2 = np.load(path, mmap_mode="r+")
+        if self.transformed_maximum_projection_channel_2 is None:
+            path = registration_directory / "transformed_maximum_projection_channel_2.npy"
+            if path.exists():
+                self.transformed_maximum_projection_channel_2 = np.load(path, mmap_mode="r+")
+
+        # Eagerly loads channel 1 deformed cell masks (ROIMask .npz; cannot be memory-mapped).
+        masks_path = output_path / "registration_deformed_masks.npz"
+        if self.deformed_cell_masks is None and masks_path.exists():
+            self.deformed_cell_masks = ROIMask.load_list(masks_path)
+
+        # Eagerly loads channel 2 deformed cell masks (ROIMask .npz; cannot be memory-mapped).
+        masks_path_channel_2 = output_path / "registration_deformed_masks_channel_2.npz"
+        if self.deformed_cell_masks_channel_2 is None and masks_path_channel_2.exists():
+            self.deformed_cell_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
 
 
 @dataclass
@@ -266,11 +388,11 @@ class MultiDayTrackingData:
         appear across sessions.
     """
 
-    template_masks: list[ROIStatistics] | None = None
-    """The template cell masks in shared visual space coordinates. Each ROIStatistics represents a cell that can be
+    template_masks: list[ROIMask] | None = None
+    """The template cell masks in shared visual space coordinates. Each ROIMask represents a cell that can be
     tracked across sessions, with pixel coordinates and weights derived from the clustering consensus."""
 
-    template_masks_channel_2: list[ROIStatistics] | None = None
+    template_masks_channel_2: list[ROIMask] | None = None
     """The channel 2 template cell masks in shared visual space coordinates. Only present when tracking channel 2
     cells independently in dual-channel recordings."""
 
@@ -287,6 +409,14 @@ class MultiDayTrackingData:
         self.template_masks = None
         self.template_masks_channel_2 = None
 
+    def release_arrays(self) -> None:
+        """Releases all list fields to free memory.
+
+        Use ``load_arrays()`` to re-acquire the data on demand.
+        """
+        self.template_masks = None
+        self.template_masks_channel_2 = None
+
     def save_arrays(self, output_path: Path) -> None:
         """Saves template mask arrays to .npz files.
 
@@ -294,12 +424,10 @@ class MultiDayTrackingData:
             output_path: The directory where to save the tracking data files.
         """
         if self.template_masks is not None:
-            ROIStatistics.save_list(self.template_masks, output_path / "tracking_template_masks.npz")
+            ROIMask.save_list(self.template_masks, output_path / "tracking_template_masks.npz")
 
         if self.template_masks_channel_2 is not None:
-            ROIStatistics.save_list(
-                self.template_masks_channel_2, output_path / "tracking_template_masks_channel_2.npz"
-            )
+            ROIMask.save_list(self.template_masks_channel_2, output_path / "tracking_template_masks_channel_2.npz")
 
     def load_arrays(self, output_path: Path) -> None:
         """Loads template mask arrays from .npz files into this instance.
@@ -309,11 +437,22 @@ class MultiDayTrackingData:
         """
         masks_path = output_path / "tracking_template_masks.npz"
         if self.template_masks is None and masks_path.exists():
-            self.template_masks = ROIStatistics.load_list(masks_path)
+            self.template_masks = ROIMask.load_list(masks_path)
 
         masks_path_channel_2 = output_path / "tracking_template_masks_channel_2.npz"
         if self.template_masks_channel_2 is None and masks_path_channel_2.exists():
-            self.template_masks_channel_2 = ROIStatistics.load_list(masks_path_channel_2)
+            self.template_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
+
+    def memory_map_arrays(self, output_path: Path) -> None:
+        """Loads template mask arrays from .npz files into this instance.
+
+        This method is identical to load_arrays() because template masks are stored as .npz archives, which do not
+        support memory mapping. It exists for API consistency with sibling dataclasses.
+
+        Args:
+            output_path: The directory containing the tracking data files.
+        """
+        self.load_arrays(output_path)
 
 
 @dataclass
@@ -343,34 +482,52 @@ class MultiDayRuntimeData(YamlConfig):
     """The combined single-day processing data for this session, loaded from the session directory. This field is not
     serialized to YAML and is loaded on-demand from the single-day pipeline outputs."""
 
-    def __post_init__(self) -> None:
-        """Loads arrays from existing output files."""
-        # Loads arrays from each child dataclass if output_path is set.
+    def release_arrays(self) -> None:
+        """Releases all array fields across registration, tracking, extraction, and combined_data to free memory.
+
+        Delegates to the ``release_arrays()`` method on each child dataclass. Also releases combined_data detection
+        and extraction arrays if combined_data is loaded. Scalar fields and the ``has_registration_data`` flag are
+        preserved so that ``is_registered()`` continues to work correctly.
+        """
+        self.registration.release_arrays()
+        self.tracking.release_arrays()
+        self.extraction.release_arrays()
+        if self.combined_data is not None:
+            self.combined_data.detection.release_arrays()
+            self.combined_data.extraction.release_arrays()
+
+    def load_arrays(self) -> None:
+        """Eagerly loads all multi-day NumPy arrays from disk into memory.
+
+        This is a convenience method that eagerly loads registration, tracking, and extraction arrays. CombinedData
+        (single-day data) is NOT loaded by this method and must be loaded separately by the caller. Use the individual
+        ``load_arrays()`` / ``memory_map_arrays()`` methods on each child dataclass for fine-grained control over
+        which arrays are loaded and how.
+        """
         if self.output_path is not None:
             self.registration.load_arrays(self.output_path)
             self.tracking.load_arrays(self.output_path)
             self.extraction.load_arrays(self.output_path)
 
-        # Loads CombinedData from the single-day data path if not already set. Multi-day functionality requires
-        # single-day data to be available, so this raises an error if the data cannot be loaded.
-        if self.combined_data is None and self.io.data_path is not None:
-            combined_metadata_path = self.io.data_path / "combined_metadata.npz"
-            if not combined_metadata_path.exists():
-                message = (
-                    f"Unable to load multi-day runtime data. The single-day combined_metadata.npz file does not exist "
-                    f"at the expected path: {combined_metadata_path}. Multi-day processing requires single-day data to "
-                    f"be available. Ensure the single-day pipeline completed successfully and the data has not been "
-                    f"moved or deleted."
-                )
-                console.error(message=message, error=FileNotFoundError)
-            self.combined_data = CombinedData.load(root_path=self.io.data_path)
+    def memory_map_arrays(self) -> None:
+        """Memory-maps all multi-day NumPy arrays from disk in ``r+`` mode.
+
+        This is a convenience method that memory-maps registration, tracking, and extraction arrays. CombinedData
+        (single-day data) is NOT loaded by this method and must be loaded separately by the caller. Use the individual
+        ``load_arrays()`` / ``memory_map_arrays()`` methods on each child dataclass for fine-grained control over
+        which arrays are loaded and how.
+        """
+        if self.output_path is not None:
+            self.registration.memory_map_arrays(self.output_path)
+            self.tracking.memory_map_arrays(self.output_path)
+            self.extraction.memory_map_arrays(self.output_path)
 
     def save(self, output_path: Path) -> None:
         """Saves the runtime data to a YAML file and arrays to .npz/.npy files.
 
         Notes:
-            The combined_data field is NOT saved since it references immutable single-day outputs. It is reloaded
-            from io.data_path during deserialization via __post_init__.
+            The combined_data field is NOT saved since it references immutable single-day outputs. It must be loaded
+            separately by the caller after deserialization.
 
         Args:
             output_path: The directory where to save the multiday_runtime_data.yaml file and array files.
@@ -383,9 +540,14 @@ class MultiDayRuntimeData(YamlConfig):
         self.tracking.save_arrays(output_path)
         self.extraction.save_arrays(output_path)
 
-        # Creates a deep copy for YAML serialization. The deep copy is still needed because array fields must be
-        # nulled for YAML serialization while keeping the originals intact in memory.
-        yaml_copy = copy.deepcopy(self)
+        # Creates a shallow copy for YAML serialization. Child dataclasses are shallow-copied individually so that
+        # prepare_for_saving() nulls array fields on the copies without affecting the originals in memory.
+        yaml_copy = copy.copy(self)
+        yaml_copy.registration = copy.copy(self.registration)
+        yaml_copy.tracking = copy.copy(self.tracking)
+        yaml_copy.extraction = copy.copy(self.extraction)
+        yaml_copy.io = copy.copy(self.io)
+        yaml_copy.timing = copy.copy(self.timing)
 
         # Nulls array fields in child dataclasses for YAML serialization.
         yaml_copy.registration.prepare_for_saving()
@@ -401,13 +563,18 @@ class MultiDayRuntimeData(YamlConfig):
 
     @classmethod
     def load(cls, output_path: Path) -> MultiDayRuntimeData:
-        """Loads runtime data from a YAML file and associated array files.
+        """Deserializes runtime data from a YAML file without loading any NumPy arrays or CombinedData.
+
+        After calling this method, multi-day arrays can be loaded using the ``load_arrays()`` or
+        ``memory_map_arrays()`` convenience methods, or individually per-child dataclass. CombinedData must be loaded
+        separately by the caller (e.g., ``runtime.combined_data = CombinedData.load(...)``).
 
         Args:
             output_path: The directory containing the multiday_runtime_data.yaml file.
 
         Returns:
-            A MultiDayRuntimeData instance with all data loaded, including arrays.
+            A MultiDayRuntimeData instance with all scalar fields deserialized. NumPy array fields and combined_data
+            remain None until explicitly loaded.
         """
         file_path = output_path / "multiday_runtime_data.yaml"
         return cls.from_yaml(file_path=file_path)

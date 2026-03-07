@@ -23,22 +23,20 @@ from ..dataclasses import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Preferred name for the acquisition parameters JSON file.
-_PREFERRED_PARAMETERS_FILENAME: str = "cindra_parameters.json"
 
-# Legacy name for the acquisition parameters JSON file (fallback).
-_LEGACY_PARAMETERS_FILENAME: str = "suite2p_parameters.json"
+_PARAMETERS_FILENAME: str = "cindra_parameters.json"
+"""The name of the acquisition parameters JSON file expected in each session's data directory."""
 
-# Maximum number of imaging channels supported by the pipeline.
 _MAXIMUM_CHANNEL_COUNT: int = 2
+"""The maximum number of imaging channels supported by the pipeline."""
 
 
 def find_data_directory(data_path: Path) -> Path:
     """Recursively searches for the directory containing the acquisition parameters JSON file.
 
     This function searches the data_path directory and all subdirectories for a file named 'cindra_parameters.json'
-    first, then falls back to 'suite2p_parameters.json' (created by sl-experiment). Returns the parent directory
-    containing the matched file. This directory is expected to also contain the TIFF files.
+    (created by sl-experiment). Returns the parent directory containing the matched file. This directory is expected
+    to also contain the TIFF files.
 
     Args:
         data_path: The root directory to search for the acquisition parameters file.
@@ -54,16 +52,12 @@ def find_data_directory(data_path: Path) -> Path:
         message = f"Unable to find data directory. The data_path is not a directory: {data_path}"
         console.error(message=message, error=ValueError)
 
-    # Searches for the preferred cindra parameters file first, then falls back to the legacy suite2p file.
-    parameter_files = list(data_path.rglob(_PREFERRED_PARAMETERS_FILENAME))
-    if not parameter_files:
-        parameter_files = list(data_path.rglob(_LEGACY_PARAMETERS_FILENAME))
+    parameter_files = list(data_path.rglob(_PARAMETERS_FILENAME))
 
     if not parameter_files:
         message = (
-            f"Unable to find '{_PREFERRED_PARAMETERS_FILENAME}' or '{_LEGACY_PARAMETERS_FILENAME}' in the data "
-            f"directory or its subdirectories: {data_path}. This file is required and must contain acquisition "
-            f"metadata."
+            f"Unable to find '{_PARAMETERS_FILENAME}' in the data directory or its subdirectories: {data_path}. "
+            f"This file is required and must contain acquisition metadata."
         )
         console.error(message=message, error=FileNotFoundError)
 
@@ -87,7 +81,7 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
         loaded from the saved output directory if available, allowing the pipeline to work without raw TIFF data.
 
     Args:
-        configuration: The single-day pipeline configuration. Must have save_path configured in file_io. The data_path
+        configuration: The single-day pipeline configuration. Must have output_path configured in file_io. The data_path
             is only required when raw data needs to be processed (rebinarization) or when no processed data exists.
 
     Returns:
@@ -96,20 +90,20 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
         instance with IOData fields initialized.
 
     Raises:
-        ValueError: If save_path is not configured, or if the acquisition parameters specify more than 2 channels.
+        ValueError: If output_path is not configured, or if the acquisition parameters specify more than 2 channels.
         FileNotFoundError: If neither processed data nor raw data with acquisition parameters is available.
     """
     # Validates that the save path is configured.
-    save_path_root = configuration.file_io.save_path
-    if save_path_root is None:
+    output_path_root = configuration.file_io.output_path
+    if output_path_root is None:
         message = (
-            "Unable to resolve single-day contexts. The save_path must be configured in the FileIO section of the "
+            "Unable to resolve single-day contexts. The output_path must be configured in the FileIO section of the "
             "configuration, but it is currently None."
         )
         console.error(message=message, error=ValueError)
 
     # Checks if processed data already exists with saved acquisition parameters.
-    saved_acquisition_path = save_path_root / "cindra" / "acquisition_parameters.yaml"
+    saved_acquisition_path = output_path_root / "cindra" / "acquisition_parameters.yaml"
     if saved_acquisition_path.exists():
         # Loads acquisition parameters from processed output (supports loading moved data without raw TIFFs).
         acquisition = AcquisitionParameters.from_yaml(file_path=saved_acquisition_path)
@@ -118,7 +112,7 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
         # Falls back to finding acquisition parameters from raw data path.
         if configuration.file_io.data_path is None:
             message = (
-                "Unable to resolve single-day contexts. No processed data exists at the save_path and data_path is "
+                "Unable to resolve single-day contexts. No processed data exists at the output_path and data_path is "
                 "not configured. Either provide processed data or configure data_path to point to raw TIFF data."
             )
             console.error(message=message, error=ValueError)
@@ -148,12 +142,12 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
     # Creates a RuntimeContext for each plane.
     for virtual_plane_index in range(plane_count):
         # Resolves the output directory for this plane. Always uses 'cindra' as the subdirectory.
-        plane_output_path = save_path_root / "cindra" / f"plane_{virtual_plane_index}"
+        plane_output_path = output_path_root / "cindra" / f"plane_{virtual_plane_index}"
 
         # Checks if existing runtime data exists for this plane.
         runtime_yaml_path = plane_output_path / "runtime_data.yaml"
         if runtime_yaml_path.exists():
-            # Loads existing runtime data.
+            # Loads existing runtime data (scalars only). Arrays are loaded on demand by each pipeline function.
             runtime_data = SingleDayRuntimeData.load(output_path=plane_output_path)
             console.echo(message=f"Loaded existing runtime data for plane {virtual_plane_index}.", level=LogLevel.INFO)
 
@@ -170,7 +164,7 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
 
         # Initializes the IOData for this plane with binary file paths.
         io_data = IOData(
-            output_directory=plane_output_path,
+            output_path=plane_output_path,
             registered_binary_path=plane_output_path / "channel_1_data.bin",
             plane_index=virtual_plane_index,
             sampling_rate=sampling_rate,
@@ -253,7 +247,7 @@ def resolve_multiday_contexts(
         ValueError: If target_session_id does not match any resolved session identifier.
     """
     session_directories = configuration.session_io.session_directories
-    session_ids = _extract_unique_components(paths=session_directories)
+    session_ids = extract_unique_components(paths=session_directories)
     dataset_name = configuration.session_io.dataset_name
 
     # Resolves all cindra directories and output paths upfront. These are cheap path operations needed for every
@@ -283,11 +277,13 @@ def resolve_multiday_contexts(
 
         data_path = data_paths[index]
         output_path = output_paths[index]
+
+        # Loads single-day combined data (scalars only). Arrays are loaded on demand by each pipeline function.
         combined_data = CombinedData.load(root_path=data_path)
 
         runtime_path = output_path / "multiday_runtime_data.yaml"
         if runtime_path.exists():
-            # Loads existing runtime data (pure deserialization from known output_path).
+            # Loads existing runtime data (scalars only). Arrays are loaded on demand by each pipeline function.
             runtime = MultiDayRuntimeData.load(output_path=output_path)
 
             # Updates IO paths to reflect the current configuration's session directories. This handles cases where
@@ -296,7 +292,7 @@ def resolve_multiday_contexts(
             runtime.io.dataset_output_paths = tuple(output_paths)
             runtime.io.mroi_region_borders = _compute_mroi_region_borders(data_path=data_path)
 
-            # Injects the preloaded CombinedData to ensure it's available regardless of __post_init__ behavior.
+            # Injects the preloaded CombinedData.
             runtime.combined_data = combined_data
 
             contexts.append(MultiDayRuntimeContext(configuration=configuration, runtime=runtime))
@@ -430,9 +426,6 @@ def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
 def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
     """Finds and loads acquisition parameters from the data directory.
 
-    Searches for the preferred 'cindra_parameters.json' first, then falls back to the legacy
-    'suite2p_parameters.json'.
-
     Args:
         data_path: The root directory to search for the acquisition parameters file.
 
@@ -444,11 +437,7 @@ def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
         ValueError: If the data_path is not a directory, or if required fields are missing from the JSON file.
     """
     data_directory = find_data_directory(data_path)
-
-    # Tries the preferred filename first, then falls back to the legacy filename.
-    parameters_path = data_directory / _PREFERRED_PARAMETERS_FILENAME
-    if not parameters_path.exists():
-        parameters_path = data_directory / _LEGACY_PARAMETERS_FILENAME
+    parameters_path = data_directory / _PARAMETERS_FILENAME
 
     message = f"Found acquisition parameters at: {parameters_path}."
     console.echo(message=message, level=LogLevel.SUCCESS)
@@ -456,7 +445,7 @@ def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
     return _load_acquisition_parameters(json_path=parameters_path)
 
 
-def _extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
+def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
     """Extracts the first component from the end of each input path that uniquely identifies each path globally.
 
     Notes:

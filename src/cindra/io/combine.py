@@ -119,7 +119,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         ValueError: If no valid planes with ROI statistics are found.
     """
     # Extracts plane directories from the RuntimeContext instances.
-    plane_directories = [context.runtime.io.output_directory for context in plane_contexts]
+    plane_directories = [context.runtime.io.output_path for context in plane_contexts]
 
     # Computes the y-axis and x-axis displacement for each plane. These displacement values are used to arrange
     # individual planes back into the original recording movie.
@@ -196,6 +196,17 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         if context.runtime.extraction.roi_statistics is None:
             continue
 
+        # Skips planes without fluorescence traces (extraction not completed). This check must precede ROI statistics
+        # collection to avoid adding ROI entries that lack corresponding fluorescence data.
+        if (
+            context.runtime.extraction.cell_fluorescence is None
+            or context.runtime.extraction.neuropil_fluorescence is None
+            or context.runtime.extraction.subtracted_fluorescence is None
+            or context.runtime.extraction.spikes is None
+            or context.runtime.extraction.cell_classification is None
+        ):
+            continue
+
         # Calculates the pixel ranges for placing this plane's data in the combined view.
         y_start = y_offsets[plane_index]
         y_end = y_offsets[plane_index] + heights[plane_index]
@@ -256,26 +267,28 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         # Creates deep copies of ROI statistics to avoid modifying the original and updates coordinates.
         for roi in context.runtime.extraction.roi_statistics:
             roi_copy = copy.deepcopy(roi)
-            roi_copy.x_pixels = roi_copy.x_pixels + x_offsets[plane_index]
-            roi_copy.y_pixels = roi_copy.y_pixels + y_offsets[plane_index]
-            roi_copy.centroid = (
-                roi_copy.centroid[0] + int(y_offsets[plane_index]),
-                roi_copy.centroid[1] + int(x_offsets[plane_index]),
+            roi_copy.mask.x_pixels = roi_copy.mask.x_pixels + x_offsets[plane_index]
+            roi_copy.mask.y_pixels = roi_copy.mask.y_pixels + y_offsets[plane_index]
+            roi_copy.mask.centroid = (
+                roi_copy.mask.centroid[0] + int(y_offsets[plane_index]),
+                roi_copy.mask.centroid[1] + int(x_offsets[plane_index]),
             )
             roi_copy.plane_index = plane_index
+            roi_copy.mask.frame_width = combined_width
             combined_roi_stats.append(roi_copy)
 
         # Processes channel 2 ROI statistics if second channel is functional.
         if second_channel_functional and context.runtime.extraction.roi_statistics_channel_2 is not None:
             for roi in context.runtime.extraction.roi_statistics_channel_2:
                 roi_copy = copy.deepcopy(roi)
-                roi_copy.x_pixels = roi_copy.x_pixels + x_offsets[plane_index]
-                roi_copy.y_pixels = roi_copy.y_pixels + y_offsets[plane_index]
-                roi_copy.centroid = (
-                    roi_copy.centroid[0] + int(y_offsets[plane_index]),
-                    roi_copy.centroid[1] + int(x_offsets[plane_index]),
+                roi_copy.mask.x_pixels = roi_copy.mask.x_pixels + x_offsets[plane_index]
+                roi_copy.mask.y_pixels = roi_copy.mask.y_pixels + y_offsets[plane_index]
+                roi_copy.mask.centroid = (
+                    roi_copy.mask.centroid[0] + int(y_offsets[plane_index]),
+                    roi_copy.mask.centroid[1] + int(x_offsets[plane_index]),
                 )
                 roi_copy.plane_index = plane_index
+                roi_copy.mask.frame_width = combined_width
                 combined_roi_stats_channel_2.append(roi_copy)
 
         # Extracts fluorescence and classification data from the RuntimeContext.
@@ -284,16 +297,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         plane_subtracted_fluorescence = context.runtime.extraction.subtracted_fluorescence
         plane_spikes = context.runtime.extraction.spikes
         plane_cell_classification = context.runtime.extraction.cell_classification
-
-        # Skips fluorescence processing if data is not available.
-        if (
-            plane_cell_fluorescence is None
-            or plane_neuropil_fluorescence is None
-            or plane_subtracted_fluorescence is None
-            or plane_spikes is None
-            or plane_cell_classification is None
-        ):
-            continue
 
         # Pads fluorescence data if this plane has fewer frames than the maximum.
         cell_count, frame_count = plane_cell_fluorescence.shape

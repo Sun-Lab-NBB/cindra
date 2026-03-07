@@ -231,7 +231,7 @@ cindra/
 ```python
 {
     "session_paths": ["/path/session1", "/path/session2", ...],  # Required, minimum 1
-    "config_path": "/path/to/config.yaml",  # Required
+    "configuration_path": "/path/to/config.yaml",  # Required
     "workers_per_plane": -1,    # Optional, -1 for automatic (max 30)
     "max_parallel_planes": -1   # Optional, -1 for automatic
 }
@@ -350,7 +350,7 @@ Summary: 10/30 sessions complete | 2 processing | 18 queued | 0 failed
 
 **CRITICAL**: You MUST ask the user about configuration before processing. Never skip this step.
 
-For complete parameter documentation, invoke `/single-day-config`.
+For complete parameter documentation, invoke `/single-day-data`.
 
 ### Step 1: Ask About Existing Configuration
 
@@ -386,7 +386,7 @@ When `mesoscan=True`, these parameters are **automatically overwritten** from `c
 - `fs` - Set to `frame_rate`
 - ROI geometry (`lines`, `dx`, `dy`, `nrois`)
 
-User-specified values for these parameters are ignored. See `/single-day-config` for complete details.
+User-specified values for these parameters are ignored. See `/single-day-data` for complete details.
 
 ### Multi-Day Compatibility
 
@@ -427,7 +427,7 @@ The system automatically calculates optimal resource allocation:
 | Error Message                           | Cause                    | Resolution                        |
 |-----------------------------------------|--------------------------|-----------------------------------|
 | "At least one session path is required" | Empty session_paths list | Provide at least one session path |
-| "Configuration file not found"          | Invalid config_path      | Generate or verify configuration  |
+| "Configuration file not found"          | Invalid configuration_path | Generate or verify configuration  |
 | "Session directory not found"           | Invalid path for session | Verify path exists                |
 | "Batch processing already in progress"  | Batch already running    | Wait for current batch to complete|
 

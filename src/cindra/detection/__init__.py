@@ -4,7 +4,11 @@ from .utils import compute_spatial_taper_mask, compute_registration_blocks, comp
 from .detect import detect_plane_rois
 from .tracking import track_rois_across_sessions
 from .detect_rois import extend_roi
-from .roi_statistics import compute_roi_statistics, estimate_diameter_from_rois, compute_median_pixel_position
+from .roi_statistics import (
+    compute_roi_statistics,
+    estimate_diameter_from_rois,
+    compute_median_pixel_position,
+)
 
 __all__ = [
     "compute_block_smoothing_kernel",

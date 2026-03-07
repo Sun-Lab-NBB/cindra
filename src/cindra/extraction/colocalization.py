@@ -15,14 +15,14 @@ if TYPE_CHECKING:
 
     from ..dataclasses import ROIStatistics
 
-# The number of spatial blocks along each axis used for block-wise bleedthrough regression.
 _BLOCK_COUNT: int = 3
+"""The number of spatial blocks along each axis used for block-wise bleedthrough regression."""
 
-# The fraction of the mean block dimension used as the Gaussian smoothing sigma for quadrant masks.
 _SMOOTHING_FRACTION: float = 0.25
+"""The fraction of the mean block dimension used as the Gaussian smoothing sigma for quadrant masks."""
 
-# The minimum intensity floor used to prevent division by zero in colocalization probability computation.
 _INTENSITY_EPSILON: float = 1e-3
+"""The minimum intensity floor used to prevent division by zero in colocalization probability computation."""
 
 
 def compute_intensity_colocalization(
@@ -129,7 +129,7 @@ def compute_spatial_colocalization(
     frame_height: int,
     frame_width: int,
     colocalization_threshold: float,
-) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+) -> NDArray[np.float32]:
     """Computes spatial colocalization by matching ROIs between two channels based on pixel overlap.
 
     Computes pairwise overlap fractions between all ROIs in channel 1 and channel 2, then finds
@@ -141,8 +141,8 @@ def compute_spatial_colocalization(
         This method is appropriate when both channels contain functional data with independently
         detected ROIs. The overlap fraction is normalized by the smaller ROI size, ensuring that
         a small ROI fully contained within a larger ROI receives an overlap score of 1.0. The
-        mutual best-match constraint guarantees that accepted pairings are consistent across both
-        output arrays: if channel_1_to_2[i] points to j, then channel_2_to_1[j] points to i.
+        mutual best-match constraint guarantees one-to-one correspondence: the inverse mapping
+        (channel 2 to channel 1) is fully derivable from the returned array.
 
     Args:
         rois_channel_1: The ROI statistics for channel 1 ROIs.
@@ -153,34 +153,22 @@ def compute_spatial_colocalization(
             colocalization, this represents the pixel overlap ratio threshold.
 
     Returns:
-        A tuple of two arrays for bidirectional ROI mappings. The first array has shape
-        (n_channel_1_rois, 2) where column 0 contains the matched channel 2 ROI index (-1 if no
-        match) and column 1 contains the overlap score. The second array has shape
-        (n_channel_2_rois, 2) with the same format for channel 2 to channel 1 mapping.
+        An array of shape (n_channel_1_rois, 2) where column 0 contains the matched channel 2 ROI index (-1 if
+        no match) and column 1 contains the overlap score.
     """
     count_1 = len(rois_channel_1)
-    count_2 = len(rois_channel_2)
 
     # Handles edge cases with empty ROI lists. Returns early to satisfy type narrowing requirements.
     if not rois_channel_1:
-        channel_1_to_2 = np.zeros((0, 2), dtype=np.float32)
-        channel_2_to_1 = np.column_stack(
-            (
-                np.full(count_2, fill_value=-1, dtype=np.float32),
-                np.zeros(count_2, dtype=np.float32),
-            )
-        )
-        return channel_1_to_2, channel_2_to_1
+        return np.zeros((0, 2), dtype=np.float32)
 
     if not rois_channel_2:
-        channel_1_to_2 = np.column_stack(
+        return np.column_stack(
             (
                 np.full(count_1, fill_value=-1, dtype=np.float32),
                 np.zeros(count_1, dtype=np.float32),
             )
         )
-        channel_2_to_1 = np.zeros((0, 2), dtype=np.float32)
-        return channel_1_to_2, channel_2_to_1
 
     # Computes the pairwise overlap matrix via sparse matrix multiplication.
     overlap_matrix = _compute_overlap_matrix(
@@ -194,31 +182,22 @@ def compute_spatial_colocalization(
     best_indices_1 = np.argmax(overlap_matrix, axis=1)
     best_scores_1 = np.max(overlap_matrix, axis=1)
     best_indices_2 = np.argmax(overlap_matrix, axis=0)
-    best_scores_2 = np.max(overlap_matrix, axis=0)
 
     # Enforces mutual best matching: a pair (i, j) is accepted only when channel 1 ROI i's best
     # match is j AND channel 2 ROI j's best match is i. For each channel 1 ROI i, looks up its
     # proposed partner j = best_indices_1[i], then checks whether j's best partner points back to i.
-    is_mutual_1 = best_indices_2[best_indices_1] == np.arange(count_1)
-    is_mutual_2 = best_indices_1[best_indices_2] == np.arange(count_2)
+    is_mutual = best_indices_2[best_indices_1] == np.arange(count_1)
 
     # Rejects non-mutual matches and pairs below the overlap threshold.
-    unmatched_1 = ~is_mutual_1 | (best_scores_1 < colocalization_threshold)
-    unmatched_2 = ~is_mutual_2 | (best_scores_2 < colocalization_threshold)
+    unmatched = ~is_mutual | (best_scores_1 < colocalization_threshold)
 
     channel_1_to_2 = np.empty((count_1, 2), dtype=np.float32)
     channel_1_to_2[:, 0] = best_indices_1
     channel_1_to_2[:, 1] = best_scores_1
-    channel_1_to_2[unmatched_1, 0] = -1
-    channel_1_to_2[unmatched_1, 1] = 0.0
+    channel_1_to_2[unmatched, 0] = -1
+    channel_1_to_2[unmatched, 1] = 0.0
 
-    channel_2_to_1 = np.empty((count_2, 2), dtype=np.float32)
-    channel_2_to_1[:, 0] = best_indices_2
-    channel_2_to_1[:, 1] = best_scores_2
-    channel_2_to_1[unmatched_2, 0] = -1
-    channel_2_to_1[unmatched_2, 1] = 0.0
-
-    return channel_1_to_2, channel_2_to_1
+    return channel_1_to_2
 
 
 def _correct_bleedthrough(
@@ -227,7 +206,7 @@ def _correct_bleedthrough(
 ) -> NDArray[np.float32]:
     """Corrects bleedthrough from the functional channel into the structural channel using local regression.
 
-    Performs non-rigid regression to subtract the contribution of functional channel signal that bleeds
+    Performs nonrigid regression to subtract the contribution of functional channel signal that bleeds
     into the structural channel. The image is divided into a 3x3 grid of blocks, and for each block a
     linear coefficient is computed to predict structural intensity from functional intensity. The predicted
     bleedthrough is then subtracted from the structural channel.
@@ -328,7 +307,7 @@ def _build_sparse_roi_masks(
 
     for roi_index, roi in enumerate(rois):
         # Converts 2D pixel coordinates to flattened 1D indices via row-major arithmetic.
-        flat_pixels = (roi.y_pixels * frame_width + roi.x_pixels).astype(np.intp)
+        flat_pixels = (roi.mask.y_pixels * frame_width + roi.mask.x_pixels).astype(np.intp)
 
         # Assigns every pixel in this ROI to the same row (roi_index) in the sparse matrix.
         row_indices.append(np.full(len(flat_pixels), fill_value=roi_index, dtype=np.intp))

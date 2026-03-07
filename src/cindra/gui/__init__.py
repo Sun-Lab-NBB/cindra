@@ -1,15 +1,13 @@
-"""Provides the interactive desktop GUIs for cindra data visualization and analysis.
+"""Provides the interactive GUIs for visualizing the processing outcomes of the single-day and multi-day pipelines."""
 
-Sub-packages:
-    roi: ROI viewer and editor for single-day pipeline output.
-    registration: Registration quality viewer for motion correction inspection.
-    tracking: Multi-day cell tracking quality viewer.
-"""
-
-from .roi import run
-from .tracking import run_tracking_viewer
+from .app import (
+    run_roi_viewer,
+    run_tracking_viewer,
+    run_registration_viewer,
+)
 
 __all__ = [
-    "run",
+    "run_registration_viewer",
+    "run_roi_viewer",
     "run_tracking_viewer",
 ]
