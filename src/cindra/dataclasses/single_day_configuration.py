@@ -6,8 +6,19 @@ from enum import StrEnum
 from pathlib import Path  # noqa: TC003 - needed at runtime for dacite deserialization
 from dataclasses import field, dataclass
 
-from ataraxis_base_utilities import ensure_directory_exists
+from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
+
+
+class PipelineType(StrEnum):
+    """Defines the supported cindra processing pipeline types."""
+
+    SINGLE_DAY = "single-day"
+    """The within-session pipeline that processes a single recording session (binarize, process, combine)."""
+
+    MULTI_DAY = "multi-day"
+    """The across-session pipeline that tracks and extracts ROIs across multiple recording sessions (discover,
+    extract)."""
 
 
 class BaselineMethod(StrEnum):
@@ -22,6 +33,60 @@ class BaselineMethod(StrEnum):
 
     CONSTANT_PERCENTILE = "constant_percentile"
     """Uses a low percentile of the trace as a robust constant baseline, ignoring outliers."""
+
+
+@dataclass
+class _PipelineHeader(YamlConfig):
+    """Minimal dataclass for detecting the pipeline type from a configuration YAML file.
+
+    Declares only the ``pipeline_type`` field as a raw string. Extra keys present in the YAML are silently discarded by
+    dacite during deserialization, making this class safe to load against any cindra configuration file. The field
+    defaults to None so that a missing key is distinguishable from a valid value.
+    """
+
+    pipeline_type: str | None = None
+    """The raw pipeline type string read from the YAML file, or None if the key is absent."""
+
+
+def detect_pipeline_type(file_path: Path) -> PipelineType:
+    """Detects the pipeline type stored in the specified configuration YAML file.
+
+    Reads the ``pipeline_type`` discriminator field from the configuration file without loading the full configuration
+    dataclass.
+
+    Args:
+        file_path: The path to the configuration YAML file to inspect.
+
+    Returns:
+        The PipelineType member matching the ``pipeline_type`` value stored in the configuration file.
+
+    Raises:
+        FileNotFoundError: If the configuration file does not exist or does not have a '.yaml' extension.
+        ValueError: If the file does not contain a recognized ``pipeline_type`` value.
+    """
+    if not file_path.exists() or file_path.suffix != ".yaml":
+        message = (
+            f"Unable to detect the pipeline type from the specified configuration file. Expected an existing "
+            f"'.yaml' file, but received '{file_path}'."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    raw_type = _PipelineHeader.from_yaml(file_path=file_path).pipeline_type
+
+    try:
+        if raw_type is not None:
+            return PipelineType(raw_type)
+    except ValueError:
+        pass
+
+    expected = ", ".join(f"'{member.value}'" for member in PipelineType)
+    message = (
+        f"Unable to detect the pipeline type from the configuration file at '{file_path}'. The 'pipeline_type' "
+        f"field is missing or has an unrecognized value '{raw_type}'. Expected one of: {expected}."
+    )
+    console.error(message=message, error=ValueError)
+    # Unreachable fallback to work around faulty RUFF error checking.
+    raise ValueError(message)  # pragma: no cover
 
 
 @dataclass
@@ -56,8 +121,8 @@ class AcquisitionParameters(YamlConfig):
         For single-ROI data, only frame_rate, plane_number, and channel_number are required. For MROI data,
         additional fields describe the geometry of each ROI.
 
-        The pipeline expects a cindra_parameters.json or suite2p_parameters.json file in the data directory containing
-        these parameters. Use the is_mroi property to determine whether the data uses multi-ROI acquisition.
+        The pipeline expects a cindra_parameters.json file in the data directory containing these parameters. Use the
+        is_mroi property to determine whether the data uses multi-ROI acquisition.
     """
 
     frame_rate: float
@@ -152,9 +217,9 @@ class FileIO:
     """The path to the root data directory containing the input TIFF files. The pipeline recursively searches this
     directory and all subdirectories for .tiff/.tif files to process."""
 
-    save_path: Path | None = None
-    """The path to the root output directory where to save the processing results. The pipeline automatically
-    creates a 'cindra' subdirectory under this path to store all output files."""
+    output_path: Path | None = None
+    """The path to the root output directory where processing results are saved. The pipeline automatically creates a
+    'cindra' subdirectory under this path to store all output files."""
 
     ignored_file_names: tuple[str, ...] = ()
     """The tuple of file names to ignore when searching for and loading raw data. Any file whose name exactly matches
@@ -277,17 +342,17 @@ class OnePhotonRegistration:
 
 
 @dataclass
-class NonRigidRegistration:
-    """Stores parameters for non-rigid registration, which is used to improve motion registration in complex
+class NonrigidRegistration:
+    """Stores parameters for nonrigid registration, which is used to improve motion registration in complex
     datasets by dividing frames into subregions and shifting each subregion independently of other subregions.
     """
 
     enabled: bool = True
-    """Determines whether to perform non-rigid registration to correct for local motion and deformation. This is
+    """Determines whether to perform nonrigid registration to correct for local motion and deformation. This is
     primarily used for correcting non-uniform motion."""
 
     block_size: tuple[int, int] = (128, 128)
-    """The block size, in pixels, for non-rigid registration, defining the dimensions of subregions used in
+    """The block size, in pixels, for nonrigid registration, defining the dimensions of subregions used in
     the correction. It is recommended to keep this size a power of 2 and/or 3 for more efficient FFT computation.
     During processing, each frame is split into sub-regions with these dimensions and the registration is applied
     to each region independently."""
@@ -451,6 +516,8 @@ class SingleDayConfiguration(YamlConfig):
         For runtime data (computed by the pipeline), see SingleDayRuntimeData.
     """
 
+    pipeline_type: PipelineType = field(default=PipelineType.SINGLE_DAY, init=False)
+    """Identifies this configuration as a single-day pipeline configuration."""
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
     """Stores runtime behavior settings shared with the multi-day pipeline (parallel workers, progress bars)."""
     main: Main = field(default_factory=Main)
@@ -463,8 +530,8 @@ class SingleDayConfiguration(YamlConfig):
     one_photon_registration: OnePhotonRegistration = field(default_factory=OnePhotonRegistration)
     """Stores parameters for additional pre-registration processing used to improve the registration of 1-photon
     datasets."""
-    non_rigid_registration: NonRigidRegistration = field(default_factory=NonRigidRegistration)
-    """Stores parameters for non-rigid registration, which is used to improve motion registration in complex
+    nonrigid_registration: NonrigidRegistration = field(default_factory=NonrigidRegistration)
+    """Stores parameters for nonrigid registration, which is used to improve motion registration in complex
     datasets."""
     roi_detection: ROIDetection = field(default_factory=ROIDetection)
     """Stores parameters for cell ROI detection and extraction."""

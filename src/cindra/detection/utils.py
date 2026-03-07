@@ -11,11 +11,11 @@ from scipy.ndimage import gaussian_filter
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-# Minimum standard deviation threshold to prevent division by zero in downstream processing.
 _MINIMUM_STANDARD_DEVIATION: float = 1e-10
+"""The minimum standard deviation threshold to prevent division by zero in downstream processing."""
 
-# Kernel size threshold for selecting Gaussian vs rolling mean high-pass filter.
 _GAUSSIAN_KERNEL_THRESHOLD: int = 10
+"""The kernel size threshold for selecting Gaussian vs rolling mean high-pass filter."""
 
 
 def apply_temporal_high_pass_filter(frames: NDArray[np.float32], kernel_size: int) -> None:
@@ -163,10 +163,10 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
 
 @lru_cache(maxsize=5)
 def compute_block_smoothing_kernel(x_block_count: int, y_block_count: int) -> NDArray[np.float32]:
-    """Computes a normalized Gaussian kernel matrix for smoothing non-rigid block shifts.
+    """Computes a normalized Gaussian kernel matrix for smoothing nonrigid block shifts.
 
     Creates a kernel that weights neighboring blocks based on their spatial distance, used to enforce smoothness
-    constraints in non-rigid registration. Results are cached since block counts don't change during a recording.
+    constraints in nonrigid registration. Results are cached since block counts don't change during a recording.
 
     Args:
         x_block_count: Number of blocks along the x-axis.

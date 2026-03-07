@@ -18,8 +18,8 @@ from ataraxis_base_utilities import console
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-# Small epsilon value for numerical stability when normalizing by magnitude.
 NORMALIZATION_EPSILON: float = 1e-5
+"""The small epsilon value for numerical stability when normalizing by magnitude."""
 
 
 def apply_phase_correlation(
@@ -108,9 +108,9 @@ def combine_rigid_offsets(
 def combine_nonrigid_offsets(
     offset_list: list[tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]],
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
-    """Combines non-rigid registration offsets from multiple processing batches.
+    """Combines nonrigid registration offsets from multiple processing batches.
 
-    Non-rigid offsets are 2D arrays with subpixel shifts per block per frame, so vertical stacking
+    Nonrigid offsets are 2D arrays with subpixel shifts per block per frame, so vertical stacking
     preserves the block structure across batches.
 
     Args:

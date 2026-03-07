@@ -227,13 +227,13 @@ multiday/
 **Input:**
 ```python
 {
-    "animal_configs": [  # List of animals to process
+    "animal_configurations": [  # List of animals to process
         {
-            "config_path": "/path/to/animal1_config.yaml",
+            "configuration_path": "/path/to/animal1_config.yaml",
             "session_paths": ["/path/to/session1", "/path/to/session2"]
         },
         {
-            "config_path": "/path/to/animal2_config.yaml",
+            "configuration_path": "/path/to/animal2_config.yaml",
             "session_paths": ["/path/to/session3", "/path/to/session4"]
         }
     ],
@@ -423,7 +423,7 @@ The system automatically calculates optimal resource allocation:
 | Error Message                          | Cause                          | Resolution                        |
 |----------------------------------------|--------------------------------|-----------------------------------|
 | "No cindra output directory found"     | Single-day processing incomplete| Run single-day pipeline first     |
-| "Configuration file not found"         | Invalid config_path            | Generate or verify configuration  |
+| "Configuration file not found"         | Invalid configuration_path     | Generate or verify configuration  |
 | "Session directory not found"          | Invalid path for session       | Verify path exists                |
 | "Batch processing already in progress" | Batch already running          | Wait for current batch to complete|
 

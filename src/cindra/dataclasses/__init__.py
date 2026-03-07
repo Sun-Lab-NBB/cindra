@@ -10,6 +10,7 @@ from .multi_day_data import (
 )
 from .single_day_data import (
     IOData,
+    ROIMask,
     TimingData,
     CombinedData,
     DetectionData,
@@ -23,16 +24,18 @@ from .multi_day_configuration import ReferenceImageType, MultiDayConfiguration
 from .single_day_configuration import (
     Main,
     FileIO,
+    PipelineType,
     ROIDetection,
     Registration,
     BaselineMethod,
     RuntimeSettings,
     SignalExtraction,
     SpikeDeconvolution,
-    NonRigidRegistration,
+    NonrigidRegistration,
     AcquisitionParameters,
     OnePhotonRegistration,
     SingleDayConfiguration,
+    detect_pipeline_type,
 )
 
 __all__ = [
@@ -51,9 +54,11 @@ __all__ = [
     "MultiDayRuntimeData",
     "MultiDayTimingData",
     "MultiDayTrackingData",
-    "NonRigidRegistration",
+    "NonrigidRegistration",
     "OnePhotonRegistration",
+    "PipelineType",
     "ROIDetection",
+    "ROIMask",
     "ROIStatistics",
     "ReferenceImageType",
     "Registration",
@@ -65,6 +70,7 @@ __all__ = [
     "SingleDayRuntimeData",
     "SpikeDeconvolution",
     "TimingData",
+    "detect_pipeline_type",
     "python_version",
     "version",
 ]

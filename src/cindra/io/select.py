@@ -74,6 +74,11 @@ def select_session_cells(contexts: list[MultiDayRuntimeContext]) -> None:
             console.echo(message=message, level=LogLevel.INFO)
             continue
 
+        # Memory-maps combined extraction arrays needed for cell selection (roi_statistics, classification).
+        combined_data = runtime.combined_data
+        if combined_data is not None and runtime.io.data_path is not None:
+            combined_data.extraction.memory_map_arrays(runtime.io.data_path)
+
         # Performs cell selection filtering for both channels.
         channel_1_count, channel_2_count = _filter_cells(runtime=runtime, configuration=configuration)
 
@@ -90,6 +95,10 @@ def select_session_cells(contexts: list[MultiDayRuntimeContext]) -> None:
 
         # Saves the updated runtime data with the selected cell indices.
         context.save_runtime()
+
+        # Releases combined extraction arrays to free memory.
+        if context.runtime.combined_data is not None:
+            context.runtime.combined_data.extraction.release_arrays()
 
 
 def _filter_channel_cells(
@@ -132,7 +141,7 @@ def _filter_channel_cells(
 
         # Applies MROI region border filter if applicable.
         if mroi_region_borders and not all(
-            abs(roi.centroid[1] - border) > region_margin for border in mroi_region_borders
+            abs(roi.mask.centroid[1] - border) > region_margin for border in mroi_region_borders
         ):
             continue
 

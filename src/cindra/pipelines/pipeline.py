@@ -16,11 +16,11 @@ from ..dataclasses import RuntimeContext, MultiDayConfiguration, SingleDayConfig
 if TYPE_CHECKING:
     from pathlib import Path
 
-# The tracker file name for the single-day processing pipeline.
 _SINGLE_DAY_TRACKER_NAME: str = "single_day_tracker.yaml"
+"""The tracker file name for the single-day processing pipeline."""
 
-# The tracker file name for the multi-day processing pipeline.
 _MULTI_DAY_TRACKER_NAME: str = "multi_day_tracker.yaml"
+"""The tracker file name for the multi-day processing pipeline."""
 
 
 class SingleDayJobNames(StrEnum):
@@ -56,7 +56,7 @@ def run_single_day_pipeline(
 ) -> None:
     """Executes the requested single-day processing pipeline steps for the target data.
 
-    The caller is responsible for writing all runtime overrides (``file_io.data_path``, ``file_io.save_path``,
+    The caller is responsible for writing all runtime overrides (``file_io.data_path``, ``file_io.output_path``,
     ``runtime.parallel_workers``, ``runtime.display_progress_bars``) into the configuration file before invoking this
     function. The pipeline reads these values from the file at ``configuration_path`` and does not accept them as
     direct parameters.
@@ -107,14 +107,14 @@ def run_single_day_pipeline(
     else:
         console.disable_progress()
 
-    # Defaults save_path to data_path if not explicitly set.
-    if configuration.file_io.save_path is None:
-        configuration.file_io.save_path = configuration.file_io.data_path
+    # Defaults output_path to data_path if not explicitly set.
+    if configuration.file_io.output_path is None:
+        configuration.file_io.output_path = configuration.file_io.data_path
 
-    # Validates that the save_path is configured.
-    if configuration.file_io.save_path is None:
+    # Validates that the output_path is configured.
+    if configuration.file_io.output_path is None:
         message = (
-            "Unable to run the single-day cindra processing pipeline. The save_path must be configured in the "
+            "Unable to run the single-day cindra processing pipeline. The output_path must be configured in the "
             "FileIO section of the configuration, but it is currently None."
         )
         console.error(message=message, error=ValueError)
@@ -125,7 +125,7 @@ def run_single_day_pipeline(
     plane_count = len(contexts)
 
     # Derives the tracker path from the configuration.
-    tracker_path: Path = configuration.file_io.save_path / _SINGLE_DAY_TRACKER_NAME
+    tracker_path: Path = configuration.file_io.output_path / _SINGLE_DAY_TRACKER_NAME
 
     # Determines which jobs to run based on the flags.
     requested_jobs: dict[str, bool] = {
@@ -362,23 +362,27 @@ def _execute_single_day_job(
             process_plane(configuration=configuration, plane_index=plane_index)
 
         elif job_name == SingleDayJobNames.COMBINE:
-            # Validates that save_path is configured before loading contexts.
-            if configuration.file_io.save_path is None:
+            # Validates that output_path is configured before loading contexts.
+            if configuration.file_io.output_path is None:
                 message = (
-                    "Unable to execute the combination job. The save_path must be configured in the FileIO section "
+                    "Unable to execute the combination job. The output_path must be configured in the FileIO section "
                     "of the configuration, but it is currently None."
                 )
                 console.error(message=message, error=ValueError)
 
-            # Loads contexts from disk and combines all processed planes into a dataset. Extraction result
-            # arrays (fluorescence traces, classification) are not loaded automatically due to their memory
-            # footprint, so they must be loaded explicitly before combining.
-            root_path = configuration.file_io.save_path / "cindra"
+            # Loads contexts from disk and combines all processed planes into a dataset. Arrays are not
+            # loaded automatically due to their memory footprint, so they must be loaded explicitly before
+            # combining. Detection arrays provide background images; extraction arrays provide ROI statistics
+            # and fluorescence traces.
+            root_path = configuration.file_io.output_path / "cindra"
             contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
             if not isinstance(contexts, list):
                 contexts = [contexts]
             for context in contexts:
-                context.runtime.load_results()
+                if context.runtime.output_path is not None:
+                    context.runtime.detection.memory_map_arrays(context.runtime.output_path)
+                    context.runtime.extraction.memory_map_arrays(context.runtime.output_path)
+                    context.runtime.extraction.memory_map_results(context.runtime.output_path)
             save_combined_data(contexts=contexts)
 
         else:

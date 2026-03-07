@@ -14,11 +14,11 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-# Maximum value that can be stored in a signed 16-bit integer, minus a small buffer.
 _INT16_MAX_VALUE: int = 2**15 - 2
+"""The maximum value that can be stored in a signed 16-bit integer, minus a small buffer."""
 
-# Default maximum batch size for frame binning operations.
 _DEFAULT_BIN_BATCH_SIZE: int = 500
+"""The default maximum batch size for frame binning operations."""
 
 
 class BinaryFile:

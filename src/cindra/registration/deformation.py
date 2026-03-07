@@ -11,18 +11,18 @@ import scipy.ndimage
 
 from .spline_grid import SplineGrid, compute_cardinal_coefficients
 
-# Minimum sigma value below which diffusion kernel returns a delta function (no smoothing).
 _MINIMUM_DIFFUSION_SIGMA: float = 0.1
+"""The minimum sigma value below which the diffusion kernel returns a delta function (no smoothing)."""
 
-# Interpolation order constant for cubic cardinal spline interpolation.
 _CUBIC_INTERPOLATION_ORDER: int = 3
+"""The interpolation order constant for cubic cardinal spline interpolation."""
 
-# Interpolation order constant for bilinear interpolation.
 _BILINEAR_INTERPOLATION_ORDER: int = 1
+"""The interpolation order constant for bilinear interpolation."""
 
-# Boundary tolerance for determining if a sample point falls within valid image bounds. Pixels are centered at integer
-# coordinates, so valid samples extend from -0.5 to (dimension - 0.5).
 _BOUNDARY_TOLERANCE: float = -0.5
+"""The boundary tolerance for determining if a sample point falls within valid image bounds. Pixels are centered at
+integer coordinates, so valid samples extend from -0.5 to (dimension - 0.5)."""
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

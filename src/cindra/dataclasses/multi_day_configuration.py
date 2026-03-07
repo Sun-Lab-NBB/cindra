@@ -10,7 +10,7 @@ from natsort import natsorted
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
-from .single_day_configuration import RuntimeSettings, SignalExtraction, SpikeDeconvolution
+from .single_day_configuration import PipelineType, RuntimeSettings, SignalExtraction, SpikeDeconvolution
 
 
 class ReferenceImageType(StrEnum):
@@ -166,6 +166,8 @@ class MultiDayConfiguration(YamlConfig):
         For runtime data (computed by the pipeline), see MultiDayRuntimeData.
     """
 
+    pipeline_type: PipelineType = field(default=PipelineType.MULTI_DAY, init=False)
+    """Identifies this configuration as a multi-day pipeline configuration."""
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
     """Stores runtime behavior settings shared with the single-day pipeline (parallel workers, progress bars)."""
     session_io: SessionIO = field(default_factory=SessionIO)

@@ -12,10 +12,10 @@ from ataraxis_base_utilities import console
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ..dataclasses import ROIStatistics
+    from ..dataclasses import ROIMask, ROIStatistics
 
 
-def estimate_diameter_from_rois(rois: list[ROIStatistics], default_diameter: int = 10) -> int:
+def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10) -> int:
     """Estimates the cell diameter from the pixel counts of a list of ROIs.
 
     This function computes the median pixel count across all ROIs and derives an equivalent circular diameter. This is
@@ -106,8 +106,8 @@ def compute_roi_statistics(
 
     # Initializes centroids for ROIs that lack them. The centroid is required for computing radial statistics.
     for roi in rois:
-        if not roi.centroid or roi.centroid == (0, 0):
-            roi.centroid = compute_median_pixel_position(y_pixels=roi.y_pixels, x_pixels=roi.x_pixels)
+        if not roi.mask.centroid or roi.mask.centroid == (0, 0):
+            roi.mask.centroid = compute_median_pixel_position(y_pixels=roi.mask.y_pixels, x_pixels=roi.mask.x_pixels)
 
     # Resolves the cell diameter for distance normalization. A sensible default is used when no diameter is provided.
     default_diameter = 10
@@ -146,11 +146,11 @@ def compute_roi_statistics(
         if not lightweight:
             data.solidity = wrapper.solidity
             # noinspection PyUnboundLocalVariable
-            data.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
+            data.mask.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
 
             # noinspection PyUnboundLocalVariable
             ellipse = wrapper.fit_ellipse(y_scale=y_scale, x_scale=x_scale)
-            data.radius = ellipse.radius
+            data.mask.radius = ellipse.radius
             data.aspect_ratio = ellipse.aspect_ratio
 
         # Collects values for normalization to avoid re-iterating over ROIs.
@@ -189,7 +189,7 @@ def compute_roi_statistics(
         roi_wrappers = [_ROI(data=roi, diameter=effective_diameter, crop=crop) for roi in rois]
         overlap_counts = _ROI.get_overlap_count_image(rois=roi_wrappers, height=frame_height, width=frame_width)
         for wrapper in roi_wrappers:
-            wrapper.data.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
+            wrapper.data.mask.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
 
 
 @dataclass(frozen=True)
@@ -280,7 +280,10 @@ class _ROI:
     """Cache of sorted baseline distances keyed by diameter, avoiding recomputation across instances."""
 
     def __init__(self, data: ROIStatistics, diameter: int, crop: bool = True) -> None:
-        if data.x_pixels.shape != data.y_pixels.shape or data.x_pixels.shape != data.pixel_weights.shape:
+        if (
+            data.mask.x_pixels.shape != data.mask.y_pixels.shape
+            or data.mask.x_pixels.shape != data.mask.pixel_weights.shape
+        ):
             message = (
                 "Unable to initialize the ROI class. The x_pixels, y_pixels, and pixel_weights arrays in the input "
                 "ROIStatistics instance must have the same shape."
@@ -300,22 +303,22 @@ class _ROI:
     @property
     def y_pixels(self) -> NDArray[np.int32]:
         """Returns the y-coordinates of the ROI pixels."""
-        return self._data.y_pixels
+        return self._data.mask.y_pixels
 
     @property
     def x_pixels(self) -> NDArray[np.int32]:
         """Returns the x-coordinates of the ROI pixels."""
-        return self._data.x_pixels
+        return self._data.mask.x_pixels
 
     @property
     def pixel_weights(self) -> NDArray[np.float32]:
         """Returns the pixel weights (lambda values) for the ROI."""
-        return self._data.pixel_weights
+        return self._data.mask.pixel_weights
 
     @property
     def centroid(self) -> tuple[int, int]:
         """Returns the centroid (y, x) pixel position of the ROI."""
-        return self._data.centroid[0], self._data.centroid[1]
+        return self._data.mask.centroid[0], self._data.mask.centroid[1]
 
     @property
     def soma_mask(self) -> NDArray[np.bool_]:

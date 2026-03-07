@@ -33,25 +33,25 @@ from .nonrigid import (
 from ..detection import compute_registration_blocks
 from .bidiphase_correction import compute_bidirectional_phase_offset, apply_bidirectional_phase_correction
 
-# Minimum number of frames required to compute registration quality metrics.
 _MINIMUM_REGISTRATION_METRIC_FRAMES: int = 1500
+"""The minimum number of frames required to compute registration quality metrics."""
 
-# Threshold fraction of bad frames above which registration is considered failed.
 _BAD_FRAME_FRACTION_THRESHOLD: float = 0.5
+"""The threshold fraction of bad frames above which registration is considered failed."""
 
-# Maximum median filter window size for offset time series smoothing.
 _MAXIMUM_MEDIAN_FILTER_WINDOW: int = 101
+"""The maximum median filter window size for offset time series smoothing."""
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from ..dataclasses import RuntimeContext
 
-    # Type alias for the registration block structure returned by compute_registration_blocks. Contains y_blocks,
-    # x_blocks, block_counts, actual_block_size, and smoothing_kernel.
     RegistrationBlocks = tuple[
         list[NDArray[np.int32]], list[NDArray[np.int32]], tuple[int, int], tuple[int, int], NDArray[np.float32]
     ]
+    """The type alias for the registration block structure returned by compute_registration_blocks. Contains y_blocks,
+    x_blocks, block_counts, actual_block_size, and smoothing_kernel."""
 
 
 def register_plane(context: RuntimeContext) -> None:
@@ -229,6 +229,9 @@ def register_plane(context: RuntimeContext) -> None:
 
     # Persists the final registration state (including metrics if computed) to disk.
     context.save_runtime()
+
+    # Releases registration arrays to free memory. The has_registration_data flag survives re-serialization.
+    context.runtime.registration.release_arrays()
 
 
 @dataclass(frozen=True, slots=True)
@@ -577,7 +580,7 @@ def _register_frames_batch(
     for frame, y_shift, x_shift in zip(frames, y_shifts, x_shifts, strict=False):
         frame[:] = shift_frame(frame=frame, y_shift=y_shift, x_shift=x_shift)
 
-    # Phase 2: Non-rigid registration - computes per-block subpixel shifts to correct local deformations.
+    # Phase 2: Nonrigid registration - computes per-block subpixel shifts to correct local deformations.
     if nonrigid_enabled:
         # Extracts nonrigid reference data. Fallback assignments are for type checker only; these are guaranteed to be
         # present when nonrigid_enabled is True.
@@ -737,10 +740,10 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
     normalize_frames = config.registration.normalize_frames
     batch_size = config.registration.batch_size
     reference_frame_count = config.registration.reference_frame_count
-    nonrigid_enabled = config.non_rigid_registration.enabled
-    block_size = config.non_rigid_registration.block_size
-    signal_to_noise_threshold = config.non_rigid_registration.signal_to_noise_threshold
-    maximum_block_shift = config.non_rigid_registration.maximum_block_shift
+    nonrigid_enabled = config.nonrigid_registration.enabled
+    block_size = config.nonrigid_registration.block_size
+    signal_to_noise_threshold = config.nonrigid_registration.signal_to_noise_threshold
+    maximum_block_shift = config.nonrigid_registration.maximum_block_shift
     parallel_workers = config.runtime.parallel_workers
     enable_bidiphase_computation = config.registration.compute_bidirectional_phase_offset
     initial_bidirectional_phase_offset = config.registration.bidirectional_phase_offset_override
@@ -986,8 +989,8 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
     # Extracts configuration parameters.
     config = context.configuration
     align_by_first_channel = config.registration.align_by_first_channel
-    nonrigid_enabled = config.non_rigid_registration.enabled
-    block_size = config.non_rigid_registration.block_size
+    nonrigid_enabled = config.nonrigid_registration.enabled
+    block_size = config.nonrigid_registration.block_size
     batch_size = config.registration.batch_size
 
     # Extracts runtime IO data.

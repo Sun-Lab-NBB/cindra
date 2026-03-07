@@ -7,11 +7,10 @@ from pathlib import Path
 
 import click
 
-from ..gui import run, run_tracking_viewer
-from ..gui.registration import run_registration_viewer
+from ..gui import run_roi_viewer, run_tracking_viewer, run_registration_viewer
 
-# Ensures that displayed CLICK help messages are formatted according to the lab standard.
 CONTEXT_SETTINGS = {"max_content_width": 120}
+"""The Click context settings that ensure displayed help messages are formatted according to the lab standard."""
 
 
 @click.group("cindra-gui", context_settings=CONTEXT_SETTINGS)
@@ -25,15 +24,22 @@ def cindra_gui() -> None:
 
 @cindra_gui.command("roi")
 @click.option(
-    "-s",
-    "--session-path",
+    "-r",
+    "--recording-path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
-    default=None,
+    required=True,
     help="Path to a cindra output directory to load on startup.",
 )
-def gui_roi(session_path: Path | None) -> None:
-    """Launches the ROI viewer and editor for single-day pipeline output."""
-    run(session_path=session_path)
+@click.option(
+    "-d",
+    "--dataset",
+    type=str,
+    default=None,
+    help="Multi-day dataset name to load. Stays in single-day mode if not provided.",
+)
+def gui_roi(recording_path: Path, dataset: str | None) -> None:
+    """Launches the ROI viewer for single-day pipeline output."""
+    run_roi_viewer(recording_path=recording_path, dataset=dataset)
 
 
 @cindra_gui.command("registration")
@@ -57,6 +63,13 @@ def gui_registration(recording_path: Path) -> None:
     required=True,
     help="Path to any recording's cindra output directory that is part of a multi-day dataset.",
 )
-def gui_tracking(recording_path: Path) -> None:
+@click.option(
+    "-d",
+    "--dataset",
+    type=str,
+    default=None,
+    help="Multi-day dataset name to load. Defaults to the first available dataset.",
+)
+def gui_tracking(recording_path: Path, dataset: str | None) -> None:
     """Launches the multi-day tracking quality viewer for inspecting across-day ROI tracking results."""
-    run_tracking_viewer(recording_path=recording_path)
+    run_tracking_viewer(recording_path=recording_path, dataset=dataset)

@@ -369,6 +369,11 @@ def _extract_single_day(context: RuntimeContext) -> None:
     extraction_data = context.runtime.extraction
     timing = context.runtime.timing
 
+    # Loads extraction arrays from the previous stage (detection) if not in memory.
+    output_path = context.runtime.io.output_path
+    if output_path is not None and extraction_data.roi_statistics is None:
+        extraction_data.load_arrays(output_path)
+
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
     frame_height = io_data.frame_height
     frame_width = io_data.frame_width
@@ -511,6 +516,9 @@ def _extract_single_day(context: RuntimeContext) -> None:
 
     # Saves updated runtime data to disk.
     context.save_runtime()
+
+    # Releases extraction arrays to free memory.
+    context.runtime.extraction.release_arrays()
 
 
 def _extract_structural_channel_2(
@@ -738,14 +746,13 @@ def _extract_functional_channel_2(
 
     # Computes spatial colocalization between channel 1 and channel 2 ROIs.
     if extraction_data.roi_statistics is not None:
-        channel_1_to_2, _channel_2_to_1 = compute_spatial_colocalization(
+        extraction_data.cell_colocalization = compute_spatial_colocalization(
             rois_channel_1=extraction_data.roi_statistics,
             rois_channel_2=roi_statistics_channel_2,
             frame_height=frame_height,
             frame_width=frame_width,
             colocalization_threshold=extraction_config.colocalization_threshold,
         )
-        extraction_data.cell_colocalization = channel_1_to_2
 
 
 def _extract_multiday_channel(
@@ -860,6 +867,11 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
     combined_data = context.runtime.combined_data
     session_id = context.runtime.io.session_id
 
+    # Loads extraction arrays from the previous stage (backward projection) if not in memory.
+    output_path = context.runtime.output_path
+    if output_path is not None and extraction_data.roi_statistics is None:
+        extraction_data.load_arrays(output_path)
+
     # Validates that combined data is available.
     if combined_data is None:
         console.error(
@@ -926,6 +938,14 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
             sampling_rate=sampling_rate,
         )
 
+    # Computes neuropil-corrected skewness and standard deviation for channel 1 tracked ROIs.
+    _update_roi_extraction_statistics(
+        roi_statistics=roi_statistics,
+        cell_fluorescence=extraction_data.cell_fluorescence,
+        neuropil_fluorescence=extraction_data.neuropil_fluorescence,
+        neuropil_coefficient=deconvolution_config.neuropil_coefficient,
+    )
+
     timing = context.runtime.timing
     timing.extraction_time = int(timer.elapsed)
 
@@ -934,7 +954,9 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
     roi_statistics_channel_2 = extraction_data.roi_statistics_channel_2
     if roi_statistics_channel_2 is not None:
         # Reads channel 2 registered binary paths from combined data.
-        channel_2_binary_paths: list[Path] = list(combined_data.registered_binary_paths_channel_2)  # type: ignore[arg-type]
+        channel_2_binary_paths: list[Path] = list(
+            combined_data.registered_binary_paths_channel_2  # type: ignore[arg-type]
+        )
 
         timer.reset()
 
@@ -962,24 +984,34 @@ def _extract_multi_day(context: MultiDayRuntimeContext) -> None:
                 sampling_rate=sampling_rate,
             )
 
+        # Computes neuropil-corrected skewness and standard deviation for channel 2 tracked ROIs.
+        _update_roi_extraction_statistics(
+            roi_statistics=roi_statistics_channel_2,
+            cell_fluorescence=extraction_data.cell_fluorescence_channel_2,
+            neuropil_fluorescence=extraction_data.neuropil_fluorescence_channel_2,
+            neuropil_coefficient=deconvolution_config.neuropil_coefficient,
+        )
+
         timing.extraction_time += int(timer.elapsed)
 
         # Computes spatial colocalization between channel 1 and channel 2 tracked ROIs.
-        channel_1_to_2, _channel_2_to_1 = compute_spatial_colocalization(
+        extraction_data.cell_colocalization = compute_spatial_colocalization(
             rois_channel_1=roi_statistics,
             rois_channel_2=roi_statistics_channel_2,
             frame_height=frame_height,
             frame_width=frame_width,
             colocalization_threshold=extraction_config.colocalization_threshold,
         )
-        extraction_data.cell_colocalization = channel_1_to_2
 
     # Saves updated runtime data to disk.
     context.save_runtime()
 
+    # Releases extraction arrays to free memory.
+    context.runtime.extraction.release_arrays()
+
     total_extraction_time = timing.extraction_time + timing.deconvolution_time
     timing.total_extraction_time = total_extraction_time
     console.echo(
-        message=(f"Session {session_id} multi-day extraction: complete. Total time: {total_extraction_time} seconds."),
+        message=f"Session {session_id} multi-day extraction: complete. Total time: {total_extraction_time} seconds.",
         level=LogLevel.SUCCESS,
     )

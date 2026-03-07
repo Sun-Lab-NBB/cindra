@@ -14,17 +14,17 @@ from .utils import (
 )
 from ..detection import compute_spatial_taper_mask
 
-# Small epsilon value used to prevent division by zero in SNR calculations.
 _SNR_EPSILON: float = 1e-10
+"""The small epsilon value used to prevent division by zero in SNR calculations."""
 
-# Upsampling factor for DFT-based subpixel peak localization. Value of 10 provides 0.1 pixel precision.
 _SUBPIXEL_FACTOR: int = 10
+"""The upsampling factor for DFT-based subpixel peak localization. A value of 10 provides 0.1 pixel precision."""
 
-# Half-width of the region around integer peaks used for DFT upsampling. Value of 3 uses a 7x7 region.
 _UPSAMPLING_PADDING: int = 3
+"""The half-width of the region around integer peaks used for DFT upsampling. A value of 3 uses a 7x7 region."""
 
-# Maximum number of blocks to process in a single FFT batch during phase correlation. Limits memory usage.
 _CORRELATION_BATCH_SIZE: int = 64
+"""The maximum number of blocks to process in a single FFT batch during phase correlation. Limits memory usage."""
 
 
 def compute_nonrigid_reference_data(
