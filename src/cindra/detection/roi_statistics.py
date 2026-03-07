@@ -16,10 +16,10 @@ if TYPE_CHECKING:
 
 
 def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10) -> int:
-    """Estimates the cell diameter from the pixel counts of a list of ROIs.
+    """Estimates the ROI diameter from the pixel counts of a list of ROIs.
 
     This function computes the median pixel count across all ROIs and derives an equivalent circular diameter. This is
-    useful when the original cell diameter is unavailable or when ROI geometry has been transformed (e.g., after
+    useful when the original ROI diameter is unavailable or when ROI geometry has been transformed (e.g., after
     diffeomorphic registration or template mask generation).
 
     Args:
@@ -27,7 +27,7 @@ def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10)
         default_diameter: The fallback diameter to return if the ROI list is empty or all ROIs have zero pixels.
 
     Returns:
-        The estimated cell diameter in pixels, computed as the diameter of a circle with area equal to the median
+        The estimated ROI diameter in pixels, computed as the diameter of a circle with area equal to the median
         ROI pixel count.
     """
     if not rois:
@@ -88,7 +88,7 @@ def compute_roi_statistics(
         frame_width: The width of the recording frames from which ROIs are segmented, in pixels.
         aspect: The aspect ratio of the recording. If provided, adjusts ROI ellipse fitting. Ignored in lightweight
             mode.
-        diameter: The expected cell diameter in pixels. Used for ROI ellipse fitting normalization. Ignored in
+        diameter: The expected ROI diameter in pixels. Used for ROI ellipse fitting normalization. Ignored in
             lightweight mode.
         maximum_overlap_fraction: The maximum fraction of pixels that can overlap with other ROIs. If specified, ROIs
             exceeding this threshold are removed from the list in-place. Ignored in lightweight mode.
@@ -109,7 +109,7 @@ def compute_roi_statistics(
         if not roi.mask.centroid or roi.mask.centroid == (0, 0):
             roi.mask.centroid = compute_median_pixel_position(y_pixels=roi.mask.y_pixels, x_pixels=roi.mask.x_pixels)
 
-    # Resolves the cell diameter for distance normalization. A sensible default is used when no diameter is provided.
+    # Resolves the ROI diameter for distance normalization. A sensible default is used when no diameter is provided.
     default_diameter = 10
     effective_diameter = default_diameter if diameter is None or diameter == 0 else diameter
 
@@ -258,17 +258,17 @@ class _ROI:
     Notes:
         The class uses a shared class variable for the distance kernel to avoid recomputation across instances. The
         soma mask is cached after first computation to avoid redundant calculations when accessing dependent
-        properties. Distance-based statistics (mean_radius, compactness) are normalized by the cell diameter to make
-        them scale-invariant across different cell sizes and imaging magnifications.
+        properties. Distance-based statistics (mean_radius, compactness) are normalized by the ROI diameter to make
+        them scale-invariant across different ROI sizes and imaging magnifications.
 
     Args:
         data: The ROIStatistics instance to wrap.
-        diameter: The estimated cell diameter in pixels, used to normalize distance-based statistics.
+        diameter: The estimated ROI diameter in pixels, used to normalize distance-based statistics.
         crop: Determines whether to crop to soma region when computing statistics.
 
     Attributes:
         _data: The underlying ROIStatistics instance.
-        _diameter: The cell diameter used for distance normalization.
+        _diameter: The ROI diameter used for distance normalization.
         _crop: Determines whether to crop to soma region when computing statistics.
         _cached_soma_mask: Cached soma mask array, computed on first access.
 
@@ -338,7 +338,7 @@ class _ROI:
         """Computes the mean diameter-normalized distance from ROI pixels to their median center."""
         y_pixels = self.y_pixels[self.soma_mask]
         x_pixels = self.x_pixels[self.soma_mask]
-        # Normalizes distances by cell diameter for scale-invariance, matching the original suite2p approach.
+        # Normalizes distances by ROI diameter for scale-invariance, matching the original suite2p approach.
         distances = np.hypot(
             (y_pixels - np.median(y_pixels)) / self._diameter,
             (x_pixels - np.median(x_pixels)) / self._diameter,

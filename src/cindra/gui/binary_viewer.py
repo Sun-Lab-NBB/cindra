@@ -28,7 +28,7 @@ from ataraxis_base_utilities import LogLevel, console
 from .styles import FONTS, STYLE, COLORS, PLOT_STYLE, BINARY_STYLE
 from .widgets import configure_plot, add_plot_legend, create_play_pause_group
 from .constants import BINARY_CONFIG
-from .viewer_context import SingleDayData
+from .viewer_context import SingleRecordingData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -41,7 +41,7 @@ class BinaryPlayer(QMainWindow):
         data: Pre-loaded registration data to display on startup.
 
     Attributes:
-        data: The SingleDayData instance that stores the visualized recording's data.
+        data: The SingleRecordingData instance that stores the visualized recording's data.
         _channel_2_visible: Determines whether the channel 2 overlay is currently displayed.
         _current_frame: Index of the currently displayed frame.
         _frame_delta: Frame step size for arrow key navigation.
@@ -70,7 +70,7 @@ class BinaryPlayer(QMainWindow):
     # Notifies listeners when the user loads a new recording via the File menu.
     recording_changed = QtCore.Signal()
 
-    def __init__(self, data: SingleDayData) -> None:
+    def __init__(self, data: SingleRecordingData) -> None:
         super().__init__()
 
         # Adds the main UI window.
@@ -83,7 +83,7 @@ class BinaryPlayer(QMainWindow):
         self._central_widget.setLayout(self._layout)
         # Initializes state flags and recording data.
         self._channel_2_visible: bool = False
-        self.data: SingleDayData = data
+        self.data: SingleRecordingData = data
 
         # Initializes playback state.
         self._current_frame: int = 0
@@ -201,11 +201,11 @@ class BinaryPlayer(QMainWindow):
 
         self.load_data(data=data)
 
-    def load_data(self, data: SingleDayData) -> None:
-        """Caches the input SingleDayData instance and uses it to populate the managed UI window.
+    def load_data(self, data: SingleRecordingData) -> None:
+        """Caches the input SingleRecordingData instance and uses it to populate the managed UI window.
 
         Args:
-            data: The SingleDayData instance that stores the visualized recording's data.
+            data: The SingleRecordingData instance that stores the visualized recording's data.
         """
         self.data = data
 
@@ -339,7 +339,7 @@ class BinaryPlayer(QMainWindow):
 
         recording_path = Path(directory)
         try:
-            data = SingleDayData.from_data(root_path=recording_path, view_index=-1)
+            data = SingleRecordingData.from_data(root_path=recording_path, view_index=-1)
         except Exception:
             console.echo(message="Unable to load recording data.", level=LogLevel.ERROR)
             result = QMessageBox.question(

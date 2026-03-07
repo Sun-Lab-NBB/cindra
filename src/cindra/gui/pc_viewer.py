@@ -25,7 +25,7 @@ from .constants import PC_CONFIG, COMMON_CONFIG
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from .viewer_context import SingleDayData
+    from .viewer_context import SingleRecordingData
 
 
 class PCViewer(QMainWindow):
@@ -35,7 +35,7 @@ class PCViewer(QMainWindow):
         data: Pre-loaded registration data to display on startup.
 
     Attributes:
-        data: The SingleDayData instance that stores the visualized recording's data.
+        data: The SingleRecordingData instance that stores the visualized recording's data.
         _loaded: Determines whether PC data has been loaded and is ready for display.
         _current_frame: Animation toggle state for PC extreme image cycling.
         _pc_count: Number of principal components available.
@@ -68,7 +68,7 @@ class PCViewer(QMainWindow):
         _projection_y_range: Per-plane y-axis range for the projection plot, computed across all PCs.
     """
 
-    def __init__(self, data: SingleDayData) -> None:
+    def __init__(self, data: SingleRecordingData) -> None:
         # Initializes the main viewer window.
         super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
@@ -80,7 +80,7 @@ class PCViewer(QMainWindow):
         self._central_widget.setLayout(self._layout)
 
         # Initializes state and data.
-        self.data: SingleDayData = data
+        self.data: SingleRecordingData = data
         self._loaded: bool = False
         self._current_frame: int = 0
         self._pc_count: int = data.principal_component_count
@@ -188,14 +188,14 @@ class PCViewer(QMainWindow):
 
         self.load_data(data=data)
 
-    def load_data(self, data: SingleDayData) -> None:
-        """Loads principal component registration data from the SingleDayData instance.
+    def load_data(self, data: SingleRecordingData) -> None:
+        """Loads principal component registration data from the SingleRecordingData instance.
 
         Populates the plane selector from the recording's view labels and switches to the appropriate plane before
         loading PC data.
 
         Args:
-            data: The SingleDayData instance that stores the visualized recording's data.
+            data: The SingleRecordingData instance that stores the visualized recording's data.
         """
         self.data = data
 

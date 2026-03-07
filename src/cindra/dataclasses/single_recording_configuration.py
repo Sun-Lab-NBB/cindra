@@ -1,4 +1,4 @@
-"""Provides user-defined configuration classes for the single-day (within-session) processing pipeline."""
+"""Provides user-defined configuration classes for the single-recording (within-recording) processing pipeline."""
 
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ from ataraxis_data_structures import YamlConfig
 class PipelineType(StrEnum):
     """Defines the supported cindra processing pipeline types."""
 
-    SINGLE_DAY = "single-day"
-    """The within-session pipeline that processes a single recording session (binarize, process, combine)."""
+    SINGLE_RECORDING = "single-recording"
+    """The within-recording pipeline that processes a single recording (binarize, process, combine)."""
 
-    MULTI_DAY = "multi-day"
-    """The across-session pipeline that tracks and extracts ROIs across multiple recording sessions (discover,
+    MULTI_RECORDING = "multi-recording"
+    """The across-recording pipeline that tracks and extracts ROIs across multiple recordings (discover,
     extract)."""
 
 
@@ -91,7 +91,7 @@ def detect_pipeline_type(file_path: Path) -> PipelineType:
 
 @dataclass
 class RuntimeSettings:
-    """Stores runtime behavior settings shared between single-day and multi-day processing pipelines.
+    """Stores runtime behavior settings shared between single-recording and multi-recording processing pipelines.
 
     This dataclass contains parameters that control execution behavior rather than data processing logic. Both
     pipelines use these settings to configure parallel processing and progress reporting.
@@ -100,19 +100,20 @@ class RuntimeSettings:
     parallel_workers: int = 20
     """The number of workers used to parallelize certain processing operations. This worker pool is used by numba when
     it parallelizes certain computations used during registration and ROI processing. There is generally no benefit from
-    increasing this parameter above 20 cores per each processed session or plane. On machines with a high number of
-    cores, it is recommended to keep this value between 10 and 20 cores and to instead parallelize processing sessions
-    and planes. Setting this to -1 or 0 removes worker limits, forcing the pipeline to use all available CPU cores."""
+    increasing this parameter above 20 cores per each processed recording or plane. On machines with a high number of
+    cores, it is recommended to keep this value between 10 and 20 cores and to instead parallelize processing
+    across recordings and planes. Setting this to -1 or 0 removes worker limits, forcing the pipeline to use
+    all available CPU cores."""
 
     display_progress_bars: bool = False
     """Determines whether to display progress bars for certain processing steps. Only enable this option when running
-    all processing steps sequentially. Having this enabled when running multiple sessions or planes in parallel may
+    all processing steps sequentially. Having this enabled when running multiple recordings or planes in parallel may
     interfere with properly communicating progress via the terminal."""
 
 
 @dataclass
 class AcquisitionParameters(YamlConfig):
-    """Stores the data acquisition parameters used by the system that recorded the processed cell activity data.
+    """Stores the data acquisition parameters used by the system that recorded the processed ROI activity data.
 
     This dataclass describes the acquisition parameters of the input TIFF files, supporting both single-ROI
     (standard imaging) and multi-ROI (MROI line-scanning) data.
@@ -172,10 +173,10 @@ class AcquisitionParameters(YamlConfig):
 
 @dataclass
 class Main:
-    """Stores the parameters that broadly affect the single-day pipeline processing behavior.
+    """Stores the parameters that broadly affect the single-recording pipeline processing behavior.
 
     Notes:
-        For runtime behavior settings shared with the multi-day pipeline (parallel workers, progress bars), see
+        For runtime behavior settings shared with the multi-recording pipeline (parallel workers, progress bars), see
         RuntimeSettings.
     """
 
@@ -367,13 +368,13 @@ class NonrigidRegistration:
 
 @dataclass
 class ROIDetection:
-    """Stores parameters for Region of Interest (cell) detection."""
+    """Stores parameters for Region of Interest (ROI) detection."""
 
     enabled: bool = True
     """Determines whether to perform ROI detection and classification."""
 
     preclassification_threshold: float = 0.5
-    """The classifier probability threshold used to pre-filter cells before signal extraction. This is the minimum
+    """The classifier probability threshold used to pre-filter ROIs before signal extraction. This is the minimum
     classifier confidence value (that the classified ROI is a cell) for the ROI to be processed further. Setting this
     to 0.0 keeps all detected ROIs."""
 
@@ -390,7 +391,7 @@ class ROIDetection:
     maximum_overlap: float = 0.75
     """The maximum allowed fraction of overlapping pixels between two ROIs. When two ROIs share more than this
     fraction of pixels, the ROI with lower signal quality is discarded. Lower values enforce stricter separation
-    between detected cells."""
+    between detected ROIs."""
 
     temporal_highpass_window: int = 100
     """The window size, in frames, for temporal high-pass filtering applied before ROI detection. This removes
@@ -400,7 +401,7 @@ class ROIDetection:
     maximum_iterations: int = 50
     """The iteration scaling factor for ROI extraction. The algorithm detects ROIs one at a time, subtracting each
     detected ROI's contribution before searching for the next. The actual iteration limit is this value multiplied
-    by 250 internally (e.g., 50 allows up to 12,500 iterations). Higher values allow detecting more cells but
+    by 250 internally (e.g., 50 allows up to 12,500 iterations). Higher values allow detecting more ROIs but
     increase processing time."""
 
     maximum_binned_frames: int = 5000
@@ -421,7 +422,7 @@ class ROIDetection:
 
 @dataclass
 class SignalExtraction:
-    """Stores parameters for extracting fluorescence signals from cell ROIs and surrounding neuropil regions."""
+    """Stores parameters for extracting fluorescence signals from ROIs and surrounding neuropil regions."""
 
     extract_neuropil: bool = True
     """Determines whether to extract neuropil activity. If disabled, neuropil fluorescence is assumed to be zero
@@ -430,7 +431,7 @@ class SignalExtraction:
     allow_overlap: bool = False
     """Determines whether to include overlapping pixels (shared by multiple ROIs) in signal extraction. When disabled,
     pixels belonging to multiple ROIs are excluded from all of them to prevent signal contamination between
-    neighboring cells. Enable this only if ROIs are sparse and overlap is minimal."""
+    neighboring ROIs. Enable this only if ROIs are sparse and overlap is minimal."""
 
     minimum_neuropil_pixels: int = 350
     """The minimum number of pixels required for each neuropil mask. The algorithm expands outward from the cell
@@ -503,8 +504,8 @@ class SpikeDeconvolution:
 
 
 @dataclass
-class SingleDayConfiguration(YamlConfig):
-    """Aggregates the user-defined configuration parameters for the single-day cindra pipeline.
+class SingleRecordingConfiguration(YamlConfig):
+    """Aggregates the user-defined configuration parameters for the single-recording cindra pipeline.
 
     This class stores all user-configurable parameters that control how the pipeline processes data.
     These parameters are immutable during processing - the pipeline reads them but does not modify them.
@@ -513,15 +514,15 @@ class SingleDayConfiguration(YamlConfig):
         This class is based on the 'default_ops' dictionary from the original suite2p package. The default parameters
         are tuned for working with GCaMP6F fluorescence data recorded using 2-Photon Random Access Mesoscope (2P-RAM).
 
-        For runtime data (computed by the pipeline), see SingleDayRuntimeData.
+        For runtime data (computed by the pipeline), see SingleRecordingRuntimeData.
     """
 
-    pipeline_type: PipelineType = field(default=PipelineType.SINGLE_DAY, init=False)
-    """Identifies this configuration as a single-day pipeline configuration."""
+    pipeline_type: PipelineType = field(default=PipelineType.SINGLE_RECORDING, init=False)
+    """Identifies this configuration as a single-recording pipeline configuration."""
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
-    """Stores runtime behavior settings shared with the multi-day pipeline (parallel workers, progress bars)."""
+    """Stores runtime behavior settings shared with the multi-recording pipeline (parallel workers, progress bars)."""
     main: Main = field(default_factory=Main)
-    """Stores global parameters that broadly define the cindra single-day processing configuration."""
+    """Stores global parameters that broadly define the cindra single-recording processing configuration."""
     file_io: FileIO = field(default_factory=FileIO)
     """Stores general I/O parameters that specify input data location, format, and working and output directories."""
     registration: Registration = field(default_factory=Registration)
@@ -534,7 +535,7 @@ class SingleDayConfiguration(YamlConfig):
     """Stores parameters for nonrigid registration, which is used to improve motion registration in complex
     datasets."""
     roi_detection: ROIDetection = field(default_factory=ROIDetection)
-    """Stores parameters for cell ROI detection and extraction."""
+    """Stores parameters for ROI detection and extraction."""
     signal_extraction: SignalExtraction = field(default_factory=SignalExtraction)
     """Stores parameters for extracting fluorescence signals from ROIs and surrounding neuropil regions."""
     spike_deconvolution: SpikeDeconvolution = field(default_factory=SpikeDeconvolution)
@@ -550,13 +551,13 @@ class SingleDayConfiguration(YamlConfig):
         self.to_yaml(file_path=file_path)
 
     @classmethod
-    def load(cls, file_path: Path) -> SingleDayConfiguration:
+    def load(cls, file_path: Path) -> SingleRecordingConfiguration:
         """Loads configuration from a YAML file.
 
         Args:
             file_path: The path to the .yaml configuration file.
 
         Returns:
-            A SingleDayConfiguration instance populated with the loaded data.
+            A SingleRecordingConfiguration instance populated with the loaded data.
         """
         return cls.from_yaml(file_path=file_path)

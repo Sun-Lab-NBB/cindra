@@ -1,15 +1,15 @@
-"""Provides the high-level API for the single-day processing pipeline."""
+"""Provides the high-level API for the single-recording processing pipeline."""
 
 import numba  # type: ignore[import-untyped]
 from ataraxis_time import PrecisionTimer, TimerPrecisions, get_timestamp
 from ataraxis_base_utilities import LogLevel, console
 
-from ..io import combine_planes, convert_tiffs_to_binary, resolve_single_day_contexts
+from ..io import combine_planes, convert_tiffs_to_binary, resolve_single_recording_contexts
 from ..detection import detect_plane_rois
 from ..extraction import extract_traces
 from ..dataclasses import (
     RuntimeContext,
-    SingleDayConfiguration,
+    SingleRecordingConfiguration,
 )
 from ..registration import register_plane
 
@@ -20,16 +20,16 @@ _RECOMMENDED_PROCESSING_FRAMES: int = 200
 """The recommended minimum number of frames in the processed movie for the processing to work as expected."""
 
 
-def binarize_recording(configuration: SingleDayConfiguration) -> None:
+def binarize_recording(configuration: SingleRecordingConfiguration) -> None:
     """Converts raw TIFF recording data into the internal binary format used by the processing pipeline.
 
     Notes:
-        This function executes the first phase of the single-day pipeline: it converts the raw recording data into the
-        internal binary format and initializes the per-plane runtime data hierarchy. If valid binaries already exist at
-        the output path, the conversion is skipped.
+        This function executes the first phase of the single-recording pipeline: it converts the raw recording data
+        into the internal binary format and initializes the per-plane runtime data hierarchy. If valid binaries
+        already exist at the output path, the conversion is skipped.
 
     Args:
-        configuration: The single-day pipeline configuration.
+        configuration: The single-recording pipeline configuration.
 
     Raises:
         ValueError: If data_path is not configured.
@@ -80,7 +80,7 @@ def binarize_recording(configuration: SingleDayConfiguration) -> None:
     timer.reset()
 
     # Creates RuntimeContext instances for all planes.
-    contexts = resolve_single_day_contexts(configuration=configuration)
+    contexts = resolve_single_recording_contexts(configuration=configuration)
 
     # Converts TIFF data to binary format.
     convert_tiffs_to_binary(contexts=contexts)
@@ -97,16 +97,17 @@ def binarize_recording(configuration: SingleDayConfiguration) -> None:
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
-def process_plane(configuration: SingleDayConfiguration, plane_index: int) -> None:
+def process_plane(configuration: SingleRecordingConfiguration, plane_index: int) -> None:
     """Registers, detects ROIs, and extracts fluorescence traces for the target imaging plane.
 
     Notes:
-        This function executes the second phase of the single-day pipeline: it processes a single imaging plane through
-        registration, ROI detection, and trace extraction. Multiple planes can be processed in parallel, but each
+        This function executes the second phase of the single-recording pipeline: it processes a single imaging
+        plane through registration, ROI detection, and trace extraction. Multiple planes can be processed in
+        parallel, but each
         plane may use significant memory and CPU resources.
 
     Args:
-        configuration: The single-day pipeline configuration.
+        configuration: The single-recording pipeline configuration.
         plane_index: The index of the imaging plane to process.
     """
     # Skips flyback planes early.
@@ -190,8 +191,8 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
     """Combines processed data from all imaging planes into a unified dataset and saves it to disk.
 
     Notes:
-        This function executes the final phase of the single-day pipeline. The combined dataset is a prerequisite for
-        running the multi-day processing pipeline.
+        This function executes the final phase of the single-recording pipeline. The combined dataset is a
+        prerequisite for running the multi-recording processing pipeline.
 
     Args:
         contexts: A list of RuntimeContext instances, one per plane to combine. Each context must have valid runtime

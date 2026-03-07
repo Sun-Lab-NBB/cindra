@@ -130,11 +130,11 @@ class MaskLayer(IntEnum):
     """Selects the active ROI mask layer."""
 
     ORIGINAL = 0
-    """Displays the original ROI masks from single-day extraction in native recording coordinates."""
+    """Displays the original ROI masks from single-recording extraction in native recording coordinates."""
 
     DEFORMED = 1
-    """Displays the original ROI masks warped to the shared cross-recording coordinate space via multi-day registration
-    deformation fields."""
+    """Displays the original ROI masks warped to the shared cross-recording coordinate space via
+    multi-recording registration deformation fields."""
 
     TEMPLATE = 2
     """Displays the consensus template ROI masks derived from cross-recording clustering, defined in the shared
@@ -240,14 +240,14 @@ class _ROIViewerConstants:
     values to center the color mapping within a perceptually useful region of the hue spectrum."""
     random_color_seed: int = 0
     """The seed for the random number generator used to assign ROI hue values. Ensures reproducible color assignments
-    across sessions and viewer reloads, so the same ROI always receives the same random color."""
+    across recordings and viewer reloads, so the same ROI always receives the same random color."""
     plotted_trace_count: int = 40
     """The default and maximum number of simultaneously rendered fluorescence traces. Used as the initial value in the
     max-plotted input field, the QIntValidator upper bound, and the fallback when the field is empty."""
     default_scale_factor: float = 2.0
     """The default vertical spacing multiplier used to separate stacked fluorescence traces. Controls the Y-axis
-    distance between adjacent traces in both single-day and multi-day trace plots, with larger values increasing
-    separation."""
+    distance between adjacent traces in both single-recording and multi-recording trace plots, with larger values
+    increasing separation."""
     average_threshold: int = 5
     """The minimum number of selected ROIs required before an average trace is rendered at the bottom of the trace
     plot. Below this count, only individual traces are shown to avoid displaying a noisy average from too few
@@ -262,7 +262,7 @@ class _ROIViewerConstants:
     default_channel_2_threshold: float = 0.6
     """The default colocalization probability threshold for classifying ROIs as channel 2 positive. ROIs with a
     colocalization probability above this value are assigned to channel 2, and the threshold resets to this default
-    on each session load."""
+    on each recording load."""
     bin_size_divisor: int = 2
     """The divisor applied to the product of tau and sampling rate when computing the default temporal bin size. The
     bin size is calculated as max(1, int(tau * sampling_rate / divisor)) and controls the time window used for
@@ -282,8 +282,8 @@ class _BinaryPlayerConstants:
     """Encapsulates static runtime parameters for the binary player window."""
 
     playback_speed_multiplier: int = 5
-    """The factor by which playback runs faster than the real time recording. A value of 5 means the binary viewer 
-    plays frames at 5x the original recording speed."""
+    """The factor by which playback runs faster than the recording's real-time rate. A value of 5 means the binary
+    viewer plays frames at 5x the original recording speed."""
     subsample_frame_count: int = 100
     """The number of evenly-spaced frames subsampled from the recording for dynamic range estimation. These frames
     are used to compute the mean and standard deviation that define the display intensity range."""

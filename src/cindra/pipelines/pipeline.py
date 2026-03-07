@@ -8,23 +8,23 @@ from typing import TYPE_CHECKING
 from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
 from ataraxis_data_structures import ProcessingTracker
 
-from ..io import resolve_multiday_contexts, resolve_single_day_contexts
-from .multi_day import discover_multiday_cells, extract_multiday_fluorescence
-from .single_day import process_plane, binarize_recording, save_combined_data
-from ..dataclasses import RuntimeContext, MultiDayConfiguration, SingleDayConfiguration
+from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
+from ..dataclasses import RuntimeContext, MultiRecordingConfiguration, SingleRecordingConfiguration
+from .multi_recording import discover_multi_recording_cells, extract_multi_recording_fluorescence
+from .single_recording import process_plane, binarize_recording, save_combined_data
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-_SINGLE_DAY_TRACKER_NAME: str = "single_day_tracker.yaml"
-"""The tracker file name for the single-day processing pipeline."""
+_SINGLE_RECORDING_TRACKER_NAME: str = "single_recording_tracker.yaml"
+"""The tracker file name for the single-recording processing pipeline."""
 
-_MULTI_DAY_TRACKER_NAME: str = "multi_day_tracker.yaml"
-"""The tracker file name for the multi-day processing pipeline."""
+_MULTI_RECORDING_TRACKER_NAME: str = "multi_recording_tracker.yaml"
+"""The tracker file name for the multi-recording processing pipeline."""
 
 
-class SingleDayJobNames(StrEnum):
-    """Defines the job names for the single-day processing pipeline components."""
+class SingleRecordingJobNames(StrEnum):
+    """Defines the job names for the single-recording processing pipeline components."""
 
     BINARIZE = "binarization"
     """The name for the binarization (step 1) processing job."""
@@ -35,17 +35,17 @@ class SingleDayJobNames(StrEnum):
     """The name for the combination (step 3) processing job."""
 
 
-class MultiDayJobNames(StrEnum):
-    """Defines the job names for the multi-day processing pipeline components."""
+class MultiRecordingJobNames(StrEnum):
+    """Defines the job names for the multi-recording processing pipeline components."""
 
     DISCOVER = "discovery"
-    """The name for the cell discovery (step 1) processing job."""
+    """The name for the ROI discovery (step 1) processing job."""
     EXTRACT = "extraction"
-    """The generic name for the fluorescence extraction (step 2) processing job. During runtime, the processed session
-    is identified by the tracker's specifier field, which stores the session ID string."""
+    """The generic name for the fluorescence extraction (step 2) processing job. During runtime, the processed recording
+    is identified by the tracker's specifier field, which stores the recording ID string."""
 
 
-def run_single_day_pipeline(
+def run_single_recording_pipeline(
     configuration_path: Path,
     job_id: str | None = None,
     *,
@@ -54,7 +54,7 @@ def run_single_day_pipeline(
     combine: bool = False,
     target_plane: int = -1,
 ) -> None:
-    """Executes the requested single-day processing pipeline steps for the target data.
+    """Executes the requested single-recording processing pipeline steps for the target data.
 
     The caller is responsible for writing all runtime overrides (``file_io.data_path``, ``file_io.output_path``,
     ``runtime.parallel_workers``, ``runtime.display_progress_bars``) into the configuration file before invoking this
@@ -62,7 +62,7 @@ def run_single_day_pipeline(
     direct parameters.
 
     Args:
-        configuration_path: The path to the single-day configuration YAML file.
+        configuration_path: The path to the single-recording configuration YAML file.
         job_id: The unique hexadecimal identifier for the processing job to execute. If provided, only the job
             matching this ID is executed. If not provided, all requested jobs are run sequentially.
         binarize: Determines whether to resolve the binary files for plane-specific processing (step 1).
@@ -73,26 +73,28 @@ def run_single_day_pipeline(
             sequentially.
 
     Raises:
-        FileNotFoundError: If the single-day configuration data cannot be loaded from the specified file.
-        ValueError: If session's data validation fails or the specified job_id does not match any available jobs.
+        FileNotFoundError: If the single-recording configuration data cannot be loaded from the specified file.
+        ValueError: If the recording's data validation fails or the specified job_id does not match any available jobs.
     """
     # Ensures the input configuration file is valid.
     if not configuration_path.exists() or configuration_path.suffix != ".yaml":
         message = (
-            f"Unable to run the single-day cindra processing pipeline. Expected the configuration file to end with "
-            f"a '.yaml' extension and exist at the specified path, but encountered: {configuration_path}."
+            f"Unable to run the single-recording cindra processing pipeline. Expected the configuration file to "
+            f"end with a '.yaml' extension and exist at the specified path, but encountered: {configuration_path}."
         )
         console.error(message=message, error=FileNotFoundError)
 
     # Loads configuration data from the provided file.
     try:
-        configuration: SingleDayConfiguration = SingleDayConfiguration.from_yaml(file_path=configuration_path)
+        configuration: SingleRecordingConfiguration = SingleRecordingConfiguration.from_yaml(
+            file_path=configuration_path
+        )
     except Exception:
         message = (
-            "Unable to run the single-day cindra processing pipeline, as the input configuration file is not a "
-            "valid single-day pipeline configuration file. Specifically, failed to load the file's data as a "
-            "SingleDayConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
-            "valid single-day configuration .yaml file."
+            "Unable to run the single-recording cindra processing pipeline, as the input configuration file is not a "
+            "valid single-recording pipeline configuration file. Specifically, failed to load the file's data as a "
+            "SingleRecordingConfiguration dataclass instance. Ensure that the 'configuration_path' argument "
+            "points to a valid single-recording configuration .yaml file."
         )
         console.error(message=message, error=FileNotFoundError)
 
@@ -114,24 +116,24 @@ def run_single_day_pipeline(
     # Validates that the output_path is configured.
     if configuration.file_io.output_path is None:
         message = (
-            "Unable to run the single-day cindra processing pipeline. The output_path must be configured in the "
+            "Unable to run the single-recording cindra processing pipeline. The output_path must be configured in the "
             "FileIO section of the configuration, but it is currently None."
         )
         console.error(message=message, error=ValueError)
 
     # Resolves RuntimeContext instances for all planes upfront. This determines the plane count without requiring
-    # binarization to run first, mirroring how run_multi_day_pipeline resolves contexts before building jobs.
-    contexts = resolve_single_day_contexts(configuration=configuration)
+    # binarization to run first, mirroring how run_multi_recording_pipeline resolves contexts before building jobs.
+    contexts = resolve_single_recording_contexts(configuration=configuration)
     plane_count = len(contexts)
 
     # Derives the tracker path from the configuration.
-    tracker_path: Path = configuration.file_io.output_path / _SINGLE_DAY_TRACKER_NAME
+    tracker_path: Path = configuration.file_io.output_path / _SINGLE_RECORDING_TRACKER_NAME
 
     # Determines which jobs to run based on the flags.
     requested_jobs: dict[str, bool] = {
-        SingleDayJobNames.BINARIZE: binarize,
-        SingleDayJobNames.PROCESS: process,
-        SingleDayJobNames.COMBINE: combine,
+        SingleRecordingJobNames.BINARIZE: binarize,
+        SingleRecordingJobNames.PROCESS: process,
+        SingleRecordingJobNames.COMBINE: combine,
     }
 
     # If all requested job flags are False, treats them as all True (run all jobs).
@@ -148,23 +150,23 @@ def run_single_day_pipeline(
     if job_id is not None:
         # REMOTE mode: Retrieves the job name and specifier directly from the tracker using the provided job_id.
         job_info = tracker.get_job_info(job_id=job_id)
-        _execute_single_day_job(
+        _execute_single_recording_job(
             configuration=configuration,
-            job_name=SingleDayJobNames(job_info.job_name),
+            job_name=SingleRecordingJobNames(job_info.job_name),
             specifier=job_info.specifier,
             job_id=job_id,
             tracker=tracker,
         )
     else:
         # LOCAL mode: Builds all requested jobs upfront using the pre-resolved plane count, then runs them
-        # sequentially. This mirrors the approach used by run_multi_day_pipeline.
+        # sequentially. This mirrors the approach used by run_multi_recording_pipeline.
         jobs: list[tuple[str, str]] = []
         for base_job_name in jobs_to_run:
-            if base_job_name == SingleDayJobNames.PROCESS:
+            if base_job_name == SingleRecordingJobNames.PROCESS:
                 if target_plane == -1:
-                    jobs.extend((SingleDayJobNames.PROCESS, f"plane_{p}") for p in range(plane_count))
+                    jobs.extend((SingleRecordingJobNames.PROCESS, f"plane_{p}") for p in range(plane_count))
                 else:
-                    jobs.append((SingleDayJobNames.PROCESS, f"plane_{target_plane}"))
+                    jobs.append((SingleRecordingJobNames.PROCESS, f"plane_{target_plane}"))
             else:
                 jobs.append((base_job_name, ""))
 
@@ -172,81 +174,85 @@ def run_single_day_pipeline(
         job_ids = tracker.initialize_jobs(jobs=jobs)
 
         for (name, spec), jid in zip(jobs, job_ids, strict=True):
-            _execute_single_day_job(
+            _execute_single_recording_job(
                 configuration=configuration,
-                job_name=SingleDayJobNames(name),
+                job_name=SingleRecordingJobNames(name),
                 specifier=spec,
                 job_id=jid,
                 tracker=tracker,
             )
 
-    console.echo(message="Single-day processing: Complete.", level=LogLevel.SUCCESS)
+    console.echo(message="Single-recording processing: Complete.", level=LogLevel.SUCCESS)
 
 
-def run_multi_day_pipeline(
+def run_multi_recording_pipeline(
     configuration_path: Path,
     job_id: str | None = None,
     *,
     discover: bool = False,
     extract: bool = False,
-    target_session: str | None = None,
+    target_recording: str | None = None,
 ) -> None:
-    """Executes the requested multi-day processing pipeline steps for the target data.
+    """Executes the requested multi-recording processing pipeline steps for the target data.
 
-    The caller is responsible for writing all runtime overrides (``session_io.session_directories``,
+    The caller is responsible for writing all runtime overrides (``recording_io.recording_directories``,
     ``runtime.parallel_workers``, ``runtime.display_progress_bars``) into the configuration file before invoking this
     function. The pipeline reads these values from the file at ``configuration_path`` and does not accept them as
     direct parameters.
 
     Args:
-        configuration_path: The path to the multi-day configuration YAML file. The configuration must include the
-            ``session_io.session_directories`` list of session paths and ``session_io.dataset_name``.
+        configuration_path: The path to the multi-recording configuration YAML file. The configuration must include the
+            ``recording_io.recording_directories`` list of recording paths and ``recording_io.dataset_name``.
         job_id: The unique hexadecimal identifier for the processing job to execute. If provided, only the job
             matching this ID is executed. If not provided, all requested jobs are run sequentially.
-        discover: Determines whether to discover cells whose activity can be tracked across days (step 1).
-        extract: Determines whether to extract fluorescence from the cells tracked across multiple days (step 2).
-        target_session: The unique identifier of the session to process when running the 'extract' job. If None,
-            processes all sessions.
+        discover: Determines whether to discover ROIs whose activity can be tracked across recordings (step 1).
+        extract: Determines whether to extract fluorescence from the ROIs tracked across multiple recordings (step 2).
+        target_recording: The unique identifier of the recording to process when running the 'extract' job. If None,
+            processes all recordings.
 
     Raises:
-        FileNotFoundError: If the multi-day configuration data cannot be loaded from the specified file.
-        ValueError: If session validation fails, session_directories is empty, or the specified job_id does not match
-            any available jobs.
+        FileNotFoundError: If the multi-recording configuration data cannot be loaded from the specified file.
+        ValueError: If recording validation fails, recording_directories is empty, or the specified job_id does not
+            match any available jobs.
     """
     # Ensures the input configuration file is valid.
     if not configuration_path.exists() or configuration_path.suffix != ".yaml":
         message = (
-            f"Unable to run the multi-day cindra processing pipeline. Expected the configuration file to end with "
-            f"a '.yaml' extension and exist at the specified path, but encountered: {configuration_path}."
+            f"Unable to run the multi-recording cindra processing pipeline. "
+            f"Expected the configuration file to end with a '.yaml' extension and "
+            f"exist at the specified path, but encountered: {configuration_path}."
         )
         console.error(message=message, error=FileNotFoundError)
 
     # Loads configuration data from the provided file.
     try:
-        config: MultiDayConfiguration = MultiDayConfiguration.from_yaml(file_path=configuration_path)
+        config: MultiRecordingConfiguration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
     except Exception:
         message = (
-            "Unable to run the multi-day cindra processing pipeline, as the input configuration file is not a "
-            "valid multi-day pipeline configuration file. Specifically, failed to load the file's data as a "
-            "MultiDayConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
-            "valid multi-day configuration .yaml file."
+            "Unable to run the multi-recording cindra processing pipeline, as the input configuration file is not a "
+            "valid multi-recording pipeline configuration file. Specifically, failed to load the file's data as a "
+            "MultiRecordingConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
+            "valid multi-recording configuration .yaml file."
         )
         console.error(message=message, error=FileNotFoundError)
 
-    # Validates that the configuration contains the required session directories.
-    if not config.session_io.session_directories:
+    # Validates that the configuration contains the required recording directories.
+    if not config.recording_io.recording_directories:
         message = (
-            "Unable to run the multi-day cindra processing pipeline. The configuration file must specify at least "
-            "two session directories under 'session_io.session_directories'. The provided configuration has no session "
-            "directories specified."
+            "Unable to run the multi-recording cindra processing pipeline. The "
+            "configuration file must specify at least two recording directories "
+            "under 'recording_io.recording_directories'. The provided configuration "
+            "has no recording directories specified."
         )
         console.error(message=message, error=ValueError)
 
     # Validates that the configuration contains a dataset name.
-    if not config.session_io.dataset_name:
+    if not config.recording_io.dataset_name:
         message = (
-            "Unable to run the multi-day cindra processing pipeline. The configuration file must specify a dataset "
-            "name under 'session_io.dataset_name'. The provided configuration has no dataset name specified."
+            "Unable to run the multi-recording cindra processing pipeline. The "
+            "configuration file must specify a dataset name under "
+            "'recording_io.dataset_name'. The provided configuration has no "
+            "dataset name specified."
         )
         console.error(message=message, error=ValueError)
 
@@ -260,26 +266,27 @@ def run_multi_day_pipeline(
         console.disable_progress()
 
     console.echo(
-        message=f"Processing {len(config.session_io.session_directories)} sessions for dataset "
-        f"'{config.session_io.dataset_name}'..."
+        message=f"Processing {len(config.recording_io.recording_directories)} recordings for dataset "
+        f"'{config.recording_io.dataset_name}'..."
     )
 
-    # Resolves MultiDayRuntimeContext instances to extract session IDs and the main session output path. This also
-    # validates that all session directories contain valid single-day outputs and handles relocated data.
-    contexts = resolve_multiday_contexts(configuration=config)
-    session_ids: list[str] = [ctx.runtime.io.session_id for ctx in contexts]
-    main_session_path = contexts[0].runtime.output_path
-    if main_session_path is None:
+    # Resolves MultiRecordingRuntimeContext instances to extract recording IDs and the main recording output
+    # path. This also validates that all recording directories contain valid single-recording outputs and
+    # handles relocated data.
+    contexts = resolve_multi_recording_contexts(configuration=config)
+    recording_ids: list[str] = [ctx.runtime.io.recording_id for ctx in contexts]
+    main_recording_path = contexts[0].runtime.output_path
+    if main_recording_path is None:
         message = (
-            "Unable to run the multi-day pipeline. The main session's output path is not configured in the resolved "
-            "runtime context."
+            "Unable to run the multi-recording pipeline. The main recording's "
+            "output path is not configured in the resolved runtime context."
         )
         console.error(message=message, error=ValueError)
 
     # Determines which jobs to run based on the flags.
     requested_jobs: dict[str, bool] = {
-        MultiDayJobNames.DISCOVER: discover,
-        MultiDayJobNames.EXTRACT: extract,
+        MultiRecordingJobNames.DISCOVER: discover,
+        MultiRecordingJobNames.EXTRACT: extract,
     }
 
     # If all requested job flags are False, treats them as all True (run all jobs).
@@ -292,56 +299,57 @@ def run_multi_day_pipeline(
     # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
         # REMOTE mode: Retrieves the job name and specifier directly from the tracker using the provided job_id.
-        tracker = ProcessingTracker(file_path=main_session_path.joinpath(_MULTI_DAY_TRACKER_NAME))
+        tracker = ProcessingTracker(file_path=main_recording_path.joinpath(_MULTI_RECORDING_TRACKER_NAME))
         job_info = tracker.get_job_info(job_id=job_id)
-        _execute_multi_day_job(
+        _execute_multi_recording_job(
             configuration=config,
-            job_name=MultiDayJobNames(job_info.job_name),
+            job_name=MultiRecordingJobNames(job_info.job_name),
             specifier=job_info.specifier,
             job_id=job_id,
             tracker=tracker,
         )
     else:
         # LOCAL mode: Initializes the tracker and runs all requested jobs. For EXTRACT jobs, expands to
-        # session-specific jobs if target_session is None.
+        # recording-specific jobs if target_recording is None.
         jobs: list[tuple[str, str]] = []
         for base_job_name in jobs_to_run:
-            if base_job_name == MultiDayJobNames.EXTRACT:
-                if target_session is None:
-                    jobs.extend((MultiDayJobNames.EXTRACT, session_id) for session_id in session_ids)
+            if base_job_name == MultiRecordingJobNames.EXTRACT:
+                if target_recording is None:
+                    jobs.extend((MultiRecordingJobNames.EXTRACT, recording_id) for recording_id in recording_ids)
                 else:
-                    jobs.append((MultiDayJobNames.EXTRACT, target_session))
+                    jobs.append((MultiRecordingJobNames.EXTRACT, target_recording))
             else:
                 jobs.append((base_job_name, ""))
 
         console.echo(message=f"Initializing the processing tracker for {len(jobs)} job(s)...")
-        tracker = ProcessingTracker(file_path=main_session_path.joinpath(_MULTI_DAY_TRACKER_NAME))
+        tracker = ProcessingTracker(file_path=main_recording_path.joinpath(_MULTI_RECORDING_TRACKER_NAME))
         job_ids = tracker.initialize_jobs(jobs=jobs)
 
         for (name, spec), jid in zip(jobs, job_ids, strict=True):
-            _execute_multi_day_job(
+            _execute_multi_recording_job(
                 configuration=config,
-                job_name=MultiDayJobNames(name),
+                job_name=MultiRecordingJobNames(name),
                 specifier=spec,
                 job_id=jid,
                 tracker=tracker,
             )
 
-    console.echo(message="Multi-day processing: Complete.", level=LogLevel.SUCCESS)
+    console.echo(message="Multi-recording processing: Complete.", level=LogLevel.SUCCESS)
 
 
-def _execute_single_day_job(
-    configuration: SingleDayConfiguration,
-    job_name: SingleDayJobNames,
+def _execute_single_recording_job(
+    configuration: SingleRecordingConfiguration,
+    job_name: SingleRecordingJobNames,
     specifier: str,
     job_id: str,
     tracker: ProcessingTracker,
 ) -> None:
-    """Executes a single processing job of the single-day pipeline.
+    """Executes a single processing job of the single-recording pipeline.
 
     Args:
-        configuration: The SingleDayConfiguration instance for the pipeline.
-        job_name: The job name identifying the job to run. Must be a valid member of the SingleDayJobNames enumeration.
+        configuration: The SingleRecordingConfiguration instance for the pipeline.
+        job_name: The job name identifying the job to run. Must be a valid member of the
+            SingleRecordingJobNames enumeration.
         specifier: The job specifier string. For PROCESS jobs, this encodes the plane index as 'plane_{index}'.
             For BINARIZE and COMBINE jobs, this is an empty string.
         job_id: The unique hexadecimal identifier for this processing job.
@@ -354,14 +362,14 @@ def _execute_single_day_job(
     tracker.start_job(job_id=job_id)
 
     try:
-        if job_name == SingleDayJobNames.BINARIZE:
+        if job_name == SingleRecordingJobNames.BINARIZE:
             binarize_recording(configuration=configuration)
 
-        elif job_name == SingleDayJobNames.PROCESS:
+        elif job_name == SingleRecordingJobNames.PROCESS:
             plane_index = int(specifier.removeprefix("plane_"))
             process_plane(configuration=configuration, plane_index=plane_index)
 
-        elif job_name == SingleDayJobNames.COMBINE:
+        elif job_name == SingleRecordingJobNames.COMBINE:
             # Validates that output_path is configured before loading contexts.
             if configuration.file_io.output_path is None:
                 message = (
@@ -388,7 +396,7 @@ def _execute_single_day_job(
         else:
             message = (
                 f"Unable to execute the requested job '{job_name}' with ID '{job_id}'. The input job name is not "
-                f"recognized. Use one of the valid Job names: {list(SingleDayJobNames)}."
+                f"recognized. Use one of the valid Job names: {list(SingleRecordingJobNames)}."
             )
             console.error(message=message, error=ValueError)
 
@@ -399,19 +407,20 @@ def _execute_single_day_job(
         raise
 
 
-def _execute_multi_day_job(
-    configuration: MultiDayConfiguration,
-    job_name: MultiDayJobNames,
+def _execute_multi_recording_job(
+    configuration: MultiRecordingConfiguration,
+    job_name: MultiRecordingJobNames,
     specifier: str,
     job_id: str,
     tracker: ProcessingTracker,
 ) -> None:
-    """Executes a single processing job of the multi-day pipeline.
+    """Executes a single processing job of the multi-recording pipeline.
 
     Args:
-        configuration: The MultiDayConfiguration instance for the pipeline.
-        job_name: The job name identifying the job to run. Must be a valid member of the MultiDayJobNames enumeration.
-        specifier: The job specifier string. For EXTRACT jobs, this is the session ID. For DISCOVER jobs, this is an
+        configuration: The MultiRecordingConfiguration instance for the pipeline.
+        job_name: The job name identifying the job to run. Must be a valid member of the
+            MultiRecordingJobNames enumeration.
+        specifier: The job specifier string. For EXTRACT jobs, this is the recording ID. For DISCOVER jobs, this is an
             empty string.
         job_id: The unique hexadecimal identifier for this processing job.
         tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
@@ -423,16 +432,16 @@ def _execute_multi_day_job(
     tracker.start_job(job_id=job_id)
 
     try:
-        if job_name == MultiDayJobNames.DISCOVER:
-            discover_multiday_cells(configuration=configuration)
+        if job_name == MultiRecordingJobNames.DISCOVER:
+            discover_multi_recording_cells(configuration=configuration)
 
-        elif job_name == MultiDayJobNames.EXTRACT:
-            extract_multiday_fluorescence(configuration=configuration, session_id=specifier)
+        elif job_name == MultiRecordingJobNames.EXTRACT:
+            extract_multi_recording_fluorescence(configuration=configuration, recording_id=specifier)
 
         else:
             message = (
                 f"Unable to execute the requested job '{job_name}' with ID '{job_id}'. The input job name is not "
-                f"recognized. Use one of the valid Job names: {list(MultiDayJobNames)}."
+                f"recognized. Use one of the valid Job names: {list(MultiRecordingJobNames)}."
             )
             console.error(message=message, error=ValueError)
 

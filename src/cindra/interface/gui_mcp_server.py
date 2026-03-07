@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from mcp.server.fastmcp import FastMCP
 
 if TYPE_CHECKING:
-    from ..gui.viewer_context import ViewerData, SingleDayData
+    from ..gui.viewer_context import ViewerData, SingleRecordingData
 
 gui_mcp = FastMCP(name="cindra-gui-mcp", json_response=True)
 """The GUI MCP server instance initialized with JSON response mode for structured output."""
@@ -41,7 +41,7 @@ class _ViewerProcess:
         viewer_id: The unique identifier for this viewer instance.
         viewer_type: The type of viewer ('roi', 'tracking', or 'registration').
         recording_path: The path to the recording loaded in the viewer.
-        dataset: The multi-day dataset name, or None for single-day mode.
+        dataset: The multi-recording dataset name, or None for single-recording mode.
         process: The subprocess.Popen instance for the viewer process.
     """
 
@@ -49,7 +49,7 @@ class _ViewerProcess:
     viewer_type: str
     recording_path: str
     dataset: str | None
-    process: subprocess.Popen  # type: ignore[type-arg]
+    process: subprocess.Popen
 
 
 _viewer_registry: dict[str, _ViewerProcess] = {}
@@ -100,7 +100,7 @@ def _get_or_load_viewer_data(recording_path: str, dataset: str | None = None) ->
 
     Args:
         recording_path: The path to the recording's cindra output directory.
-        dataset: Optional multi-day dataset name to load.
+        dataset: Optional multi-recording dataset name to load.
 
     Returns:
         A ViewerData instance loaded from the specified path.
@@ -127,17 +127,17 @@ def _get_or_load_viewer_data(recording_path: str, dataset: str | None = None) ->
     return data
 
 
-def _get_or_load_single_day_data(recording_path: str) -> SingleDayData:
-    """Returns a cached SingleDayData instance extracted from ViewerData, or loads one from disk.
+def _get_or_load_single_recording_data(recording_path: str) -> SingleRecordingData:
+    """Returns a cached SingleRecordingData instance extracted from ViewerData, or loads one from disk.
 
     Args:
         recording_path: The path to the recording's cindra output directory.
 
     Returns:
-        A SingleDayData instance loaded from the specified path.
+        A SingleRecordingData instance loaded from the specified path.
     """
     viewer_data = _get_or_load_viewer_data(recording_path)
-    return viewer_data.single_day
+    return viewer_data.single_recording
 
 
 # ------------------------------------------------------------------
@@ -157,10 +157,10 @@ def launch_viewer_tool(
     to interact with directly. Returns a viewer_id that can be used to check status or close the viewer later.
 
     Args:
-        viewer_type: The type of viewer to launch. 'roi' for ROI inspection, 'tracking' for multi-day tracking
+        viewer_type: The type of viewer to launch. 'roi' for ROI inspection, 'tracking' for multi-recording tracking
             quality, 'registration' for registration quality (binary player + PC viewer).
         recording_path: Absolute path to the cindra pipeline output directory for the recording to visualize.
-        dataset: Multi-day dataset name to load on startup. Only used by 'roi' and 'tracking' viewers.
+        dataset: Multi-recording dataset name to load on startup. Only used by 'roi' and 'tracking' viewers.
     """
     path = Path(recording_path)
     if not path.exists():
@@ -255,11 +255,11 @@ def close_viewer_tool(viewer_id: str) -> dict[str, Any]:
 
 
 @gui_mcp.tool()
-def query_session_metadata_tool(recording_path: str) -> dict[str, Any]:
-    """Queries metadata for a cindra-processed recording session.
+def query_recording_metadata_tool(recording_path: str) -> dict[str, Any]:
+    """Queries metadata for a cindra-processed recording.
 
-    Returns frame count, sampling rate, plane count, ROI count, cell count, available multi-day datasets, and other
-    session properties. Does not require a GUI viewer to be open.
+    Returns frame count, sampling rate, plane count, ROI count, available multi-recording datasets, and other
+    recording properties. Does not require a GUI viewer to be open.
 
     Args:
         recording_path: Absolute path to a cindra pipeline output directory.
@@ -274,20 +274,19 @@ def query_session_metadata_tool(recording_path: str) -> dict[str, Any]:
             ),
         }
 
-    single_day = data.single_day
+    single_recording = data.single_recording
     return {
         "success": True,
         "recording_path": recording_path,
-        "frame_count": single_day.frame_count,
-        "sampling_rate": single_day.sampling_rate,
-        "tau": single_day.tau,
-        "plane_count": single_day.plane_count,
-        "frame_height": single_day.frame_height,
-        "frame_width": single_day.frame_width,
-        "roi_count": single_day.roi_count,
-        "cell_count": single_day.cell_count,
-        "two_channels": single_day.two_channels,
-        "recording_label": single_day.recording_label,
+        "frame_count": single_recording.frame_count,
+        "sampling_rate": single_recording.sampling_rate,
+        "tau": single_recording.tau,
+        "plane_count": single_recording.plane_count,
+        "frame_height": single_recording.frame_height,
+        "frame_width": single_recording.frame_width,
+        "roi_count": single_recording.roi_count,
+        "two_channels": single_recording.two_channels,
+        "recording_label": single_recording.recording_label,
         "available_datasets": list(data.available_datasets),
     }
 
@@ -312,14 +311,14 @@ def query_roi_statistics_tool(
         top_n: Limit results to the top N ROIs after sorting. Only effective when sort_by is also provided.
     """
     try:
-        single_day = _get_or_load_single_day_data(recording_path)
+        single_recording = _get_or_load_single_recording_data(recording_path)
     except Exception as error:
         return {
             "success": False,
             "error": f"Unable to load data from '{recording_path}'. {error}",
         }
 
-    all_statistics = single_day.roi_statistics
+    all_statistics = single_recording.roi_statistics
     if roi_indices is not None:
         valid_indices = [i for i in roi_indices if 0 <= i < len(all_statistics)]
         statistics = [(i, all_statistics[i]) for i in valid_indices]
@@ -380,15 +379,15 @@ def query_fluorescence_traces_tool(
         }
 
     try:
-        single_day = _get_or_load_single_day_data(recording_path)
+        single_recording = _get_or_load_single_recording_data(recording_path)
     except Exception as error:
         return {"success": False, "error": f"Unable to load data from '{recording_path}'. {error}"}
 
     trace_map = {
-        "fluorescence": single_day.cell_fluorescence,
-        "neuropil": single_day.neuropil_fluorescence,
-        "corrected": single_day.subtracted_fluorescence,
-        "spikes": single_day.spikes,
+        "fluorescence": single_recording.cell_fluorescence,
+        "neuropil": single_recording.neuropil_fluorescence,
+        "corrected": single_recording.subtracted_fluorescence,
+        "spikes": single_recording.spikes,
     }
     traces = trace_map.get(trace_type)
     if traces is None or traces.size == 0:
@@ -431,11 +430,11 @@ def query_cell_classification_tool(
         roi_indices: Specific ROI indices to query. Returns all ROIs when not provided.
     """
     try:
-        single_day = _get_or_load_single_day_data(recording_path)
+        single_recording = _get_or_load_single_recording_data(recording_path)
     except Exception as error:
         return {"success": False, "error": f"Unable to load data from '{recording_path}'. {error}"}
 
-    classification = single_day.cell_classification
+    classification = single_recording.cell_classification
     if classification is None or classification.size == 0:
         return {"success": False, "error": "Unable to retrieve cell classification. Data is not available."}
 
@@ -452,62 +451,62 @@ def query_cell_classification_tool(
         for i in indices
     ]
 
-    cell_count = sum(1 for r in results if r["is_cell"])
+    roi_count = sum(1 for r in results if r["is_cell"])
     return {
         "success": True,
         "total_rois": total_rois,
         "queried_count": len(results),
-        "cell_count": cell_count,
-        "non_cell_count": len(results) - cell_count,
+        "roi_count": roi_count,
+        "non_roi_count": len(results) - roi_count,
         "classifications": results,
     }
 
 
 @gui_mcp.tool()
-def query_multi_day_tracking_tool(
+def query_multi_recording_tracking_tool(
     recording_path: str,
     dataset: str,
 ) -> dict[str, Any]:
-    """Queries multi-day tracking data for a cindra-processed recording's dataset.
+    """Queries multi-recording tracking data for a cindra-processed recording's dataset.
 
-    Returns the dataset structure including per-session recording IDs and mask counts for each mask layer. Does not
+    Returns the dataset structure including per-recording IDs and mask counts for each mask layer. Does not
     require a GUI viewer.
 
     Args:
-        recording_path: Absolute path to a cindra pipeline output directory that belongs to the multi-day dataset.
-        dataset: The multi-day dataset name to query.
+        recording_path: Absolute path to a cindra pipeline output directory that belongs to the multi-recording dataset.
+        dataset: The multi-recording dataset name to query.
     """
     try:
         data = _get_or_load_viewer_data(recording_path, dataset=dataset)
     except Exception as error:
         return {"success": False, "error": f"Unable to load data from '{recording_path}'. {error}"}
 
-    if not data.is_multi_day:
+    if not data.is_multi_recording:
         available = list(data.available_datasets)
         if dataset and dataset not in available:
             return {
                 "success": False,
                 "error": f"Unable to load dataset '{dataset}'. Available datasets: {available}.",
             }
-        return {"success": False, "error": "Unable to query tracking data. No multi-day dataset is loaded."}
+        return {"success": False, "error": "Unable to query tracking data. No multi-recording dataset is loaded."}
 
-    sessions: list[dict[str, Any]] = []
+    recordings: list[dict[str, Any]] = []
     for i in range(data.recording_count):
         recording = data.recording(i)
-        session_info: dict[str, Any] = {
+        recording_info: dict[str, Any] = {
             "index": i,
-            "session_id": recording.session_id,
+            "recording_id": recording.recording_id,
             "has_channel_2": recording.has_channel_2,
             "original_mask_count": len(recording.original_masks),
             "deformed_mask_count": len(recording.deformed_masks),
             "template_mask_count": len(recording.template_masks),
             "tracked_mask_count": len(recording.tracked_masks),
         }
-        sessions.append(session_info)
+        recordings.append(recording_info)
 
     return {
         "success": True,
         "dataset": data.active_dataset_name,
         "recording_count": data.recording_count,
-        "sessions": sessions,
+        "recordings": recordings,
     }

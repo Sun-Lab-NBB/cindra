@@ -1,4 +1,4 @@
-"""Provides the ROI detection entry point for the single-day and the multi-day processing pipelines."""
+"""Provides the ROI detection entry point for the single-recording and the multi-recording processing pipelines."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ _ITERATION_MULTIPLIER: int = 250
 by the sparse detection algorithm."""
 
 _BACKGROUND_SCALE: int = 4
-"""The spatial multiplier applied to the cell diameter to compute the median filter kernel size for background removal
+"""The spatial multiplier applied to the ROI diameter to compute the median filter kernel size for background removal
 in the enhanced mean image."""
 
 _ENHANCED_MINIMUM_INTENSITY: float = -6.0
@@ -44,13 +44,13 @@ _VARIANCE_EPSILON: float = 1e-10
 """The small constant added to local variance to avoid division by zero during contrast normalization."""
 
 _DEFAULT_CELL_DIAMETER: int = 12
-"""The default cell diameter in pixels, used when the estimated diameter is zero or negative."""
+"""The default ROI diameter in pixels, used when the estimated diameter is zero or negative."""
 
 type _ChannelDetectionResult = tuple[
     NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], int, list[ROIStatistics]
 ]
 """The type alias for the _detect_channel return signature containing mean image, enhanced mean image, maximum
-projection, correlation map, cell diameter, and ROI statistics."""
+projection, correlation map, ROI diameter, and ROI statistics."""
 
 
 def detect_plane_rois(context: RuntimeContext) -> None:
@@ -59,7 +59,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
     Notes:
         This function orchestrates the full detection pipeline for one or both functional channels. When both channels
         are functional (independent ROI detection), the pipeline runs independently on each channel since different
-        cell populations may have different soma sizes and spatial scales. Results are written into
+        ROI populations may have different soma sizes and spatial scales. Results are written into
         context.runtime.detection, context.runtime.extraction, and context.runtime.timing.
 
     Args:
@@ -116,7 +116,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
         )
 
     # Runs channel 1 detection.
-    mean_image, enhanced_mean_image, maximum_projection, correlation_map, cell_diameter, roi_statistics = (
+    mean_image, enhanced_mean_image, maximum_projection, correlation_map, roi_diameter, roi_statistics = (
         _detect_channel(
             binary_path=channel_1_path,
             frame_height=frame_height,
@@ -144,7 +144,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
     detection_data.enhanced_mean_image = enhanced_mean_image
     detection_data.maximum_projection = maximum_projection
     detection_data.correlation_map = correlation_map
-    detection_data.cell_diameter = cell_diameter
+    detection_data.roi_diameter = roi_diameter
     for roi in roi_statistics:
         roi.mask.frame_width = frame_width
     context.runtime.extraction.roi_statistics = roi_statistics
@@ -169,7 +169,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
             enhanced_mean_image_channel_2,
             maximum_projection_channel_2,
             correlation_map_channel_2,
-            cell_diameter_channel_2,
+            roi_diameter_channel_2,
             roi_statistics_channel_2,
         ) = _detect_channel(
             binary_path=channel_2_path,
@@ -193,7 +193,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
         detection_data.enhanced_mean_image_channel_2 = enhanced_mean_image_channel_2
         detection_data.maximum_projection_channel_2 = maximum_projection_channel_2
         detection_data.correlation_map_channel_2 = correlation_map_channel_2
-        detection_data.cell_diameter_channel_2 = cell_diameter_channel_2
+        detection_data.roi_diameter_channel_2 = roi_diameter_channel_2
         for roi in roi_statistics_channel_2:
             roi.mask.frame_width = frame_width
         context.runtime.extraction.roi_statistics_channel_2 = roi_statistics_channel_2
@@ -217,7 +217,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
 
 def _create_enhanced_mean_image(
     mean_image: NDArray[np.float32],
-    cell_diameter: int,
+    roi_diameter: int,
     valid_y_range: tuple[int, int],
     valid_x_range: tuple[int, int],
     frame_height: int,
@@ -226,14 +226,14 @@ def _create_enhanced_mean_image(
     """Creates an enhanced version of the mean image by removing background fluorescence and normalizing local contrast.
 
     Notes:
-        The enhancement pipeline applies a median filter at a scale proportional to the cell diameter to estimate and
+        The enhancement pipeline applies a median filter at a scale proportional to the ROI diameter to estimate and
         subtract the slowly varying background. The residual is then divided by its local absolute median to normalize
         contrast across the field of view. Finally, the result is clipped and rescaled to the [0, 1] range. Border
         regions outside the valid registration crop are filled with the minimum value of the enhanced interior.
 
     Args:
         mean_image: The mean image to enhance, already cropped to the valid registration region.
-        cell_diameter: The estimated cell diameter in pixels, used to compute the median filter kernel size.
+        roi_diameter: The estimated ROI diameter in pixels, used to compute the median filter kernel size.
         valid_y_range: The valid Y pixel range (start, end) after registration cropping.
         valid_x_range: The valid X pixel range (start, end) after registration cropping.
         frame_height: The height of the full frame in pixels.
@@ -243,10 +243,10 @@ def _create_enhanced_mean_image(
         The enhanced mean image with shape (frame_height, frame_width), background-subtracted and contrast-normalized
         with values in [0, 1] inside the valid region.
     """
-    # Uses cell diameter for spatial scaling, with a default fallback.
-    spatial_scale_pixels = cell_diameter if cell_diameter > 0 else _DEFAULT_CELL_DIAMETER
+    # Uses ROI diameter for spatial scaling, with a default fallback.
+    spatial_scale_pixels = roi_diameter if roi_diameter > 0 else _DEFAULT_CELL_DIAMETER
 
-    # Computes median filter kernel size proportional to the cell diameter.
+    # Computes median filter kernel size proportional to the ROI diameter.
     kernel_dimension = int(_BACKGROUND_SCALE * np.ceil(spatial_scale_pixels) + 1)
     filter_kernel_size = (kernel_dimension, kernel_dimension)
 
@@ -255,7 +255,7 @@ def _create_enhanced_mean_image(
     background_removed = medfilt2d(mean_image, kernel_size=filter_kernel_size).astype(np.float32)
     np.subtract(mean_image, background_removed, out=background_removed)
 
-    # Normalizes cell contrast by dividing by local absolute median.
+    # Normalizes ROI contrast by dividing by local absolute median.
     abs_background_removed = np.abs(background_removed)
     local_variance = medfilt2d(abs_background_removed, kernel_size=filter_kernel_size).astype(np.float32)
     np.add(local_variance, _VARIANCE_EPSILON, out=local_variance)
@@ -305,7 +305,7 @@ def _apply_preclassification(
         custom_classifier_path: The path to a custom classifier file, or None to use the built-in classifier.
         plane_index: The index of the imaging plane being processed, used for logging.
         channel_label: The channel identifier string used in log messages (e.g., "channel 1" or "channel 2").
-        diameter: The estimated cell diameter in pixels, used for distance normalization in compactness computation.
+        diameter: The estimated ROI diameter in pixels, used for distance normalization in compactness computation.
 
     Returns:
         The filtered list of ROIStatistics instances that passed the preclassification threshold.
@@ -385,7 +385,7 @@ def _detect_channel(
 
     Returns:
         A tuple of the mean image, the enhanced mean image, the maximum intensity projection, the pixel-wise
-        correlation map, the estimated cell diameter in pixels, and the list of ROIStatistics instances for the
+        correlation map, the estimated ROI diameter in pixels, and the list of ROIStatistics instances for the
         detected ROIs.
 
     Raises:
@@ -456,13 +456,13 @@ def _detect_channel(
     )
     console.echo(message=message, level=LogLevel.SUCCESS)
 
-    # The spatial scale in pixels doubles as the cell diameter for ROI statistics and classification.
-    cell_diameter = spatial_scale_pixels
+    # The spatial scale in pixels doubles as the ROI diameter for ROI statistics and classification.
+    roi_diameter = spatial_scale_pixels
 
-    # Computes the enhanced mean image using the cell diameter for spatial filtering scale.
+    # Computes the enhanced mean image using the ROI diameter for spatial filtering scale.
     enhanced_mean_image = _create_enhanced_mean_image(
         mean_image=mean_image,
-        cell_diameter=cell_diameter,
+        roi_diameter=roi_diameter,
         valid_y_range=valid_y_range,
         valid_x_range=valid_x_range,
         frame_height=frame_height,
@@ -501,7 +501,7 @@ def _detect_channel(
         roi.mask.x_pixels += x_pixel_offset
         roi.mask.centroid = (roi.mask.centroid[0] + y_pixel_offset, roi.mask.centroid[1] + x_pixel_offset)
 
-    # Applies optional preclassification filtering to remove unlikely cell candidates early.
+    # Applies optional preclassification filtering to remove unlikely ROI candidates early.
     if detection_config.preclassification_threshold > 0:
         roi_statistics = _apply_preclassification(
             roi_statistics=roi_statistics,
@@ -509,7 +509,7 @@ def _detect_channel(
             frame_width=frame_width,
             preclassification_threshold=detection_config.preclassification_threshold,
             crop_to_soma=detection_config.crop_to_soma,
-            diameter=cell_diameter,
+            diameter=roi_diameter,
             custom_classifier_path=custom_classifier_path,
             plane_index=plane_index,
             channel_label=channel_label,
@@ -524,7 +524,7 @@ def _detect_channel(
         rois=roi_statistics,
         frame_height=frame_height,
         frame_width=frame_width,
-        diameter=cell_diameter,
+        diameter=roi_diameter,
         maximum_overlap_fraction=detection_config.maximum_overlap,
         crop=detection_config.crop_to_soma,
     )
@@ -534,4 +534,4 @@ def _detect_channel(
     )
     console.echo(message=message, level=LogLevel.SUCCESS)
 
-    return mean_image, enhanced_mean_image, maximum_projection, correlation_map, cell_diameter, roi_statistics
+    return mean_image, enhanced_mean_image, maximum_projection, correlation_map, roi_diameter, roi_statistics

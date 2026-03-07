@@ -1,4 +1,6 @@
-"""Provides diffeomorphic across-session registration entry point for the multi-day cindra processing pipeline."""
+"""Provides diffeomorphic across-recording registration entry point for the multi-recording cindra processing
+pipeline.
+"""
 
 from __future__ import annotations
 
@@ -11,33 +13,34 @@ from ataraxis_base_utilities import LogLevel, console
 
 from ..detection import compute_roi_statistics
 from .deformation import Deformation
-from ..dataclasses import ROIMask, ROIStatistics, ReferenceImageType, MultiDayRuntimeContext
+from ..dataclasses import ROIMask, ROIStatistics, ReferenceImageType, MultiRecordingRuntimeContext
 from .diffeomorphic import DiffeomorphicDemonsRegistration
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
-    """Registers multiple session reference images to a common visual space using diffeomorphic demons registration.
+def register_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
+    """Registers multiple recording reference images to a common visual space using diffeomorphic demons registration.
 
-    This function computes deformation fields that align all sessions to a shared coordinate system, then applies
-    those deformations to transform reference images and cell masks. The deformation fields and transformed data
-    are stored in each session's runtime registration data.
+    This function computes deformation fields that align all recordings to a shared coordinate system, then applies
+    those deformations to transform reference images and ROI masks. The deformation fields and transformed data
+    are stored in each recording's runtime registration data.
 
     Notes:
-        This is the entry point for multi-day registration. It orchestrates the full registration workflow including
-        deformation field computation, image transformation, and mask deformation. The function modifies the runtime
-        data in each context in-place.
+        This is the entry point for multi-recording registration. It orchestrates the full registration workflow
+        including deformation field computation, image transformation, and mask deformation. The function modifies
+        the runtime data in each context in-place.
 
-        When all sessions already have registration data (deformation fields and deformed cell masks) and
+        When all recordings already have registration data (deformation fields and deformed ROI masks) and
         repeat_registration is False (default), the function returns early without re-running the expensive
         diffeomorphic registration. When repeat_registration is True, existing registration data is cleared before
         re-computing.
 
     Args:
-        contexts: The list of MultiDayRuntimeContext instances, one per session. All contexts must share the same
-            configuration. Each context's runtime.combined_data must be loaded with single-day detection results.
+        contexts: The list of MultiRecordingRuntimeContext instances, one per recording. All contexts must share
+            the same configuration. Each context's runtime.combined_data must be loaded with single-recording
+            detection results.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
@@ -46,12 +49,13 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
     registration_config = configuration.diffeomorphic_registration
     runtime_config = configuration.runtime
 
-    # Checks if registration should be skipped (all sessions already registered and not forcing re-registration).
+    # Checks if registration should be skipped (all recordings already registered and not forcing re-registration).
     all_registered = all(context.runtime.registration.is_registered() for context in contexts)
     if all_registered and not registration_config.repeat_registration:
         console.echo(
             message=(
-                "Multi-day registration: skipped. All sessions are already registered and re-registration is disabled."
+                "Multi-recording registration: skipped. All recordings are already registered and "
+                "re-registration is disabled."
             ),
             level=LogLevel.INFO,
         )
@@ -60,7 +64,7 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
     # Clears existing registration data if re-registering.
     if all_registered:
         console.echo(
-            message="Multi-day registration: forced. Clearing existing data and re-running registration.",
+            message="Multi-recording registration: forced. Clearing existing data and re-running registration.",
             level=LogLevel.INFO,
         )
         for context in contexts:
@@ -72,15 +76,15 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
         if combined is not None and context.runtime.io.data_path is not None:
             combined.detection.memory_map_arrays(context.runtime.io.data_path)
 
-    # Collects reference images from all sessions based on configured image type.
+    # Collects reference images from all recordings based on configured image type.
     image_type = registration_config.image_type
     reference_images: list[NDArray[np.float32]] = []
     for context in contexts:
         combined_data = context.runtime.combined_data
         if combined_data is None:
             message = (
-                f"Unable to register session '{context.runtime.io.session_id}' to shared visual space. The session's "
-                f"combined_data must be loaded before registration."
+                f"Unable to register recording '{context.runtime.io.recording_id}' to shared visual space. "
+                f"The recording's combined_data must be loaded before registration."
             )
             console.error(message=message, error=ValueError)
         detection = combined_data.detection
@@ -92,8 +96,8 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
             image = detection.maximum_projection
         if image is None:
             message = (
-                f"Unable to register session '{context.runtime.io.session_id}' to shared visual space. The required "
-                f"reference image ({image_type!s}) is not available in combined_data."
+                f"Unable to register recording '{context.runtime.io.recording_id}' to shared visual space. "
+                f"The required reference image ({image_type!s}) is not available in combined_data."
             )
             console.error(message=message, error=ValueError)
         reference_images.append(image.astype(np.float32))
@@ -107,7 +111,7 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
     )
     registration.register(progress=runtime_config.display_progress_bars)
 
-    # Applies deformation fields to each session in parallel.
+    # Applies deformation fields to each recording in parallel.
     if runtime_config.parallel_workers > 1:
         with ThreadPoolExecutor(max_workers=runtime_config.parallel_workers) as executor:
             futures = {
@@ -121,24 +125,24 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
 
             for future in console.track(
                 as_completed(futures),
-                description="Transforming session ROIs to a shared visual space",
+                description="Transforming recording ROIs to a shared visual space",
                 total=len(futures),
-                unit="session",
+                unit="recording",
             ):
                 future.result()
     else:
         for index, context in console.track(
             enumerate(contexts),
-            description="Transforming session ROIs to a shared visual space",
+            description="Transforming recording ROIs to a shared visual space",
             total=len(contexts),
-            unit="session",
+            unit="recording",
         ):
             _apply_forward_deformation(
                 context=context,
                 deformation=registration.get_deformation(image_index=index),
             )
 
-    # Records registration timing and persists runtime data for each session.
+    # Records registration timing and persists runtime data for each recording.
     registration_time = int(timer.elapsed)
     for context in contexts:
         context.runtime.timing.registration_time = registration_time
@@ -151,21 +155,21 @@ def register_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
             context.runtime.combined_data.detection.release_arrays()
 
     console.echo(
-        message=f"Multi-day registration: complete. Time: {registration_time} seconds.", level=LogLevel.SUCCESS
+        message=f"Multi-recording registration: complete. Time: {registration_time} seconds.", level=LogLevel.SUCCESS
     )
 
 
-def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> None:
-    """Projects template masks from shared visual space back to each session's original coordinate system.
+def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
+    """Projects template masks from shared visual space back to each recording's original coordinate system.
 
-    After cell tracking produces template masks in the shared deformed space, this function applies the inverse
-    deformation to map those masks back to each session's native coordinates. This enables fluorescence extraction
+    After ROI tracking produces template masks in the shared deformed space, this function applies the inverse
+    deformation to map those masks back to each recording's native coordinates. This enables fluorescence extraction
     using the original registered binary data.
 
     Args:
-        contexts: The list of MultiDayRuntimeContext instances, one per session. Each context must have deformation
-            fields stored in runtime.registration from a prior call to register_sessions(), and template masks set
-            in runtime.tracking from cell tracking.
+        contexts: The list of MultiRecordingRuntimeContext instances, one per recording. Each context must have
+            deformation fields stored in runtime.registration from a prior call to register_recordings(), and
+            template masks set in runtime.tracking from ROI tracking.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
@@ -187,21 +191,21 @@ def project_templates_to_sessions(contexts: list[MultiDayRuntimeContext]) -> Non
 
             for future in console.track(
                 as_completed(futures),
-                description="Projecting tracked ROIs to individual session's visual space",
+                description="Projecting tracked ROIs to individual recording's visual space",
                 total=len(futures),
-                unit="session",
+                unit="recording",
             ):
                 future.result()
     else:
         for context in console.track(
             contexts,
-            description="Projecting tracked ROIs to individual session's visual space",
+            description="Projecting tracked ROIs to individual recording's visual space",
             total=len(contexts),
-            unit="session",
+            unit="recording",
         ):
             _apply_backward_deformation(context=context)
 
-    # Records backward transform timing and persists runtime data for each session.
+    # Records backward transform timing and persists runtime data for each recording.
     backward_transform_time = int(timer.elapsed)
     for context in contexts:
         context.runtime.timing.backward_transform_time = backward_transform_time
@@ -270,7 +274,7 @@ def _forward_deform_masks(
     """Applies a forward deformation to transform ROI masks to shared visual space.
 
     Creates lightweight ROIMask instances with transformed coordinates. No shape statistics are computed since the
-    multi-day pipeline only needs spatial data for tracking.
+    multi-recording pipeline only needs spatial data for tracking.
 
     Args:
         masks: The list of ROIMask instances to transform.
@@ -301,9 +305,9 @@ def _backward_deform_masks(
     deformation: Deformation,
     frame_height: int,
     frame_width: int,
-    cell_diameter: int,
+    roi_diameter: int,
 ) -> list[ROIStatistics]:
-    """Applies an inverse deformation to project template masks back to a session's native coordinate system.
+    """Applies an inverse deformation to project template masks back to a recording's native coordinate system.
 
     Creates ROIStatistics instances with full shape statistics computed via compute_roi_statistics for downstream
     extraction and GUI use.
@@ -313,7 +317,7 @@ def _backward_deform_masks(
         deformation: The inverse Deformation instance to apply.
         frame_height: The height of the image frame in pixels, needed for statistics computation.
         frame_width: The width of the image frame in pixels, needed for statistics computation.
-        cell_diameter: The estimated cell diameter in pixels, used for distance normalization in statistics.
+        roi_diameter: The estimated ROI diameter in pixels, used for distance normalization in statistics.
 
     Returns:
         A list of ROIStatistics instances with transformed coordinates and full shape statistics.
@@ -330,7 +334,7 @@ def _backward_deform_masks(
                     centroid=centroid,
                     frame_width=frame_width,
                     cluster_id=mask.cluster_id,
-                    session_count=mask.session_count,
+                    recording_count=mask.recording_count,
                 ),
             )
         )
@@ -339,7 +343,7 @@ def _backward_deform_masks(
         rois=roi_statistics,
         frame_height=frame_height,
         frame_width=frame_width,
-        diameter=cell_diameter,
+        diameter=roi_diameter,
         crop=False,
     )
 
@@ -350,21 +354,21 @@ def _backward_deform_masks(
     return roi_statistics
 
 
-def _apply_forward_deformation(context: MultiDayRuntimeContext, deformation: Deformation) -> None:
-    """Applies a forward deformation to transform the processed session's images and ROI masks to shared visual space.
+def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformation: Deformation) -> None:
+    """Applies a forward deformation to transform the processed recording's images and ROI masks to shared visual space.
 
-    Stores the deformation field components and transforms all reference images and selected cell masks to the shared
-    multi-day coordinate system. Results are stored in the session's runtime registration data.
+    Stores the deformation field components and transforms all reference images and selected ROI masks to the shared
+    multi-recording coordinate system. Results are stored in the recording's runtime registration data.
 
     Args:
-        context: The MultiDayRuntimeContext for the session to process.
+        context: The MultiRecordingRuntimeContext for the recording to process.
         deformation: The Deformation instance computed by groupwise registration.
     """
     registration_data = context.runtime.registration
     combined_data = context.runtime.combined_data
     if combined_data is None:
         message = (
-            f"Unable to register session '{context.runtime.io.session_id}' to shared visual space. The session's "
+            f"Unable to register recording '{context.runtime.io.recording_id}' to shared visual space. The recording's "
             f"combined_data must be loaded before transforming images and ROI masks."
         )
         console.error(message=message, error=ValueError)
@@ -405,52 +409,53 @@ def _apply_forward_deformation(context: MultiDayRuntimeContext, deformation: Def
     # Gets frame dimensions for deformation.
     frame_width = combined_data.combined_width
 
-    # Loads single-day ROI masks and slices by selected cell indices for channel 1.
-    selected_indices = context.runtime.io.selected_cell_indices
-    single_day_output = context.runtime.io.data_path
-    if selected_indices and single_day_output is not None:
-        masks_path = single_day_output / "roi_masks.npz"
+    # Loads single-recording ROI masks and slices by selected ROI indices for channel 1.
+    selected_indices = context.runtime.io.selected_roi_indices
+    single_recording_output = context.runtime.io.data_path
+    if selected_indices and single_recording_output is not None:
+        masks_path = single_recording_output / "roi_masks.npz"
         if masks_path.exists():
             all_masks = ROIMask.load_list(masks_path)
             selected_masks = [all_masks[i] for i in selected_indices]
-            registration_data.deformed_cell_masks = _forward_deform_masks(
+            registration_data.deformed_roi_masks = _forward_deform_masks(
                 masks=selected_masks,
                 deformation=deformation,
                 frame_width=frame_width,
             )
 
-    # Loads single-day ROI masks and slices by selected cell indices for channel 2.
-    selected_indices_channel_2 = context.runtime.io.selected_cell_indices_channel_2
-    if selected_indices_channel_2 and single_day_output is not None:
-        masks_path_channel_2 = single_day_output / "roi_masks_channel_2.npz"
+    # Loads single-recording ROI masks and slices by selected ROI indices for channel 2.
+    selected_indices_channel_2 = context.runtime.io.selected_roi_indices_channel_2
+    if selected_indices_channel_2 and single_recording_output is not None:
+        masks_path_channel_2 = single_recording_output / "roi_masks_channel_2.npz"
         if masks_path_channel_2.exists():
             all_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
             selected_masks_channel_2 = [all_masks_channel_2[i] for i in selected_indices_channel_2]
-            registration_data.deformed_cell_masks_channel_2 = _forward_deform_masks(
+            registration_data.deformed_roi_masks_channel_2 = _forward_deform_masks(
                 masks=selected_masks_channel_2,
                 deformation=deformation,
                 frame_width=frame_width,
             )
 
 
-def _apply_backward_deformation(context: MultiDayRuntimeContext) -> None:
-    """Applies the inverse deformation to transform shared template masks back to the target session's visual space.
+def _apply_backward_deformation(context: MultiRecordingRuntimeContext) -> None:
+    """Applies the inverse deformation to transform shared template masks back to the target recording's visual space.
 
     Retrieves template masks from the context's tracking data and transforms them using the inverse of the stored
-    deformation field. Results are stored in the session's runtime extraction data for both channel 1 and channel 2
+    deformation field. Results are stored in the recording's runtime extraction data for both channel 1 and channel 2
     if available.
 
     Args:
-        context: The MultiDayRuntimeContext for the session to process. Must have tracking.template_masks set and
-            registration.deform_field_y/x populated from a prior forward deformation.
+        context: The MultiRecordingRuntimeContext for the recording to process. Must have
+            tracking.template_masks set and registration.deform_field_y/x populated from a prior forward
+            deformation.
     """
     registration_data = context.runtime.registration
     tracking_data = context.runtime.tracking
     combined_data = context.runtime.combined_data
     if combined_data is None:
         message = (
-            f"Unable to project templates to session '{context.runtime.io.session_id}'. The session's combined_data "
-            f"must be loaded before transforming template masks."
+            f"Unable to project templates to recording '{context.runtime.io.recording_id}'. The recording's "
+            f"combined_data must be loaded before transforming template masks."
         )
         console.error(message=message, error=ValueError)
     detection = combined_data.detection
@@ -462,8 +467,8 @@ def _apply_backward_deformation(context: MultiDayRuntimeContext) -> None:
     # Validates deformation fields are available from prior forward deformation.
     if registration_data.deform_field_y is None or registration_data.deform_field_x is None:
         message = (
-            f"Unable to project templates to session '{context.runtime.io.session_id}'. Deformation fields must be "
-            f"computed by register_sessions() before applying backward transformation."
+            f"Unable to project templates to recording '{context.runtime.io.recording_id}'. Deformation fields must be "
+            f"computed by register_recordings() before applying backward transformation."
         )
         console.error(message=message, error=ValueError)
 
@@ -475,28 +480,28 @@ def _apply_backward_deformation(context: MultiDayRuntimeContext) -> None:
     inverse_deformation = deformation.inverse()
 
     # Transforms channel 1 template masks if available. Uses the template diameter estimated during tracking
-    # rather than the per-session detection diameter, since templates only contain the most stable consensus pixels
+    # rather than the per-recording detection diameter, since templates only contain the most stable consensus pixels
     # and have a different effective size. Falls back to the detection diameter when loading older runtime data that
     # lacks a stored template diameter.
     if tracking_data.template_masks is not None:
-        template_diameter = tracking_data.template_diameter or detection.cell_diameter
+        template_diameter = tracking_data.template_diameter or detection.roi_diameter
         context.runtime.extraction.roi_statistics = _backward_deform_masks(
             masks=tracking_data.template_masks,
             deformation=inverse_deformation,
             frame_height=frame_height,
             frame_width=frame_width,
-            cell_diameter=template_diameter,
+            roi_diameter=template_diameter,
         )
 
     # Transforms channel 2 template masks if available.
     if tracking_data.template_masks_channel_2 is not None:
         template_diameter_channel_2 = (
-            tracking_data.template_diameter_channel_2 or detection.cell_diameter_channel_2 or detection.cell_diameter
+            tracking_data.template_diameter_channel_2 or detection.roi_diameter_channel_2 or detection.roi_diameter
         )
         context.runtime.extraction.roi_statistics_channel_2 = _backward_deform_masks(
             masks=tracking_data.template_masks_channel_2,
             deformation=inverse_deformation,
             frame_height=frame_height,
             frame_width=frame_width,
-            cell_diameter=template_diameter_channel_2,
+            roi_diameter=template_diameter_channel_2,
         )

@@ -156,7 +156,7 @@ class DiffeomorphicDemonsRegistration:
             # Main registration loop: processes scales from coarse to fine.
             with console.progress(
                 total=total_iterations,
-                description="Registering sessions to a shared visual space",
+                description="Registering recordings to a shared visual space",
                 unit="iteration",
             ) as progress_bar:
                 for level in reversed(range(scale_level_count)):

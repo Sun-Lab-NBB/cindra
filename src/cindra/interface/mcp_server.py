@@ -1,7 +1,7 @@
 """Provides the MCP server for agentic neural imaging data processing.
 
-Exposes tools that enable AI agents to discover sessions, execute pipelines, and monitor processing status for both
-single-day and multi-day cindra processing workflows.
+Exposes tools that enable AI agents to discover recordings, execute pipelines, and monitor processing status for both
+single-recording and multi-recording cindra processing workflows.
 """
 
 from __future__ import annotations
@@ -17,12 +17,12 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from mcp.server.fastmcp import FastMCP
 from ataraxis_base_utilities import resolve_worker_count, resolve_parallel_job_capacity
 
-from ..io import resolve_multiday_contexts
-from ..pipelines import run_multi_day_pipeline, run_single_day_pipeline
+from ..io import resolve_multi_recording_contexts
+from ..pipelines import run_multi_recording_pipeline, run_single_recording_pipeline
 from ..dataclasses import (
     RuntimeContext,
-    MultiDayConfiguration,
-    SingleDayConfiguration,
+    MultiRecordingConfiguration,
+    SingleRecordingConfiguration,
 )
 
 mcp = FastMCP(name="cindra-mcp", json_response=True)
@@ -34,54 +34,54 @@ _RESERVED_CORES: int = 4
 _MAXIMUM_JOB_CORES: int = 30
 """The maximum number of CPU cores any single job can use."""
 
-_MINIMUM_SESSION_COUNT: int = 2
-"""The minimum number of sessions required for multi-day processing."""
+_MINIMUM_RECORDING_COUNT: int = 2
+"""The minimum number of recordings required for multi-recording processing."""
 
 
 @dataclass
-class _SingleDayBatchState:
-    """Tracks state for single-day batch processing operations."""
+class _SingleRecordingBatchState:
+    """Tracks state for single-recording batch processing operations."""
 
-    sessions: list[Path] = field(default_factory=list)
-    """All sessions to process."""
+    recordings: list[Path] = field(default_factory=list)
+    """All recordings to process."""
     configuration_path: Path | None = None
     """Template configuration file path."""
-    session_configuration_paths: dict[str, Path] = field(default_factory=dict)
-    """Per-session configuration file paths (session_key -> configuration_path)."""
+    recording_configuration_paths: dict[str, Path] = field(default_factory=dict)
+    """Per-recording configuration file paths (recording_key -> configuration_path)."""
     current_phase: str = "binarize"
     """Current processing phase: 'binarize', 'process', or 'combine'."""
 
     # Tracks binarize phase state.
     binarize_queue: list[Path] = field(default_factory=list)
-    """Sessions waiting to binarize."""
+    """Recordings waiting to binarize."""
     binarize_active: dict[str, Thread] = field(default_factory=dict)
-    """Currently binarizing (session_key -> thread)."""
+    """Currently binarizing (recording_key -> thread)."""
     binarize_completed: set[str] = field(default_factory=set)
-    """Sessions that finished binarizing."""
+    """Recordings that finished binarizing."""
     binarize_failed: set[str] = field(default_factory=set)
-    """Sessions that failed binarization."""
+    """Recordings that failed binarization."""
     plane_counts: dict[str, int] = field(default_factory=dict)
-    """Session -> plane count (discovered during binarize)."""
+    """Recording -> plane count (discovered during binarize)."""
 
     # Tracks process phase state.
     process_queue: list[tuple[str, int]] = field(default_factory=list)
-    """(session_key, plane_index) pairs to process."""
+    """(recording_key, plane_index) pairs to process."""
     process_active: dict[str, Thread] = field(default_factory=dict)
-    """Currently processing (session_plane_key -> thread)."""
+    """Currently processing (recording_plane_key -> thread)."""
     process_completed: set[str] = field(default_factory=set)
-    """Completed session_plane keys."""
+    """Completed recording_plane keys."""
     process_failed: set[str] = field(default_factory=set)
-    """Failed session_plane keys."""
+    """Failed recording_plane keys."""
 
     # Tracks combine phase state.
     combine_queue: list[Path] = field(default_factory=list)
-    """Sessions waiting to combine."""
+    """Recordings waiting to combine."""
     combine_active: dict[str, Thread] = field(default_factory=dict)
-    """Currently combining (session_key -> thread)."""
+    """Currently combining (recording_key -> thread)."""
     combine_completed: set[str] = field(default_factory=set)
-    """Sessions that finished combining."""
+    """Recordings that finished combining."""
     combine_failed: set[str] = field(default_factory=set)
-    """Sessions that failed combination."""
+    """Recordings that failed combination."""
 
     # Stores resource allocation settings.
     workers_per_plane: int = 30
@@ -89,9 +89,9 @@ class _SingleDayBatchState:
     max_parallel_planes: int = 1
     """Max concurrent plane jobs."""
 
-    # Stores per-session and per-plane error messages.
+    # Stores per-recording and per-plane error messages.
     errors: dict[str, list[str]] = field(default_factory=dict)
-    """Session/plane key -> error messages."""
+    """Recording/plane key -> error messages."""
 
     lock: Lock = field(default_factory=Lock)
     """Thread synchronization lock."""
@@ -100,11 +100,11 @@ class _SingleDayBatchState:
 
 
 @dataclass
-class _MultiDayBatchState:
-    """Tracks state for multi-day batch processing operations."""
+class _MultiRecordingBatchState:
+    """Tracks state for multi-recording batch processing operations."""
 
     animals: list[tuple[Path, list[Path]]] = field(default_factory=list)
-    """(configuration_path, session_paths) per animal."""
+    """(configuration_path, recording_paths) per animal."""
     current_phase: str = "discover"
     """Current processing phase: 'discover' or 'extract'."""
 
@@ -118,19 +118,19 @@ class _MultiDayBatchState:
     discover_failed: set[str] = field(default_factory=set)
     """Animals that failed discovery."""
 
-    # Tracks extract phase state per session across all animals.
+    # Tracks extract phase state per recording across all animals.
     extract_queue: list[tuple[str, str]] = field(default_factory=list)
-    """(animal_key, session_id) pairs."""
+    """(animal_key, recording_id) pairs."""
     extract_active: dict[str, Thread] = field(default_factory=dict)
-    """Currently extracting (animal_session_key -> thread)."""
+    """Currently extracting (animal_recording_key -> thread)."""
     extract_completed: set[str] = field(default_factory=set)
     """Completed extractions."""
     extract_failed: set[str] = field(default_factory=set)
     """Failed extractions."""
 
-    # Stores session IDs per animal, populated during the discover phase.
-    session_ids: dict[str, list[str]] = field(default_factory=dict)
-    """animal_key -> list of session_ids."""
+    # Stores recording IDs per animal, populated during the discover phase.
+    recording_ids: dict[str, list[str]] = field(default_factory=dict)
+    """animal_key -> list of recording_ids."""
 
     # Stores resource allocation settings.
     workers_per_discover: int = 20
@@ -144,7 +144,7 @@ class _MultiDayBatchState:
     progress_bars: bool = False
     """Determines whether to display progress bars during processing."""
 
-    # Stores per-animal and per-session error messages.
+    # Stores per-animal and per-recording error messages.
     errors: dict[str, list[str]] = field(default_factory=dict)
     """Key -> error messages."""
 
@@ -154,11 +154,11 @@ class _MultiDayBatchState:
     """Background manager thread."""
 
 
-_single_day_batch_state: _SingleDayBatchState | None = None
-"""The module-level batch processing state for single-day operations."""
+_single_recording_batch_state: _SingleRecordingBatchState | None = None
+"""The module-level batch processing state for single-recording operations."""
 
-_multi_day_batch_state: _MultiDayBatchState | None = None
-"""The module-level batch processing state for multi-day operations."""
+_multi_recording_batch_state: _MultiRecordingBatchState | None = None
+"""The module-level batch processing state for multi-recording operations."""
 
 
 def run_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
@@ -171,14 +171,16 @@ def run_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") 
 
 
 @mcp.tool()
-def generate_config_file(output_path: str, pipeline_type: Literal["single-day", "multi-day"]) -> dict[str, Any]:
+def generate_config_file(
+    output_path: str, pipeline_type: Literal["single-recording", "multi-recording"]
+) -> dict[str, Any]:
     """Generates a default configuration YAML file for the specified pipeline type.
 
     Creates a configuration file with sensible defaults that can be used directly or modified before processing.
 
     Args:
         output_path: The absolute path where the configuration file should be saved.
-        pipeline_type: The type of pipeline configuration to generate ('single-day' or 'multi-day').
+        pipeline_type: The type of pipeline configuration to generate ('single-recording' or 'multi-recording').
     """
     output = Path(output_path)
 
@@ -188,10 +190,10 @@ def generate_config_file(output_path: str, pipeline_type: Literal["single-day", 
     if output.suffix != ".yaml":
         output = output.with_suffix(".yaml")
 
-    if pipeline_type == "single-day":
-        configuration: SingleDayConfiguration | MultiDayConfiguration = SingleDayConfiguration()
+    if pipeline_type == "single-recording":
+        configuration: SingleRecordingConfiguration | MultiRecordingConfiguration = SingleRecordingConfiguration()
     else:
-        configuration = MultiDayConfiguration()
+        configuration = MultiRecordingConfiguration()
 
     configuration.save(file_path=output)
 
@@ -199,28 +201,28 @@ def generate_config_file(output_path: str, pipeline_type: Literal["single-day", 
 
 
 @mcp.tool()
-def get_single_day_status(session_path: str) -> dict[str, Any]:
-    """Gets the processing status of a single-day session.
+def get_single_recording_status(recording_path: str) -> dict[str, Any]:
+    """Gets the processing status of a single-recording recording.
 
     Args:
-        session_path: The absolute path to the session data directory.
+        recording_path: The absolute path to the recording data directory.
     """
-    session = Path(session_path)
+    recording = Path(recording_path)
 
-    if not session.exists():
-        return {"success": False, "error": f"Session directory not found: {session_path}"}
+    if not recording.exists():
+        return {"success": False, "error": f"Recording directory not found: {recording_path}"}
 
-    cindra_path = session / "cindra"
+    cindra_path = recording / "cindra"
     if not cindra_path.exists():
         # Searches recursively for the RuntimeContext configuration marker.
-        matches = list(session.rglob("configuration.yaml"))
+        matches = list(recording.rglob("configuration.yaml"))
         if matches:
             cindra_path = matches[0].parent
 
     if not cindra_path.exists():
         return {
             "success": True,
-            "session_path": str(session),
+            "recording_path": str(recording),
             "status": "not_started",
             "message": "No cindra output directory found",
         }
@@ -230,7 +232,7 @@ def get_single_day_status(session_path: str) -> dict[str, Any]:
 
     status: dict[str, Any] = {
         "success": True,
-        "session_path": str(session),
+        "recording_path": str(recording),
         "cindra_path": str(cindra_path),
         "planes_found": len(planes),
         "combined_exists": combined_path.exists(),
@@ -250,51 +252,51 @@ def get_single_day_status(session_path: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def get_multi_day_status(session_path: str) -> dict[str, Any]:
-    """Gets the multi-day processing status for a session.
+def get_multi_recording_status(recording_path: str) -> dict[str, Any]:
+    """Gets the multi-recording processing status for a recording.
 
     Args:
-        session_path: The absolute path to a session directory.
+        recording_path: The absolute path to a recording directory.
     """
-    session = Path(session_path)
+    recording = Path(recording_path)
 
-    if not session.exists():
-        return {"success": False, "error": f"Session directory not found: {session_path}"}
+    if not recording.exists():
+        return {"success": False, "error": f"Recording directory not found: {recording_path}"}
 
-    # Finds the cindra directory first, using the same pattern as get_single_day_status.
-    cindra_path = session / "cindra"
+    # Finds the cindra directory first, using the same pattern as get_single_recording_status.
+    cindra_path = recording / "cindra"
     if not cindra_path.exists():
-        matches = list(session.rglob("configuration.yaml"))
+        matches = list(recording.rglob("configuration.yaml"))
         if matches:
             cindra_path = matches[0].parent
 
-    multiday_base = cindra_path / "multiday" if cindra_path.exists() else None
+    multi_recording_base = cindra_path / "multi_recording" if cindra_path.exists() else None
 
-    if multiday_base is None or not multiday_base.exists():
+    if multi_recording_base is None or not multi_recording_base.exists():
         return {
             "success": True,
-            "session_path": str(session),
+            "recording_path": str(recording),
             "status": "not_started",
-            "message": "No multiday output directory found",
+            "message": "No multi_recording output directory found",
         }
 
-    datasets = [d for d in multiday_base.iterdir() if d.is_dir()]
+    datasets = [d for d in multi_recording_base.iterdir() if d.is_dir()]
 
     if not datasets:
         return {
             "success": True,
-            "session_path": str(session),
+            "recording_path": str(recording),
             "status": "not_started",
-            "message": "No dataset folders found in multiday directory",
+            "message": "No dataset folders found in multi_recording directory",
         }
 
     dataset_statuses = {}
     for dataset in datasets:
         dataset_status: dict[str, Any] = {
-            "runtime_exists": (dataset / "multiday_runtime_data.yaml").exists(),
-            "config_exists": (dataset / "multi_day_cindra_configuration.yaml").exists(),
-            "tracker_exists": (dataset / "multiday_tracker.json").exists(),
-            "template_masks_exists": (dataset / "template_cell_masks.npy").exists(),
+            "runtime_exists": (dataset / "multi_recording_runtime_data.yaml").exists(),
+            "config_exists": (dataset / "multi_recording_cindra_configuration.yaml").exists(),
+            "tracker_exists": (dataset / "multi_recording_tracker.json").exists(),
+            "template_masks_exists": (dataset / "template_roi_masks.npy").exists(),
             "F_exists": (dataset / "F.npy").exists(),
             "Fneu_exists": (dataset / "Fneu.npy").exists(),
             "spks_exists": (dataset / "spks.npy").exists(),
@@ -309,23 +311,24 @@ def get_multi_day_status(session_path: str) -> dict[str, Any]:
         else:
             dataset_status["status"] = "unknown"
 
-        dataset_status["is_main_session"] = dataset_status["tracker_exists"]
+        dataset_status["is_main_recording"] = dataset_status["tracker_exists"]
         dataset_statuses[dataset.name] = dataset_status
 
     return {
         "success": True,
-        "session_path": str(session),
-        "multiday_path": str(multiday_base),
+        "recording_path": str(recording),
+        "multi_recording_path": str(multi_recording_base),
         "datasets": dataset_statuses,
     }
 
 
 @mcp.tool()
-def discover_single_day_sessions_tool(root_directory: str) -> dict[str, Any]:
-    """Discovers sessions containing raw neural imaging data that can be processed by the single-day pipeline.
+def discover_single_recording_recordings_tool(root_directory: str) -> dict[str, Any]:
+    """Discovers recordings containing raw neural imaging data that can be processed by the single-recording pipeline.
 
-    Searches recursively for cindra_parameters.json files (created by sl-experiment), which mark directories containing
-    raw session data suitable for single-day processing. Returns the parent directory of each match as a session
+    Searches recursively for cindra_parameters.json files (created by sl-experiment), which mark
+    directories containing raw recording data suitable for single-recording processing. Returns the
+    parent directory of each match as a recording
     candidate path.
 
     Args:
@@ -339,22 +342,22 @@ def discover_single_day_sessions_tool(root_directory: str) -> dict[str, Any]:
     if not root_path.is_dir():
         return {"error": f"Path is not a directory: {root_directory}"}
 
-    session_paths: list[str] = []
+    recording_paths: list[str] = []
     errors: list[str] = []
 
     try:
         for marker_file in root_path.rglob("cindra_parameters.json"):
             try:
-                session_paths.append(str(marker_file.parent))
+                recording_paths.append(str(marker_file.parent))
             except Exception as error:
                 errors.append(f"{marker_file.parent}: {error}")
     except PermissionError as error:
         errors.append(f"Access denied during search: {error}")
 
     # Sorts paths for consistent output.
-    session_paths.sort()
+    recording_paths.sort()
 
-    result: dict[str, Any] = {"sessions": session_paths, "count": len(session_paths)}
+    result: dict[str, Any] = {"recordings": recording_paths, "count": len(recording_paths)}
 
     if errors:
         result["errors"] = errors
@@ -363,11 +366,13 @@ def discover_single_day_sessions_tool(root_directory: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def discover_multi_day_candidates_tool(root_directory: str) -> dict[str, Any]:
-    """Discovers sessions with completed single-day processing that are candidates for multi-day cell tracking.
+def discover_multi_recording_candidates_tool(root_directory: str) -> dict[str, Any]:
+    """Discovers recordings with completed single-recording processing that are candidates for
+    multi-recording ROI tracking.
 
-    Searches recursively for combined_metadata.npz files, which mark completed single-day cindra outputs. Returns the
-    grandparent directory paths (session root directories containing cindra output).
+    Searches recursively for combined_metadata.npz files, which mark completed single-recording cindra
+    outputs. Returns the
+    grandparent directory paths (recording root directories containing cindra output).
 
     Args:
         root_directory: The absolute path to the root directory to search.
@@ -380,26 +385,26 @@ def discover_multi_day_candidates_tool(root_directory: str) -> dict[str, Any]:
     if not root_path.is_dir():
         return {"error": f"Path is not a directory: {root_directory}"}
 
-    session_paths: list[str] = []
+    recording_paths: list[str] = []
     errors: list[str] = []
 
     try:
         for marker_file in root_path.rglob("combined_metadata.npz"):
             try:
                 # The combined_metadata.npz lives in cindra/combined/; grandparent is the cindra output root,
-                # and its parent is the session directory.
-                session_root = str(marker_file.parent.parent.parent)
-                if session_root not in session_paths:
-                    session_paths.append(session_root)
+                # and its parent is the recording directory.
+                recording_root = str(marker_file.parent.parent.parent)
+                if recording_root not in recording_paths:
+                    recording_paths.append(recording_root)
             except Exception as error:
                 errors.append(f"{marker_file}: {error}")
     except PermissionError as error:
         errors.append(f"Access denied during search: {error}")
 
     # Sorts paths for consistent output.
-    session_paths.sort()
+    recording_paths.sort()
 
-    result: dict[str, Any] = {"sessions": session_paths, "count": len(session_paths)}
+    result: dict[str, Any] = {"recordings": recording_paths, "count": len(recording_paths)}
 
     if errors:
         result["errors"] = errors
@@ -409,38 +414,38 @@ def discover_multi_day_candidates_tool(root_directory: str) -> dict[str, Any]:
 
 @mcp.tool()
 def start_batch_processing_tool(
-    session_paths: list[str],
+    recording_paths: list[str],
     configuration_path: str,
     *,
-    session_output_paths: list[str] | None = None,
+    recording_output_paths: list[str] | None = None,
     workers_per_plane: int = -1,
     max_parallel_planes: int = -1,
     progress_bars: bool = False,
 ) -> dict[str, Any]:
-    """Starts batch single-day processing for multiple sessions.
+    """Starts batch single-recording processing for multiple recordings.
 
     Manages a three-phase batch: binarize (sequential), process (parallel), combine (sequential). Use
     get_batch_processing_status_tool to monitor progress.
 
     Args:
-        session_paths: List of absolute paths to session data directories (used as file_io.data_path per session).
+        recording_paths: List of absolute paths to recording data directories (used as file_io.data_path per recording).
         configuration_path: The absolute path to the template configuration YAML file.
-        session_output_paths: Optional list of absolute paths for per-session output directories (used as
-            file_io.output_path). Must match the length of session_paths when provided. When not provided, each
-            session's output_path defaults to its data_path.
+        recording_output_paths: Optional list of absolute paths for per-recording output directories (used as
+            file_io.output_path). Must match the length of recording_paths when provided. When not provided, each
+            recording's output_path defaults to its data_path.
         workers_per_plane: CPU cores per plane job (-1 for automatic, max 30).
         max_parallel_planes: Max concurrent plane jobs (-1 for automatic).
         progress_bars: Determines whether to display progress bars during processing.
     """
-    global _single_day_batch_state
+    global _single_recording_batch_state
 
-    if not session_paths:
-        return {"error": "At least one session path is required"}
+    if not recording_paths:
+        return {"error": "At least one recording path is required"}
 
-    if session_output_paths is not None and len(session_output_paths) != len(session_paths):
+    if recording_output_paths is not None and len(recording_output_paths) != len(recording_paths):
         return {
-            "error": f"session_output_paths length ({len(session_output_paths)}) must match "
-            f"session_paths length ({len(session_paths)})."
+            "error": f"recording_output_paths length ({len(recording_output_paths)}) must match "
+            f"recording_paths length ({len(recording_paths)})."
         }
 
     template_path = Path(configuration_path)
@@ -450,42 +455,42 @@ def start_batch_processing_tool(
     if template_path.suffix != ".yaml":
         return {"error": f"Configuration file must be a .yaml file: {configuration_path}"}
 
-    # Validates session paths.
+    # Validates recording paths.
     valid_indices: list[int] = []
     valid_paths: list[Path] = []
     invalid_paths: list[str] = []
 
-    for index, session_path in enumerate(session_paths):
-        path = Path(session_path)
+    for index, recording_path in enumerate(recording_paths):
+        path = Path(recording_path)
         if path.exists() and path.is_dir():
             valid_paths.append(path)
             valid_indices.append(index)
         else:
-            invalid_paths.append(session_path)
+            invalid_paths.append(recording_path)
 
     if not valid_paths:
-        return {"error": "No valid session paths provided", "invalid_paths": invalid_paths}
+        return {"error": "No valid recording paths provided", "invalid_paths": invalid_paths}
 
-    # Resolves per-session output paths. Defaults to data_path when session_output_paths is not provided.
+    # Resolves per-recording output paths. Defaults to data_path when recording_output_paths is not provided.
     resolved_output_paths: list[Path] = []
     for index, data_path in zip(valid_indices, valid_paths, strict=True):
-        if session_output_paths is not None:
-            resolved_output_paths.append(Path(session_output_paths[index]))
+        if recording_output_paths is not None:
+            resolved_output_paths.append(Path(recording_output_paths[index]))
         else:
             resolved_output_paths.append(data_path)
 
     # Checks if batch processing is already active.
-    if _single_day_batch_state is not None:
-        with _single_day_batch_state.lock:
+    if _single_recording_batch_state is not None:
+        with _single_recording_batch_state.lock:
             active_count = (
-                len(_single_day_batch_state.binarize_active)
-                + len(_single_day_batch_state.process_active)
-                + len(_single_day_batch_state.combine_active)
+                len(_single_recording_batch_state.binarize_active)
+                + len(_single_recording_batch_state.process_active)
+                + len(_single_recording_batch_state.combine_active)
             )
             queue_count = (
-                len(_single_day_batch_state.binarize_queue)
-                + len(_single_day_batch_state.process_queue)
-                + len(_single_day_batch_state.combine_queue)
+                len(_single_recording_batch_state.binarize_queue)
+                + len(_single_recording_batch_state.process_queue)
+                + len(_single_recording_batch_state.combine_queue)
             )
             if active_count > 0 or queue_count > 0:
                 return {
@@ -504,27 +509,28 @@ def start_batch_processing_tool(
         else resolve_parallel_job_capacity(workers_per_job=actual_workers)
     )
 
-    # Creates per-session configuration copies with session-specific paths and runtime settings. Each session gets its
-    # own configuration file so that concurrent workers do not interfere with one another. The configuration file is
+    # Creates per-recording configuration copies with recording-specific paths and runtime settings.
+    # Each recording gets its own configuration file so that concurrent workers do not interfere with
+    # one another. The configuration file is
     # written to the output directory, which is guaranteed to be writable (the pipeline writes output there).
-    session_configuration_paths: dict[str, Path] = {}
+    recording_configuration_paths: dict[str, Path] = {}
     for data_path, output_path in zip(valid_paths, resolved_output_paths, strict=True):
-        session_key = _get_session_key(data_path)
-        session_configuration = SingleDayConfiguration.from_yaml(file_path=template_path)
-        session_configuration.file_io.data_path = data_path
-        session_configuration.file_io.output_path = output_path
-        session_configuration.runtime.parallel_workers = actual_workers
-        session_configuration.runtime.display_progress_bars = progress_bars
+        recording_key = _get_recording_key(data_path)
+        recording_configuration = SingleRecordingConfiguration.from_yaml(file_path=template_path)
+        recording_configuration.file_io.data_path = data_path
+        recording_configuration.file_io.output_path = output_path
+        recording_configuration.runtime.parallel_workers = actual_workers
+        recording_configuration.runtime.display_progress_bars = progress_bars
         output_path.mkdir(parents=True, exist_ok=True)
-        session_configuration_path = output_path / "_batch_config.yaml"
-        session_configuration.save(file_path=session_configuration_path)
-        session_configuration_paths[session_key] = session_configuration_path
+        recording_configuration_path = output_path / "_batch_config.yaml"
+        recording_configuration.save(file_path=recording_configuration_path)
+        recording_configuration_paths[recording_key] = recording_configuration_path
 
     # Initializes batch state.
-    _single_day_batch_state = _SingleDayBatchState(
-        sessions=list(valid_paths),
+    _single_recording_batch_state = _SingleRecordingBatchState(
+        recordings=list(valid_paths),
         configuration_path=template_path,
-        session_configuration_paths=session_configuration_paths,
+        recording_configuration_paths=recording_configuration_paths,
         current_phase="binarize",
         binarize_queue=list(valid_paths),
         workers_per_plane=actual_workers,
@@ -533,13 +539,13 @@ def start_batch_processing_tool(
     )
 
     # Starts the batch manager thread.
-    manager = Thread(target=_single_day_batch_manager, daemon=True)
+    manager = Thread(target=_single_recording_batch_manager, daemon=True)
     manager.start()
-    _single_day_batch_state.manager_thread = manager
+    _single_recording_batch_state.manager_thread = manager
 
     result: dict[str, Any] = {
         "started": True,
-        "total_sessions": len(valid_paths),
+        "total_recordings": len(valid_paths),
         "workers_per_plane": actual_workers,
         "max_parallel_planes": actual_max_parallel,
         "message": "Batch processing started. Use get_batch_processing_status_tool to monitor progress.",
@@ -553,14 +559,14 @@ def start_batch_processing_tool(
 
 @mcp.tool()
 def get_batch_processing_status_tool() -> dict[str, Any]:
-    """Returns the current status of single-day batch processing.
+    """Returns the current status of single-recording batch processing.
 
-    Returns status for all sessions including phase progress (binarize, process, combine).
+    Returns status for all recordings including phase progress (binarize, process, combine).
     """
-    if _single_day_batch_state is None:
+    if _single_recording_batch_state is None:
         return {
             "current_phase": "none",
-            "sessions": [],
+            "recordings": [],
             "summary": {
                 "total": 0,
                 "binarize_completed": 0,
@@ -570,42 +576,42 @@ def get_batch_processing_status_tool() -> dict[str, Any]:
             },
         }
 
-    with _single_day_batch_state.lock:
-        sessions_status: list[dict[str, Any]] = []
+    with _single_recording_batch_state.lock:
+        recordings_status: list[dict[str, Any]] = []
 
-        for session_path in _single_day_batch_state.sessions:
-            session_key = _get_session_key(session_path)
-            session_name = session_path.name
+        for recording_path in _single_recording_batch_state.recordings:
+            recording_key = _get_recording_key(recording_path)
+            recording_name = recording_path.name
 
             # Determines binarize status.
-            if session_key in _single_day_batch_state.binarize_completed:
+            if recording_key in _single_recording_batch_state.binarize_completed:
                 binarize_status = "done"
-            elif session_key in _single_day_batch_state.binarize_failed:
+            elif recording_key in _single_recording_batch_state.binarize_failed:
                 binarize_status = "failed"
-            elif session_key in _single_day_batch_state.binarize_active:
+            elif recording_key in _single_recording_batch_state.binarize_active:
                 binarize_status = "running"
-            elif session_path in _single_day_batch_state.binarize_queue:
+            elif recording_path in _single_recording_batch_state.binarize_queue:
                 binarize_status = "pending"
             else:
                 binarize_status = "pending"
 
             # Determines process status.
-            plane_count = _single_day_batch_state.plane_counts.get(session_key, 0)
+            plane_count = _single_recording_batch_state.plane_counts.get(recording_key, 0)
             if plane_count > 0:
                 completed_planes = sum(
                     1
                     for p in range(plane_count)
-                    if _get_plane_key(session_path, p) in _single_day_batch_state.process_completed
+                    if _get_plane_key(recording_path, p) in _single_recording_batch_state.process_completed
                 )
                 failed_planes = sum(
                     1
                     for p in range(plane_count)
-                    if _get_plane_key(session_path, p) in _single_day_batch_state.process_failed
+                    if _get_plane_key(recording_path, p) in _single_recording_batch_state.process_failed
                 )
                 running_planes = sum(
                     1
                     for p in range(plane_count)
-                    if _get_plane_key(session_path, p) in _single_day_batch_state.process_active
+                    if _get_plane_key(recording_path, p) in _single_recording_batch_state.process_active
                 )
 
                 if failed_planes > 0:
@@ -618,34 +624,34 @@ def get_batch_processing_status_tool() -> dict[str, Any]:
                 process_status = "0/0"
 
             # Determines combine status.
-            if session_key in _single_day_batch_state.combine_completed:
+            if recording_key in _single_recording_batch_state.combine_completed:
                 combine_status = "done"
-            elif session_key in _single_day_batch_state.combine_failed:
+            elif recording_key in _single_recording_batch_state.combine_failed:
                 combine_status = "failed"
-            elif session_key in _single_day_batch_state.combine_active:
+            elif recording_key in _single_recording_batch_state.combine_active:
                 combine_status = "running"
-            elif session_path in _single_day_batch_state.combine_queue:
+            elif recording_path in _single_recording_batch_state.combine_queue:
                 combine_status = "pending"
             else:
                 combine_status = "pending"
 
             # Determines overall status.
-            if session_key in _single_day_batch_state.combine_completed:
+            if recording_key in _single_recording_batch_state.combine_completed:
                 overall_status = "SUCCEEDED"
             elif (
-                session_key in _single_day_batch_state.binarize_failed
-                or session_key in _single_day_batch_state.combine_failed
+                recording_key in _single_recording_batch_state.binarize_failed
+                or recording_key in _single_recording_batch_state.combine_failed
                 or any(
-                    _get_plane_key(session_path, p) in _single_day_batch_state.process_failed
+                    _get_plane_key(recording_path, p) in _single_recording_batch_state.process_failed
                     for p in range(plane_count)
                 )
             ):
                 overall_status = "FAILED"
             elif (
-                session_key in _single_day_batch_state.binarize_active
-                or session_key in _single_day_batch_state.combine_active
+                recording_key in _single_recording_batch_state.binarize_active
+                or recording_key in _single_recording_batch_state.combine_active
                 or any(
-                    _get_plane_key(session_path, p) in _single_day_batch_state.process_active
+                    _get_plane_key(recording_path, p) in _single_recording_batch_state.process_active
                     for p in range(plane_count)
                 )
             ):
@@ -653,107 +659,110 @@ def get_batch_processing_status_tool() -> dict[str, Any]:
             else:
                 overall_status = "QUEUED"
 
-            session_status: dict[str, Any] = {
-                "session_name": session_name,
+            recording_status: dict[str, Any] = {
+                "recording_name": recording_name,
                 "status": overall_status,
                 "binarize": binarize_status,
                 "process": process_status,
                 "combine": combine_status,
             }
 
-            if session_key in _single_day_batch_state.errors:
-                session_status["errors"] = _single_day_batch_state.errors[session_key]
+            if recording_key in _single_recording_batch_state.errors:
+                recording_status["errors"] = _single_recording_batch_state.errors[recording_key]
 
-            sessions_status.append(session_status)
+            recordings_status.append(recording_status)
 
         # Computes summary.
-        total_failed = len(_single_day_batch_state.binarize_failed) + len(_single_day_batch_state.combine_failed)
-        for session_key in _single_day_batch_state.binarize_completed:
-            session_path = Path(session_key)
-            plane_count = _single_day_batch_state.plane_counts.get(session_key, 0)
+        total_failed = len(_single_recording_batch_state.binarize_failed) + len(
+            _single_recording_batch_state.combine_failed
+        )
+        for recording_key in _single_recording_batch_state.binarize_completed:
+            recording_path = Path(recording_key)
+            plane_count = _single_recording_batch_state.plane_counts.get(recording_key, 0)
             if any(
-                _get_plane_key(session_path, p) in _single_day_batch_state.process_failed for p in range(plane_count)
+                _get_plane_key(recording_path, p) in _single_recording_batch_state.process_failed
+                for p in range(plane_count)
             ):
                 total_failed += 1
 
         summary = {
-            "total": len(_single_day_batch_state.sessions),
-            "binarize_completed": len(_single_day_batch_state.binarize_completed),
+            "total": len(_single_recording_batch_state.recordings),
+            "binarize_completed": len(_single_recording_batch_state.binarize_completed),
             "process_completed": len(
-                {_get_session_key(Path(key.split("|")[0])) for key in _single_day_batch_state.process_completed}
+                {_get_recording_key(Path(key.split("|")[0])) for key in _single_recording_batch_state.process_completed}
             ),
-            "combine_completed": len(_single_day_batch_state.combine_completed),
+            "combine_completed": len(_single_recording_batch_state.combine_completed),
             "failed": total_failed,
         }
 
         return {
-            "current_phase": _single_day_batch_state.current_phase,
-            "sessions": sessions_status,
+            "current_phase": _single_recording_batch_state.current_phase,
+            "recordings": recordings_status,
             "summary": summary,
         }
 
 
 @mcp.tool()
 def cancel_batch_processing_tool() -> dict[str, Any]:
-    """Cancels any running single-day batch processing.
+    """Cancels any running single-recording batch processing.
 
     Clears all queues and resets the batch state. Active jobs will complete but no new jobs will start.
     """
-    global _single_day_batch_state
+    global _single_recording_batch_state
 
-    if _single_day_batch_state is None:
-        return {"cancelled": False, "message": "No single-day batch processing is active."}
+    if _single_recording_batch_state is None:
+        return {"cancelled": False, "message": "No single-recording batch processing is active."}
 
-    with _single_day_batch_state.lock:
+    with _single_recording_batch_state.lock:
         active_count = (
-            len(_single_day_batch_state.binarize_active)
-            + len(_single_day_batch_state.process_active)
-            + len(_single_day_batch_state.combine_active)
+            len(_single_recording_batch_state.binarize_active)
+            + len(_single_recording_batch_state.process_active)
+            + len(_single_recording_batch_state.combine_active)
         )
 
         # Clears all queues to prevent new jobs from starting.
-        _single_day_batch_state.binarize_queue.clear()
-        _single_day_batch_state.process_queue.clear()
-        _single_day_batch_state.combine_queue.clear()
+        _single_recording_batch_state.binarize_queue.clear()
+        _single_recording_batch_state.process_queue.clear()
+        _single_recording_batch_state.combine_queue.clear()
 
         # Records final state before reset.
         final_state = {
-            "binarize_completed": len(_single_day_batch_state.binarize_completed),
-            "process_completed": len(_single_day_batch_state.process_completed),
-            "combine_completed": len(_single_day_batch_state.combine_completed),
+            "binarize_completed": len(_single_recording_batch_state.binarize_completed),
+            "process_completed": len(_single_recording_batch_state.process_completed),
+            "combine_completed": len(_single_recording_batch_state.combine_completed),
             "active_jobs_at_cancel": active_count,
         }
 
     # Resets batch state after releasing lock.
-    _single_day_batch_state = None
+    _single_recording_batch_state = None
 
     return {
         "cancelled": True,
-        "message": "Single-day batch processing cancelled. Active jobs will complete but no new jobs will start.",
+        "message": "Single-recording batch processing cancelled. Active jobs will complete but no new jobs will start.",
         "final_state": final_state,
     }
 
 
 @mcp.tool()
-def start_multiday_batch_processing_tool(
+def start_multi_recording_batch_processing_tool(
     animal_configurations: list[dict[str, Any]],
     *,
     workers_per_discover: int = 20,
     workers_per_extract: int = -1,
     progress_bars: bool = False,
 ) -> dict[str, Any]:
-    """Starts batch multi-day processing for multiple animals.
+    """Starts batch multi-recording processing for multiple animals.
 
-    Manages a two-phase batch: discover (parallel by animal), extract (parallel by session). Use
-    get_multiday_batch_processing_status_tool to monitor progress.
+    Manages a two-phase batch: discover (parallel by animal), extract (parallel by recording). Use
+    get_multi_recording_batch_processing_status_tool to monitor progress.
 
     Args:
-        animal_configurations: List of animal configurations, each with 'configuration_path' and 'session_paths'.
+        animal_configurations: List of animal configurations, each with 'configuration_path' and 'recording_paths'.
         workers_per_discover: Workers for discover phase (default 20).
         workers_per_extract: Workers for extract phase (-1 for automatic, max 30).
         progress_bars: Determines whether to display progress bars during processing.
     """
-    global _multi_day_batch_state
+    global _multi_recording_batch_state
 
     if not animal_configurations:
         return {"error": "At least one animal configuration is required"}
@@ -764,7 +773,7 @@ def start_multiday_batch_processing_tool(
     animal_keys: list[str] = []
 
     for animal_configuration in animal_configurations:
-        if "configuration_path" not in animal_configuration or "session_paths" not in animal_configuration:
+        if "configuration_path" not in animal_configuration or "recording_paths" not in animal_configuration:
             invalid_configurations.append(f"Missing required keys: {animal_configuration}")
             continue
 
@@ -773,37 +782,41 @@ def start_multiday_batch_processing_tool(
             invalid_configurations.append(f"Configuration not found: {configuration_path}")
             continue
 
-        session_paths = [Path(p) for p in animal_configuration["session_paths"]]
-        if len(session_paths) < _MINIMUM_SESSION_COUNT:
-            invalid_configurations.append(f"Need at least 2 sessions: {configuration_path}")
+        recording_paths = [Path(p) for p in animal_configuration["recording_paths"]]
+        if len(recording_paths) < _MINIMUM_RECORDING_COUNT:
+            invalid_configurations.append(f"Need at least 2 recordings: {configuration_path}")
             continue
 
-        invalid_sessions = [str(p) for p in session_paths if not p.exists() or not p.is_dir()]
-        if invalid_sessions:
-            invalid_configurations.append(f"Invalid sessions for {configuration_path}: {invalid_sessions}")
+        invalid_recordings = [str(p) for p in recording_paths if not p.exists() or not p.is_dir()]
+        if invalid_recordings:
+            invalid_configurations.append(f"Invalid recordings for {configuration_path}: {invalid_recordings}")
             continue
 
         # Extracts animal key from the configuration file.
         try:
-            configuration = MultiDayConfiguration.from_yaml(file_path=configuration_path)
-            animal_keys.append(configuration.session_io.dataset_name)
+            configuration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
+            animal_keys.append(configuration.recording_io.dataset_name)
         except Exception as error:
             invalid_configurations.append(f"Unable to load configuration {configuration_path}: {error}")
             continue
 
-        valid_animals.append((configuration_path, session_paths))
+        valid_animals.append((configuration_path, recording_paths))
 
     if not valid_animals:
         return {"error": "No valid animal configurations provided", "invalid_configurations": invalid_configurations}
 
     # Checks if batch processing is already active.
-    if _multi_day_batch_state is not None:
-        with _multi_day_batch_state.lock:
-            active_count = len(_multi_day_batch_state.discover_active) + len(_multi_day_batch_state.extract_active)
-            queue_count = len(_multi_day_batch_state.discover_queue) + len(_multi_day_batch_state.extract_queue)
+    if _multi_recording_batch_state is not None:
+        with _multi_recording_batch_state.lock:
+            active_count = len(_multi_recording_batch_state.discover_active) + len(
+                _multi_recording_batch_state.extract_active
+            )
+            queue_count = len(_multi_recording_batch_state.discover_queue) + len(
+                _multi_recording_batch_state.extract_queue
+            )
             if active_count > 0 or queue_count > 0:
                 return {
-                    "error": "Multi-day batch processing already in progress.",
+                    "error": "Multi-recording batch processing already in progress.",
                     "active_count": active_count,
                     "queued_count": queue_count,
                 }
@@ -820,7 +833,7 @@ def start_multiday_batch_processing_tool(
     max_parallel_extracts = resolve_parallel_job_capacity(workers_per_job=actual_workers_extract)
 
     # Initializes batch state.
-    _multi_day_batch_state = _MultiDayBatchState(
+    _multi_recording_batch_state = _MultiRecordingBatchState(
         animals=valid_animals,
         current_phase="discover",
         discover_queue=list(animal_keys),
@@ -833,19 +846,21 @@ def start_multiday_batch_processing_tool(
     )
 
     # Starts the batch manager thread.
-    manager = Thread(target=_multi_day_batch_manager, daemon=True)
+    manager = Thread(target=_multi_recording_batch_manager, daemon=True)
     manager.start()
-    _multi_day_batch_state.manager_thread = manager
+    _multi_recording_batch_state.manager_thread = manager
 
-    total_sessions = sum(len(sessions) for _, sessions in valid_animals)
+    total_recordings = sum(len(recordings) for _, recordings in valid_animals)
 
     result: dict[str, Any] = {
         "started": True,
         "total_animals": len(valid_animals),
-        "total_sessions": total_sessions,
+        "total_recordings": total_recordings,
         "workers_per_discover": actual_workers_discover,
         "workers_per_extract": actual_workers_extract,
-        "message": "Multi-day batch processing started. Use get_multiday_batch_processing_status_tool to monitor.",
+        "message": (
+            "Multi-recording batch processing started. Use get_multi_recording_batch_processing_status_tool to monitor."
+        ),
     }
 
     if invalid_configurations:
@@ -855,12 +870,12 @@ def start_multiday_batch_processing_tool(
 
 
 @mcp.tool()
-def get_multiday_batch_processing_status_tool() -> dict[str, Any]:
-    """Returns the current status of multi-day batch processing.
+def get_multi_recording_batch_processing_status_tool() -> dict[str, Any]:
+    """Returns the current status of multi-recording batch processing.
 
     Returns status for all animals including phase progress (discover, extract).
     """
-    if _multi_day_batch_state is None:
+    if _multi_recording_batch_state is None:
         return {
             "current_phase": "none",
             "animals": [],
@@ -873,50 +888,50 @@ def get_multiday_batch_processing_status_tool() -> dict[str, Any]:
             },
         }
 
-    with _multi_day_batch_state.lock:
+    with _multi_recording_batch_state.lock:
         animals_status: list[dict[str, Any]] = []
 
         # Builds an ordered list of animal keys from the configuration files.
         animal_keys_ordered: list[str] = []
-        for configuration_path, _ in _multi_day_batch_state.animals:
+        for configuration_path, _ in _multi_recording_batch_state.animals:
             try:
-                configuration = MultiDayConfiguration.from_yaml(file_path=configuration_path)
-                animal_keys_ordered.append(configuration.session_io.dataset_name)
+                configuration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
+                animal_keys_ordered.append(configuration.recording_io.dataset_name)
             except Exception:  # noqa: S112
                 continue
 
         for animal_key in animal_keys_ordered:
             # Determines discover status.
-            if animal_key in _multi_day_batch_state.discover_completed:
+            if animal_key in _multi_recording_batch_state.discover_completed:
                 discover_status = "done"
-            elif animal_key in _multi_day_batch_state.discover_failed:
+            elif animal_key in _multi_recording_batch_state.discover_failed:
                 discover_status = "failed"
-            elif animal_key in _multi_day_batch_state.discover_active:
+            elif animal_key in _multi_recording_batch_state.discover_active:
                 discover_status = "running"
-            elif animal_key in _multi_day_batch_state.discover_queue:
+            elif animal_key in _multi_recording_batch_state.discover_queue:
                 discover_status = "pending"
             else:
                 discover_status = "pending"
 
             # Determines extract progress.
-            session_ids = _multi_day_batch_state.session_ids.get(animal_key, [])
-            extract_total = len(session_ids)
+            recording_ids = _multi_recording_batch_state.recording_ids.get(animal_key, [])
+            extract_total = len(recording_ids)
             extract_completed = sum(
-                1 for sid in session_ids if f"{animal_key}|{sid}" in _multi_day_batch_state.extract_completed
+                1 for sid in recording_ids if f"{animal_key}|{sid}" in _multi_recording_batch_state.extract_completed
             )
             extract_failed = sum(
-                1 for sid in session_ids if f"{animal_key}|{sid}" in _multi_day_batch_state.extract_failed
+                1 for sid in recording_ids if f"{animal_key}|{sid}" in _multi_recording_batch_state.extract_failed
             )
 
             # Determines overall status.
-            if animal_key in _multi_day_batch_state.discover_failed:
+            if animal_key in _multi_recording_batch_state.discover_failed:
                 overall_status = "FAILED"
             elif extract_failed > 0:
                 overall_status = "PARTIAL"
             elif extract_completed == extract_total and extract_total > 0:
                 overall_status = "SUCCEEDED"
-            elif animal_key in _multi_day_batch_state.discover_active or any(
-                f"{animal_key}|{sid}" in _multi_day_batch_state.extract_active for sid in session_ids
+            elif animal_key in _multi_recording_batch_state.discover_active or any(
+                f"{animal_key}|{sid}" in _multi_recording_batch_state.extract_active for sid in recording_ids
             ):
                 overall_status = "PROCESSING"
             else:
@@ -930,93 +945,97 @@ def get_multiday_batch_processing_status_tool() -> dict[str, Any]:
                 "extract_total": extract_total,
             }
 
-            if animal_key in _multi_day_batch_state.errors:
-                animal_status["errors"] = _multi_day_batch_state.errors[animal_key]
+            if animal_key in _multi_recording_batch_state.errors:
+                animal_status["errors"] = _multi_recording_batch_state.errors[animal_key]
 
             animals_status.append(animal_status)
 
         # Computes summary.
-        total_extract_completed = len(_multi_day_batch_state.extract_completed)
-        total_extract_total = sum(len(ids) for ids in _multi_day_batch_state.session_ids.values())
-        total_failed = len(_multi_day_batch_state.discover_failed) + len(_multi_day_batch_state.extract_failed)
+        total_extract_completed = len(_multi_recording_batch_state.extract_completed)
+        total_extract_total = sum(len(ids) for ids in _multi_recording_batch_state.recording_ids.values())
+        total_failed = len(_multi_recording_batch_state.discover_failed) + len(
+            _multi_recording_batch_state.extract_failed
+        )
 
         summary = {
-            "total_animals": len(_multi_day_batch_state.animals),
-            "discover_completed": len(_multi_day_batch_state.discover_completed),
+            "total_animals": len(_multi_recording_batch_state.animals),
+            "discover_completed": len(_multi_recording_batch_state.discover_completed),
             "extract_completed": total_extract_completed,
             "extract_total": total_extract_total,
             "failed": total_failed,
         }
 
         return {
-            "current_phase": _multi_day_batch_state.current_phase,
+            "current_phase": _multi_recording_batch_state.current_phase,
             "animals": animals_status,
             "summary": summary,
         }
 
 
 @mcp.tool()
-def cancel_multiday_batch_processing_tool() -> dict[str, Any]:
-    """Cancels any running multi-day batch processing.
+def cancel_multi_recording_batch_processing_tool() -> dict[str, Any]:
+    """Cancels any running multi-recording batch processing.
 
     Clears all queues and resets the batch state. Active jobs will complete but no new jobs will start.
     """
-    global _multi_day_batch_state
+    global _multi_recording_batch_state
 
-    if _multi_day_batch_state is None:
-        return {"cancelled": False, "message": "No multi-day batch processing is active."}
+    if _multi_recording_batch_state is None:
+        return {"cancelled": False, "message": "No multi-recording batch processing is active."}
 
-    with _multi_day_batch_state.lock:
-        active_count = len(_multi_day_batch_state.discover_active) + len(_multi_day_batch_state.extract_active)
+    with _multi_recording_batch_state.lock:
+        active_count = len(_multi_recording_batch_state.discover_active) + len(
+            _multi_recording_batch_state.extract_active
+        )
 
         # Clears all queues to prevent new jobs from starting.
-        _multi_day_batch_state.discover_queue.clear()
-        _multi_day_batch_state.extract_queue.clear()
+        _multi_recording_batch_state.discover_queue.clear()
+        _multi_recording_batch_state.extract_queue.clear()
 
         # Records final state before reset.
         final_state = {
-            "discover_completed": len(_multi_day_batch_state.discover_completed),
-            "extract_completed": len(_multi_day_batch_state.extract_completed),
+            "discover_completed": len(_multi_recording_batch_state.discover_completed),
+            "extract_completed": len(_multi_recording_batch_state.extract_completed),
             "active_jobs_at_cancel": active_count,
         }
 
     # Resets batch state after releasing lock.
-    _multi_day_batch_state = None
+    _multi_recording_batch_state = None
 
     return {
         "cancelled": True,
-        "message": "Multi-day batch processing cancelled. Active jobs will complete but no new jobs will start.",
+        "message": "Multi-recording batch processing cancelled. Active jobs will complete but no new jobs will start.",
         "final_state": final_state,
     }
 
 
-def _get_session_key(session_path: Path) -> str:
-    """Generates a unique key for a session path.
+def _get_recording_key(recording_path: Path) -> str:
+    """Generates a unique key for a recording path.
 
     Args:
-        session_path: The path to the session directory.
+        recording_path: The path to the recording directory.
 
     Returns:
-        A string key for the session.
+        A string key for the recording.
     """
-    return str(session_path)
+    return str(recording_path)
 
 
-def _get_plane_key(session_path: Path, plane_index: int) -> str:
-    """Generates a unique key for a session-plane combination.
+def _get_plane_key(recording_path: Path, plane_index: int) -> str:
+    """Generates a unique key for a recording-plane combination.
 
     Args:
-        session_path: The path to the session directory.
+        recording_path: The path to the recording directory.
         plane_index: The plane index.
 
     Returns:
-        A string key for the session-plane combination.
+        A string key for the recording-plane combination.
     """
-    return f"{session_path}|plane_{plane_index}"
+    return f"{recording_path}|plane_{plane_index}"
 
 
 def _run_binarize_job(configuration_path: Path) -> tuple[bool, int, str | None]:
-    """Runs the binarize phase for a single session.
+    """Runs the binarize phase for a single recording.
 
     Args:
         configuration_path: The path to the configuration file.
@@ -1025,7 +1044,7 @@ def _run_binarize_job(configuration_path: Path) -> tuple[bool, int, str | None]:
         A tuple containing success status, plane count (0 if failed), and error message if failed.
     """
     try:
-        run_single_day_pipeline(
+        run_single_recording_pipeline(
             configuration_path=configuration_path,
             binarize=True,
             process=False,
@@ -1033,7 +1052,7 @@ def _run_binarize_job(configuration_path: Path) -> tuple[bool, int, str | None]:
         )
 
         # Loads the configuration to find the output path, then counts planes via RuntimeContext.
-        configuration = SingleDayConfiguration.from_yaml(file_path=configuration_path)
+        configuration = SingleRecordingConfiguration.from_yaml(file_path=configuration_path)
         effective_output_path = (
             configuration.file_io.output_path
             if configuration.file_io.output_path is not None
@@ -1067,7 +1086,7 @@ def _run_process_job(configuration_path: Path, plane_index: int) -> tuple[bool, 
         A tuple containing success status and error message if failed.
     """
     try:
-        run_single_day_pipeline(
+        run_single_recording_pipeline(
             configuration_path=configuration_path,
             binarize=False,
             process=True,
@@ -1085,7 +1104,7 @@ def _run_process_job(configuration_path: Path, plane_index: int) -> tuple[bool, 
 
 
 def _run_combine_job(configuration_path: Path) -> tuple[bool, str | None]:
-    """Runs the combine phase for a single session.
+    """Runs the combine phase for a single recording.
 
     Args:
         configuration_path: The path to the configuration file.
@@ -1094,7 +1113,7 @@ def _run_combine_job(configuration_path: Path) -> tuple[bool, str | None]:
         A tuple containing success status and error message if failed.
     """
     try:
-        run_single_day_pipeline(
+        run_single_recording_pipeline(
             configuration_path=configuration_path,
             binarize=False,
             process=False,
@@ -1110,14 +1129,14 @@ def _run_combine_job(configuration_path: Path) -> tuple[bool, str | None]:
         return True, None
 
 
-def _binarize_worker(session_path: Path, configuration_path: Path) -> None:
-    """Runs binarization for one session and updates batch state.
+def _binarize_worker(recording_path: Path, configuration_path: Path) -> None:
+    """Runs binarization for one recording and updates batch state.
 
     Args:
-        session_path: The path to the session directory.
+        recording_path: The path to the recording directory.
         configuration_path: The path to the configuration file.
     """
-    session_key = _get_session_key(session_path)
+    recording_key = _get_recording_key(recording_path)
     success: bool = False
     plane_count: int = 0
     error: str | None = None
@@ -1129,28 +1148,28 @@ def _binarize_worker(session_path: Path, configuration_path: Path) -> None:
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
         success, plane_count, error = (False, 0, f"Worker crash: {type(exception).__name__}: {exception} ({location})")
     finally:
-        if _single_day_batch_state is not None:
-            with _single_day_batch_state.lock:
-                _single_day_batch_state.binarize_active.pop(session_key, None)
+        if _single_recording_batch_state is not None:
+            with _single_recording_batch_state.lock:
+                _single_recording_batch_state.binarize_active.pop(recording_key, None)
                 if success:
-                    _single_day_batch_state.binarize_completed.add(session_key)
-                    _single_day_batch_state.plane_counts[session_key] = plane_count
+                    _single_recording_batch_state.binarize_completed.add(recording_key)
+                    _single_recording_batch_state.plane_counts[recording_key] = plane_count
                 else:
-                    _single_day_batch_state.binarize_failed.add(session_key)
+                    _single_recording_batch_state.binarize_failed.add(recording_key)
                     if error:
-                        _single_day_batch_state.errors.setdefault(session_key, []).append(f"binarize: {error}")
+                        _single_recording_batch_state.errors.setdefault(recording_key, []).append(f"binarize: {error}")
 
 
-def _process_worker(session_path: Path, configuration_path: Path, plane_index: int) -> None:
+def _process_worker(recording_path: Path, configuration_path: Path, plane_index: int) -> None:
     """Runs processing for one plane and updates batch state.
 
     Args:
-        session_path: The path to the session directory.
-        configuration_path: The path to the session's configuration file.
+        recording_path: The path to the recording directory.
+        configuration_path: The path to the recording's configuration file.
         plane_index: The plane index to process.
     """
-    session_key = _get_session_key(session_path)
-    plane_key = _get_plane_key(session_path, plane_index)
+    recording_key = _get_recording_key(recording_path)
+    plane_key = _get_plane_key(recording_path, plane_index)
     success: bool = False
     error: str | None = None
 
@@ -1161,27 +1180,27 @@ def _process_worker(session_path: Path, configuration_path: Path, plane_index: i
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
         success, error = False, f"Worker crash: {type(exception).__name__}: {exception} ({location})"
     finally:
-        if _single_day_batch_state is not None:
-            with _single_day_batch_state.lock:
-                _single_day_batch_state.process_active.pop(plane_key, None)
+        if _single_recording_batch_state is not None:
+            with _single_recording_batch_state.lock:
+                _single_recording_batch_state.process_active.pop(plane_key, None)
                 if success:
-                    _single_day_batch_state.process_completed.add(plane_key)
+                    _single_recording_batch_state.process_completed.add(plane_key)
                 else:
-                    _single_day_batch_state.process_failed.add(plane_key)
+                    _single_recording_batch_state.process_failed.add(plane_key)
                     if error:
-                        _single_day_batch_state.errors.setdefault(session_key, []).append(
+                        _single_recording_batch_state.errors.setdefault(recording_key, []).append(
                             f"process_plane_{plane_index}: {error}"
                         )
 
 
-def _combine_worker(session_path: Path, configuration_path: Path) -> None:
-    """Runs combination for one session and updates batch state.
+def _combine_worker(recording_path: Path, configuration_path: Path) -> None:
+    """Runs combination for one recording and updates batch state.
 
     Args:
-        session_path: The path to the session directory.
+        recording_path: The path to the recording directory.
         configuration_path: The path to the configuration file.
     """
-    session_key = _get_session_key(session_path)
+    recording_key = _get_recording_key(recording_path)
     success: bool = False
     error: str | None = None
 
@@ -1192,113 +1211,117 @@ def _combine_worker(session_path: Path, configuration_path: Path) -> None:
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
         success, error = False, f"Worker crash: {type(exception).__name__}: {exception} ({location})"
     finally:
-        if _single_day_batch_state is not None:
-            with _single_day_batch_state.lock:
-                _single_day_batch_state.combine_active.pop(session_key, None)
+        if _single_recording_batch_state is not None:
+            with _single_recording_batch_state.lock:
+                _single_recording_batch_state.combine_active.pop(recording_key, None)
                 if success:
-                    _single_day_batch_state.combine_completed.add(session_key)
+                    _single_recording_batch_state.combine_completed.add(recording_key)
                 else:
-                    _single_day_batch_state.combine_failed.add(session_key)
+                    _single_recording_batch_state.combine_failed.add(recording_key)
                     if error:
-                        _single_day_batch_state.errors.setdefault(session_key, []).append(f"combine: {error}")
+                        _single_recording_batch_state.errors.setdefault(recording_key, []).append(f"combine: {error}")
 
 
-def _single_day_batch_manager() -> None:
-    """Orchestrates three-phase single-day batch processing: binarize, process, combine."""
+def _single_recording_batch_manager() -> None:
+    """Orchestrates three-phase single-recording batch processing: binarize, process, combine."""
     timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
-    if _single_day_batch_state is None:
+    if _single_recording_batch_state is None:
         return
 
     while True:
-        with _single_day_batch_state.lock:
+        with _single_recording_batch_state.lock:
             # Phase 1: BINARIZE.
-            if _single_day_batch_state.current_phase == "binarize":
+            if _single_recording_batch_state.current_phase == "binarize":
                 # Starts new binarize jobs (sequential - I/O bound).
-                if not _single_day_batch_state.binarize_active and _single_day_batch_state.binarize_queue:
-                    next_session = _single_day_batch_state.binarize_queue.pop(0)
-                    session_key = _get_session_key(next_session)
-                    session_configuration = _single_day_batch_state.session_configuration_paths[session_key]
+                if not _single_recording_batch_state.binarize_active and _single_recording_batch_state.binarize_queue:
+                    next_recording = _single_recording_batch_state.binarize_queue.pop(0)
+                    recording_key = _get_recording_key(next_recording)
+                    recording_configuration = _single_recording_batch_state.recording_configuration_paths[recording_key]
 
                     thread = Thread(
                         target=_binarize_worker,
-                        kwargs={"session_path": next_session, "configuration_path": session_configuration},
+                        kwargs={"recording_path": next_recording, "configuration_path": recording_configuration},
                         daemon=True,
                     )
                     thread.start()
-                    _single_day_batch_state.binarize_active[session_key] = thread
+                    _single_recording_batch_state.binarize_active[recording_key] = thread
 
                 # Checks if binarize phase is complete.
-                if not _single_day_batch_state.binarize_active and not _single_day_batch_state.binarize_queue:
+                if (
+                    not _single_recording_batch_state.binarize_active
+                    and not _single_recording_batch_state.binarize_queue
+                ):
                     # Builds process queue from completed binarizations (naturally sorted for deterministic order).
-                    for session_key in natsorted(_single_day_batch_state.binarize_completed):
-                        plane_count = _single_day_batch_state.plane_counts.get(session_key, 0)
+                    for recording_key in natsorted(_single_recording_batch_state.binarize_completed):
+                        plane_count = _single_recording_batch_state.plane_counts.get(recording_key, 0)
                         for plane in range(plane_count):
-                            _single_day_batch_state.process_queue.append((session_key, plane))
+                            _single_recording_batch_state.process_queue.append((recording_key, plane))
 
-                    _single_day_batch_state.current_phase = "process"
+                    _single_recording_batch_state.current_phase = "process"
 
             # Phase 2: PROCESS.
-            elif _single_day_batch_state.current_phase == "process":
+            elif _single_recording_batch_state.current_phase == "process":
                 # Starts new process jobs (parallel - CPU bound).
                 while (
-                    len(_single_day_batch_state.process_active) < _single_day_batch_state.max_parallel_planes
-                    and _single_day_batch_state.process_queue
+                    len(_single_recording_batch_state.process_active)
+                    < _single_recording_batch_state.max_parallel_planes
+                    and _single_recording_batch_state.process_queue
                 ):
-                    session_key, plane_index = _single_day_batch_state.process_queue.pop(0)
-                    session_path = Path(session_key)
-                    plane_key = _get_plane_key(session_path, plane_index)
-                    session_configuration = _single_day_batch_state.session_configuration_paths[session_key]
+                    recording_key, plane_index = _single_recording_batch_state.process_queue.pop(0)
+                    recording_path = Path(recording_key)
+                    plane_key = _get_plane_key(recording_path, plane_index)
+                    recording_configuration = _single_recording_batch_state.recording_configuration_paths[recording_key]
 
                     thread = Thread(
                         target=_process_worker,
                         kwargs={
-                            "session_path": session_path,
-                            "configuration_path": session_configuration,
+                            "recording_path": recording_path,
+                            "configuration_path": recording_configuration,
                             "plane_index": plane_index,
                         },
                         daemon=True,
                     )
                     thread.start()
-                    _single_day_batch_state.process_active[plane_key] = thread
+                    _single_recording_batch_state.process_active[plane_key] = thread
 
                 # Checks if process phase is complete.
-                if not _single_day_batch_state.process_active and not _single_day_batch_state.process_queue:
-                    # Builds combine queue from sessions with all planes processed (naturally sorted).
-                    for session_key in natsorted(_single_day_batch_state.binarize_completed):
-                        plane_count = _single_day_batch_state.plane_counts.get(session_key, 0)
+                if not _single_recording_batch_state.process_active and not _single_recording_batch_state.process_queue:
+                    # Builds combine queue from recordings with all planes processed (naturally sorted).
+                    for recording_key in natsorted(_single_recording_batch_state.binarize_completed):
+                        plane_count = _single_recording_batch_state.plane_counts.get(recording_key, 0)
                         all_planes_done = all(
-                            _get_plane_key(Path(session_key), p) in _single_day_batch_state.process_completed
+                            _get_plane_key(Path(recording_key), p) in _single_recording_batch_state.process_completed
                             for p in range(plane_count)
                         )
                         any_plane_failed = any(
-                            _get_plane_key(Path(session_key), p) in _single_day_batch_state.process_failed
+                            _get_plane_key(Path(recording_key), p) in _single_recording_batch_state.process_failed
                             for p in range(plane_count)
                         )
 
                         if all_planes_done and not any_plane_failed:
-                            _single_day_batch_state.combine_queue.append(Path(session_key))
+                            _single_recording_batch_state.combine_queue.append(Path(recording_key))
 
-                    _single_day_batch_state.current_phase = "combine"
+                    _single_recording_batch_state.current_phase = "combine"
 
             # Phase 3: COMBINE.
-            elif _single_day_batch_state.current_phase == "combine":
+            elif _single_recording_batch_state.current_phase == "combine":
                 # Starts new combine jobs (sequential - I/O bound).
-                if not _single_day_batch_state.combine_active and _single_day_batch_state.combine_queue:
-                    next_session = _single_day_batch_state.combine_queue.pop(0)
-                    session_key = _get_session_key(next_session)
-                    session_configuration = _single_day_batch_state.session_configuration_paths[session_key]
+                if not _single_recording_batch_state.combine_active and _single_recording_batch_state.combine_queue:
+                    next_recording = _single_recording_batch_state.combine_queue.pop(0)
+                    recording_key = _get_recording_key(next_recording)
+                    recording_configuration = _single_recording_batch_state.recording_configuration_paths[recording_key]
 
                     thread = Thread(
                         target=_combine_worker,
-                        kwargs={"session_path": next_session, "configuration_path": session_configuration},
+                        kwargs={"recording_path": next_recording, "configuration_path": recording_configuration},
                         daemon=True,
                     )
                     thread.start()
-                    _single_day_batch_state.combine_active[session_key] = thread
+                    _single_recording_batch_state.combine_active[recording_key] = thread
 
                 # Checks if all processing is complete.
-                if not _single_day_batch_state.combine_active and not _single_day_batch_state.combine_queue:
+                if not _single_recording_batch_state.combine_active and not _single_recording_batch_state.combine_queue:
                     break
 
         # Sleeps briefly before checking again.
@@ -1306,37 +1329,37 @@ def _single_day_batch_manager() -> None:
 
 
 def _run_discover_job(
-    configuration_path: Path, session_paths: list[Path], workers: int, progress_bars: bool = False
+    configuration_path: Path, recording_paths: list[Path], workers: int, progress_bars: bool = False
 ) -> tuple[bool, list[str], str | None]:
     """Runs the discover phase for a single animal.
 
     Args:
         configuration_path: The path to the configuration file.
-        session_paths: The list of session paths for this animal.
+        recording_paths: The list of recording paths for this animal.
         workers: The number of workers to use.
         progress_bars: Determines whether to display progress bars during processing.
 
     Returns:
-        A tuple containing success status, list of session IDs, and error message if failed.
+        A tuple containing success status, list of recording IDs, and error message if failed.
     """
     try:
-        # Writes session directories and runtime settings into the configuration file before running the pipeline.
-        configuration = MultiDayConfiguration.from_yaml(file_path=configuration_path)
-        configuration.session_io.session_directories = tuple(natsorted(session_paths))
+        # Writes recording directories and runtime settings into the configuration file before running the pipeline.
+        configuration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
+        configuration.recording_io.recording_directories = tuple(natsorted(recording_paths))
         configuration.runtime.parallel_workers = workers
         configuration.runtime.display_progress_bars = progress_bars
         configuration.save(file_path=configuration_path)
 
-        run_multi_day_pipeline(
+        run_multi_recording_pipeline(
             configuration_path=configuration_path,
             discover=True,
             extract=False,
         )
 
-        # Reloads the configuration and resolves contexts to extract session IDs.
-        configuration = MultiDayConfiguration.from_yaml(file_path=configuration_path)
-        contexts = resolve_multiday_contexts(configuration=configuration)
-        session_ids = [ctx.runtime.io.session_id for ctx in contexts]
+        # Reloads the configuration and resolves contexts to extract recording IDs.
+        configuration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
+        contexts = resolve_multi_recording_contexts(configuration=configuration)
+        recording_ids = [ctx.runtime.io.recording_id for ctx in contexts]
 
     except Exception as error:
         frames = traceback.extract_tb(error.__traceback__)
@@ -1344,18 +1367,18 @@ def _run_discover_job(
         return False, [], f"{type(error).__name__}: {error} ({location})"
 
     else:
-        return True, session_ids, None
+        return True, recording_ids, None
 
 
 def _run_extract_job(
-    configuration_path: Path, session_paths: list[Path], session_id: str, workers: int, progress_bars: bool = False
+    configuration_path: Path, recording_paths: list[Path], recording_id: str, workers: int, progress_bars: bool = False
 ) -> tuple[bool, str | None]:
-    """Runs the extract phase for a single session.
+    """Runs the extract phase for a single recording.
 
     Args:
         configuration_path: The path to the configuration file.
-        session_paths: The list of session paths for this animal.
-        session_id: The session ID to extract.
+        recording_paths: The list of recording paths for this animal.
+        recording_id: The recording ID to extract.
         workers: The number of workers to use.
         progress_bars: Determines whether to display progress bars during processing.
 
@@ -1363,18 +1386,18 @@ def _run_extract_job(
         A tuple containing success status and error message if failed.
     """
     try:
-        # Writes session directories and runtime settings into the configuration file before running the pipeline.
-        configuration = MultiDayConfiguration.from_yaml(file_path=configuration_path)
-        configuration.session_io.session_directories = tuple(natsorted(session_paths))
+        # Writes recording directories and runtime settings into the configuration file before running the pipeline.
+        configuration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
+        configuration.recording_io.recording_directories = tuple(natsorted(recording_paths))
         configuration.runtime.parallel_workers = workers
         configuration.runtime.display_progress_bars = progress_bars
         configuration.save(file_path=configuration_path)
 
-        run_multi_day_pipeline(
+        run_multi_recording_pipeline(
             configuration_path=configuration_path,
             discover=False,
             extract=True,
-            target_session=session_id,
+            target_recording=recording_id,
         )
 
     except Exception as error:
@@ -1387,72 +1410,76 @@ def _run_extract_job(
 
 
 def _discover_worker(
-    animal_key: str, configuration_path: Path, session_paths: list[Path], workers: int, progress_bars: bool = False
+    animal_key: str, configuration_path: Path, recording_paths: list[Path], workers: int, progress_bars: bool = False
 ) -> None:
     """Runs discovery for one animal and updates batch state.
 
     Args:
         animal_key: The unique key for this animal.
         configuration_path: The path to the configuration file.
-        session_paths: The list of session paths for this animal.
+        recording_paths: The list of recording paths for this animal.
         workers: The number of workers to use.
         progress_bars: Determines whether to display progress bars during processing.
     """
     success: bool = False
-    session_ids: list[str] = []
+    recording_ids: list[str] = []
     error: str | None = None
 
     try:
-        success, session_ids, error = _run_discover_job(
+        success, recording_ids, error = _run_discover_job(
             configuration_path=configuration_path,
-            session_paths=session_paths,
+            recording_paths=recording_paths,
             workers=workers,
             progress_bars=progress_bars,
         )
     except Exception as exception:
         frames = traceback.extract_tb(exception.__traceback__)
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
-        success, session_ids, error = (False, [], f"Worker crash: {type(exception).__name__}: {exception} ({location})")
+        success, recording_ids, error = (
+            False,
+            [],
+            f"Worker crash: {type(exception).__name__}: {exception} ({location})",
+        )
     finally:
-        if _multi_day_batch_state is not None:
-            with _multi_day_batch_state.lock:
-                _multi_day_batch_state.discover_active.pop(animal_key, None)
+        if _multi_recording_batch_state is not None:
+            with _multi_recording_batch_state.lock:
+                _multi_recording_batch_state.discover_active.pop(animal_key, None)
                 if success:
-                    _multi_day_batch_state.discover_completed.add(animal_key)
-                    _multi_day_batch_state.session_ids[animal_key] = session_ids
+                    _multi_recording_batch_state.discover_completed.add(animal_key)
+                    _multi_recording_batch_state.recording_ids[animal_key] = recording_ids
                 else:
-                    _multi_day_batch_state.discover_failed.add(animal_key)
+                    _multi_recording_batch_state.discover_failed.add(animal_key)
                     if error:
-                        _multi_day_batch_state.errors.setdefault(animal_key, []).append(f"discover: {error}")
+                        _multi_recording_batch_state.errors.setdefault(animal_key, []).append(f"discover: {error}")
 
 
 def _extract_worker(
     animal_key: str,
     configuration_path: Path,
-    session_paths: list[Path],
-    session_id: str,
+    recording_paths: list[Path],
+    recording_id: str,
     workers: int,
     progress_bars: bool = False,
 ) -> None:
-    """Runs extraction for one session and updates batch state.
+    """Runs extraction for one recording and updates batch state.
 
     Args:
         animal_key: The unique key for this animal.
         configuration_path: The path to the configuration file.
-        session_paths: The list of session paths for this animal.
-        session_id: The session ID to extract.
+        recording_paths: The list of recording paths for this animal.
+        recording_id: The recording ID to extract.
         workers: The number of workers to use.
         progress_bars: Determines whether to display progress bars during processing.
     """
-    extract_key = f"{animal_key}|{session_id}"
+    extract_key = f"{animal_key}|{recording_id}"
     success: bool = False
     error: str | None = None
 
     try:
         success, error = _run_extract_job(
             configuration_path=configuration_path,
-            session_paths=session_paths,
-            session_id=session_id,
+            recording_paths=recording_paths,
+            recording_id=recording_id,
             workers=workers,
             progress_bars=progress_bars,
         )
@@ -1461,96 +1488,98 @@ def _extract_worker(
         location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
         success, error = False, f"Worker crash: {type(exception).__name__}: {exception} ({location})"
     finally:
-        if _multi_day_batch_state is not None:
-            with _multi_day_batch_state.lock:
-                _multi_day_batch_state.extract_active.pop(extract_key, None)
+        if _multi_recording_batch_state is not None:
+            with _multi_recording_batch_state.lock:
+                _multi_recording_batch_state.extract_active.pop(extract_key, None)
                 if success:
-                    _multi_day_batch_state.extract_completed.add(extract_key)
+                    _multi_recording_batch_state.extract_completed.add(extract_key)
                 else:
-                    _multi_day_batch_state.extract_failed.add(extract_key)
+                    _multi_recording_batch_state.extract_failed.add(extract_key)
                     if error:
-                        _multi_day_batch_state.errors.setdefault(animal_key, []).append(
-                            f"extract_{session_id}: {error}"
+                        _multi_recording_batch_state.errors.setdefault(animal_key, []).append(
+                            f"extract_{recording_id}: {error}"
                         )
 
 
-def _multi_day_batch_manager() -> None:
-    """Orchestrates two-phase multi-day batch processing: discover, extract."""
+def _multi_recording_batch_manager() -> None:
+    """Orchestrates two-phase multi-recording batch processing: discover, extract."""
     timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
-    if _multi_day_batch_state is None:
+    if _multi_recording_batch_state is None:
         return
 
-    # Builds animal key to configuration and sessions mapping.
+    # Builds animal key to configuration and recordings mapping.
     animal_configurations: dict[str, tuple[Path, list[Path]]] = {}
-    for configuration_path, session_paths in _multi_day_batch_state.animals:
-        configuration = MultiDayConfiguration.from_yaml(file_path=configuration_path)
-        animal_key = configuration.session_io.dataset_name
-        animal_configurations[animal_key] = (configuration_path, session_paths)
+    for configuration_path, recording_paths in _multi_recording_batch_state.animals:
+        configuration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
+        animal_key = configuration.recording_io.dataset_name
+        animal_configurations[animal_key] = (configuration_path, recording_paths)
 
     while True:
-        with _multi_day_batch_state.lock:
+        with _multi_recording_batch_state.lock:
             # Phase 1: DISCOVER.
-            if _multi_day_batch_state.current_phase == "discover":
+            if _multi_recording_batch_state.current_phase == "discover":
                 # Starts new discover jobs.
                 while (
-                    len(_multi_day_batch_state.discover_active) < _multi_day_batch_state.max_parallel_discovers
-                    and _multi_day_batch_state.discover_queue
+                    len(_multi_recording_batch_state.discover_active)
+                    < _multi_recording_batch_state.max_parallel_discovers
+                    and _multi_recording_batch_state.discover_queue
                 ):
-                    animal_key = _multi_day_batch_state.discover_queue.pop(0)
-                    configuration_path, session_paths = animal_configurations[animal_key]
+                    animal_key = _multi_recording_batch_state.discover_queue.pop(0)
+                    configuration_path, recording_paths = animal_configurations[animal_key]
 
                     thread = Thread(
                         target=_discover_worker,
                         kwargs={
                             "animal_key": animal_key,
                             "configuration_path": configuration_path,
-                            "session_paths": session_paths,
-                            "workers": _multi_day_batch_state.workers_per_discover,
-                            "progress_bars": _multi_day_batch_state.progress_bars,
+                            "recording_paths": recording_paths,
+                            "workers": _multi_recording_batch_state.workers_per_discover,
+                            "progress_bars": _multi_recording_batch_state.progress_bars,
                         },
                         daemon=True,
                     )
                     thread.start()
-                    _multi_day_batch_state.discover_active[animal_key] = thread
+                    _multi_recording_batch_state.discover_active[animal_key] = thread
 
                 # Checks if discover phase is complete.
-                if not _multi_day_batch_state.discover_active and not _multi_day_batch_state.discover_queue:
+                if not _multi_recording_batch_state.discover_active and not _multi_recording_batch_state.discover_queue:
                     # Builds extract queue from completed discoveries (naturally sorted for deterministic order).
-                    for animal_key in natsorted(_multi_day_batch_state.discover_completed):
-                        for session_id in natsorted(_multi_day_batch_state.session_ids.get(animal_key, [])):
-                            _multi_day_batch_state.extract_queue.append((animal_key, session_id))
+                    for animal_key in natsorted(_multi_recording_batch_state.discover_completed):
+                        for recording_id in natsorted(_multi_recording_batch_state.recording_ids.get(animal_key, [])):
+                            _multi_recording_batch_state.extract_queue.append((animal_key, recording_id))
 
-                    _multi_day_batch_state.current_phase = "extract"
+                    _multi_recording_batch_state.current_phase = "extract"
 
             # Phase 2: EXTRACT.
-            elif _multi_day_batch_state.current_phase == "extract":
+            elif _multi_recording_batch_state.current_phase == "extract":
                 # Starts new extract jobs.
                 while (
-                    len(_multi_day_batch_state.extract_active) < _multi_day_batch_state.max_parallel_extracts
-                    and _multi_day_batch_state.extract_queue
+                    len(_multi_recording_batch_state.extract_active)
+                    < _multi_recording_batch_state.max_parallel_extracts
+                    and _multi_recording_batch_state.extract_queue
                 ):
-                    animal_key, session_id = _multi_day_batch_state.extract_queue.pop(0)
-                    extract_key = f"{animal_key}|{session_id}"
-                    configuration_path, session_paths = animal_configurations[animal_key]
+                    animal_key, recording_id = _multi_recording_batch_state.extract_queue.pop(0)
+                    extract_key = f"{animal_key}|{recording_id}"
+                    configuration_path, recording_paths = animal_configurations[animal_key]
 
                     thread = Thread(
                         target=_extract_worker,
                         kwargs={
                             "animal_key": animal_key,
                             "configuration_path": configuration_path,
-                            "session_paths": session_paths,
-                            "session_id": session_id,
-                            "workers": _multi_day_batch_state.workers_per_extract,
-                            "progress_bars": _multi_day_batch_state.progress_bars,
+                            "recording_paths": recording_paths,
+                            "recording_id": recording_id,
+                            "workers": _multi_recording_batch_state.workers_per_extract,
+                            "progress_bars": _multi_recording_batch_state.progress_bars,
                         },
                         daemon=True,
                     )
                     thread.start()
-                    _multi_day_batch_state.extract_active[extract_key] = thread
+                    _multi_recording_batch_state.extract_active[extract_key] = thread
 
                 # Checks if all processing is complete.
-                if not _multi_day_batch_state.extract_active and not _multi_day_batch_state.extract_queue:
+                if not _multi_recording_batch_state.extract_active and not _multi_recording_batch_state.extract_queue:
                     break
 
         # Sleeps briefly before checking again.

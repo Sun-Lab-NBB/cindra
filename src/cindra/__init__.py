@@ -1,7 +1,7 @@
-"""Enhanced neural imaging analysis library with single-day and multi-day cell tracking pipelines.
+"""Enhanced neural imaging analysis library with single-recording and multi-recording ROI tracking pipelines.
 
 cindra is a reimplementation of the popular suite2p (https://github.com/MouseLand/suite2p) library with expanded
-documentation, modern Python support, and a new multi-day cell tracking pipeline based on the OSM manuscript
+documentation, modern Python support, and a new multi-recording ROI tracking pipeline based on the OSM manuscript
 (https://www.nature.com/articles/s41586-024-08548-w).
 
 Original suite2p copyright:
@@ -22,12 +22,17 @@ config.THREADING_LAYER = "tbb"
 from ataraxis_base_utilities import console  # noqa: E402
 
 from .pipelines import (  # noqa: E402
-    MultiDayJobNames,
-    SingleDayJobNames,
-    run_multi_day_pipeline,
-    run_single_day_pipeline,
+    MultiRecordingJobNames,
+    SingleRecordingJobNames,
+    run_multi_recording_pipeline,
+    run_single_recording_pipeline,
 )
-from .dataclasses import CombinedData, RuntimeContext, MultiDayConfiguration, SingleDayConfiguration  # noqa: E402
+from .dataclasses import (  # noqa: E402
+    CombinedData,
+    RuntimeContext,
+    MultiRecordingConfiguration,
+    SingleRecordingConfiguration,
+)
 
 # Ensures console output is enabled whenever the cindra library is imported. The 'Console' class is
 # used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal
@@ -37,11 +42,11 @@ if not console.enabled:
 
 __all__ = [
     "CombinedData",
-    "MultiDayConfiguration",
-    "MultiDayJobNames",
+    "MultiRecordingConfiguration",
+    "MultiRecordingJobNames",
     "RuntimeContext",
-    "SingleDayConfiguration",
-    "SingleDayJobNames",
-    "run_multi_day_pipeline",
-    "run_single_day_pipeline",
+    "SingleRecordingConfiguration",
+    "SingleRecordingJobNames",
+    "run_multi_recording_pipeline",
+    "run_single_recording_pipeline",
 ]
