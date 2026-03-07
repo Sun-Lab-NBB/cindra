@@ -874,7 +874,7 @@ class ROIStatistics:
             dtype=np.float32,
         )
 
-        plane_index = np.array([roi.plane_index for roi in roi_list], dtype=np.uint8)
+        plane_index = np.array([roi.plane_index for roi in roi_list], dtype=np.int32)
 
         save_dict: dict[str, np.ndarray] = {
             "footprints": footprints,

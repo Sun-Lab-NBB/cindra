@@ -26,7 +26,7 @@ pipeline.
 - Complete output data reference: every file, directory, array shape, dtype, and NPZ key produced by the pipeline
 
 **Does not cover:**
-- Multi-day configuration parameters (see `/multi-day-config`)
+- Multi-day configuration parameters or data formats (see `/multi-day-data`)
 - Processing workflow, session discovery, or batch operations (see `/single-day-processing`)
 - Multi-day processing workflow or cell tracking (see `/multi-day-processing`)
 
@@ -477,7 +477,7 @@ Saved at both the combined root and per-plane levels. Companion file to `roi_mas
 | `normalized_pixel_count_full` | float32 | (num_rois,) | Pixel count normalized by expected cell size (full)    |
 | `skewness`                    | float32 | (num_rois,) | Fluorescence skewness (NaN if unavailable)             |
 | `standard_deviation`          | float32 | (num_rois,) | Fluorescence std dev (NaN if unavailable)              |
-| `plane_index`                 | uint8   | (num_rois,) | Imaging plane index for each ROI                       |
+| `plane_index`                 | int32   | (num_rois,) | Imaging plane index for each ROI                       |
 
 **Optional variable-length arrays** (present only when the data exists):
 
@@ -587,7 +587,8 @@ and set to None in the YAML.
 | Counts / dimensions | uint32  | pixel_counts, frame_count, combined_height            |
 | Small counts        | uint16  | plane_heights, plane_widths, session_count            |
 | Booleans            | bool    | bad_frames, soma_mask, overlap_mask                   |
-| Plane indices       | uint8   | plane_index, plane_count                              |
+| Plane indices       | int32   | plane_index                                           |
+| Plane counts        | uint8   | plane_count                                           |
 
 All `.npy` files are saved with `allow_pickle=False`. Arrays support memory-mapped loading via
 `np.load(path, mmap_mode='r+')` for efficient access to large datasets.
@@ -607,7 +608,7 @@ files, so no special configuration is required.
 
 | Skill                    | Relationship                                                          |
 |--------------------------|-----------------------------------------------------------------------|
-| `/multi-day-config`      | Companion configuration reference for the multi-day pipeline          |
+| `/multi-day-data`        | Companion configuration and data reference for the multi-day pipeline |
 | `/single-day-processing` | Processing workflow that consumes this configuration                  |
 | `/multi-day-processing`  | Multi-day workflow that requires single-day processing to be complete |
 
