@@ -354,7 +354,7 @@ Summary: 1/2 animals complete | 2/4 sessions extracted | 0 failed
 
 **CRITICAL**: You MUST ask the user about configuration before processing. Never skip this step.
 
-For complete parameter documentation, invoke `/multi-day-config`.
+For complete parameter documentation, invoke `/multi-day-data`.
 
 ### Step 1: Ask About Existing Configuration
 
@@ -389,7 +389,7 @@ These are set automatically by the MCP batch tool:
 - `io.session_directories` - Set from `session_paths` argument
 - `main.parallel_workers` - Set from worker arguments
 
-See `/multi-day-config` for complete parameter documentation including cell selection, registration tuning, and
+See `/multi-day-data` for complete parameter documentation including cell selection, registration tuning, and
 clustering options.
 
 ---
