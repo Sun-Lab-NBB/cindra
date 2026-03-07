@@ -1,4 +1,4 @@
-"""Provides user-defined configuration classes for the multi-day (across-session) processing pipeline."""
+"""Provides user-defined configuration classes for the multi-recording (across-recording) processing pipeline."""
 
 from __future__ import annotations
 
@@ -10,55 +10,56 @@ from natsort import natsorted
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
-from .single_day_configuration import PipelineType, RuntimeSettings, SignalExtraction, SpikeDeconvolution
+from .single_recording_configuration import PipelineType, RuntimeSettings, SignalExtraction, SpikeDeconvolution
 
 
 class ReferenceImageType(StrEnum):
-    """Defines the supported reference image types for diffeomorphic registration across sessions."""
+    """Defines the supported reference image types for diffeomorphic registration across recordings."""
 
     MEAN = "mean"
     """The temporal mean of all registered frames, providing a static view of the imaging field."""
 
     ENHANCED_MEAN = "enhanced_mean"
-    """The high-pass filtered mean image that enhances cell boundaries for improved registration."""
+    """The high-pass filtered mean image that enhances ROI boundaries for improved registration."""
 
     MAXIMUM_PROJECTION = "maximum_projection"
     """The maximum intensity projection across all frames, highlighting active structures."""
 
 
 @dataclass
-class SessionIO:
-    """Stores the parameters that specify input session locations and output directories."""
+class RecordingIO:
+    """Stores the parameters that specify input recording locations and output directories."""
 
-    session_directories: tuple[Path, ...] = ()
-    """Specifies the sessions to register across days as absolute paths to their root directories.
-    Sessions are natural-sorted, and the first session after sorting becomes the 'main session' which stores
-    the processing tracker file. Each session directory is expected to contain the combined_metadata.npz file created
-    by the single-day processing pipeline."""
+    recording_directories: tuple[Path, ...] = ()
+    """Specifies the recordings to include in multi-recording processing as absolute paths to their root directories.
+    Recordings are natural-sorted, and the first recording after sorting becomes the 'main recording' which stores
+    the processing tracker file. Each recording directory is expected to contain the combined_metadata.npz file created
+    by the single-recording processing pipeline."""
 
     dataset_name: str = ""
-    """Specifies the name of the multiday dataset. This name is used to create the output directory under each
-    session's cindra directory (e.g., session/cindra/multiday/{dataset_name}/) and to identify the dataset in the
-    tracker file."""
+    """Specifies the name of the multi_recording dataset. This name is used to create the output directory under each
+    recording's cindra directory (e.g., recording/cindra/multi_recording/{dataset_name}/) and to identify the dataset
+    in the tracker file."""
 
     repeat_selection: bool = False
-    """Determines whether to repeat the cell selection step when processing. When True, the pipeline re-runs cell 
-    selection filtering using the current ROI selection parameters, even if selected cells already exist. This allows 
-    updated single-day results or modified selection criteria to be integrated into multi-day processing. When False 
-    (default), existing cell selections are used if present."""
+    """Determines whether to repeat the ROI selection step when processing. When True, the pipeline re-runs ROI
+    selection filtering using the current ROI selection parameters, even if selected ROIs already exist. This allows
+    updated single-recording results or modified selection criteria to be integrated into multi-recording processing.
+    When False (default), existing ROI selections are used if present."""
 
     def __post_init__(self) -> None:
-        """Natural-sorts session directories after construction or YAML loading."""
-        self.session_directories = tuple(natsorted(self.session_directories))
+        """Natural-sorts recording directories after construction or YAML loading."""
+        self.recording_directories = tuple(natsorted(self.recording_directories))
 
 
 @dataclass
 class ROISelection:
-    """Stores parameters for selecting single-day-detected ROIs to be tracked across multiple sessions (days)."""
+    """Stores parameters for selecting single-recording-detected ROIs to be tracked across multiple recordings."""
 
     probability_threshold: float = 0.85
-    """The minimum required cell probability score assigned to the ROI by the single-day cindra classifier. ROIs
-    with a lower classifier score are excluded from multi-day processing. This parameter applies to channel 1 ROIs."""
+    """The minimum required cell probability score assigned to the ROI by the single-recording cindra classifier. ROIs
+    with a lower classifier score are excluded from multi-recording processing. This parameter applies to channel 1
+    ROIs."""
 
     maximum_size: int = 1000
     """The maximum allowed ROI size, in pixels. ROIs with a larger pixel size are excluded from processing. This
@@ -73,12 +74,12 @@ class ROISelection:
 
     probability_threshold_channel_2: float | None = None
     """The minimum required cell probability score for channel 2 ROIs. When set to None (default), channel 2 ROIs use
-    the same probability_threshold as channel 1. Set this to a different value when channel 2 cells have different
+    the same probability_threshold as channel 1. Set this to a different value when channel 2 ROIs have different
     classification characteristics."""
 
     maximum_size_channel_2: int | None = None
     """The maximum allowed ROI size for channel 2, in pixels. When set to None (default), channel 2 ROIs use the same
-    maximum_size as channel 1. Set this to a different value when channel 2 cells have different size
+    maximum_size as channel 1. Set this to a different value when channel 2 ROIs have different size
     characteristics."""
 
     mroi_region_margin_channel_2: int | None = None
@@ -88,13 +89,13 @@ class ROISelection:
 
 @dataclass
 class DiffeomorphicRegistration:
-    """Stores parameters for diffeomorphic demons registration that aligns sessions from multiple days to the same
+    """Stores parameters for diffeomorphic demons registration that aligns multiple recordings to the same
     visual (sampling) space.
     """
 
     image_type: ReferenceImageType | str = ReferenceImageType.ENHANCED_MEAN
-    """The type of cindra-generated reference image to use for across-day registration. This image is used to
-    calculate the deformation fields that register all sessions to a common visual space."""
+    """The type of cindra-generated reference image to use for across-recording registration. This image is used to
+    calculate the deformation fields that register all recordings to a common visual space."""
 
     grid_sampling_factor: float = 1
     """Determines how the B-spline grid spacing scales with image scale during the multi-scale registration process.
@@ -107,18 +108,18 @@ class DiffeomorphicRegistration:
     longer computation time."""
 
     speed_factor: float = 3
-    """The relative force of the deformation transform applied when registering the sessions to the same visual space.
+    """The relative force of the deformation transform applied when registering the recordings to the same visual space.
     This is the most important parameter to tune. For most cases, a value between 1 and 5 is reasonable."""
 
     repeat_registration: bool = False
     """Determines whether to repeat diffeomorphic registration when existing registration data is found. When True,
-    the pipeline clears existing deformation fields, transformed images, and deformed cell masks before re-running
+    the pipeline clears existing deformation fields, transformed images, and deformed ROI masks before re-running
     registration. When False (default), existing registration results are reused if present."""
 
 
 @dataclass
 class ROITracking:
-    """Stores parameters for tracking ROIs across multiple registered sessions (days) using spatial clustering."""
+    """Stores parameters for tracking ROIs across multiple registered recordings using spatial clustering."""
 
     threshold: float = 0.75
     """The Jaccard distance threshold for the hierarchical clustering algorithm. Candidate ROI pairs that pass the
@@ -126,13 +127,13 @@ class ROITracking:
     clustered together as the same ROI if their Jaccard distance is below this value."""
 
     mask_prevalence: int = 50
-    """The minimum percentage of registered sessions that must contain a given ROI for it to be included in the
-    tracked cell set. Clusters with members in fewer sessions than this threshold are discarded."""
+    """The minimum percentage of registered recordings that must contain a given ROI for it to be included in the
+    tracked ROI set. Clusters with members in fewer recordings than this threshold are discarded."""
 
     pixel_prevalence: int = 50
-    """The minimum percentage of registered sessions in which a pixel must appear for it to be included in the ROI's
-    cross-session template mask. Pixels below this threshold are excluded, so only spatially stable regions of each
-    tracked ROI contribute to the template used for fluorescence extraction across sessions."""
+    """The minimum percentage of registered recordings in which a pixel must appear for it to be included in the ROI's
+    cross-recording template mask. Pixels below this threshold are excluded, so only spatially stable regions of each
+    tracked ROI contribute to the template used for fluorescence extraction across recordings."""
 
     step_sizes: tuple[int, int] = (200, 200)
     """The block size, in pixels, as (height, width) used to partition the deformed visual space into spatial bins
@@ -148,39 +149,39 @@ class ROITracking:
     Only pairs that pass this spatial pre-filter proceed to the Jaccard overlap comparison controlled by threshold."""
 
     minimum_size: int = 25
-    """The minimum number of non-overlapping pixels a cross-session template mask must contain after removing pixels
-    shared with other templates. Templates below this size are discarded as too small to represent a valid cell."""
+    """The minimum number of non-overlapping pixels a cross-recording template mask must contain after removing pixels
+    shared with other templates. Templates below this size are discarded as too small to represent a valid ROI."""
 
 
 @dataclass
-class MultiDayConfiguration(YamlConfig):
-    """Aggregates the user-defined configuration parameters for the multi-day cindra pipeline.
+class MultiRecordingConfiguration(YamlConfig):
+    """Aggregates the user-defined configuration parameters for the multi-recording cindra pipeline.
 
     This class stores all user-configurable parameters that control how the pipeline processes data.
     These parameters are immutable during processing - the pipeline reads them but does not modify them.
 
     Notes:
         This class is based on the reference implementation here:
-        https://github.com/sprustonlab/multiday-suite2p-public.
+        https://github.com/sprustonlab/multi_recording-suite2p-public.
 
-        For runtime data (computed by the pipeline), see MultiDayRuntimeData.
+        For runtime data (computed by the pipeline), see MultiRecordingRuntimeData.
     """
 
-    pipeline_type: PipelineType = field(default=PipelineType.MULTI_DAY, init=False)
-    """Identifies this configuration as a multi-day pipeline configuration."""
+    pipeline_type: PipelineType = field(default=PipelineType.MULTI_RECORDING, init=False)
+    """Identifies this configuration as a multi-recording pipeline configuration."""
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
-    """Stores runtime behavior settings shared with the single-day pipeline (parallel workers, progress bars)."""
-    session_io: SessionIO = field(default_factory=SessionIO)
-    """Stores parameters that specify input session locations and output directories."""
+    """Stores runtime behavior settings shared with the single-recording pipeline (parallel workers, progress bars)."""
+    recording_io: RecordingIO = field(default_factory=RecordingIO)
+    """Stores parameters that specify input recording locations and output directories."""
     roi_selection: ROISelection = field(default_factory=ROISelection)
-    """Stores parameters for selecting single-day-detected ROIs to be tracked across multiple sessions (days)."""
+    """Stores parameters for selecting single-recording-detected ROIs to be tracked across multiple recordings."""
     diffeomorphic_registration: DiffeomorphicRegistration = field(default_factory=DiffeomorphicRegistration)
-    """Stores parameters for diffeomorphic demons registration that aligns sessions to the same visual space."""
+    """Stores parameters for diffeomorphic demons registration that aligns recordings to the same visual space."""
     roi_tracking: ROITracking = field(default_factory=ROITracking)
-    """Stores parameters for tracking ROIs across multiple registered sessions (days) using spatial clustering."""
+    """Stores parameters for tracking ROIs across multiple registered recordings using spatial clustering."""
     signal_extraction: SignalExtraction = field(default_factory=SignalExtraction)
     """Stores parameters for extracting fluorescence signals from ROIs and surrounding neuropil regions of the ROIs
-    tracked across days."""
+    tracked across recordings."""
     spike_deconvolution: SpikeDeconvolution = field(default_factory=SpikeDeconvolution)
     """Stores parameters for deconvolving fluorescence signals to infer spike trains."""
 
@@ -194,13 +195,13 @@ class MultiDayConfiguration(YamlConfig):
         self.to_yaml(file_path=file_path)
 
     @classmethod
-    def load(cls, file_path: Path) -> MultiDayConfiguration:
+    def load(cls, file_path: Path) -> MultiRecordingConfiguration:
         """Loads configuration from a YAML file.
 
         Args:
             file_path: The path to the .yaml configuration file.
 
         Returns:
-            A MultiDayConfiguration instance populated with the loaded data.
+            A MultiRecordingConfiguration instance populated with the loaded data.
         """
         return cls.from_yaml(file_path=file_path)

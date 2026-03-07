@@ -1,4 +1,4 @@
-"""Provides frame registration (motion correction) entry point for the single-day cindra processing pipeline."""
+"""Provides frame registration (motion correction) entry point for the single-recording cindra processing pipeline."""
 
 from __future__ import annotations
 

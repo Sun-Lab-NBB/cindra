@@ -1,4 +1,4 @@
-"""Provides runtime data classes for the single-day (within-session) processing pipeline."""
+"""Provides runtime data classes for the single-recording (within-recording) processing pipeline."""
 
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ def is_memory_mapped(array: NDArray | None) -> bool:
 
 @dataclass
 class IOData:
-    """Stores the Input / Output runtime data for all stages of the single-day processing pipeline."""
+    """Stores the Input / Output runtime data for all stages of the single-recording processing pipeline."""
 
     frame_height: int = 0
     """The height of each frame in pixels (Y dimension of the imaging field of view)."""
@@ -364,8 +364,8 @@ class RegistrationData:
         """Memory-maps registration arrays from individual .npy files in the ``registration_data/`` subdirectory.
 
         Uses ``r+`` mode to allow both reading and writing through the memory-mapped arrays. This avoids loading the
-        full array contents into memory, which is useful when reusing previously-generated data (e.g., single-day
-        outputs consumed by the multi-day pipeline).
+        full array contents into memory, which is useful when reusing previously-generated data (e.g., single-recording
+        outputs consumed by the multi-recording pipeline).
 
         Args:
             output_path: The directory containing the ``registration_data/`` subdirectory.
@@ -413,27 +413,27 @@ class RegistrationData:
 class DetectionData:
     """Stores runtime data from the detection stage."""
 
-    cell_diameter: int = 0
-    """The estimated cell diameter in pixels, automatically computed from the spatial scale during detection."""
+    roi_diameter: int = 0
+    """The estimated ROI diameter in pixels, automatically computed from the spatial scale during detection."""
 
     aspect_ratio: float = 0.0
-    """The aspect ratio of detected cells, computed as the ratio of vertical to horizontal diameter."""
+    """The aspect ratio of detected ROIs, computed as the ratio of vertical to horizontal diameter."""
 
     mean_image: NDArray[np.float32] | None = None
     """The temporal mean of all registered frames, providing a static view of the imaging field."""
 
     enhanced_mean_image: NDArray[np.float32] | None = None
-    """The high-pass filtered mean image that enhances cell boundaries for improved detection."""
+    """The high-pass filtered mean image that enhances ROI boundaries for improved detection."""
 
     maximum_projection: NDArray[np.float32] | None = None
     """The maximum intensity projection across all frames, highlighting active structures."""
 
     correlation_map: NDArray[np.float32] | None = None
-    """The pixel-wise correlation map used to identify regions with correlated activity for cell detection."""
+    """The pixel-wise correlation map used to identify regions with correlated activity for ROI detection."""
 
-    cell_diameter_channel_2: int = 0
-    """The estimated cell diameter for the second imaging channel in pixels. Computed independently because channel 2
-    may label a different cell population with different soma sizes."""
+    roi_diameter_channel_2: int = 0
+    """The estimated ROI diameter for the second imaging channel in pixels. Computed independently because channel 2
+    may label a different ROI population with different soma sizes."""
 
     mean_image_channel_2: NDArray[np.float32] | None = None
     """The temporal mean of all registered frames for the second imaging channel."""
@@ -543,8 +543,8 @@ class DetectionData:
         """Memory-maps detection arrays from individual .npy files in the ``detection_data/`` subdirectory.
 
         Uses ``r+`` mode to allow both reading and writing through the memory-mapped arrays. This avoids loading the
-        full array contents into memory, which is useful when reusing previously-generated data (e.g., single-day
-        outputs consumed by the multi-day pipeline).
+        full array contents into memory, which is useful when reusing previously-generated data (e.g., single-recording
+        outputs consumed by the multi-recording pipeline).
 
         Args:
             output_path: The directory containing the ``detection_data/`` subdirectory.
@@ -586,8 +586,8 @@ class DetectionData:
 class ROIMask:
     """Lightweight spatial ROI data for pipeline processing.
 
-    Stores pixel coordinates, weights, and tracking metadata. Used as the working type throughout the multi-day
-    pipeline and as the on-disk format for spatial data in both single-day and multi-day outputs.
+    Stores pixel coordinates, weights, and tracking metadata. Used as the working type throughout the multi-recording
+    pipeline and as the on-disk format for spatial data in both single-recording and multi-recording outputs.
     """
 
     y_pixels: NDArray[np.int32]
@@ -609,10 +609,10 @@ class ROIMask:
     """The fitted ellipse radius representing the approximate ROI size."""
 
     cluster_id: int = 0
-    """The multi-day cell cluster ID. Zero indicates unclustered, positive values indicate cluster membership."""
+    """The multi-recording ROI cluster ID. Zero indicates unclustered, positive values indicate cluster membership."""
 
-    session_count: int = 0
-    """The number of sessions in which this cell was detected during multi-day tracking."""
+    recording_count: int = 0
+    """The number of recordings in which this ROI was detected during multi-recording tracking."""
 
     overlap_mask: NDArray[np.bool_] | None = None
     """The boolean mask indicating which pixels overlap with other ROIs. Transient; not persisted."""
@@ -703,7 +703,7 @@ class ROIMask:
         centroids = np.array([mask.centroid for mask in mask_list], dtype=np.int32)
         radius = np.array([mask.radius for mask in mask_list], dtype=np.float32)
         cluster_id = np.array([mask.cluster_id for mask in mask_list], dtype=np.uint32)
-        session_count = np.array([mask.session_count for mask in mask_list], dtype=np.uint16)
+        recording_count = np.array([mask.recording_count for mask in mask_list], dtype=np.uint16)
         frame_width = np.array([mask_list[0].frame_width], dtype=np.uint32)
 
         np.savez(
@@ -716,7 +716,7 @@ class ROIMask:
             centroids=centroids,
             radius=radius,
             cluster_id=cluster_id,
-            session_count=session_count,
+            recording_count=recording_count,
             frame_width=frame_width,
         )
 
@@ -743,7 +743,7 @@ class ROIMask:
         centroids = data["centroids"]
         radius = data["radius"]
         cluster_id = data["cluster_id"]
-        session_count = data["session_count"]
+        recording_count = data["recording_count"]
         frame_width = int(data["frame_width"][0])
 
         mask_list: list[ROIMask] = []
@@ -756,7 +756,7 @@ class ROIMask:
                 frame_width=frame_width,
                 radius=float(radius[i]),
                 cluster_id=int(cluster_id[i]),
-                session_count=int(session_count[i]),
+                recording_count=int(recording_count[i]),
             )
             mask_list.append(mask)
 
@@ -767,11 +767,11 @@ class ROIMask:
 class ROIStatistics:
     """Stores spatial and statistical properties for a single region of interest (ROI).
 
-    This dataclass represents the complete set of properties computed for each detected cell ROI during the detection,
-    extraction, and optional multi-day processing stages. The fields are organized into required core properties
+    This dataclass represents the complete set of properties computed for each detected ROI during the detection,
+    extraction, and optional multi-recording processing stages. The fields are organized into required core properties
     (always present after detection), shape statistics (computed during ROI detection, with defaults for staged
-    construction), optional extraction properties (added during signal extraction), multi-plane/multi-day properties,
-    and GUI visualization properties.
+    construction), optional extraction properties (added during signal extraction),
+    multi-plane/multi-recording properties, and GUI visualization properties.
 
     Notes:
         This dataclass replaces the legacy dictionary-based stat.npy format. Shape statistics fields have default
@@ -813,10 +813,10 @@ class ROIStatistics:
     """The ratio of ellipse axes, indicating ROI elongation."""
 
     normalized_pixel_count: float = 0.0
-    """The pixel count normalized by expected cell size (soma region only)."""
+    """The pixel count normalized by expected ROI size (soma region only)."""
 
     normalized_pixel_count_full: float = 0.0
-    """The pixel count normalized by expected cell size (full ROI)."""
+    """The pixel count normalized by expected ROI size (full ROI)."""
 
     # Optional extraction data (added during signal extraction).
     skewness: float | None = None
@@ -962,7 +962,7 @@ class ROIStatistics:
     def load_masks_only(masks_path: Path) -> list[ROIMask]:
         """Loads only the spatial ROIMask data from a masks .npz file.
 
-        Convenience method for the multi-day pipeline when only spatial data is needed.
+        Convenience method for the multi-recording pipeline when only spatial data is needed.
 
         Args:
             masks_path: The path to the masks .npz file.
@@ -1153,9 +1153,10 @@ class ExtractionData:
     def load_arrays(self, output_path: Path) -> None:
         """Loads ROI statistics and classification results from disk.
 
-        This method loads only ROI statistics and cell classification arrays, which are the extraction data needed
-        during pipeline processing (specifically for multi-day cell selection and tracking). Fluorescence traces and
-        colocalization data are not loaded because they are never needed during pipeline execution and consume
+        This method loads only ROI statistics and cell classification arrays, which are the extraction data
+        needed during pipeline processing (specifically for multi-recording ROI selection and tracking).
+        Fluorescence traces and colocalization data are not loaded because they are never needed during
+        pipeline execution and consume
         significant memory. Use load_results() to load all result arrays when needed for analysis or visualization.
 
         Args:
@@ -1195,7 +1196,7 @@ class ExtractionData:
         """Loads all extraction result arrays from disk.
 
         This method loads fluorescence traces, classification results, and colocalization data. Classification arrays
-        may already be loaded by load_arrays() (which loads them for multi-day pipeline use), in which case the
+        may already be loaded by load_arrays() (which loads them for multi-recording pipeline use), in which case the
         guarded loading here is a no-op. Fluorescence traces and colocalization data are not loaded by load_arrays()
         because they consume significant memory and are not needed during pipeline execution. Call this method when
         result data is needed for analysis or visualization.
@@ -1308,7 +1309,7 @@ class ExtractionData:
 
         This method mirrors load_results() but uses ``r+`` memory mapping for all .npy files instead of eager loading.
         This avoids loading the full array contents into memory, which is useful when reusing previously-generated data
-        (e.g., single-day outputs consumed by the multi-day pipeline).
+        (e.g., single-recording outputs consumed by the multi-recording pipeline).
 
         Args:
             output_path: The directory containing the result .npy files.
@@ -1424,7 +1425,7 @@ class TimingData:
 
 
 @dataclass
-class SingleDayRuntimeData(YamlConfig):
+class SingleRecordingRuntimeData(YamlConfig):
     """Aggregates all runtime data for a single plane."""
 
     output_path: Path | None = None
@@ -1471,8 +1472,8 @@ class SingleDayRuntimeData(YamlConfig):
         """Memory-maps all NumPy arrays from .npy files on disk in ``r+`` mode.
 
         This method opens each .npy file as a read-write memory-mapped array, avoiding full materialization in RAM.
-        Use this when reusing previously-generated data that does not need to be copied into memory (e.g., single-day
-        outputs consumed by the multi-day pipeline).
+        Use this when reusing previously-generated data that does not need to be copied into memory (e.g.,
+        single-recording outputs consumed by the multi-recording pipeline).
         """
         if self.output_path is None:
             return
@@ -1521,7 +1522,7 @@ class SingleDayRuntimeData(YamlConfig):
         yaml_copy.to_yaml(file_path=file_path)
 
     @classmethod
-    def load(cls, output_path: Path) -> SingleDayRuntimeData:
+    def load(cls, output_path: Path) -> SingleRecordingRuntimeData:
         """Deserializes runtime data from a YAML file without loading any NumPy arrays.
 
         After calling this method, arrays can be loaded individually per-child dataclass using the ``load_arrays()``
@@ -1532,8 +1533,8 @@ class SingleDayRuntimeData(YamlConfig):
             output_path: The directory containing the runtime_data.yaml file.
 
         Returns:
-            A SingleDayRuntimeData instance with all scalar fields deserialized. NumPy array fields remain None until
-            explicitly loaded.
+            A SingleRecordingRuntimeData instance with all scalar fields deserialized. NumPy array fields
+            remain None until explicitly loaded.
         """
         file_path = output_path / "runtime_data.yaml"
         return cls.from_yaml(file_path=file_path)
@@ -1571,12 +1572,12 @@ class CombinedData:
     """The width of the combined field of view in pixels."""
 
     tau: float = 0.0
-    """The timescale of the calcium indicator sensor in seconds, cached from the single-day configuration for use by
-    the multi-day extraction pipeline."""
+    """The timescale of the calcium indicator sensor in seconds, cached from the single-recording
+    configuration for use by the multi-recording extraction pipeline."""
 
     sampling_rate: float = 0.0
-    """The per-plane sampling rate in Hertz, cached from the single-day runtime for use by the multi-day extraction
-    pipeline."""
+    """The per-plane sampling rate in Hertz, cached from the single-recording runtime for use by the
+    multi-recording extraction pipeline."""
 
     plane_heights: NDArray[np.uint16] = field(default_factory=lambda: np.array([], dtype=np.uint16))
     """Per-plane frame heights in pixels."""

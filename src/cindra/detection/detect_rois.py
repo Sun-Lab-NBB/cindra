@@ -188,7 +188,7 @@ def detect(
     # Precomputes the effective detection threshold since both factors are constant across iterations.
     scaled_threshold = time_multiplier * peak_threshold
     message = (
-        f"Plane {plane_index} detection: estimated target cell diameter ~{int(spatial_scale_pixels)} pixels, "
+        f"Plane {plane_index} detection: estimated target ROI diameter ~{int(spatial_scale_pixels)} pixels, "
         f"using {frames.shape[0]} binned frames and a minimum peak activity threshold of {round(scaled_threshold, 2)}."
     )
     console.echo(message=message, level=LogLevel.INFO)
@@ -234,7 +234,7 @@ def detect(
 
         # Initial ROI seed.
         # Seeds the ROI as a square patch at the peak location. The patch size matches the spatial scale's filter size
-        # so that the initial footprint is proportional to the expected cell diameter at this scale.
+        # so that the initial footprint is proportional to the expected ROI diameter at this scale.
         y_pixels, x_pixels, pixel_weights = _create_initial_square(
             center_y=int(peak_y),
             center_x=int(peak_x),
@@ -250,7 +250,7 @@ def detect(
 
         # ROI growth.
         # Repeatedly extends the ROI boundary and re-estimates weights from the residual. Multiple passes allow the
-        # mask to converge to the cell's true spatial extent by incorporating increasingly distant correlated pixels.
+        # mask to converge to the ROI's true spatial extent by incorporating increasingly distant correlated pixels.
         for _extension_pass in range(extension_iterations):
             y_pixels, x_pixels, pixel_weights = _extend_iteratively(
                 y_pixels=y_pixels,
@@ -270,7 +270,7 @@ def detect(
 
         # Component splitting.
         # Tests whether a two-component model explains significantly more variance than the single-component model. If
-        # so, the ROI likely contains two overlapping cells and the dominant component is retained.
+        # so, the ROI likely contains two overlapping ROIs and the dominant component is retained.
         split_ratio, component_pack = _check_split_components(
             pixel_frames=frames[:, flat_indices],
             weights=pixel_weights,
@@ -294,7 +294,7 @@ def detect(
 
         # Residual subtraction.
         # Removes the detected ROI's contribution from the residual frames so that subsequent iterations detect new
-        # cells rather than re-detecting the same activity.
+        # ROIs rather than re-detecting the same activity.
         frames[np.ix_(active_frame_indices, flat_indices)] -= (
             time_projection[active_frame_indices][:, np.newaxis] * pixel_weights
         )

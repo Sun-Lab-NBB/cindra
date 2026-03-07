@@ -39,8 +39,9 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
         images in each context's runtime data.
 
     Args:
-        contexts: A list of RuntimeContext instances created by resolve_single_day_contexts(). Each context must have
-            valid configuration, acquisition parameters, and IOData with binary file paths configured.
+        contexts: A list of RuntimeContext instances created by resolve_single_recording_contexts(). Each
+            context must have valid configuration, acquisition parameters, and IOData with binary file paths
+            configured.
 
     Raises:
         ValueError: If contexts is empty or data_path is not configured.

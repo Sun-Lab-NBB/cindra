@@ -1,15 +1,15 @@
-"""Provides the processing pipeline orchestration logic for single-day and multi-day workflows."""
+"""Provides the processing pipeline orchestration logic for single-recording and multi-recording workflows."""
 
 from .pipeline import (
-    MultiDayJobNames,
-    SingleDayJobNames,
-    run_multi_day_pipeline,
-    run_single_day_pipeline,
+    MultiRecordingJobNames,
+    SingleRecordingJobNames,
+    run_multi_recording_pipeline,
+    run_single_recording_pipeline,
 )
 
 __all__ = [
-    "MultiDayJobNames",
-    "SingleDayJobNames",
-    "run_multi_day_pipeline",
-    "run_single_day_pipeline",
+    "MultiRecordingJobNames",
+    "SingleRecordingJobNames",
+    "run_multi_recording_pipeline",
+    "run_single_recording_pipeline",
 ]

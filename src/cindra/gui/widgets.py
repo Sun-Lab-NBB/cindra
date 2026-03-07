@@ -476,7 +476,7 @@ def _plot_multi_trace(
     y_minimum = 0.0
     average_pen = COLORS.silver
 
-    # Plots average trace at bottom when enough cells are selected.
+    # Plots average trace at bottom when enough ROIs are selected.
     if len(selected) > ROI_CONFIG.average_threshold:
         trace_box.plot(
             frame_indices,

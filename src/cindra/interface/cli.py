@@ -6,9 +6,9 @@ import click
 from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console
 
-from ..pipelines import run_multi_day_pipeline, run_single_day_pipeline
+from ..pipelines import run_multi_recording_pipeline, run_single_recording_pipeline
 from .mcp_server import run_server
-from ..dataclasses import PipelineType, MultiDayConfiguration, SingleDayConfiguration, detect_pipeline_type
+from ..dataclasses import PipelineType, MultiRecordingConfiguration, SingleRecordingConfiguration, detect_pipeline_type
 
 CONTEXT_SETTINGS = {"max_content_width": 120}
 """The Click context settings that ensure displayed help messages are formatted according to the Sun lab standard."""
@@ -32,7 +32,7 @@ def cindra_mcp(transport: str) -> None:
     """Starts the Model Context Protocol (MCP) server for agentic neural imaging data processing.
 
     The MCP server exposes tools that enable AI agents to discover recording data, execute pipelines,
-    monitor processing status, and manage batch operations for both single-day and multi-day workflows.
+    monitor processing status, and manage batch operations for both single-recording and multi-recording workflows.
     """
     run_server(transport=transport)  # type: ignore[arg-type]
 
@@ -41,7 +41,7 @@ def cindra_mcp(transport: str) -> None:
 @click.option(
     "-p",
     "--pipeline",
-    type=click.Choice(["single-day", "sd", "multi-day", "md"], case_sensitive=False),
+    type=click.Choice(["single-recording", "sd", "multi-recording", "md"], case_sensitive=False),
     required=True,
     help="The type of processing pipeline to generate the configuration file for.",
 )
@@ -68,18 +68,18 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     with the parameters specified inside the file.
     """
     # Normalizes shorthand aliases and resolves pipeline-specific parameters.
-    single_day = pipeline in ("single-day", "sd")
-    resolved_name = name if name is not None else ("cindra_sd_conf" if single_day else "cindra_md_conf")
+    single_recording = pipeline in ("single-recording", "sd")
+    resolved_name = name if name is not None else ("cindra_sd_conf" if single_recording else "cindra_md_conf")
     file_path = output_path.joinpath(resolved_name).with_suffix(".yaml")
 
     # Generates the precursor configuration file in the specified output directory.
-    config = SingleDayConfiguration() if single_day else MultiDayConfiguration()
+    config = SingleRecordingConfiguration() if single_recording else MultiRecordingConfiguration()
     config.save(file_path=file_path)
 
     message = (
-        f"Default {'single-day' if single_day else 'multi-day'} pipeline configuration file: generated in the "
-        f"{file_path.parent} directory. Modify the configuration parameters in the file to finish the configuration "
-        f"process."
+        f"Default {'single-recording' if single_recording else 'multi-recording'} pipeline configuration file: "
+        f"generated in the {file_path.parent} directory. Modify the configuration parameters in the file to finish "
+        f"the configuration process."
     )
     console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -135,7 +135,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     show_default=True,
     default=False,
     help=(
-        "[Single-day] Determines whether to resolve the binary files for plane-specific processing (step 1). "
+        "[Single-recording] Determines whether to resolve the binary files for plane-specific processing (step 1). "
         "This step prepares the data for further processing during step 2."
     ),
 )
@@ -146,8 +146,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     show_default=True,
     default=False,
     help=(
-        "[Single-day] Determines whether to process the target plane(s) to remove motion, discover ROIs, and extract "
-        "their fluorescence (step 2). This step aggregates most data processing logic of the pipeline."
+        "[Single-recording] Determines whether to process the target plane(s) to remove motion, discover ROIs,"
+        " and extract their fluorescence (step 2). This step aggregates most data processing logic of the"
+        " pipeline."
     ),
 )
 @click.option(
@@ -157,8 +158,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     show_default=True,
     default=False,
     help=(
-        "[Single-day] Determines whether to combine processed plane data into a uniform dataset (step 3). Note, this "
-        "step is required to later process the data as part of a multi-day pipeline."
+        "[Single-recording] Determines whether to combine processed plane data into a uniform dataset"
+        " (step 3). Note, this step is required to later process the data as part of a multi-recording"
+        " pipeline."
     ),
 )
 @click.option(
@@ -167,7 +169,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     type=int,
     default=-1,
     help=(
-        "[Single-day] The index of the plane to process when running the PROCESS step (2). Setting this to '-1' "
+        "[Single-recording] The index of the plane to process when running the PROCESS step (2). Setting this to '-1' "
         "(default value) processes all available planes sequentially."
     ),
 )
@@ -178,7 +180,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     required=False,
     default=None,
     help=(
-        "[Single-day] The path to the root directory that stores the processed recording's data. When provided, "
+        "[Single-recording] The path to the root directory that stores the processed recording's data. When provided, "
         "this path overrides the matching field in the pipeline's configuration file."
     ),
 )
@@ -189,7 +191,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     required=False,
     default=None,
     help=(
-        "[Single-day] The path to the root directory where to create the cindra's output hierarchy and store the "
+        "[Single-recording] The path to the root directory where to create the cindra's output hierarchy and store the "
         "processed data. When provided, this path overrides the matching field in the pipeline's configuration file."
     ),
 )
@@ -200,7 +202,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     show_default=True,
     default=False,
     help=(
-        "[Multi-day] Determines whether to discover ROIs trackable across days (recordings) (step 1). This step "
+        "[Multi-recording] Determines whether to discover ROIs trackable across recordings (step 1). This step "
         "discovers the candidates for the fluorescence extraction performed during the second processing step."
     ),
 )
@@ -211,8 +213,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     show_default=True,
     default=False,
     help=(
-        "[Multi-day] Determines whether to extract the fluorescence from ROIs tracked across days, identified "
-        "during the first processing step."
+        "[Multi-recording] Determines whether to extract the fluorescence from ROIs tracked across"
+        " recordings, identified during the first processing step."
     ),
 )
 @click.option(
@@ -222,7 +224,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     required=False,
     default=None,
     help=(
-        "[Multi-day] The unique identifier of the recording session to process when running the 'extract' step. If "
+        "[Multi-recording] The unique identifier of the recording to process when running the 'extract' step. If "
         "this argument is not provided, the pipeline processes all available recordings in the dataset."
     ),
 )
@@ -234,8 +236,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     multiple=True,
     required=False,
     help=(
-        "[Multi-day] The path to the recording processed with the single-day cindra pipeline to include in the "
-        "processed multi-day dataset. Specify this option multiple times to include multiple recording sessions "
+        "[Multi-recording] The path to the recording processed with the single-recording cindra pipeline"
+        " to include in the processed multi-recording dataset. Specify this option multiple times to include"
+        " multiple recordings "
         "(at least two required). When provided, these paths override the matching fields in the pipeline's "
         "configuration file."
     ),
@@ -258,15 +261,16 @@ def cindra_run(
 ) -> None:
     """Runs the cindra processing pipeline using the specified configuration file.
 
-    The pipeline type (single-day or multi-day) is automatically detected from the configuration file. When --job-id
-    is provided, only the matching job is executed and all step flags are ignored.
+    The pipeline type (single-recording or multi-recording) is automatically detected from the
+    configuration file. When --job-id is provided, only the matching job is executed and all step flags
+    are ignored.
     """
     # Detects the pipeline type from the configuration file and dispatches to the appropriate pipeline runner.
     pipeline_type = detect_pipeline_type(file_path=input_path)
 
-    if pipeline_type == PipelineType.SINGLE_DAY:
+    if pipeline_type == PipelineType.SINGLE_RECORDING:
         # Writes CLI overrides into the configuration file before running the pipeline.
-        configuration = SingleDayConfiguration.from_yaml(file_path=input_path)
+        configuration = SingleRecordingConfiguration.from_yaml(file_path=input_path)
         configuration.runtime.parallel_workers = workers
         configuration.runtime.display_progress_bars = progress_bars
         if data_path is not None:
@@ -275,7 +279,7 @@ def cindra_run(
             configuration.file_io.output_path = output_path
         configuration.save(file_path=input_path)
 
-        run_single_day_pipeline(
+        run_single_recording_pipeline(
             configuration_path=input_path,
             job_id=job_id,
             binarize=binarize,
@@ -285,17 +289,17 @@ def cindra_run(
         )
     else:
         # Writes CLI overrides into the configuration file before running the pipeline.
-        multi_day_configuration = MultiDayConfiguration.from_yaml(file_path=input_path)
+        multi_recording_configuration = MultiRecordingConfiguration.from_yaml(file_path=input_path)
         if recording_paths:
-            multi_day_configuration.session_io.session_directories = tuple(natsorted(recording_paths))
-        multi_day_configuration.runtime.parallel_workers = workers
-        multi_day_configuration.runtime.display_progress_bars = progress_bars
-        multi_day_configuration.save(file_path=input_path)
+            multi_recording_configuration.recording_io.recording_directories = tuple(natsorted(recording_paths))
+        multi_recording_configuration.runtime.parallel_workers = workers
+        multi_recording_configuration.runtime.display_progress_bars = progress_bars
+        multi_recording_configuration.save(file_path=input_path)
 
-        run_multi_day_pipeline(
+        run_multi_recording_pipeline(
             configuration_path=input_path,
             job_id=job_id,
             discover=discover,
             extract=extract,
-            target_session=target_recording,
+            target_recording=target_recording,
         )

@@ -129,7 +129,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     heights = np.array([context.runtime.io.frame_height for context in plane_contexts], dtype=np.uint16)
     widths = np.array([context.runtime.io.frame_width for context in plane_contexts], dtype=np.uint16)
 
-    # Calculates the overall height and width of the entire recording plane after accounting for plane displacement.
+    # Calculates the overall height and width of the entire combined plane after accounting for plane displacement.
     combined_height = int(np.amax(y_offsets + heights))
     combined_width = int(np.amax(x_offsets + widths))
 
@@ -192,7 +192,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
     # Loops over all available planes to process each plane's data.
     for plane_index, context in enumerate(plane_contexts):
-        # Skips planes without ROI statistics (no detected cells).
+        # Skips planes without ROI statistics (no detected ROIs).
         if context.runtime.extraction.roi_statistics is None:
             continue
 
@@ -299,9 +299,9 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         plane_cell_classification = context.runtime.extraction.cell_classification
 
         # Pads fluorescence data if this plane has fewer frames than the maximum.
-        cell_count, frame_count = plane_cell_fluorescence.shape
+        roi_count, frame_count = plane_cell_fluorescence.shape
         if frame_count < max_frame_count:
-            padding = np.zeros((cell_count, max_frame_count - frame_count), dtype=np.float32)
+            padding = np.zeros((roi_count, max_frame_count - frame_count), dtype=np.float32)
             plane_cell_fluorescence = np.concatenate((plane_cell_fluorescence, padding), axis=1)
             plane_neuropil_fluorescence = np.concatenate((plane_neuropil_fluorescence, padding), axis=1)
             plane_subtracted_fluorescence = np.concatenate((plane_subtracted_fluorescence, padding), axis=1)
@@ -333,10 +333,10 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
                 and plane_spikes_channel_2 is not None
                 and plane_cell_classification_channel_2 is not None
             ):
-                cell_count_channel_2, frame_count_channel_2 = plane_cell_fluorescence_channel_2.shape
+                roi_count_channel_2, frame_count_channel_2 = plane_cell_fluorescence_channel_2.shape
                 if frame_count_channel_2 < max_frame_count:
                     padding_channel_2 = np.zeros(
-                        (cell_count_channel_2, max_frame_count - frame_count_channel_2), dtype=np.float32
+                        (roi_count_channel_2, max_frame_count - frame_count_channel_2), dtype=np.float32
                     )
                     plane_cell_fluorescence_channel_2 = np.concatenate(
                         (plane_cell_fluorescence_channel_2, padding_channel_2), axis=1
@@ -421,8 +421,8 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         cell_colocalization=combined_cell_colocalization,
     )
 
-    # Gathers registered binary paths for each plane so the multi-day extraction pipeline can construct
-    # BinaryFileCombined without reloading single-day contexts. These paths are guaranteed to be set after
+    # Gathers registered binary paths for each plane so the multi-recording extraction pipeline can construct
+    # BinaryFileCombined without reloading single-recording contexts. These paths are guaranteed to be set after
     # registration completes, so None values indicate a corrupted or incomplete pipeline run.
     channel_1_paths: list[Path] = []
     for context in plane_contexts:
@@ -455,7 +455,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         registered_binary_paths_channel_2 = tuple(channel_2_paths)
 
     # Builds and returns the CombinedData instance. Caches per-plane geometry, binary paths, tau, and sampling_rate
-    # from the single-day contexts so that the multi-day extraction pipeline can access them directly.
+    # from the single-recording contexts so that the multi-recording extraction pipeline can access them directly.
     combined_data = CombinedData(
         detection=detection,
         extraction=extraction,

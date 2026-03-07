@@ -8,14 +8,14 @@ from dataclasses import dataclass
 from natsort import natsorted
 from ataraxis_base_utilities import console, ensure_directory_exists
 
-from .multi_day_data import MultiDayRuntimeData
-from .single_day_data import CombinedData, SingleDayRuntimeData
-from .multi_day_configuration import MultiDayConfiguration
-from .single_day_configuration import AcquisitionParameters, SingleDayConfiguration
+from .multi_recording_data import MultiRecordingRuntimeData
+from .single_recording_data import CombinedData, SingleRecordingRuntimeData
+from .multi_recording_configuration import MultiRecordingConfiguration
+from .single_recording_configuration import AcquisitionParameters, SingleRecordingConfiguration
 
 
-def _load_single_day_runtime(plane_directory: Path) -> SingleDayRuntimeData:
-    """Loads a SingleDayRuntimeData instance and corrects stale paths if the dataset was relocated.
+def _load_single_recording_runtime(plane_directory: Path) -> SingleRecordingRuntimeData:
+    """Loads a SingleRecordingRuntimeData instance and corrects stale paths if the dataset was relocated.
 
     When a dataset is moved between machines, the paths cached in the plane's runtime YAML no longer match the actual
     directory structure. This function detects the mismatch by comparing the cached output_path to the known-correct
@@ -26,9 +26,10 @@ def _load_single_day_runtime(plane_directory: Path) -> SingleDayRuntimeData:
         plane_directory: The actual on-disk path to the plane directory (e.g., ``cindra/plane_0``).
 
     Returns:
-        A fully-loaded SingleDayRuntimeData instance with all paths and arrays resolved against the correct location.
+        A fully-loaded SingleRecordingRuntimeData instance with all paths and arrays resolved against the
+        correct location.
     """
-    runtime = SingleDayRuntimeData.load(output_path=plane_directory)
+    runtime = SingleRecordingRuntimeData.load(output_path=plane_directory)
 
     if runtime.output_path is not None and runtime.output_path != plane_directory:
         old_prefix, new_prefix = _compute_relocation_prefixes(old_path=runtime.output_path, new_path=plane_directory)
@@ -38,7 +39,7 @@ def _load_single_day_runtime(plane_directory: Path) -> SingleDayRuntimeData:
         runtime.save(output_path=runtime.output_path)
 
         # Reloads the runtime from the corrected YAML so that arrays are resolved against the new paths.
-        runtime = SingleDayRuntimeData.load(output_path=plane_directory)
+        runtime = SingleRecordingRuntimeData.load(output_path=plane_directory)
 
     # Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
     return runtime
@@ -73,25 +74,25 @@ def _compute_relocation_prefixes(old_path: Path, new_path: Path) -> tuple[Path, 
     return old_prefix, new_prefix
 
 
-def _relocate_cross_session_path(path: Path, old_prefix: Path, new_prefix: Path) -> Path:
-    """Relocates a dataset output path from a different session that does not share the entry session's prefix.
+def _relocate_cross_recording_path(path: Path, old_prefix: Path, new_prefix: Path) -> Path:
+    """Relocates a dataset output path from a different recording that does not share the entry recording's prefix.
 
-    Multi-day datasets store output paths for all sessions in each session's runtime data. When the entry session's
-    prefix is used for relocation, paths belonging to other sessions fail ``relative_to`` because they contain a
-    different session-specific directory segment (e.g., a different timestamp-based session directory). This function
-    handles that case by splitting the cross-session path at the same depth as the entry prefix, substituting the
-    differing session-specific segments into the new prefix, and reattaching the trailing suffix.
+    Multi-recording datasets store output paths for all recordings in each recording's runtime data. When the entry
+    recording's prefix is used for relocation, paths belonging to other recordings fail ``relative_to`` because they
+    contain a different recording-specific directory segment (e.g., a different timestamp-based recording directory).
+    This function handles that case by splitting the cross-recording path at the same depth as the entry prefix,
+    substituting the differing recording-specific segments into the new prefix, and reattaching the trailing suffix.
 
     Args:
-        path: The stale cross-session path to relocate.
-        old_prefix: The entry session's old prefix computed by ``_compute_relocation_prefixes``.
-        new_prefix: The entry session's new prefix computed by ``_compute_relocation_prefixes``.
+        path: The stale cross-recording path to relocate.
+        old_prefix: The entry recording's old prefix computed by ``_compute_relocation_prefixes``.
+        new_prefix: The entry recording's new prefix computed by ``_compute_relocation_prefixes``.
 
     Returns:
-        The relocated cross-session path with the correct new prefix and session-specific segments.
+        The relocated cross-recording path with the correct new prefix and recording-specific segments.
 
     Raises:
-        ValueError: If the cross-session path has fewer segments than the entry session prefix, indicating an
+        ValueError: If the cross-recording path has fewer segments than the entry recording prefix, indicating an
             incompatible directory structure.
     """
     path_parts = path.parts
@@ -99,18 +100,18 @@ def _relocate_cross_session_path(path: Path, old_prefix: Path, new_prefix: Path)
 
     if len(path_parts) < len(old_prefix_parts):
         message = (
-            f"Unable to relocate cross-session path {path}. The path has {len(path_parts)} segments but the entry "
-            f"session prefix has {len(old_prefix_parts)} segments, indicating an incompatible directory structure."
+            f"Unable to relocate cross-recording path {path}. The path has {len(path_parts)} segments but the entry "
+            f"recording prefix has {len(old_prefix_parts)} segments, indicating an incompatible directory structure."
         )
         console.error(message=message, error=ValueError)
 
-    # Splits the cross-session path into a base (same depth as old_prefix) and a trailing suffix.
+    # Splits the cross-recording path into a base (same depth as old_prefix) and a trailing suffix.
     cross_base_parts = path_parts[: len(old_prefix_parts)]
     suffix_parts = path_parts[len(old_prefix_parts) :]
 
-    # Identifies directory segments that differ between the entry session's old prefix and the cross-session base,
+    # Identifies directory segments that differ between the entry recording's old prefix and the cross-recording base,
     # then applies those differing segments to the new prefix at the corresponding positions. This preserves the
-    # structural transformation (e.g., directory insertion or rename) while swapping in the correct session-specific
+    # structural transformation (e.g., directory insertion or rename) while swapping in the correct recording-specific
     # segments.
     relocated_prefix_parts = list(new_prefix.parts)
     for index, (old_part, cross_part) in enumerate(zip(old_prefix_parts, cross_base_parts, strict=False)):
@@ -124,13 +125,13 @@ def _relocate_cross_session_path(path: Path, old_prefix: Path, new_prefix: Path)
 
 
 def _relocate_runtime_paths(
-    runtime: SingleDayRuntimeData | MultiDayRuntimeData, old_prefix: Path, new_prefix: Path
+    runtime: SingleRecordingRuntimeData | MultiRecordingRuntimeData, old_prefix: Path, new_prefix: Path
 ) -> None:
     """Applies a prefix substitution to all cached paths in a runtime data instance.
 
     Args:
-        runtime: The runtime data instance whose paths will be updated in-place. Accepts either SingleDayRuntimeData
-            or MultiDayRuntimeData instances.
+        runtime: The runtime data instance whose paths will be updated in-place. Accepts either
+            SingleRecordingRuntimeData or MultiRecordingRuntimeData instances.
         old_prefix: The stale path prefix to replace.
         new_prefix: The correct path prefix on the current filesystem.
     """
@@ -138,9 +139,9 @@ def _relocate_runtime_paths(
         runtime.output_path = new_prefix / runtime.output_path.relative_to(old_prefix)
 
     # Paths that already reside under new_prefix are skipped to prevent double-relocation. This occurs when some
-    # paths in the YAML were updated independently (e.g., single-day pipeline re-ran after a directory rename) while
-    # others remained stale.
-    if isinstance(runtime, SingleDayRuntimeData):
+    # paths in the YAML were updated independently (e.g., single-recording pipeline re-ran after a directory
+    # rename) while others remained stale.
+    if isinstance(runtime, SingleRecordingRuntimeData):
         if runtime.io.registered_binary_path is not None and not runtime.io.registered_binary_path.is_relative_to(
             new_prefix
         ):
@@ -158,9 +159,9 @@ def _relocate_runtime_paths(
         if runtime.io.data_path is not None and not runtime.io.data_path.is_relative_to(new_prefix):
             runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
 
-        # Relocates dataset_output_paths with cross-session fallback. Multi-day datasets store paths for all
-        # sessions, but the prefix is session-specific. Paths from other sessions fail relative_to and are handled
-        # by _relocate_cross_session_path which substitutes the differing session-specific segments.
+        # Relocates dataset_output_paths with cross-recording fallback. Multi-recording datasets store paths for all
+        # recordings, but the prefix is recording-specific. Paths from other recordings fail relative_to and are handled
+        # by _relocate_cross_recording_path which substitutes the differing recording-specific segments.
         relocated_paths: list[Path] = []
         for path in runtime.io.dataset_output_paths:
             if path.is_relative_to(new_prefix):
@@ -170,18 +171,18 @@ def _relocate_runtime_paths(
                 relocated_paths.append(new_prefix / path.relative_to(old_prefix))
             except ValueError:
                 relocated_paths.append(
-                    _relocate_cross_session_path(path=path, old_prefix=old_prefix, new_prefix=new_prefix)
+                    _relocate_cross_recording_path(path=path, old_prefix=old_prefix, new_prefix=new_prefix)
                 )
         runtime.io.dataset_output_paths = tuple(relocated_paths)
 
 
-def _load_multiday_data(runtime: MultiDayRuntimeData) -> None:
-    """Loads CombinedData metadata (scalars only) onto a deserialized MultiDayRuntimeData instance.
+def _load_multi_recording_data(runtime: MultiRecordingRuntimeData) -> None:
+    """Loads CombinedData metadata (scalars only) onto a deserialized MultiRecordingRuntimeData instance.
 
     Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
 
     Args:
-        runtime: A MultiDayRuntimeData instance that has been deserialized from YAML but has not had CombinedData
+        runtime: A MultiRecordingRuntimeData instance that has been deserialized from YAML but has not had CombinedData
             loaded yet.
     """
     if runtime.combined_data is None and runtime.io.data_path is not None:
@@ -190,7 +191,8 @@ def _load_multiday_data(runtime: MultiDayRuntimeData) -> None:
 
 @dataclass
 class RuntimeContext:
-    """Combines configuration, acquisition parameters, and runtime data used in the single-day processing pipeline.
+    """Combines configuration, acquisition parameters, and runtime data used in the single-recording
+    processing pipeline.
 
     Notes:
         This class provides a unified interface for pipeline functions to access user configuration (immutable),
@@ -201,14 +203,14 @@ class RuntimeContext:
         acquisition fields are shared across all planes, while the runtime field contains plane-specific data.
     """
 
-    configuration: SingleDayConfiguration
+    configuration: SingleRecordingConfiguration
     """The user-defined processing configuration, which remains immutable during processing."""
 
     acquisition: AcquisitionParameters
     """The acquisition parameters loaded from the input data's JSON file. This describes the recording setup including
     frame rate, plane count, channel count, and MROI geometry if applicable."""
 
-    runtime: SingleDayRuntimeData
+    runtime: SingleRecordingRuntimeData
     """The runtime data, which is computed and updated by pipeline stages."""
 
     def save_shared(self) -> None:
@@ -262,7 +264,7 @@ class RuntimeContext:
         array loading succeeds.
 
         Args:
-            root_path: The path to the session's root processed data directory. The method searches
+            root_path: The path to the recording's root processed data directory. The method searches
                 recursively for configuration.yaml to locate the cindra output directory.
             plane_index: The index of the plane to load. Use -1 to load all available planes.
 
@@ -280,7 +282,7 @@ class RuntimeContext:
         if len(matches) == 0:
             message = (
                 f"Unable to load RuntimeContext. No configuration.yaml file was found under {root_path}. "
-                f"Ensure the single-day pipeline has been run for this session."
+                f"Ensure the single-recording pipeline has been run for this recording."
             )
             console.error(message=message, error=FileNotFoundError)
 
@@ -303,7 +305,7 @@ class RuntimeContext:
             )
             console.error(message=message, error=FileNotFoundError)
 
-        config = SingleDayConfiguration.load(file_path=config_path)
+        config = SingleRecordingConfiguration.load(file_path=config_path)
         acquisition = AcquisitionParameters.from_yaml(file_path=acquisition_path)
 
         if plane_index == -1:
@@ -312,7 +314,7 @@ class RuntimeContext:
             contexts: list[RuntimeContext] = []
 
             for plane_directory in plane_directories:
-                runtime = _load_single_day_runtime(plane_directory=plane_directory)
+                runtime = _load_single_recording_runtime(plane_directory=plane_directory)
                 contexts.append(cls(configuration=config, acquisition=acquisition, runtime=runtime))
 
             return contexts
@@ -325,35 +327,35 @@ class RuntimeContext:
             )
             console.error(message=message, error=FileNotFoundError)
 
-        runtime = _load_single_day_runtime(plane_directory=plane_path)
+        runtime = _load_single_recording_runtime(plane_directory=plane_path)
         return cls(configuration=config, acquisition=acquisition, runtime=runtime)
 
 
 @dataclass
-class MultiDayRuntimeContext:
-    """Combines configuration and runtime data used in the multi-day processing pipeline.
+class MultiRecordingRuntimeContext:
+    """Combines configuration and runtime data used in the multi-recording processing pipeline.
 
     Notes:
-        This class provides a unified interface for multi-day pipeline functions to access user configuration
-        (immutable) and per-session runtime data (computed during processing). It replaces the legacy ops dictionary
-        pattern used in the original multi-day implementation with a type-safe structure.
+        This class provides a unified interface for multi-recording pipeline functions to access user configuration
+        (immutable) and per-recording runtime data (computed during processing). It replaces the legacy ops dictionary
+        pattern used in the original multi-recording implementation with a type-safe structure.
 
-        Each MultiDayRuntimeContext instance represents a single session. The configuration is shared across all
-        session contexts, while the runtime field contains session-specific data. This mirrors the RuntimeContext
+        Each MultiRecordingRuntimeContext instance represents a single recording. The configuration is shared across all
+        recording contexts, while the runtime field contains recording-specific data. This mirrors the RuntimeContext
         pattern where each instance represents a single plane.
     """
 
-    configuration: MultiDayConfiguration
+    configuration: MultiRecordingConfiguration
     """The user-defined processing configuration, which remains immutable during processing."""
 
-    runtime: MultiDayRuntimeData
-    """The per-session runtime data, which is computed and updated by pipeline stages."""
+    runtime: MultiRecordingRuntimeData
+    """The per-recording runtime data, which is computed and updated by pipeline stages."""
 
     def save_shared(self) -> None:
-        """Saves the shared configuration to the main session's output directory.
+        """Saves the shared configuration to the main recording's output directory.
 
-        This method saves the immutable configuration to the first session's multiday directory. It should be called
-        once at the start of processing.
+        This method saves the immutable configuration to the first recording's multi_recording directory. It
+        should be called once at the start of processing.
 
         Raises:
             ValueError: If output_path is not set in the runtime data.
@@ -365,15 +367,15 @@ class MultiDayRuntimeContext:
             )
             console.error(message=message, error=ValueError)
 
-        main_session_path = self.runtime.io.dataset_output_paths[0]
-        ensure_directory_exists(main_session_path)
+        main_recording_path = self.runtime.io.dataset_output_paths[0]
+        ensure_directory_exists(main_recording_path)
 
-        self.configuration.save(file_path=main_session_path / "multiday_configuration.yaml")
+        self.configuration.save(file_path=main_recording_path / "multi_recording_configuration.yaml")
 
     def save_runtime(self) -> None:
-        """Saves this session's runtime data to its output directory.
+        """Saves this recording's runtime data to its output directory.
 
-        This method uses self.runtime.output_path as the save location. This directory is session-specific.
+        This method uses self.runtime.output_path as the save location. This directory is recording-specific.
 
         Raises:
             ValueError: If output_path is not set in the runtime data.
@@ -388,61 +390,63 @@ class MultiDayRuntimeContext:
         self.runtime.save(output_path=self.runtime.output_path)
 
     @classmethod
-    def load(cls, root_path: Path, session_index: int = -1) -> MultiDayRuntimeContext | list[MultiDayRuntimeContext]:
-        """Loads one or more previously-saved MultiDayRuntimeContext instances from a session's data directory.
+    def load(
+        cls, root_path: Path, recording_index: int = -1
+    ) -> MultiRecordingRuntimeContext | list[MultiRecordingRuntimeContext]:
+        """Loads one or more previously-saved MultiRecordingRuntimeContext instances from a recording's data directory.
 
-        Searches root_path recursively for a multiday_runtime_data.yaml file, loads that session's runtime data,
-        then uses its stored dataset_output_paths to reconstruct the full dataset hierarchy. If the dataset was
+        Searches root_path recursively for a multi_recording_runtime_data.yaml file, loads that recording's runtime
+        data, then uses its stored dataset_output_paths to reconstruct the full dataset hierarchy. If the dataset was
         moved to a different location (e.g., transferred between machines), all cached absolute paths are
         automatically relocated to match the new directory structure.
 
         Args:
-            root_path: The path to any dataset session's root processed data directory. The method searches
-                recursively for the multiday_runtime_data.yaml file within this directory tree.
-            session_index: The index of the session to load. Use -1 to load all available sessions.
+            root_path: The path to any dataset recording's root processed data directory. The method searches
+                recursively for the multi_recording_runtime_data.yaml file within this directory tree.
+            recording_index: The index of the recording to load. Use -1 to load all available recordings.
 
         Returns:
-            A single MultiDayRuntimeContext if session_index >= 0, or a list of all MultiDayRuntimeContext instances
-            if session_index is -1.
+            A single MultiRecordingRuntimeContext if recording_index >= 0, or a list of all
+            MultiRecordingRuntimeContext instances if recording_index is -1.
 
         Raises:
-            FileNotFoundError: If no multiday_runtime_data.yaml is found, or configuration files are missing.
-            RuntimeError: If multiple multiday_runtime_data.yaml files are found under root_path.
-            IndexError: If session_index is out of range.
+            FileNotFoundError: If no multi_recording_runtime_data.yaml is found, or configuration files are missing.
+            RuntimeError: If multiple multi_recording_runtime_data.yaml files are found under root_path.
+            IndexError: If recording_index is out of range.
         """
-        # Discovers the multiday_runtime_data.yaml file within the root_path directory tree.
-        matches = list(root_path.rglob("multiday_runtime_data.yaml"))
+        # Discovers the multi_recording_runtime_data.yaml file within the root_path directory tree.
+        matches = list(root_path.rglob("multi_recording_runtime_data.yaml"))
 
         if len(matches) == 0:
             message = (
-                f"Unable to load MultiDayRuntimeContext. No multiday_runtime_data.yaml file was found under "
-                f"{root_path}. Ensure the multi-day pipeline has been run for this session."
+                f"Unable to load MultiRecordingRuntimeContext. No multi_recording_runtime_data.yaml file was "
+                f"found under {root_path}. Ensure the multi-recording pipeline has been run for this recording."
             )
             console.error(message=message, error=FileNotFoundError)
 
         if len(matches) > 1:
             message = (
-                f"Unable to load MultiDayRuntimeContext. Found {len(matches)} multiday_runtime_data.yaml files "
-                f"under {root_path}, but expected exactly one."
+                f"Unable to load MultiRecordingRuntimeContext. Found {len(matches)} "
+                f"multi_recording_runtime_data.yaml files under {root_path}, but expected exactly one."
             )
             console.error(message=message, error=RuntimeError)
 
         resolved_output_path = matches[0].parent
 
-        # Loads the entry-point session's runtime to access dataset_output_paths.
-        entry_runtime = MultiDayRuntimeData.load(output_path=resolved_output_path)
+        # Loads the entry-point recording's runtime to access dataset_output_paths.
+        entry_runtime = MultiRecordingRuntimeData.load(output_path=resolved_output_path)
         output_paths = entry_runtime.io.dataset_output_paths
 
         if not output_paths:
             message = (
-                f"Unable to load MultiDayRuntimeContext. The runtime data at {resolved_output_path} does not "
-                f"contain dataset_output_paths. Ensure the data was saved by resolve_multiday_contexts()."
+                f"Unable to load MultiRecordingRuntimeContext. The runtime data at {resolved_output_path} does not "
+                f"contain dataset_output_paths. Ensure the data was saved by resolve_multi_recording_contexts()."
             )
             console.error(message=message, error=FileNotFoundError)
 
         # Detects whether the dataset was moved by comparing the resolved path to the cached output_path. If they
-        # differ, computes a prefix substitution, relocates and re-saves ALL sessions (both multi-day and underlying
-        # single-day data) so future loads find correct paths.
+        # differ, computes a prefix substitution, relocates and re-saves ALL recordings (both multi-recording
+        # and underlying single-recording data) so future loads find correct paths.
         if entry_runtime.output_path is not None and entry_runtime.output_path != resolved_output_path:
             old_prefix, new_prefix = _compute_relocation_prefixes(
                 old_path=entry_runtime.output_path, new_path=resolved_output_path
@@ -450,79 +454,81 @@ class MultiDayRuntimeContext:
             _relocate_runtime_paths(runtime=entry_runtime, old_prefix=old_prefix, new_prefix=new_prefix)
             output_paths = entry_runtime.io.dataset_output_paths
 
-            # Persists corrected paths for every session's multi-day data and underlying single-day data. The entry
-            # session has already been relocated in-place above. Other sessions are loaded (with stale YAML content),
-            # relocated, and saved. Single-day plane data is relocated by calling _load_single_day_runtime() which
-            # detects the path mismatch and persists corrected paths.
+            # Persists corrected paths for every recording's multi-recording data and underlying
+            # single-recording data. The entry recording has already been relocated in-place above. Other
+            # recordings are loaded (with stale YAML content), relocated, and saved. Single-recording plane
+            # data is relocated by calling _load_single_recording_runtime() which detects the path mismatch
+            # and persists corrected paths.
             entry_runtime.save(output_path=entry_runtime.output_path)
             if entry_runtime.io.data_path is not None:
                 for plane_dir in entry_runtime.io.data_path.glob("plane_*"):
                     if plane_dir.is_dir() and (plane_dir / "runtime_data.yaml").exists():
-                        _load_single_day_runtime(plane_directory=plane_dir)
+                        _load_single_recording_runtime(plane_directory=plane_dir)
 
-            for session_output_path in output_paths:
-                if session_output_path == resolved_output_path:
+            for recording_output_path in output_paths:
+                if recording_output_path == resolved_output_path:
                     continue
 
-                # Computes per-session relocation prefixes instead of reusing the entry session's prefix. Each
-                # session has its own session-specific directory segment, so cross-session prefix substitution fails.
-                other_runtime = MultiDayRuntimeData.load(output_path=session_output_path)
-                if other_runtime.output_path is not None and other_runtime.output_path != session_output_path:
-                    session_old_prefix, session_new_prefix = _compute_relocation_prefixes(
-                        old_path=other_runtime.output_path, new_path=session_output_path
+                # Computes per-recording relocation prefixes instead of reusing the entry recording's prefix. Each
+                # recording has its own recording-specific directory segment, so cross-recording prefix
+                # substitution fails.
+                other_runtime = MultiRecordingRuntimeData.load(output_path=recording_output_path)
+                if other_runtime.output_path is not None and other_runtime.output_path != recording_output_path:
+                    recording_old_prefix, recording_new_prefix = _compute_relocation_prefixes(
+                        old_path=other_runtime.output_path, new_path=recording_output_path
                     )
                     _relocate_runtime_paths(
-                        runtime=other_runtime, old_prefix=session_old_prefix, new_prefix=session_new_prefix
+                        runtime=other_runtime, old_prefix=recording_old_prefix, new_prefix=recording_new_prefix
                     )
-                    other_runtime.save(output_path=session_output_path)
+                    other_runtime.save(output_path=recording_output_path)
 
                 if other_runtime.io.data_path is not None:
                     for plane_dir in other_runtime.io.data_path.glob("plane_*"):
                         if plane_dir.is_dir() and (plane_dir / "runtime_data.yaml").exists():
-                            _load_single_day_runtime(plane_directory=plane_dir)
+                            _load_single_recording_runtime(plane_directory=plane_dir)
 
             # Reloads the entry runtime from the corrected YAML so that paths are resolved against the new location.
-            entry_runtime = MultiDayRuntimeData.load(output_path=resolved_output_path)
+            entry_runtime = MultiRecordingRuntimeData.load(output_path=resolved_output_path)
             output_paths = entry_runtime.io.dataset_output_paths
 
-        # Loads configuration from the first output path (the main session after natural sorting).
-        config_path = output_paths[0] / "multiday_configuration.yaml"
+        # Loads configuration from the first output path (the main recording after natural sorting).
+        config_path = output_paths[0] / "multi_recording_configuration.yaml"
         if not config_path.exists():
             message = (
-                f"Unable to load MultiDayRuntimeContext. Configuration file does not exist at the expected "
+                f"Unable to load MultiRecordingRuntimeContext. Configuration file does not exist at the expected "
                 f"path: {config_path}."
             )
             console.error(message=message, error=FileNotFoundError)
-        configuration = MultiDayConfiguration.load(file_path=config_path)
+        configuration = MultiRecordingConfiguration.load(file_path=config_path)
 
         # Eagerly loads arrays and CombinedData onto the entry runtime before returning it.
-        _load_multiday_data(entry_runtime)
+        _load_multi_recording_data(entry_runtime)
 
-        if session_index == -1:
-            # Loads all sessions. Reuses the already-loaded entry runtime to avoid redundant I/O.
-            contexts: list[MultiDayRuntimeContext] = []
+        if recording_index == -1:
+            # Loads all recordings. Reuses the already-loaded entry runtime to avoid redundant I/O.
+            contexts: list[MultiRecordingRuntimeContext] = []
             for output_path in output_paths:
                 if output_path == resolved_output_path:
                     contexts.append(cls(configuration=configuration, runtime=entry_runtime))
                 else:
-                    runtime = MultiDayRuntimeData.load(output_path=output_path)
-                    _load_multiday_data(runtime)
+                    runtime = MultiRecordingRuntimeData.load(output_path=output_path)
+                    _load_multi_recording_data(runtime)
                     contexts.append(cls(configuration=configuration, runtime=runtime))
             return contexts
 
-        # Loads a specific session.
-        if session_index < 0 or session_index >= len(output_paths):
+        # Loads a specific recording.
+        if recording_index < 0 or recording_index >= len(output_paths):
             message = (
-                f"Unable to load MultiDayRuntimeContext. Session index {session_index} is out of range. "
+                f"Unable to load MultiRecordingRuntimeContext. Recording index {recording_index} is out of range. "
                 f"Valid range is 0 to {len(output_paths) - 1}."
             )
             console.error(message=message, error=IndexError)
 
         # Reuses the already-loaded entry runtime if it matches the requested index.
-        target_path = output_paths[session_index]
+        target_path = output_paths[recording_index]
         if target_path == resolved_output_path:
             return cls(configuration=configuration, runtime=entry_runtime)
 
-        runtime = MultiDayRuntimeData.load(output_path=target_path)
-        _load_multiday_data(runtime)
+        runtime = MultiRecordingRuntimeData.load(output_path=target_path)
+        _load_multi_recording_data(runtime)
         return cls(configuration=configuration, runtime=runtime)

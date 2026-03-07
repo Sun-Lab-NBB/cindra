@@ -11,7 +11,7 @@ from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console
 
 from ..io import BinaryFile, BinaryFileCombined
-from ..dataclasses import CombinedData, RuntimeContext, MultiDayRuntimeContext
+from ..dataclasses import CombinedData, RuntimeContext, MultiRecordingRuntimeContext
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -23,9 +23,9 @@ if TYPE_CHECKING:
         ROIStatistics,
         ExtractionData,
         RegistrationData,
-        MultiDayRuntimeData,
-        MultiDayTrackingData,
-        MultiDayRegistrationData,
+        MultiRecordingRuntimeData,
+        MultiRecordingTrackingData,
+        MultiRecordingRegistrationData,
     )
 
 EMPTY: NDArray[np.float32] = np.empty(0, dtype=np.float32)
@@ -33,8 +33,9 @@ EMPTY: NDArray[np.float32] = np.empty(0, dtype=np.float32)
 
 
 @dataclass
-class SingleDayData:
-    """Wraps the output of the single-day processing pipeline for a single recording and serves it to consumer GUIs.
+class SingleRecordingData:
+    """Wraps the output of the single-recording processing pipeline for a single recording and serves it to consumer
+    GUIs.
 
     Provides a switchable view over combined multi-plane data and individual per-plane data. All trace arrays are
     memory-mapped at initialization and routed to callers based on the active view index.
@@ -185,7 +186,7 @@ class SingleDayData:
         statistics = self._current_extraction.roi_statistics
         if statistics is None:
             console.error(
-                message="Unable to retrieve the ROI statistics for the current single-day view. The pipeline "
+                message="Unable to retrieve the ROI statistics for the current single-recording view. The pipeline "
                 "data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -208,7 +209,7 @@ class SingleDayData:
         value = self._current_extraction.cell_fluorescence
         if value is None:
             console.error(
-                message="Unable to retrieve the cell fluorescence traces for the current single-day view. "
+                message="Unable to retrieve the cell fluorescence traces for the current single-recording view. "
                 "The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -226,7 +227,7 @@ class SingleDayData:
         value = self._current_extraction.neuropil_fluorescence
         if value is None:
             console.error(
-                message="Unable to retrieve the neuropil fluorescence traces for the current single-day view. "
+                message="Unable to retrieve the neuropil fluorescence traces for the current single-recording view. "
                 "The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -244,7 +245,7 @@ class SingleDayData:
         value = self._current_extraction.subtracted_fluorescence
         if value is None:
             console.error(
-                message="Unable to retrieve the subtracted fluorescence traces for the current single-day view. "
+                message="Unable to retrieve the subtracted fluorescence traces for the current single-recording view. "
                 "The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -262,7 +263,7 @@ class SingleDayData:
         value = self._current_extraction.spikes
         if value is None:
             console.error(
-                message="Unable to retrieve the deconvolved spikes for the current single-day view. "
+                message="Unable to retrieve the deconvolved spikes for the current single-recording view. "
                 "The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -287,7 +288,7 @@ class SingleDayData:
         value = self._current_extraction.cell_classification
         if value is None:
             console.error(
-                message="Unable to retrieve the cell classification for the current single-day view. "
+                message="Unable to retrieve the cell classification for the current single-recording view. "
                 "The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -313,7 +314,7 @@ class SingleDayData:
         value = self._current_detection.mean_image
         if value is None:
             console.error(
-                message="Unable to retrieve the mean image for the current single-day view. The pipeline data "
+                message="Unable to retrieve the mean image for the current single-recording view. The pipeline data "
                 "is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -325,7 +326,7 @@ class SingleDayData:
         value = self._current_detection.enhanced_mean_image
         if value is None:
             console.error(
-                message="Unable to retrieve the enhanced mean image for the current single-day view. The "
+                message="Unable to retrieve the enhanced mean image for the current single-recording view. The "
                 "pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -337,7 +338,7 @@ class SingleDayData:
         value = self._current_detection.maximum_projection
         if value is None:
             console.error(
-                message="Unable to retrieve the maximum projection for the current single-day view. The pipeline "
+                message="Unable to retrieve the maximum projection for the current single-recording view. The pipeline "
                 "data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -349,7 +350,7 @@ class SingleDayData:
         value = self._current_detection.correlation_map
         if value is None:
             console.error(
-                message="Unable to retrieve the correlation map for the current single-day view. The pipeline "
+                message="Unable to retrieve the correlation map for the current single-recording view. The pipeline "
                 "data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -386,13 +387,13 @@ class SingleDayData:
         return value if value is not None else EMPTY
 
     @property
-    def cell_diameter(self) -> int:
-        """Returns the estimated cell diameter in pixels."""
-        return self._current_detection.cell_diameter
+    def roi_diameter(self) -> int:
+        """Returns the estimated ROI diameter in pixels."""
+        return self._current_detection.roi_diameter
 
     @property
     def aspect_ratio(self) -> float:
-        """Returns the aspect ratio of detected cells."""
+        """Returns the aspect ratio of detected ROIs."""
         return self._current_detection.aspect_ratio
 
     @property
@@ -477,7 +478,7 @@ class SingleDayData:
         value = self._contexts[0].runtime.io.output_path
         if value is None:
             console.error(
-                message="Unable to retrieve the output path for the single-day recording. The pipeline "
+                message="Unable to retrieve the output path for the single-recording recording. The pipeline "
                 "data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -537,19 +538,19 @@ class SingleDayData:
         self._view_index = view_index
 
     @classmethod
-    def from_data(cls, root_path: Path, view_index: int = -1) -> SingleDayData:
-        """Loads single-day pipeline data with combined and per-plane results.
+    def from_data(cls, root_path: Path, view_index: int = -1) -> SingleRecordingData:
+        """Loads single-recording pipeline data with combined and per-plane results.
 
         Loads all planes via ``RuntimeContext.load()`` and the combined data from the root cindra output directory. All
         trace arrays are memory-mapped from disk at initialization.
 
         Args:
-            root_path: The path to the session's root processed data directory. The method searches recursively for the
-                cindra output directory via ``RuntimeContext.load()``.
+            root_path: The path to the recording's root processed data directory. The method searches
+                recursively for the cindra output directory via ``RuntimeContext.load()``.
             view_index: The initial view index. -1 selects the combined view, 0+ selects a per-plane view.
 
         Returns:
-            A fully populated SingleDayData instance.
+            A fully populated SingleRecordingData instance.
         """
         console.echo(message=f"Loading a single recording's data from: {root_path}.")
         console.echo(message="Resolving runtime contexts...")
@@ -572,7 +573,9 @@ class SingleDayData:
                 context.runtime.extraction.memory_map_arrays(plane_output)
 
         if cindra_root is None:
-            message = "Unable to load single-day data. No plane output path was found in any loaded RuntimeContext."
+            message = (
+                "Unable to load single-recording data. No plane output path was found in any loaded RuntimeContext."
+            )
             console.error(message=message, error=FileNotFoundError)
 
         console.echo(message="Loading combined plane data...")
@@ -616,18 +619,19 @@ class SingleDayData:
 
 
 @dataclass
-class MultiDayData:
-    """Wraps the output of the multi-day processing pipeline for a single session and serves it to consumer GUIs.
+class MultiRecordingData:
+    """Wraps the output of the multi-recording processing pipeline for a single recording and serves it to
+    consumer GUIs.
 
-    Each instance represents one session within a multi-day dataset. All arrays are resolved eagerly at
+    Each instance represents one recording within a multi-recording dataset. All arrays are resolved eagerly at
     initialization: ``.npy`` files are memory-mapped and ``.npz`` files are loaded into RAM.
     """
 
-    _context: MultiDayRuntimeContext = field(repr=False)
-    """The multi-day runtime context for this session."""
+    _context: MultiRecordingRuntimeContext = field(repr=False)
+    """The multi-recording runtime context for this recording."""
 
     def __post_init__(self) -> None:
-        """Memory-maps registration arrays and eagerly loads tracking and extraction arrays for this session."""
+        """Memory-maps registration arrays and eagerly loads tracking and extraction arrays for this recording."""
         output_path = self._runtime.output_path
         if output_path is not None:
             self._runtime.registration.memory_map_arrays(output_path)
@@ -640,9 +644,9 @@ class MultiDayData:
             combined.extraction.memory_map_arrays(self._runtime.io.data_path)
 
     @property
-    def session_id(self) -> str:
+    def recording_id(self) -> str:
         """Returns the recording identifier string."""
-        return self._runtime.io.session_id
+        return self._runtime.io.recording_id
 
     @property
     def runtime_dataset_name(self) -> str:
@@ -651,11 +655,11 @@ class MultiDayData:
 
     @property
     def data_path(self) -> Path:
-        """Returns the session's single-day cindra root path."""
+        """Returns the recording's single-recording cindra root path."""
         value = self._runtime.io.data_path
         if value is None:
             console.error(
-                message=f"Unable to retrieve the data path for multi-day session '{self.session_id}'. "
+                message=f"Unable to retrieve the data path for multi-recording recording '{self.recording_id}'. "
                 f"The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -672,7 +676,7 @@ class MultiDayData:
         value = self._detection.mean_image
         if value is None:
             console.error(
-                message=f"Unable to retrieve the mean image for multi-day session '{self.session_id}'. "
+                message=f"Unable to retrieve the mean image for multi-recording recording '{self.recording_id}'. "
                 f"The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -684,8 +688,8 @@ class MultiDayData:
         value = self._detection.enhanced_mean_image
         if value is None:
             console.error(
-                message=f"Unable to retrieve the enhanced mean image for multi-day session '{self.session_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
+                message=f"Unable to retrieve the enhanced mean image for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
         return value
@@ -696,8 +700,8 @@ class MultiDayData:
         value = self._detection.maximum_projection
         if value is None:
             console.error(
-                message=f"Unable to retrieve the maximum projection for multi-day session '{self.session_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
+                message=f"Unable to retrieve the maximum projection for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
         return value
@@ -708,7 +712,7 @@ class MultiDayData:
         value = self._detection.correlation_map
         if value is None:
             console.error(
-                message=f"Unable to retrieve the correlation map for multi-day session '{self.session_id}'. "
+                message=f"Unable to retrieve the correlation map for multi-recording recording '{self.recording_id}'. "
                 f"The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -744,8 +748,8 @@ class MultiDayData:
         value = self._registration.transformed_mean_image
         if value is None:
             console.error(
-                message=f"Unable to retrieve the transformed mean image for multi-day session '{self.session_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
+                message=f"Unable to retrieve the transformed mean image for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
         return value
@@ -756,8 +760,8 @@ class MultiDayData:
         value = self._registration.transformed_enhanced_mean_image
         if value is None:
             console.error(
-                message=f"Unable to retrieve the transformed enhanced mean image for multi-day session "
-                f"'{self.session_id}'. This indicates incomplete or corrupt pipeline data.",
+                message=f"Unable to retrieve the transformed enhanced mean image for multi-recording recording "
+                f"'{self.recording_id}'. This indicates incomplete or corrupt pipeline data.",
                 error=RuntimeError,
             )
         return value
@@ -768,8 +772,8 @@ class MultiDayData:
         value = self._registration.transformed_maximum_projection
         if value is None:
             console.error(
-                message=f"Unable to retrieve the transformed maximum projection for multi-day session "
-                f"'{self.session_id}'. The pipeline data is incomplete or corrupt.",
+                message=f"Unable to retrieve the transformed maximum projection for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
         return value
@@ -798,11 +802,11 @@ class MultiDayData:
         all_masks = self._combined.extraction.roi_statistics
         if all_masks is None:
             console.error(
-                message=f"Unable to retrieve the original masks for multi-day session '{self.session_id}'. "
+                message=f"Unable to retrieve the original masks for multi-recording recording '{self.recording_id}'. "
                 f"The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
-        selected_indices = self._runtime.io.selected_cell_indices
+        selected_indices = self._runtime.io.selected_roi_indices
         if not selected_indices:
             return list(all_masks)
         return [all_masks[i] for i in selected_indices]
@@ -813,7 +817,7 @@ class MultiDayData:
         all_masks = self._combined.extraction.roi_statistics_channel_2
         if all_masks is None:
             return []
-        selected_indices = self._runtime.io.selected_cell_indices_channel_2
+        selected_indices = self._runtime.io.selected_roi_indices_channel_2
         if not selected_indices:
             return list(all_masks)
         return [all_masks[i] for i in selected_indices]
@@ -821,10 +825,10 @@ class MultiDayData:
     @property
     def deformed_masks(self) -> list[ROIMask]:
         """Returns the ROI masks warped to the shared coordinate space."""
-        value = self._registration.deformed_cell_masks
+        value = self._registration.deformed_roi_masks
         if value is None:
             console.error(
-                message=f"Unable to retrieve the deformed masks for multi-day session '{self.session_id}'. "
+                message=f"Unable to retrieve the deformed masks for multi-recording recording '{self.recording_id}'. "
                 f"The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -833,7 +837,7 @@ class MultiDayData:
     @property
     def deformed_masks_channel_2(self) -> list[ROIMask]:
         """Returns the channel 2 ROI masks warped to the shared coordinate space. Empty if single-channel."""
-        value = self._registration.deformed_cell_masks_channel_2
+        value = self._registration.deformed_roi_masks_channel_2
         return value if value is not None else []
 
     @property
@@ -842,7 +846,7 @@ class MultiDayData:
         value = self._tracking.template_masks
         if value is None:
             console.error(
-                message=f"Unable to retrieve the template masks for multi-day session '{self.session_id}'. "
+                message=f"Unable to retrieve the template masks for multi-recording recording '{self.recording_id}'. "
                 f"The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -856,11 +860,11 @@ class MultiDayData:
 
     @property
     def tracked_masks(self) -> list[ROIStatistics]:
-        """Returns the template ROI masks backward-deformed to this session's native coordinate space."""
+        """Returns the template ROI masks backward-deformed to this recording's native coordinate space."""
         value = self._runtime.extraction.roi_statistics
         if value is None:
             console.error(
-                message=f"Unable to retrieve the tracked masks for multi-day session '{self.session_id}'. "
+                message=f"Unable to retrieve the tracked masks for multi-recording recording '{self.recording_id}'. "
                 f"The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
@@ -874,82 +878,82 @@ class MultiDayData:
 
     @property
     def cell_fluorescence(self) -> NDArray[np.float32]:
-        """Returns the cell fluorescence array for this session's extraction."""
+        """Returns the cell fluorescence array for this recording's extraction."""
         value = self._runtime.extraction.cell_fluorescence
         if value is None:
             console.error(
-                message=f"Unable to retrieve the cell fluorescence traces for multi-day session '{self.session_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
+                message=f"Unable to retrieve the cell fluorescence traces for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
         return value
 
     @property
     def neuropil_fluorescence(self) -> NDArray[np.float32]:
-        """Returns the neuropil fluorescence array for this session's extraction."""
+        """Returns the neuropil fluorescence array for this recording's extraction."""
         value = self._runtime.extraction.neuropil_fluorescence
         if value is None:
             console.error(
-                message=f"Unable to retrieve the neuropil fluorescence traces for multi-day session "
-                f"'{self.session_id}'. This indicates incomplete or corrupt pipeline data.",
+                message=f"Unable to retrieve the neuropil fluorescence traces for multi-recording recording "
+                f"'{self.recording_id}'. This indicates incomplete or corrupt pipeline data.",
                 error=RuntimeError,
             )
         return value
 
     @property
     def subtracted_fluorescence(self) -> NDArray[np.float32]:
-        """Returns the baseline-and-neuropil-subtracted fluorescence traces for this session's extraction."""
+        """Returns the baseline-and-neuropil-subtracted fluorescence traces for this recording's extraction."""
         value = self._runtime.extraction.subtracted_fluorescence
         if value is None:
             console.error(
-                message=f"Unable to retrieve the subtracted fluorescence traces for multi-day session "
-                f"'{self.session_id}'. The pipeline data is incomplete or corrupt.",
+                message=f"Unable to retrieve the subtracted fluorescence traces for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
         return value
 
     @property
     def spikes(self) -> NDArray[np.float32]:
-        """Returns the deconvolved spikes array for this session's extraction."""
+        """Returns the deconvolved spikes array for this recording's extraction."""
         value = self._runtime.extraction.spikes
         if value is None:
             console.error(
-                message=f"Unable to retrieve the deconvolved spikes for multi-day session '{self.session_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
+                message=f"Unable to retrieve the deconvolved spikes for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
         return value
 
     @property
-    def _runtime(self) -> MultiDayRuntimeData:
-        """Returns the runtime data for this session."""
+    def _runtime(self) -> MultiRecordingRuntimeData:
+        """Returns the runtime data for this recording."""
         return self._context.runtime
 
     @property
-    def _registration(self) -> MultiDayRegistrationData:
-        """Returns the registration data for this session."""
+    def _registration(self) -> MultiRecordingRegistrationData:
+        """Returns the registration data for this recording."""
         return self._runtime.registration
 
     @property
-    def _tracking(self) -> MultiDayTrackingData:
-        """Returns the tracking data for this session."""
+    def _tracking(self) -> MultiRecordingTrackingData:
+        """Returns the tracking data for this recording."""
         return self._runtime.tracking
 
     @property
     def _combined(self) -> CombinedData:
-        """Returns the combined single-day data for this session."""
+        """Returns the combined single-recording data for this recording."""
         value = self._runtime.combined_data
         if value is None:
             console.error(
-                message=f"Unable to retrieve the combined single-day data for multi-day session '{self.session_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
+                message=f"Unable to retrieve the combined single-recording data for multi-recording "
+                f"recording '{self.recording_id}'. The pipeline data is incomplete or corrupt.",
                 error=RuntimeError,
             )
         return value
 
     @property
     def _detection(self) -> DetectionData:
-        """Returns the combined detection data for this session."""
+        """Returns the combined detection data for this recording."""
         return self._combined.detection
 
 
@@ -957,24 +961,25 @@ class MultiDayData:
 class ViewerData:
     """Provides the top-level data entry point for all consumer GUIs.
 
-    Binds single-day data with an optionally loaded multi-day dataset. Consumer GUIs access the underlying
-    ``single_day`` and per-recording ``MultiDayData`` objects directly via ``current_recording`` or
+    Binds single-recording data with an optionally loaded multi-recording dataset. Consumer GUIs access the underlying
+    ``single_recording`` and per-recording ``MultiRecordingData`` objects directly via ``current_recording`` or
     ``recording(index)``.
     """
 
-    single_day: SingleDayData
-    """The single-day pipeline data, always present."""
+    single_recording: SingleRecordingData
+    """The single-recording pipeline data, always present."""
 
-    _recordings: list[MultiDayData] = field(default_factory=list)
-    """The loaded multi-day dataset's per-session MultiDayData instances. Empty when the visualized recording
-    only has single-day data."""
+    _recordings: list[MultiRecordingData] = field(default_factory=list)
+    """The loaded multi-recording dataset's per-recording MultiRecordingData instances. Empty when the visualized
+    recording only has single-recording data."""
 
     _available_datasets: tuple[str, ...] = ()
-    """Natsorted dataset names discovered under the root path, used to inform consumers on multi-day datasets
-    that include the visualized recording session."""
+    """Natsorted dataset names discovered under the root path, used to inform consumers on multi-recording datasets
+    that include the visualized recording."""
 
     _active_dataset_name: str = ""
-    """The name of the active multi-day dataset. Empty when the visualized recording only has single-day data."""
+    """The name of the active multi-recording dataset. Empty when the visualized recording only has
+    single-recording data."""
 
     _current_recording_index: int = 0
     """The index into ``_recordings`` for the currently active recording."""
@@ -984,21 +989,21 @@ class ViewerData:
     that re-activating the same dataset is instant."""
 
     dataset_name: str = ""
-    """Display label for the active multi-day dataset."""
+    """Display label for the active multi-recording dataset."""
 
     @property
-    def is_multi_day(self) -> bool:
-        """Returns True when multi-day data is loaded and active."""
+    def is_multi_recording(self) -> bool:
+        """Returns True when multi-recording data is loaded and active."""
         return bool(self._recordings) and bool(self._active_dataset_name)
 
     @property
     def available_datasets(self) -> tuple[str, ...]:
-        """Returns the natsorted names of all discovered multi-day datasets that use the visualized recording."""
+        """Returns the natsorted names of all discovered multi-recording datasets that use the visualized recording."""
         return self._available_datasets
 
     @property
     def active_dataset_name(self) -> str:
-        """Returns the name of the active multi-day dataset, or empty string for single-day mode."""
+        """Returns the name of the active multi-recording dataset, or empty string for single-recording mode."""
         return self._active_dataset_name
 
     @property
@@ -1009,7 +1014,7 @@ class ViewerData:
     @property
     def recording_ids(self) -> tuple[str, ...]:
         """Returns the recording identifier strings for all recordings in the loaded dataset."""
-        return tuple(recording.session_id for recording in self._recordings)
+        return tuple(recording.recording_id for recording in self._recordings)
 
     @property
     def current_recording_index(self) -> int:
@@ -1020,27 +1025,27 @@ class ViewerData:
     def current_recording_id(self) -> str:
         """Returns the recording identifier for the currently displayed recording."""
         if self._recordings:
-            return self._recordings[self._current_recording_index].session_id
+            return self._recordings[self._current_recording_index].recording_id
         return ""
 
     @property
-    def current_recording(self) -> MultiDayData:
-        """Returns the MultiDayData for the currently active recording."""
+    def current_recording(self) -> MultiRecordingData:
+        """Returns the MultiRecordingData for the currently active recording."""
         return self._recordings[self._current_recording_index]
 
-    def recording(self, index: int) -> MultiDayData:
-        """Returns the MultiDayData for the recording at the given index.
+    def recording(self, index: int) -> MultiRecordingData:
+        """Returns the MultiRecordingData for the recording at the given index.
 
         Args:
             index: The recording index.
 
         Returns:
-            The MultiDayData instance for the specified recording.
+            The MultiRecordingData instance for the specified recording.
         """
         return self._recordings[index]
 
     def load_dataset(self, dataset_name: str) -> None:
-        """Activates the named multi-day dataset, loading from disk only when switching to a different dataset.
+        """Activates the named multi-recording dataset, loading from disk only when switching to a different dataset.
 
         If the requested dataset is already in memory, re-activates it without reloading. Only one dataset is held in
         memory at a time.
@@ -1061,11 +1066,11 @@ class ViewerData:
             return
 
         # Loads a different dataset from disk, replacing the previous one.
-        search_root = self.single_day.output_path.parent
+        search_root = self.single_recording.output_path.parent
         self._load_dataset_from_root(dataset_name=dataset_name, search_root=search_root)
 
     def unload_dataset(self) -> None:
-        """Deactivates multi-day mode without dropping the loaded dataset from memory."""
+        """Deactivates multi-recording mode without dropping the loaded dataset from memory."""
         self._active_dataset_name = ""
         self._current_recording_index = 0
         self.dataset_name = ""
@@ -1089,24 +1094,24 @@ class ViewerData:
 
     @classmethod
     def from_data(cls, root_path: Path, *, dataset: str | None = None) -> ViewerData:
-        """Loads single-day data and discovers available multi-day datasets.
+        """Loads single-recording data and discovers available multi-recording datasets.
 
-        Loads single-day pipeline data from ``root_path``, then discovers available multi-day dataset names
+        Loads single-recording pipeline data from ``root_path``, then discovers available multi-recording dataset names
         (lightweight). A dataset is only loaded when explicitly requested via the ``dataset`` parameter; otherwise
-        the instance starts in single-day mode and consumers can load a dataset later via the dropdown.
+        the instance starts in single-recording mode and consumers can load a dataset later via the dropdown.
 
         Args:
             root_path: Root cindra output directory.
-            dataset: Explicit dataset name to load. Stays in single-day mode if None.
+            dataset: Explicit dataset name to load. Stays in single-recording mode if None.
 
         Returns:
             A fully populated ViewerData instance.
         """
-        single_day = SingleDayData.from_data(root_path=root_path)
+        single_recording = SingleRecordingData.from_data(root_path=root_path)
         available = cls._discover_dataset_names(root_path=root_path)
 
         instance = cls(
-            single_day=single_day,
+            single_recording=single_recording,
             _available_datasets=available,
         )
 
@@ -1117,10 +1122,10 @@ class ViewerData:
 
     @staticmethod
     def _discover_dataset_names(root_path: Path) -> tuple[str, ...]:
-        """Discovers available multi-day dataset names under root_path.
+        """Discovers available multi-recording dataset names under root_path.
 
-        Searches for multiday_runtime_data.yaml files, extracts the parent directory name (dataset name) from each,
-        deduplicates, and returns natsorted.
+        Searches for multi_recording_runtime_data.yaml files, extracts the parent directory name (dataset name)
+        from each, deduplicates, and returns natsorted.
 
         Args:
             root_path: The root directory to search recursively.
@@ -1128,21 +1133,21 @@ class ViewerData:
         Returns:
             A tuple of natsorted unique dataset names.
         """
-        matches = list(root_path.rglob("multiday_runtime_data.yaml"))
+        matches = list(root_path.rglob("multi_recording_runtime_data.yaml"))
         if not matches:
             return ()
 
         return tuple(natsorted({match.parent.name for match in matches}))
 
     def _load_dataset_from_root(self, dataset_name: str, search_root: Path) -> None:
-        """Loads a specific multi-day dataset from the search root.
+        """Loads a specific multi-recording dataset from the search root.
 
         Args:
             dataset_name: The dataset name to load.
-            search_root: The root path to search for multiday_runtime_data.yaml files.
+            search_root: The root path to search for multi_recording_runtime_data.yaml files.
         """
-        # Finds the target dataset directory by matching multiday_runtime_data.yaml parent names.
-        matches = list(search_root.rglob("multiday_runtime_data.yaml"))
+        # Finds the target dataset directory by matching multi_recording_runtime_data.yaml parent names.
+        matches = list(search_root.rglob("multi_recording_runtime_data.yaml"))
         target_dir: Path | None = None
         for match in matches:
             if match.parent.name == dataset_name:
@@ -1157,27 +1162,27 @@ class ViewerData:
             return
 
         try:
-            contexts = MultiDayRuntimeContext.load(root_path=target_dir, session_index=-1)
+            contexts = MultiRecordingRuntimeContext.load(root_path=target_dir, recording_index=-1)
             if not isinstance(contexts, list):
                 contexts = [contexts]
         except Exception:
             console.echo(
-                message=f"Failed to load multi-day dataset '{dataset_name}', aborting.",
+                message=f"Failed to load multi-recording dataset '{dataset_name}', aborting.",
                 level=LogLevel.WARNING,
             )
             return
 
-        # Constructs MultiDayData per session, skipping failures.
-        console.echo(message=f"Loading multi-day dataset '{dataset_name}' ({len(contexts)} recording(s))...")
-        recordings: list[MultiDayData] = []
+        # Constructs MultiRecordingData per recording, skipping failures.
+        console.echo(message=f"Loading multi-recording dataset '{dataset_name}' ({len(contexts)} recording(s))...")
+        recordings: list[MultiRecordingData] = []
         for index, context in enumerate(contexts):
-            session_id = context.runtime.io.session_id
+            recording_id = context.runtime.io.recording_id
             try:
-                console.echo(message=f"  Loading recording {index + 1}/{len(contexts)}: {session_id}...")
-                recordings.append(MultiDayData(_context=context))
+                console.echo(message=f"  Loading recording {index + 1}/{len(contexts)}: {recording_id}...")
+                recordings.append(MultiRecordingData(_context=context))
             except Exception:
                 console.echo(
-                    message=f"Failed to load multi-day session '{session_id}', skipping.",
+                    message=f"Failed to load multi-recording recording '{recording_id}', skipping.",
                     level=LogLevel.WARNING,
                 )
         console.echo(
@@ -1197,10 +1202,10 @@ class ViewerData:
         else:
             self.dataset_name = dataset_name
 
-        # Resolves the current recording index to point at the anchor session. single_day.output_path already
+        # Resolves the current recording index to point at the anchor recording. single_recording.output_path already
         # returns the cindra root (plane output_path.parent), which matches recording.data_path directly.
-        single_day_root = self.single_day.output_path
+        single_recording_root = self.single_recording.output_path
         for index, recording in enumerate(recordings):
-            if recording.data_path == single_day_root:
+            if recording.data_path == single_recording_root:
                 self._current_recording_index = index
                 break

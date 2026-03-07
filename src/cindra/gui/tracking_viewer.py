@@ -1,4 +1,4 @@
-"""Provides the multi-day tracking viewer window."""
+"""Provides the multi-recording tracking viewer window."""
 
 from __future__ import annotations
 
@@ -49,15 +49,13 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from ..dataclasses import ROIMask, ROIStatistics
-    from .viewer_context import MultiDayData
+    from .viewer_context import MultiRecordingData
 
 
 class TrackingViewer(QMainWindow):
-    """Displays a UI window for viewing the quality of across-day ROI tracking.
-
-    Displays background images with ROI mask overlays for each recording in a multi-day dataset. Supports manual and
-    automatic recording cycling, coordinate space switching, mask layer selection, channel toggling, and mask opacity
-    control.
+    """Displays background images with ROI mask overlays for each recording in a multi-recording dataset, supporting
+    manual and automatic recording cycling, coordinate space switching, mask layer selection, channel toggling, and mask
+    opacity control.
 
     Args:
         data: The preloaded tracking data to display on startup.
@@ -80,7 +78,7 @@ class TrackingViewer(QMainWindow):
         _view_box: View box for the primary image display.
         _image_item: Image item for the composited background and mask display.
         _status_bar: Status bar displaying recording info and selection state.
-        _dataset_combo: Dropdown for selecting the active multi-day dataset.
+        _dataset_combo: Dropdown for selecting the active multi-recording dataset.
         _recording_combo: Dropdown for selecting the active recording.
         _skip_backward_button: Button for navigating to the previous recording.
         _play_button: Button to start automatic recording cycling.
@@ -96,7 +94,7 @@ class TrackingViewer(QMainWindow):
 
     def __init__(self, data: ViewerData) -> None:
         super().__init__()
-        self.setWindowTitle("Multi-Day ROI Tracking")
+        self.setWindowTitle("Multi-Recording ROI Tracking")
         self.setGeometry(*TRACKING_STYLE.window_geometry)
 
         self.data: ViewerData = data
@@ -131,7 +129,7 @@ class TrackingViewer(QMainWindow):
         toolbar = QHBoxLayout()
         self._file_button: QPushButton = QPushButton("File")
         self._file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self._file_button.setToolTip("Load a multi-day dataset for visualization.")
+        self._file_button.setToolTip("Load a multi-recording dataset for visualization.")
         file_menu = QMenu(self)
         file_menu.setStyleSheet(STYLE.menu)
         load_action = file_menu.addAction("&Load dataset")
@@ -139,7 +137,9 @@ class TrackingViewer(QMainWindow):
         load_action.triggered.connect(self._load_dataset)
         self._file_button.setMenu(file_menu)
         toolbar.addWidget(self._file_button)
-        hint_label = QLabel("Hint: Use arrows to navigate recordings and mask layers, use space to toggle auto-cycling.")
+        hint_label = QLabel(
+            "Hint: Use arrows to navigate recordings and mask layers, use space to toggle auto-cycling."
+        )
         hint_label.setStyleSheet(STYLE.white_label)
         hint_label.setFont(FONTS.small_bold)
         toolbar.addWidget(hint_label)
@@ -208,7 +208,7 @@ class TrackingViewer(QMainWindow):
         self._channel_2_checkbox.setEnabled(has_channel_2)
 
         # Updates the window title to reflect the active dataset.
-        self.setWindowTitle(f"Multi-Day ROI Tracking — {data.dataset_name}")
+        self.setWindowTitle(f"Multi-Recording ROI Tracking — {data.dataset_name}")
 
         self._refresh_display()
 
@@ -258,11 +258,11 @@ class TrackingViewer(QMainWindow):
         return super().eventFilter(source, event)
 
     def _load_dataset(self) -> None:
-        """Displays a file dialog that allows users to select a new multi-day dataset to visualize."""
+        """Displays a file dialog that allows users to select a new multi-recording dataset to visualize."""
         # Defaults the file dialog to the parent of the currently loaded recording's output
         # directory, so the user can easily navigate to a sibling recording.
         start_directory = ""
-        output = self.data.single_day.output_path
+        output = self.data.single_recording.output_path
         parent = output.parent
         if parent.is_dir():
             start_directory = str(parent)
@@ -278,7 +278,7 @@ class TrackingViewer(QMainWindow):
 
         try:
             data = ViewerData.from_data(root_path=recording_path)
-            if not data.is_multi_day and data.available_datasets:
+            if not data.is_multi_recording and data.available_datasets:
                 data.load_dataset(dataset_name=data.available_datasets[0])
         except Exception:
             console.echo(message="Unable to load dataset.", level=LogLevel.ERROR)
@@ -304,12 +304,12 @@ class TrackingViewer(QMainWindow):
         layout = QVBoxLayout(panel)
         panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
-        # Dataset selector group. Lists all discovered multi-day datasets for runtime switching.
+        # Dataset selector group. Lists all discovered multi-recording datasets for runtime switching.
         dataset_group = QGroupBox("Dataset")
         dataset_group.setStyleSheet(STYLE.group_box)
         dataset_layout = QVBoxLayout(dataset_group)
         self._dataset_combo = QComboBox()
-        self._dataset_combo.setToolTip("Select the active multi-day dataset.")
+        self._dataset_combo.setToolTip("Select the active multi-recording dataset.")
         self._dataset_combo.currentIndexChanged.connect(self._on_dataset_selected)
         dataset_layout.addWidget(self._dataset_combo)
         layout.addWidget(dataset_group)
@@ -516,13 +516,13 @@ class TrackingViewer(QMainWindow):
 
         # Determines whether the ROI identity set has changed, requiring a selection reset. Template and Tracked
         # layers share the same ROI identity set (template-derived) so the selection persists across recording
-        # switches and Template/Tracked toggles. Original and Deformed share a separate identity set (single-day
-        # extraction) so the selection persists only within the same session.
+        # switches and Template/Tracked toggles. Original and Deformed share a separate identity set (single-recording
+        # extraction) so the selection persists only within the same recording.
         current_is_template_group = mask_layer in (MaskLayer.TEMPLATE, MaskLayer.TRACKED)
         recording_index = self.data.current_recording_index
         layer_group_changed = current_is_template_group != self._selection_was_template
-        session_changed = not current_is_template_group and recording_index != self._selection_recording_index
-        if layer_group_changed or session_changed:
+        recording_changed = not current_is_template_group and recording_index != self._selection_recording_index
+        if layer_group_changed or recording_changed:
             self._selected_rois = None
             self._roi_edit.clear()
         elif self._selected_rois is not None and self._cached_mask_count > 0:
@@ -532,16 +532,16 @@ class TrackingViewer(QMainWindow):
         self._selection_recording_index = recording_index
 
         if masks:
-            frame_height = self.data.single_day.frame_height
-            frame_width = self.data.single_day.frame_width
+            frame_height = self.data.single_recording.frame_height
+            frame_width = self.data.single_recording.frame_width
 
             # Generates deterministic per-ROI colors using random HSV hues with full saturation and value.
             # Original and Deformed layers use the Original mask count as the palette reference so both layers
-            # share identical colors within a session (they represent the same ROIs in different coordinate
-            # spaces). Template layers use their own count directly, which is identical across all sessions,
+            # share identical colors within a recording (they represent the same ROIs in different coordinate
+            # spaces). Template layers use their own count directly, which is identical across all recordings,
             # ensuring consistent colors when switching recordings.
             # Template and Tracked layers share a color palette (same ROI identity set). Original and Deformed
-            # layers share a separate palette (same single-day ROIs in different coordinate spaces).
+            # layers share a separate palette (same single-recording ROIs in different coordinate spaces).
             if mask_layer in (MaskLayer.TEMPLATE, MaskLayer.TRACKED):
                 template_masks = self._resolve_masks(rec, MaskLayer.TEMPLATE, channel_2)
                 color_count = len(template_masks) if template_masks else len(masks)
@@ -635,7 +635,7 @@ class TrackingViewer(QMainWindow):
             selection_text = f"Masks: {self._cached_mask_count}"
         self._status_bar.showMessage(
             f"Recording: {recording_id}  |  {selection_text}  |  "
-            f"Size: {self.data.single_day.frame_height} x {self.data.single_day.frame_width}"
+            f"Size: {self.data.single_recording.frame_height} x {self.data.single_recording.frame_width}"
         )
 
     def _on_recording_selected(self, index: int) -> None:
@@ -698,7 +698,7 @@ class TrackingViewer(QMainWindow):
         click_y = int(view_position.y())
 
         # Bounds-checks against frame dimensions.
-        sd = self.data.single_day
+        sd = self.data.single_recording
         if click_y < 0 or click_y >= sd.frame_height or click_x < 0 or click_x >= sd.frame_width:
             return
 
@@ -795,15 +795,15 @@ class TrackingViewer(QMainWindow):
         """
         normalized = normalize_percentile(
             image=image,
-            frame_height=self.data.single_day.frame_height,
-            frame_width=self.data.single_day.frame_width,
+            frame_height=self.data.single_recording.frame_height,
+            frame_width=self.data.single_recording.frame_width,
         )
         grayscale = (normalized * 255).astype(np.uint8)
         return np.stack([grayscale, grayscale, grayscale], axis=-1)
 
     @staticmethod
     def _resolve_background(
-        rec: MultiDayData,
+        rec: MultiRecordingData,
         image_type: BackgroundView,
         coordinate_space: CoordinateSpace,
         channel_2: bool,
@@ -811,7 +811,7 @@ class TrackingViewer(QMainWindow):
         """Resolves the background image from a recording based on the active view settings.
 
         Args:
-            rec: The multi-day recording to read from.
+            rec: The multi-recording recording to read from.
             image_type: The selected background image type.
             coordinate_space: Native or transformed coordinate space.
             channel_2: Determines whether to return the channel 2 variant.
@@ -845,14 +845,14 @@ class TrackingViewer(QMainWindow):
 
     @staticmethod
     def _resolve_masks(
-        rec: MultiDayData,
+        rec: MultiRecordingData,
         layer: MaskLayer,
         channel_2: bool,
     ) -> Sequence[ROIMask | ROIStatistics]:
         """Resolves the mask list from a recording based on the active mask layer and channel.
 
         Args:
-            rec: The multi-day recording to read from.
+            rec: The multi-recording recording to read from.
             layer: The selected mask layer.
             channel_2: Determines whether to return the channel 2 variant.
 

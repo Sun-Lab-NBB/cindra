@@ -14,7 +14,7 @@ from .styles import FONTS, PC_STYLE, BINARY_STYLE
 from .pc_viewer import PCViewer
 from .roi_viewer import ROIViewer
 from .binary_viewer import BinaryPlayer
-from .viewer_context import ViewerData, SingleDayData
+from .viewer_context import ViewerData, SingleRecordingData
 from .tracking_viewer import TrackingViewer
 
 if TYPE_CHECKING:
@@ -22,16 +22,16 @@ if TYPE_CHECKING:
 
 
 def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> None:
-    """Launches the standalone multi-day tracking viewer.
+    """Launches the standalone multi-recording tracking viewer.
 
     Creates a QApplication, shows the TrackingViewer window, and enters the event loop. The viewer
-    loads multi-day tracking data from the provided directory on startup.
+    loads multi-recording tracking data from the provided directory on startup.
 
     Args:
         recording_path: The path to the root data directory for any cindra-processed recording that
-            makes up the visualized multi-day dataset. The loader uses that recording's data to
+            makes up the visualized multi-recording dataset. The loader uses that recording's data to
             search and reconstruct the full dataset hierarchy.
-        dataset: Multi-day dataset name to load. Defaults to the first available dataset.
+        dataset: Multi-recording dataset name to load. Defaults to the first available dataset.
     """
     console.echo(message="Initializing the Tracking GUI...")
     application, owns_application = _get_or_create_application()
@@ -39,11 +39,11 @@ def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> 
     # Loads recording data upfront so the viewer window receives a fully populated data instance.
     # The tracking viewer requires a loaded dataset, so defaults to the first available one.
     data = ViewerData.from_data(root_path=recording_path, dataset=dataset)
-    if not data.is_multi_day and data.available_datasets:
+    if not data.is_multi_recording and data.available_datasets:
         data.load_dataset(dataset_name=data.available_datasets[0])
 
     # Creates the viewer window with the loaded data.
-    console.echo(message="Initializing Multi-Day Tracking viewer...")
+    console.echo(message="Initializing Multi-Recording Tracking viewer...")
     window = TrackingViewer(data=data)
 
     window.show()
@@ -56,7 +56,7 @@ def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> 
 
 
 def run_registration_viewer(recording_path: Path) -> None:
-    """Launches the standalone single-day registration viewer.
+    """Launches the standalone single-recording registration viewer.
 
     Creates a QApplication, shows the BinaryPlayer and PCViewer windows, and enters the event
     loop. The binary viewer always displays the stitched multi-plane movie while the PC viewer
@@ -72,11 +72,11 @@ def run_registration_viewer(recording_path: Path) -> None:
     # Loads recording data upfront. The binary viewer uses the combined view (-1) for stitched
     # playback, while the PC viewer gets a shallow copy with its own mutable _view_index set to
     # plane 0 for per-plane PC metrics.
-    data = SingleDayData.from_data(root_path=recording_path, view_index=-1)
+    data = SingleRecordingData.from_data(root_path=recording_path, view_index=-1)
     pc_data = copy.copy(data)
     pc_data.switch_view(view_index=0)
 
-    # Creates both viewer windows with independent SingleDayData copies.
+    # Creates both viewer windows with independent SingleRecordingData copies.
     console.echo(message="Initializing Registered Recording viewer...")
     binary_player = BinaryPlayer(data=data)
     console.echo(message="Initializing Registration Quality Metrics viewer...")
@@ -143,12 +143,12 @@ def run_registration_viewer(recording_path: Path) -> None:
 def run_roi_viewer(recording_path: Path, *, dataset: str | None = None) -> None:
     """Launches the standalone ROI viewer with right-click reclassification.
 
-    Creates a QApplication, loads pipeline data from the given session directory, shows the ROIViewer window, and
+    Creates a QApplication, loads pipeline data from the given recording directory, shows the ROIViewer window, and
     enters the event loop.
 
     Args:
         recording_path: Path to a cindra output directory to load on startup.
-        dataset: Multi-day dataset name to load. Stays in single-day mode if not provided.
+        dataset: Multi-recording dataset name to load. Stays in single-recording mode if not provided.
     """
     console.echo(message="Initializing the ROI GUI...")
     application, owns_application = _get_or_create_application()

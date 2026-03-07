@@ -6,37 +6,37 @@ Command Line Interfaces
 
 .. click:: cindra.interface.cli:cindra_cli
 
-Single-Day Pipeline Configuration
+Single-Recording Pipeline Configuration
 =================================
-.. automodule:: cindra.configuration.single_day
+.. automodule:: cindra.configuration.single_recording
    :members:
    :undoc-members:
    :show-inheritance:
 
-Single-Day Pipeline API
+Single-Recording Pipeline API
 =======================
-.. automodule:: cindra.single_day
+.. automodule:: cindra.single_recording
    :members:
    :undoc-members:
    :show-inheritance:
 
-Multi-Day Pipeline Configuration
+Multi-Recording Pipeline Configuration
 =================================
-.. automodule:: cindra.configuration.multi_day
+.. automodule:: cindra.configuration.multi_recording
    :members:
    :undoc-members:
    :show-inheritance:
 
-Multi-Day Pipeline API
+Multi-Recording Pipeline API
 ======================
-.. automodule:: cindra.multi_day
+.. automodule:: cindra.multi_recording
    :members:
    :undoc-members:
    :show-inheritance:
 
-Multi-day Pipeline Algorithms
+Multi-recording Pipeline Algorithms
 =============================
-.. automodule:: cindra.multiday
+.. automodule:: cindra.multi_recording
    :members:
    :undoc-members:
    :show-inheritance:

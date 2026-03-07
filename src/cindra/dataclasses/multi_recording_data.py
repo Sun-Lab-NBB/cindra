@@ -1,4 +1,4 @@
-"""Provides runtime data classes for the multi-day (across-session) processing pipeline."""
+"""Provides runtime data classes for the multi-recording (across-recording) processing pipeline."""
 
 from __future__ import annotations
 
@@ -12,47 +12,48 @@ from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
 from .version import version, python_version
-from .single_day_data import ROIMask, CombinedData, ExtractionData, is_memory_mapped
+from .single_recording_data import ROIMask, CombinedData, ExtractionData, is_memory_mapped
 
 
 @dataclass
-class MultiDayIOData:
-    """Stores the Input / Output runtime data for all stages of the multi-day processing pipeline."""
+class MultiRecordingIOData:
+    """Stores the Input / Output runtime data for all stages of the multi-recording processing pipeline."""
 
-    session_id: str = ""
-    """The unique identifier for this session, derived from the distinguishing component of the session directory
-    path. This ID is used to name output subdirectories and identify the session in logs."""
+    recording_id: str = ""
+    """The unique identifier for this recording, derived from the distinguishing component of the recording directory
+    path. This ID is used to name output subdirectories and identify the recording in logs."""
 
     data_path: Path | None = None
-    """The path to this session's cindra single-day pipeline output directory. This is the resolved cindra root
-    that contains combined_metadata.npz and other single-day outputs. Used to reload CombinedData on demand by
+    """The path to this recording's cindra single-recording pipeline output directory. This is the resolved cindra root
+    that contains combined_metadata.npz and other single-recording outputs. Used to reload CombinedData on demand by
     downstream pipeline stages."""
 
     dataset_name: str = ""
-    """The name of the multi-day dataset, used to create the output subdirectory structure."""
+    """The name of the multi-recording dataset, used to create the output subdirectory structure."""
 
     mroi_region_borders: tuple[int, ...] = ()
     """The x-coordinates of MROI region borders, computed from acquisition parameters during initialization. For MROI
     recordings, these borders mark the boundaries between adjacent imaging regions in the combined field of view.
-    ROIs near these borders are filtered out during cell selection to avoid tracking ambiguities. This field is empty
+    ROIs near these borders are filtered out during ROI selection to avoid tracking ambiguities. This field is empty
     for non-MROI recordings."""
 
     dataset_output_paths: tuple[Path, ...] = ()
-    """The multiday output paths for every session in the dataset, stored in natural-sorted order. Each entry points
-    to a session's multiday output directory (e.g., {cindra_directory}/multiday/{dataset_name}/). Storing this tuple in
-    every session enables full dataset hierarchy reconstruction from any single session's serialized YAML file."""
+    """The multi_recording output paths for every recording in the dataset, stored in natural-sorted order. Each
+    entry points to a recording's multi_recording output directory
+    (e.g., {cindra_directory}/multi_recording/{dataset_name}/). Storing this tuple in every recording enables full
+    dataset hierarchy reconstruction from any single recording's serialized YAML file."""
 
-    selected_cell_indices: tuple[int, ...] = ()
-    """The indices of channel 1 ROIs selected from CombinedData.extraction.roi_statistics for multi-day tracking.
-    These indices reference the original single-day ROI list, avoiding duplication of ROI data."""
+    selected_roi_indices: tuple[int, ...] = ()
+    """The indices of channel 1 ROIs selected from CombinedData.extraction.roi_statistics for multi-recording tracking.
+    These indices reference the original single-recording ROI list, avoiding duplication of ROI data."""
 
-    selected_cell_indices_channel_2: tuple[int, ...] = ()
-    """The indices of channel 2 ROIs selected from CombinedData.extraction.roi_statistics_channel_2 for multi-day
+    selected_roi_indices_channel_2: tuple[int, ...] = ()
+    """The indices of channel 2 ROIs selected from CombinedData.extraction.roi_statistics_channel_2 for multi-recording
     tracking. Empty if channel 2 data is not available or no channel 2 ROIs were selected."""
 
 
 @dataclass
-class MultiDayRegistrationData:
+class MultiRecordingRegistrationData:
     """Stores runtime data from the registration stage."""
 
     has_registration_data: bool = False
@@ -88,23 +89,23 @@ class MultiDayRegistrationData:
     transformed_maximum_projection_channel_2: NDArray[np.float32] | None = None
     """The channel 2 maximum projection transformed to the shared (deformed) visual space."""
 
-    # Deformed cell masks (intermediate data for cell tracking).
-    deformed_cell_masks: list[ROIMask] | None = None
-    """The channel 1 cell ROI spatial data after multi-day registration deform offsets have been applied to the
+    # Deformed ROI masks (intermediate data for ROI tracking).
+    deformed_roi_masks: list[ROIMask] | None = None
+    """The channel 1 ROI spatial data after multi-recording registration deform offsets have been applied to the
     spatial coordinates of each ROI."""
 
-    deformed_cell_masks_channel_2: list[ROIMask] | None = None
-    """The channel 2 cell ROI spatial data after multi-day registration deform offsets have been applied to the
+    deformed_roi_masks_channel_2: list[ROIMask] | None = None
+    """The channel 2 ROI spatial data after multi-recording registration deform offsets have been applied to the
     spatial coordinates of each ROI."""
 
     def is_registered(self) -> bool:
         """Checks whether registration data exists.
 
         Returns:
-            True if the session has been registered (has deformation fields and deformed cell masks in memory, or
+            True if the recording has been registered (has deformation fields and deformed ROI masks in memory, or
             arrays were previously saved to disk), False otherwise.
         """
-        arrays_loaded = self.deform_field_y is not None and self.deformed_cell_masks is not None
+        arrays_loaded = self.deform_field_y is not None and self.deformed_roi_masks is not None
         return arrays_loaded or self.has_registration_data
 
     def clear(self) -> None:
@@ -118,8 +119,8 @@ class MultiDayRegistrationData:
         self.transformed_mean_image_channel_2 = None
         self.transformed_enhanced_mean_image_channel_2 = None
         self.transformed_maximum_projection_channel_2 = None
-        self.deformed_cell_masks = None
-        self.deformed_cell_masks_channel_2 = None
+        self.deformed_roi_masks = None
+        self.deformed_roi_masks_channel_2 = None
 
     def prepare_for_saving(self) -> None:
         """Sets array fields to None for YAML serialization."""
@@ -131,8 +132,8 @@ class MultiDayRegistrationData:
         self.transformed_mean_image_channel_2 = None
         self.transformed_enhanced_mean_image_channel_2 = None
         self.transformed_maximum_projection_channel_2 = None
-        self.deformed_cell_masks = None
-        self.deformed_cell_masks_channel_2 = None
+        self.deformed_roi_masks = None
+        self.deformed_roi_masks_channel_2 = None
 
     def release_arrays(self) -> None:
         """Releases all array fields to free memory without affecting ``has_registration_data``.
@@ -149,14 +150,14 @@ class MultiDayRegistrationData:
         self.transformed_mean_image_channel_2 = None
         self.transformed_enhanced_mean_image_channel_2 = None
         self.transformed_maximum_projection_channel_2 = None
-        self.deformed_cell_masks = None
-        self.deformed_cell_masks_channel_2 = None
+        self.deformed_roi_masks = None
+        self.deformed_roi_masks_channel_2 = None
 
     def save_arrays(self, output_path: Path) -> None:
         """Saves registration arrays as individual .npy files inside a ``registration_arrays/`` subdirectory.
 
         Notes:
-            Deformed cell masks use the ROIStatistics variable-length serialization pattern and remain as .npz files
+            Deformed ROI masks use the ROIStatistics variable-length serialization pattern and remain as .npz files
             saved directly into ``output_path``.
 
         Args:
@@ -208,14 +209,14 @@ class MultiDayRegistrationData:
                 self.transformed_maximum_projection_channel_2,
             )
 
-        # Saves channel 1 deformed cell masks (ROIMask .npz).
-        if self.deformed_cell_masks is not None:
-            ROIMask.save_list(self.deformed_cell_masks, output_path / "registration_deformed_masks.npz")
+        # Saves channel 1 deformed ROI masks (ROIMask .npz).
+        if self.deformed_roi_masks is not None:
+            ROIMask.save_list(self.deformed_roi_masks, output_path / "registration_deformed_masks.npz")
 
-        # Saves channel 2 deformed cell masks (ROIMask .npz).
-        if self.deformed_cell_masks_channel_2 is not None:
+        # Saves channel 2 deformed ROI masks (ROIMask .npz).
+        if self.deformed_roi_masks_channel_2 is not None:
             ROIMask.save_list(
-                self.deformed_cell_masks_channel_2, output_path / "registration_deformed_masks_channel_2.npz"
+                self.deformed_roi_masks_channel_2, output_path / "registration_deformed_masks_channel_2.npz"
             )
 
     def load_arrays(self, output_path: Path) -> None:
@@ -264,15 +265,15 @@ class MultiDayRegistrationData:
             if path.exists():
                 self.transformed_maximum_projection_channel_2 = np.load(path).astype(np.float32)
 
-        # Loads channel 1 deformed cell masks (ROIMask .npz).
+        # Loads channel 1 deformed ROI masks (ROIMask .npz).
         masks_path = output_path / "registration_deformed_masks.npz"
-        if self.deformed_cell_masks is None and masks_path.exists():
-            self.deformed_cell_masks = ROIMask.load_list(masks_path)
+        if self.deformed_roi_masks is None and masks_path.exists():
+            self.deformed_roi_masks = ROIMask.load_list(masks_path)
 
-        # Loads channel 2 deformed cell masks (ROIMask .npz).
+        # Loads channel 2 deformed ROI masks (ROIMask .npz).
         masks_path_channel_2 = output_path / "registration_deformed_masks_channel_2.npz"
-        if self.deformed_cell_masks_channel_2 is None and masks_path_channel_2.exists():
-            self.deformed_cell_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
+        if self.deformed_roi_masks_channel_2 is None and masks_path_channel_2.exists():
+            self.deformed_roi_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
 
     def memory_map_arrays(self, output_path: Path) -> None:
         """Memory-maps registration arrays from individual .npy files in ``r+`` mode.
@@ -323,85 +324,85 @@ class MultiDayRegistrationData:
             if path.exists():
                 self.transformed_maximum_projection_channel_2 = np.load(path, mmap_mode="r+")
 
-        # Eagerly loads channel 1 deformed cell masks (ROIMask .npz; cannot be memory-mapped).
+        # Eagerly loads channel 1 deformed ROI masks (ROIMask .npz; cannot be memory-mapped).
         masks_path = output_path / "registration_deformed_masks.npz"
-        if self.deformed_cell_masks is None and masks_path.exists():
-            self.deformed_cell_masks = ROIMask.load_list(masks_path)
+        if self.deformed_roi_masks is None and masks_path.exists():
+            self.deformed_roi_masks = ROIMask.load_list(masks_path)
 
-        # Eagerly loads channel 2 deformed cell masks (ROIMask .npz; cannot be memory-mapped).
+        # Eagerly loads channel 2 deformed ROI masks (ROIMask .npz; cannot be memory-mapped).
         masks_path_channel_2 = output_path / "registration_deformed_masks_channel_2.npz"
-        if self.deformed_cell_masks_channel_2 is None and masks_path_channel_2.exists():
-            self.deformed_cell_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
+        if self.deformed_roi_masks_channel_2 is None and masks_path_channel_2.exists():
+            self.deformed_roi_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
 
 
 @dataclass
-class MultiDayTimingData:
+class MultiRecordingTimingData:
     """Stores pipeline timing and version data.
 
     Notes:
         All time durations are stored as integers representing seconds. Discovery phase timing (registration, tracking,
-        backward transform) is stored redundantly in each session for simplicity. Extraction phase timing is
-        session-specific.
+        backward transform) is stored redundantly in each recording for simplicity. Extraction phase timing is
+        recording-specific.
     """
 
-    # Discovery phase timing (stored redundantly per session).
+    # Discovery phase timing (stored redundantly per recording).
     registration_time: int = 0
-    """The across-session diffeomorphic demons registration time in seconds."""
+    """The across-recording diffeomorphic demons registration time in seconds."""
 
     tracking_time: int = 0
-    """The across-session cell tracking time in seconds."""
+    """The across-recording ROI tracking time in seconds."""
 
     backward_transform_time: int = 0
-    """The backward across-session cell mask transformation time in seconds."""
+    """The backward across-recording ROI mask transformation time in seconds."""
 
     total_discovery_time: int = 0
     """The total discovery phase time in seconds."""
 
-    # Extraction phase timing (session-specific).
+    # Extraction phase timing (recording-specific).
     extraction_time: int = 0
-    """The fluorescence extraction time for this session in seconds."""
+    """The fluorescence extraction time for this recording in seconds."""
 
     deconvolution_time: int = 0
-    """The spike deconvolution time for this session in seconds."""
+    """The spike deconvolution time for this recording in seconds."""
 
     total_extraction_time: int = 0
-    """The total extraction phase time for this session in seconds."""
+    """The total extraction phase time for this recording in seconds."""
 
     # Version and timestamp tracking.
     date_processed: str = ""
-    """The timestamp when this session's processing completed."""
+    """The timestamp when this recording's processing completed."""
 
     python_version: str = python_version
-    """The Python interpreter version used for processing this session."""
+    """The Python interpreter version used for processing this recording."""
 
     cindra_version: str = version
-    """The cindra library version used for processing this session."""
+    """The cindra library version used for processing this recording."""
 
 
 @dataclass
-class MultiDayTrackingData:
-    """Stores template masks from cross-session cell tracking.
+class MultiRecordingTrackingData:
+    """Stores template masks from cross-recording ROI tracking.
 
     Notes:
-        Template masks represent consensus cell ROIs that can be reliably identified across multiple sessions. They are
-        generated by clustering deformed cell masks in the shared visual space and extracting pixels that consistently
-        appear across sessions.
+        Template masks represent consensus ROIs that can be reliably identified across multiple recordings. They are
+        generated by clustering deformed ROI masks in the shared visual space and extracting pixels that consistently
+        appear across recordings.
     """
 
     template_masks: list[ROIMask] | None = None
-    """The template cell masks in shared visual space coordinates. Each ROIMask represents a cell that can be
-    tracked across sessions, with pixel coordinates and weights derived from the clustering consensus."""
+    """The template ROI masks in shared visual space coordinates. Each ROIMask represents an ROI that can be
+    tracked across recordings, with pixel coordinates and weights derived from the clustering consensus."""
 
     template_masks_channel_2: list[ROIMask] | None = None
-    """The channel 2 template cell masks in shared visual space coordinates. Only present when tracking channel 2
-    cells independently in dual-channel recordings."""
+    """The channel 2 template ROI masks in shared visual space coordinates. Only present when tracking channel 2
+    ROIs independently in dual-channel recordings."""
 
     template_diameter: int = 0
-    """The estimated cell diameter in pixels for channel 1 template masks, derived from the median pixel count of
+    """The estimated ROI diameter in pixels for channel 1 template masks, derived from the median pixel count of
     the generated templates. A value of 0 indicates that no templates have been computed yet."""
 
     template_diameter_channel_2: int = 0
-    """The estimated cell diameter in pixels for channel 2 template masks, derived from the median pixel count of
+    """The estimated ROI diameter in pixels for channel 2 template masks, derived from the median pixel count of
     the generated templates. A value of 0 indicates that no templates have been computed yet."""
 
     def prepare_for_saving(self) -> None:
@@ -456,31 +457,32 @@ class MultiDayTrackingData:
 
 
 @dataclass
-class MultiDayRuntimeData(YamlConfig):
-    """Aggregates all runtime data for a single session."""
+class MultiRecordingRuntimeData(YamlConfig):
+    """Aggregates all runtime data for a single recording."""
 
     output_path: Path | None = None
     """The path to the directory where runtime data and array files are stored."""
 
-    io: MultiDayIOData = field(default_factory=MultiDayIOData)
-    """The per-session I/O data including session ID, session directory, and dataset name."""
+    io: MultiRecordingIOData = field(default_factory=MultiRecordingIOData)
+    """The per-recording I/O data including recording ID, recording directory, and dataset name."""
 
-    registration: MultiDayRegistrationData = field(default_factory=MultiDayRegistrationData)
+    registration: MultiRecordingRegistrationData = field(default_factory=MultiRecordingRegistrationData)
     """The runtime data from the registration stage (deformation fields, transformed images, deformed masks)."""
 
-    tracking: MultiDayTrackingData = field(default_factory=MultiDayTrackingData)
-    """The runtime data from the cross-session cell tracking stage (template masks in shared visual space)."""
+    tracking: MultiRecordingTrackingData = field(default_factory=MultiRecordingTrackingData)
+    """The runtime data from the cross-recording ROI tracking stage (template masks in shared visual space)."""
 
     extraction: ExtractionData = field(default_factory=ExtractionData)
-    """The runtime data from the extraction stage. After backward transformation, tracked cell masks are stored as
+    """The runtime data from the extraction stage. After backward transformation, tracked ROI masks are stored as
     ROIStatistics in roi_statistics. Extraction then populates fluorescence traces and classification fields."""
 
-    timing: MultiDayTimingData = field(default_factory=MultiDayTimingData)
+    timing: MultiRecordingTimingData = field(default_factory=MultiRecordingTimingData)
     """The timing information for both discovery and extraction phases."""
 
     combined_data: CombinedData | None = None
-    """The combined single-day processing data for this session, loaded from the session directory. This field is not
-    serialized to YAML and is loaded on-demand from the single-day pipeline outputs."""
+    """The combined single-recording processing data for this recording, loaded from the recording directory.
+    This field is not serialized to YAML and is loaded on-demand from the single-recording pipeline
+    outputs."""
 
     def release_arrays(self) -> None:
         """Releases all array fields across registration, tracking, extraction, and combined_data to free memory.
@@ -497,12 +499,12 @@ class MultiDayRuntimeData(YamlConfig):
             self.combined_data.extraction.release_arrays()
 
     def load_arrays(self) -> None:
-        """Eagerly loads all multi-day NumPy arrays from disk into memory.
+        """Eagerly loads all multi-recording NumPy arrays from disk into memory.
 
-        This is a convenience method that eagerly loads registration, tracking, and extraction arrays. CombinedData
-        (single-day data) is NOT loaded by this method and must be loaded separately by the caller. Use the individual
-        ``load_arrays()`` / ``memory_map_arrays()`` methods on each child dataclass for fine-grained control over
-        which arrays are loaded and how.
+        This is a convenience method that eagerly loads registration, tracking, and extraction arrays.
+        CombinedData (single-recording data) is NOT loaded by this method and must be loaded separately by
+        the caller. Use the individual ``load_arrays()`` / ``memory_map_arrays()`` methods on each child
+        dataclass for fine-grained control over which arrays are loaded and how.
         """
         if self.output_path is not None:
             self.registration.load_arrays(self.output_path)
@@ -510,12 +512,12 @@ class MultiDayRuntimeData(YamlConfig):
             self.extraction.load_arrays(self.output_path)
 
     def memory_map_arrays(self) -> None:
-        """Memory-maps all multi-day NumPy arrays from disk in ``r+`` mode.
+        """Memory-maps all multi-recording NumPy arrays from disk in ``r+`` mode.
 
-        This is a convenience method that memory-maps registration, tracking, and extraction arrays. CombinedData
-        (single-day data) is NOT loaded by this method and must be loaded separately by the caller. Use the individual
-        ``load_arrays()`` / ``memory_map_arrays()`` methods on each child dataclass for fine-grained control over
-        which arrays are loaded and how.
+        This is a convenience method that memory-maps registration, tracking, and extraction arrays.
+        CombinedData (single-recording data) is NOT loaded by this method and must be loaded separately by
+        the caller. Use the individual ``load_arrays()`` / ``memory_map_arrays()`` methods on each child
+        dataclass for fine-grained control over which arrays are loaded and how.
         """
         if self.output_path is not None:
             self.registration.memory_map_arrays(self.output_path)
@@ -526,11 +528,11 @@ class MultiDayRuntimeData(YamlConfig):
         """Saves the runtime data to a YAML file and arrays to .npz/.npy files.
 
         Notes:
-            The combined_data field is NOT saved since it references immutable single-day outputs. It must be loaded
-            separately by the caller after deserialization.
+            The combined_data field is NOT saved since it references immutable single-recording outputs. It
+            must be loaded separately by the caller after deserialization.
 
         Args:
-            output_path: The directory where to save the multiday_runtime_data.yaml file and array files.
+            output_path: The directory where to save the multi_recording_runtime_data.yaml file and array files.
         """
         ensure_directory_exists(output_path)
         self.output_path = output_path
@@ -554,27 +556,27 @@ class MultiDayRuntimeData(YamlConfig):
         yaml_copy.tracking.prepare_for_saving()
         yaml_copy.extraction.prepare_for_saving()
 
-        # Excludes combined_data from YAML (it references immutable single-day data and is reloaded on load).
+        # Excludes combined_data from YAML (it references immutable single-recording data and is reloaded on load).
         yaml_copy.combined_data = None
 
         # Saves the YAML file.
-        file_path = output_path / "multiday_runtime_data.yaml"
+        file_path = output_path / "multi_recording_runtime_data.yaml"
         yaml_copy.to_yaml(file_path=file_path)
 
     @classmethod
-    def load(cls, output_path: Path) -> MultiDayRuntimeData:
+    def load(cls, output_path: Path) -> MultiRecordingRuntimeData:
         """Deserializes runtime data from a YAML file without loading any NumPy arrays or CombinedData.
 
-        After calling this method, multi-day arrays can be loaded using the ``load_arrays()`` or
+        After calling this method, multi-recording arrays can be loaded using the ``load_arrays()`` or
         ``memory_map_arrays()`` convenience methods, or individually per-child dataclass. CombinedData must be loaded
         separately by the caller (e.g., ``runtime.combined_data = CombinedData.load(...)``).
 
         Args:
-            output_path: The directory containing the multiday_runtime_data.yaml file.
+            output_path: The directory containing the multi_recording_runtime_data.yaml file.
 
         Returns:
-            A MultiDayRuntimeData instance with all scalar fields deserialized. NumPy array fields and combined_data
-            remain None until explicitly loaded.
+            A MultiRecordingRuntimeData instance with all scalar fields deserialized. NumPy array fields
+            and combined_data remain None until explicitly loaded.
         """
-        file_path = output_path / "multiday_runtime_data.yaml"
+        file_path = output_path / "multi_recording_runtime_data.yaml"
         return cls.from_yaml(file_path=file_path)

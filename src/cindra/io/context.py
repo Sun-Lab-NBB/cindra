@@ -10,14 +10,14 @@ from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from ..dataclasses import (
     IOData,
     CombinedData,
-    MultiDayIOData,
     RuntimeContext,
-    MultiDayRuntimeData,
-    SingleDayRuntimeData,
+    MultiRecordingIOData,
     AcquisitionParameters,
-    MultiDayConfiguration,
-    MultiDayRuntimeContext,
-    SingleDayConfiguration,
+    MultiRecordingRuntimeData,
+    SingleRecordingRuntimeData,
+    MultiRecordingConfiguration,
+    MultiRecordingRuntimeContext,
+    SingleRecordingConfiguration,
 )
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 
 _PARAMETERS_FILENAME: str = "cindra_parameters.json"
-"""The name of the acquisition parameters JSON file expected in each session's data directory."""
+"""The name of the acquisition parameters JSON file expected in each recording's data directory."""
 
 _MAXIMUM_CHANNEL_COUNT: int = 2
 """The maximum number of imaging channels supported by the pipeline."""
@@ -64,11 +64,12 @@ def find_data_directory(data_path: Path) -> Path:
     return parameter_files[0].parent
 
 
-def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[RuntimeContext]:
-    """Creates RuntimeContext instances for all imaging planes processed by the target single-day pipeline.
+def resolve_single_recording_contexts(configuration: SingleRecordingConfiguration) -> list[RuntimeContext]:
+    """Creates RuntimeContext instances for all imaging planes processed by the target single-recording pipeline.
 
-    This function performs the initial setup for single-day processing: it finds acquisition parameters from the data
-    directory, creates output directories, and initializes RuntimeContext instances for each of the recording's plains.
+    This function performs the initial setup for single-recording processing: it finds acquisition parameters from
+    the data directory, creates output directories, and initializes RuntimeContext instances for each of the
+    recording's plains.
 
     Notes:
         For standard single-ROI data, one context is created per physical plane. For MROI (Multi-ROI) data, one context
@@ -81,12 +82,13 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
         loaded from the saved output directory if available, allowing the pipeline to work without raw TIFF data.
 
     Args:
-        configuration: The single-day pipeline configuration. Must have output_path configured in file_io. The data_path
-            is only required when raw data needs to be processed (rebinarization) or when no processed data exists.
+        configuration: The single-recording pipeline configuration. Must have output_path configured in
+            file_io. The data_path is only required when raw data needs to be processed (rebinarization) or
+            when no processed data exists.
 
     Returns:
         A list of RuntimeContext instances, one per plane (or virtual plane for MROI data). Each context contains
-        references to the shared configuration, acquisition parameters, and a plane-specific SingleDayRuntimeData
+        references to the shared configuration, acquisition parameters, and a plane-specific SingleRecordingRuntimeData
         instance with IOData fields initialized.
 
     Raises:
@@ -97,8 +99,8 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
     output_path_root = configuration.file_io.output_path
     if output_path_root is None:
         message = (
-            "Unable to resolve single-day contexts. The output_path must be configured in the FileIO section of the "
-            "configuration, but it is currently None."
+            "Unable to resolve single-recording contexts. The output_path must be configured in the "
+            "FileIO section of the configuration, but it is currently None."
         )
         console.error(message=message, error=ValueError)
 
@@ -112,8 +114,9 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
         # Falls back to finding acquisition parameters from raw data path.
         if configuration.file_io.data_path is None:
             message = (
-                "Unable to resolve single-day contexts. No processed data exists at the output_path and data_path is "
-                "not configured. Either provide processed data or configure data_path to point to raw TIFF data."
+                "Unable to resolve single-recording contexts. No processed data exists at the output_path "
+                "and data_path is not configured. Either provide processed data or configure data_path to "
+                "point to raw TIFF data."
             )
             console.error(message=message, error=ValueError)
         acquisition = _find_acquisition_parameters(configuration.file_io.data_path)
@@ -121,8 +124,9 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
     # Validates that the channel count does not exceed the maximum supported channel count.
     if acquisition.channel_number > _MAXIMUM_CHANNEL_COUNT:
         message = (
-            f"Unable to resolve single-day contexts. The pipeline supports at most {_MAXIMUM_CHANNEL_COUNT} channels, "
-            f"but the acquisition parameters specify {acquisition.channel_number} channels."
+            f"Unable to resolve single-recording contexts. The pipeline supports at most "
+            f"{_MAXIMUM_CHANNEL_COUNT} channels, but the acquisition parameters specify "
+            f"{acquisition.channel_number} channels."
         )
         console.error(message=message, error=ValueError)
 
@@ -148,7 +152,7 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
         runtime_yaml_path = plane_output_path / "runtime_data.yaml"
         if runtime_yaml_path.exists():
             # Loads existing runtime data (scalars only). Arrays are loaded on demand by each pipeline function.
-            runtime_data = SingleDayRuntimeData.load(output_path=plane_output_path)
+            runtime_data = SingleRecordingRuntimeData.load(output_path=plane_output_path)
             console.echo(message=f"Loaded existing runtime data for plane {virtual_plane_index}.", level=LogLevel.INFO)
 
             context = RuntimeContext(
@@ -183,8 +187,8 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
             io_data.mroi_y_offset = acquisition.roi_y_coordinates[roi_index]
             io_data.mroi_x_offset = acquisition.roi_x_coordinates[roi_index]
 
-        # Creates the SingleDayRuntimeData with the initialized IOData.
-        runtime_data = SingleDayRuntimeData(
+        # Creates the SingleRecordingRuntimeData with the initialized IOData.
+        runtime_data = SingleRecordingRuntimeData(
             output_path=plane_output_path,
             io=io_data,
         )
@@ -208,86 +212,89 @@ def resolve_single_day_contexts(configuration: SingleDayConfiguration) -> list[R
     return contexts
 
 
-def resolve_multiday_contexts(
-    configuration: MultiDayConfiguration,
-    target_session_id: str | None = None,
-) -> list[MultiDayRuntimeContext]:
-    """Creates MultiDayRuntimeContext instances for recording sessions processed by the target multi-day pipeline.
+def resolve_multi_recording_contexts(
+    configuration: MultiRecordingConfiguration,
+    target_recording_id: str | None = None,
+) -> list[MultiRecordingRuntimeContext]:
+    """Creates MultiRecordingRuntimeContext instances for recordings processed by the target multi-recording pipeline.
 
-    This function performs the initial setup for multi-day processing: it discovers cindra output directories for each
-    session, derives multiday output paths, and initializes MultiDayRuntimeContext instances.
+    This function performs the initial setup for multi-recording processing: it discovers cindra output
+    directories for each recording, derives multi_recording output paths, and initializes
+    MultiRecordingRuntimeContext instances.
 
     Notes:
-        Each session directory must contain exactly one cindra output directory with a combined_metadata.npz file from
-        a completed single-day pipeline run. The function extracts unique session identifiers from the directory paths
-        to distinguish sessions within the dataset.
+        Each recording directory must contain exactly one cindra output directory with a
+        combined_metadata.npz file from a completed single-recording pipeline run. The function extracts
+        unique recording identifiers from the directory paths to distinguish recordings within the dataset.
 
         The configuration is always saved to disk, ensuring it reflects the current settings passed to this function.
-        Cell selection is performed as a separate step using select_session_cells(), not during context resolution.
+        ROI selection is performed as a separate step using select_recording_rois(), not during context resolution.
 
-        When target_session_id is provided, only the matching session's CombinedData and runtime data are loaded.
-        Non-matching sessions are skipped entirely. This avoids the overhead of loading large arrays for sessions
-        that will not be used (e.g., during per-session extraction).
+        When target_recording_id is provided, only the matching recording's CombinedData and runtime data are loaded.
+        Non-matching recordings are skipped entirely. This avoids the overhead of loading large arrays for recordings
+        that will not be used (e.g., during per-recording extraction).
 
     Args:
-        configuration: The multi-day pipeline configuration. Must have session_directories and dataset_name configured
-            in session_io.
-        target_session_id: When provided, only resolves the context for the session matching this identifier. The
-            returned list contains a single element. When None (default), all sessions are resolved.
+        configuration: The multi-recording pipeline configuration. Must have recording_directories and
+            dataset_name configured in recording_io.
+        target_recording_id: When provided, only resolves the context for the recording matching this identifier. The
+            returned list contains a single element. When None (default), all recordings are resolved.
 
     Returns:
-        A list of MultiDayRuntimeContext instances, one per session (or one element when target_session_id is set).
-        Each context contains references to the shared configuration and a session-specific MultiDayRuntimeData
-        instance with MultiDayIOData fields initialized.
+        A list of MultiRecordingRuntimeContext instances, one per recording (or one element when
+        target_recording_id is set). Each context contains references to the shared configuration and a
+        recording-specific MultiRecordingRuntimeData
+        instance with MultiRecordingIOData fields initialized.
 
     Raises:
-        FileNotFoundError: If no combined_metadata.npz file is found in a session directory.
-        RuntimeError: If multiple combined_metadata.npz files are found in a session directory, or if session paths
+        FileNotFoundError: If no combined_metadata.npz file is found in a recording directory.
+        RuntimeError: If multiple combined_metadata.npz files are found in a recording directory, or if recording paths
             do not contain unique identifying components.
-        ValueError: If target_session_id does not match any resolved session identifier.
+        ValueError: If target_recording_id does not match any resolved recording identifier.
     """
-    session_directories = configuration.session_io.session_directories
-    session_ids = extract_unique_components(paths=session_directories)
-    dataset_name = configuration.session_io.dataset_name
+    recording_directories = configuration.recording_io.recording_directories
+    recording_ids = extract_unique_components(paths=recording_directories)
+    dataset_name = configuration.recording_io.dataset_name
 
     # Resolves all cindra directories and output paths upfront. These are cheap path operations needed for every
-    # session regardless of target filtering, because dataset_output_paths stores the full set.
+    # recording regardless of target filtering, because dataset_output_paths stores the full set.
     data_paths: list[Path] = []
     output_paths: list[Path] = []
-    for session_directory in session_directories:
-        data_path = _find_cindra_directory(session_directory=session_directory)
+    for recording_directory in recording_directories:
+        data_path = _find_cindra_directory(recording_directory=recording_directory)
         data_paths.append(data_path)
-        output_paths.append(data_path / "multiday" / dataset_name)
+        output_paths.append(data_path / "multi_recording" / dataset_name)
 
-    # Validates the target session ID before performing expensive I/O.
-    if target_session_id is not None and target_session_id not in session_ids:
-        available_ids = list(session_ids)
+    # Validates the target recording ID before performing expensive I/O.
+    if target_recording_id is not None and target_recording_id not in recording_ids:
+        available_ids = list(recording_ids)
         message = (
-            f"Unable to resolve multi-day context for session '{target_session_id}'. The provided session_id does "
-            f"not match any resolved session identifier. Available session IDs: {available_ids}."
+            f"Unable to resolve multi-recording context for recording '{target_recording_id}'. The "
+            f"provided recording_id does not match any resolved recording identifier. Available "
+            f"recording IDs: {available_ids}."
         )
         console.error(message=message, error=ValueError)
 
-    contexts: list[MultiDayRuntimeContext] = []
+    contexts: list[MultiRecordingRuntimeContext] = []
 
-    for index, session_id in enumerate(session_ids):
-        # Skips non-target sessions when a specific session is requested.
-        if target_session_id is not None and session_id != target_session_id:
+    for index, recording_id in enumerate(recording_ids):
+        # Skips non-target recordings when a specific recording is requested.
+        if target_recording_id is not None and recording_id != target_recording_id:
             continue
 
         data_path = data_paths[index]
         output_path = output_paths[index]
 
-        # Loads single-day combined data (scalars only). Arrays are loaded on demand by each pipeline function.
+        # Loads single-recording combined data (scalars only). Arrays are loaded on demand by each pipeline function.
         combined_data = CombinedData.load(root_path=data_path)
 
-        runtime_path = output_path / "multiday_runtime_data.yaml"
+        runtime_path = output_path / "multi_recording_runtime_data.yaml"
         if runtime_path.exists():
             # Loads existing runtime data (scalars only). Arrays are loaded on demand by each pipeline function.
-            runtime = MultiDayRuntimeData.load(output_path=output_path)
+            runtime = MultiRecordingRuntimeData.load(output_path=output_path)
 
-            # Updates IO paths to reflect the current configuration's session directories. This handles cases where
-            # session directories have changed or data was moved since the runtime was last saved.
+            # Updates IO paths to reflect the current configuration's recording directories. This handles cases where
+            # recording directories have changed or data was moved since the runtime was last saved.
             runtime.io.data_path = data_path
             runtime.io.dataset_output_paths = tuple(output_paths)
             runtime.io.mroi_region_borders = _compute_mroi_region_borders(data_path=data_path)
@@ -295,12 +302,12 @@ def resolve_multiday_contexts(
             # Injects the preloaded CombinedData.
             runtime.combined_data = combined_data
 
-            contexts.append(MultiDayRuntimeContext(configuration=configuration, runtime=runtime))
+            contexts.append(MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime))
             continue
 
         # Constructs new IO data with all discovered paths.
-        io_data = MultiDayIOData(
-            session_id=session_id,
+        io_data = MultiRecordingIOData(
+            recording_id=recording_id,
             data_path=data_path,
             dataset_name=dataset_name,
             dataset_output_paths=tuple(output_paths),
@@ -310,14 +317,16 @@ def resolve_multiday_contexts(
         io_data.mroi_region_borders = _compute_mroi_region_borders(data_path=data_path)
 
         # Constructs the runtime data with the IO data, output path, and preloaded CombinedData.
-        runtime = MultiDayRuntimeData(output_path=output_path, io=io_data, combined_data=combined_data)
+        runtime = MultiRecordingRuntimeData(output_path=output_path, io=io_data, combined_data=combined_data)
 
-        # Creates the output directory for this session.
+        # Creates the output directory for this recording.
         ensure_directory_exists(output_path)
 
-        contexts.append(MultiDayRuntimeContext(configuration=configuration, runtime=runtime))
+        contexts.append(MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime))
 
-    console.echo(message=f"Loaded existing multi-day runtime data for {len(contexts)} session(s).", level=LogLevel.INFO)
+    console.echo(
+        message=f"Loaded existing multi-recording runtime data for {len(contexts)} recording(s).", level=LogLevel.INFO
+    )
 
     # Saves shared configuration once via the first context to ensure it is always up to date.
     contexts[0].save_shared()
@@ -449,10 +458,11 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
     """Extracts the first component from the end of each input path that uniquely identifies each path globally.
 
     Notes:
-        This function adapts the multi-day pipeline to directory structures where the unique session identifier appears
-        at different levels of the path hierarchy. For example, given paths like ``/data/day1/session`` and
-        ``/data/day2/session``, the function identifies ``day1`` and ``day2`` as the unique components (not ``session``,
-        which is shared). This allows users to organize sessions using any naming convention, as long as each path
+        This function adapts the multi-recording pipeline to directory structures where the unique
+        recording identifier appears at different levels of the path hierarchy. For example, given paths
+        like ``/data/day1/recording`` and ``/data/day2/recording``, the function identifies ``day1`` and
+        ``day2`` as the unique components (not ``recording``,
+        which is shared). This allows users to organize recordings using any naming convention, as long as each path
         contains at least one unique component somewhere in its hierarchy.
 
     Args:
@@ -497,36 +507,37 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
     return tuple(unique_components)
 
 
-def _find_cindra_directory(session_directory: Path) -> Path:
-    """Discovers the cindra output directory within a session directory tree.
+def _find_cindra_directory(recording_directory: Path) -> Path:
+    """Discovers the cindra output directory within a recording directory tree.
 
-    Searches recursively for the combined_metadata.npz file created by the single-day pipeline's combination step.
-    Since multi-day session paths are not pre-sanitized, the cindra directory may be
-    nested at an arbitrary depth below the session root (e.g., under a processed_data/mesoscope_data/ subdirectory).
+    Searches recursively for the combined_metadata.npz file created by the single-recording pipeline's combination step.
+    Since multi-recording recording paths are not pre-sanitized, the cindra directory may be
+    nested at an arbitrary depth below the recording root (e.g., under a processed_data/mesoscope_data/ subdirectory).
 
     Args:
-        session_directory: The path to the session's root directory.
+        recording_directory: The path to the recording's root directory.
 
     Returns:
         The path to the cindra output directory that contains the combined_metadata.npz file.
 
     Raises:
-        FileNotFoundError: If no combined_metadata.npz file is found under the session directory.
-        RuntimeError: If multiple combined_metadata.npz files are found under the session directory.
+        FileNotFoundError: If no combined_metadata.npz file is found under the recording directory.
+        RuntimeError: If multiple combined_metadata.npz files are found under the recording directory.
     """
-    matches = list(session_directory.rglob("combined_metadata.npz"))
+    matches = list(recording_directory.rglob("combined_metadata.npz"))
 
     if not matches:
         message = (
-            f"Unable to locate cindra output for session {session_directory}. No combined_metadata.npz file was "
-            f"found anywhere in the directory tree. Ensure the single-day pipeline has completed successfully for "
-            f"this recording session before running multi-day processing."
+            f"Unable to locate cindra output for recording {recording_directory}. No "
+            f"combined_metadata.npz file was found anywhere in the directory tree. Ensure the "
+            f"single-recording pipeline has completed successfully for this recording before running "
+            f"multi-recording processing."
         )
         console.error(message=message, error=FileNotFoundError)
 
     if len(matches) > 1:
         message = (
-            f"Unable to locate cindra output for session {session_directory}. Found {len(matches)} "
+            f"Unable to locate cindra output for recording {recording_directory}. Found {len(matches)} "
             f"combined_metadata.npz files, but expected exactly one unique match."
         )
         console.error(message=message, error=RuntimeError)

@@ -1,13 +1,13 @@
 ---
-name: single-day-processing
+name: single-recording-processing
 description: >-
-  Guides AI agents through single-day (within-session) neural imaging data processing using the cindra MCP server.
-  Covers session discovery, configuration, batch processing, and status monitoring for individual recording sessions.
+  Guides AI agents through single-recording (within-recording) neural imaging data processing using the cindra MCP server.
+  Covers recording discovery, configuration, batch processing, and status monitoring for individual recordings.
 ---
 
-# Single-Day Neural Imaging Processing
+# Single-Recording Neural Imaging Processing
 
-Guides AI agents through the workflow for processing neural imaging data from individual recording sessions using the
+Guides AI agents through the workflow for processing neural imaging data from individual recordings using the
 cindra MCP server tools.
 
 ---
@@ -15,7 +15,7 @@ cindra MCP server tools.
 ## Agent Requirements
 
 **You MUST use the MCP tools provided by this library for all neural imaging data processing tasks.** The cindra
-library provides an MCP server that exposes specialized tools for discovering sessions, executing pipelines, and
+library provides an MCP server that exposes specialized tools for discovering recordings, executing pipelines, and
 monitoring processing status. These tools are the only supported interface for agentic neural imaging data processing.
 
 ### Mandatory Tool Usage
@@ -29,9 +29,9 @@ monitoring processing status. These tools are the only supported interface for a
 
 The MCP tools provide:
 
-1. **Background processing** - Jobs run in separate threads, allowing parallel session processing
+1. **Background processing** - Jobs run in separate threads, allowing parallel recording processing
 2. **Intelligent batching** - Three-phase processing (binarize → process → combine)
-3. **Automatic queuing** - Sessions beyond parallel capacity are queued and started automatically
+3. **Automatic queuing** - Recordings beyond parallel capacity are queued and started automatically
 4. **Status tracking** - Real-time progress monitoring across all phases
 5. **Error isolation** - Failures in one job don't crash the entire pipeline
 6. **Resource management** - Automatic CPU core allocation and cleanup
@@ -76,32 +76,32 @@ Add to your `.mcp.json` file in the project root:
 ### Verifying Connection
 
 Before processing, verify the MCP tools are available by checking your tool list. If the cindra tools
-(`discover_sessions_tool`, `start_batch_processing_tool`, etc.) are not present, the server is not connected.
+(`discover_recordings_tool`, `start_batch_processing_tool`, etc.) are not present, the server is not connected.
 
 ---
 
 ## Available Tools
 
-The MCP server exposes a unified API where all processing goes through the batch manager, even for single sessions.
+The MCP server exposes a unified API where all processing goes through the batch manager, even for single recordings.
 
 ### Configuration Tool
 
 | Tool                   | Purpose                                                    |
 |------------------------|------------------------------------------------------------|
-| `generate_config_file` | Generates a default configuration YAML file (single-day)   |
+| `generate_config_file` | Generates a default configuration YAML file (single-recording)   |
 
-### Session Discovery and Status Tools
+### Recording Discovery and Status Tools
 
 | Tool                     | Purpose                                             |
 |--------------------------|-----------------------------------------------------|
-| `discover_sessions_tool` | Finds sessions under a root directory               |
-| `get_single_day_status`  | Checks filesystem for single-day processing outputs |
+| `discover_recordings_tool` | Finds recordings under a root directory               |
+| `get_single_recording_status`  | Checks filesystem for single-recording processing outputs |
 
 ### Batch Processing Tools
 
 | Tool                               | Purpose                                            |
 |------------------------------------|----------------------------------------------------|
-| `start_batch_processing_tool`      | Starts batch single-day processing (1+ sessions)   |
+| `start_batch_processing_tool`      | Starts batch single-recording processing (1+ recordings)   |
 | `get_batch_processing_status_tool` | Returns in-memory status of running batch          |
 | `cancel_batch_processing_tool`     | Cancels batch processing, clears queues            |
 
@@ -109,19 +109,19 @@ The MCP server exposes a unified API where all processing goes through the batch
 
 ## Pipeline Architecture
 
-The single-day pipeline processes brain imaging data from a single recording session through three sequential phases.
+The single-recording pipeline processes brain imaging data from a single recording through three sequential phases.
 
 ### Three-Phase Processing
 
 ```
 Phase 1: BINARIZE (I/O bound)
 ├── Converts raw TIFFs to binary format
-├── Determines plane count for the session
+├── Determines plane count for the recording
 └── Sequential - I/O limited
 
 Phase 2: PROCESS (CPU bound)
 ├── Motion correction (registration)
-├── ROI detection (cell identification)
+├── ROI detection
 ├── Signal extraction (fluorescence traces)
 ├── Processes each plane independently
 └── Parallel - up to 30 workers per plane
@@ -134,30 +134,30 @@ Phase 3: COMBINE (I/O bound)
 
 ### Batch Processing Architecture
 
-When processing multiple sessions:
+When processing multiple recordings:
 
 ```
-Phase 1: BINARIZE (Sequential across sessions)
-├── Session 1: binarize → determines plane count
-├── Session 2: binarize → determines plane count
-└── Session N: binarize → determines plane count
+Phase 1: BINARIZE (Sequential across recordings)
+├── Recording 1: binarize → determines plane count
+├── Recording 2: binarize → determines plane count
+└── Recording N: binarize → determines plane count
 
-Phase 2: PROCESS (Parallel across session-plane pairs)
-├── Session 1, Plane 0 ─┐
-├── Session 1, Plane 1  │
-├── Session 2, Plane 0  ├── Parallel batch
-├── Session 2, Plane 1  │
+Phase 2: PROCESS (Parallel across recording-plane pairs)
+├── Recording 1, Plane 0 ─┐
+├── Recording 1, Plane 1  │
+├── Recording 2, Plane 0  ├── Parallel batch
+├── Recording 2, Plane 1  │
 └── ...                 ┘
 
-Phase 3: COMBINE (Sequential across sessions)
-├── Session 1: combine
-├── Session 2: combine
-└── Session N: combine
+Phase 3: COMBINE (Sequential across recordings)
+├── Recording 1: combine
+├── Recording 2: combine
+└── Recording N: combine
 ```
 
 ### Output Structure
 
-Results are saved to `{session_path}/cindra/`:
+Results are saved to `{recording_path}/cindra/`:
 
 ```
 cindra/
@@ -189,7 +189,7 @@ cindra/
 ```python
 {
     "output_path": "/path/to/config.yaml",  # Required
-    "pipeline_type": "single-day"           # Required
+    "pipeline_type": "single-recording"           # Required
 }
 ```
 
@@ -198,11 +198,11 @@ cindra/
 {
     "success": True,
     "file_path": "/path/to/config.yaml",
-    "pipeline_type": "single-day"
+    "pipeline_type": "single-recording"
 }
 ```
 
-### `discover_sessions_tool`
+### `discover_recordings_tool`
 
 **Input:**
 ```python
@@ -214,7 +214,7 @@ cindra/
 **Output:**
 ```python
 {
-    "sessions": [
+    "recordings": [
         "/path/to/data/animal1/2024-01-15-10-30-00-123456",
         "/path/to/data/animal1/2024-01-16-09-00-00-234567",
         ...
@@ -230,7 +230,7 @@ cindra/
 **Input:**
 ```python
 {
-    "session_paths": ["/path/session1", "/path/session2", ...],  # Required, minimum 1
+    "recording_paths": ["/path/recording1", "/path/recording2", ...],  # Required, minimum 1
     "configuration_path": "/path/to/config.yaml",  # Required
     "workers_per_plane": -1,    # Optional, -1 for automatic (max 30)
     "max_parallel_planes": -1   # Optional, -1 for automatic
@@ -241,7 +241,7 @@ cindra/
 ```python
 {
     "started": True,
-    "total_sessions": 30,
+    "total_recordings": 30,
     "workers_per_plane": 28,
     "max_parallel_planes": 2,
     "message": "Batch processing started. Use get_batch_processing_status_tool to monitor progress."
@@ -256,9 +256,9 @@ cindra/
 ```python
 {
     "current_phase": "process",  # "binarize", "process", or "combine"
-    "sessions": [
+    "recordings": [
         {
-            "session_name": "2024-01-15-10-30-00-123456",
+            "recording_name": "2024-01-15-10-30-00-123456",
             "status": "PROCESSING",
             "binarize": "done",
             "process": "3/4",
@@ -284,7 +284,7 @@ cindra/
 ```python
 {
     "cancelled": True,
-    "message": "Single-day batch processing cancelled. Active jobs will complete but no new jobs will start.",
+    "message": "Single-recording batch processing cancelled. Active jobs will complete but no new jobs will start.",
     "final_state": {
         "binarize_completed": 5,
         "process_completed": 12,
@@ -301,12 +301,12 @@ cindra/
 When presenting status to the user, format the data as a clear table:
 
 ```
-**Single-Day Batch Processing Status**
+**Single-Recording Batch Processing Status**
 
 Current Phase: PROCESS
-Summary: 10/30 sessions complete | 2 processing | 18 queued | 0 failed
+Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
-| Session                      | Binarize | Process | Combine | Status     |
+| Recording                      | Binarize | Process | Combine | Status     |
 |------------------------------|----------|---------|---------|------------|
 | 2024-01-15-10-30-00-123456   | done     | 2/4     | pending | PROCESSING |
 | 2024-01-15-11-45-00-234567   | done     | 4/4     | running | PROCESSING |
@@ -323,19 +323,19 @@ Summary: 10/30 sessions complete | 2 processing | 18 queued | 0 failed
 **You MUST complete this checklist before starting batch processing.** Do not skip any step.
 
 ```
-- [ ] Session discovery complete (used discover_sessions_tool or received explicit paths)
+- [ ] Recording discovery complete (used discover_recordings_tool or received explicit paths)
 - [ ] Configuration file confirmed or created (see Configuration Guidance section)
 - [ ] Asked about exclusions if creating new config (flyback planes, ignored files)
 - [ ] Asked user about CPU core allocation (see Resource Allocation section)
 - [ ] Received user response confirming worker count
-- [ ] Confirmed which sessions to process
+- [ ] Confirmed which recordings to process
 ```
 
 **STOP**: If any checkbox is incomplete, do not proceed. Complete the missing steps first.
 
 ### Workflow Steps
 
-1. **Discover sessions** → Use `discover_sessions_tool` to find all session paths
+1. **Discover recordings** → Use `discover_recordings_tool` to find all recording paths
 2. **Check configuration** → Ask user if they have an existing config (see Configuration Guidance)
 3. **Create config if needed** → Generate default and ask about exclusions (flyback planes, ignored files)
 4. **Ask about CPU allocation** → Explain resource model and ask how many cores to use
@@ -350,7 +350,7 @@ Summary: 10/30 sessions complete | 2 processing | 18 queued | 0 failed
 
 **CRITICAL**: You MUST ask the user about configuration before processing. Never skip this step.
 
-For complete parameter documentation, invoke `/single-day-data`.
+For complete parameter documentation, invoke `/single-recording-data`.
 
 ### Step 1: Ask About Existing Configuration
 
@@ -367,7 +367,7 @@ Before processing, always ask:
 2. Proceed to CPU core allocation
 
 **If user needs a new configuration:**
-1. Use `generate_config_file` with `pipeline_type: "single-day"` to create a default configuration file
+1. Use `generate_config_file` with `pipeline_type: "single-recording"` to create a default configuration file
 2. Ask about exclusions (see below)
 3. Proceed to CPU core allocation
 
@@ -386,11 +386,11 @@ When `mesoscan=True`, these parameters are **automatically overwritten** from `c
 - `fs` - Set to `frame_rate`
 - ROI geometry (`lines`, `dx`, `dy`, `nrois`)
 
-User-specified values for these parameters are ignored. See `/single-day-data` for complete details.
+User-specified values for these parameters are ignored. See `/single-recording-data` for complete details.
 
-### Multi-Day Compatibility
+### Multi-Recording Compatibility
 
-If the user intends to run multi-day processing on these sessions later, ensure:
+If the user intends to run multi-recording processing on these recordings later, ensure:
 - `file_io.delete_bin: false` (keep registered binary files)
 - `output.combined: true` (merge plane results)
 
@@ -426,16 +426,16 @@ The system automatically calculates optimal resource allocation:
 
 | Error Message                           | Cause                    | Resolution                        |
 |-----------------------------------------|--------------------------|-----------------------------------|
-| "At least one session path is required" | Empty session_paths list | Provide at least one session path |
+| "At least one recording path is required" | Empty recording_paths list | Provide at least one recording path |
 | "Configuration file not found"          | Invalid configuration_path | Generate or verify configuration  |
-| "Session directory not found"           | Invalid path for session | Verify path exists                |
+| "Recording directory not found"           | Invalid path for recording | Verify path exists                |
 | "Batch processing already in progress"  | Batch already running    | Wait for current batch to complete|
 
 ### Handling Failures
 
-If processing fails for some sessions:
+If processing fails for some recordings:
 
-1. Note which sessions failed from the status output
+1. Note which recordings failed from the status output
 2. Read the error messages in the output
 3. Explain the errors to the user with root cause and resolution
 4. Wait for the current batch to complete before starting retries
