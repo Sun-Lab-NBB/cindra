@@ -158,7 +158,7 @@ def compute_colors(
 
     # Generates deterministic random hues (seeded for reproducibility across sessions).
     np.random.seed(seed=ROI_CONFIG.random_color_seed)  # noqa: NPY002
-    random_colors = np.random.random((cell_count,))  # noqa: NPY002
+    random_colors = np.random.random((cell_count,)).astype(np.float32)  # noqa: NPY002
     if two_channels:
         # Shifts hues into the channel 2 color range so the two channels are visually distinct.
         random_colors = random_colors / ROI_CONFIG.channel_2_color_divisor + ROI_CONFIG.channel_2_color_offset
@@ -218,7 +218,7 @@ def compute_colors(
 
         # Maps the normalized [0, 1] values to RGB through the active colormap.
         colors[color_mode] = _apply_colormap(statistic_values, roi_colormap)
-        normalized_statistics[color_mode] = statistic_values.flatten()
+        normalized_statistics[color_mode] = statistic_values.ravel()
 
     # Uses the classifier probability (column 1) directly as a pre-normalized [0, 1] value for colormap mapping.
     classifier_values = cell_classification[:, 1:2]
@@ -293,6 +293,12 @@ def initialize_roi_maps(
         if y_pixels is not None:
             x_pixels = roi.mask.x_pixels
 
+            # Clips out-of-bounds coordinates that can arise from backward-deformed multi-day masks. Without
+            # clipping, negative indices wrap around in numpy advanced indexing, producing mangled overlays.
+            valid = (y_pixels >= 0) & (y_pixels < frame_height) & (x_pixels >= 0) & (x_pixels < frame_width)
+            y_pixels = y_pixels[valid]
+            x_pixels = x_pixels[valid]
+
             # Shifts all existing layers down by one (layer N-1 → layer N) to make room at layer 0. NumPy
             # evaluates the RHS into a temporary before assigning, so the copy order is safe.
             roi_indices[1:, y_pixels, x_pixels] = roi_indices[:-1, y_pixels, x_pixels]
@@ -364,9 +370,7 @@ def draw_masks(
     color_index = roi_color_mode
     view_index = background_view
 
-    # The ROI-only view (view_index == 0, black background) always uses full opacity since partial transparency on
-    # black just dims the ROIs. All other views use the slider value.
-    effective_opacity = 255 if view_index == 0 else roi_opacity
+    effective_opacity = roi_opacity
 
     # Sets alpha to zero everywhere, then writes the effective opacity only at ROI pixels. Avoids a full-frame
     # multiply + cast by using boolean indexing on the sparse ROI presence mask.
@@ -380,10 +384,13 @@ def draw_masks(
         # ROI view: highlights selected ROIs with brightness based on overlap depth.
         for roi_index in selected_roi_indices:
             roi = roi_statistics[roi_index]
-            y_pixels = roi.mask.y_pixels.flatten()
-            x_pixels = roi.mask.x_pixels.flatten()
+            y_pixels = roi.mask.y_pixels.ravel()
+            x_pixels = roi.mask.x_pixels.ravel()
+            valid = (y_pixels >= 0) & (y_pixels < frame_height) & (x_pixels >= 0) & (x_pixels < frame_width)
+            y_pixels = y_pixels[valid]
+            x_pixels = x_pixels[valid]
             overlap_count = (roi_maps.roi_indices[:, y_pixels, x_pixels] > -1).sum(axis=0) - 1
-            brightness = 1 - overlap_count / ROI_CONFIG.overlap_layers
+            brightness = (1 - overlap_count / ROI_CONFIG.overlap_layers).astype(np.float32)
             overlay = _highlight_selected_roi(overlay, y_pixels, x_pixels, brightness)
     else:
         # Image view: highlights selected ROIs with colored circles.
@@ -392,8 +399,11 @@ def draw_masks(
             y_circle, x_circle = roi.mask.circle_pixels
             valid = (y_circle >= 0) & (x_circle >= 0) & (y_circle < frame_height) & (x_circle < frame_width)
             y_circle, x_circle = y_circle[valid], x_circle[valid]
-            y_pixels = roi.mask.y_pixels.flatten()
-            x_pixels = roi.mask.x_pixels.flatten()
+            y_pixels = roi.mask.y_pixels.ravel()
+            x_pixels = roi.mask.x_pixels.ravel()
+            valid = (y_pixels >= 0) & (y_pixels < frame_height) & (x_pixels >= 0) & (x_pixels < frame_width)
+            y_pixels = y_pixels[valid]
+            x_pixels = x_pixels[valid]
             overlay[y_pixels, x_pixels, 3] = 0
             roi_color = color_arrays.colors[color_index, roi_index]
             overlay = _highlight_selected_circle(
@@ -452,7 +462,7 @@ def render_colorbar(
     color_index = roi_color_mode
     if color_index == 0:
         colorbar_widgets.image.setImage(
-            np.zeros((ROI_STYLE.colorbar_row_count, ROI_STYLE.colorbar_sample_count - 1, 3))
+            np.zeros((ROI_STYLE.colorbar_row_count, ROI_STYLE.colorbar_sample_count - 1, 3), dtype=np.uint8)
         )
     else:
         colorbar_widgets.image.setImage(colorbar_image)
@@ -640,10 +650,7 @@ def recompute_binary_classification(
         threshold: Probability cutoff for cell/non-cell assignment. Uses original labels when None.
     """
     non_cell_color, cell_color = _classification_endpoint_colors(colormap)
-    if threshold is not None:
-        is_cell = cell_classification[:, 1] >= threshold
-    else:
-        is_cell = cell_classification[:, 0] > 0
+    is_cell = cell_classification[:, 1] >= threshold if threshold is not None else cell_classification[:, 0] > 0
     binary_colors = color_arrays.colors[ROIColorMode.CELL_CLASSIFICATION]
     binary_colors[:] = non_cell_color
     binary_colors[is_cell] = cell_color
@@ -793,7 +800,8 @@ def _place_in_valid_region(
     """Normalizes and places an image into the valid subregion of the full frame.
 
     Args:
-        image: Input image to normalize and place. A size-0 array produces a gray fallback.
+        image: Input image to normalize and place. A size-0 array produces a gray fallback when a valid region is
+            specified, or a zero fallback otherwise.
         frame_height: Height of the full frame.
         frame_width: Width of the full frame.
         valid_y_range: Row range (start, end) for the valid subregion.
@@ -802,6 +810,10 @@ def _place_in_valid_region(
     Returns:
         Full-frame image with the normalized data placed in the valid region.
     """
+    # Delegates to normalize_percentile when no valid subregion is specified.
+    if valid_y_range is None or valid_x_range is None:
+        return normalize_percentile(image=image, frame_height=frame_height, frame_width=frame_width)
+
     if image.size == 0:
         return np.full((frame_height, frame_width), 0.5, dtype=np.float32)
 
@@ -815,19 +827,14 @@ def _place_in_valid_region(
     normalized = (image - lower_bound) / (upper_bound - lower_bound)
 
     # Places in the valid subregion, filling the border with the lower percentile value.
-    if valid_y_range is not None and valid_x_range is not None:
-        output = np.full((frame_height, frame_width), lower_bound, dtype=np.float32)
-        with contextlib.suppress(ValueError, IndexError):
-            output[valid_y_range[0] : valid_y_range[1], valid_x_range[0] : valid_x_range[1]] = normalized
-        np.clip(output, 0, 1, out=output)
-        return output
-
-    # No valid region specified; clips the normalized image in place and returns directly.
-    np.clip(normalized, 0, 1, out=normalized)
-    return normalized
+    output = np.full((frame_height, frame_width), lower_bound, dtype=np.float32)
+    with contextlib.suppress(ValueError, IndexError):
+        output[valid_y_range[0] : valid_y_range[1], valid_x_range[0] : valid_x_range[1]] = normalized
+    np.clip(output, 0, 1, out=output)
+    return output
 
 
-def _convert_hues_to_rgb(hues: NDArray[np.float64]) -> NDArray[np.uint8]:
+def _convert_hues_to_rgb(hues: NDArray[np.float32]) -> NDArray[np.uint8]:
     """Converts HSV hue values to RGB uint8 colors with full saturation and value.
 
     Args:
@@ -876,7 +883,7 @@ def _apply_hsv_colormap(values: NDArray[np.float32]) -> NDArray[np.uint8]:
         RGB color array with shape (..., 3) and dtype uint8.
     """
     inverted = 1.0 - (values + ROI_CONFIG.hsv_offset) / ROI_CONFIG.hsv_divisor
-    return _convert_hues_to_rgb(inverted.ravel().astype(np.float64))
+    return _convert_hues_to_rgb(inverted.ravel().astype(np.float32))
 
 
 def _classification_endpoint_colors(colormap: str) -> tuple[NDArray[np.uint8], NDArray[np.uint8]]:
@@ -918,8 +925,13 @@ def _flip_roi(
     color_arrays.normalized_statistics[ROIColorMode.CELL_CLASSIFICATION, roi_index] = float(is_cell)
 
     # Refreshes the precomputed RGB overlay pixels for every color slot including the binary classification slot.
+    # Clips coordinates to valid frame bounds (backward-deformed multi-day masks may have out-of-bounds pixels).
     y_pixels = roi_statistics[roi_index].mask.y_pixels
     x_pixels = roi_statistics[roi_index].mask.x_pixels
+    frame_height, frame_width = color_arrays.rgb.shape[1], color_arrays.rgb.shape[2]
+    valid = (y_pixels >= 0) & (y_pixels < frame_height) & (x_pixels >= 0) & (x_pixels < frame_width)
+    y_pixels = y_pixels[valid]
+    x_pixels = x_pixels[valid]
     for color_index in range(color_arrays.colors.shape[0]):
         color = color_arrays.colors[color_index]
         color_arrays.rgb[color_index, y_pixels, x_pixels, :3] = color[roi_maps.roi_indices[0, y_pixels, x_pixels], :]
@@ -927,9 +939,9 @@ def _flip_roi(
 
 def _highlight_selected_roi(
     overlay: NDArray[np.uint8],
-    y_pixels: NDArray,
-    x_pixels: NDArray,
-    brightness: NDArray,
+    y_pixels: NDArray[np.int32],
+    x_pixels: NDArray[np.int32],
+    brightness: NDArray[np.float32],
 ) -> NDArray[np.uint8]:
     """Highlights a selected ROI in the overlay with white based on overlap depth.
 
@@ -948,8 +960,8 @@ def _highlight_selected_roi(
 
 def _highlight_selected_circle(
     overlay: NDArray[np.uint8],
-    y_circle: NDArray,
-    x_circle: NDArray,
+    y_circle: NDArray[np.int32],
+    x_circle: NDArray[np.int32],
     color: NDArray[np.uint8],
 ) -> NDArray[np.uint8]:
     """Draws a colored circle on the overlay for a selected ROI.

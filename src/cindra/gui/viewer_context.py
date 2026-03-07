@@ -281,10 +281,8 @@ class SingleDayData:
 
     @property
     def cell_classification(self) -> NDArray[np.float32]:
-        """Returns the cell classification array with shape (roi_count, 2) for the current view.
-
-        Column 0 holds binary labels (0.0/1.0), column 1 holds classifier probabilities. The array is memory-mapped
-        read-write so label modifications propagate directly to disk.
+        """Returns the memory-mapped read-write cell classification array with shape (roi_count, 2) for the current
+        view, where column 0 holds binary labels (0.0/1.0) and column 1 holds classifier probabilities.
         """
         value = self._current_extraction.cell_classification
         if value is None:
@@ -429,27 +427,23 @@ class SingleDayData:
 
     @property
     def principal_component_extreme_images(self) -> NDArray[np.float32] | None:
-        """Returns the mean images from frames at extreme ends of each principal component.
-
-        The returned array has shape (2, num_components, height, width). Index 0 contains low-projection means,
-        index 1 contains high-projection means.
+        """Returns the mean images from frames at extreme ends of each principal component as an array with shape
+        (2, num_components, height, width) where index 0 contains low-projection means and index 1 contains
+        high-projection means.
         """
         return self._current_registration.principal_component_extreme_images
 
     @property
     def principal_component_shift_metrics(self) -> NDArray[np.float32] | None:
-        """Returns the registration shift metrics computed by aligning PC extreme images.
-
-        The returned array has shape (num_components, 3). Column 0 contains mean rigid shift magnitude, column 1
-        contains mean nonrigid shift magnitude, and column 2 contains maximum nonrigid shift magnitude.
+        """Returns the registration shift metrics computed by aligning PC extreme images as an array with shape
+        (num_components, 3) where columns contain mean rigid, mean nonrigid, and maximum nonrigid shift magnitudes.
         """
         return self._current_registration.principal_component_shift_metrics
 
     @property
     def principal_component_projections(self) -> NDArray[np.float32] | None:
-        """Returns the projection of each frame onto the principal components of the registered movie.
-
-        The returned array has shape (num_frames, num_components).
+        """Returns the projection of each frame onto the principal components of the registered movie as an array
+        with shape (num_frames, num_components).
         """
         return self._current_registration.principal_component_projections
 
@@ -462,10 +456,8 @@ class SingleDayData:
 
     @property
     def recording_label(self) -> str:
-        """Returns the trailing components of the recording data path for display labels.
-
-        Starts with the last 3 path components and progressively reduces to 2, then 1, if the label exceeds 45
-        characters.
+        """Returns the trailing components of the recording data path for display labels, starting with the last 3
+        path components and progressively reducing to 2, then 1, if the label exceeds 45 characters.
         """
         data_path = self._contexts[self._current_plane_index].configuration.file_io.data_path
         if data_path is not None:
@@ -1205,8 +1197,9 @@ class ViewerData:
         else:
             self.dataset_name = dataset_name
 
-        # Resolves the current recording index to point at the anchor session.
-        single_day_root = self.single_day.output_path.parent
+        # Resolves the current recording index to point at the anchor session. single_day.output_path already
+        # returns the cindra root (plane output_path.parent), which matches recording.data_path directly.
+        single_day_root = self.single_day.output_path
         for index, recording in enumerate(recordings):
             if recording.data_path == single_day_root:
                 self._current_recording_index = index

@@ -68,9 +68,6 @@ class _PlotStyle:
 class _FontStyle:
     """Encapsulates static font and text size parameters shared by all viewer windows."""
 
-    family: str = "Arial"
-    """The standard font family used throughout the GUI."""
-
     plot_title_size: str = "14pt"
     """The font size for plot titles."""
 
@@ -96,8 +93,6 @@ class _ROIViewerStyle:
 
     colorbar_max_height: int = 60
     """The maximum height for the colorbar widget."""
-    color_edit_width: int = 65
-    """The width for color panel edit fields and the colormap combo box."""
     colorbar_sample_count: int = 101
     """The number of samples for the colorbar gradient."""
     colorbar_row_count: int = 20
@@ -160,8 +155,6 @@ class _Colors:
     """The red color (#FF0000)."""
     white: tuple[int, int, int] = (255, 255, 255)
     """The white color (#FFFFFF)."""
-    black: tuple[int, int, int] = (0, 0, 0)
-    """The black color (#000000)."""
     gray: tuple[int, int, int] = (100, 100, 100)
     """The gray color (#646464)."""
     silver: tuple[int, int, int] = (192, 192, 192)

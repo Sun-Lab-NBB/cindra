@@ -113,16 +113,16 @@ class TraceMode(IntEnum):
 class TraceModeLabel(StrEnum):
     """Provides human-readable display labels for the TraceMode dropdown, indexed by TraceMode value."""
 
-    RAW_FLUORESCENCE = "Fluorescence"
+    RAW_FLUORESCENCE = "fluorescence"
     """The display label for the raw fluorescence trace mode."""
 
-    NEUROPIL = "Neuropil"
+    NEUROPIL = "neuropil"
     """The display label for the neuropil fluorescence trace mode."""
 
-    NEUROPIL_CORRECTED = "Corrected"
+    NEUROPIL_CORRECTED = "corrected"
     """The display label for the neuropil-corrected trace mode."""
 
-    DECONVOLVED = "Spikes"
+    DECONVOLVED = "spikes"
     """The display label for the deconvolved spikes trace mode."""
 
 
