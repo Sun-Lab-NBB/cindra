@@ -54,6 +54,7 @@ from .constants import (
     TraceMode,
     ROIColorMode,
     BackgroundView,
+    TraceModeLabel,
     ROIColorModeLabel,
     BackgroundViewLabel,
 )
@@ -147,7 +148,6 @@ class ROIViewer(QMainWindow):
         _trace_controls: Trace display mode, visibility checkboxes, and max plotted controls.
         _classifier_controls: Classifier builder panel with Classify toggle, New, and Add to Existing buttons.
         _roi_index_edit: Input field for jumping to a specific ROI by number in the ROI info bar.
-        _roi_statistic_labels: Labels displaying per-ROI statistics in the ROI info bar.
         _all_recordings_button: Toggle button for stacked all-recordings trace display.
     """
 
@@ -167,6 +167,7 @@ class ROIViewer(QMainWindow):
         self._last_reclassified_index: int = -1
         self._classify_mode: bool = False
         self._pre_classify_color_mode: int = ROIColorMode.RANDOM
+        self._saved_opacity: int = STYLE.default_mask_opacity
 
         # Multi-day state. Persists across _reset_state calls.
         self._all_recordings_visible: bool = False
@@ -262,16 +263,43 @@ class ROIViewer(QMainWindow):
         self._trace_widget.show()
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
-        """Toggles all ROIs on or off when spacebar is pressed.
+        """Handles keyboard controls for mask opacity, color mode, and colormap cycling.
+
+        Space toggles opacity between zero and the previous slider value. Left/right arrow keys cycle through enabled
+        color modes. Up/down arrow keys cycle through colormaps.
 
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
+        slider = self._color_controls.opacity_slider
         if event.key() == QtCore.Qt.Key.Key_Space:
-            if self._selected_roi_indices:
-                self._deselect_all_rois()
+            if slider.value() > 0:
+                self._saved_opacity = slider.value()
+                slider.setValue(0)
             else:
-                self._select_all_rois()
+                slider.setValue(self._saved_opacity)
+        elif event.key() in (QtCore.Qt.Key.Key_Up, QtCore.Qt.Key.Key_Down):
+            chooser = self._color_controls.colormap_chooser
+            count = chooser.count()
+            if count > 0:
+                step = -1 if event.key() == QtCore.Qt.Key.Key_Up else 1
+                chooser.setCurrentIndex((chooser.currentIndex() + step) % count)
+                self._on_color_changed(self._roi_color_mode)
+        elif event.key() in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right):
+            combo = self._color_controls.color_combo
+            if not combo.isEnabled():
+                return
+            count = combo.count()
+            step = 1 if event.key() == QtCore.Qt.Key.Key_Right else -1
+            model = combo.model()
+            current = combo.currentIndex()
+            for _ in range(count):
+                current = (current + step) % count
+                item = model.item(current) if isinstance(model, QStandardItemModel) else None
+                if item is None or item.isEnabled():
+                    combo.setCurrentIndex(current)
+                    self._on_color_changed(current)
+                    break
 
     def eventFilter(self, source: QtCore.QObject, event: QtCore.QEvent) -> bool:  # noqa: N802
         """Returns focus to the main window when Escape is pressed inside an edit field.
@@ -279,8 +307,11 @@ class ROIViewer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        # noinspection PyUnresolvedReferences
-        if event.type() == QtCore.QEvent.Type.KeyPress and event.key() == QtCore.Qt.Key.Key_Escape:
+        if (
+            event.type() == QtCore.QEvent.Type.KeyPress
+            and isinstance(event, QtGui.QKeyEvent)
+            and event.key() == QtCore.Qt.Key.Key_Escape
+        ):
             self.setFocus()
             return True
         return super().eventFilter(source, event)
@@ -324,6 +355,7 @@ class ROIViewer(QMainWindow):
         # File menu button with dropdown for loading recordings.
         file_button = QPushButton("File")
         file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        file_button.setToolTip("Load a recording for visualization.")
         file_menu = QMenu(self)
         file_menu.setStyleSheet(STYLE.menu)
         load_action = file_menu.addAction("&Load recording")
@@ -331,7 +363,10 @@ class ROIViewer(QMainWindow):
         load_action.triggered.connect(self._load_recording)
         file_button.setMenu(file_menu)
         toolbar.addWidget(file_button)
-
+        hint_label = QLabel("Hint: Use arrows to change color mode and colormap, use space to toggle masks.")
+        hint_label.setStyleSheet(STYLE.white_label)
+        hint_label.setFont(FONTS.small_bold)
+        toolbar.addWidget(hint_label)
         toolbar.addStretch()
         parent_layout.addLayout(toolbar)
 
@@ -351,6 +386,10 @@ class ROIViewer(QMainWindow):
         roi_source_layout = QVBoxLayout(self._roi_source_group)
         self._roi_source_combo: QComboBox = QComboBox(self)
         self._roi_source_combo.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._roi_source_combo.setToolTip(
+            "Select the ROI source. 'Original' uses single-day detected ROIs. Dataset entries use tracked ROIs from "
+            "the multi-day pipeline projected back to this session's native coordinate space."
+        )
         self._roi_source_combo.activated.connect(self._on_dataset_source_changed)
         roi_source_layout.addWidget(self._roi_source_combo)
         self._roi_source_group.setVisible(False)
@@ -380,7 +419,7 @@ class ROIViewer(QMainWindow):
         self._ranked_count_edit.setText(str(ROI_CONFIG.top_selection_count))
         self._ranked_count_edit.setFixedWidth(STYLE.edit_width)
         self._ranked_count_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        self._ranked_count_edit.setToolTip("Number of top/bottom ROIs to select.")
+        self._ranked_count_edit.setToolTip("Set the number of top/bottom ROIs to auto-select.")
         self._ranked_count_edit.returnPressed.connect(self.setFocus)
         self._ranked_count_edit.installEventFilter(self)
         fields_row.addWidget(self._ranked_count_edit)
@@ -422,6 +461,10 @@ class ROIViewer(QMainWindow):
         self._channel_2_button = QPushButton("Channel 2")
         self._channel_2_button.setCheckable(True)
         self._channel_2_button.setEnabled(False)
+        self._channel_2_button.setToolTip(
+            "Toggle display between channel 1 and channel 2 data. When active, background images, ROI masks, and "
+            "fluorescence traces switch to the channel 2 variants."
+        )
         self._channel_2_button.toggled.connect(self._on_channel_2_toggled)
         channel_layout.addWidget(self._channel_2_button)
 
@@ -431,7 +474,7 @@ class ROIViewer(QMainWindow):
         self._colors_group, self._color_controls = self._create_color_controls()
         colors_box = self._colors_group
         self._colorbar_widgets = self._create_colorbar()
-        colors_box.layout().addWidget(self._colorbar_widgets.widget)
+        colors_box.layout().addWidget(self._colorbar_widgets.widget)  # type: ignore[union-attr]
         layout.addWidget(colors_box)
 
         # Trace display controls.
@@ -475,6 +518,10 @@ class ROIViewer(QMainWindow):
         view_combo.addItems(list(BackgroundViewLabel))
         view_combo.setFont(FONTS.small_bold)
         view_combo.setEnabled(False)
+        view_combo.setToolTip(
+            "Select the background image displayed behind the ROI overlay. 'ROIs' shows masks on a black "
+            "background. Other options show the corresponding single-day detection image."
+        )
         view_combo.activated.connect(self._on_view_changed)
         layout.addWidget(view_combo)
 
@@ -512,6 +559,9 @@ class ROIViewer(QMainWindow):
         color_combo.addItems(list(ROIColorModeLabel))
         color_combo.setFont(FONTS.small_bold)
         color_combo.setEnabled(False)
+        color_combo.setToolTip(
+            "Select the statistic used to color ROI masks. Each mode maps a per-ROI value to the active colormap."
+        )
         color_combo.activated.connect(self._on_color_changed)
         color_row.addWidget(color_combo)
         color_row.addStretch()
@@ -526,6 +576,9 @@ class ROIViewer(QMainWindow):
         colormap_chooser.addItems([cm.value for cm in Colormap])
         colormap_chooser.setCurrentIndex(0)
         colormap_chooser.setFont(FONTS.small_bold)
+        colormap_chooser.setToolTip(
+            "Select the color gradient applied when mapping ROI statistic values to overlay colors."
+        )
         colormap_row.addWidget(colormap_chooser)
         colormap_row.addStretch()
         layout.addLayout(colormap_row)
@@ -540,11 +593,12 @@ class ROIViewer(QMainWindow):
         threshold_edit.setFixedWidth(STYLE.edit_width)
         threshold_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         threshold_edit.setEnabled(False)
+        threshold_edit.setToolTip("Classifier probability threshold for the Cell Classification color mode.")
         threshold_edit.returnPressed.connect(self._on_threshold_changed)
         threshold_edit.returnPressed.connect(self.setFocus)
         threshold_edit.installEventFilter(self)
         params_row.addWidget(threshold_edit)
-        binning_label = QLabel("Bin Count:")
+        binning_label = QLabel("Bin Size:")
         binning_label.setStyleSheet(STYLE.white_label)
         params_row.addWidget(binning_label)
         binning_edit = QLineEdit(self)
@@ -553,6 +607,7 @@ class ROIViewer(QMainWindow):
         binning_edit.setText("1")
         binning_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         binning_edit.setEnabled(False)
+        binning_edit.setToolTip("Number of frames averaged per temporal bin when computing activity correlations.")
         binning_edit.returnPressed.connect(self._recompute_binned_fluorescence)
         binning_edit.returnPressed.connect(self.setFocus)
         binning_edit.installEventFilter(self)
@@ -628,18 +683,26 @@ class ROIViewer(QMainWindow):
         classify_button.setCheckable(True)
         classify_button.setFont(FONTS.small_bold)
         classify_button.setEnabled(False)
+        classify_button.setToolTip(
+            "Toggle classifier mode. When active, clicking an ROI flips its cell/non-cell label instead of "
+            "selecting it for trace plotting."
+        )
         classify_button.toggled.connect(self._on_classify_toggled)
         layout.addWidget(classify_button, 0, 0, 2, 2)
 
         # Trains a new classifier from scratch using the current cell/non-cell labels.
         new_button = QPushButton("New", self)
         new_button.setFont(FONTS.small_bold)
+        new_button.setToolTip("Create a new classifier training dataset from the current cell/non-cell labels.")
         new_button.clicked.connect(self._on_classifier_new)
         layout.addWidget(new_button, 2, 0, 1, 1)
 
         # Appends the current session's labels to an existing classifier and retrains it.
         add_button = QPushButton("Add to Existing", self)
         add_button.setFont(FONTS.small_bold)
+        add_button.setToolTip(
+            "Append this session's cell/non-cell labels to an existing classifier training dataset and retrain."
+        )
         add_button.clicked.connect(self._on_classifier_add_to_existing)
         layout.addWidget(add_button, 2, 1, 1, 1)
 
@@ -671,21 +734,25 @@ class ROIViewer(QMainWindow):
 
         # Trace mode checkboxes in a 2x2 grid. Each toggles visibility of a trace type. In multi-day
         # mode, only one can be active at a time; in single-day mode, multiple can be checked.
-        fluorescence_checkbox = QCheckBox("fluorescence")
+        fluorescence_checkbox = QCheckBox(TraceModeLabel.RAW_FLUORESCENCE)
         fluorescence_checkbox.setStyleSheet(STYLE.white_label)
+        fluorescence_checkbox.setToolTip("Toggle the raw fluorescence trace in the trace panel.")
         layout.addWidget(fluorescence_checkbox, 0, 0, 1, 1)
 
-        neuropil_checkbox = QCheckBox("neuropil")
+        neuropil_checkbox = QCheckBox(TraceModeLabel.NEUROPIL)
         neuropil_checkbox.setStyleSheet(STYLE.white_label)
+        neuropil_checkbox.setToolTip("Toggle the neuropil fluorescence trace in the trace panel.")
         layout.addWidget(neuropil_checkbox, 0, 1, 1, 1)
 
-        corrected_checkbox = QCheckBox("corrected")
+        corrected_checkbox = QCheckBox(TraceModeLabel.NEUROPIL_CORRECTED)
         corrected_checkbox.setStyleSheet(STYLE.white_label)
         corrected_checkbox.setChecked(True)
+        corrected_checkbox.setToolTip("Toggle the neuropil-corrected fluorescence trace in the trace panel.")
         layout.addWidget(corrected_checkbox, 1, 0, 1, 1)
 
-        spikes_checkbox = QCheckBox("spikes")
+        spikes_checkbox = QCheckBox(TraceModeLabel.DECONVOLVED)
         spikes_checkbox.setStyleSheet(STYLE.white_label)
+        spikes_checkbox.setToolTip("Toggle the deconvolved spike trace in the trace panel.")
         layout.addWidget(spikes_checkbox, 1, 1, 1, 1)
 
         # Maximum trace count. Caps how many ROI traces are drawn simultaneously in the trace
@@ -699,6 +766,9 @@ class ROIViewer(QMainWindow):
         maximum_trace_count_edit.setText(str(ROI_CONFIG.plotted_trace_count))
         maximum_trace_count_edit.setFixedWidth(STYLE.edit_width)
         maximum_trace_count_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+        maximum_trace_count_edit.setToolTip(
+            "Limit the maximum number of traces in multi-ROI or multi-recording display modes."
+        )
         maximum_trace_count_edit.installEventFilter(self)
         trace_count_row.addWidget(maximum_trace_count_edit)
         trace_count_row.addStretch()
@@ -1640,7 +1710,7 @@ class ROIViewer(QMainWindow):
         stack_position = recording_count - 1
         active_mode = self._active_trace_mode
         plotted_count = 0
-        raw_traces: list[NDArray[np.float64]] = []
+        raw_traces: list[NDArray[np.float32]] = []
 
         for recording_index in range(recording_count):
             recording = self._context_data.recording(recording_index)
@@ -1668,7 +1738,7 @@ class ROIViewer(QMainWindow):
 
             frame_indices = np.arange(len(trace), dtype=np.int32)
             max_frames = max(max_frames, len(trace))
-            raw_traces.append(trace.astype(np.float64).flatten())
+            raw_traces.append(trace.astype(np.float32).ravel())
 
             # Normalizes trace to [0, 1] range for stacked display.
             trace_max = float(trace.max())
@@ -1680,7 +1750,7 @@ class ROIViewer(QMainWindow):
 
             # Generates a deterministic color for this recording using HSV hues.
             hue = recording_index / max(self._context_data.recording_count, 1)
-            hsv = np.array([[hue, 1.0, 1.0]])
+            hsv = np.array([[hue, 1.0, 1.0]], dtype=np.float32)
             rgb = (255.0 * hsv_to_rgb(hsv)).astype(np.uint8)[0]
             pen_color = (int(rgb[0]), int(rgb[1]), int(rgb[2]))
 
@@ -1696,9 +1766,9 @@ class ROIViewer(QMainWindow):
         y_minimum = 0.0
         minimum_contributors = 5
         if plotted_count > ROI_CONFIG.average_threshold and raw_traces:
-            padded = np.full((len(raw_traces), max_frames), np.nan, dtype=np.float64)
-            for trace_index, trace in enumerate(raw_traces):
-                padded[trace_index, : len(trace)] = trace
+            padded = np.full((len(raw_traces), max_frames), np.nan, dtype=np.float32)
+            for trace_index, raw_trace in enumerate(raw_traces):
+                padded[trace_index, : len(raw_trace)] = raw_trace
             contributor_count = np.sum(~np.isnan(padded), axis=0)
             valid_mask = contributor_count >= minimum_contributors
             if np.any(valid_mask):
@@ -1713,10 +1783,11 @@ class ROIViewer(QMainWindow):
                 average_frames = np.arange(max_frames, dtype=np.int32)
                 # Splits at NaN boundaries to avoid connecting gaps with lines.
                 segments = np.split(
-                    np.arange(max_frames), np.where(~valid_mask)[0],
+                    np.arange(max_frames, dtype=np.int32),
+                    np.where(~valid_mask)[0],
                 )
                 for segment in segments:
-                    if len(segment) < 2:
+                    if len(segment) < 2:  # noqa: PLR2004
                         continue
                     segment_frames = average_frames[segment]
                     segment_values = -1 * average_scale + average[segment] * average_scale

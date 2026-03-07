@@ -101,6 +101,7 @@ class PCViewer(QMainWindow):
         self._plane_selector: QComboBox = QComboBox(self)
         self._plane_selector.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self._plane_selector.setEnabled(False)
+        self._plane_selector.setToolTip("Select the imaging plane.")
         self._plane_selector.currentIndexChanged.connect(self._on_plane_changed)
         toolbar.addWidget(plane_label)
         toolbar.addWidget(self._plane_selector)
@@ -308,8 +309,11 @@ class PCViewer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        # noinspection PyUnresolvedReferences
-        if event.type() == QtCore.QEvent.Type.KeyPress and event.key() == QtCore.Qt.Key.Key_Escape:
+        if (
+            event.type() == QtCore.QEvent.Type.KeyPress
+            and isinstance(event, QtGui.QKeyEvent)
+            and event.key() == QtCore.Qt.Key.Key_Escape
+        ):
             self.setFocus()
             return True
         return super().eventFilter(source, event)
@@ -334,9 +338,9 @@ class PCViewer(QMainWindow):
         self._pc_edit.setFixedWidth(STYLE.edit_width)
         self._pc_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._pc_edit.setFont(big_font)
-        self._pc_edit.setToolTip("Principal component number (Left/Right arrow keys to step).")
+        self._pc_edit.setToolTip("Principal component number.")
         self._pc_edit.returnPressed.connect(self._plot_frame)
-        self._pc_edit.returnPressed.connect(lambda: self.setFocus())
+        self._pc_edit.returnPressed.connect(self.setFocus)
         self._pc_edit.textEdited.connect(self._pause_animation)
         self._pc_edit.installEventFilter(self)
         panel.addWidget(pc_label)
@@ -355,8 +359,8 @@ class PCViewer(QMainWindow):
         # Playback controls.
         playback = create_play_pause_group(
             self,
-            play_tooltip="Play (Space).",
-            pause_tooltip="Pause (Space). Use Left/Right arrow keys to step through PCs.",
+            play_tooltip="Start automatic PC cycling.",
+            pause_tooltip="Stop automatic PC cycling.",
             no_focus=True,
         )
         self._play_button = playback.play_button

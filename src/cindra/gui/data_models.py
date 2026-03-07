@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
-
 if TYPE_CHECKING:
     import numpy as np
     import pyqtgraph as pg  # type: ignore[import-untyped]
@@ -53,7 +52,7 @@ class ColorArrays:
     """The per-statistic colorbar range values as [low, mid, high] lists."""
     rgb: NDArray[np.uint8]
     """The RGBA overlay arrays with shape (color_count, height, width, 4)."""
-    random_hues: NDArray[np.float64]
+    random_hues: NDArray[np.float32]
     """The per-ROI random hue values with shape (roi_count,)."""
 
 

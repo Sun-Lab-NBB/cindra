@@ -33,14 +33,8 @@ def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> 
             search and reconstruct the full dataset hierarchy.
         dataset: Multi-day dataset name to load. Defaults to the first available dataset.
     """
-    # Reuses the existing QApplication if one is already running (e.g. when embedded in a larger
-    # GUI), otherwise creates a new one.
     console.echo(message="Initializing the Tracking GUI...")
-    application = QApplication.instance()
-    owns_application = application is None
-    if owns_application:
-        application = QApplication(sys.argv)
-        application.setFont(FONTS.small)
+    application, owns_application = _get_or_create_application()
 
     # Loads recording data upfront so the viewer window receives a fully populated data instance.
     # The tracking viewer requires a loaded dataset, so defaults to the first available one.
@@ -72,14 +66,8 @@ def run_registration_viewer(recording_path: Path) -> None:
         recording_path: The Path to a cindra-processed recording's root data directory containing
             registration results.
     """
-    # Reuses the existing QApplication if one is already running (e.g. when embedded in a larger
-    # GUI), otherwise creates a new one.
     console.echo(message="Initializing the Registration GUI...")
-    application = QApplication.instance()
-    owns_application = application is None
-    if owns_application:
-        application = QApplication(sys.argv)
-        application.setFont(FONTS.small)
+    application, owns_application = _get_or_create_application()
 
     # Loads recording data upfront. The binary viewer uses the combined view (-1) for stitched
     # playback, while the PC viewer gets a shallow copy with its own mutable _view_index set to
@@ -96,7 +84,7 @@ def run_registration_viewer(recording_path: Path) -> None:
 
     # Computes screen-adaptive window positions. On large screens the two viewers sit side by side;
     # on smaller screens they cascade with a visible offset so both title bars remain accessible.
-    screen = application.primaryScreen()  # type: ignore[union-attr]
+    screen = application.primaryScreen()
     available = screen.availableGeometry()
 
     # Top-left corner of the binary viewer, in pixels from the screen's top-left corner.
@@ -163,14 +151,7 @@ def run_roi_viewer(recording_path: Path, *, dataset: str | None = None) -> None:
         dataset: Multi-day dataset name to load. Stays in single-day mode if not provided.
     """
     console.echo(message="Initializing the ROI GUI...")
-    application = QApplication.instance()
-    owns_application = application is None
-    if owns_application:
-        application = QApplication(sys.argv)
-        application.setFont(FONTS.small)
-    if not isinstance(application, QApplication):  # pragma: no cover
-        message = "Unable to launch the ROI viewer. Failed to obtain a QApplication instance."
-        console.error(message=message, error=RuntimeError)
+    application, owns_application = _get_or_create_application()
 
     # Loads recording data upfront so the viewer window receives a fully populated data instance.
     data = ViewerData.from_data(root_path=recording_path, dataset=dataset)
@@ -182,3 +163,18 @@ def run_roi_viewer(recording_path: Path, *, dataset: str | None = None) -> None:
 
     if owns_application:
         sys.exit(application.exec())
+
+
+def _get_or_create_application() -> tuple[QApplication, bool]:
+    """Returns the current QApplication instance, creating one if none exists.
+
+    Returns:
+        A tuple of (application, owns_application) where owns_application is True when a new
+        QApplication was created by this call.
+    """
+    application = QApplication.instance()
+    owns_application = application is None
+    if owns_application:
+        application = QApplication(sys.argv)
+        application.setFont(FONTS.small)
+    return application, owns_application  # type: ignore[return-value]

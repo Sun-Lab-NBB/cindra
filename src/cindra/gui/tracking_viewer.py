@@ -131,6 +131,7 @@ class TrackingViewer(QMainWindow):
         toolbar = QHBoxLayout()
         self._file_button: QPushButton = QPushButton("File")
         self._file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._file_button.setToolTip("Load a multi-day dataset for visualization.")
         file_menu = QMenu(self)
         file_menu.setStyleSheet(STYLE.menu)
         load_action = file_menu.addAction("&Load dataset")
@@ -138,7 +139,7 @@ class TrackingViewer(QMainWindow):
         load_action.triggered.connect(self._load_dataset)
         self._file_button.setMenu(file_menu)
         toolbar.addWidget(self._file_button)
-        hint_label = QLabel("Hint: Use arrows to navigate recordings / mask layers, use space to toggle auto-cycling.")
+        hint_label = QLabel("Hint: Use arrows to navigate recordings and mask layers, use space to toggle auto-cycling.")
         hint_label.setStyleSheet(STYLE.white_label)
         hint_label.setFont(FONTS.small_bold)
         toolbar.addWidget(hint_label)
@@ -212,7 +213,7 @@ class TrackingViewer(QMainWindow):
         self._refresh_display()
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
-        """Handles keyboard navigation for recording stepping and auto-cycle control.
+        """Handles keyboard navigation for recording stepping, opacity controls, and auto-cycle toggling.
 
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
@@ -247,8 +248,11 @@ class TrackingViewer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        # noinspection PyUnresolvedReferences
-        if event.type() == QtCore.QEvent.Type.KeyPress and event.key() == QtCore.Qt.Key.Key_Escape:
+        if (
+            event.type() == QtCore.QEvent.Type.KeyPress
+            and isinstance(event, QtGui.QKeyEvent)
+            and event.key() == QtCore.Qt.Key.Key_Escape
+        ):
             self.setFocus()
             return True
         return super().eventFilter(source, event)
@@ -305,6 +309,7 @@ class TrackingViewer(QMainWindow):
         dataset_group.setStyleSheet(STYLE.group_box)
         dataset_layout = QVBoxLayout(dataset_group)
         self._dataset_combo = QComboBox()
+        self._dataset_combo.setToolTip("Select the active multi-day dataset.")
         self._dataset_combo.currentIndexChanged.connect(self._on_dataset_selected)
         dataset_layout.addWidget(self._dataset_combo)
         layout.addWidget(dataset_group)
@@ -315,6 +320,7 @@ class TrackingViewer(QMainWindow):
         recording_layout = QVBoxLayout(recording_group)
 
         self._recording_combo = QComboBox()
+        self._recording_combo.setToolTip("Select the active recording.")
         self._recording_combo.currentIndexChanged.connect(self._on_recording_selected)
         recording_layout.addWidget(self._recording_combo)
 
@@ -325,13 +331,13 @@ class TrackingViewer(QMainWindow):
         self._skip_backward_button: QToolButton = QToolButton()
         self._skip_backward_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaSkipBackward))
         self._skip_backward_button.setIconSize(icon_size)
-        self._skip_backward_button.setToolTip("Previous recording (Left arrow).")
+        self._skip_backward_button.setToolTip("Go to the previous recording.")
         self._skip_backward_button.clicked.connect(self._previous_recording)
 
         playback = create_play_pause_group(
             self,
-            play_tooltip="Start auto-cycling (Space).",
-            pause_tooltip="Stop auto-cycling (Space). Use Left/Right arrow keys to step through recordings.",
+            play_tooltip="Start automatic recording cycling.",
+            pause_tooltip="Stop automatic recording cycling.",
         )
         self._play_button = playback.play_button
         self._pause_button = playback.pause_button
@@ -341,7 +347,7 @@ class TrackingViewer(QMainWindow):
         self._skip_forward_button: QToolButton = QToolButton()
         self._skip_forward_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaSkipForward))
         self._skip_forward_button.setIconSize(icon_size)
-        self._skip_forward_button.setToolTip("Next recording (Right arrow).")
+        self._skip_forward_button.setToolTip("Go to the next recording.")
         self._skip_forward_button.clicked.connect(self._next_recording)
 
         navigation_row.addWidget(self._skip_backward_button)
@@ -361,6 +367,10 @@ class TrackingViewer(QMainWindow):
         background_layout = QVBoxLayout(background_group)
 
         self._background_combo = QComboBox()
+        self._background_combo.setToolTip(
+            "Select the background image displayed behind the ROI overlay. 'ROIs' shows masks on a black "
+            "background. Other options show the corresponding detection image."
+        )
         self._background_combo.addItem(BackgroundViewLabel.ROIS_ONLY, userData=BackgroundView.ROIS_ONLY)
         self._background_combo.addItem(BackgroundViewLabel.MEAN_IMAGE, userData=BackgroundView.MEAN_IMAGE)
         self._background_combo.addItem(
@@ -381,6 +391,10 @@ class TrackingViewer(QMainWindow):
         space_layout = QVBoxLayout(space_group)
 
         self._space_combo = QComboBox()
+        self._space_combo.setToolTip(
+            "Select the coordinate space. 'Native' shows masks in the recording's original coordinates. "
+            "'Transformed' shows masks in the template coordinate space."
+        )
         self._space_combo.addItem("Native", userData=CoordinateSpace.NATIVE)
         self._space_combo.addItem("Transformed", userData=CoordinateSpace.TRANSFORMED)
         self._space_combo.currentIndexChanged.connect(self._refresh_display)
@@ -394,6 +408,7 @@ class TrackingViewer(QMainWindow):
         mask_layout = QVBoxLayout(mask_group)
 
         self._mask_combo = QComboBox()
+        self._mask_combo.setToolTip("Select the mask layer to display.")
         self._mask_combo.addItem("Original", userData=MaskLayer.ORIGINAL)
         self._mask_combo.addItem("Deformed", userData=MaskLayer.DEFORMED)
         self._mask_combo.addItem("Template", userData=MaskLayer.TEMPLATE)
@@ -406,7 +421,7 @@ class TrackingViewer(QMainWindow):
         self._opacity_slider = QSlider(QtCore.Qt.Orientation.Horizontal)
         self._opacity_slider.setRange(0, 255)
         self._opacity_slider.setValue(STYLE.default_mask_opacity)
-        self._opacity_slider.setToolTip("Adjust mask opacity. Use the mouse wheel over the image to change quickly.")
+        self._opacity_slider.setToolTip("Adjust mask opacity.")
         self._opacity_slider.valueChanged.connect(self._on_opacity_changed)
         opacity_row.addWidget(self._opacity_slider)
         mask_layout.addLayout(opacity_row)
@@ -421,6 +436,10 @@ class TrackingViewer(QMainWindow):
         self._channel_2_checkbox = QPushButton("Channel 2")
         self._channel_2_checkbox.setCheckable(True)
         self._channel_2_checkbox.setEnabled(False)
+        self._channel_2_checkbox.setToolTip(
+            "Toggle display between channel 1 and channel 2 data. When active, background images and ROI masks "
+            "switch to the channel 2 variants."
+        )
         self._channel_2_checkbox.toggled.connect(self._on_channel_2_toggled)
         channel_layout.addWidget(self._channel_2_checkbox)
 
@@ -438,7 +457,7 @@ class TrackingViewer(QMainWindow):
         self._roi_edit = QLineEdit()
         self._roi_edit.setFixedWidth(STYLE.edit_width)
         self._roi_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        self._roi_edit.setToolTip("Enter an ROI index to select it. Click an ROI or use Ctrl/Shift-click to toggle.")
+        self._roi_edit.setToolTip("Enter an ROI index to select it.")
         self._roi_edit.returnPressed.connect(self._on_roi_entered)
         self._roi_edit.returnPressed.connect(self.setFocus)
         self._roi_edit.installEventFilter(self)
@@ -531,7 +550,7 @@ class TrackingViewer(QMainWindow):
                 color_count = len(original_masks) if original_masks else len(masks)
 
             rng = np.random.default_rng(seed=ROI_CONFIG.random_color_seed)
-            hues = rng.random(color_count)
+            hues = rng.random(color_count).astype(np.float32)
             hsv = np.stack([hues, np.ones_like(hues), np.ones_like(hues)], axis=-1)
             roi_colors = (255.0 * hsv_to_rgb(hsv)).astype(np.uint8)
 

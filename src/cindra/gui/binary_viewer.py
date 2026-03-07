@@ -11,6 +11,7 @@ import pyqtgraph as pg  # type: ignore[import-untyped]
 from PySide6.QtWidgets import (
     QMenu,
     QLabel,
+    QStyle,
     QSlider,
     QWidget,
     QLineEdit,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QToolButton,
 )
 from ataraxis_base_utilities import LogLevel, console
 
@@ -98,6 +100,7 @@ class BinaryPlayer(QMainWindow):
         # File menu button with dropdown for loading recordings.
         self._file_button: QPushButton = QPushButton("File")
         self._file_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._file_button.setToolTip("Load a recording for visualization.")
         file_menu = QMenu(self)
         file_menu.setStyleSheet(STYLE.menu)
         load_action = file_menu.addAction("&Load recording")
@@ -110,6 +113,7 @@ class BinaryPlayer(QMainWindow):
         self._channel_2_button: QPushButton = QPushButton("View Channel 2")
         self._channel_2_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self._channel_2_button.setEnabled(False)
+        self._channel_2_button.setToolTip("Toggle the channel 2 overlay.")
         self._channel_2_button.clicked.connect(self._toggle_channel_2)
         toolbar.addWidget(self._channel_2_button)
 
@@ -164,9 +168,10 @@ class BinaryPlayer(QMainWindow):
         self._step_edit.setFixedWidth(STYLE.edit_width)
         self._step_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._step_edit.setFont(big_font)
+        self._step_edit.setToolTip("Set the number of frames to skip per navigation step.")
         self._step_edit.setValidator(QtGui.QIntValidator(1, 10000))
         self._step_edit.returnPressed.connect(self._apply_step)
-        self._step_edit.returnPressed.connect(lambda: self.setFocus())
+        self._step_edit.returnPressed.connect(self.setFocus)
         self._step_edit.installEventFilter(self)
         info_bar.addWidget(step_label)
         info_bar.addWidget(self._step_edit)
@@ -181,10 +186,11 @@ class BinaryPlayer(QMainWindow):
         self._create_buttons()
         self._frame_slider: QSlider = QSlider(QtCore.Qt.Orientation.Horizontal)
         self._frame_slider.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._frame_slider.setToolTip("Seek to a specific frame.")
         self._frame_slider.setTickInterval(BINARY_CONFIG.frame_slider_tick_interval)
         self._frame_slider.setTracking(False)
         self._frame_slider.valueChanged.connect(self._go_to_frame)
-        self._layout.addWidget(self._frame_slider, 3, 2, 1, 4)
+        self._layout.addWidget(self._frame_slider, 3, 4, 1, 2)
 
         self._update_frame_slider()
         self._update_buttons()
@@ -254,26 +260,48 @@ class BinaryPlayer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        if event.type() == QtCore.QEvent.Type.KeyPress and event.key() == QtCore.Qt.Key.Key_Escape:
+        if (
+            event.type() == QtCore.QEvent.Type.KeyPress
+            and isinstance(event, QtGui.QKeyEvent)
+            and event.key() == QtCore.Qt.Key.Key_Escape
+        ):
             self.setFocus()
             return True
         return super().eventFilter(source, event)
 
     def _create_buttons(self) -> None:
         """Creates and lays out playback control buttons for the player window."""
+        icon_size = QtCore.QSize(STYLE.icon_size, STYLE.icon_size)
+
+        self._skip_backward_button: QToolButton = QToolButton()
+        self._skip_backward_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaSkipBackward))
+        self._skip_backward_button.setIconSize(icon_size)
+        self._skip_backward_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._skip_backward_button.setToolTip("Step backward by the current frame delta.")
+        self._skip_backward_button.clicked.connect(self._step_backward)
+
         playback = create_play_pause_group(
             self,
-            play_tooltip="Play (Space).",
-            pause_tooltip="Pause (Space). Use left/right arrow keys to step through frames.",
+            play_tooltip="Start frame playback.",
+            pause_tooltip="Stop frame playback.",
         )
         self._play_button = playback.play_button
         self._pause_button = playback.pause_button
         self._play_button.clicked.connect(self._start_playback)
         self._pause_button.clicked.connect(self._pause_playback)
 
-        # Places play/pause buttons on row 3 alongside the frame slider.
-        self._layout.addWidget(self._play_button, 3, 0, 1, 1)
-        self._layout.addWidget(self._pause_button, 3, 1, 1, 1)
+        self._skip_forward_button: QToolButton = QToolButton()
+        self._skip_forward_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaSkipForward))
+        self._skip_forward_button.setIconSize(icon_size)
+        self._skip_forward_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self._skip_forward_button.setToolTip("Step forward by the current frame delta.")
+        self._skip_forward_button.clicked.connect(self._step_forward)
+
+        # Places navigation buttons on row 3 alongside the frame slider.
+        self._layout.addWidget(self._skip_backward_button, 3, 0, 1, 1)
+        self._layout.addWidget(self._play_button, 3, 1, 1, 1)
+        self._layout.addWidget(self._pause_button, 3, 2, 1, 1)
+        self._layout.addWidget(self._skip_forward_button, 3, 3, 1, 1)
 
     def _update_frame_slider(self) -> None:
         """Configures the frame slider range and enables it."""
@@ -362,9 +390,9 @@ class BinaryPlayer(QMainWindow):
 
         # Computes average rigid registration offsets across all planes.
         plane_count = self.data.plane_count
-        x_values = np.arange(frame_count)
-        average_y = np.zeros(frame_count, dtype=np.float64)
-        average_x = np.zeros(frame_count, dtype=np.float64)
+        x_values = np.arange(frame_count, dtype=np.int32)
+        average_y = np.zeros(frame_count, dtype=np.float32)
+        average_x = np.zeros(frame_count, dtype=np.float32)
         for plane_index in range(plane_count):
             rigid_y, rigid_x = self.data.plane_rigid_offsets(plane_index)
             average_y += rigid_y
@@ -447,11 +475,15 @@ class BinaryPlayer(QMainWindow):
         self._current_frame = int(self._frame_slider.value())
         self._render_frame()
 
-    def _jump_to_frame(self) -> None:
-        """Clamps and displays the frame at the current ``_current_frame`` position."""
-        if self._play_button.isEnabled():
-            self._current_frame = max(0, min(self.data.frame_count - 1, self._current_frame))
-            self._render_frame()
+    def _step_backward(self) -> None:
+        """Steps backward by the current frame delta."""
+        self._current_frame = max(0, self._current_frame - self._frame_delta)
+        self._frame_slider.setValue(self._current_frame)
+
+    def _step_forward(self) -> None:
+        """Steps forward by the current frame delta."""
+        self._current_frame = min(self.data.frame_count - 1, self._current_frame + self._frame_delta)
+        self._frame_slider.setValue(self._current_frame)
 
     def _start_playback(self) -> None:
         """Starts video playback by enabling the frame update timer."""

@@ -436,7 +436,7 @@ def _plot_multi_trace(
     trace_spacing = 1.0 / scale_factor
     tick_labels: list[tuple[float, str]] = []
     stack_position = len(selected) - 1
-    average = np.zeros((cell_fluorescence.shape[1],), dtype=np.float64)
+    average = np.zeros((cell_fluorescence.shape[1],), dtype=np.float32)
 
     for index in selected[::-1]:
         # Selects trace based on activity mode.
@@ -449,7 +449,7 @@ def _plot_multi_trace(
         else:
             trace = spikes[index, :]
 
-        average += trace.flatten()
+        average += trace.ravel()
         trace_max = float(trace.max())
         trace_min = float(trace.min())
 
