@@ -436,8 +436,8 @@ class SingleRecordingData:
 
     @property
     def principal_component_shift_metrics(self) -> NDArray[np.float32] | None:
-        """Returns the registration shift metrics computed by aligning PC extreme images as an array with shape
-        (num_components, 3) where columns contain mean rigid, mean nonrigid, and maximum nonrigid shift magnitudes.
+        """Returns the registration offset metrics computed by aligning PC extreme images as an array with shape
+        (num_components, 3) where columns contain mean rigid, mean nonrigid, and maximum nonrigid offset magnitudes.
         """
         return self._current_registration.principal_component_shift_metrics
 

@@ -193,7 +193,7 @@ Rigid registration parameters for motion correction.
 | `align_by_first_channel`                   | bool  | True    | Use first channel for alignment. False = use second channel.       |
 | `reference_frame_count`                    | int   | 500     | Frames to compute reference image.                                 |
 | `batch_size`                               | int   | 100     | Frames per registration batch.                                     |
-| `maximum_shift_fraction`                   | float | 0.1     | Max shift as fraction of frame size (0.1 = 10%).                   |
+| `maximum_offset_fraction`                  | float | 0.1     | Max offset as fraction of frame size (0.1 = 10%).                  |
 | `spatial_smoothing_sigma`                  | float | 1.15    | Gaussian sigma (pixels) for phase correlation smoothing.           |
 | `temporal_smoothing_sigma`                 | float | 0.0     | Gaussian sigma (frames) for temporal smoothing. 0 = disabled.      |
 | `two_step_registration`                    | bool  | False   | Enable refinement registration (two-step).                         |
@@ -226,8 +226,8 @@ Nonrigid registration for local motion correction.
 |-----------------------------|-----------------|------------|------------------------------------------------------|
 | `enabled`                   | bool            | True       | Enable nonrigid registration for non-uniform motion. |
 | `block_size`                | tuple[int, int] | (128, 128) | Block dimensions (pixels). Power of 2/3 recommended. |
-| `signal_to_noise_threshold` | float           | 1.2        | SNR threshold for accepting block shifts.            |
-| `maximum_block_shift`       | float           | 5.0        | Max block shift (pixels) relative to rigid shift.    |
+| `signal_to_noise_threshold` | float           | 1.2        | SNR threshold for accepting block offsets.            |
+| `maximum_block_offset`      | float           | 5.0        | Max block offset (pixels) relative to rigid offset.  |
 
 ---
 

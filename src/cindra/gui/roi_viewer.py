@@ -1895,12 +1895,12 @@ class ROIViewer(QMainWindow):
         merged_compactness = np.concatenate([existing_compactness, new_compactness])
         merged_skewness = np.concatenate([existing_skewness, new_skewness])
 
-        save_path, _ = QFileDialog.getSaveFileName(self, "Save Merged Dataset", source_path, "NumPy files (*.npz)")
-        if not save_path:
+        output_path, _ = QFileDialog.getSaveFileName(self, "Save Merged Dataset", source_path, "NumPy files (*.npz)")
+        if not output_path:
             return
 
         Classifier.create_training_dataset(
-            file_path=Path(save_path),
+            file_path=Path(output_path),
             training_labels=merged_training_labels,
             normalized_pixel_count=merged_normalized_pixel_count,
             compactness=merged_compactness,
@@ -1909,7 +1909,7 @@ class ROIViewer(QMainWindow):
 
         new_sample_count = len(new_training_labels)
         total_sample_count = len(merged_training_labels)
-        filename = Path(save_path).name
+        filename = Path(output_path).name
         self._classifier_controls.status_label.setText(
             f"Added {new_sample_count} samples ({total_sample_count} total) to {filename}."
         )

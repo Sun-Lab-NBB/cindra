@@ -53,7 +53,7 @@ def apply_phase_correlation(
     # Multiplies by conjugate of reference spectrum. In frequency domain, this computes cross-correlation.
     frames_fft *= kernel
 
-    # Transforms back to spatial domain to get correlation surface. The peak location indicates the shift.
+    # Transforms back to spatial domain to get correlation surface. The peak location indicates the offset.
     return scipy_irfft2(frames_fft, s=(frames.shape[-2], width), axes=(-2, -1), workers=workers).astype(
         np.float32, copy=False
     )
@@ -91,7 +91,7 @@ def combine_rigid_offsets(
 ) -> tuple[NDArray[np.int32], NDArray[np.int32], NDArray[np.float32]]:
     """Combines rigid registration offsets from multiple processing batches.
 
-    Rigid offsets are 1D arrays with one integer pixel shift per frame, so horizontal stacking
+    Rigid offsets are 1D arrays with one integer pixel offset per frame, so horizontal stacking
     concatenates all frames into a single array.
 
     Args:
@@ -110,7 +110,7 @@ def combine_nonrigid_offsets(
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """Combines nonrigid registration offsets from multiple processing batches.
 
-    Nonrigid offsets are 2D arrays with subpixel shifts per block per frame, so vertical stacking
+    Nonrigid offsets are 2D arrays with subpixel offsets per block per frame, so vertical stacking
     preserves the block structure across batches.
 
     Args:
@@ -254,10 +254,10 @@ def compute_reference_fft(reference_image: NDArray[np.float32]) -> NDArray[np.co
 
 @lru_cache(maxsize=5)
 def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray[np.float32], int]:
-    """Computes the upsampling matrix for subpixel shift estimation using Gaussian RBF interpolation.
+    """Computes the upsampling matrix for subpixel offset estimation using Gaussian RBF interpolation.
 
     Builds a kernel that maps low-resolution correlation peaks to a high-resolution grid for precise subpixel
-    shift detection. Uses the RBF interpolation formula: inv(K(low, low)) @ K(low, high). Results are cached
+    offset detection. Uses the RBF interpolation formula: inv(K(low, low)) @ K(low, high). Results are cached
     since the same kernel is reused across all frames.
 
     Args:

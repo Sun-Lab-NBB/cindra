@@ -12,10 +12,10 @@ from ataraxis_base_utilities import LogLevel, console
 
 from ..io import BinaryFile
 from .rigid import (
-    shift_frame,
+    translate_frame,
     apply_edge_taper,
     compute_edge_taper,
-    compute_rigid_shifts,
+    compute_rigid_offsets,
     compute_phase_correlation_kernel,
 )
 from .utils import (
@@ -26,7 +26,7 @@ from .utils import (
 )
 from .metrics import compute_pc_metrics
 from .nonrigid import (
-    compute_nonrigid_shifts,
+    compute_nonrigid_offsets,
     apply_nonrigid_correction,
     compute_nonrigid_reference_data,
 )
@@ -134,7 +134,7 @@ def register_plane(context: RuntimeContext) -> None:
         # Re-runs registration (computes new reference from already-registered frames).
         _register_alignment_channel(context)
 
-        # Re-applies shifts to the secondary channel if present.
+        # Re-applies offsets to the secondary channel if present.
         if has_second_channel:
             _register_secondary_channel(context)
 
@@ -164,7 +164,7 @@ def register_plane(context: RuntimeContext) -> None:
                 level=LogLevel.WARNING,
             )
 
-    # Computes valid region from registration shifts.
+    # Computes valid region from registration offsets.
     registration_data = context.runtime.registration
     height, width = io_data.frame_height, io_data.frame_width
 
@@ -192,7 +192,7 @@ def register_plane(context: RuntimeContext) -> None:
         correlations=correlations,
         bad_frame_threshold=config.registration.bad_frame_threshold,
         bad_frames=bad_frames,
-        maximum_shift_fraction=config.registration.maximum_shift_fraction,
+        maximum_offset_fraction=config.registration.maximum_offset_fraction,
         frame_height=height,
         frame_width=width,
     )
@@ -264,15 +264,15 @@ class _BatchRegistrationResult:
 
     frames: NDArray[np.float32]
     """The registered frames with shape (batch_size, height, width)."""
-    y_shifts: NDArray[np.int32]
+    y_offsets: NDArray[np.int32]
     """The y-direction rigid pixel offsets with shape (batch_size,)."""
-    x_shifts: NDArray[np.int32]
+    x_offsets: NDArray[np.int32]
     """The x-direction rigid pixel offsets with shape (batch_size,)."""
     correlations: NDArray[np.float32]
     """The phase correlation peak values with shape (batch_size,)."""
-    y_shifts_nonrigid: NDArray[np.float32] | None
+    y_offsets_nonrigid: NDArray[np.float32] | None
     """The y-direction nonrigid subpixel offsets with shape (batch_size, num_blocks), or None."""
-    x_shifts_nonrigid: NDArray[np.float32] | None
+    x_offsets_nonrigid: NDArray[np.float32] | None
     """The x-direction nonrigid subpixel offsets with shape (batch_size, num_blocks), or None."""
     correlations_nonrigid: NDArray[np.float32] | None
     """The nonrigid correlation values with shape (batch_size, num_blocks), or None."""
@@ -284,25 +284,25 @@ def _compute_crop(
     correlations: NDArray[np.float32],
     bad_frame_threshold: float,
     bad_frames: NDArray[np.bool_],
-    maximum_shift_fraction: float,
+    maximum_offset_fraction: float,
     frame_height: int,
     frame_width: int,
 ) -> tuple[NDArray[np.bool_], tuple[int, int], tuple[int, int]]:
-    """Computes the valid pixel region after registration by analyzing frame shifts.
+    """Computes the valid pixel region after registration by analyzing frame offsets.
 
     After registration, frames that shifted significantly will have undefined pixels at their edges. This function
-    determines which pixel region is valid across all frames by finding the maximum shift magnitude. It also
-    identifies bad frames that have abnormally large shifts or poor correlation quality, excluding them from the
+    determines which pixel region is valid across all frames by finding the maximum offset magnitude. It also
+    identifies bad frames that have abnormally large offsets or poor correlation quality, excluding them from the
     valid region calculation to prevent a few outlier frames from unnecessarily shrinking the usable field of view.
 
     Args:
         x_offsets: The x-direction rigid pixel offsets with shape (num_frames,).
         y_offsets: The y-direction rigid pixel offsets with shape (num_frames,).
         correlations: The phase correlation peak values with shape (num_frames,) indicating registration quality.
-        bad_frame_threshold: The threshold multiplier for identifying outlier frames based on shift deviation
+        bad_frame_threshold: The threshold multiplier for identifying outlier frames based on offset deviation
             relative to correlation quality.
         bad_frames: A boolean array with shape (num_frames,) of frames already marked as bad from external sources.
-        maximum_shift_fraction: The maximum allowed shift as a fraction of the minimum spatial dimension. Frames
+        maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension. Frames
             exceeding this threshold are flagged as bad.
         frame_height: The height of each frame in pixels.
         frame_width: The width of each frame in pixels.
@@ -329,10 +329,10 @@ def _compute_crop(
     # Normalizes phase correlation relative to local median to detect quality drops.
     correlation_normalized = correlations / medfilt(correlations, kernel_size=filter_window).astype(np.float32)
 
-    # Combines deviation and correlation metrics: bad frames have large shifts AND/OR poor correlation.
+    # Combines deviation and correlation metrics: bad frames have large offsets AND/OR poor correlation.
     outlier_metric = delta_xy / np.maximum(0, correlation_normalized)
-    x_threshold = maximum_shift_fraction * frame_width * 0.95
-    y_threshold = maximum_shift_fraction * frame_height * 0.95
+    x_threshold = maximum_offset_fraction * frame_width * 0.95
+    y_threshold = maximum_offset_fraction * frame_height * 0.95
     bad_frames = (
         bad_frames
         | (outlier_metric > bad_frame_threshold * 100)
@@ -356,7 +356,7 @@ def _compute_crop(
         y_min = np.ceil(np.abs(y_offsets).max())
         x_min = np.ceil(np.abs(x_offsets).max())
 
-    # Valid region is the interior rectangle after accounting for maximum shifts in each direction.
+    # Valid region is the interior rectangle after accounting for maximum offsets in each direction.
     y_max = frame_height - y_min
     x_max = frame_width - x_min
     valid_y_range = (int(y_min), int(y_max))
@@ -411,7 +411,7 @@ def _compute_reference(
     spatial_highpass_window: int,
     edge_taper_pixels: float,
     spatial_smoothing_sigma: float,
-    maximum_shift_fraction: float,
+    maximum_offset_fraction: float,
     temporal_smoothing_sigma: float,
     workers: int,
 ) -> NDArray[np.float32]:
@@ -431,8 +431,8 @@ def _compute_reference(
         edge_taper_pixels: Controls the steepness of the edge taper falloff. Larger values produce a more gradual
             taper that suppresses border artifacts during phase correlation.
         spatial_smoothing_sigma: The standard deviation of Gaussian smoothing applied to phase correlation maps.
-        maximum_shift_fraction: The maximum allowed shift as a fraction of the minimum spatial dimension.
-            The search window is limited to min(height, width) * maximum_shift_fraction pixels.
+        maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension.
+            The search window is limited to min(height, width) * maximum_offset_fraction pixels.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation maps.
             If 0, no smoothing is applied.
         workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
@@ -464,21 +464,21 @@ def _compute_reference(
             taper_slope=taper_slope,
         )
 
-        # Computes rigid registration shifts via phase correlation.
-        y_shifts, x_shifts, correlations = compute_rigid_shifts(
+        # Computes rigid registration offsets via phase correlation.
+        y_offsets, x_offsets, correlations = compute_rigid_offsets(
             frames=apply_edge_taper(frames=frames, taper_mask=taper_mask, mean_offset=mean_offset),
             reference_kernel=compute_phase_correlation_kernel(
                 reference_image=reference_image,
                 smoothing_sigma=spatial_smoothing_sigma,
             ),
-            maximum_shift_fraction=maximum_shift_fraction,
+            maximum_offset_fraction=maximum_offset_fraction,
             temporal_smoothing_sigma=temporal_smoothing_sigma,
             workers=workers,
         )
 
-        # Applies computed shifts to align all frames to current reference.
-        for frame, y_shift, x_shift in zip(frames, y_shifts, x_shifts, strict=False):
-            frame[:] = shift_frame(frame=frame, y_shift=y_shift, x_shift=x_shift)
+        # Applies computed offsets to align all frames to current reference.
+        for frame, y_offset, x_offset in zip(frames, y_offsets, x_offsets, strict=False):
+            frame[:] = translate_frame(frame=frame, y_offset=y_offset, x_offset=x_offset)
 
         # Selects top-correlated frames for next reference, excluding rank 0 (the frame most correlated with the
         # current reference) to prevent self-reinforcing bias in the iterative refinement.
@@ -489,11 +489,11 @@ def _compute_reference(
         # Updates reference as the mean of the best-aligned frames. Input frames are float32, mean preserves dtype.
         reference_image = frames[sorted_indices].mean(axis=0)
 
-        # Centers the reference by reversing the mean shift of selected frames.
-        reference_image = shift_frame(
+        # Centers the reference by reversing the mean offset of selected frames.
+        reference_image = translate_frame(
             frame=reference_image,
-            y_shift=int(np.round(-y_shifts[sorted_indices].mean())),
-            x_shift=int(np.round(-x_shifts[sorted_indices].mean())),
+            y_offset=int(np.round(-y_offsets[sorted_indices].mean())),
+            x_offset=int(np.round(-x_offsets[sorted_indices].mean())),
         )
 
     return reference_image
@@ -509,10 +509,10 @@ def _register_frames_batch(
     pre_smoothing_sigma: float,
     spatial_highpass_window: int,
     temporal_smoothing_sigma: float,
-    maximum_shift_fraction: float,
+    maximum_offset_fraction: float,
     nonrigid_enabled: bool,
     signal_to_noise_threshold: float,
-    maximum_block_shift: float,
+    maximum_block_offset: float,
     workers: int,
 ) -> _BatchRegistrationResult:
     """Registers the input batch of frames to the reference image using rigid and optionally nonrigid phase correlation.
@@ -530,16 +530,16 @@ def _register_frames_batch(
         spatial_highpass_window: The window size for the spatial high-pass filter that removes low-frequency background.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation maps.
             If 0, no smoothing is applied.
-        maximum_shift_fraction: The maximum allowed shift as a fraction of the minimum spatial dimension.
-            The search window is limited to min(height, width) * maximum_shift_fraction pixels.
+        maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension.
+            The search window is limited to min(height, width) * maximum_offset_fraction pixels.
         nonrigid_enabled: Determines whether to apply nonrigid (piecewise) registration after rigid alignment.
         signal_to_noise_threshold: The SNR threshold below which additional smoothing is applied to correlation
             peaks. Higher values apply more smoothing; typical values range from 1.0 to 1.5.
-        maximum_block_shift: The maximum allowed shift for nonrigid blocks in pixels.
+        maximum_block_offset: The maximum allowed offset for nonrigid blocks in pixels.
         workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
-        A _BatchRegistrationResult containing registered frames and computed shifts. Nonrigid arrays are None if
+        A _BatchRegistrationResult containing registered frames and computed offsets. Nonrigid arrays are None if
         nonrigid registration is disabled.
     """
     # Corrects bidirectional scanning artifacts if offset is non-zero.
@@ -547,7 +547,7 @@ def _register_frames_batch(
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=bidirectional_phase_offset)
 
     # Creates a working copy for correlation computation; original frames are shifted separately. Temporal smoothing
-    # is only applied to the correlation maps inside compute_rigid_shifts, not to the raw frames here.
+    # is only applied to the correlation maps inside compute_rigid_offsets, not to the raw frames here.
     frames_smooth = frames.copy()
 
     # Applies one-photon preprocessing: spatial smoothing followed by high-pass filtering.
@@ -563,24 +563,24 @@ def _register_frames_batch(
         else frames_smooth
     )
 
-    # Phase 1: Rigid registration - computes whole-frame translation shifts.
-    y_shifts, x_shifts, correlations = compute_rigid_shifts(
+    # Phase 1: Rigid registration - computes whole-frame translation offsets.
+    y_offsets, x_offsets, correlations = compute_rigid_offsets(
         frames=apply_edge_taper(
             frames=frames_for_correlation,
             taper_mask=reference_data.taper_mask,
             mean_offset=reference_data.mean_offset,
         ),
         reference_kernel=reference_data.reference_kernel,
-        maximum_shift_fraction=maximum_shift_fraction,
+        maximum_offset_fraction=maximum_offset_fraction,
         temporal_smoothing_sigma=temporal_smoothing_sigma,
         workers=workers,
     )
 
-    # Applies rigid shifts to original (unsmoothed) frames.
-    for frame, y_shift, x_shift in zip(frames, y_shifts, x_shifts, strict=False):
-        frame[:] = shift_frame(frame=frame, y_shift=y_shift, x_shift=x_shift)
+    # Applies rigid offsets to original (unsmoothed) frames.
+    for frame, y_offset, x_offset in zip(frames, y_offsets, x_offsets, strict=False):
+        frame[:] = translate_frame(frame=frame, y_offset=y_offset, x_offset=x_offset)
 
-    # Phase 2: Nonrigid registration - computes per-block subpixel shifts to correct local deformations.
+    # Phase 2: Nonrigid registration - computes per-block subpixel offsets to correct local deformations.
     if nonrigid_enabled:
         # Extracts nonrigid reference data. Fallback assignments are for type checker only; these are guaranteed to be
         # present when nonrigid_enabled is True.
@@ -605,22 +605,22 @@ def _register_frames_batch(
             else np.empty((0, 0, 0), dtype=np.complex64)
         )
 
-        # Applies rigid shifts to the smoothed working copy so nonrigid phase correlation operates on pre-aligned data.
-        # Without this, the per-block shifts would capture both global translation and local deformation,
+        # Applies rigid offsets to the smoothed working copy so nonrigid phase correlation operates on pre-aligned data.
+        # Without this, the per-block offsets would capture both global translation and local deformation,
         # double-counting
         # the rigid component that was already corrected on the original frames.
-        for frame_smooth, y_shift, x_shift in zip(frames_smooth, y_shifts, x_shifts, strict=False):
-            frame_smooth[:] = shift_frame(frame=frame_smooth, y_shift=y_shift, x_shift=x_shift)
+        for frame_smooth, y_offset, x_offset in zip(frames_smooth, y_offsets, x_offsets, strict=False):
+            frame_smooth[:] = translate_frame(frame=frame_smooth, y_offset=y_offset, x_offset=x_offset)
 
-        # Re-clips intensity range after rigid shift for nonrigid correlation.
+        # Re-clips intensity range after rigid offset for nonrigid correlation.
         frames_for_correlation = (
             np.clip(frames_smooth, normalization_minimum, normalization_maximum)
             if normalization_minimum > -np.inf
             else frames_smooth
         )
 
-        # Computes block-wise subpixel shifts using phase correlation on each block.
-        y_shifts_nonrigid, x_shifts_nonrigid, correlations_nonrigid = compute_nonrigid_shifts(
+        # Computes block-wise subpixel offsets using phase correlation on each block.
+        y_offsets_nonrigid, x_offsets_nonrigid, correlations_nonrigid = compute_nonrigid_offsets(
             frames=frames_for_correlation,
             taper_mask=taper_mask_nonrigid,
             mean_offset=mean_offset_nonrigid,
@@ -629,34 +629,34 @@ def _register_frames_batch(
             smoothing_kernel=blocks[-1],
             x_blocks=blocks[1],
             y_blocks=blocks[0],
-            maximum_shift=maximum_block_shift,
+            maximum_offset=maximum_block_offset,
             workers=workers,
         )
 
-        # Applies nonrigid warping to original frames using computed block shifts.
+        # Applies nonrigid warping to original frames using computed block offsets.
         frames = apply_nonrigid_correction(
             frames=frames,
             y_blocks=blocks[0],
             x_blocks=blocks[1],
             block_counts=blocks[2],
-            y_block_shifts=y_shifts_nonrigid,
-            x_block_shifts=x_shifts_nonrigid,
+            y_block_offsets=y_offsets_nonrigid,
+            x_block_offsets=x_offsets_nonrigid,
         )
     else:
-        y_shifts_nonrigid, x_shifts_nonrigid, correlations_nonrigid = None, None, None
+        y_offsets_nonrigid, x_offsets_nonrigid, correlations_nonrigid = None, None, None
 
     return _BatchRegistrationResult(
         frames=frames,
-        y_shifts=y_shifts,
-        x_shifts=x_shifts,
+        y_offsets=y_offsets,
+        x_offsets=x_offsets,
         correlations=correlations,
-        y_shifts_nonrigid=y_shifts_nonrigid,
-        x_shifts_nonrigid=x_shifts_nonrigid,
+        y_offsets_nonrigid=y_offsets_nonrigid,
+        x_offsets_nonrigid=x_offsets_nonrigid,
         correlations_nonrigid=correlations_nonrigid,
     )
 
 
-def _shift_frames_batch(
+def _apply_precomputed_offsets_batch(
     frames: NDArray[np.float32],
     y_offsets: NDArray[np.int32],
     x_offsets: NDArray[np.int32],
@@ -667,9 +667,9 @@ def _shift_frames_batch(
     bidirectional_phase_corrected: bool,
     nonrigid_enabled: bool,
 ) -> NDArray[np.float32]:
-    """Applies precomputed registration shifts to a batch of frames.
+    """Applies precomputed registration offsets to a batch of frames.
 
-    Used to register the second channel using shifts computed from the first channel, avoiding redundant shift
+    Used to register the second channel using offsets computed from the first channel, avoiding redundant offset
     computation.
 
     Args:
@@ -694,9 +694,9 @@ def _shift_frames_batch(
             bidirectional_phase_offset=bidirectional_phase_offset,
         )
 
-    # Applies rigid (whole-frame) shifts.
+    # Applies rigid (whole-frame) offsets.
     for frame, y_offset, x_offset in zip(frames, y_offsets, x_offsets, strict=False):
-        frame[:] = shift_frame(frame=frame, y_shift=y_offset, x_shift=x_offset)
+        frame[:] = translate_frame(frame=frame, y_offset=y_offset, x_offset=x_offset)
 
     # Applies nonrigid (per-block) warping if enabled. Fallback assignments are for type checker only; these are
     # guaranteed to be present when nonrigid_enabled is True.
@@ -709,8 +709,8 @@ def _shift_frames_batch(
             y_blocks=_blocks[0],
             x_blocks=_blocks[1],
             block_counts=_blocks[2],
-            y_block_shifts=_y_nr,
-            x_block_shifts=_x_nr,
+            y_block_offsets=_y_nr,
+            x_block_offsets=_x_nr,
         )
 
     return frames
@@ -736,14 +736,14 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
     edge_taper_pixels = config.one_photon_registration.edge_taper_pixels
     spatial_smoothing_sigma = config.registration.spatial_smoothing_sigma
     temporal_smoothing_sigma = config.registration.temporal_smoothing_sigma
-    maximum_shift_fraction = config.registration.maximum_shift_fraction
+    maximum_offset_fraction = config.registration.maximum_offset_fraction
     normalize_frames = config.registration.normalize_frames
     batch_size = config.registration.batch_size
     reference_frame_count = config.registration.reference_frame_count
     nonrigid_enabled = config.nonrigid_registration.enabled
     block_size = config.nonrigid_registration.block_size
     signal_to_noise_threshold = config.nonrigid_registration.signal_to_noise_threshold
-    maximum_block_shift = config.nonrigid_registration.maximum_block_shift
+    maximum_block_offset = config.nonrigid_registration.maximum_block_offset
     parallel_workers = config.runtime.parallel_workers
     enable_bidiphase_computation = config.registration.compute_bidirectional_phase_offset
     initial_bidirectional_phase_offset = config.registration.bidirectional_phase_offset_override
@@ -783,7 +783,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
         sample_indices = np.linspace(0, num_frames, 1 + np.minimum(reference_frame_count, num_frames), dtype=int)[:-1]
         frames = frames_file[sample_indices].astype(np.float32)
 
-        # Computes bidiphase shift if enabled and not already set.
+        # Computes bidiphase offset if enabled and not already set.
         if enable_bidiphase_computation and bidirectional_phase_offset == 0 and not bidirectional_phase_corrected:
             bidirectional_phase_offset = compute_bidirectional_phase_offset(frames=frames)
             console.echo(
@@ -809,7 +809,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
             spatial_highpass_window=spatial_highpass_window,
             edge_taper_pixels=edge_taper_pixels,
             spatial_smoothing_sigma=spatial_smoothing_sigma,
-            maximum_shift_fraction=maximum_shift_fraction,
+            maximum_offset_fraction=maximum_offset_fraction,
             temporal_smoothing_sigma=temporal_smoothing_sigma,
             workers=parallel_workers,
         )
@@ -901,24 +901,24 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
                 pre_smoothing_sigma=pre_smoothing_sigma,
                 spatial_highpass_window=spatial_highpass_window,
                 temporal_smoothing_sigma=temporal_smoothing_sigma,
-                maximum_shift_fraction=maximum_shift_fraction,
+                maximum_offset_fraction=maximum_offset_fraction,
                 nonrigid_enabled=nonrigid_enabled,
                 signal_to_noise_threshold=signal_to_noise_threshold,
-                maximum_block_shift=maximum_block_shift,
+                maximum_block_offset=maximum_block_offset,
                 workers=parallel_workers,
             )
 
-            rigid_offsets_batches.append((batch_result.y_shifts, batch_result.x_shifts, batch_result.correlations))
+            rigid_offsets_batches.append((batch_result.y_offsets, batch_result.x_offsets, batch_result.correlations))
             if nonrigid_enabled:
                 # Fallback assignments are for type checker only; guaranteed present when nonrigid_enabled is True.
-                y_shifts_nonrigid = (
-                    batch_result.y_shifts_nonrigid
-                    if batch_result.y_shifts_nonrigid is not None
+                y_offsets_nonrigid = (
+                    batch_result.y_offsets_nonrigid
+                    if batch_result.y_offsets_nonrigid is not None
                     else np.empty((0, 0), dtype=np.float32)
                 )
-                x_shifts_nonrigid = (
-                    batch_result.x_shifts_nonrigid
-                    if batch_result.x_shifts_nonrigid is not None
+                x_offsets_nonrigid = (
+                    batch_result.x_offsets_nonrigid
+                    if batch_result.x_offsets_nonrigid is not None
                     else np.empty((0, 0), dtype=np.float32)
                 )
                 correlations_nonrigid = (
@@ -926,7 +926,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
                     if batch_result.correlations_nonrigid is not None
                     else np.empty((0, 0), dtype=np.float32)
                 )
-                nonrigid_offsets_batches.append((y_shifts_nonrigid, x_shifts_nonrigid, correlations_nonrigid))
+                nonrigid_offsets_batches.append((y_offsets_nonrigid, x_offsets_nonrigid, correlations_nonrigid))
 
             mean_image += batch_result.frames.sum(axis=0)
 
@@ -1003,8 +1003,8 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
     bidirectional_phase_offset = registration_data.bidirectional_phase_offset
     bidirectional_phase_corrected = registration_data.bidirectional_phase_corrected
 
-    # Extracts rigid offsets and converts to int32 for shift operations. Fallback to empty arrays is for type narrowing
-    # only; offsets are always present since _register_alignment_channel populates them before this function is called.
+    # Extracts rigid offsets and converts to int32 for translation operations. Fallback to empty arrays is for type
+    # narrowing only; offsets are always present since _register_alignment_channel populates them before this is called.
     y_offsets = registration_data.rigid_y_offsets if registration_data.rigid_y_offsets is not None else np.empty(0)
     x_offsets = registration_data.rigid_x_offsets if registration_data.rigid_x_offsets is not None else np.empty(0)
     y_offsets_int = y_offsets.astype(np.int32)
@@ -1079,8 +1079,8 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
             else:
                 y_offsets_nonrigid_batch, x_offsets_nonrigid_batch = None, None
 
-            # Applies precomputed shifts (rigid + nonrigid if enabled).
-            frames = _shift_frames_batch(
+            # Applies precomputed offsets (rigid + nonrigid if enabled).
+            frames = _apply_precomputed_offsets_batch(
                 frames=frames,
                 y_offsets=y_offsets_batch,
                 x_offsets=x_offsets_batch,

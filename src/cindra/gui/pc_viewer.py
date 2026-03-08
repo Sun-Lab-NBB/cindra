@@ -42,12 +42,12 @@ class PCViewer(QMainWindow):
         _pc_images: PC extreme images array with shape (2, num_pcs, height, width), or None.
         _image_height: Height of PC images in pixels.
         _image_width: Width of PC images in pixels.
-        _pc_metrics: Registration shift metrics array with shape (num_pcs, 3), or None.
+        _pc_metrics: Registration offset metrics array with shape (num_pcs, 3), or None.
         _pc_projections: Per-frame PC projection array with shape (num_frames, num_pcs), or None.
         _central_widget: Central widget container.
         _layout: Grid layout for arranging all controls and views.
         _graphics_widget: PyQtGraph graphics layout for image and plot views.
-        _metrics_plot: Plot widget for PC shift metrics.
+        _metrics_plot: Plot widget for PC offset metrics.
         _difference_view_box: View box for the PC difference image.
         _merged_view_box: View box for the merged PC overlay image.
         _animated_view_box: View box for the animated PC extreme image.
@@ -57,7 +57,7 @@ class PCViewer(QMainWindow):
         _projection_plot: Plot widget for the PC time-course projection.
         _plane_selector: Dropdown for selecting the imaging plane.
         _pc_edit: Input field for the current principal component number.
-        _metric_labels: Labels displaying per-PC registration shift values.
+        _metric_labels: Labels displaying per-PC registration offset values.
         _title_labels: Text items anchored inside each image view box, positioned at the bottom center.
         _play_button: Button to start PC animation playback.
         _pause_button: Button to pause PC animation playback.
@@ -120,15 +120,15 @@ class PCViewer(QMainWindow):
         self._layout.setRowStretch(1, 1)
         self._layout.setRowStretch(2, 0)
 
-        # Configures pixel shift metrics plot. Top content margin provides space for the legend row.
+        # Configures pixel offset metrics plot. Top content margin provides space for the legend row.
         # noinspection PyUnresolvedReferences
         self._metrics_plot = self._graphics_widget.addPlot(row=0, col=0)
         configure_plot(
             self._metrics_plot,
             mouse_x=False,
             mouse_y=False,
-            title="PC Registration Shifts",
-            left_label="Shift (px)",
+            title="PC Registration Offsets",
+            left_label="Offset (px)",
             bottom_label="PC #",
         )
 
@@ -347,7 +347,7 @@ class PCViewer(QMainWindow):
         panel.addWidget(self._pc_edit)
         panel.addSpacing(group_spacing)
 
-        # Metric value labels showing per-PC registration shift magnitudes.
+        # Metric value labels showing per-PC registration offset magnitudes.
         self._metric_labels: list[QLabel] = []
         for _ in range(3):
             metric_label = QLabel("")
@@ -449,7 +449,7 @@ class PCViewer(QMainWindow):
         self._animated_image.setLevels([pc_low.min(), pc_low.max()])
         self._zoom_plot()
 
-        # Metrics plot: shows rigid, nonrigid, and nonrigid-max shift magnitudes across all PCs.
+        # Metrics plot: shows rigid, nonrigid, and nonrigid-max offset magnitudes across all PCs.
         # The legend is recreated on every update because clear() removes it from the plot.
         self._metrics_plot.clear()
         self._metrics_plot.disableAutoRange()
