@@ -262,15 +262,15 @@ class Registration:
     overhead. On slow drives, increasing this number may result in faster runtime, at the expense of increased RAM
     use."""
 
-    maximum_shift_fraction: float = 0.1
-    """The maximum allowed shift during registration, given as a fraction of the frame size (e.g., 0.1 indicates 10%).
-    This determines how much the algorithm is allowed to shift the entire frame to align it to the reference image."""
+    maximum_offset_fraction: float = 0.1
+    """The maximum allowed offset during registration, given as a fraction of the frame size (e.g., 0.1 indicates 10%).
+    This determines how much the algorithm is allowed to offset the entire frame to align it to the reference image."""
 
     spatial_smoothing_sigma: float = 1.15
     """The standard deviation (in pixels) of the Gaussian filter used to spatially smooth the phase correlation surface
     between the reference image and each processed frame. Smoothing helps reduce noise in the correlation surface,
-    improving the accuracy of sub-pixel shift detection. Higher values produce more smoothing but may reduce precision
-    for detecting small shifts."""
+    improving the accuracy of sub-pixel offset detection. Higher values produce more smoothing but may reduce precision
+    for detecting small offsets."""
 
     temporal_smoothing_sigma: float = 0.0
     """The standard deviation (in frames) of the Gaussian filter used to temporally smooth the phase correlation surface
@@ -293,7 +293,7 @@ class Registration:
     normalize_frames: bool = True
     """Determines whether to clip pixel intensities to the 1st-99th percentile range during registration. This removes
     extreme outlier pixels from both the reference image and each frame before computing phase correlation, improving
-    shift detection accuracy by reducing the influence of anomalously bright or dark pixels."""
+    offset detection accuracy by reducing the influence of anomalously bright or dark pixels."""
 
     registration_metric_principal_components: int = 5
     """The number of Principal Components (PCs) used to compute the registration quality metrics. These metrics are
@@ -360,10 +360,10 @@ class NonrigidRegistration:
 
     signal_to_noise_threshold: float = 1.2
     """The signal-to-noise ratio threshold. The phase correlation peak must be this many times higher than the
-    noise level for the algorithm to accept the block shift and apply it to the output dataset."""
+    noise level for the algorithm to accept the block offset and apply it to the output dataset."""
 
-    maximum_block_shift: float = 5.0
-    """The maximum allowed shift, in pixels, for each block relative to the rigid registration shift."""
+    maximum_block_offset: float = 5.0
+    """The maximum allowed offset, in pixels, for each block relative to the rigid registration offset."""
 
 
 @dataclass

@@ -65,15 +65,22 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:
                 binaries_valid = False
                 break
 
-        if binaries_valid:
+        if binaries_valid and not configuration.file_io.repeat_binarization:
             message = f"Loaded {len(loaded_contexts)} existing plane contexts with valid binaries."
             console.echo(message=message, level=LogLevel.SUCCESS)
             return
 
-        # Binaries are missing or invalid - fall through to recreate.
-        console.echo(
-            message="Existing binaries are missing or invalid. Recreating from TIFF files...", level=LogLevel.WARNING
-        )
+        if configuration.file_io.repeat_binarization:
+            console.echo(
+                message="Repeating binarization as requested by 'repeat_binarization' parameter...",
+                level=LogLevel.WARNING,
+            )
+        else:
+            # Binaries are missing or invalid - fall through to recreate.
+            console.echo(
+                message="Existing binaries are missing or invalid. Recreating from TIFF files...",
+                level=LogLevel.WARNING,
+            )
 
     # Starts the binarization timer.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)

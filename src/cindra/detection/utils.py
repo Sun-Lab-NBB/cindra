@@ -163,7 +163,7 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
 
 @lru_cache(maxsize=5)
 def compute_block_smoothing_kernel(x_block_count: int, y_block_count: int) -> NDArray[np.float32]:
-    """Computes a normalized Gaussian kernel matrix for smoothing nonrigid block shifts.
+    """Computes a normalized Gaussian kernel matrix for smoothing nonrigid block offsets.
 
     Creates a kernel that weights neighboring blocks based on their spatial distance, used to enforce smoothness
     constraints in nonrigid registration. Results are cached since block counts don't change during a recording.
@@ -214,7 +214,7 @@ def compute_registration_blocks(
         A tuple of (y_blocks, x_blocks, block_counts, actual_block_size, smoothing_kernel). The
         y_blocks and x_blocks are lists of 2-element arrays specifying the start and end indices for
         each block. The block_counts tuple gives (y_count, x_count). The actual_block_size tuple gives
-        the final block dimensions. The smoothing_kernel is used for interpolating block shifts.
+        the final block dimensions. The smoothing_kernel is used for interpolating block offsets.
     """
     # Computes block dimensions and counts for each axis. If the requested block size exceeds the image
     # dimension, uses the full dimension as a single block. Otherwise, the 1.5x multiplier produces
@@ -247,7 +247,7 @@ def compute_registration_blocks(
         for x_index in range(x_block_count)
     ]
 
-    # Computes the smoothing kernel used for SNR-based adaptive smoothing during shift estimation.
+    # Computes the smoothing kernel used for SNR-based adaptive smoothing during offset estimation.
     smoothing_kernel = compute_block_smoothing_kernel(
         x_block_count=x_block_count,
         y_block_count=y_block_count,

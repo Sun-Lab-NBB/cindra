@@ -197,9 +197,9 @@ class RegistrationData:
     (num_frames, num_components). Shows how each frame relates to the computed PCs over time."""
 
     principal_component_shift_metrics: NDArray[np.float32] | None = None
-    """The registration shift metrics computed by aligning PC extreme images of the registered recording movie, with
-    shape (num_components, 3). Column 0 contains mean rigid shift magnitude, column 1 contains mean nonrigid shift
-    magnitude, and column 2 contains maximum nonrigid shift magnitude. Large values indicate poor registration
+    """The registration offset metrics computed by aligning PC extreme images of the registered recording movie, with
+    shape (num_components, 3). Column 0 contains mean rigid offset magnitude, column 1 contains mean nonrigid offset
+    magnitude, and column 2 contains maximum nonrigid offset magnitude. Large values indicate poor registration
     quality."""
 
     def is_registered(self) -> bool:
