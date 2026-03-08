@@ -23,7 +23,7 @@ def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10)
     diffeomorphic registration or template mask generation).
 
     Args:
-        rois: The list of ROIStatistics instances to analyze.
+        rois: The list of ROIMask instances to analyze.
         default_diameter: The fallback diameter to return if the ROI list is empty or all ROIs have zero pixels.
 
     Returns:
@@ -245,25 +245,27 @@ class _ROI:
         properties. Distance-based statistics (mean_radius, compactness) are normalized by the ROI diameter to make
         them scale-invariant across different ROI sizes and imaging magnifications.
 
-    Args:
-        data: The ROIStatistics instance to wrap.
-        diameter: The estimated ROI diameter in pixels, used to normalize distance-based statistics.
-        crop: Determines whether to crop to soma region when computing statistics.
-
     Attributes:
         _data: The underlying ROIStatistics instance.
         _diameter: The ROI diameter used for distance normalization.
         _crop: Determines whether to crop to soma region when computing statistics.
         _cached_soma_mask: Cached soma mask array, computed on first access.
-
-    Raises:
-        TypeError: If the x_pixels, y_pixels, and pixel_weights arrays do not have the same shape.
     """
 
     _baseline_cache: ClassVar[dict[int, NDArray[np.float32]]] = {}
     """Cache of sorted baseline distances keyed by diameter, avoiding recomputation across instances."""
 
     def __init__(self, data: ROIStatistics, diameter: int, crop: bool = True) -> None:
+        """Initializes the _ROI wrapper for computing derived statistics from an ROIStatistics instance.
+
+        Args:
+            data: The ROIStatistics instance to wrap.
+            diameter: The estimated ROI diameter in pixels, used to normalize distance-based statistics.
+            crop: Determines whether to crop to soma region when computing statistics.
+
+        Raises:
+            TypeError: If the x_pixels, y_pixels, and pixel_weights arrays do not have the same shape.
+        """
         if (
             data.mask.x_pixels.shape != data.mask.y_pixels.shape
             or data.mask.x_pixels.shape != data.mask.pixel_weights.shape
@@ -306,10 +308,8 @@ class _ROI:
 
     @property
     def soma_mask(self) -> NDArray[np.bool_]:
-        """Computes and caches the soma mask for this ROI.
-
-        Returns:
-            A boolean mask indicating which pixels belong to the soma region.
+        """Computes, caches, and returns a boolean mask indicating which pixels belong to the soma region of this
+        ROI.
         """
         if self._cached_soma_mask is not None:
             return self._cached_soma_mask

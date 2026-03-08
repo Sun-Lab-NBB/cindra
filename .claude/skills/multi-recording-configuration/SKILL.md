@@ -65,8 +65,9 @@ Searches recursively for `combined_metadata.npz` files to find recordings with c
 
 ## Configuration overview
 
-The multi-recording pipeline uses `MultiRecordingConfiguration`, a dataclass with 7 nested sections. This pipeline tracks ROIs
-across multiple recordings and extracts consistent fluorescence traces using consensus template masks.
+The multi-recording pipeline uses `MultiRecordingConfiguration`, a dataclass with 7 nested sections. This
+pipeline tracks ROIs across multiple recordings and extracts consistent fluorescence traces using consensus
+template masks.
 
 All parameters are specified in the `MultiRecordingConfiguration` YAML file. The pipeline loads the fully resolved
 configuration directly from the file without any runtime overrides.
@@ -75,10 +76,10 @@ configuration directly from the file without any runtime overrides.
 
 ## Prerequisites from single-recording processing
 
-Before multi-recording processing, all recordings must have completed single-recording processing through all three phases
-(binarize, process, combine). The multi-recording pipeline locates single-recording output by recursively searching each recording
-directory for a `combined_metadata.npz` file. The parent directory of this file becomes the cindra root for that
-recording.
+Before multi-recording processing, all recordings must have completed single-recording processing through
+all three phases (binarize, process, combine). The multi-recording pipeline locates single-recording output by
+recursively searching each recording directory for a `combined_metadata.npz` file. The parent directory of this
+file becomes the cindra root for that recording.
 
 **Required single-recording outputs per recording:**
 

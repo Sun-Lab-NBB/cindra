@@ -13,11 +13,11 @@ import click
 from ..gui import run_roi_viewer, run_tracking_viewer, run_registration_viewer
 from .gui_mcp_server import run_gui_server
 
-CONTEXT_SETTINGS = {"max_content_width": 120}
+_CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """The Click context settings that ensure displayed help messages are formatted according to the lab standard."""
 
 
-@click.group("cindra-gui", context_settings=CONTEXT_SETTINGS)
+@click.group("cindra-gui", context_settings=_CONTEXT_SETTINGS)
 def cindra_gui() -> None:
     """Launches cindra GUI applications for visualizing pipeline outputs.
 

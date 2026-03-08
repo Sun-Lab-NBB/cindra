@@ -10,13 +10,13 @@ from ..pipelines import run_multi_recording_pipeline, run_single_recording_pipel
 from .mcp_server import run_server
 from ..dataclasses import PipelineType, MultiRecordingConfiguration, SingleRecordingConfiguration, detect_pipeline_type
 
-CONTEXT_SETTINGS = {"max_content_width": 120}
+_CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """The Click context settings that ensure displayed help messages are formatted according to the Sun lab standard."""
 
 
-@click.group("cindra", context_settings=CONTEXT_SETTINGS)
+@click.group("cindra", context_settings=_CONTEXT_SETTINGS)
 def cindra_cli() -> None:
-    """This Command-Line Interface (CLI) is the entry-point for all headless interactions with the cindra library."""
+    """Provides the entry-point for all headless command-line interactions with the cindra library."""
 
 
 @cindra_cli.command("mcp")

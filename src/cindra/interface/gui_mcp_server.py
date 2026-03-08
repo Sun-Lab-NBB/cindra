@@ -35,21 +35,18 @@ _CELL_LABEL_THRESHOLD: float = 0.5
 
 @dataclass
 class _ViewerProcess:
-    """Tracks a managed GUI viewer subprocess.
-
-    Attributes:
-        viewer_id: The unique identifier for this viewer instance.
-        viewer_type: The type of viewer ('roi', 'tracking', or 'registration').
-        recording_path: The path to the recording loaded in the viewer.
-        dataset: The multi-recording dataset name, or None for single-recording mode.
-        process: The subprocess.Popen instance for the viewer process.
-    """
+    """Tracks a managed GUI viewer subprocess."""
 
     viewer_id: str
+    """The unique identifier for this viewer instance."""
     viewer_type: str
+    """The type of viewer ('roi', 'tracking', or 'registration')."""
     recording_path: str
+    """The path to the recording loaded in the viewer."""
     dataset: str | None
-    process: subprocess.Popen
+    """The multi-recording dataset name, or None for single-recording mode."""
+    process: subprocess.Popen[str]
+    """The subprocess.Popen instance for the viewer process."""
 
 
 _viewer_registry: dict[str, _ViewerProcess] = {}
@@ -68,9 +65,7 @@ def run_gui_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdi
     gui_mcp.run(transport=transport)
 
 
-# ------------------------------------------------------------------
 # Internal helpers
-# ------------------------------------------------------------------
 
 
 def _get_viewer(viewer_id: str) -> _ViewerProcess | None:
@@ -140,9 +135,7 @@ def _get_or_load_single_recording_data(recording_path: str) -> SingleRecordingDa
     return viewer_data.single_recording
 
 
-# ------------------------------------------------------------------
 # Lifecycle tools (3)
-# ------------------------------------------------------------------
 
 
 @gui_mcp.tool()
@@ -249,9 +242,7 @@ def close_viewer_tool(viewer_id: str) -> dict[str, Any]:
     return {"success": True, "viewer_id": viewer_id}
 
 
-# ------------------------------------------------------------------
 # Data query tools (5) — no GUI needed
-# ------------------------------------------------------------------
 
 
 @gui_mcp.tool()

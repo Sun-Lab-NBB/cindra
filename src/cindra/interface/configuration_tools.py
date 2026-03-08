@@ -28,13 +28,17 @@ def generate_config_file(
     output = Path(output_path)
 
     if not output.parent.exists():
-        return {"success": False, "error": f"Parent directory does not exist: {output.parent}"}
+        return {
+            "success": False,
+            "error": f"Unable to generate configuration file. The parent directory does not exist: {output.parent}",
+        }
 
     if output.suffix != ".yaml":
         output = output.with_suffix(".yaml")
 
+    configuration: SingleRecordingConfiguration | MultiRecordingConfiguration
     if pipeline_type == "single-recording":
-        configuration: SingleRecordingConfiguration | MultiRecordingConfiguration = SingleRecordingConfiguration()
+        configuration = SingleRecordingConfiguration()
     else:
         configuration = MultiRecordingConfiguration()
 
@@ -47,9 +51,8 @@ def generate_config_file(
 def discover_single_recording_candidates_tool(root_directory: str) -> dict[str, Any]:
     """Discovers recordings containing raw neural imaging data that can be processed by the single-recording pipeline.
 
-    Searches recursively for cindra_parameters.json files (created by sl-experiment), which mark directories
-    containing raw recording data suitable for single-recording processing. Returns the parent directory of each
-    match as a recording candidate path.
+    Searches recursively for cindra_parameters.json files, which mark directories containing raw recording data
+    suitable for single-recording processing. Returns the parent directory of each match as a recording candidate path.
 
     Args:
         root_directory: The absolute path to the root directory to search.
@@ -57,20 +60,20 @@ def discover_single_recording_candidates_tool(root_directory: str) -> dict[str, 
     root_path = Path(root_directory)
 
     if not root_path.exists():
-        return {"error": f"Directory does not exist: {root_directory}"}
+        return {
+            "error": f"Unable to discover single-recording candidates. The directory does not exist: {root_directory}",
+        }
 
     if not root_path.is_dir():
-        return {"error": f"Path is not a directory: {root_directory}"}
+        return {
+            "error": f"Unable to discover single-recording candidates. The path is not a directory: {root_directory}",
+        }
 
     recording_paths: list[str] = []
     errors: list[str] = []
 
     try:
-        for marker_file in root_path.rglob("cindra_parameters.json"):
-            try:
-                recording_paths.append(str(marker_file.parent))
-            except Exception as error:
-                errors.append(f"{marker_file.parent}: {error}")
+        recording_paths.extend(str(marker_file.parent) for marker_file in root_path.rglob("cindra_parameters.json"))
     except PermissionError as error:
         errors.append(f"Access denied during search: {error}")
 
@@ -99,24 +102,25 @@ def discover_multi_recording_candidates_tool(root_directory: str) -> dict[str, A
     root_path = Path(root_directory)
 
     if not root_path.exists():
-        return {"error": f"Directory does not exist: {root_directory}"}
+        return {
+            "error": f"Unable to discover multi-recording candidates. The directory does not exist: {root_directory}",
+        }
 
     if not root_path.is_dir():
-        return {"error": f"Path is not a directory: {root_directory}"}
+        return {
+            "error": f"Unable to discover multi-recording candidates. The path is not a directory: {root_directory}",
+        }
 
     recording_paths: list[str] = []
     errors: list[str] = []
 
     try:
         for marker_file in root_path.rglob("combined_metadata.npz"):
-            try:
-                # The combined_metadata.npz is saved at the cindra root level (e.g., {recording}/cindra/). Its parent
-                # is the cindra output directory, and its grandparent is the recording root directory.
-                recording_root = str(marker_file.parent.parent)
-                if recording_root not in recording_paths:
-                    recording_paths.append(recording_root)
-            except Exception as error:
-                errors.append(f"{marker_file}: {error}")
+            # Resolves the recording root from the file hierarchy. The combined_metadata.npz lives at the cindra root
+            # level (e.g., {recording}/cindra/), so its grandparent is the recording root directory.
+            recording_root = str(marker_file.parent.parent)
+            if recording_root not in recording_paths:
+                recording_paths.append(recording_root)
     except PermissionError as error:
         errors.append(f"Access denied during search: {error}")
 

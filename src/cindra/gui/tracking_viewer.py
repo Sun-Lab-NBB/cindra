@@ -499,12 +499,12 @@ class TrackingViewer(QMainWindow):
         channel_2 = self._channel_2_checkbox.isChecked()
 
         # Retrieves and normalizes the background image into the cache.
-        rec = self.data.current_recording
-        background = self._resolve_background(rec, background_type, coordinate_space, channel_2)
+        recording = self.data.current_recording
+        background = self._resolve_background(recording, background_type, coordinate_space, channel_2)
         self._cached_background = self._normalize_image(image=background)
 
         # Pre-collects all valid mask pixel coordinates and per-ROI colors into the cache.
-        masks = self._resolve_masks(rec, mask_layer, channel_2)
+        masks = self._resolve_masks(recording, mask_layer, channel_2)
         self._cached_mask_count = len(masks) if masks else 0
         self._roi_edit.setValidator(QtGui.QIntValidator(0, max(0, self._cached_mask_count - 1)))
         self._cached_mask_y = None
@@ -542,10 +542,10 @@ class TrackingViewer(QMainWindow):
             # Template and Tracked layers share a color palette (same ROI identity set). Original and Deformed
             # layers share a separate palette (same single-recording ROIs in different coordinate spaces).
             if mask_layer in (MaskLayer.TEMPLATE, MaskLayer.TRACKED):
-                template_masks = self._resolve_masks(rec, MaskLayer.TEMPLATE, channel_2)
+                template_masks = self._resolve_masks(recording, MaskLayer.TEMPLATE, channel_2)
                 color_count = len(template_masks) if template_masks else len(masks)
             else:
-                original_masks = self._resolve_masks(rec, MaskLayer.ORIGINAL, channel_2)
+                original_masks = self._resolve_masks(recording, MaskLayer.ORIGINAL, channel_2)
                 color_count = len(original_masks) if original_masks else len(masks)
 
             rng = np.random.default_rng(seed=ROI_CONFIG.random_color_seed)
@@ -697,8 +697,13 @@ class TrackingViewer(QMainWindow):
         click_y = int(view_position.y())
 
         # Bounds-checks against frame dimensions.
-        sd = self.data.single_recording
-        if click_y < 0 or click_y >= sd.frame_height or click_x < 0 or click_x >= sd.frame_width:
+        single_recording = self.data.single_recording
+        if (
+            click_y < 0
+            or click_y >= single_recording.frame_height
+            or click_x < 0
+            or click_x >= single_recording.frame_width
+        ):
             return
 
         # noinspection PyTypeChecker

@@ -34,9 +34,9 @@ _MAXIMUM_CHANNEL_COUNT: int = 2
 def find_data_directory(data_path: Path) -> Path:
     """Recursively searches for the directory containing the acquisition parameters JSON file.
 
-    This function searches the data_path directory and all subdirectories for a file named 'cindra_parameters.json'
-    (created by sl-experiment). Returns the parent directory containing the matched file. This directory is expected
-    to also contain the TIFF files.
+    This function searches the data_path directory and all subdirectories for a file named 'cindra_parameters.json'.
+    Returns the parent directory containing the matched file. This directory is expected to also contain the TIFF
+    files.
 
     Args:
         data_path: The root directory to search for the acquisition parameters file.
@@ -355,7 +355,7 @@ def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
         ValueError: If required fields are missing from the JSON data.
     """
     if not json_path.exists():
-        message = f"Acquisition parameters file not found: {json_path}"
+        message = f"Unable to load acquisition parameters. The file was not found: {json_path}."
         console.error(message=message, error=FileNotFoundError)
 
     with json_path.open("r") as file:
@@ -501,7 +501,7 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
                 break
 
         if not found_unique:
-            message = f"No unique component found for path: {path}, which is not allowed."
+            message = f"Unable to extract a unique component from the given path: {path}."
             console.error(message=message, error=RuntimeError)
 
     return tuple(unique_components)

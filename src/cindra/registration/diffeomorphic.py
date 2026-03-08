@@ -370,7 +370,7 @@ class DiffeomorphicDemonsRegistration:
         """
         # Validates that pyramids have been initialized (should always be true when this method is called).
         if self._pyramids is None:
-            message = "Cannot retrieve image: pyramids have not been initialized. Call register() first."
+            message = "Unable to retrieve image. The pyramids have not been initialized, call register() first."
             console.error(message=message, error=RuntimeError)
 
         # noinspection PyUnresolvedReferences

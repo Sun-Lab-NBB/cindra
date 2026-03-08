@@ -159,11 +159,7 @@ class BinaryFile:
 
     @property
     def shape(self) -> tuple[int, int, int]:
-        """Returns the dimensions of the data in the file as a tuple of three elements.
-
-        The first element is the number of frames. The second element is the height of each frame. The third
-        element is the width of each frame.
-        """
+        """Returns the dimensions of the data in the file as (frame_number, height, width)."""
         return self.frame_number, self.height, self.width
 
     @property
@@ -177,7 +173,7 @@ class BinaryFile:
         self.file._mmap.close()  # type: ignore[attr-defined]
 
     def __enter__(self) -> Self:
-        """Supports accessing the file via a context manager by returning self to caller upon entering the context."""
+        """Returns self to enable use as a context manager."""
         return self
 
     def __exit__(
@@ -192,7 +188,7 @@ class BinaryFile:
     def __setitem__(self, indices: slice | int | tuple[int, ...] | NDArray[Any], data: NDArray[np.int16]) -> None:
         """Sets data in the binary file at specific indices.
 
-        This method is used to assign data to the binary file at the provided indices. If the data is not in 'int16'
+        Assigns data to the binary file at the provided indices. If the data is not in 'int16'
         format, it is restricted to the maximum value that can be represented by a 16-bit signed integer and converted
         to an 'int16' format.
 
@@ -405,7 +401,7 @@ class BinaryFile:
 
 
 class BinaryFileCombined:
-    """Creates or opens a collection of cindra binarys (.bin) for reading image data across planes.
+    """Creates or opens a collection of cindra binaries (.bin) for reading image data across planes.
 
     This class allows working with multiple imaging planes, each stored inside a separate cindra binary.
     It provides similar functionality to the BinaryFile class but extends it to handle multiple planes.
@@ -474,9 +470,7 @@ class BinaryFileCombined:
             console.error(message=message, error=ValueError)
 
     def __enter__(self) -> Self:
-        """Supports accessing managed files via a context manager by returning self to caller upon entering the
-        context.
-        """
+        """Returns self to enable use as a context manager."""
         return self
 
     def __exit__(
@@ -503,19 +497,15 @@ class BinaryFileCombined:
 
     @property
     def frame_number(self) -> int:
-        """Returns the total number of frames stored in each of the managed files.
-
-        This number is always the same across all managed files.
+        """Returns the total number of frames stored in each managed file, which is always the same across all
+        files.
         """
         return self.files[0].frame_number
 
     @property
     def shape(self) -> tuple[int, NDArray[np.uint16], NDArray[np.uint16]]:
-        """Returns the dimensions of the data stored inside managed files as a tuple of three elements.
-
-        The first element is the total number of frames inside each file, which is the same for all files. The second
-        element is an array of plane (frame) heights for each managed file. The third element is the array of plane
-        (frame) widths for each managed file.
+        """Returns the dimensions of the managed files as (frame_number, plane_heights, plane_widths), where
+        frame_number is the same for all files and the arrays contain per-file plane dimensions.
         """
         return self.frame_number, self.plane_heights, self.plane_widths
 

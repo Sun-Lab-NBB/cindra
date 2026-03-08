@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QGroupBox,
     QLineEdit,
+    QListView,
     QSplitter,
     QStatusBar,
     QFileDialog,
@@ -910,9 +911,7 @@ class ROIViewer(QMainWindow):
             )
             colocalization = recording.cell_colocalization
             self._cell_colocalization = (
-                colocalization
-                if colocalization.size > 0
-                else np.zeros((roi_count, 2), dtype=np.float32)
+                colocalization if colocalization.size > 0 else np.zeros((roi_count, 2), dtype=np.float32)
             )
             self._two_channels = recording.has_channel_2
             self._cell_fluorescence = recording.cell_fluorescence
@@ -955,7 +954,7 @@ class ROIViewer(QMainWindow):
             self._ranked_count_edit.setVisible(False)
 
             # Hides inapplicable color modes: cell probability, cell classification, footprint.
-            color_view = self._color_controls.color_combo.view()
+            color_view: QListView = self._color_controls.color_combo.view()  # type: ignore[assignment]
             for hidden_index in (
                 ROIColorMode.CELL_PROBABILITY,
                 ROIColorMode.CELL_CLASSIFICATION,
@@ -1091,7 +1090,8 @@ class ROIViewer(QMainWindow):
 
         # Hides corrected structural view item if not available.
         has_structural = single_recording.corrected_structural_mean_image.size > 0
-        self._background_combo.view().setRowHidden(BackgroundView.CORRECTED_STRUCTURAL, not has_structural)
+        background_view: QListView = self._background_combo.view()  # type: ignore[assignment]
+        background_view.setRowHidden(BackgroundView.CORRECTED_STRUCTURAL, not has_structural)
 
         # Shows channel 2 group only if channel 2 data exists.
         self._channel_group.setVisible(self._two_channels)
@@ -1102,7 +1102,7 @@ class ROIViewer(QMainWindow):
         self._classifier_controls.classify_button.setEnabled(True)
 
         # Shows all color mode rows, then selectively hides unavailable modes.
-        color_view = self._color_controls.color_combo.view()
+        color_view: QListView = self._color_controls.color_combo.view()  # type: ignore[assignment]
         for item_index in range(self._color_controls.color_combo.count()):
             color_view.setRowHidden(item_index, False)
         color_view.setRowHidden(ROIColorMode.COLOCALIZATION_PROBABILITY, not self._two_channels)
