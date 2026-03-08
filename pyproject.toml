@@ -106,7 +106,7 @@ exclude = [".github", "recipe"]
 
 # Specifies the library structure.
 [tool.hatch.build.targets.wheel]
-packages = ["src/cindra", "notebooks"]
+packages = ["src/cindra"]
 
 # Ruff Configuration.
 [tool.ruff]
