@@ -24,16 +24,19 @@ class ROIColorMode(IntEnum):
     ASPECT_RATIO = 4
     """Colors ROIs by the aspect ratio of their bounding ellipse."""
 
-    COLOCALIZATION_PROBABILITY = 5
+    SOLIDITY = 5
+    """Colors ROIs by the solidity (soma-to-convex-hull area ratio) of their spatial footprint."""
+
+    COLOCALIZATION_PROBABILITY = 6
     """Colors ROIs by their channel 2 colocalization probability."""
 
-    CELL_PROBABILITY = 6
+    CELL_PROBABILITY = 7
     """Colors ROIs by the trained classifier's cell-probability estimate using a colormap gradient."""
 
-    CORRELATIONS = 7
+    CORRELATIONS = 8
     """Colors ROIs by pairwise activity correlation with the selected ROI."""
 
-    CELL_CLASSIFICATION = 8
+    CELL_CLASSIFICATION = 9
     """Colors ROIs by binary cell/non-cell labels (green for cell, magenta for non-cell)."""
 
 
@@ -54,6 +57,9 @@ class ROIColorModeLabel(StrEnum):
 
     ASPECT_RATIO = "Aspect Ratio"
     """The display label for aspect ratio-based ROI coloring."""
+
+    SOLIDITY = "Solidity"
+    """The display label for solidity-based ROI coloring."""
 
     COLOCALIZATION_PROBABILITY = "Colocalization"
     """The display label for channel 2 colocalization probability-based ROI coloring."""

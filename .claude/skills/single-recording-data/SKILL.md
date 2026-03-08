@@ -466,17 +466,12 @@ Saved at both the combined root and per-plane levels. Companion file to `roi_mas
 | NPZ key                       | Dtype   | Shape       | Description                                            |
 |-------------------------------|---------|-------------|--------------------------------------------------------|
 | `footprints`                  | uint16  | (num_rois,) | Spatial scale (hop size) used during detection         |
-| `mean_radius`                 | float32 | (num_rois,) | Mean Euclidean distance from pixels to median center   |
-| `baseline_mean_radius`        | float32 | (num_rois,) | Expected mean radius for uniform pixel distribution    |
 | `compactness`                 | float32 | (num_rois,) | Ratio of actual to expected mean radius (1.0=circular) |
 | `solidity`                    | float32 | (num_rois,) | Ratio of soma pixels to convex hull area               |
 | `pixel_count`                 | uint32  | (num_rois,) | Total pixels in complete ROI                           |
-| `soma_pixel_count`            | uint32  | (num_rois,) | Pixels in soma-cropped region                          |
 | `aspect_ratio`                | float32 | (num_rois,) | Ellipse axis ratio indicating elongation               |
 | `normalized_pixel_count`      | float32 | (num_rois,) | Pixel count normalized by expected ROI size (soma)     |
-| `normalized_pixel_count_full` | float32 | (num_rois,) | Pixel count normalized by expected ROI size (full)     |
 | `skewness`                    | float32 | (num_rois,) | Fluorescence skewness (NaN if unavailable)             |
-| `standard_deviation`          | float32 | (num_rois,) | Fluorescence std dev (NaN if unavailable)              |
 | `plane_index`                 | int32   | (num_rois,) | Imaging plane index for each ROI                       |
 
 **Optional variable-length arrays** (present only when the data exists):
