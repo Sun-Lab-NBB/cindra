@@ -379,9 +379,9 @@ class Deformation:
 
         Args:
             grid_sampling: The B-spline grid spacing (knot spacing) in pixels.
-            injective: Whether to apply injectivity constraint to prevent grid folding.
+            injective: Determines whether to apply injectivity constraint to prevent grid folding.
             injective_factor: Scaling factor for the injectivity limit (0 < factor <= 1).
-            freeze_edges: Whether to freeze edges to zero deformation.
+            freeze_edges: Determines whether to freeze edges to zero deformation.
 
         Returns:
             A new regularized Deformation instance, or None if the grid is too small for the requested constraints.

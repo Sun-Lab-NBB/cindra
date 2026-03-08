@@ -126,10 +126,8 @@ class SplineGrid:
 
     @property
     def ndim(self) -> int:
-        """Returns the number of grid dimensions.
-
-        Notes:
-            In the current SplineGrid implementation the number of dimensions is fixed to 2.
+        """Returns the number of grid dimensions, which is fixed to 2 in the current SplineGrid
+        implementation.
         """
         return len(self._field_shape)
 
@@ -192,9 +190,9 @@ class SplineGrid:
         Args:
             field_y: The Y-dimension displacement field array.
             field_x: The X-dimension displacement field array.
-            injective: Whether to apply injectivity constraint to prevent grid folding.
+            injective: Determines whether to apply injectivity constraint to prevent grid folding.
             injective_factor: The scaling factor for the injectivity limit (0 < factor <= 1).
-            freeze_edges: Whether to freeze the edges, preventing them from being deformed.
+            freeze_edges: Determines whether to freeze the edges, preventing them from being deformed.
 
         Returns:
             True if all constraints were successfully applied, False if the grid is too small for frozen edges.
@@ -220,12 +218,15 @@ class SplineGrid:
     def _get_knots(self, dimension: int) -> NDArray[np.float32]:
         """Returns the knot array for the requested image field dimension.
 
-        Args:
-            dimension: The image field dimension for which to retrieve the knot array.
-
         Notes:
             Dimension indexing starts from 0. Dimension 0 corresponds to the Y (vertical) dimension and
             dimension 1 corresponds to the X (horizontal) dimension.
+
+        Args:
+            dimension: The image field dimension for which to retrieve the knot array.
+
+        Returns:
+            The knot array for the requested dimension.
         """
         return self._knots[dimension]
 

@@ -42,16 +42,16 @@ _BAD_FRAME_FRACTION_THRESHOLD: float = 0.5
 _MAXIMUM_MEDIAN_FILTER_WINDOW: int = 101
 """The maximum median filter window size for offset time series smoothing."""
 
+type RegistrationBlocks = tuple[
+    list[NDArray[np.int32]], list[NDArray[np.int32]], tuple[int, int], tuple[int, int], NDArray[np.float32]
+]
+"""The type alias for the registration block structure returned by compute_registration_blocks. Contains y_blocks,
+x_blocks, block_counts, actual_block_size, and smoothing_kernel."""
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from ..dataclasses import RuntimeContext
-
-    RegistrationBlocks = tuple[
-        list[NDArray[np.int32]], list[NDArray[np.int32]], tuple[int, int], tuple[int, int], NDArray[np.float32]
-    ]
-    """The type alias for the registration block structure returned by compute_registration_blocks. Contains y_blocks,
-    x_blocks, block_counts, actual_block_size, and smoothing_kernel."""
 
 
 def register_plane(context: RuntimeContext) -> None:

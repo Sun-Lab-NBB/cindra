@@ -31,6 +31,20 @@ type _ZoomHandler = Callable[[], None]
 """The callback type for double-click zoom-to-fit events dispatched by a ViewBox to the orchestrator."""
 
 
+@dataclass(frozen=True)
+class PlayPauseGroup:
+    """Stores a play/pause button pair and their exclusive button group."""
+
+    play_button: QToolButton
+    """The play button."""
+
+    pause_button: QToolButton
+    """The pause button."""
+
+    button_group: QButtonGroup
+    """The exclusive button group containing both buttons."""
+
+
 def configure_plot(
     plot: pg.PlotItem,
     *,
@@ -489,26 +503,6 @@ def _plot_multi_trace(
     y_maximum = (len(selected) - 1) * trace_spacing + 1
     axis.setTicks([tick_labels])
     return y_minimum, y_maximum
-
-
-@dataclass(frozen=True)
-class PlayPauseGroup:
-    """Stores a play/pause button pair and their exclusive button group.
-
-    Attributes:
-        play_button: The play button.
-        pause_button: The pause button.
-        button_group: The exclusive button group containing both buttons.
-    """
-
-    play_button: QToolButton
-    """The play button."""
-
-    pause_button: QToolButton
-    """The pause button."""
-
-    button_group: QButtonGroup
-    """The exclusive button group containing both buttons."""
 
 
 def create_play_pause_group(

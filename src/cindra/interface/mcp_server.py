@@ -178,7 +178,10 @@ def get_single_recording_status(recording_path: str) -> dict[str, Any]:
     recording = Path(recording_path)
 
     if not recording.exists():
-        return {"success": False, "error": f"Recording directory not found: {recording_path}"}
+        return {
+            "success": False,
+            "error": f"Unable to get single-recording status. Recording directory not found: {recording_path}.",
+        }
 
     cindra_path = recording / "cindra"
     if not cindra_path.exists():
@@ -192,7 +195,7 @@ def get_single_recording_status(recording_path: str) -> dict[str, Any]:
             "success": True,
             "recording_path": str(recording),
             "status": "not_started",
-            "message": "No cindra output directory found",
+            "message": "Unable to find cindra output directory.",
         }
 
     combined_path = cindra_path / "combined"
@@ -229,7 +232,10 @@ def get_multi_recording_status(recording_path: str) -> dict[str, Any]:
     recording = Path(recording_path)
 
     if not recording.exists():
-        return {"success": False, "error": f"Recording directory not found: {recording_path}"}
+        return {
+            "success": False,
+            "error": f"Unable to get multi-recording status. Recording directory not found: {recording_path}.",
+        }
 
     # Finds the cindra directory first, using the same pattern as get_single_recording_status.
     cindra_path = recording / "cindra"
@@ -245,7 +251,7 @@ def get_multi_recording_status(recording_path: str) -> dict[str, Any]:
             "success": True,
             "recording_path": str(recording),
             "status": "not_started",
-            "message": "No multi_recording output directory found",
+            "message": "Unable to find multi-recording output directory.",
         }
 
     datasets = [d for d in multi_recording_base.iterdir() if d.is_dir()]
@@ -255,7 +261,7 @@ def get_multi_recording_status(recording_path: str) -> dict[str, Any]:
             "success": True,
             "recording_path": str(recording),
             "status": "not_started",
-            "message": "No dataset folders found in multi_recording directory",
+            "message": "Unable to find dataset folders in multi-recording directory.",
         }
 
     dataset_statuses = {}
@@ -318,20 +324,26 @@ def start_batch_processing_tool(
     global _single_recording_batch_state
 
     if not recording_paths:
-        return {"error": "At least one recording path is required"}
+        return {"error": "Unable to start batch processing. At least one recording path is required."}
 
     if recording_output_paths is not None and len(recording_output_paths) != len(recording_paths):
         return {
-            "error": f"recording_output_paths length ({len(recording_output_paths)}) must match "
-            f"recording_paths length ({len(recording_paths)})."
+            "error": (
+                f"Unable to start batch processing. The recording_output_paths length "
+                f"({len(recording_output_paths)}) must match the recording_paths length ({len(recording_paths)})."
+            ),
         }
 
     template_path = Path(configuration_path)
     if not template_path.exists():
-        return {"error": f"Configuration file not found: {configuration_path}"}
+        return {"error": f"Unable to start batch processing. Configuration file not found: {configuration_path}."}
 
     if template_path.suffix != ".yaml":
-        return {"error": f"Configuration file must be a .yaml file: {configuration_path}"}
+        return {
+            "error": (
+                f"Unable to start batch processing. Configuration file must be a .yaml file: {configuration_path}."
+            ),
+        }
 
     # Validates recording paths.
     valid_indices: list[int] = []
@@ -347,7 +359,10 @@ def start_batch_processing_tool(
             invalid_paths.append(recording_path)
 
     if not valid_paths:
-        return {"error": "No valid recording paths provided", "invalid_paths": invalid_paths}
+        return {
+            "error": "Unable to start batch processing. No valid recording paths provided.",
+            "invalid_paths": invalid_paths,
+        }
 
     # Resolves per-recording output paths. Defaults to data_path when recording_output_paths is not provided.
     resolved_output_paths: list[Path] = []
@@ -372,7 +387,7 @@ def start_batch_processing_tool(
             )
             if active_count > 0 or queue_count > 0:
                 return {
-                    "error": "Batch processing already in progress. Wait for current batch to complete.",
+                    "error": "Unable to start batch processing. Batch processing is already in progress.",
                     "active_count": active_count,
                     "queued_count": queue_count,
                 }
@@ -643,7 +658,9 @@ def start_multi_recording_batch_processing_tool(
     global _multi_recording_batch_state
 
     if not animal_configurations:
-        return {"error": "At least one animal configuration is required"}
+        return {
+            "error": "Unable to start multi-recording batch processing. At least one animal configuration is required.",
+        }
 
     # Validates animal configurations.
     valid_animals: list[tuple[Path, list[Path]]] = []
@@ -681,7 +698,10 @@ def start_multi_recording_batch_processing_tool(
         valid_animals.append((configuration_path, recording_paths))
 
     if not valid_animals:
-        return {"error": "No valid animal configurations provided", "invalid_configurations": invalid_configurations}
+        return {
+            "error": "Unable to start multi-recording batch processing. No valid animal configurations provided.",
+            "invalid_configurations": invalid_configurations,
+        }
 
     # Checks if batch processing is already active.
     if _multi_recording_batch_state is not None:
@@ -694,7 +714,9 @@ def start_multi_recording_batch_processing_tool(
             )
             if active_count > 0 or queue_count > 0:
                 return {
-                    "error": "Multi-recording batch processing already in progress.",
+                    "error": (
+                        "Unable to start multi-recording batch processing. Batch processing is already in progress."
+                    ),
                     "active_count": active_count,
                     "queued_count": queue_count,
                 }

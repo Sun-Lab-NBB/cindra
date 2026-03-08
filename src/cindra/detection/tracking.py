@@ -407,7 +407,7 @@ def _filter_templates(
 def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], channel_2: bool) -> None:
     """Tracks ROIs for a single channel across multiple recordings.
 
-    This internal worker performs the core tracking algorithm for either channel 1 or channel 2 ROIs.
+    Performs the core tracking algorithm for either channel 1 or channel 2 ROIs.
 
     Args:
         contexts: The list of MultiRecordingRuntimeContext instances, one per recording.

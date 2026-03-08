@@ -86,6 +86,7 @@ def detect_pipeline_type(file_path: Path) -> PipelineType:
     )
     console.error(message=message, error=ValueError)
     # Unreachable fallback to work around faulty RUFF error checking.
+    # noinspection PyUnreachableCode
     raise ValueError(message)  # pragma: no cover
 
 
@@ -163,10 +164,8 @@ class AcquisitionParameters(YamlConfig):
 
     @property
     def virtual_plane_count(self) -> int:
-        """Returns the total number of virtual planes (roi_number * plane_number).
-
-        For single-ROI data, this equals plane_number. For MROI data, each ROI x plane combination becomes a
-        separate virtual plane for processing.
+        """Returns the total number of virtual planes (roi_number * plane_number), where each ROI x plane
+        combination becomes a separate virtual plane for processing.
         """
         return self.roi_number * self.plane_number
 

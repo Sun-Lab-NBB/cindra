@@ -3,8 +3,8 @@ name: single-recording-configuration
 description: >-
   Complete reference for single-recording pipeline configuration parameters, input data format, and MCP configuration
   tools. Documents all 9 configuration sections, parameter meanings, default values, acquisition parameter handling,
-  and available MCP tools for generating configurations and discovering recordings. Use when configuring single-recording
-  processing or when the user asks about single-recording configuration parameters.
+  and available MCP tools for generating configurations and discovering recordings. Use when configuring
+  single-recording processing or when the user asks about single-recording configuration parameters.
 user-invocable: true
 ---
 
@@ -76,8 +76,8 @@ Searches recursively for `combined_metadata.npz` files to find recordings with c
 
 ## Configuration overview
 
-The single-recording pipeline uses `SingleRecordingConfiguration`, a dataclass with 9 nested sections. Default values are
-optimized for GCaMP6f data from 2-Photon Random Access Mesoscope (2P-RAM).
+The single-recording pipeline uses `SingleRecordingConfiguration`, a dataclass with 9 nested sections.
+Default values are optimized for GCaMP6f data from 2-Photon Random Access Mesoscope (2P-RAM).
 
 All parameters are specified in the `SingleRecordingConfiguration` YAML file. The pipeline loads the fully resolved
 configuration directly from the file without any runtime overrides.

@@ -89,7 +89,7 @@ def _load_optional_array_field(
     return result
 
 
-def is_memory_mapped(array: NDArray | None) -> bool:
+def is_memory_mapped(array: NDArray[np.generic] | None) -> bool:
     """Checks whether the input array is a memory-mapped numpy array."""
     return isinstance(array, np.memmap)
 
@@ -624,10 +624,8 @@ class ROIMask:
 
     @cached_property
     def boundary_pixels(self) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
-        """Computes the exterior boundary mask of the ROI from its pixel coordinates.
-
-        Returns:
-            The (y_boundary, x_boundary) arrays containing the boundary mask pixel coordinates.
+        """Computes the exterior boundary mask of the ROI and returns (y_boundary, x_boundary) pixel coordinate
+        arrays.
         """
         # Reshapes coordinate arrays into column vectors for 2D array indexing.
         y_pixels = np.expand_dims(self.y_pixels.flatten(), axis=1)
@@ -670,13 +668,8 @@ class ROIMask:
 
     @cached_property
     def circle_pixels(self) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
-        """Computes the pixel coordinates of a circle around the ROI centroid.
-
-        The circle uses ``1.25 * radius`` and 100 sample points. Coordinates are unclipped; consumers should clip to
-        frame bounds at the point of use.
-
-        Returns:
-            The (y_circle, x_circle) arrays containing the circle pixel coordinates.
+        """Computes unclipped (y_circle, x_circle) pixel coordinates of a circle with ``1.25 * radius`` and
+        100 sample points around the ROI centroid.
         """
         scaled_radius = self.radius * 1.25
         theta = np.linspace(0.0, 2 * np.pi, num=100)

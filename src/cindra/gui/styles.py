@@ -119,7 +119,7 @@ class _BinaryPlayerStyle:
     window_geometry: tuple[int, int, int, int] = (50, 50, 1400, 1070)
     """The initial window position (x, y) and size (width, height) for the binary player."""
     legend_column_count: int = 2
-    """The number of columns in the registration offset plot legend. This ensures that the legend uses the 
+    """The number of columns in the registration offset plot legend. This ensures that the legend uses the
     horizontal, rather than a vertical layout."""
 
 
@@ -130,12 +130,12 @@ class _PCViewerStyle:
     group_spacing: int = 20
     """The pixel spacing inserted between logical widget groups in the bottom control panel."""
     title_gutter_fraction: float = 0.08
-    """The fraction of image height added as black space below each Principal Component extreme image. This ensures 
+    """The fraction of image height added as black space below each Principal Component extreme image. This ensures
     that the image titles anchored to the bottom of the image are not clipped by the image or any other GUI elements."""
     window_geometry: tuple[int, int, int, int] = (50, 50, 1300, 800)
     """The initial window position (x, y) and size (width, height) for the PC viewer."""
     legend_column_count: int = 3
-    """The number of columns in the PC metrics plot legend. This ensures that the legend uses the horizontal, 
+    """The number of columns in the PC metrics plot legend. This ensures that the legend uses the horizontal,
     rather than a vertical layout."""
 
 

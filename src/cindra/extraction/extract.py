@@ -381,23 +381,19 @@ def _extract_single_recording(context: RuntimeContext) -> None:
 
     # Validates that detection has been run and the registered binary path is available.
     if extraction_data.roi_statistics is None:
-        console.error(
-            message=(
-                f"Unable to run extraction for plane {plane_index}. ROI detection must run before extraction, but "
-                f"no ROI statistics are available."
-            ),
-            error=RuntimeError,
+        message = (
+            f"Unable to run extraction for plane {plane_index}. ROI detection must run before extraction, but "
+            f"no ROI statistics are available."
         )
+        console.error(message=message, error=RuntimeError)
 
     channel_1_path = io_data.registered_binary_path
     if channel_1_path is None:
-        console.error(
-            message=(
-                f"Unable to run extraction for plane {plane_index}. The registered binary file path is not set "
-                f"for channel 1."
-            ),
-            error=RuntimeError,
+        message = (
+            f"Unable to run extraction for plane {plane_index}. The registered binary file path is not set "
+            f"for channel 1."
         )
+        console.error(message=message, error=RuntimeError)
 
     roi_statistics = extraction_data.roi_statistics
     channel_1_label = f"plane {plane_index} channel 1"
@@ -545,13 +541,10 @@ def _extract_structural_channel_2(
     channel_2_label = f"plane {plane_index} channel 2"
 
     if channel_2_path is None:
-        console.error(
-            message=(
-                f"Unable to run extraction for {channel_2_label}. The registered binary file path is not set "
-                f"for channel 2."
-            ),
-            error=RuntimeError,
+        message = (
+            f"Unable to run extraction for {channel_2_label}. The registered binary file path is not set for channel 2."
         )
+        console.error(message=message, error=RuntimeError)
 
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
@@ -628,24 +621,19 @@ def _extract_functional_channel_2(
     frame_width = io_data.frame_width
 
     if channel_2_path is None:
-        console.error(
-            message=(
-                f"Unable to run extraction for {channel_2_label}. The registered binary file path is not set "
-                f"for channel 2."
-            ),
-            error=RuntimeError,
+        message = (
+            f"Unable to run extraction for {channel_2_label}. The registered binary file path is not set for channel 2."
         )
+        console.error(message=message, error=RuntimeError)
 
     # Validates that channel 2 ROI statistics exist from detection.
     roi_statistics_channel_2 = extraction_data.roi_statistics_channel_2
     if roi_statistics_channel_2 is None:
-        console.error(
-            message=(
-                f"Unable to run functional channel 2 extraction for plane {plane_index}. Channel 2 ROI detection "
-                f"must run before extraction, but no channel 2 ROI statistics are available."
-            ),
-            error=RuntimeError,
+        message = (
+            f"Unable to run functional channel 2 extraction for plane {plane_index}. Channel 2 ROI detection "
+            f"must run before extraction, but no channel 2 ROI statistics are available."
         )
+        console.error(message=message, error=RuntimeError)
 
     # Creates independent masks from channel 2 ROI statistics.
     channel_2_roi_masks, channel_2_neuropil_masks = _create_and_unpack_masks(
@@ -876,14 +864,12 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
 
     # Validates that combined data is available.
     if combined_data is None:
-        console.error(
-            message=(
-                f"Unable to extract multi-recording traces for recording {recording_id}. The combined "
-                f"single-recording data is not loaded. Ensure the single-recording pipeline completed "
-                f"successfully and the data has not been moved or deleted."
-            ),
-            error=RuntimeError,
+        message = (
+            f"Unable to extract multi-recording traces for recording {recording_id}. The combined "
+            f"single-recording data is not loaded. Ensure the single-recording pipeline completed "
+            f"successfully and the data has not been moved or deleted."
         )
+        console.error(message=message, error=RuntimeError)
 
     frame_height = combined_data.combined_height
     frame_width = combined_data.combined_width
@@ -900,15 +886,13 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
     # Validates that backward-transformed ROI statistics exist from the discovery phase.
     roi_statistics = extraction_data.roi_statistics
     if roi_statistics is None:
-        console.error(
-            message=(
-                f"Unable to extract multi-recording traces for recording {recording_id}. "
-                f"Backward-transformed ROI statistics are not available. Ensure the multi-recording "
-                f"discovery phase (registration, tracking, backward transform) has been completed before "
-                f"running extraction."
-            ),
-            error=RuntimeError,
+        message = (
+            f"Unable to extract multi-recording traces for recording {recording_id}. "
+            f"Backward-transformed ROI statistics are not available. Ensure the multi-recording "
+            f"discovery phase (registration, tracking, backward transform) has been completed before "
+            f"running extraction."
         )
+        console.error(message=message, error=RuntimeError)
 
     # Reads channel 1 registered binary paths from combined data.
     channel_1_binary_paths: list[Path] = list(combined_data.registered_binary_paths)
