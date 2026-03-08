@@ -925,6 +925,40 @@ class MultiRecordingData:
         return value
 
     @property
+    def cell_fluorescence_channel_2(self) -> NDArray[np.float32]:
+        """Returns the channel 2 cell fluorescence traces. Empty with size 0 if single-channel."""
+        value = self._runtime.extraction.cell_fluorescence_channel_2
+        return value if value is not None else EMPTY
+
+    @property
+    def neuropil_fluorescence_channel_2(self) -> NDArray[np.float32]:
+        """Returns the channel 2 neuropil fluorescence traces. Empty with size 0 if single-channel."""
+        value = self._runtime.extraction.neuropil_fluorescence_channel_2
+        return value if value is not None else EMPTY
+
+    @property
+    def subtracted_fluorescence_channel_2(self) -> NDArray[np.float32]:
+        """Returns the channel 2 baseline-and-neuropil-subtracted fluorescence traces. Empty with size 0 if
+        single-channel.
+        """
+        value = self._runtime.extraction.subtracted_fluorescence_channel_2
+        return value if value is not None else EMPTY
+
+    @property
+    def spikes_channel_2(self) -> NDArray[np.float32]:
+        """Returns the channel 2 deconvolved spike traces. Empty with size 0 if single-channel."""
+        value = self._runtime.extraction.spikes_channel_2
+        return value if value is not None else EMPTY
+
+    @property
+    def cell_colocalization(self) -> NDArray[np.float32]:
+        """Returns the cell colocalization array with shape (roi_count, 2), or an empty array if colocalization data is
+        unavailable.
+        """
+        value = self._runtime.extraction.cell_colocalization
+        return value if value is not None else EMPTY
+
+    @property
     def _runtime(self) -> MultiRecordingRuntimeData:
         """Returns the runtime data for this recording."""
         return self._context.runtime

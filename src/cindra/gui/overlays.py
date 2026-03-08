@@ -28,6 +28,7 @@ _STATISTIC_FIELD_MAP: dict[int, str] = {
     ROIColorMode.ASPECT_RATIO: "aspect_ratio",
     ROIColorMode.SOLIDITY: "solidity",
     ROIColorMode.COLOCALIZATION_PROBABILITY: "colocalization_probability",
+    ROIColorMode.RECORDING_COUNT: "recording_count",
 }
 """Maps ROIColorMode values to the corresponding ROIStatistics attribute names for percentile-based color modes."""
 
@@ -179,10 +180,14 @@ def compute_colors(
     # color mode loop. Missing attributes default to 0.0.
     precomputed_statistics: dict[str, NDArray[np.float32]] = {}
     for field_name in _STATISTIC_FIELD_MAP.values():
-        values = np.array([getattr(roi, field_name, None) or 0.0 for roi in roi_statistics], dtype=np.float32)
+        if field_name == "recording_count":
+            # recording_count lives on ROIMask, not ROIStatistics, so it requires nested access.
+            values = np.array([roi.mask.recording_count for roi in roi_statistics], dtype=np.float32)
+        else:
+            values = np.array([getattr(roi, field_name, None) or 0.0 for roi in roi_statistics], dtype=np.float32)
         precomputed_statistics[field_name] = values.reshape(-1, 1)
 
-    # Iterates over percentile-based color modes (SKEWNESS through COLOCALIZATION_PROBABILITY), skipping RANDOM
+    # Iterates over percentile-based color modes (SKEWNESS through RECORDING_COUNT), skipping RANDOM
     # and stopping before CELL_PROBABILITY which uses a different coloring strategy.
     for color_mode in ROIColorMode:
         if color_mode >= ROIColorMode.CELL_PROBABILITY:

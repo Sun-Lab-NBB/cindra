@@ -414,7 +414,8 @@ class ROIViewer(QMainWindow):
         self._roi_index_edit.returnPressed.connect(self.setFocus)
         self._roi_index_edit.installEventFilter(self)
         fields_row.addWidget(self._roi_index_edit)
-        fields_row.addWidget(QLabel("Autoselection #:"))
+        self._autoselection_label = QLabel("Autoselection #:")
+        fields_row.addWidget(self._autoselection_label)
         self._ranked_count_edit = QLineEdit()
         self._ranked_count_edit.setValidator(QtGui.QIntValidator(1, ROI_CONFIG.top_selection_count))
         self._ranked_count_edit.setText(str(ROI_CONFIG.top_selection_count))
@@ -454,14 +455,13 @@ class ROIViewer(QMainWindow):
         background_box, self._background_combo = self._create_view_controls()
         layout.addWidget(background_box)
 
-        # Channel toggle.
-        channel_group = QGroupBox("Channel")
-        channel_group.setStyleSheet(STYLE.group_box)
-        channel_layout = QVBoxLayout(channel_group)
+        # Channel toggle. Hidden when channel 2 data does not exist.
+        self._channel_group = QGroupBox("Channel")
+        self._channel_group.setStyleSheet(STYLE.group_box)
+        channel_layout = QVBoxLayout(self._channel_group)
 
         self._channel_2_button = QPushButton("Channel 2")
         self._channel_2_button.setCheckable(True)
-        self._channel_2_button.setEnabled(False)
         self._channel_2_button.setToolTip(
             "Toggle display between channel 1 and channel 2 data. When active, background images, ROI masks, and "
             "fluorescence traces switch to the channel 2 variants."
@@ -469,7 +469,8 @@ class ROIViewer(QMainWindow):
         self._channel_2_button.toggled.connect(self._on_channel_2_toggled)
         channel_layout.addWidget(self._channel_2_button)
 
-        layout.addWidget(channel_group)
+        self._channel_group.setVisible(False)
+        layout.addWidget(self._channel_group)
 
         # ROI color controls and colorbar.
         self._colors_group, self._color_controls = self._create_color_controls()
@@ -482,9 +483,9 @@ class ROIViewer(QMainWindow):
         self._trace_group, self._trace_controls = self._create_trace_controls()
         layout.addWidget(self._trace_group)
 
-        # Classifier builder controls.
-        classifier_box, self._classifier_controls = self._create_classifier_controls()
-        layout.addWidget(classifier_box)
+        # Classifier builder controls. Hidden in multi-recording mode.
+        self._classifier_group, self._classifier_controls = self._create_classifier_controls()
+        layout.addWidget(self._classifier_group)
 
         layout.addStretch()
         return panel
@@ -584,37 +585,39 @@ class ROIViewer(QMainWindow):
         colormap_row.addStretch()
         layout.addLayout(colormap_row)
 
-        # Classifier threshold and temporal bin count on one row.
-        params_row = QHBoxLayout()
-        threshold_label = QLabel("Threshold:")
-        threshold_label.setStyleSheet(STYLE.white_label)
-        params_row.addWidget(threshold_label)
+        # Classifier threshold and temporal bin size share the same row since they are mutually exclusive.
+        # The container is hidden when neither color mode is active, preventing empty layout gaps.
+        self._params_container = QWidget()
+        params_row = QHBoxLayout(self._params_container)
+        params_row.setContentsMargins(0, 0, 0, 0)
+        self._threshold_label = QLabel("Threshold:")
+        self._threshold_label.setStyleSheet(STYLE.white_label)
+        params_row.addWidget(self._threshold_label)
         threshold_edit = QLineEdit(self)
         threshold_edit.setText("0.5")
         threshold_edit.setFixedWidth(STYLE.edit_width)
         threshold_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        threshold_edit.setEnabled(False)
         threshold_edit.setToolTip("Classifier probability threshold for the Cell Classification color mode.")
         threshold_edit.returnPressed.connect(self._on_threshold_changed)
         threshold_edit.returnPressed.connect(self.setFocus)
         threshold_edit.installEventFilter(self)
         params_row.addWidget(threshold_edit)
-        binning_label = QLabel("Bin Size:")
-        binning_label.setStyleSheet(STYLE.white_label)
-        params_row.addWidget(binning_label)
+        self._binning_label = QLabel("Bin Size:")
+        self._binning_label.setStyleSheet(STYLE.white_label)
+        params_row.addWidget(self._binning_label)
         binning_edit = QLineEdit(self)
         binning_edit.setFixedWidth(STYLE.edit_width)
         binning_edit.setValidator(QtGui.QIntValidator(0, 500))
         binning_edit.setText("1")
         binning_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        binning_edit.setEnabled(False)
         binning_edit.setToolTip("Number of frames averaged per temporal bin when computing activity correlations.")
         binning_edit.returnPressed.connect(self._recompute_binned_fluorescence)
         binning_edit.returnPressed.connect(self.setFocus)
         binning_edit.installEventFilter(self)
         params_row.addWidget(binning_edit)
         params_row.addStretch()
-        layout.addLayout(params_row)
+        self._params_container.setVisible(False)
+        layout.addWidget(self._params_container)
 
         # Connects the colormap chooser so that switching colormaps repaints the ROIs using the
         # currently active color mode without recalculating the statistic values.
@@ -905,7 +908,12 @@ class ROIViewer(QMainWindow):
                 if roi_count > 0
                 else np.empty((0, 2), dtype=np.float32)
             )
-            self._cell_colocalization = np.zeros((roi_count, 2), dtype=np.float32)
+            colocalization = recording.cell_colocalization
+            self._cell_colocalization = (
+                colocalization
+                if colocalization.size > 0
+                else np.zeros((roi_count, 2), dtype=np.float32)
+            )
             self._two_channels = recording.has_channel_2
             self._cell_fluorescence = recording.cell_fluorescence
             self._neuropil_fluorescence = recording.neuropil_fluorescence
@@ -938,39 +946,34 @@ class ROIViewer(QMainWindow):
         # Enables interactive controls.
         self._enable_controls()
 
-        # Multi-recording mode gating: disables inapplicable controls.
+        # Multi-recording mode gating: hides inapplicable controls.
         if is_multi_recording:
-            # Disables selection modes (top-n, bottom-n).
-            self._top_button.setEnabled(False)
-            self._bottom_button.setEnabled(False)
+            # Hides ranked selection controls (top-n, bottom-n) and autoselection field.
+            self._top_button.setVisible(False)
+            self._bottom_button.setVisible(False)
+            self._autoselection_label.setVisible(False)
+            self._ranked_count_edit.setVisible(False)
 
-            # Disables inapplicable color modes: cell probability, correlations, cell classification.
-            color_model = self._color_controls.color_combo.model()
-            if isinstance(color_model, QStandardItemModel):
-                for disabled_index in (
-                    ROIColorMode.CELL_PROBABILITY,
-                    ROIColorMode.CORRELATIONS,
-                    ROIColorMode.CELL_CLASSIFICATION,
-                ):
-                    item = color_model.item(disabled_index)
-                    if item is not None:
-                        item.setEnabled(False)
+            # Hides inapplicable color modes: cell probability, cell classification, footprint.
+            color_view = self._color_controls.color_combo.view()
+            for hidden_index in (
+                ROIColorMode.CELL_PROBABILITY,
+                ROIColorMode.CELL_CLASSIFICATION,
+                ROIColorMode.FOOTPRINT,
+            ):
+                color_view.setRowHidden(hidden_index, True)
 
             # Shows the "All Recordings" toggle.
             self._all_recordings_button.setVisible(True)
             self._all_recordings_button.setChecked(False)
 
-            # Disables classifier controls (requires single-recording classification state).
-            self._classifier_controls.classify_button.setEnabled(False)
-            self._classifier_controls.new_button.setEnabled(False)
-            self._classifier_controls.add_button.setEnabled(False)
+            # Hides classifier group (requires single-recording classification state).
+            self._classifier_group.setVisible(False)
         else:
             self._all_recordings_button.setVisible(False)
 
-            # Enables classifier controls for single-recording recordings.
-            self._classifier_controls.classify_button.setEnabled(True)
-            self._classifier_controls.new_button.setEnabled(True)
-            self._classifier_controls.add_button.setEnabled(True)
+            # Shows classifier group for single-recording recordings.
+            self._classifier_group.setVisible(True)
 
         # Resets channel 2 toggle state.
         self._channel_2_button.setChecked(False)
@@ -1086,39 +1089,31 @@ class ROIViewer(QMainWindow):
         self._background_combo.setEnabled(True)
         self._background_combo.setCurrentIndex(0)
 
-        # Disables corrected structural view item if not available.
-        view_model = self._background_combo.model()
-        if isinstance(view_model, QStandardItemModel):
-            structural_item = view_model.item(BackgroundView.CORRECTED_STRUCTURAL)
-            if structural_item is not None:
-                if single_recording.corrected_structural_mean_image.size == 0:
-                    structural_item.setEnabled(False)
-                else:
-                    structural_item.setEnabled(True)
+        # Hides corrected structural view item if not available.
+        has_structural = single_recording.corrected_structural_mean_image.size > 0
+        self._background_combo.view().setRowHidden(BackgroundView.CORRECTED_STRUCTURAL, not has_structural)
 
-        # Enables channel 2 toggle if channel 2 data exists.
-        has_channel_2 = self._two_channels
-        self._channel_2_button.setEnabled(has_channel_2)
+        # Shows channel 2 group only if channel 2 data exists.
+        self._channel_group.setVisible(self._two_channels)
 
         # Enables color dropdown and classify mode toggle.
         self._color_controls.color_combo.setEnabled(True)
         self._color_controls.color_combo.setCurrentIndex(0)
         self._classifier_controls.classify_button.setEnabled(True)
 
-        # Re-enables all color mode items, then disables channel 2 mode if not available.
-        color_model = self._color_controls.color_combo.model()
-        if isinstance(color_model, QStandardItemModel):
-            for item_index in range(color_model.rowCount()):
-                item = color_model.item(item_index)
-                if item is not None:
-                    item.setEnabled(True)
-            channel_2_item = color_model.item(ROIColorMode.COLOCALIZATION_PROBABILITY)
-            if channel_2_item is not None:
-                channel_2_item.setEnabled(self._two_channels)
+        # Shows all color mode rows, then selectively hides unavailable modes.
+        color_view = self._color_controls.color_combo.view()
+        for item_index in range(self._color_controls.color_combo.count()):
+            color_view.setRowHidden(item_index, False)
+        color_view.setRowHidden(ROIColorMode.COLOCALIZATION_PROBABILITY, not self._two_channels)
+        # Recording count is only meaningful for multi-recording tracked ROIs.
+        color_view.setRowHidden(ROIColorMode.RECORDING_COUNT, not self._is_multi_recording)
 
-        # Enables ranked selection buttons.
-        self._top_button.setEnabled(True)
-        self._bottom_button.setEnabled(True)
+        # Shows ranked selection buttons and autoselection field (may be hidden by multi-recording gating).
+        self._top_button.setVisible(True)
+        self._bottom_button.setVisible(True)
+        self._autoselection_label.setVisible(True)
+        self._ranked_count_edit.setVisible(True)
 
     def _on_view_changed(self, index: int) -> None:
         """Handles background view dropdown changes.
@@ -1132,20 +1127,23 @@ class ROIViewer(QMainWindow):
     def _on_color_changed(self, index: int) -> None:
         """Handles ROI color mode dropdown changes.
 
-        Enables the classifier threshold field for the cell classification mode when classify mode is off, and the
-        temporal bins field for the activity correlation mode.
+        Shows the classifier threshold field for the cell classification mode when classify mode is off, and the
+        temporal bins field for the activity correlation mode. Hides both fields for all other modes.
 
         Args:
             index: The color mode index selected.
         """
         self._roi_color_mode = ROIColorMode(index)
 
-        # Enables mode-specific parameter fields and disables the rest. Threshold is only available in cell
+        # Shows mode-specific parameter fields and hides the rest. Threshold is only shown in cell
         # classification mode when classify mode is off (threshold-based coloring from probabilities).
         uses_threshold = self._roi_color_mode == ROIColorMode.CELL_CLASSIFICATION and not self._classify_mode
-        self._color_controls.threshold_edit.setEnabled(uses_threshold)
+        self._threshold_label.setVisible(uses_threshold)
+        self._color_controls.threshold_edit.setVisible(uses_threshold)
         uses_binning = self._roi_color_mode == ROIColorMode.CORRELATIONS
-        self._color_controls.binning_edit.setEnabled(uses_binning)
+        self._binning_label.setVisible(uses_binning)
+        self._color_controls.binning_edit.setVisible(uses_binning)
+        self._params_container.setVisible(uses_threshold or uses_binning)
 
         # Defaults to ROI 0 when switching to correlation mode with no selection.
         if uses_binning and not self._selected_roi_indices:
@@ -1267,8 +1265,7 @@ class ROIViewer(QMainWindow):
             self._roi_source_group.setEnabled(False)
             self._roi_selection_group.setEnabled(False)
             controls.color_combo.setEnabled(False)
-            controls.threshold_edit.setEnabled(False)
-            controls.binning_edit.setEnabled(False)
+            self._params_container.setVisible(False)
             self._trace_group.setEnabled(False)
         else:
             # Restores previous color mode and recolorizes from the probability threshold.
@@ -1292,8 +1289,13 @@ class ROIViewer(QMainWindow):
             self._roi_source_group.setEnabled(True)
             self._roi_selection_group.setEnabled(True)
             controls.color_combo.setEnabled(True)
-            controls.threshold_edit.setEnabled(restored == ROIColorMode.CELL_CLASSIFICATION)
-            controls.binning_edit.setEnabled(restored == ROIColorMode.CORRELATIONS)
+            uses_threshold = restored == ROIColorMode.CELL_CLASSIFICATION
+            self._threshold_label.setVisible(uses_threshold)
+            controls.threshold_edit.setVisible(uses_threshold)
+            uses_binning = restored == ROIColorMode.CORRELATIONS
+            self._binning_label.setVisible(uses_binning)
+            controls.binning_edit.setVisible(uses_binning)
+            self._params_container.setVisible(uses_threshold or uses_binning)
             self._trace_group.setEnabled(True)
 
         self._update_plot()
