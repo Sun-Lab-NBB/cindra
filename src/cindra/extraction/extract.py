@@ -326,21 +326,19 @@ def _update_roi_extraction_statistics(
     neuropil_fluorescence: NDArray[np.float32],
     neuropil_coefficient: float,
 ) -> None:
-    """Computes neuropil-corrected skewness and standard deviation and stores them in the ROI statistics.
+    """Computes neuropil-corrected skewness and stores it in the ROI statistics.
 
     Args:
-        roi_statistics: The ROI statistics to update in-place with the computed skewness and standard deviation values.
+        roi_statistics: The ROI statistics to update in-place with the computed skewness values.
         cell_fluorescence: The extracted cell fluorescence traces with shape (roi_count, frame_count).
         neuropil_fluorescence: The extracted neuropil fluorescence traces with shape (roi_count, frame_count).
         neuropil_coefficient: The scaling factor applied to neuropil fluorescence before subtraction.
     """
     corrected = cell_fluorescence - np.float32(neuropil_coefficient) * neuropil_fluorescence
     skew_values = np.asarray(stats.skew(a=corrected, axis=1))
-    std_values = np.std(corrected, axis=1)
 
-    for roi, skewness_value, standard_deviation_value in zip(roi_statistics, skew_values, std_values, strict=True):
+    for roi, skewness_value in zip(roi_statistics, skew_values, strict=True):
         roi.skewness = float(skewness_value)
-        roi.standard_deviation = float(standard_deviation_value)
 
 
 def _extract_single_recording(context: RuntimeContext) -> None:

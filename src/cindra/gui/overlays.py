@@ -26,6 +26,7 @@ _STATISTIC_FIELD_MAP: dict[int, str] = {
     ROIColorMode.COMPACTNESS: "compactness",
     ROIColorMode.FOOTPRINT: "footprint",
     ROIColorMode.ASPECT_RATIO: "aspect_ratio",
+    ROIColorMode.SOLIDITY: "solidity",
     ROIColorMode.COLOCALIZATION_PROBABILITY: "colocalization_probability",
 }
 """Maps ROIColorMode values to the corresponding ROIStatistics attribute names for percentile-based color modes."""

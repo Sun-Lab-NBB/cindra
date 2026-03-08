@@ -151,6 +151,15 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     if has_max_projection:
         combined_max_projection = np.zeros((combined_height, combined_width), dtype=np.float32)
 
+    # Initializes the combined corrected structural mean image if any plane has one. This image is produced by
+    # intensity colocalization when one channel is structural (not functional).
+    has_corrected_structural = any(
+        context.runtime.extraction.corrected_structural_mean_image is not None for context in plane_contexts
+    )
+    combined_corrected_structural_mean_image: NDArray[np.float32] | None = None
+    if has_corrected_structural:
+        combined_corrected_structural_mean_image = np.zeros((combined_height, combined_width), dtype=np.float32)
+
     # Initializes channel 2 image arrays if two channels are present.
     combined_mean_image_channel_2: NDArray[np.float32] | None = None
     combined_enhanced_mean_image_channel_2: NDArray[np.float32] | None = None
@@ -262,6 +271,16 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         ):
             combined_max_projection_channel_2[np.ix_(y_range, x_range)] = (
                 context.runtime.detection.maximum_projection_channel_2
+            )
+
+        # Updates corrected structural mean image if available for this plane.
+        if (
+            has_corrected_structural
+            and combined_corrected_structural_mean_image is not None
+            and context.runtime.extraction.corrected_structural_mean_image is not None
+        ):
+            combined_corrected_structural_mean_image[np.ix_(y_range, x_range)] = (
+                context.runtime.extraction.corrected_structural_mean_image
             )
 
         # Creates deep copies of ROI statistics to avoid modifying the original and updates coordinates.
@@ -419,6 +438,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         spikes_channel_2=combined_spikes_channel_2,
         cell_classification_channel_2=combined_cell_classification_channel_2,
         cell_colocalization=combined_cell_colocalization,
+        corrected_structural_mean_image=combined_corrected_structural_mean_image,
     )
 
     # Gathers registered binary paths for each plane so the multi-recording extraction pipeline can construct

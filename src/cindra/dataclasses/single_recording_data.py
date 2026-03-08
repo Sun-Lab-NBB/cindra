@@ -788,12 +788,6 @@ class ROIStatistics:
     """The spatial scale (hop size) used during sparse detection for this ROI."""
 
     # Shape statistics (computed during ROI detection, with defaults for staged construction).
-    mean_radius: float = 0.0
-    """The mean Euclidean distance from ROI pixels to their median center."""
-
-    baseline_mean_radius: float = 0.0
-    """The expected mean radius for a uniformly distributed set of pixels of the same count as the ROI."""
-
     compactness: float = 0.0
     """The ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
 
@@ -802,9 +796,6 @@ class ROIStatistics:
 
     pixel_count: int = 0
     """The total number of pixels in the complete ROI."""
-
-    soma_pixel_count: int = 0
-    """The number of pixels in the soma-cropped region of the ROI."""
 
     soma_mask: NDArray[np.bool_] | None = None
     """The boolean mask indicating which pixels belong to the soma region."""
@@ -815,15 +806,9 @@ class ROIStatistics:
     normalized_pixel_count: float = 0.0
     """The pixel count normalized by expected ROI size (soma region only)."""
 
-    normalized_pixel_count_full: float = 0.0
-    """The pixel count normalized by expected ROI size (full ROI)."""
-
     # Optional extraction data (added during signal extraction).
     skewness: float | None = None
     """The skewness of the baseline-subtracted fluorescence time series."""
-
-    standard_deviation: float | None = None
-    """The standard deviation of the baseline-subtracted fluorescence time series."""
 
     neuropil_mask: NDArray[np.int32] | None = None
     """The raveled (flattened) pixel indices used for neuropil signal extraction. Each index refers to a pixel position
@@ -856,39 +841,26 @@ class ROIStatistics:
 
         # Stores scalar statistics fields.
         footprints = np.array([roi.footprint for roi in roi_list], dtype=np.uint16)
-        mean_radius = np.array([roi.mean_radius for roi in roi_list], dtype=np.float32)
-        baseline_mean_radius = np.array([roi.baseline_mean_radius for roi in roi_list], dtype=np.float32)
         compactness = np.array([roi.compactness for roi in roi_list], dtype=np.float32)
         solidity = np.array([roi.solidity for roi in roi_list], dtype=np.float32)
         pixel_count = np.array([roi.pixel_count for roi in roi_list], dtype=np.uint32)
-        soma_pixel_count = np.array([roi.soma_pixel_count for roi in roi_list], dtype=np.uint32)
         aspect_ratio = np.array([roi.aspect_ratio for roi in roi_list], dtype=np.float32)
         normalized_pixel_count = np.array([roi.normalized_pixel_count for roi in roi_list], dtype=np.float32)
-        normalized_pixel_count_full = np.array([roi.normalized_pixel_count_full for roi in roi_list], dtype=np.float32)
 
         skewness = np.array(
             [roi.skewness if roi.skewness is not None else np.nan for roi in roi_list], dtype=np.float32
-        )
-        standard_deviation = np.array(
-            [roi.standard_deviation if roi.standard_deviation is not None else np.nan for roi in roi_list],
-            dtype=np.float32,
         )
 
         plane_index = np.array([roi.plane_index for roi in roi_list], dtype=np.int32)
 
         save_dict: dict[str, np.ndarray] = {
             "footprints": footprints,
-            "mean_radius": mean_radius,
-            "baseline_mean_radius": baseline_mean_radius,
             "compactness": compactness,
             "solidity": solidity,
             "pixel_count": pixel_count,
-            "soma_pixel_count": soma_pixel_count,
             "aspect_ratio": aspect_ratio,
             "normalized_pixel_count": normalized_pixel_count,
-            "normalized_pixel_count_full": normalized_pixel_count_full,
             "skewness": skewness,
-            "standard_deviation": standard_deviation,
             "plane_index": plane_index,
         }
 
@@ -916,17 +888,12 @@ class ROIStatistics:
         roi_count = len(masks)
 
         footprints = data["footprints"]
-        mean_radius = data["mean_radius"]
-        baseline_mean_radius = data["baseline_mean_radius"]
         compactness = data["compactness"]
         solidity = data["solidity"]
         pixel_count = data["pixel_count"]
-        soma_pixel_count = data["soma_pixel_count"]
         aspect_ratio = data["aspect_ratio"]
         normalized_pixel_count = data["normalized_pixel_count"]
-        normalized_pixel_count_full = data["normalized_pixel_count_full"]
         skewness = data["skewness"]
-        standard_deviation = data["standard_deviation"]
         plane_index = data["plane_index"]
 
         soma_mask_list = _load_optional_array_field("soma_mask", roi_count, data, dtype=np.bool_)
@@ -939,18 +906,13 @@ class ROIStatistics:
             roi = ROIStatistics(
                 mask=masks[i],
                 footprint=int(footprints[i]),
-                mean_radius=float(mean_radius[i]),
-                baseline_mean_radius=float(baseline_mean_radius[i]),
                 compactness=float(compactness[i]),
                 solidity=float(solidity[i]),
                 pixel_count=int(pixel_count[i]),
-                soma_pixel_count=int(soma_pixel_count[i]),
                 soma_mask=soma_mask_list[i],  # type: ignore[arg-type]
                 aspect_ratio=float(aspect_ratio[i]),
                 normalized_pixel_count=float(normalized_pixel_count[i]),
-                normalized_pixel_count_full=float(normalized_pixel_count_full[i]),
                 skewness=None if np.isnan(skewness[i]) else float(skewness[i]),
-                standard_deviation=None if np.isnan(standard_deviation[i]) else float(standard_deviation[i]),
                 neuropil_mask=neuropil_mask_list[i],  # type: ignore[arg-type]
                 plane_index=int(plane_index[i]),
             )

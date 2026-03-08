@@ -126,21 +126,16 @@ def compute_roi_statistics(
 
         overlap_counts = _ROI.get_overlap_count_image(rois=roi_wrappers, height=frame_height, width=frame_width)
 
-    # Pre-allocates arrays to collect statistics for normalization during the computation loop.
+    # Pre-allocates an array to collect soma pixel counts for normalization during the computation loop.
     roi_count = len(rois)
-    mean_radius_values = np.empty(roi_count, dtype=np.float32)
-    pixel_count_values = np.empty(roi_count, dtype=np.float32)
     soma_pixel_count_values = np.empty(roi_count, dtype=np.float32)
 
     # Computes shape statistics for each ROI and writes them back to the ROIStatistics instances. In lightweight mode,
     # skips the expensive ellipse fitting, convex hull solidity, and overlap mask computations.
     for i, wrapper in enumerate(roi_wrappers):
         data = wrapper.data
-        data.mean_radius = wrapper.mean_radius
-        data.baseline_mean_radius = wrapper.baseline_mean_radius
         data.compactness = wrapper.compactness
         data.pixel_count = wrapper.pixel_count
-        data.soma_pixel_count = wrapper.soma_pixel_count
         data.soma_mask = wrapper.soma_mask
 
         if not lightweight:
@@ -153,26 +148,15 @@ def compute_roi_statistics(
             data.mask.radius = ellipse.radius
             data.aspect_ratio = ellipse.aspect_ratio
 
-        # Collects values for normalization to avoid re-iterating over ROIs.
-        mean_radius_values[i] = data.mean_radius
-        pixel_count_values[i] = data.pixel_count
-        soma_pixel_count_values[i] = data.soma_pixel_count
+        # Collects soma pixel counts for normalization to avoid re-iterating over ROIs.
+        soma_pixel_count_values[i] = wrapper.soma_pixel_count
 
-    # Normalizes statistics relative to the first 100 ROIs. Detection algorithms typically find high-confidence ROIs
-    # first, so early ROIs serve as a reliable baseline for comparing later, lower-confidence detections.
+    # Normalizes soma pixel count relative to the first 100 ROIs. Detection algorithms typically find high-confidence
+    # ROIs first, so early ROIs serve as a reliable baseline for comparing later, lower-confidence detections.
     normalization_count = 100
-    normalization_epsilon = 1e-10
-
-    mean_radius_baseline = np.nanmedian(mean_radius_values[:normalization_count]) + normalization_epsilon
-    mean_radius_normalized = mean_radius_values / mean_radius_baseline
-    pixel_count_normalized = pixel_count_values / np.mean(pixel_count_values[:normalization_count])
     soma_pixel_count_normalized = soma_pixel_count_values / np.mean(soma_pixel_count_values[:normalization_count])
 
-    for roi, radius_norm, count_norm, soma_count_norm in zip(
-        rois, mean_radius_normalized, pixel_count_normalized, soma_pixel_count_normalized, strict=True
-    ):
-        roi.mean_radius = float(radius_norm)
-        roi.normalized_pixel_count_full = float(count_norm)
+    for roi, soma_count_norm in zip(rois, soma_pixel_count_normalized, strict=True):
         roi.normalized_pixel_count = float(soma_count_norm)
 
     # Removes ROIs with excessive overlap. High overlap often indicates over-segmentation or neuropil contamination.
