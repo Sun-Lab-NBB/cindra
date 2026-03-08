@@ -203,9 +203,8 @@ class TrackingViewer(QMainWindow):
         self._recording_combo.setCurrentIndex(0)
         self._recording_combo.blockSignals(False)
 
-        # Enables channel 2 toggle if available.
-        has_channel_2 = data.current_recording.has_channel_2
-        self._channel_2_checkbox.setEnabled(has_channel_2)
+        # Shows channel 2 group only if channel 2 data exists.
+        self._channel_group.setVisible(data.current_recording.has_channel_2)
 
         # Updates the window title to reflect the active dataset.
         self.setWindowTitle(f"Multi-Recording ROI Tracking — {data.dataset_name}")
@@ -428,14 +427,13 @@ class TrackingViewer(QMainWindow):
 
         layout.addWidget(mask_group)
 
-        # Channel group.
-        channel_group = QGroupBox("Channel")
-        channel_group.setStyleSheet(STYLE.group_box)
-        channel_layout = QVBoxLayout(channel_group)
+        # Channel group. Hidden when channel 2 data does not exist.
+        self._channel_group = QGroupBox("Channel")
+        self._channel_group.setStyleSheet(STYLE.group_box)
+        channel_layout = QVBoxLayout(self._channel_group)
 
         self._channel_2_checkbox = QPushButton("Channel 2")
         self._channel_2_checkbox.setCheckable(True)
-        self._channel_2_checkbox.setEnabled(False)
         self._channel_2_checkbox.setToolTip(
             "Toggle display between channel 1 and channel 2 data. When active, background images and ROI masks "
             "switch to the channel 2 variants."
@@ -443,7 +441,8 @@ class TrackingViewer(QMainWindow):
         self._channel_2_checkbox.toggled.connect(self._on_channel_2_toggled)
         channel_layout.addWidget(self._channel_2_checkbox)
 
-        layout.addWidget(channel_group)
+        self._channel_group.setVisible(False)
+        layout.addWidget(self._channel_group)
 
         # ROI selection group.
         roi_group = QGroupBox("ROI Selection")

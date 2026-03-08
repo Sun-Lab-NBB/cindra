@@ -109,10 +109,10 @@ class BinaryPlayer(QMainWindow):
         self._file_button.setMenu(file_menu)
         toolbar.addWidget(self._file_button)
 
-        # Channel 2 toggle button. Disabled until a recording with two channels is loaded.
+        # Channel 2 toggle button. Hidden until a recording with two channels is loaded.
         self._channel_2_button: QPushButton = QPushButton("View Channel 2")
         self._channel_2_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self._channel_2_button.setEnabled(False)
+        self._channel_2_button.setVisible(False)
         self._channel_2_button.setToolTip("Toggle the channel 2 overlay.")
         self._channel_2_button.clicked.connect(self._toggle_channel_2)
         toolbar.addWidget(self._channel_2_button)
@@ -418,7 +418,7 @@ class BinaryPlayer(QMainWindow):
         self._offset_plot.addItem(self._offset_scatter)
         self._update_offset_scatter(0)
 
-        self._channel_2_button.setEnabled(self.data.two_channels)
+        self._channel_2_button.setVisible(self.data.two_channels)
 
         self._current_frame = 0
         self._render_frame()

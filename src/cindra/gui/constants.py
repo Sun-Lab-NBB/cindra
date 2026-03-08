@@ -30,13 +30,16 @@ class ROIColorMode(IntEnum):
     COLOCALIZATION_PROBABILITY = 6
     """Colors ROIs by their channel 2 colocalization probability."""
 
-    CELL_PROBABILITY = 7
+    RECORDING_COUNT = 7
+    """Colors ROIs by the number of recordings in which they were tracked, indicating tracking reliability."""
+
+    CELL_PROBABILITY = 8
     """Colors ROIs by the trained classifier's cell-probability estimate using a colormap gradient."""
 
-    CORRELATIONS = 8
+    CORRELATIONS = 9
     """Colors ROIs by pairwise activity correlation with the selected ROI."""
 
-    CELL_CLASSIFICATION = 9
+    CELL_CLASSIFICATION = 10
     """Colors ROIs by binary cell/non-cell labels (green for cell, magenta for non-cell)."""
 
 
@@ -63,6 +66,9 @@ class ROIColorModeLabel(StrEnum):
 
     COLOCALIZATION_PROBABILITY = "Colocalization"
     """The display label for channel 2 colocalization probability-based ROI coloring."""
+
+    RECORDING_COUNT = "Recording Count"
+    """The display label for recording count-based ROI coloring."""
 
     CELL_PROBABILITY = "Cell Probability"
     """The display label for classifier probability gradient ROI coloring."""
