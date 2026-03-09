@@ -238,8 +238,9 @@ mapping and are always eagerly loaded.
 | Skill                              | Relationship                                                                             |
 |------------------------------------|------------------------------------------------------------------------------------------|
 | `/multi-recording-configuration`   | Configuration parameter reference for the multi-recording pipeline                       |
-| `/single-recording-results`        | Companion output data reference for the single-recording pipeline                        |
 | `/multi-recording-processing`      | Processing workflow that produces this output                                            |
+| `/single-recording-results`        | Companion output data reference for the single-recording pipeline                        |
+| `/visualization`                   | Launch viewers and query tools to visualize and inspect this output data                 |
 
 ---
 

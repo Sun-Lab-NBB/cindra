@@ -88,7 +88,9 @@ Add to your `.mcp.json` file in the project root:
 ### Verifying Connection
 
 Before processing, verify the MCP tools are available by checking your tool list. If the cindra tools
-(`discover_recordings_tool`, `start_multi_recording_batch_processing_tool`, etc.) are not present, the server is not connected.
+(`discover_multi_recording_candidates_tool`, `start_multi_recording_batch_processing_tool`, etc.) are not
+present, the server is not connected. Invoke `/mcp-environment-setup` to diagnose and resolve connectivity
+issues.
 
 ---
 
@@ -106,7 +108,7 @@ The MCP server exposes a unified API where all processing goes through the batch
 
 | Tool                     | Purpose                                            |
 |--------------------------|----------------------------------------------------|
-| `discover_recordings_tool` | Finds recordings under a root directory              |
+| `discover_multi_recording_candidates_tool` | Finds recordings under a root directory              |
 | `get_multi_recording_status`   | Checks filesystem for multi-recording processing outputs |
 
 ### Batch Processing Tools
@@ -178,130 +180,7 @@ multi_recording/
 
 ---
 
-## Tool Input/Output Formats
-
-### `generate_config_file`
-
-**Input:**
-```python
-{
-    "output_path": "/path/to/config.yaml",  # Required
-    "pipeline_type": "multi-recording"            # Required
-}
-```
-
-**Output:**
-```python
-{
-    "success": True,
-    "file_path": "/path/to/config.yaml",
-    "pipeline_type": "multi-recording"
-}
-```
-
-### `discover_recordings_tool`
-
-**Input:**
-```python
-{
-    "root_directory": "/path/to/data"  # Required
-}
-```
-
-**Output:**
-```python
-{
-    "recordings": [
-        "/path/to/data/animal1/2024-01-15-10-30-00-123456",
-        "/path/to/data/animal1/2024-01-16-09-00-00-234567",
-        ...
-    ],
-    "count": 30,
-    "skipped": [...],  # Optional
-    "errors": [...]    # Optional
-}
-```
-
-### `start_multi_recording_batch_processing_tool`
-
-**Input:**
-```python
-{
-    "animal_configurations": [  # List of animals to process
-        {
-            "configuration_path": "/path/to/animal1_config.yaml",
-            "recording_paths": ["/path/to/recording1", "/path/to/recording2"]
-        },
-        {
-            "configuration_path": "/path/to/animal2_config.yaml",
-            "recording_paths": ["/path/to/recording3", "/path/to/recording4"]
-        }
-    ],
-    "workers_per_discover": 20,   # Optional, workers for discover phase
-    "workers_per_extract": -1     # Optional, -1 for automatic (max 30)
-}
-```
-
-**Output:**
-```python
-{
-    "started": True,
-    "total_animals": 2,
-    "total_recordings": 4,
-    "workers_per_discover": 20,
-    "workers_per_extract": 28,
-    "message": "Multi-recording batch processing started."
-}
-```
-
-### `get_multi_recording_batch_processing_status_tool`
-
-**Input:** None
-
-**Output:**
-```python
-{
-    "current_phase": "extract",  # "discover" or "extract"
-    "animals": [
-        {
-            "animal_key": "animal1_dataset",
-            "status": "EXTRACTING",
-            "discover": "done",
-            "extract_completed": 1,
-            "extract_total": 2
-        },
-        ...
-    ],
-    "summary": {
-        "total_animals": 2,
-        "discover_completed": 2,
-        "extract_completed": 2,
-        "extract_total": 4,
-        "failed": 0
-    }
-}
-```
-
-### `cancel_multi_recording_batch_processing_tool`
-
-**Input:** None
-
-**Output:**
-```python
-{
-    "cancelled": True,
-    "message": "Multi-recording batch processing cancelled. Active jobs will complete but no new jobs will start.",
-    "final_state": {
-        "discover_completed": 1,
-        "extract_completed": 2,
-        "active_jobs_at_cancel": 1
-    }
-}
-```
-
----
-
-## Formatting Status as a Table
+## Formatting status as a table
 
 When presenting status to the user, format the data as a clear table:
 
@@ -354,7 +233,7 @@ Summary: 1/2 animals complete | 2/4 recordings extracted | 0 failed
 
 **CRITICAL**: You MUST ask the user about configuration before processing. Never skip this step.
 
-For complete parameter documentation, invoke `/multi-recording-data`.
+For complete parameter documentation, invoke `/multi-recording-configuration`.
 
 ### Step 1: Ask About Existing Configuration
 
@@ -389,7 +268,7 @@ These are set automatically by the MCP batch tool:
 - `io.recording_directories` - Set from `recording_paths` argument
 - `main.parallel_workers` - Set from worker arguments
 
-See `/multi-recording-data` for complete parameter documentation including ROI selection, registration tuning, and
+See `/multi-recording-configuration` for complete parameter documentation including ROI selection, registration tuning, and
 clustering options.
 
 ---
@@ -444,4 +323,17 @@ If processing fails for some animals/recordings:
 | `Recording IDs mismatch`                 | Configuration doesn't match recordings   | Verify recording_directories in config |
 | `Registration failed between recordings` | Too much drift between recordings            | Check FOV alignment                  |
 | `No trackable ROIs found`              | Insufficient overlap in detected ROIs  | Adjust clustering threshold          |
+
+---
+
+## Related skills
+
+| Skill                              | Relationship                                                                             |
+|------------------------------------|------------------------------------------------------------------------------------------|
+| `/mcp-environment-setup`           | Prerequisite: MCP server must be connected for processing tools                          |
+| `/single-recording-processing`     | Prerequisite: all recordings must have single-recording processing complete              |
+| `/single-recording-results`        | Prerequisite: single-recording output files required as input                            |
+| `/multi-recording-configuration`   | Configuration reference for all multi-recording pipeline parameters                      |
+| `/multi-recording-results`         | Output data format reference for evaluating processing results                           |
+| `/visualization`                   | Next step: launch viewers to inspect tracking quality and query results                  |
 

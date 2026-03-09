@@ -312,8 +312,10 @@ files, so no special configuration is required.
 | Skill                              | Relationship                                                                      |
 |------------------------------------|-----------------------------------------------------------------------------------|
 | `/single-recording-configuration`  | Configuration parameter reference for the single-recording pipeline               |
-| `/multi-recording-results`         | Companion output data reference for the multi-recording pipeline                  |
 | `/single-recording-processing`     | Processing workflow that produces this output                                     |
+| `/multi-recording-results`         | Companion output data reference for the multi-recording pipeline                  |
+| `/multi-recording-configuration`   | Multi-recording configuration requires these outputs as prerequisites             |
+| `/visualization`                   | Launch viewers and query tools to visualize and inspect this output data           |
 
 ---
 
