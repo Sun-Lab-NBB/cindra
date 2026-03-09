@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from . import processing_tools, acquisition_tools, configuration_tools  # noqa: F401
+from . import results_tools, processing_tools, acquisition_tools, configuration_tools  # noqa: F401
 from .mcp_instance import mcp
 
 

@@ -16,10 +16,10 @@ from .single_recording import process_plane, binarize_recording, save_combined_d
 if TYPE_CHECKING:
     from pathlib import Path
 
-_SINGLE_RECORDING_TRACKER_NAME: str = "single_recording_tracker.yaml"
+SINGLE_RECORDING_TRACKER_NAME: str = "single_recording_tracker.yaml"
 """The tracker file name for the single-recording processing pipeline."""
 
-_MULTI_RECORDING_TRACKER_NAME: str = "multi_recording_tracker.yaml"
+MULTI_RECORDING_TRACKER_NAME: str = "multi_recording_tracker.yaml"
 """The tracker file name for the multi-recording processing pipeline."""
 
 
@@ -127,7 +127,7 @@ def run_single_recording_pipeline(
     plane_count = len(contexts)
 
     # Derives the tracker path from the configuration.
-    tracker_path: Path = configuration.file_io.output_path / _SINGLE_RECORDING_TRACKER_NAME
+    tracker_path: Path = configuration.file_io.output_path / SINGLE_RECORDING_TRACKER_NAME
 
     # Determines which jobs to run based on the flags.
     requested_jobs: dict[str, bool] = {
@@ -299,7 +299,7 @@ def run_multi_recording_pipeline(
     # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
         # REMOTE mode: Retrieves the job name and specifier directly from the tracker using the provided job_id.
-        tracker = ProcessingTracker(file_path=main_recording_path.joinpath(_MULTI_RECORDING_TRACKER_NAME))
+        tracker = ProcessingTracker(file_path=main_recording_path.joinpath(MULTI_RECORDING_TRACKER_NAME))
         job_info = tracker.get_job_info(job_id=job_id)
         _execute_multi_recording_job(
             configuration=config,
@@ -322,7 +322,7 @@ def run_multi_recording_pipeline(
                 jobs.append((base_job_name, ""))
 
         console.echo(message=f"Initializing the processing tracker for {len(jobs)} job(s)...")
-        tracker = ProcessingTracker(file_path=main_recording_path.joinpath(_MULTI_RECORDING_TRACKER_NAME))
+        tracker = ProcessingTracker(file_path=main_recording_path.joinpath(MULTI_RECORDING_TRACKER_NAME))
         job_ids = tracker.initialize_jobs(jobs=jobs)
 
         for (name, spec), jid in zip(jobs, job_ids, strict=True):

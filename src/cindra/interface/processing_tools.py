@@ -1,35 +1,42 @@
 """Provides MCP tools for batch processing, status monitoring, and cancellation of neural imaging pipelines.
 
 These tools enable AI agents to start, monitor, and cancel both single-recording and multi-recording batch processing
-operations. Single-recording processing follows a three-phase workflow (binarize, process, combine), while
+operations. Processing state is tracked via ProcessingTracker YAML files that persist across restarts, rather than
+in-memory state. Single-recording processing follows a three-phase workflow (binarize, process, combine), while
 multi-recording processing follows a two-phase workflow (discover, extract).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock, Thread
-import traceback
-from dataclasses import field, dataclass
 
 from natsort import natsorted
+from ataraxis_base_utilities import resolve_parallel_job_capacity, resolve_worker_count
+from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 from ataraxis_time import PrecisionTimer, TimerPrecisions
-from ataraxis_base_utilities import resolve_worker_count, resolve_parallel_job_capacity
 
-from ..io import resolve_multi_recording_contexts
-from ..pipelines import run_multi_recording_pipeline, run_single_recording_pipeline
-from ..dataclasses import (
-    RuntimeContext,
-    MultiRecordingConfiguration,
-    SingleRecordingConfiguration,
+from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
+from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
+from ..pipelines import (
+    MULTI_RECORDING_TRACKER_NAME,
+    SINGLE_RECORDING_TRACKER_NAME,
+    MultiRecordingJobNames,
+    SingleRecordingJobNames,
+    run_multi_recording_pipeline,
+    run_single_recording_pipeline,
 )
 from .mcp_instance import mcp
 
-_RESERVED_CORES: int = 4
+_RESERVED_CORES: int = 2
 """The number of CPU cores reserved for system operations."""
 
 _MAXIMUM_JOB_CORES: int = 30
 """The maximum number of CPU cores any single job can use."""
+
+_MAXIMUM_PARALLEL_BINARIZE: int = 3
+"""The maximum number of concurrent binarization jobs (I/O bound with TIFF decompression)."""
 
 _MINIMUM_RECORDING_COUNT: int = 2
 """The minimum number of recordings required for multi-recording processing."""
@@ -37,118 +44,84 @@ _MINIMUM_RECORDING_COUNT: int = 2
 
 @dataclass
 class _SingleRecordingBatchState:
-    """Tracks state for single-recording batch processing operations."""
+    """Tracks the runtime orchestration state for single-recording batch processing.
 
-    recordings: list[Path] = field(default_factory=list)
-    """All recordings to process."""
-    configuration_path: Path | None = None
-    """Template configuration file path."""
-    recording_configuration_paths: dict[str, Path] = field(default_factory=dict)
-    """Per-recording configuration file paths (recording_key -> configuration_path)."""
+    Job completion and failure states are persisted in per-recording ProcessingTracker YAML files. This dataclass only
+    holds the minimal state needed for thread orchestration: phase queues, active threads, resource limits, and
+    tracker/configuration path mappings.
+    """
+
+    tracker_paths: dict[str, Path] = field(default_factory=dict)
+    """Recording key to ProcessingTracker file path mapping."""
+    configuration_paths: dict[str, Path] = field(default_factory=dict)
+    """Recording key to per-recording configuration file path mapping."""
+
+    binarize_jobs: dict[str, str] = field(default_factory=dict)
+    """Recording key to binarize job ID mapping."""
+    process_jobs: dict[str, list[str]] = field(default_factory=dict)
+    """Recording key to ordered list of process job IDs mapping."""
+    combine_jobs: dict[str, str] = field(default_factory=dict)
+    """Recording key to combine job ID mapping."""
+
     current_phase: str = "binarize"
     """Current processing phase: 'binarize', 'process', or 'combine'."""
+    phase_queue: list[tuple[str, str]] = field(default_factory=list)
+    """Ordered (recording_key, job_id) pairs queued for dispatch in the current phase."""
+    active_threads: dict[str, Thread] = field(default_factory=dict)
+    """Currently running job_id to Thread mapping."""
 
-    # Tracks binarize phase state.
-    binarize_queue: list[Path] = field(default_factory=list)
-    """Recordings waiting to binarize."""
-    binarize_active: dict[str, Thread] = field(default_factory=dict)
-    """Currently binarizing (recording_key -> thread)."""
-    binarize_completed: set[str] = field(default_factory=set)
-    """Recordings that finished binarizing."""
-    binarize_failed: set[str] = field(default_factory=set)
-    """Recordings that failed binarization."""
-    plane_counts: dict[str, int] = field(default_factory=dict)
-    """Recording -> plane count (discovered during binarize)."""
-
-    # Tracks process phase state.
-    process_queue: list[tuple[str, int]] = field(default_factory=list)
-    """(recording_key, plane_index) pairs to process."""
-    process_active: dict[str, Thread] = field(default_factory=dict)
-    """Currently processing (recording_plane_key -> thread)."""
-    process_completed: set[str] = field(default_factory=set)
-    """Completed recording_plane keys."""
-    process_failed: set[str] = field(default_factory=set)
-    """Failed recording_plane keys."""
-
-    # Tracks combine phase state.
-    combine_queue: list[Path] = field(default_factory=list)
-    """Recordings waiting to combine."""
-    combine_active: dict[str, Thread] = field(default_factory=dict)
-    """Currently combining (recording_key -> thread)."""
-    combine_completed: set[str] = field(default_factory=set)
-    """Recordings that finished combining."""
-    combine_failed: set[str] = field(default_factory=set)
-    """Recordings that failed combination."""
-
-    # Stores resource allocation settings.
     workers_per_plane: int = 30
-    """CPU cores per plane job."""
+    """CPU cores allocated per plane processing job."""
     max_parallel_planes: int = 1
-    """Max concurrent plane jobs."""
-
-    # Stores per-recording and per-plane error messages.
-    errors: dict[str, list[str]] = field(default_factory=dict)
-    """Recording/plane key -> error messages."""
+    """Maximum number of concurrent plane processing jobs."""
 
     lock: Lock = field(default_factory=Lock)
-    """Thread synchronization lock."""
+    """Thread synchronization lock for batch state access."""
     manager_thread: Thread | None = None
-    """Background manager thread."""
+    """Background batch manager thread reference."""
 
 
 @dataclass
 class _MultiRecordingBatchState:
-    """Tracks state for multi-recording batch processing operations."""
+    """Tracks the runtime orchestration state for multi-recording batch processing.
 
-    animals: list[tuple[Path, list[Path]]] = field(default_factory=list)
-    """(configuration_path, recording_paths) per animal."""
+    Job completion and failure states are persisted in per-animal ProcessingTracker YAML files. This dataclass only
+    holds the minimal state needed for thread orchestration: phase queues, active threads, resource limits, and
+    tracker/configuration path mappings.
+    """
+
+    tracker_paths: dict[str, Path] = field(default_factory=dict)
+    """Animal key to ProcessingTracker file path mapping."""
+    configuration_paths: dict[str, Path] = field(default_factory=dict)
+    """Animal key to configuration file path mapping."""
+    recording_paths: dict[str, list[Path]] = field(default_factory=dict)
+    """Animal key to list of recording directory paths mapping."""
+
+    discover_jobs: dict[str, str] = field(default_factory=dict)
+    """Animal key to discover job ID mapping."""
+    extract_jobs: dict[str, list[str]] = field(default_factory=dict)
+    """Animal key to ordered list of extract job IDs mapping."""
+
     current_phase: str = "discover"
     """Current processing phase: 'discover' or 'extract'."""
+    phase_queue: list[tuple[str, str]] = field(default_factory=list)
+    """Ordered (animal_key, job_id) pairs queued for dispatch in the current phase."""
+    active_threads: dict[str, Thread] = field(default_factory=dict)
+    """Currently running job_id to Thread mapping."""
 
-    # Tracks discover phase state per animal.
-    discover_queue: list[str] = field(default_factory=list)
-    """Animal keys waiting to discover."""
-    discover_active: dict[str, Thread] = field(default_factory=dict)
-    """Currently discovering (animal_key -> thread)."""
-    discover_completed: set[str] = field(default_factory=set)
-    """Animals that finished discovery."""
-    discover_failed: set[str] = field(default_factory=set)
-    """Animals that failed discovery."""
-
-    # Tracks extract phase state per recording across all animals.
-    extract_queue: list[tuple[str, str]] = field(default_factory=list)
-    """(animal_key, recording_id) pairs."""
-    extract_active: dict[str, Thread] = field(default_factory=dict)
-    """Currently extracting (animal_recording_key -> thread)."""
-    extract_completed: set[str] = field(default_factory=set)
-    """Completed extractions."""
-    extract_failed: set[str] = field(default_factory=set)
-    """Failed extractions."""
-
-    # Stores recording IDs per animal, populated during the discover phase.
-    recording_ids: dict[str, list[str]] = field(default_factory=dict)
-    """animal_key -> list of recording_ids."""
-
-    # Stores resource allocation settings.
     workers_per_discover: int = 20
-    """Workers for discover phase."""
+    """Workers allocated for the discover phase."""
     max_parallel_discovers: int = 1
-    """Max concurrent discovers."""
+    """Maximum number of concurrent discover jobs."""
     workers_per_extract: int = 30
-    """Workers for extract phase."""
+    """Workers allocated for the extract phase."""
     max_parallel_extracts: int = 1
-    """Max concurrent extractions."""
-    progress_bars: bool = False
-    """Determines whether to display progress bars during processing."""
-
-    # Stores per-animal and per-recording error messages.
-    errors: dict[str, list[str]] = field(default_factory=dict)
-    """Key -> error messages."""
+    """Maximum number of concurrent extract jobs."""
 
     lock: Lock = field(default_factory=Lock)
-    """Thread synchronization lock."""
+    """Thread synchronization lock for batch state access."""
     manager_thread: Thread | None = None
-    """Background manager thread."""
+    """Background batch manager thread reference."""
 
 
 _single_recording_batch_state: _SingleRecordingBatchState | None = None
@@ -160,19 +133,20 @@ _multi_recording_batch_state: _MultiRecordingBatchState | None = None
 
 @mcp.tool()
 def get_single_recording_status(recording_path: str) -> dict[str, object]:
-    """Gets the processing status of a single-recording by inspecting its output directory structure.
+    """Gets the processing status of a single recording by reading its ProcessingTracker file.
 
-    Checks for the presence of plane directories, combined output files, and cindra configuration markers to determine
-    how far processing has progressed for the given recording.
+    Reads the tracker YAML file at <recording_path>/single_recording_tracker.yaml to determine how far processing has
+    progressed. Returns per-job status grouped by pipeline phase (binarize, process, combine) and an overall status
+    string synthesized from the tracker state.
 
     Args:
         recording_path: The absolute path to the recording data directory.
 
     Returns:
-        On success, contains the 'recording_path', 'cindra_path', 'planes_found' count, 'combined_exists' flag, and
-        optionally the 'combined_files' availability mapping. When the recording has not been processed, contains a
-        'status' of 'not_started'. On failure, contains an 'error' describing the issue. Both cases include a
-        'success' flag.
+        On success, contains the 'recording_path', 'tracker_path', per-phase job status in 'jobs', a 'summary' with
+        counts by status, and a synthesized 'status' string ('not_started', 'binarizing', 'processing', 'combining',
+        'completed', or 'failed'). When no tracker exists, returns 'status' of 'not_started'. On failure, contains an
+        'error' describing the issue. Both cases include a 'success' flag.
     """
     recording = Path(recording_path)
 
@@ -182,60 +156,34 @@ def get_single_recording_status(recording_path: str) -> dict[str, object]:
             "error": f"Unable to get single-recording status. Recording directory not found: {recording_path}.",
         }
 
-    cindra_path = recording / "cindra"
-    if not cindra_path.exists():
-        # Searches recursively for the RuntimeContext configuration marker.
-        matches = list(recording.rglob("configuration.yaml"))
-        if matches:
-            cindra_path = matches[0].parent
-
-    if not cindra_path.exists():
+    tracker_path = recording / SINGLE_RECORDING_TRACKER_NAME
+    if not tracker_path.exists():
         return {
             "success": True,
             "recording_path": str(recording),
             "status": "not_started",
-            "message": "Unable to find cindra output directory.",
+            "message": "No processing tracker found for this recording.",
         }
 
-    combined_path = cindra_path / "combined"
-    planes = [p for p in cindra_path.iterdir() if p.is_dir() and p.name.startswith("plane")]
-
-    status: dict[str, object] = {
-        "success": True,
-        "recording_path": str(recording),
-        "cindra_path": str(cindra_path),
-        "planes_found": len(planes),
-        "combined_exists": combined_path.exists(),
-    }
-
-    if combined_path.exists():
-        status["combined_files"] = {
-            "combined_metadata": (combined_path / "combined_metadata.npz").exists(),
-            "roi_statistics": (combined_path / "roi_statistics.npz").exists(),
-            "cell_fluorescence": (combined_path / "cell_fluorescence.npy").exists(),
-            "neuropil_fluorescence": (combined_path / "neuropil_fluorescence.npy").exists(),
-            "spikes": (combined_path / "spikes.npy").exists(),
-            "cell_classification": (combined_path / "cell_classification.npy").exists(),
-        }
-
-    return status
+    return _read_single_recording_tracker(tracker_path=tracker_path, recording_path=recording)
 
 
 @mcp.tool()
 def get_multi_recording_status(recording_path: str) -> dict[str, object]:
-    """Gets the multi-recording processing status for a recording by inspecting its output directory structure.
+    """Gets the multi-recording processing status for a recording by reading ProcessingTracker files.
 
-    Checks for dataset directories under the multi_recording output folder, examining each for runtime data,
-    configuration, tracker, template masks, and extracted fluorescence files to determine the processing stage.
+    Searches for multi-recording tracker YAML files under <recording_path>/cindra/multi_recording/<dataset>/ and reads
+    each tracker to determine per-dataset processing progress. Returns per-job status grouped by pipeline phase
+    (discover, extract) for each dataset found.
 
     Args:
         recording_path: The absolute path to a recording directory.
 
     Returns:
-        On success, contains the 'recording_path', 'multi_recording_path', and a 'datasets' mapping where each
-        dataset key maps to its file presence flags, overall 'status', and 'is_main_recording' indicator. When the
-        recording has not been processed, contains a 'status' of 'not_started'. On failure, contains an 'error'
-        describing the issue. Both cases include a 'success' flag.
+        On success, contains the 'recording_path' and a 'datasets' mapping where each dataset key maps to its tracker
+        status, including per-phase job states, summary counts, and overall status. When no trackers exist, returns
+        'status' of 'not_started'. On failure, contains an 'error' describing the issue. Both cases include a 'success'
+        flag.
     """
     recording = Path(recording_path)
 
@@ -245,61 +193,33 @@ def get_multi_recording_status(recording_path: str) -> dict[str, object]:
             "error": f"Unable to get multi-recording status. Recording directory not found: {recording_path}.",
         }
 
-    # Finds the cindra directory first, using the same pattern as get_single_recording_status.
-    cindra_path = recording / "cindra"
-    if not cindra_path.exists():
-        matches = list(recording.rglob("configuration.yaml"))
-        if matches:
-            cindra_path = matches[0].parent
-
-    multi_recording_base = cindra_path / "multi_recording" if cindra_path.exists() else None
-
-    if multi_recording_base is None or not multi_recording_base.exists():
+    # Searches for multi-recording tracker files under the cindra output hierarchy.
+    multi_recording_base = recording / "cindra" / "multi_recording"
+    if not multi_recording_base.exists():
         return {
             "success": True,
             "recording_path": str(recording),
             "status": "not_started",
-            "message": "Unable to find multi-recording output directory.",
+            "message": "No multi-recording output directory found.",
         }
 
-    datasets = [directory for directory in multi_recording_base.iterdir() if directory.is_dir()]
-
-    if not datasets:
+    tracker_files = list(multi_recording_base.rglob(MULTI_RECORDING_TRACKER_NAME))
+    if not tracker_files:
         return {
             "success": True,
             "recording_path": str(recording),
             "status": "not_started",
-            "message": "Unable to find dataset folders in multi-recording directory.",
+            "message": "No multi-recording processing trackers found.",
         }
 
     dataset_statuses: dict[str, dict[str, object]] = {}
-    for dataset in datasets:
-        dataset_status: dict[str, object] = {
-            "runtime_exists": (dataset / "multi_recording_runtime_data.yaml").exists(),
-            "config_exists": (dataset / "multi_recording_configuration.yaml").exists(),
-            "tracker_exists": (dataset / "multi_recording_tracker.yaml").exists(),
-            "template_masks_exists": (dataset / "tracking_template_masks.npz").exists(),
-            "cell_fluorescence_exists": (dataset / "cell_fluorescence.npy").exists(),
-            "neuropil_fluorescence_exists": (dataset / "neuropil_fluorescence.npy").exists(),
-            "spikes_exists": (dataset / "spikes.npy").exists(),
-        }
-
-        if dataset_status["cell_fluorescence_exists"]:
-            dataset_status["status"] = "completed"
-        elif dataset_status["template_masks_exists"]:
-            dataset_status["status"] = "discovery_completed"
-        elif dataset_status["runtime_exists"]:
-            dataset_status["status"] = "initialized"
-        else:
-            dataset_status["status"] = "unknown"
-
-        dataset_status["is_main_recording"] = dataset_status["tracker_exists"]
-        dataset_statuses[dataset.name] = dataset_status
+    for tracker_file in tracker_files:
+        dataset_name = tracker_file.parent.name
+        dataset_statuses[dataset_name] = _read_multi_recording_tracker(tracker_path=tracker_file)
 
     return {
         "success": True,
         "recording_path": str(recording),
-        "multi_recording_path": str(multi_recording_base),
         "datasets": dataset_statuses,
     }
 
@@ -317,8 +237,9 @@ def start_batch_processing_tool(
     """Starts batch single-recording processing for multiple recordings.
 
     Manages a three-phase batch workflow: binarize (sequential), process (parallel by plane), combine (sequential).
-    Creates per-recording configuration copies with recording-specific paths and runtime settings to prevent
-    concurrent worker interference. Use get_batch_processing_status_tool to monitor progress.
+    Creates per-recording configuration copies with recording-specific paths and runtime settings, initializes
+    ProcessingTracker files for each recording, and dispatches jobs via background threads. Use
+    get_batch_processing_status_tool to monitor progress.
 
     Args:
         recording_paths: List of absolute paths to recording data directories (used as file_io.data_path per
@@ -390,21 +311,11 @@ def start_batch_processing_tool(
     # Checks if batch processing is already active.
     if _single_recording_batch_state is not None:
         with _single_recording_batch_state.lock:
-            active_count = (
-                len(_single_recording_batch_state.binarize_active)
-                + len(_single_recording_batch_state.process_active)
-                + len(_single_recording_batch_state.combine_active)
-            )
-            queue_count = (
-                len(_single_recording_batch_state.binarize_queue)
-                + len(_single_recording_batch_state.process_queue)
-                + len(_single_recording_batch_state.combine_queue)
-            )
-            if active_count > 0 or queue_count > 0:
+            if _single_recording_batch_state.active_threads or _single_recording_batch_state.phase_queue:
                 return {
                     "error": "Unable to start batch processing. Batch processing is already in progress.",
-                    "active_count": active_count,
-                    "queued_count": queue_count,
+                    "active_count": len(_single_recording_batch_state.active_threads),
+                    "queued_count": len(_single_recording_batch_state.phase_queue),
                 }
 
     # Calculates resource allocation.
@@ -417,12 +328,17 @@ def start_batch_processing_tool(
         else resolve_parallel_job_capacity(workers_per_job=actual_workers)
     )
 
-    # Creates per-recording configuration copies with recording-specific paths and runtime settings. Each recording
-    # gets its own configuration file so that concurrent workers do not interfere with one another. The configuration
-    # file is written to the output directory, which is guaranteed to be writable (the pipeline writes output there).
-    recording_configuration_paths: dict[str, Path] = {}
+    # Creates per-recording configurations, resolves plane counts, and initializes ProcessingTracker files.
+    batch_state = _SingleRecordingBatchState(
+        workers_per_plane=actual_workers,
+        max_parallel_planes=actual_max_parallel,
+        lock=Lock(),
+    )
+
     for data_path, output_path in zip(valid_paths, resolved_output_paths, strict=True):
-        recording_key = _get_recording_key(recording_path=data_path)
+        recording_key = str(data_path)
+
+        # Creates a per-recording configuration copy with recording-specific paths and runtime settings.
         recording_configuration = SingleRecordingConfiguration.from_yaml(file_path=template_path)
         recording_configuration.file_io.data_path = data_path
         recording_configuration.file_io.output_path = output_path
@@ -431,21 +347,35 @@ def start_batch_processing_tool(
         output_path.mkdir(parents=True, exist_ok=True)
         recording_configuration_path = output_path / "_batch_config.yaml"
         recording_configuration.save(file_path=recording_configuration_path)
-        recording_configuration_paths[recording_key] = recording_configuration_path
+        batch_state.configuration_paths[recording_key] = recording_configuration_path
 
-    # Initializes batch state.
-    _single_recording_batch_state = _SingleRecordingBatchState(
-        recordings=list(valid_paths),
-        configuration_path=template_path,
-        recording_configuration_paths=recording_configuration_paths,
-        current_phase="binarize",
-        binarize_queue=list(valid_paths),
-        workers_per_plane=actual_workers,
-        max_parallel_planes=actual_max_parallel,
-        lock=Lock(),
-    )
+        # Resolves plane count from configuration to build the complete job list.
+        contexts = resolve_single_recording_contexts(configuration=recording_configuration)
+        plane_count = len(contexts)
 
-    # Starts the batch manager thread.
+        # Builds the job list: binarize, all process planes, combine.
+        jobs: list[tuple[str, str]] = [(SingleRecordingJobNames.BINARIZE, "")]
+        for plane_index in range(plane_count):
+            jobs.append((SingleRecordingJobNames.PROCESS, f"plane_{plane_index}"))
+        jobs.append((SingleRecordingJobNames.COMBINE, ""))
+
+        # Initializes the ProcessingTracker with all jobs for this recording.
+        tracker_path = output_path / SINGLE_RECORDING_TRACKER_NAME
+        tracker = ProcessingTracker(file_path=tracker_path)
+        job_ids = tracker.initialize_jobs(jobs=jobs)
+        batch_state.tracker_paths[recording_key] = tracker_path
+
+        # Maps job IDs to phases for orchestration.
+        batch_state.binarize_jobs[recording_key] = job_ids[0]
+        batch_state.process_jobs[recording_key] = job_ids[1 : 1 + plane_count]
+        batch_state.combine_jobs[recording_key] = job_ids[-1]
+
+    # Populates the binarize phase queue (naturally sorted for deterministic order).
+    for recording_key in natsorted(batch_state.tracker_paths.keys()):
+        batch_state.phase_queue.append((recording_key, batch_state.binarize_jobs[recording_key]))
+
+    # Activates the batch state and starts the manager thread.
+    _single_recording_batch_state = batch_state
     manager = Thread(target=_single_recording_batch_manager, daemon=True)
     manager.start()
     _single_recording_batch_state.manager_thread = manager
@@ -468,153 +398,98 @@ def start_batch_processing_tool(
 def get_batch_processing_status_tool() -> dict[str, object]:
     """Returns the current status of single-recording batch processing.
 
-    Reports per-recording progress across all three phases (binarize, process, combine), including active, completed,
-    and failed counts for each phase.
+    Reads ProcessingTracker files for each recording in the batch to report per-recording progress across all three
+    phases (binarize, process, combine), including active, completed, and failed counts.
 
     Returns:
         Contains the 'current_phase', per-recording 'recordings' status list, and a 'summary' with aggregate counts
-        for binarize_completed, process_completed, combine_completed, and failed recordings. Returns empty state when
-        no batch processing has been started.
+        for total, succeeded, failed, and running recordings. Returns empty state when no batch processing has been
+        started.
     """
     if _single_recording_batch_state is None:
         return {
             "current_phase": "none",
             "recordings": [],
-            "summary": {
-                "total": 0,
-                "binarize_completed": 0,
-                "process_completed": 0,
-                "combine_completed": 0,
-                "failed": 0,
-            },
+            "summary": {"total": 0, "succeeded": 0, "failed": 0, "running": 0},
         }
 
     with _single_recording_batch_state.lock:
         recordings_status: list[dict[str, object]] = []
+        total_succeeded = 0
+        total_failed = 0
+        total_running = 0
 
-        for recording_path in _single_recording_batch_state.recordings:
-            recording_key = _get_recording_key(recording_path=recording_path)
-            recording_name = recording_path.name
+        for recording_key in natsorted(_single_recording_batch_state.tracker_paths.keys()):
+            tracker_path = _single_recording_batch_state.tracker_paths[recording_key]
+            tracker = ProcessingTracker(file_path=tracker_path)
 
-            # Determines binarize status.
-            if recording_key in _single_recording_batch_state.binarize_completed:
-                binarize_status = "done"
-            elif recording_key in _single_recording_batch_state.binarize_failed:
-                binarize_status = "failed"
-            elif recording_key in _single_recording_batch_state.binarize_active:
-                binarize_status = "running"
-            elif recording_path in _single_recording_batch_state.binarize_queue:
-                binarize_status = "pending"
+            # Reads binarize job status.
+            binarize_job_id = _single_recording_batch_state.binarize_jobs[recording_key]
+            binarize_status = tracker.get_job_status(job_id=binarize_job_id).name.lower()
+
+            # Reads process job statuses.
+            process_job_ids = _single_recording_batch_state.process_jobs[recording_key]
+            plane_count = len(process_job_ids)
+            process_succeeded = sum(
+                1
+                for job_id in process_job_ids
+                if tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
+            )
+            process_failed = sum(
+                1
+                for job_id in process_job_ids
+                if tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
+            )
+
+            if process_failed:
+                process_status = f"{process_succeeded}/{plane_count} (failed: {process_failed})"
             else:
-                binarize_status = "pending"
+                process_status = f"{process_succeeded}/{plane_count}"
 
-            # Determines process status.
-            plane_count = _single_recording_batch_state.plane_counts.get(recording_key, 0)
-            if plane_count > 0:
-                completed_planes = sum(
-                    1
-                    for plane_index in range(plane_count)
-                    if _get_plane_key(recording_path=recording_path, plane_index=plane_index)
-                    in _single_recording_batch_state.process_completed
-                )
-                failed_planes = sum(
-                    1
-                    for plane_index in range(plane_count)
-                    if _get_plane_key(recording_path=recording_path, plane_index=plane_index)
-                    in _single_recording_batch_state.process_failed
-                )
-                running_planes = sum(
-                    1
-                    for plane_index in range(plane_count)
-                    if _get_plane_key(recording_path=recording_path, plane_index=plane_index)
-                    in _single_recording_batch_state.process_active
-                )
+            # Reads combine job status.
+            combine_job_id = _single_recording_batch_state.combine_jobs[recording_key]
+            combine_status = tracker.get_job_status(job_id=combine_job_id).name.lower()
 
-                if failed_planes > 0:
-                    process_status = f"{completed_planes}/{plane_count} (failed: {failed_planes})"
-                elif running_planes > 0:
-                    process_status = f"{completed_planes}/{plane_count} (running: {running_planes})"
-                else:
-                    process_status = f"{completed_planes}/{plane_count}"
-            else:
-                process_status = "0/0"
-
-            # Determines combine status.
-            if recording_key in _single_recording_batch_state.combine_completed:
-                combine_status = "done"
-            elif recording_key in _single_recording_batch_state.combine_failed:
-                combine_status = "failed"
-            elif recording_key in _single_recording_batch_state.combine_active:
-                combine_status = "running"
-            elif recording_path in _single_recording_batch_state.combine_queue:
-                combine_status = "pending"
-            else:
-                combine_status = "pending"
-
-            # Determines overall status.
-            if recording_key in _single_recording_batch_state.combine_completed:
+            # Synthesizes overall recording status from tracker state.
+            if tracker.complete:
                 overall_status = "SUCCEEDED"
-            elif (
-                recording_key in _single_recording_batch_state.binarize_failed
-                or recording_key in _single_recording_batch_state.combine_failed
-                or any(
-                    _get_plane_key(recording_path=recording_path, plane_index=plane_index)
-                    in _single_recording_batch_state.process_failed
-                    for plane_index in range(plane_count)
-                )
-            ):
+                total_succeeded += 1
+            elif tracker.encountered_error:
                 overall_status = "FAILED"
-            elif (
-                recording_key in _single_recording_batch_state.binarize_active
-                or recording_key in _single_recording_batch_state.combine_active
-                or any(
-                    _get_plane_key(recording_path=recording_path, plane_index=plane_index)
-                    in _single_recording_batch_state.process_active
-                    for plane_index in range(plane_count)
-                )
+                total_failed += 1
+            elif any(
+                job_id in _single_recording_batch_state.active_threads
+                for job_id in [binarize_job_id, *process_job_ids, combine_job_id]
             ):
                 overall_status = "PROCESSING"
+                total_running += 1
             else:
                 overall_status = "QUEUED"
 
             recording_status: dict[str, object] = {
-                "recording_name": recording_name,
+                "recording_name": Path(recording_key).name,
                 "status": overall_status,
                 "binarize": binarize_status,
                 "process": process_status,
                 "combine": combine_status,
             }
 
-            if recording_key in _single_recording_batch_state.errors:
-                recording_status["errors"] = _single_recording_batch_state.errors[recording_key]
+            # Includes error messages from any failed jobs.
+            errors: list[str] = []
+            for job_id in [binarize_job_id, *process_job_ids, combine_job_id]:
+                job_info = tracker.get_job_info(job_id=job_id)
+                if job_info.error_message:
+                    errors.append(f"{job_info.job_name}({job_info.specifier}): {job_info.error_message}")
+            if errors:
+                recording_status["errors"] = errors
 
             recordings_status.append(recording_status)
 
-        # Computes summary.
-        total_failed = len(_single_recording_batch_state.binarize_failed) + len(
-            _single_recording_batch_state.combine_failed
-        )
-        for recording_key in _single_recording_batch_state.binarize_completed:
-            recording_path = Path(recording_key)
-            plane_count = _single_recording_batch_state.plane_counts.get(recording_key, 0)
-            if any(
-                _get_plane_key(recording_path=recording_path, plane_index=plane_index)
-                in _single_recording_batch_state.process_failed
-                for plane_index in range(plane_count)
-            ):
-                total_failed += 1
-
         summary = {
-            "total": len(_single_recording_batch_state.recordings),
-            "binarize_completed": len(_single_recording_batch_state.binarize_completed),
-            "process_completed": len(
-                {
-                    _get_recording_key(recording_path=Path(key.split("|")[0]))
-                    for key in _single_recording_batch_state.process_completed
-                }
-            ),
-            "combine_completed": len(_single_recording_batch_state.combine_completed),
+            "total": len(_single_recording_batch_state.tracker_paths),
+            "succeeded": total_succeeded,
             "failed": total_failed,
+            "running": total_running,
         }
 
         return {
@@ -628,12 +503,12 @@ def get_batch_processing_status_tool() -> dict[str, object]:
 def cancel_batch_processing_tool() -> dict[str, object]:
     """Cancels any running single-recording batch processing.
 
-    Clears all queues to prevent new jobs from starting and resets the batch state. Active jobs will complete
+    Clears all phase queues to prevent new jobs from starting and resets the batch state. Active jobs will complete
     naturally but no new jobs will be dispatched.
 
     Returns:
         Contains a 'canceled' flag, a 'message' describing the outcome, and a 'final_state' with counts for
-        binarize_completed, process_completed, combine_completed, and active_jobs_at_cancel.
+        succeeded_jobs, failed_jobs, and active_jobs_at_cancel.
     """
     global _single_recording_batch_state
 
@@ -641,22 +516,26 @@ def cancel_batch_processing_tool() -> dict[str, object]:
         return {"canceled": False, "message": "No single-recording batch processing is active."}
 
     with _single_recording_batch_state.lock:
-        active_count = (
-            len(_single_recording_batch_state.binarize_active)
-            + len(_single_recording_batch_state.process_active)
-            + len(_single_recording_batch_state.combine_active)
-        )
+        active_count = len(_single_recording_batch_state.active_threads)
 
-        # Clears all queues to prevent new jobs from starting.
-        _single_recording_batch_state.binarize_queue.clear()
-        _single_recording_batch_state.process_queue.clear()
-        _single_recording_batch_state.combine_queue.clear()
+        # Clears the phase queue to prevent new jobs from starting.
+        _single_recording_batch_state.phase_queue.clear()
 
-        # Records final state before reset.
+        # Reads final state from trackers.
+        total_succeeded = 0
+        total_failed = 0
+        for tracker_path in _single_recording_batch_state.tracker_paths.values():
+            tracker = ProcessingTracker(file_path=tracker_path)
+            summary = tracker.get_summary()
+            for status, count in summary.items():
+                if status == ProcessingStatus.SUCCEEDED:
+                    total_succeeded += count
+                elif status == ProcessingStatus.FAILED:
+                    total_failed += count
+
         final_state = {
-            "binarize_completed": len(_single_recording_batch_state.binarize_completed),
-            "process_completed": len(_single_recording_batch_state.process_completed),
-            "combine_completed": len(_single_recording_batch_state.combine_completed),
+            "succeeded_jobs": total_succeeded,
+            "failed_jobs": total_failed,
             "active_jobs_at_cancel": active_count,
         }
 
@@ -681,8 +560,9 @@ def start_multi_recording_batch_processing_tool(
     """Starts batch multi-recording processing for multiple animals.
 
     Manages a two-phase batch workflow: discover (parallel by animal), extract (parallel by recording). Each animal
-    configuration specifies a configuration file and its associated recording paths. Use
-    get_multi_recording_batch_processing_status_tool to monitor progress.
+    configuration specifies a configuration file and its associated recording paths. Initializes ProcessingTracker
+    files per animal and dispatches jobs via background threads. Use get_multi_recording_batch_processing_status_tool
+    to monitor progress.
 
     Args:
         animal_configurations: List of animal configurations, each a dictionary with 'configuration_path' (absolute
@@ -705,9 +585,8 @@ def start_multi_recording_batch_processing_tool(
         }
 
     # Validates animal configurations.
-    valid_animals: list[tuple[Path, list[Path]]] = []
+    valid_animals: list[tuple[str, Path, list[Path]]] = []
     invalid_configurations: list[str] = []
-    animal_keys: list[str] = []
 
     for animal_configuration in animal_configurations:
         if "configuration_path" not in animal_configuration or "recording_paths" not in animal_configuration:
@@ -721,25 +600,27 @@ def start_multi_recording_batch_processing_tool(
             continue
 
         # noinspection PyTypeChecker
-        recording_paths = [Path(path) for path in animal_configuration["recording_paths"]]
-        if len(recording_paths) < _MINIMUM_RECORDING_COUNT:
+        animal_recording_paths = [Path(path) for path in animal_configuration["recording_paths"]]
+        if len(animal_recording_paths) < _MINIMUM_RECORDING_COUNT:
             invalid_configurations.append(f"Need at least 2 recordings: {animal_configuration_path}")
             continue
 
-        invalid_recordings = [str(path) for path in recording_paths if not path.exists() or not path.is_dir()]
+        invalid_recordings = [
+            str(path) for path in animal_recording_paths if not path.exists() or not path.is_dir()
+        ]
         if invalid_recordings:
             invalid_configurations.append(f"Invalid recordings for {animal_configuration_path}: {invalid_recordings}")
             continue
 
-        # Extracts animal key from the configuration file.
+        # Loads configuration to extract the animal key and validate the file format.
         try:
             configuration = MultiRecordingConfiguration.from_yaml(file_path=animal_configuration_path)
-            animal_keys.append(configuration.recording_io.dataset_name)
+            animal_key = configuration.recording_io.dataset_name
         except Exception as error:
             invalid_configurations.append(f"Unable to load configuration {animal_configuration_path}: {error}")
             continue
 
-        valid_animals.append((animal_configuration_path, recording_paths))
+        valid_animals.append((animal_key, animal_configuration_path, animal_recording_paths))
 
     if not valid_animals:
         return {
@@ -750,19 +631,13 @@ def start_multi_recording_batch_processing_tool(
     # Checks if batch processing is already active.
     if _multi_recording_batch_state is not None:
         with _multi_recording_batch_state.lock:
-            active_count = len(_multi_recording_batch_state.discover_active) + len(
-                _multi_recording_batch_state.extract_active
-            )
-            queue_count = len(_multi_recording_batch_state.discover_queue) + len(
-                _multi_recording_batch_state.extract_queue
-            )
-            if active_count > 0 or queue_count > 0:
+            if _multi_recording_batch_state.active_threads or _multi_recording_batch_state.phase_queue:
                 return {
                     "error": (
                         "Unable to start multi-recording batch processing. Batch processing is already in progress."
                     ),
-                    "active_count": active_count,
-                    "queued_count": queue_count,
+                    "active_count": len(_multi_recording_batch_state.active_threads),
+                    "queued_count": len(_multi_recording_batch_state.phase_queue),
                 }
 
     # Calculates resource allocation.
@@ -777,28 +652,63 @@ def start_multi_recording_batch_processing_tool(
     max_parallel_extracts = resolve_parallel_job_capacity(workers_per_job=actual_workers_extract)
 
     # Initializes batch state.
-    _multi_recording_batch_state = _MultiRecordingBatchState(
-        animals=valid_animals,
-        current_phase="discover",
-        discover_queue=list(animal_keys),
+    batch_state = _MultiRecordingBatchState(
         workers_per_discover=actual_workers_discover,
         max_parallel_discovers=max_parallel_discovers,
         workers_per_extract=actual_workers_extract,
         max_parallel_extracts=max_parallel_extracts,
-        progress_bars=progress_bars,
         lock=Lock(),
     )
 
-    # Starts the batch manager thread.
+    total_recordings = 0
+    for animal_key, animal_configuration_path, animal_recording_paths in valid_animals:
+        # Writes recording directories and runtime settings into the configuration file so the pipeline can read them.
+        configuration = MultiRecordingConfiguration.from_yaml(file_path=animal_configuration_path)
+        configuration.recording_io.recording_directories = tuple(natsorted(animal_recording_paths))
+        configuration.runtime.parallel_workers = actual_workers_discover
+        configuration.runtime.display_progress_bars = progress_bars
+        configuration.save(file_path=animal_configuration_path)
+
+        # Resolves contexts to determine recording IDs and the tracker output path.
+        contexts = resolve_multi_recording_contexts(configuration=configuration)
+        recording_ids = [context.runtime.io.recording_id for context in contexts]
+        main_recording_path = contexts[0].runtime.output_path
+
+        if main_recording_path is None:
+            invalid_configurations.append(f"Unable to resolve output path for animal '{animal_key}'.")
+            continue
+
+        # Builds the job list: discover, then extract per recording.
+        jobs: list[tuple[str, str]] = [(MultiRecordingJobNames.DISCOVER, "")]
+        for recording_id in recording_ids:
+            jobs.append((MultiRecordingJobNames.EXTRACT, recording_id))
+
+        # Initializes the ProcessingTracker with all jobs for this animal.
+        tracker_path = main_recording_path / MULTI_RECORDING_TRACKER_NAME
+        tracker = ProcessingTracker(file_path=tracker_path)
+        job_ids = tracker.initialize_jobs(jobs=jobs)
+
+        # Stores per-animal state for orchestration.
+        batch_state.tracker_paths[animal_key] = tracker_path
+        batch_state.configuration_paths[animal_key] = animal_configuration_path
+        batch_state.recording_paths[animal_key] = animal_recording_paths
+        batch_state.discover_jobs[animal_key] = job_ids[0]
+        batch_state.extract_jobs[animal_key] = job_ids[1:]
+        total_recordings += len(recording_ids)
+
+    # Populates the discover phase queue (naturally sorted for deterministic order).
+    for animal_key in natsorted(batch_state.tracker_paths.keys()):
+        batch_state.phase_queue.append((animal_key, batch_state.discover_jobs[animal_key]))
+
+    # Activates the batch state and starts the manager thread.
+    _multi_recording_batch_state = batch_state
     manager = Thread(target=_multi_recording_batch_manager, daemon=True)
     manager.start()
     _multi_recording_batch_state.manager_thread = manager
 
-    total_recordings = sum(len(recordings) for _, recordings in valid_animals)
-
     result: dict[str, object] = {
         "started": True,
-        "total_animals": len(valid_animals),
+        "total_animals": len(batch_state.tracker_paths),
         "total_recordings": total_recordings,
         "workers_per_discover": actual_workers_discover,
         "workers_per_extract": actual_workers_extract,
@@ -817,78 +727,61 @@ def start_multi_recording_batch_processing_tool(
 def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
     """Returns the current status of multi-recording batch processing.
 
-    Reports per-animal progress across both phases (discover, extract), including active, completed, and failed
-    counts for each phase and each animal's recordings.
+    Reads ProcessingTracker files for each animal in the batch to report per-animal progress across both phases
+    (discover, extract), including active, completed, and failed counts.
 
     Returns:
         Contains the 'current_phase', per-animal 'animals' status list, and a 'summary' with aggregate counts for
-        total_animals, discover_completed, extract_completed, extract_total, and failed. Returns empty state when no
-        batch processing has been started.
+        total_animals, succeeded, failed, and running. Returns empty state when no batch processing has been started.
     """
     if _multi_recording_batch_state is None:
         return {
             "current_phase": "none",
             "animals": [],
-            "summary": {
-                "total_animals": 0,
-                "discover_completed": 0,
-                "extract_completed": 0,
-                "extract_total": 0,
-                "failed": 0,
-            },
+            "summary": {"total_animals": 0, "succeeded": 0, "failed": 0, "running": 0},
         }
 
     with _multi_recording_batch_state.lock:
         animals_status: list[dict[str, object]] = []
+        total_succeeded = 0
+        total_failed = 0
+        total_running = 0
 
-        # Builds an ordered list of animal keys from the configuration files.
-        animal_keys_ordered: list[str] = []
-        for animal_configuration_path, _ in _multi_recording_batch_state.animals:
-            try:
-                configuration = MultiRecordingConfiguration.from_yaml(file_path=animal_configuration_path)
-                animal_keys_ordered.append(configuration.recording_io.dataset_name)
-            except Exception:  # noqa: S112
-                continue
+        for animal_key in natsorted(_multi_recording_batch_state.tracker_paths.keys()):
+            tracker_path = _multi_recording_batch_state.tracker_paths[animal_key]
+            tracker = ProcessingTracker(file_path=tracker_path)
 
-        for animal_key in animal_keys_ordered:
-            # Determines discover status.
-            if animal_key in _multi_recording_batch_state.discover_completed:
-                discover_status = "done"
-            elif animal_key in _multi_recording_batch_state.discover_failed:
-                discover_status = "failed"
-            elif animal_key in _multi_recording_batch_state.discover_active:
-                discover_status = "running"
-            elif animal_key in _multi_recording_batch_state.discover_queue:
-                discover_status = "pending"
-            else:
-                discover_status = "pending"
+            # Reads discover job status.
+            discover_job_id = _multi_recording_batch_state.discover_jobs[animal_key]
+            discover_status = tracker.get_job_status(job_id=discover_job_id).name.lower()
 
-            # Determines extract progress.
-            recording_ids = _multi_recording_batch_state.recording_ids.get(animal_key, [])
-            extract_total = len(recording_ids)
-            extract_completed = sum(
+            # Reads extract job statuses.
+            extract_job_ids = _multi_recording_batch_state.extract_jobs[animal_key]
+            extract_total = len(extract_job_ids)
+            extract_succeeded = sum(
                 1
-                for recording_id in recording_ids
-                if f"{animal_key}|{recording_id}" in _multi_recording_batch_state.extract_completed
+                for job_id in extract_job_ids
+                if tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
             )
             extract_failed = sum(
                 1
-                for recording_id in recording_ids
-                if f"{animal_key}|{recording_id}" in _multi_recording_batch_state.extract_failed
+                for job_id in extract_job_ids
+                if tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
             )
 
-            # Determines overall status.
-            if animal_key in _multi_recording_batch_state.discover_failed:
-                overall_status = "FAILED"
-            elif extract_failed > 0:
-                overall_status = "PARTIAL"
-            elif extract_completed == extract_total and extract_total > 0:
+            # Synthesizes overall animal status from tracker state.
+            if tracker.complete:
                 overall_status = "SUCCEEDED"
-            elif animal_key in _multi_recording_batch_state.discover_active or any(
-                f"{animal_key}|{recording_id}" in _multi_recording_batch_state.extract_active
-                for recording_id in recording_ids
+                total_succeeded += 1
+            elif tracker.encountered_error:
+                overall_status = "FAILED"
+                total_failed += 1
+            elif any(
+                job_id in _multi_recording_batch_state.active_threads
+                for job_id in [discover_job_id, *extract_job_ids]
             ):
                 overall_status = "PROCESSING"
+                total_running += 1
             else:
                 overall_status = "QUEUED"
 
@@ -896,28 +789,27 @@ def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
                 "animal_key": animal_key,
                 "status": overall_status,
                 "discover": discover_status,
-                "extract_completed": extract_completed,
+                "extract_completed": extract_succeeded,
+                "extract_failed": extract_failed,
                 "extract_total": extract_total,
             }
 
-            if animal_key in _multi_recording_batch_state.errors:
-                animal_status["errors"] = _multi_recording_batch_state.errors[animal_key]
+            # Includes error messages from any failed jobs.
+            errors: list[str] = []
+            for job_id in [discover_job_id, *extract_job_ids]:
+                job_info = tracker.get_job_info(job_id=job_id)
+                if job_info.error_message:
+                    errors.append(f"{job_info.job_name}({job_info.specifier}): {job_info.error_message}")
+            if errors:
+                animal_status["errors"] = errors
 
             animals_status.append(animal_status)
 
-        # Computes summary.
-        total_extract_completed = len(_multi_recording_batch_state.extract_completed)
-        total_extract_total = sum(len(ids) for ids in _multi_recording_batch_state.recording_ids.values())
-        total_failed = len(_multi_recording_batch_state.discover_failed) + len(
-            _multi_recording_batch_state.extract_failed
-        )
-
         summary = {
-            "total_animals": len(_multi_recording_batch_state.animals),
-            "discover_completed": len(_multi_recording_batch_state.discover_completed),
-            "extract_completed": total_extract_completed,
-            "extract_total": total_extract_total,
+            "total_animals": len(_multi_recording_batch_state.tracker_paths),
+            "succeeded": total_succeeded,
             "failed": total_failed,
+            "running": total_running,
         }
 
         return {
@@ -931,12 +823,12 @@ def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
 def cancel_multi_recording_batch_processing_tool() -> dict[str, object]:
     """Cancels any running multi-recording batch processing.
 
-    Clears all queues to prevent new jobs from starting and resets the batch state. Active jobs will complete
+    Clears all phase queues to prevent new jobs from starting and resets the batch state. Active jobs will complete
     naturally but no new jobs will be dispatched.
 
     Returns:
         Contains a 'canceled' flag, a 'message' describing the outcome, and a 'final_state' with counts for
-        discover_completed, extract_completed, and active_jobs_at_cancel.
+        succeeded_jobs, failed_jobs, and active_jobs_at_cancel.
     """
     global _multi_recording_batch_state
 
@@ -944,18 +836,26 @@ def cancel_multi_recording_batch_processing_tool() -> dict[str, object]:
         return {"canceled": False, "message": "No multi-recording batch processing is active."}
 
     with _multi_recording_batch_state.lock:
-        active_count = len(_multi_recording_batch_state.discover_active) + len(
-            _multi_recording_batch_state.extract_active
-        )
+        active_count = len(_multi_recording_batch_state.active_threads)
 
-        # Clears all queues to prevent new jobs from starting.
-        _multi_recording_batch_state.discover_queue.clear()
-        _multi_recording_batch_state.extract_queue.clear()
+        # Clears the phase queue to prevent new jobs from starting.
+        _multi_recording_batch_state.phase_queue.clear()
 
-        # Records final state before reset.
+        # Reads final state from trackers.
+        total_succeeded = 0
+        total_failed = 0
+        for tracker_path in _multi_recording_batch_state.tracker_paths.values():
+            tracker = ProcessingTracker(file_path=tracker_path)
+            summary = tracker.get_summary()
+            for status, count in summary.items():
+                if status == ProcessingStatus.SUCCEEDED:
+                    total_succeeded += count
+                elif status == ProcessingStatus.FAILED:
+                    total_failed += count
+
         final_state = {
-            "discover_completed": len(_multi_recording_batch_state.discover_completed),
-            "extract_completed": len(_multi_recording_batch_state.extract_completed),
+            "succeeded_jobs": total_succeeded,
+            "failed_jobs": total_failed,
             "active_jobs_at_cancel": active_count,
         }
 
@@ -969,225 +869,36 @@ def cancel_multi_recording_batch_processing_tool() -> dict[str, object]:
     }
 
 
-def _get_recording_key(recording_path: Path) -> str:
-    """Generates a unique string key for identifying a recording path in batch state tracking.
+def _pipeline_worker(configuration_path: Path, job_id: str, *, single_recording: bool = True) -> None:
+    """Executes a single pipeline job identified by its job ID.
+
+    Calls the appropriate pipeline function in REMOTE mode, passing the job_id so the pipeline reads the job definition
+    from the ProcessingTracker and updates tracker state on completion or failure. The pipeline handles all tracker
+    state transitions (start_job, complete_job, fail_job) internally.
 
     Args:
-        recording_path: The path to the recording directory.
-
-    Returns:
-        A string key derived from the recording path.
-    """
-    return str(recording_path)
-
-
-def _get_plane_key(recording_path: Path, plane_index: int) -> str:
-    """Generates a unique string key for identifying a recording-plane combination in batch state tracking.
-
-    Args:
-        recording_path: The path to the recording directory.
-        plane_index: The zero-based plane index.
-
-    Returns:
-        A compound string key combining the recording path and plane index.
-    """
-    return f"{recording_path}|plane_{plane_index}"
-
-
-def _run_binarize_job(configuration_path: Path) -> tuple[bool, int, str | None]:
-    """Runs the binarize phase for a single recording and discovers the plane count from the output.
-
-    Args:
-        configuration_path: The path to the recording's configuration file.
-
-    Returns:
-        A tuple containing the success status, the plane count (0 if failed), and an error message if failed.
+        configuration_path: The path to the recording or animal configuration file.
+        job_id: The unique hexadecimal job identifier registered in the ProcessingTracker.
+        single_recording: Determines whether to call the single-recording or multi-recording pipeline.
     """
     try:
-        run_single_recording_pipeline(
-            configuration_path=configuration_path,
-            binarize=True,
-            process=False,
-            combine=False,
-        )
-
-        # Loads the configuration to find the output path, then counts planes via RuntimeContext.
-        configuration = SingleRecordingConfiguration.from_yaml(file_path=configuration_path)
-        effective_output_path = (
-            configuration.file_io.output_path
-            if configuration.file_io.output_path is not None
-            else configuration.file_io.data_path
-        )
-        if effective_output_path is None:
-            return False, 0, "Configuration error: neither file_io.output_path nor file_io.data_path is set."
-        root_path = effective_output_path / "cindra"
-        contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
-        if not isinstance(contexts, list):
-            contexts = [contexts]
-        plane_count = len(contexts)
-
-    except Exception as error:
-        frames = traceback.extract_tb(error.__traceback__)
-        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
-        return False, 0, f"{type(error).__name__}: {error} ({location})"
-
-    else:
-        return True, plane_count, None
-
-
-def _run_process_job(configuration_path: Path, plane_index: int) -> tuple[bool, str | None]:
-    """Runs the process phase for a single plane within a recording.
-
-    Args:
-        configuration_path: The path to the recording's configuration file.
-        plane_index: The zero-based plane index to process.
-
-    Returns:
-        A tuple containing the success status and an error message if failed.
-    """
-    try:
-        run_single_recording_pipeline(
-            configuration_path=configuration_path,
-            binarize=False,
-            process=True,
-            combine=False,
-            target_plane=plane_index,
-        )
-
-    except Exception as error:
-        frames = traceback.extract_tb(error.__traceback__)
-        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
-        return False, f"{type(error).__name__}: {error} ({location})"
-
-    else:
-        return True, None
-
-
-def _run_combine_job(configuration_path: Path) -> tuple[bool, str | None]:
-    """Runs the combine phase for a single recording, merging all processed plane outputs.
-
-    Args:
-        configuration_path: The path to the recording's configuration file.
-
-    Returns:
-        A tuple containing the success status and an error message if failed.
-    """
-    try:
-        run_single_recording_pipeline(
-            configuration_path=configuration_path,
-            binarize=False,
-            process=False,
-            combine=True,
-        )
-
-    except Exception as error:
-        frames = traceback.extract_tb(error.__traceback__)
-        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
-        return False, f"{type(error).__name__}: {error} ({location})"
-
-    else:
-        return True, None
-
-
-def _binarize_worker(recording_path: Path, configuration_path: Path) -> None:
-    """Runs binarization for one recording and updates the single-recording batch state upon completion.
-
-    Args:
-        recording_path: The path to the recording directory.
-        configuration_path: The path to the recording's configuration file.
-    """
-    recording_key = _get_recording_key(recording_path=recording_path)
-    success: bool = False
-    plane_count: int = 0
-    error: str | None = None
-
-    try:
-        success, plane_count, error = _run_binarize_job(configuration_path=configuration_path)
-    except Exception as exception:
-        frames = traceback.extract_tb(exception.__traceback__)
-        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
-        success, plane_count, error = (False, 0, f"Worker crash: {type(exception).__name__}: {exception} ({location})")
-    finally:
-        if _single_recording_batch_state is not None:
-            with _single_recording_batch_state.lock:
-                _single_recording_batch_state.binarize_active.pop(recording_key, None)
-                if success:
-                    _single_recording_batch_state.binarize_completed.add(recording_key)
-                    _single_recording_batch_state.plane_counts[recording_key] = plane_count
-                else:
-                    _single_recording_batch_state.binarize_failed.add(recording_key)
-                    if error:
-                        _single_recording_batch_state.errors.setdefault(recording_key, []).append(f"binarize: {error}")
-
-
-def _process_worker(recording_path: Path, configuration_path: Path, plane_index: int) -> None:
-    """Runs processing for one plane and updates the single-recording batch state upon completion.
-
-    Args:
-        recording_path: The path to the recording directory.
-        configuration_path: The path to the recording's configuration file.
-        plane_index: The zero-based plane index to process.
-    """
-    recording_key = _get_recording_key(recording_path=recording_path)
-    plane_key = _get_plane_key(recording_path=recording_path, plane_index=plane_index)
-    success: bool = False
-    error: str | None = None
-
-    try:
-        success, error = _run_process_job(configuration_path=configuration_path, plane_index=plane_index)
-    except Exception as exception:
-        frames = traceback.extract_tb(exception.__traceback__)
-        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
-        success, error = False, f"Worker crash: {type(exception).__name__}: {exception} ({location})"
-    finally:
-        if _single_recording_batch_state is not None:
-            with _single_recording_batch_state.lock:
-                _single_recording_batch_state.process_active.pop(plane_key, None)
-                if success:
-                    _single_recording_batch_state.process_completed.add(plane_key)
-                else:
-                    _single_recording_batch_state.process_failed.add(plane_key)
-                    if error:
-                        _single_recording_batch_state.errors.setdefault(recording_key, []).append(
-                            f"process_plane_{plane_index}: {error}"
-                        )
-
-
-def _combine_worker(recording_path: Path, configuration_path: Path) -> None:
-    """Runs combination for one recording and updates the single-recording batch state upon completion.
-
-    Args:
-        recording_path: The path to the recording directory.
-        configuration_path: The path to the recording's configuration file.
-    """
-    recording_key = _get_recording_key(recording_path=recording_path)
-    success: bool = False
-    error: str | None = None
-
-    try:
-        success, error = _run_combine_job(configuration_path=configuration_path)
-    except Exception as exception:
-        frames = traceback.extract_tb(exception.__traceback__)
-        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
-        success, error = False, f"Worker crash: {type(exception).__name__}: {exception} ({location})"
-    finally:
-        if _single_recording_batch_state is not None:
-            with _single_recording_batch_state.lock:
-                _single_recording_batch_state.combine_active.pop(recording_key, None)
-                if success:
-                    _single_recording_batch_state.combine_completed.add(recording_key)
-                else:
-                    _single_recording_batch_state.combine_failed.add(recording_key)
-                    if error:
-                        _single_recording_batch_state.errors.setdefault(recording_key, []).append(f"combine: {error}")
+        if single_recording:
+            run_single_recording_pipeline(configuration_path=configuration_path, job_id=job_id)
+        else:
+            run_multi_recording_pipeline(configuration_path=configuration_path, job_id=job_id)
+    except Exception:
+        # The pipeline already called tracker.fail_job() before re-raising. The exception is caught here to prevent
+        # the daemon thread from propagating it, since the tracker records the failure state persistently.
+        pass
 
 
 def _single_recording_batch_manager() -> None:
     """Orchestrates three-phase single-recording batch processing: binarize, process, combine.
 
     Runs as a daemon thread, polling at 1-second intervals to dispatch new jobs and advance between phases.
-    Binarize and combine phases run sequentially (I/O bound), while the process phase runs jobs in parallel
-    up to the configured max_parallel_planes limit.
+    Binarize and combine phases run up to 3 concurrent jobs (I/O bound), while the process phase runs jobs in parallel
+    up to the configured max_parallel_planes limit. Job state is tracked via ProcessingTracker files; this
+    manager only handles thread orchestration and phase transitions.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
@@ -1196,363 +907,341 @@ def _single_recording_batch_manager() -> None:
 
     while True:
         with _single_recording_batch_state.lock:
-            # Phase 1: BINARIZE.
+            # Cleans up completed threads.
+            completed_job_ids = [
+                completed_job_id
+                for completed_job_id, thread in _single_recording_batch_state.active_threads.items()
+                if not thread.is_alive()
+            ]
+            for completed_job_id in completed_job_ids:
+                _single_recording_batch_state.active_threads.pop(completed_job_id, None)
+
+            # Phase 1: BINARIZE (parallel — up to _MAXIMUM_PARALLEL_BINARIZE concurrent jobs).
             if _single_recording_batch_state.current_phase == "binarize":
-                # Starts new binarize jobs (sequential - I/O bound).
-                if not _single_recording_batch_state.binarize_active and _single_recording_batch_state.binarize_queue:
-                    next_recording = _single_recording_batch_state.binarize_queue.pop(0)
-                    recording_key = _get_recording_key(recording_path=next_recording)
-                    recording_configuration = _single_recording_batch_state.recording_configuration_paths[recording_key]
-
-                    thread = Thread(
-                        target=_binarize_worker,
-                        kwargs={"recording_path": next_recording, "configuration_path": recording_configuration},
-                        daemon=True,
-                    )
-                    thread.start()
-                    _single_recording_batch_state.binarize_active[recording_key] = thread
-
-                # Checks if binarize phase is complete.
-                if (
-                    not _single_recording_batch_state.binarize_active
-                    and not _single_recording_batch_state.binarize_queue
-                ):
-                    # Builds process queue from completed binarizations (naturally sorted for deterministic order).
-                    for recording_key in natsorted(_single_recording_batch_state.binarize_completed):
-                        plane_count = _single_recording_batch_state.plane_counts.get(recording_key, 0)
-                        for plane in range(plane_count):
-                            _single_recording_batch_state.process_queue.append((recording_key, plane))
-
-                    _single_recording_batch_state.current_phase = "process"
-
-            # Phase 2: PROCESS.
-            elif _single_recording_batch_state.current_phase == "process":
-                # Starts new process jobs (parallel - CPU bound).
                 while (
-                    len(_single_recording_batch_state.process_active)
-                    < _single_recording_batch_state.max_parallel_planes
-                    and _single_recording_batch_state.process_queue
+                    len(_single_recording_batch_state.active_threads) < _MAXIMUM_PARALLEL_BINARIZE
+                    and _single_recording_batch_state.phase_queue
                 ):
-                    recording_key, plane_index = _single_recording_batch_state.process_queue.pop(0)
-                    recording_path = Path(recording_key)
-                    plane_key = _get_plane_key(recording_path=recording_path, plane_index=plane_index)
-                    recording_configuration = _single_recording_batch_state.recording_configuration_paths[recording_key]
-
+                    recording_key, job_id = _single_recording_batch_state.phase_queue.pop(0)
                     thread = Thread(
-                        target=_process_worker,
+                        target=_pipeline_worker,
                         kwargs={
-                            "recording_path": recording_path,
-                            "configuration_path": recording_configuration,
-                            "plane_index": plane_index,
+                            "configuration_path": _single_recording_batch_state.configuration_paths[recording_key],
+                            "job_id": job_id,
+                            "single_recording": True,
                         },
                         daemon=True,
                     )
                     thread.start()
-                    _single_recording_batch_state.process_active[plane_key] = thread
+                    _single_recording_batch_state.active_threads[job_id] = thread
 
-                # Checks if process phase is complete.
-                if not _single_recording_batch_state.process_active and not _single_recording_batch_state.process_queue:
-                    # Builds combine queue from recordings with all planes processed (naturally sorted).
-                    for recording_key in natsorted(_single_recording_batch_state.binarize_completed):
-                        plane_count = _single_recording_batch_state.plane_counts.get(recording_key, 0)
-                        all_planes_done = all(
-                            _get_plane_key(recording_path=Path(recording_key), plane_index=plane_index)
-                            in _single_recording_batch_state.process_completed
-                            for plane_index in range(plane_count)
+                # Transitions to process phase when all binarize jobs have been dispatched and completed.
+                if not _single_recording_batch_state.active_threads and not _single_recording_batch_state.phase_queue:
+                    # Builds process queue from recordings whose binarize job succeeded.
+                    for recording_key in natsorted(_single_recording_batch_state.tracker_paths.keys()):
+                        tracker = ProcessingTracker(
+                            file_path=_single_recording_batch_state.tracker_paths[recording_key]
                         )
-                        any_plane_failed = any(
-                            _get_plane_key(recording_path=Path(recording_key), plane_index=plane_index)
-                            in _single_recording_batch_state.process_failed
-                            for plane_index in range(plane_count)
+                        binarize_status = tracker.get_job_status(
+                            job_id=_single_recording_batch_state.binarize_jobs[recording_key]
                         )
+                        if binarize_status == ProcessingStatus.SUCCEEDED:
+                            for process_job_id in _single_recording_batch_state.process_jobs[recording_key]:
+                                _single_recording_batch_state.phase_queue.append((recording_key, process_job_id))
 
-                        if all_planes_done and not any_plane_failed:
-                            _single_recording_batch_state.combine_queue.append(Path(recording_key))
+                    _single_recording_batch_state.current_phase = "process"
 
-                    _single_recording_batch_state.current_phase = "combine"
-
-            # Phase 3: COMBINE.
-            elif _single_recording_batch_state.current_phase == "combine":
-                # Starts new combine jobs (sequential - I/O bound).
-                if not _single_recording_batch_state.combine_active and _single_recording_batch_state.combine_queue:
-                    next_recording = _single_recording_batch_state.combine_queue.pop(0)
-                    recording_key = _get_recording_key(recording_path=next_recording)
-                    recording_configuration = _single_recording_batch_state.recording_configuration_paths[recording_key]
-
+            # Phase 2: PROCESS (parallel — up to max_parallel_planes concurrent jobs).
+            elif _single_recording_batch_state.current_phase == "process":
+                while (
+                    len(_single_recording_batch_state.active_threads)
+                    < _single_recording_batch_state.max_parallel_planes
+                    and _single_recording_batch_state.phase_queue
+                ):
+                    recording_key, job_id = _single_recording_batch_state.phase_queue.pop(0)
                     thread = Thread(
-                        target=_combine_worker,
-                        kwargs={"recording_path": next_recording, "configuration_path": recording_configuration},
+                        target=_pipeline_worker,
+                        kwargs={
+                            "configuration_path": _single_recording_batch_state.configuration_paths[recording_key],
+                            "job_id": job_id,
+                            "single_recording": True,
+                        },
                         daemon=True,
                     )
                     thread.start()
-                    _single_recording_batch_state.combine_active[recording_key] = thread
+                    _single_recording_batch_state.active_threads[job_id] = thread
 
-                # Checks if all processing is complete.
-                if not _single_recording_batch_state.combine_active and not _single_recording_batch_state.combine_queue:
+                # Transitions to combine phase when all process jobs have been dispatched and completed.
+                if not _single_recording_batch_state.active_threads and not _single_recording_batch_state.phase_queue:
+                    # Builds combine queue from recordings whose process jobs succeeded.
+                    for recording_key in natsorted(_single_recording_batch_state.tracker_paths.keys()):
+                        tracker = ProcessingTracker(
+                            file_path=_single_recording_batch_state.tracker_paths[recording_key]
+                        )
+                        process_job_ids = _single_recording_batch_state.process_jobs[recording_key]
+                        all_succeeded = all(
+                            tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
+                            for job_id in process_job_ids
+                        )
+                        if all_succeeded:
+                            _single_recording_batch_state.phase_queue.append(
+                                (recording_key, _single_recording_batch_state.combine_jobs[recording_key])
+                            )
+
+                    _single_recording_batch_state.current_phase = "combine"
+
+            # Phase 3: COMBINE (parallel — up to _MAXIMUM_PARALLEL_BINARIZE concurrent jobs, I/O bound).
+            elif _single_recording_batch_state.current_phase == "combine":
+                while (
+                    len(_single_recording_batch_state.active_threads) < _MAXIMUM_PARALLEL_BINARIZE
+                    and _single_recording_batch_state.phase_queue
+                ):
+                    recording_key, job_id = _single_recording_batch_state.phase_queue.pop(0)
+                    thread = Thread(
+                        target=_pipeline_worker,
+                        kwargs={
+                            "configuration_path": _single_recording_batch_state.configuration_paths[recording_key],
+                            "job_id": job_id,
+                            "single_recording": True,
+                        },
+                        daemon=True,
+                    )
+                    thread.start()
+                    _single_recording_batch_state.active_threads[job_id] = thread
+
+                # Exits when all combine jobs have been dispatched and completed.
+                if not _single_recording_batch_state.active_threads and not _single_recording_batch_state.phase_queue:
                     break
 
-        # Sleeps briefly before checking again.
+        # Polls at 1-second intervals before checking again.
         timer.delay(delay=1000, allow_sleep=True)
-
-
-def _run_discover_job(
-    configuration_path: Path, recording_paths: list[Path], workers: int, progress_bars: bool = False
-) -> tuple[bool, list[str], str | None]:
-    """Runs the discover phase for a single animal, writing recording directories and runtime settings into the
-    configuration file before executing the pipeline.
-
-    Args:
-        configuration_path: The path to the multi-recording configuration file.
-        recording_paths: The list of recording paths for this animal.
-        workers: The number of parallel workers to use.
-        progress_bars: Determines whether to display progress bars during processing.
-
-    Returns:
-        A tuple containing the success status, the list of discovered recording IDs, and an error message if failed.
-    """
-    try:
-        # Writes recording directories and runtime settings into the configuration file before running the pipeline.
-        configuration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
-        configuration.recording_io.recording_directories = tuple(natsorted(recording_paths))
-        configuration.runtime.parallel_workers = workers
-        configuration.runtime.display_progress_bars = progress_bars
-        configuration.save(file_path=configuration_path)
-
-        run_multi_recording_pipeline(
-            configuration_path=configuration_path,
-            discover=True,
-            extract=False,
-        )
-
-        # Reloads the configuration and resolves contexts to extract recording IDs.
-        configuration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
-        contexts = resolve_multi_recording_contexts(configuration=configuration)
-        recording_ids = [context.runtime.io.recording_id for context in contexts]
-
-    except Exception as error:
-        frames = traceback.extract_tb(error.__traceback__)
-        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
-        return False, [], f"{type(error).__name__}: {error} ({location})"
-
-    else:
-        return True, recording_ids, None
-
-
-def _run_extract_job(
-    configuration_path: Path, recording_paths: list[Path], recording_id: str, workers: int, progress_bars: bool = False
-) -> tuple[bool, str | None]:
-    """Runs the extract phase for a single recording within a multi-recording dataset.
-
-    Args:
-        configuration_path: The path to the multi-recording configuration file.
-        recording_paths: The list of recording paths for this animal.
-        recording_id: The recording ID to extract fluorescence from.
-        workers: The number of parallel workers to use.
-        progress_bars: Determines whether to display progress bars during processing.
-
-    Returns:
-        A tuple containing the success status and an error message if failed.
-    """
-    try:
-        # Writes recording directories and runtime settings into the configuration file before running the pipeline.
-        configuration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
-        configuration.recording_io.recording_directories = tuple(natsorted(recording_paths))
-        configuration.runtime.parallel_workers = workers
-        configuration.runtime.display_progress_bars = progress_bars
-        configuration.save(file_path=configuration_path)
-
-        run_multi_recording_pipeline(
-            configuration_path=configuration_path,
-            discover=False,
-            extract=True,
-            target_recording=recording_id,
-        )
-
-    except Exception as error:
-        frames = traceback.extract_tb(error.__traceback__)
-        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
-        return False, f"{type(error).__name__}: {error} ({location})"
-
-    else:
-        return True, None
-
-
-def _discover_worker(
-    animal_key: str, configuration_path: Path, recording_paths: list[Path], workers: int, progress_bars: bool = False
-) -> None:
-    """Runs discovery for one animal and updates the multi-recording batch state upon completion.
-
-    Args:
-        animal_key: The unique dataset name key for this animal.
-        configuration_path: The path to the multi-recording configuration file.
-        recording_paths: The list of recording paths for this animal.
-        workers: The number of parallel workers to use.
-        progress_bars: Determines whether to display progress bars during processing.
-    """
-    success: bool = False
-    recording_ids: list[str] = []
-    error: str | None = None
-
-    try:
-        success, recording_ids, error = _run_discover_job(
-            configuration_path=configuration_path,
-            recording_paths=recording_paths,
-            workers=workers,
-            progress_bars=progress_bars,
-        )
-    except Exception as exception:
-        frames = traceback.extract_tb(exception.__traceback__)
-        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
-        success, recording_ids, error = (
-            False,
-            [],
-            f"Worker crash: {type(exception).__name__}: {exception} ({location})",
-        )
-    finally:
-        if _multi_recording_batch_state is not None:
-            with _multi_recording_batch_state.lock:
-                _multi_recording_batch_state.discover_active.pop(animal_key, None)
-                if success:
-                    _multi_recording_batch_state.discover_completed.add(animal_key)
-                    _multi_recording_batch_state.recording_ids[animal_key] = recording_ids
-                else:
-                    _multi_recording_batch_state.discover_failed.add(animal_key)
-                    if error:
-                        _multi_recording_batch_state.errors.setdefault(animal_key, []).append(f"discover: {error}")
-
-
-def _extract_worker(
-    animal_key: str,
-    configuration_path: Path,
-    recording_paths: list[Path],
-    recording_id: str,
-    workers: int,
-    progress_bars: bool = False,
-) -> None:
-    """Runs extraction for one recording and updates the multi-recording batch state upon completion.
-
-    Args:
-        animal_key: The unique dataset name key for this animal.
-        configuration_path: The path to the multi-recording configuration file.
-        recording_paths: The list of recording paths for this animal.
-        recording_id: The recording ID to extract fluorescence from.
-        workers: The number of parallel workers to use.
-        progress_bars: Determines whether to display progress bars during processing.
-    """
-    extract_key = f"{animal_key}|{recording_id}"
-    success: bool = False
-    error: str | None = None
-
-    try:
-        success, error = _run_extract_job(
-            configuration_path=configuration_path,
-            recording_paths=recording_paths,
-            recording_id=recording_id,
-            workers=workers,
-            progress_bars=progress_bars,
-        )
-    except Exception as exception:
-        frames = traceback.extract_tb(exception.__traceback__)
-        location = f"{frames[-1].filename}:{frames[-1].lineno}" if frames else "unknown"
-        success, error = False, f"Worker crash: {type(exception).__name__}: {exception} ({location})"
-    finally:
-        if _multi_recording_batch_state is not None:
-            with _multi_recording_batch_state.lock:
-                _multi_recording_batch_state.extract_active.pop(extract_key, None)
-                if success:
-                    _multi_recording_batch_state.extract_completed.add(extract_key)
-                else:
-                    _multi_recording_batch_state.extract_failed.add(extract_key)
-                    if error:
-                        _multi_recording_batch_state.errors.setdefault(animal_key, []).append(
-                            f"extract_{recording_id}: {error}"
-                        )
 
 
 def _multi_recording_batch_manager() -> None:
     """Orchestrates two-phase multi-recording batch processing: discover, extract.
 
     Runs as a daemon thread, polling at 1-second intervals to dispatch new jobs and advance between phases.
-    Both discover and extract phases support parallel execution up to their respective configured limits.
+    Both discover and extract phases support parallel execution up to their respective configured limits. Job state
+    is tracked via ProcessingTracker files; this manager only handles thread orchestration and phase transitions.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
     if _multi_recording_batch_state is None:
         return
 
-    # Builds animal key to configuration and recordings mapping.
-    animal_configurations: dict[str, tuple[Path, list[Path]]] = {}
-    for animal_configuration_path, recording_paths in _multi_recording_batch_state.animals:
-        configuration = MultiRecordingConfiguration.from_yaml(file_path=animal_configuration_path)
-        animal_key = configuration.recording_io.dataset_name
-        animal_configurations[animal_key] = (animal_configuration_path, recording_paths)
-
     while True:
         with _multi_recording_batch_state.lock:
-            # Phase 1: DISCOVER.
-            if _multi_recording_batch_state.current_phase == "discover":
-                # Starts new discover jobs.
-                while (
-                    len(_multi_recording_batch_state.discover_active)
-                    < _multi_recording_batch_state.max_parallel_discovers
-                    and _multi_recording_batch_state.discover_queue
-                ):
-                    animal_key = _multi_recording_batch_state.discover_queue.pop(0)
-                    animal_configuration_path, recording_paths = animal_configurations[animal_key]
+            # Cleans up completed threads.
+            completed_job_ids = [
+                completed_job_id
+                for completed_job_id, thread in _multi_recording_batch_state.active_threads.items()
+                if not thread.is_alive()
+            ]
+            for completed_job_id in completed_job_ids:
+                _multi_recording_batch_state.active_threads.pop(completed_job_id, None)
 
+            # Phase 1: DISCOVER (parallel — up to max_parallel_discovers concurrent jobs).
+            if _multi_recording_batch_state.current_phase == "discover":
+                while (
+                    len(_multi_recording_batch_state.active_threads)
+                    < _multi_recording_batch_state.max_parallel_discovers
+                    and _multi_recording_batch_state.phase_queue
+                ):
+                    animal_key, job_id = _multi_recording_batch_state.phase_queue.pop(0)
                     thread = Thread(
-                        target=_discover_worker,
+                        target=_pipeline_worker,
                         kwargs={
-                            "animal_key": animal_key,
-                            "configuration_path": animal_configuration_path,
-                            "recording_paths": recording_paths,
-                            "workers": _multi_recording_batch_state.workers_per_discover,
-                            "progress_bars": _multi_recording_batch_state.progress_bars,
+                            "configuration_path": _multi_recording_batch_state.configuration_paths[animal_key],
+                            "job_id": job_id,
+                            "single_recording": False,
                         },
                         daemon=True,
                     )
                     thread.start()
-                    _multi_recording_batch_state.discover_active[animal_key] = thread
+                    _multi_recording_batch_state.active_threads[job_id] = thread
 
-                # Checks if discover phase is complete.
-                if not _multi_recording_batch_state.discover_active and not _multi_recording_batch_state.discover_queue:
-                    # Builds extract queue from completed discoveries (naturally sorted for deterministic order).
-                    for animal_key in natsorted(_multi_recording_batch_state.discover_completed):
-                        for recording_id in natsorted(_multi_recording_batch_state.recording_ids.get(animal_key, [])):
-                            _multi_recording_batch_state.extract_queue.append((animal_key, recording_id))
+                # Transitions to extract phase when all discover jobs have been dispatched and completed.
+                if not _multi_recording_batch_state.active_threads and not _multi_recording_batch_state.phase_queue:
+                    # Builds extract queue from animals whose discover job succeeded.
+                    for animal_key in natsorted(_multi_recording_batch_state.tracker_paths.keys()):
+                        tracker = ProcessingTracker(
+                            file_path=_multi_recording_batch_state.tracker_paths[animal_key]
+                        )
+                        discover_status = tracker.get_job_status(
+                            job_id=_multi_recording_batch_state.discover_jobs[animal_key]
+                        )
+                        if discover_status == ProcessingStatus.SUCCEEDED:
+                            for extract_job_id in _multi_recording_batch_state.extract_jobs[animal_key]:
+                                _multi_recording_batch_state.phase_queue.append((animal_key, extract_job_id))
 
                     _multi_recording_batch_state.current_phase = "extract"
 
-            # Phase 2: EXTRACT.
+            # Phase 2: EXTRACT (parallel — up to max_parallel_extracts concurrent jobs).
             elif _multi_recording_batch_state.current_phase == "extract":
-                # Starts new extract jobs.
                 while (
-                    len(_multi_recording_batch_state.extract_active)
+                    len(_multi_recording_batch_state.active_threads)
                     < _multi_recording_batch_state.max_parallel_extracts
-                    and _multi_recording_batch_state.extract_queue
+                    and _multi_recording_batch_state.phase_queue
                 ):
-                    animal_key, recording_id = _multi_recording_batch_state.extract_queue.pop(0)
-                    extract_key = f"{animal_key}|{recording_id}"
-                    animal_configuration_path, recording_paths = animal_configurations[animal_key]
-
+                    animal_key, job_id = _multi_recording_batch_state.phase_queue.pop(0)
                     thread = Thread(
-                        target=_extract_worker,
+                        target=_pipeline_worker,
                         kwargs={
-                            "animal_key": animal_key,
-                            "configuration_path": animal_configuration_path,
-                            "recording_paths": recording_paths,
-                            "recording_id": recording_id,
-                            "workers": _multi_recording_batch_state.workers_per_extract,
-                            "progress_bars": _multi_recording_batch_state.progress_bars,
+                            "configuration_path": _multi_recording_batch_state.configuration_paths[animal_key],
+                            "job_id": job_id,
+                            "single_recording": False,
                         },
                         daemon=True,
                     )
                     thread.start()
-                    _multi_recording_batch_state.extract_active[extract_key] = thread
+                    _multi_recording_batch_state.active_threads[job_id] = thread
 
-                # Checks if all processing is complete.
-                if not _multi_recording_batch_state.extract_active and not _multi_recording_batch_state.extract_queue:
+                # Exits when all extract jobs have been dispatched and completed.
+                if not _multi_recording_batch_state.active_threads and not _multi_recording_batch_state.phase_queue:
                     break
 
-        # Sleeps briefly before checking again.
+        # Polls at 1-second intervals before checking again.
         timer.delay(delay=1000, allow_sleep=True)
+
+
+def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> dict[str, object]:
+    """Reads a single-recording ProcessingTracker and returns structured status information.
+
+    Args:
+        tracker_path: The path to the ProcessingTracker YAML file.
+        recording_path: The path to the recording directory (for display purposes).
+
+    Returns:
+        A dictionary containing the recording path, tracker path, per-phase job status, summary counts, and an
+        overall synthesized status string.
+    """
+    tracker = ProcessingTracker(file_path=tracker_path)
+    summary = tracker.get_summary()
+
+    # Groups jobs by pipeline phase using find_jobs.
+    binarize_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.BINARIZE)
+    process_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.PROCESS)
+    combine_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.COMBINE)
+
+    # Reads binarize status.
+    binarize_status: dict[str, object] = {}
+    for job_id in binarize_jobs:
+        job_info = tracker.get_job_info(job_id=job_id)
+        binarize_status["status"] = job_info.status.name.lower()
+        if job_info.error_message:
+            binarize_status["error"] = job_info.error_message
+
+    # Reads per-plane process status.
+    process_status: dict[str, object] = {}
+    for job_id, (_, specifier) in process_jobs.items():
+        job_info = tracker.get_job_info(job_id=job_id)
+        process_status[specifier] = job_info.status.name.lower()
+
+    # Reads combine status.
+    combine_status: dict[str, object] = {}
+    for job_id in combine_jobs:
+        job_info = tracker.get_job_info(job_id=job_id)
+        combine_status["status"] = job_info.status.name.lower()
+        if job_info.error_message:
+            combine_status["error"] = job_info.error_message
+
+    # Synthesizes overall status from tracker state.
+    if tracker.complete:
+        overall_status = "completed"
+    elif tracker.encountered_error:
+        overall_status = "failed"
+    elif combine_jobs and any(
+        tracker.get_job_info(job_id=job_id).status == ProcessingStatus.RUNNING for job_id in combine_jobs
+    ):
+        overall_status = "combining"
+    elif process_jobs and any(
+        tracker.get_job_info(job_id=job_id).status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
+        for job_id in process_jobs
+    ):
+        overall_status = "processing"
+    elif binarize_jobs and any(
+        tracker.get_job_info(job_id=job_id).status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
+        for job_id in binarize_jobs
+    ):
+        overall_status = "binarizing"
+    else:
+        overall_status = "scheduled"
+
+    # Formats summary counts using ProcessingStatus enum names.
+    summary_counts: dict[str, int] = {status.name.lower(): count for status, count in summary.items()}
+
+    return {
+        "success": True,
+        "recording_path": str(recording_path),
+        "tracker_path": str(tracker_path),
+        "status": overall_status,
+        "jobs": {
+            "binarize": binarize_status,
+            "process": process_status,
+            "combine": combine_status,
+        },
+        "summary": summary_counts,
+    }
+
+
+def _read_multi_recording_tracker(tracker_path: Path) -> dict[str, object]:
+    """Reads a multi-recording ProcessingTracker and returns structured status information.
+
+    Args:
+        tracker_path: The path to the ProcessingTracker YAML file.
+
+    Returns:
+        A dictionary containing the tracker path, per-phase job status, summary counts, and an overall synthesized
+        status string.
+    """
+    tracker = ProcessingTracker(file_path=tracker_path)
+    summary = tracker.get_summary()
+
+    # Groups jobs by pipeline phase using find_jobs.
+    discover_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.DISCOVER)
+    extract_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.EXTRACT)
+
+    # Reads discover status.
+    discover_status: dict[str, object] = {}
+    for job_id in discover_jobs:
+        job_info = tracker.get_job_info(job_id=job_id)
+        discover_status["status"] = job_info.status.name.lower()
+        if job_info.error_message:
+            discover_status["error"] = job_info.error_message
+
+    # Reads per-recording extract status.
+    extract_status: dict[str, object] = {}
+    for job_id, (_, specifier) in extract_jobs.items():
+        job_info = tracker.get_job_info(job_id=job_id)
+        extract_status[specifier] = job_info.status.name.lower()
+
+    # Synthesizes overall status from tracker state.
+    if tracker.complete:
+        overall_status = "completed"
+    elif tracker.encountered_error:
+        overall_status = "failed"
+    elif extract_jobs and any(
+        tracker.get_job_info(job_id=job_id).status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
+        for job_id in extract_jobs
+    ):
+        overall_status = "extracting"
+    elif discover_jobs and any(
+        tracker.get_job_info(job_id=job_id).status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
+        for job_id in discover_jobs
+    ):
+        overall_status = "discovering"
+    else:
+        overall_status = "scheduled"
+
+    # Formats summary counts using ProcessingStatus enum names.
+    summary_counts: dict[str, int] = {status.name.lower(): count for status, count in summary.items()}
+
+    return {
+        "tracker_path": str(tracker_path),
+        "status": overall_status,
+        "jobs": {
+            "discover": discover_status,
+            "extract": extract_status,
+        },
+        "summary": summary_counts,
+    }
