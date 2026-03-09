@@ -16,7 +16,7 @@ from natsort import natsorted
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import resolve_worker_count, resolve_parallel_job_capacity
 
-from . import configuration_tools  # noqa: F401
+from . import acquisition_tools, configuration_tools  # noqa: F401
 from ..io import resolve_multi_recording_contexts
 from ..pipelines import run_multi_recording_pipeline, run_single_recording_pipeline
 from ..dataclasses import (

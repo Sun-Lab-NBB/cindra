@@ -76,7 +76,8 @@ Add to your `.mcp.json` file in the project root:
 ### Verifying Connection
 
 Before processing, verify the MCP tools are available by checking your tool list. If the cindra tools
-(`discover_recordings_tool`, `start_batch_processing_tool`, etc.) are not present, the server is not connected.
+(`discover_single_recording_candidates_tool`, `start_batch_processing_tool`, etc.) are not present, the server
+is not connected. Invoke `/mcp-environment-setup` to diagnose and resolve connectivity issues.
 
 ---
 
@@ -94,7 +95,7 @@ The MCP server exposes a unified API where all processing goes through the batch
 
 | Tool                     | Purpose                                             |
 |--------------------------|-----------------------------------------------------|
-| `discover_recordings_tool` | Finds recordings under a root directory               |
+| `discover_single_recording_candidates_tool` | Finds recordings under a root directory               |
 | `get_single_recording_status`  | Checks filesystem for single-recording processing outputs |
 
 ### Batch Processing Tools
@@ -181,122 +182,7 @@ cindra/
 
 ---
 
-## Tool Input/Output Formats
-
-### `generate_config_file`
-
-**Input:**
-```python
-{
-    "output_path": "/path/to/config.yaml",  # Required
-    "pipeline_type": "single-recording"           # Required
-}
-```
-
-**Output:**
-```python
-{
-    "success": True,
-    "file_path": "/path/to/config.yaml",
-    "pipeline_type": "single-recording"
-}
-```
-
-### `discover_recordings_tool`
-
-**Input:**
-```python
-{
-    "root_directory": "/path/to/data"  # Required
-}
-```
-
-**Output:**
-```python
-{
-    "recordings": [
-        "/path/to/data/animal1/2024-01-15-10-30-00-123456",
-        "/path/to/data/animal1/2024-01-16-09-00-00-234567",
-        ...
-    ],
-    "count": 30,
-    "skipped": [...],  # Optional
-    "errors": [...]    # Optional
-}
-```
-
-### `start_batch_processing_tool`
-
-**Input:**
-```python
-{
-    "recording_paths": ["/path/recording1", "/path/recording2", ...],  # Required, minimum 1
-    "configuration_path": "/path/to/config.yaml",  # Required
-    "workers_per_plane": -1,    # Optional, -1 for automatic (max 30)
-    "max_parallel_planes": -1   # Optional, -1 for automatic
-}
-```
-
-**Output:**
-```python
-{
-    "started": True,
-    "total_recordings": 30,
-    "workers_per_plane": 28,
-    "max_parallel_planes": 2,
-    "message": "Batch processing started. Use get_batch_processing_status_tool to monitor progress."
-}
-```
-
-### `get_batch_processing_status_tool`
-
-**Input:** None
-
-**Output:**
-```python
-{
-    "current_phase": "process",  # "binarize", "process", or "combine"
-    "recordings": [
-        {
-            "recording_name": "2024-01-15-10-30-00-123456",
-            "status": "PROCESSING",
-            "binarize": "done",
-            "process": "3/4",
-            "combine": "pending"
-        },
-        ...
-    ],
-    "summary": {
-        "total": 30,
-        "binarize_completed": 30,
-        "process_completed": 15,
-        "combine_completed": 10,
-        "failed": 0
-    }
-}
-```
-
-### `cancel_batch_processing_tool`
-
-**Input:** None
-
-**Output:**
-```python
-{
-    "cancelled": True,
-    "message": "Single-recording batch processing cancelled. Active jobs will complete but no new jobs will start.",
-    "final_state": {
-        "binarize_completed": 5,
-        "process_completed": 12,
-        "combine_completed": 3,
-        "active_jobs_at_cancel": 2
-    }
-}
-```
-
----
-
-## Formatting Status as a Table
+## Formatting status as a table
 
 When presenting status to the user, format the data as a clear table:
 
@@ -323,7 +209,7 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 **You MUST complete this checklist before starting batch processing.** Do not skip any step.
 
 ```
-- [ ] Recording discovery complete (used discover_recordings_tool or received explicit paths)
+- [ ] Recording discovery complete (used discover_single_recording_candidates_tool or received explicit paths)
 - [ ] Configuration file confirmed or created (see Configuration Guidance section)
 - [ ] Asked about exclusions if creating new config (flyback planes, ignored files)
 - [ ] Asked user about CPU core allocation (see Resource Allocation section)
@@ -335,7 +221,7 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
 ### Workflow Steps
 
-1. **Discover recordings** → Use `discover_recordings_tool` to find all recording paths
+1. **Discover recordings** → Use `discover_single_recording_candidates_tool` to find all recording paths
 2. **Check configuration** → Ask user if they have an existing config (see Configuration Guidance)
 3. **Create config if needed** → Generate default and ask about exclusions (flyback planes, ignored files)
 4. **Ask about CPU allocation** → Explain resource model and ask how many cores to use
@@ -350,7 +236,7 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
 **CRITICAL**: You MUST ask the user about configuration before processing. Never skip this step.
 
-For complete parameter documentation, invoke `/single-recording-data`.
+For complete parameter documentation, invoke `/single-recording-configuration`.
 
 ### Step 1: Ask About Existing Configuration
 
@@ -386,7 +272,7 @@ When `mesoscan=True`, these parameters are **automatically overwritten** from `c
 - `fs` - Set to `frame_rate`
 - ROI geometry (`lines`, `dx`, `dy`, `nrois`)
 
-User-specified values for these parameters are ignored. See `/single-recording-data` for complete details.
+User-specified values for these parameters are ignored. See `/single-recording-configuration` for complete details.
 
 ### Multi-Recording Compatibility
 
@@ -439,3 +325,17 @@ If processing fails for some recordings:
 2. Read the error messages in the output
 3. Explain the errors to the user with root cause and resolution
 4. Wait for the current batch to complete before starting retries
+
+---
+
+## Related skills
+
+| Skill                              | Relationship                                                                             |
+|------------------------------------|------------------------------------------------------------------------------------------|
+| `/mcp-environment-setup`           | Prerequisite: MCP server must be connected for processing tools                          |
+| `/acquisition-data-preparation`    | Prerequisite: raw data must be prepared before processing                                |
+| `/single-recording-configuration`  | Configuration reference for all pipeline parameters                                      |
+| `/single-recording-results`        | Output data format reference for evaluating processing results                           |
+| `/multi-recording-processing`      | Next step: multi-recording processing for longitudinal ROI tracking                      |
+| `/multi-recording-configuration`   | Downstream: multi-recording configuration requires single-recording output               |
+| `/visualization`                   | Next step: launch viewers to inspect and query processing results                        |
