@@ -91,11 +91,12 @@ The MCP server exposes a unified API where all processing goes through the batch
 |------------------------|------------------------------------------------------------|
 | `generate_config_file` | Generates a default configuration YAML file (single-recording)   |
 
-### Recording Discovery and Status Tools
+### Recording Discovery, Readiness, and Status Tools
 
 | Tool                     | Purpose                                             |
 |--------------------------|-----------------------------------------------------|
 | `discover_single_recording_candidates_tool` | Finds recordings under a root directory               |
+| `validate_recording_readiness`             | Validates raw data + parameters before processing     |
 | `get_single_recording_status`  | Checks filesystem for single-recording processing outputs |
 
 ### Batch Processing Tools
@@ -162,22 +163,27 @@ Results are saved to `{recording_path}/cindra/`:
 
 ```
 cindra/
-├── plane0/          # Per-plane processing results
-│   ├── data.bin     # Registered binary data
-│   ├── ops.npy      # Processing parameters
-│   ├── stat.npy     # ROI statistics
-│   ├── F.npy        # Fluorescence traces
-│   ├── Fneu.npy     # Neuropil traces
-│   └── spks.npy     # Deconvolved spikes
-├── plane1/
+├── plane_0/                       # Per-plane processing results
+│   ├── runtime_data.yaml          # Plane runtime configuration
+│   ├── channel_1_data.bin         # Registered binary data
+│   ├── registration_data/         # Registration outputs
+│   ├── detection_data/            # Detection reference images
+│   ├── roi_masks.npz              # ROI spatial masks
+│   ├── roi_statistics.npz         # ROI morphological statistics
+│   ├── cell_fluorescence.npy      # Fluorescence traces
+│   ├── neuropil_fluorescence.npy  # Neuropil traces
+│   ├── spikes.npy                 # Deconvolved spikes
+│   └── cell_classification.npy    # Cell/non-cell classification
+├── plane_1/
 ├── ...
-└── combined/        # Merged results from all planes
-    ├── ops.npy
-    ├── stat.npy
-    ├── F.npy
-    ├── Fneu.npy
-    ├── spks.npy
-    └── iscell.npy
+├── combined_metadata.npz          # Merged plane metadata
+├── detection_data/                # Combined detection reference images
+├── roi_masks.npz                  # Combined ROI spatial masks
+├── roi_statistics.npz             # Combined ROI statistics
+├── cell_fluorescence.npy          # Combined fluorescence traces
+├── neuropil_fluorescence.npy      # Combined neuropil traces
+├── spikes.npy                     # Combined deconvolved spikes
+└── cell_classification.npy        # Combined cell classification
 ```
 
 ---
@@ -210,6 +216,7 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
 ```
 - [ ] Recording discovery complete (used discover_single_recording_candidates_tool or received explicit paths)
+- [ ] Raw data validated for each recording (see Raw Data Validation section below)
 - [ ] Configuration file confirmed or created (see Configuration Guidance section)
 - [ ] Asked about exclusions if creating new config (flyback planes, ignored files)
 - [ ] Asked user about CPU core allocation (see Resource Allocation section)
@@ -219,16 +226,34 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
 **STOP**: If any checkbox is incomplete, do not proceed. Complete the missing steps first.
 
+### Raw Data Validation
+
+Before committing compute resources to batch processing, validate that each recording's raw data is ready. Use
+`validate_recording_readiness` on each discovered recording directory to confirm that `cindra_parameters.json`
+is present and valid, that TIFF files are readable with consistent dimensions, and that TIFF data is compatible
+with the acquisition parameters.
+
+**Exception**: Skip this step for recordings that already have valid binary files from a previous binarization run
+(check via `get_single_recording_status`). Existing valid binaries mean the raw data was already successfully
+ingested, so re-validation is unnecessary.
+
+**If validation fails**: Invoke `/acquisition-data-preparation` to resolve the issues. Common problems include
+missing `cindra_parameters.json` (needs to be created), incorrect acquisition parameters (needs correction),
+frame count not divisible by the interleave stride (incomplete volume or wrong plane/channel count), or
+inconsistent TIFF dimensions (corrupted or mismatched files). Do not proceed to processing until all recordings
+pass readiness validation or have valid existing binaries.
+
 ### Workflow Steps
 
 1. **Discover recordings** → Use `discover_single_recording_candidates_tool` to find all recording paths
-2. **Check configuration** → Ask user if they have an existing config (see Configuration Guidance)
-3. **Create config if needed** → Generate default and ask about exclusions (flyback planes, ignored files)
-4. **Ask about CPU allocation** → Explain resource model and ask how many cores to use
-5. **Start batch processing** → Call `start_batch_processing_tool`
-6. **Inform user** → Report batch status and explain three-phase processing
-7. **Check status on request** → Display formatted status table
-8. **Explain any errors** → Analyze and explain errors when processing completes
+2. **Validate raw data** → Use `validate_recording_readiness` on each recording (skip if valid binaries exist)
+3. **Check configuration** → Ask user if they have an existing config (see Configuration Guidance)
+4. **Create config if needed** → Generate default and ask about exclusions (flyback planes, ignored files)
+5. **Ask about CPU allocation** → Explain resource model and ask how many cores to use
+6. **Start batch processing** → Call `start_batch_processing_tool`
+7. **Inform user** → Report batch status and explain three-phase processing
+8. **Check status on request** → Display formatted status table
+9. **Explain any errors** → Analyze and explain errors when processing completes
 
 ---
 
@@ -236,7 +261,10 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
 **CRITICAL**: You MUST ask the user about configuration before processing. Never skip this step.
 
-For complete parameter documentation, invoke `/single-recording-configuration`.
+For complete parameter documentation, invoke `/single-recording-configuration`. If the user asks about specific
+parameters (tau, registration, ROI detection, etc.) or needs help tuning configuration values, transition to
+`/single-recording-configuration` to provide the full parameter reference before returning here to continue
+the processing workflow.
 
 ### Step 1: Ask About Existing Configuration
 
@@ -325,6 +353,31 @@ If processing fails for some recordings:
 2. Read the error messages in the output
 3. Explain the errors to the user with root cause and resolution
 4. Wait for the current batch to complete before starting retries
+
+### Error-to-Skill Routing
+
+When errors suggest upstream issues, invoke the appropriate skill to resolve before retrying:
+
+| Error pattern                                     | Upstream skill to invoke          |
+|---------------------------------------------------|-----------------------------------|
+| Missing `cindra_parameters.json`, TIFF read error | `/acquisition-data-preparation`   |
+| Invalid parameter values, wrong plane/channel     | `/acquisition-data-preparation`   |
+| Configuration parameter issues, bad tau/channels  | `/single-recording-configuration` |
+| MCP tools unavailable, server connection errors   | `/mcp-environment-setup`          |
+
+---
+
+## Post-Processing Next Steps
+
+After batch processing completes successfully:
+
+1. **Verify outputs** — invoke `/single-recording-results` to validate that all expected output files are
+   present and correctly formatted.
+2. **Inspect results** — invoke `/visualization` to launch viewers for visual inspection of registration
+   quality, detected ROIs, and extracted traces.
+3. **Multi-recording processing** — if the user plans to track ROIs across recordings, invoke
+   `/multi-recording-configuration` to set up the multi-recording pipeline, then `/multi-recording-processing`
+   to execute it.
 
 ---
 

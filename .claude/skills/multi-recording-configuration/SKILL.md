@@ -374,15 +374,21 @@ spike_deconvolution:
 
 ## Configuration workflow
 
-1. **Verify prerequisites** — all recordings must have completed single-recording processing (all 3 phases).
-2. **Discover candidates** using `discover_multi_recording_candidates_tool` to find recordings with completed output.
+1. **Discover candidates** using `discover_multi_recording_candidates_tool` to find recordings with completed
+   single-recording output.
+2. **Verify prerequisites** — confirm all discovered recordings have completed single-recording processing
+   (all 3 phases). If any recording is incomplete, invoke `/single-recording-processing` (or
+   `/acquisition-data-preparation` if raw data is not yet prepared) to complete the prerequisite chain before
+   continuing.
 3. **Generate a default configuration** using `generate_config_file` with `pipeline_type="multi-recording"`.
    Alternatively, use `read_config_file` to inspect an existing or legacy configuration for conversion.
 4. **Set `dataset_name`** — this is the only required user parameter.
 5. **Review and tune** registration and tracking parameters based on expected tissue drift.
 6. **Validate** the configuration using `validate_config_file` to check for errors, warnings, and non-default
    parameters.
-7. **Hand off** to the processing workflow (see `/multi-recording-processing`).
+7. **Configuration complete** — the validated configuration file is ready for use. This skill does not start
+   processing. If invoked standalone, inform the user that the configuration is ready, and they can proceed
+   when ready. If invoked from another skill, return control to the caller.
 
 ---
 

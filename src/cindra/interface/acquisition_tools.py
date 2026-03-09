@@ -1,13 +1,17 @@
-"""Provides MCP tools for creating and validating acquisition parameter files.
+"""Provides MCP tools for creating and validating acquisition parameter files and inspecting raw TIFF data.
 
 These tools enable AI agents to prepare raw imaging data for cindra processing by generating cindra_parameters.json
-files and validating existing acquisition parameter files.
+files, validating existing acquisition parameter files, and verifying that raw TIFF files are readable and consistent
+with the recording's acquisition parameters.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+
+from natsort import natsorted
+from tifffile import TiffFile
 
 from .mcp_instance import mcp
 
@@ -16,6 +20,12 @@ _PARAMETERS_FILENAME: str = "cindra_parameters.json"
 
 _MAXIMUM_CHANNEL_COUNT: int = 2
 """The maximum number of imaging channels supported by the pipeline."""
+
+_TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
+"""The supported TIFF file extensions for raw imaging data."""
+
+_MINIMUM_RECOMMENDED_FRAMES_PER_PLANE: int = 200
+"""The minimum recommended number of frames per plane for reliable processing."""
 
 
 @mcp.tool()
@@ -149,6 +159,210 @@ def validate_acquisition_parameters_file(file_path: str) -> dict[str, bool | str
         "valid": not errors,
         "parameters": data,
     }
+
+    if errors:
+        result["errors"] = errors
+    if warnings:
+        result["warnings"] = warnings
+
+    return result
+
+
+@mcp.tool()
+def validate_recording_readiness(recording_directory: str) -> dict[str, object]:
+    """Validates that a recording directory is fully ready for cindra single-recording processing.
+
+    Verifies that the cindra_parameters.json acquisition parameters file is present and valid, that raw TIFF files
+    exist and are readable with consistent dimensions, and that the TIFF data is compatible with the acquisition
+    parameters. This tool is intended as the final readiness gate before committing compute resources to pipeline
+    execution.
+
+    Args:
+        recording_directory: The absolute path to the recording directory containing raw TIFF files and a
+            cindra_parameters.json file.
+
+    Returns:
+        On success, contains the 'recording_directory', overall 'valid' status, 'tiff_file_count', 'total_frames',
+        'frames_per_plane', 'frame_height', 'frame_width', 'dtype', validated 'acquisition_parameters', per-file
+        'files' details, and any validation 'errors' or 'warnings'. On failure, contains an 'error' describing the
+        issue. Both cases include a 'success' flag.
+    """
+    directory = Path(recording_directory)
+
+    if not directory.exists():
+        return {
+            "success": False,
+            "error": f"Unable to validate recording readiness. The directory does not exist: {recording_directory}",
+        }
+
+    if not directory.is_dir():
+        return {
+            "success": False,
+            "error": f"Unable to validate recording readiness. The path is not a directory: {recording_directory}",
+        }
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    # Requires cindra_parameters.json to be present and valid.
+    parameters_path = directory / _PARAMETERS_FILENAME
+    if not parameters_path.exists():
+        return {
+            "success": False,
+            "error": (
+                f"Unable to validate recording readiness. No {_PARAMETERS_FILENAME} found in: {recording_directory}. "
+                f"Use generate_acquisition_parameters_file to create one before validating readiness."
+            ),
+        }
+
+    try:
+        with parameters_path.open() as file:
+            parameters = json.load(file)
+    except json.JSONDecodeError as exception:
+        return {
+            "success": False,
+            "error": f"Unable to validate recording readiness. Failed to parse {_PARAMETERS_FILENAME}: {exception}",
+        }
+
+    if not isinstance(parameters, dict):
+        return {
+            "success": False,
+            "error": (
+                f"Unable to validate recording readiness. Expected a JSON object in {_PARAMETERS_FILENAME}, "
+                f"but found {type(parameters).__name__}."
+            ),
+        }
+
+    # Validates acquisition parameters using the shared validator.
+    parameter_errors, parameter_warnings = _validate_acquisition_parameters(data=parameters)
+    errors.extend(parameter_errors)
+    warnings.extend(parameter_warnings)
+
+    # Extracts validated acquisition fields for cross-validation with TIFF data.
+    plane_number = parameters.get("plane_number", 1)
+    channel_number = parameters.get("channel_number", 1)
+    roi_number = parameters.get("roi_number", 1)
+    roi_lines = parameters.get("roi_lines")
+    interleave_stride = (
+        plane_number * channel_number if isinstance(plane_number, int) and isinstance(channel_number, int) else 0
+    )
+
+    # Discovers TIFF files using the same pattern as the pipeline.
+    tiff_paths: list[Path] = []
+    for extension in _TIFF_EXTENSIONS:
+        tiff_paths.extend(directory.glob(f"*.{extension}"))
+    tiff_paths = natsorted(tiff_paths)
+
+    if not tiff_paths:
+        errors.append(f"No TIFF files found in: {recording_directory}")
+        return {
+            "success": True,
+            "recording_directory": str(directory),
+            "valid": False,
+            "errors": errors,
+            "warnings": warnings,
+            "acquisition_parameters": parameters,
+            "tiff_file_count": 0,
+            "total_frames": 0,
+            "files": [],
+        }
+
+    # Inspects each TIFF file for page count, dimensions, and dtype.
+    file_details: list[dict[str, str | int]] = []
+    total_frames: int = 0
+    reference_height: int | None = None
+    reference_width: int | None = None
+    reference_dtype: str | None = None
+
+    for tiff_path in tiff_paths:
+        try:
+            tiff = TiffFile(tiff_path)
+            page_count = len(tiff.pages)
+
+            if page_count == 0:
+                errors.append(f"TIFF file contains zero frames: {tiff_path.name}")
+                file_details.append({"name": tiff_path.name, "frames": 0})
+                continue
+
+            # Reads dimensions and dtype from the first page without loading full frame data.
+            first_page = tiff.pages[0]
+            height = first_page.shape[0]
+            width = first_page.shape[1] if len(first_page.shape) > 1 else 1
+            dtype = str(first_page.dtype)
+
+            file_details.append(
+                {"name": tiff_path.name, "frames": page_count, "height": height, "width": width, "dtype": dtype}
+            )
+            total_frames += page_count
+
+            # Tracks reference dimensions from the first valid file.
+            if reference_height is None:
+                reference_height = height
+                reference_width = width
+                reference_dtype = dtype
+            else:
+                if height != reference_height or width != reference_width:
+                    errors.append(
+                        f"Dimension mismatch in {tiff_path.name}: {height}x{width} (expected "
+                        f"{reference_height}x{reference_width})."
+                    )
+                if dtype != reference_dtype:
+                    warnings.append(f"Dtype varies in {tiff_path.name}: {dtype} (first file uses {reference_dtype}).")
+
+        except Exception as exception:
+            errors.append(f"Unable to read TIFF file {tiff_path.name}: {type(exception).__name__}: {exception}")
+
+    # Cross-validates TIFF data against acquisition parameters.
+    frames_per_plane: int = 0
+    if total_frames > 0 and interleave_stride > 0:
+        frames_per_plane = total_frames // interleave_stride
+        remainder = total_frames % interleave_stride
+
+        if remainder != 0:
+            warnings.append(
+                f"Total frames ({total_frames}) do not divide evenly by the interleave stride "
+                f"({interleave_stride} = {plane_number} planes x {channel_number} channels). "
+                f"The last {remainder} frames will be discarded during binarization."
+            )
+
+        if frames_per_plane < _MINIMUM_RECOMMENDED_FRAMES_PER_PLANE:
+            warnings.append(
+                f"Frames per plane ({frames_per_plane}) is below the recommended minimum of "
+                f"{_MINIMUM_RECOMMENDED_FRAMES_PER_PLANE} for reliable processing."
+            )
+
+    # Validates MROI roi_lines against actual frame height.
+    if isinstance(roi_number, int) and roi_number > 1 and roi_lines and reference_height is not None:
+        for roi_index, lines in enumerate(roi_lines):
+            if isinstance(lines, list) and lines:
+                max_line = max(lines)
+                if max_line >= reference_height:
+                    errors.append(
+                        f"ROI {roi_index} roi_lines maximum ({max_line}) exceeds frame height ({reference_height})."
+                    )
+
+    # Checks dtype compatibility with the pipeline.
+    if reference_dtype is not None and reference_dtype not in ("uint16", "int16", "int32"):
+        warnings.append(
+            f"TIFF dtype '{reference_dtype}' is not one of the natively supported types (uint16, int16, int32). "
+            f"Data will be cast to int16 during binarization, which may cause precision loss."
+        )
+
+    result: dict[str, object] = {
+        "success": True,
+        "recording_directory": str(directory),
+        "valid": not errors,
+        "acquisition_parameters": parameters,
+        "tiff_file_count": len(tiff_paths),
+        "total_frames": total_frames,
+        "frames_per_plane": frames_per_plane,
+        "files": file_details,
+    }
+
+    if reference_height is not None:
+        result["frame_height"] = reference_height
+        result["frame_width"] = reference_width
+        result["dtype"] = reference_dtype
 
     if errors:
         result["errors"] = errors
