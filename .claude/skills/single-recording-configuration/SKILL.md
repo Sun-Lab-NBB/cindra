@@ -349,12 +349,17 @@ file_io:
 ## Configuration workflow
 
 1. **Discover recordings** using `discover_single_recording_candidates_tool` to find directories with raw data.
-2. **Generate a default configuration** using `generate_config_file` with `pipeline_type="single-recording"`.
+2. **Verify data readiness** — use `validate_recording_readiness` on each discovered recording to confirm that
+   raw data and acquisition parameters are ready. If any recording fails validation, invoke
+   `/acquisition-data-preparation` to resolve before continuing.
+3. **Generate a default configuration** using `generate_config_file` with `pipeline_type="single-recording"`.
    Alternatively, use `read_config_file` to inspect an existing or legacy configuration for conversion.
-3. **Review and modify** the generated YAML file, setting at minimum `main.tau` and `main.two_channels`.
-4. **Validate** the configuration using `validate_config_file` to check for errors, warnings, and non-default
+4. **Review and modify** the generated YAML file, setting at minimum `main.tau` and `main.two_channels`.
+5. **Validate** the configuration using `validate_config_file` to check for errors, warnings, and non-default
    parameters.
-5. **Hand off** to the processing workflow (see `/single-recording-processing`).
+6. **Configuration complete** — the validated configuration file is ready for use. This skill does not start
+   processing. If invoked standalone, inform the user that the configuration is ready and they can proceed
+   when ready. If invoked from another skill, return control to the caller.
 
 ---
 
@@ -387,5 +392,5 @@ Single-Recording Configuration Compliance:
 - [ ] `main.ignored_flyback_planes` lists correct flyback plane indices if applicable
 - [ ] `file_io.ignored_file_names` lists any TIFFs to exclude
 - [ ] Review any warnings from `validate_config_file` (pipeline-set parameters, channel consistency)
-- [ ] Acquisition data prepared (see `/acquisition-data-preparation` verification checklist)
+- [ ] Acquisition data prepared, `validate_recording_readiness` passed (if not, invoke `/acquisition-data-preparation`)
 ```

@@ -20,7 +20,9 @@ fluorescence traces using the cindra MCP server tools.
 2. The `combine` step completed for each recording (cindra/combined/ exists)
 3. Recordings are from the same animal and imaging region
 
-If single-recording processing is not complete, use the `/single-recording-processing` skill first.
+If single-recording processing is not complete, the full prerequisite chain is:
+`/acquisition-data-preparation` → `/single-recording-configuration` → `/single-recording-processing`.
+Invoke the earliest missing step and work forward through the chain before returning here.
 
 ---
 
@@ -164,18 +166,22 @@ Phase 2: EXTRACT (Parallel across all recordings)
 
 ### Output Structure
 
-Results are saved to `{recording_path}/multi_recording/{dataset_name}/`:
+Results are saved to `{recording_path}/cindra/multi_recording/{dataset_name}/`:
 
 ```
 multi_recording/
 └── dataset_name/
-    ├── ops.npy                              # Processing parameters
-    ├── multi_recording_cindra_configuration.yaml    # Configuration snapshot
-    ├── multi_recording_tracker.json                # Processing tracker (main recording only)
-    ├── template_roi_masks.npy              # Tracked ROI masks
-    ├── F.npy                                # Fluorescence traces
-    ├── Fneu.npy                             # Neuropil traces
-    └── spks.npy                             # Deconvolved spikes
+    ├── multi_recording_runtime_data.yaml       # Runtime data (per-recording)
+    ├── multi_recording_configuration.yaml      # Configuration snapshot (main recording only)
+    ├── multi_recording_tracker.yaml            # Processing tracker (main recording only)
+    ├── registration_arrays/                    # Deformation fields and transformed images
+    ├── registration_deformed_masks.npz         # Forward-deformed ROI masks
+    ├── tracking_template_masks.npz             # Tracked consensus ROI masks
+    ├── roi_masks.npz                           # Extracted ROI spatial masks
+    ├── roi_statistics.npz                      # Extracted ROI statistics
+    ├── cell_fluorescence.npy                   # Fluorescence traces
+    ├── neuropil_fluorescence.npy               # Neuropil traces
+    └── spikes.npy                              # Deconvolved spikes
 ```
 
 ---
@@ -218,7 +224,9 @@ Summary: 1/2 animals complete | 2/4 recordings extracted | 0 failed
 
 ### Workflow Steps
 
-1. **Verify prerequisites** → Ensure all recordings have single-recording processing complete
+1. **Verify prerequisites** → Use `discover_multi_recording_candidates_tool` and `get_single_recording_status`
+   to confirm all recordings have completed single-recording processing. If any recording is incomplete, invoke
+   `/single-recording-processing` (or `/acquisition-data-preparation` if raw data is not yet prepared).
 2. **Organize by animal** → Group recordings by animal/dataset
 3. **Check configuration** → Ask user if they have an existing config (see Configuration Guidance)
 4. **Create config if needed** → Generate default and ask about dataset name + MROI region margin
@@ -233,7 +241,10 @@ Summary: 1/2 animals complete | 2/4 recordings extracted | 0 failed
 
 **CRITICAL**: You MUST ask the user about configuration before processing. Never skip this step.
 
-For complete parameter documentation, invoke `/multi-recording-configuration`.
+For complete parameter documentation, invoke `/multi-recording-configuration`. If the user asks about specific
+parameters (registration speed, ROI tracking thresholds, mask prevalence, etc.) or needs help tuning
+configuration values, transition to `/multi-recording-configuration` to provide the full parameter reference
+before returning here to continue the processing workflow.
 
 ### Step 1: Ask About Existing Configuration
 
@@ -324,6 +335,29 @@ If processing fails for some animals/recordings:
 | `Registration failed between recordings` | Too much drift between recordings            | Check FOV alignment                  |
 | `No trackable ROIs found`              | Insufficient overlap in detected ROIs  | Adjust clustering threshold          |
 
+### Error-to-Skill Routing
+
+When errors suggest upstream issues, invoke the appropriate skill to resolve before retrying:
+
+| Error pattern                                       | Upstream skill to invoke           |
+|-----------------------------------------------------|------------------------------------|
+| Missing cindra output, incomplete single-recording  | `/single-recording-processing`     |
+| Missing raw data, no `cindra_parameters.json`       | `/acquisition-data-preparation`    |
+| Configuration parameter issues, bad dataset name    | `/multi-recording-configuration`   |
+| Registration tuning needed (too much/little drift)  | `/multi-recording-configuration`   |
+| MCP tools unavailable, server connection errors     | `/mcp-environment-setup`           |
+
+---
+
+## Post-Processing Next Steps
+
+After batch processing completes successfully:
+
+1. **Verify outputs** — invoke `/multi-recording-results` to validate that all expected output files are
+   present and correctly formatted for each animal.
+2. **Inspect results** — invoke `/visualization` to launch viewers for visual inspection of cross-recording
+   registration quality, tracked ROI masks, and extracted traces.
+
 ---
 
 ## Related skills
@@ -331,6 +365,7 @@ If processing fails for some animals/recordings:
 | Skill                              | Relationship                                                                             |
 |------------------------------------|------------------------------------------------------------------------------------------|
 | `/mcp-environment-setup`           | Prerequisite: MCP server must be connected for processing tools                          |
+| `/acquisition-data-preparation`    | Upstream: raw data preparation and readiness validation for each recording               |
 | `/single-recording-processing`     | Prerequisite: all recordings must have single-recording processing complete              |
 | `/single-recording-results`        | Prerequisite: single-recording output files required as input                            |
 | `/multi-recording-configuration`   | Configuration reference for all multi-recording pipeline parameters                      |
