@@ -13,6 +13,7 @@ from ataraxis_base_utilities import LogLevel, console
 from .styles import FONTS, PC_STYLE, BINARY_STYLE
 from .pc_viewer import PCViewer
 from .roi_viewer import ROIViewer
+from .viewer_state import StateWriter
 from .binary_viewer import BinaryPlayer
 from .viewer_context import ViewerData, SingleRecordingData
 from .tracking_viewer import TrackingViewer
@@ -21,7 +22,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> None:
+def run_tracking_viewer(
+    recording_path: Path,
+    *,
+    dataset: str | None = None,
+    state_path: Path | None = None,
+) -> None:
     """Launches the standalone multi-recording tracking viewer.
 
     Creates a QApplication, shows the TrackingViewer window, and enters the event loop. The viewer
@@ -32,6 +38,9 @@ def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> 
             makes up the visualized multi-recording dataset. The loader uses that recording's data to
             search and reconstruct the full dataset hierarchy.
         dataset: Multi-recording dataset name to load. Defaults to the first available dataset.
+        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP
+            server. When provided, a StateWriter polls the viewer's display state and writes changes
+            to this file.
     """
     console.echo(message="Initializing the Tracking GUI...")
     application, owns_application = _get_or_create_application()
@@ -46,6 +55,10 @@ def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> 
     console.echo(message="Initializing Multi-Recording Tracking viewer...")
     window = TrackingViewer(data=data)
 
+    # Starts the state writer if a state file path was provided by the MCP server.
+    if state_path is not None:
+        _state_writer = StateWriter(state_path=state_path, get_state=window.get_state, parent=window)
+
     window.show()
     console.echo(message="Tracking viewer: ready.", level=LogLevel.SUCCESS)
 
@@ -55,7 +68,7 @@ def run_tracking_viewer(recording_path: Path, *, dataset: str | None = None) -> 
         sys.exit(application.exec())
 
 
-def run_registration_viewer(recording_path: Path) -> None:
+def run_registration_viewer(recording_path: Path, *, state_path: Path | None = None) -> None:
     """Launches the standalone single-recording registration viewer.
 
     Creates a QApplication, shows the BinaryPlayer and PCViewer windows, and enters the event
@@ -65,6 +78,9 @@ def run_registration_viewer(recording_path: Path) -> None:
     Args:
         recording_path: The Path to a cindra-processed recording's root data directory containing
             registration results.
+        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP
+            server. When provided, a StateWriter polls both viewers' display states and writes the
+            combined state to this file.
     """
     console.echo(message="Initializing the Registration GUI...")
     application, owns_application = _get_or_create_application()
@@ -81,6 +97,23 @@ def run_registration_viewer(recording_path: Path) -> None:
     binary_player = BinaryPlayer(data=data)
     console.echo(message="Initializing Registration Quality Metrics viewer...")
     pc_viewer = PCViewer(data=pc_data)
+
+    # Starts the state writer if a state file path was provided by the MCP server. Combines both
+    # viewers' states into a single dictionary keyed by viewer type.
+    if state_path is not None:
+
+        def _combined_state() -> dict[str, object]:
+            return {
+                "viewer_type": "registration",
+                "binary_player": binary_player.get_state(),
+                "pc_viewer": pc_viewer.get_state(),
+            }
+
+        _state_writer = StateWriter(
+            state_path=state_path,
+            get_state=_combined_state,
+            parent=binary_player,
+        )
 
     # Computes screen-adaptive window positions. On large screens the two viewers sit side by side;
     # on smaller screens they cascade with a visible offset so both title bars remain accessible.
@@ -140,7 +173,12 @@ def run_registration_viewer(recording_path: Path) -> None:
         sys.exit(application.exec())
 
 
-def run_roi_viewer(recording_path: Path, *, dataset: str | None = None) -> None:
+def run_roi_viewer(
+    recording_path: Path,
+    *,
+    dataset: str | None = None,
+    state_path: Path | None = None,
+) -> None:
     """Launches the standalone ROI viewer with right-click reclassification.
 
     Creates a QApplication, loads pipeline data from the given recording directory, shows the ROIViewer window, and
@@ -149,6 +187,9 @@ def run_roi_viewer(recording_path: Path, *, dataset: str | None = None) -> None:
     Args:
         recording_path: Path to a cindra output directory to load on startup.
         dataset: Multi-recording dataset name to load. Stays in single-recording mode if not provided.
+        state_path: Optional path to a state file for cross-process state exchange with the GUI MCP
+            server. When provided, a StateWriter polls the viewer's display state and writes changes
+            to this file.
     """
     console.echo(message="Initializing the ROI GUI...")
     application, owns_application = _get_or_create_application()
@@ -158,6 +199,11 @@ def run_roi_viewer(recording_path: Path, *, dataset: str | None = None) -> None:
 
     console.echo(message="Initializing ROI viewer...")
     window = ROIViewer(data=data)
+
+    # Starts the state writer if a state file path was provided by the MCP server.
+    if state_path is not None:
+        _state_writer = StateWriter(state_path=state_path, get_state=window.get_state, parent=window)
+
     window.show()
     console.echo(message="ROI viewer: ready.", level=LogLevel.SUCCESS)
 

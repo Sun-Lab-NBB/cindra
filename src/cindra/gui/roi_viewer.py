@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
 import numpy as np
@@ -339,6 +339,42 @@ class ROIViewer(QMainWindow):
 
         self._reset_state()
         self._initialize_gui()
+
+    def get_state(self) -> dict[str, Any]:
+        """Returns the current display state of the ROI viewer for cross-process state exchange.
+
+        Returns:
+            A dictionary containing the viewer type, active display settings, and selection state.
+        """
+        if not self._recording_loaded or self._context_data is None:
+            return {"viewer_type": "roi", "loaded": False}
+
+        return {
+            "viewer_type": "roi",
+            "loaded": True,
+            "channel_2_active": self._channel_2_button.isChecked(),
+            "background_view": BackgroundView(self._background_view).name.lower(),
+            "roi_color_mode": ROIColorMode(self._roi_color_mode).name.lower(),
+            "colormap": self._roi_colormap,
+            "selected_roi_indices": list(self._selected_roi_indices),
+            "opacity": self._color_controls.opacity_slider.value(),
+            "classify_mode": self._classify_mode,
+            "trace_visibility": {
+                "fluorescence": self._trace_controls.fluorescence_checkbox.isChecked(),
+                "neuropil": self._trace_controls.neuropil_checkbox.isChecked(),
+                "corrected": self._trace_controls.corrected_checkbox.isChecked(),
+                "spikes": self._trace_controls.spikes_checkbox.isChecked(),
+            },
+            "temporal_bin_size": self._temporal_bin_size,
+            "colocalization_threshold": self._colocalization_threshold,
+            "roi_count": self._roi_count,
+            "frame_count": self._frame_count,
+            "two_channels": self._two_channels,
+            "all_recordings_visible": self._all_recordings_visible,
+            "roi_source": self._roi_source_combo.currentText(),
+            "active_dataset": self._context_data.active_dataset_name if self._is_multi_recording else None,
+            "available_datasets": list(self._context_data.available_datasets),
+        }
 
     @property
     def _is_multi_recording(self) -> bool:

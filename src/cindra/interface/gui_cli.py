@@ -2,8 +2,7 @@
 MCP server.
 
 This CLI is installed as a separate entry-point from the main 'cindra' CLI to avoid loading GUI dependencies during
-headless pipeline execution. The GUI MCP server module avoids Qt imports at module level, so the 'mcp' subcommand
-starts without loading PySide6.
+headless pipeline execution.
 """
 
 from pathlib import Path
@@ -41,9 +40,17 @@ def cindra_gui() -> None:
     default=None,
     help="Multi-recording dataset name to load. Stays in single-recording mode if not provided.",
 )
-def gui_roi(recording_path: Path, dataset: str | None) -> None:
+@click.option(
+    "-sf",
+    "--state-file",
+    type=click.Path(path_type=Path),
+    default=None,
+    hidden=True,
+    help="Path to the state file for cross-process state exchange with the GUI MCP server.",
+)
+def gui_roi(recording_path: Path, dataset: str | None, state_file: Path | None) -> None:
     """Launches the ROI viewer for single-recording pipeline output."""
-    run_roi_viewer(recording_path=recording_path, dataset=dataset)
+    run_roi_viewer(recording_path=recording_path, dataset=dataset, state_path=state_file)
 
 
 @cindra_gui.command("registration")
@@ -54,9 +61,17 @@ def gui_roi(recording_path: Path, dataset: str | None) -> None:
     required=True,
     help="Path to a cindra output directory containing registration results.",
 )
-def gui_registration(recording_path: Path) -> None:
+@click.option(
+    "-sf",
+    "--state-file",
+    type=click.Path(path_type=Path),
+    default=None,
+    hidden=True,
+    help="Path to the state file for cross-process state exchange with the GUI MCP server.",
+)
+def gui_registration(recording_path: Path, state_file: Path | None) -> None:
     """Launches the registration quality viewer for inspecting motion correction results."""
-    run_registration_viewer(recording_path=recording_path)
+    run_registration_viewer(recording_path=recording_path, state_path=state_file)
 
 
 @cindra_gui.command("tracking")
@@ -74,9 +89,17 @@ def gui_registration(recording_path: Path) -> None:
     default=None,
     help="Multi-recording dataset name to load. Defaults to the first available dataset.",
 )
-def gui_tracking(recording_path: Path, dataset: str | None) -> None:
+@click.option(
+    "-sf",
+    "--state-file",
+    type=click.Path(path_type=Path),
+    default=None,
+    hidden=True,
+    help="Path to the state file for cross-process state exchange with the GUI MCP server.",
+)
+def gui_tracking(recording_path: Path, dataset: str | None, state_file: Path | None) -> None:
     """Launches the multi-recording tracking quality viewer for inspecting across-recording ROI tracking results."""
-    run_tracking_viewer(recording_path=recording_path, dataset=dataset)
+    run_tracking_viewer(recording_path=recording_path, dataset=dataset, state_path=state_file)
 
 
 @cindra_gui.command("mcp")
@@ -89,9 +112,5 @@ def gui_tracking(recording_path: Path, dataset: str | None) -> None:
     help="The transport protocol to use for MCP communication.",
 )
 def gui_mcp(transport: str) -> None:
-    """Starts the GUI MCP server for agentic viewer control and data querying.
-
-    The GUI MCP server exposes tools that enable AI agents to launch GUI viewers, control them in real-time, and query
-    processed data such as ROI statistics, fluorescence traces, and tracking results.
-    """
+    """Starts the GUI MCP server for agentic viewer lifecycle management and display state queries."""
     run_gui_server(transport=transport)  # type: ignore[arg-type]
