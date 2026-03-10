@@ -1,5 +1,7 @@
 """Contains tests for the bidiphase_correction module."""
 
+from __future__ import annotations
+
 import numpy as np
 import pytest
 
@@ -12,7 +14,7 @@ from cindra.registration.bidiphase_correction import (
 class TestComputeBidirectionalPhaseOffset:
     """Tests for compute_bidirectional_phase_offset."""
 
-    def test_zero_offset_for_aligned_frames(self):
+    def test_zero_offset_for_aligned_frames(self) -> None:
         """Verifies zero offset is returned when odd and even lines are aligned."""
         # Uses a smooth, structured pattern so odd/even line correlation is unambiguous.
         x = np.linspace(0, 4 * np.pi, 128, dtype=np.float32)
@@ -22,7 +24,7 @@ class TestComputeBidirectionalPhaseOffset:
         assert offset == 0
 
     @pytest.mark.parametrize("shift", [3, 5, -3, -5])
-    def test_detects_known_offset(self, shift):
+    def test_detects_known_offset(self, shift: int) -> None:
         """Verifies detection of a known horizontal offset between odd and even lines."""
         width = 256
         x = np.arange(width, dtype=np.float32)
@@ -37,14 +39,14 @@ class TestComputeBidirectionalPhaseOffset:
         # The function returns the correction offset (negative of the applied shift)
         assert abs(offset - (-shift)) <= 1
 
-    def test_returns_int(self):
+    def test_returns_int(self) -> None:
         """Verifies the return type is a Python int."""
         rng = np.random.default_rng(42)
         frames = rng.standard_normal((5, 32, 32)).astype(np.float32)
         offset = compute_bidirectional_phase_offset(frames=frames)
         assert isinstance(offset, int)
 
-    def test_odd_height_frames(self):
+    def test_odd_height_frames(self) -> None:
         """Verifies the function handles frames with odd height."""
         rng = np.random.default_rng(42)
         frames = rng.standard_normal((5, 33, 64)).astype(np.float32)
@@ -55,7 +57,7 @@ class TestComputeBidirectionalPhaseOffset:
 class TestApplyBidirectionalPhaseCorrection:
     """Tests for apply_bidirectional_phase_correction."""
 
-    def test_zero_offset_no_change(self):
+    def test_zero_offset_no_change(self) -> None:
         """Verifies zero offset produces no change to frames."""
         rng = np.random.default_rng(42)
         frames = rng.standard_normal((5, 32, 32)).astype(np.float32)
@@ -63,7 +65,7 @@ class TestApplyBidirectionalPhaseCorrection:
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=0)
         np.testing.assert_array_equal(frames, original)
 
-    def test_positive_offset_shifts_odd_lines_right(self):
+    def test_positive_offset_shifts_odd_lines_right(self) -> None:
         """Verifies positive offset shifts odd lines to the right and zeros the left border."""
         frames = np.ones((1, 4, 10), dtype=np.float32)
         frames[0, 1, :] = np.arange(10, dtype=np.float32)  # Odd line
@@ -72,7 +74,7 @@ class TestApplyBidirectionalPhaseCorrection:
         np.testing.assert_allclose(frames[0, 1, :3], 0.0)
         np.testing.assert_allclose(frames[0, 1, 3:], np.arange(7, dtype=np.float32))
 
-    def test_negative_offset_shifts_odd_lines_left(self):
+    def test_negative_offset_shifts_odd_lines_left(self) -> None:
         """Verifies negative offset shifts odd lines to the left and zeros the right border."""
         frames = np.ones((1, 4, 10), dtype=np.float32)
         frames[0, 1, :] = np.arange(10, dtype=np.float32)  # Odd line
@@ -81,14 +83,14 @@ class TestApplyBidirectionalPhaseCorrection:
         np.testing.assert_allclose(frames[0, 1, :7], np.arange(3, 10, dtype=np.float32))
         np.testing.assert_allclose(frames[0, 1, 7:], 0.0)
 
-    def test_in_place_modification(self):
+    def test_in_place_modification(self) -> None:
         """Verifies the correction is applied in-place."""
         frames = np.ones((1, 4, 10), dtype=np.float32)
         original_id = id(frames)
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=2)
         assert id(frames) == original_id
 
-    def test_even_lines_unchanged(self):
+    def test_even_lines_unchanged(self) -> None:
         """Verifies even lines are not modified by the correction."""
         rng = np.random.default_rng(42)
         frames = rng.standard_normal((2, 10, 20)).astype(np.float32)
@@ -96,7 +98,7 @@ class TestApplyBidirectionalPhaseCorrection:
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=3)
         np.testing.assert_array_equal(frames[:, ::2, :], even_lines)
 
-    def test_multiple_frames(self):
+    def test_multiple_frames(self) -> None:
         """Verifies the correction is applied consistently to all frames."""
         frames = np.ones((3, 6, 10), dtype=np.float32)
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=2)

@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 [project]
 name = "cindra"
 version = "1.0.0rc1"
-description = "A reimplementation of the suite2p library with novel data arhetecture and accross-day tracking pipeline."
+description = "A reimplementation of the suite2p library with novel data architecture and across-day tracking pipeline."
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]

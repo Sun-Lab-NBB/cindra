@@ -129,9 +129,8 @@ class Deformation:
     def __repr__(self) -> str:
         """Returns a string representation of the Deformation instance."""
         if self.is_identity:
-            return f"<Deformation {self.ndim}D identity>"
-        shape_string = "x".join(str(size) for size in self.field_shape)
-        return f"<Deformation shape {shape_string}>"
+            return f"Deformation(field_shape={self.field_shape}, identity=True)"
+        return f"Deformation(field_shape={self.field_shape})"
 
     @property
     def is_identity(self) -> bool:

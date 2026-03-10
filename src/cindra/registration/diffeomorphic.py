@@ -12,12 +12,12 @@ from .pyramid import ScaleSpacePyramid
 from .deformation import Deformation
 from .spline_grid import SplineGrid
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
 _MINIMUM_GRID_DIMENSION: int = 4
 """The minimum B-spline grid dimension required for frozen edge constraints. Grids smaller than this cannot properly
 constrain edge deformations."""
-
-if TYPE_CHECKING:
-    from numpy.typing import NDArray
 
 
 class DiffeomorphicDemonsRegistration:

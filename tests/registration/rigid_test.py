@@ -1,5 +1,7 @@
 """Contains tests for the rigid module."""
 
+from __future__ import annotations
+
 import numpy as np
 
 from cindra.registration.rigid import (
@@ -14,27 +16,27 @@ from cindra.registration.rigid import (
 class TestComputeEdgeTaper:
     """Tests for compute_edge_taper."""
 
-    def test_output_shapes(self):
+    def test_output_shapes(self) -> None:
         """Verifies both outputs have the correct shape."""
         reference = np.ones((64, 64), dtype=np.float32) * 100.0
         taper_mask, mean_offset = compute_edge_taper(reference_image=reference, taper_slope=5.0)
         assert taper_mask.shape == (64, 64)
         assert mean_offset.shape == (64, 64)
 
-    def test_output_dtypes(self):
+    def test_output_dtypes(self) -> None:
         """Verifies both outputs are float32."""
         reference = np.ones((32, 32), dtype=np.float32)
         taper_mask, mean_offset = compute_edge_taper(reference_image=reference, taper_slope=5.0)
         assert taper_mask.dtype == np.float32
         assert mean_offset.dtype == np.float32
 
-    def test_mask_center_near_one(self):
+    def test_mask_center_near_one(self) -> None:
         """Verifies the taper mask center is close to 1.0."""
         reference = np.ones((101, 101), dtype=np.float32)
         taper_mask, _ = compute_edge_taper(reference_image=reference, taper_slope=5.0)
         assert taper_mask[50, 50] > 0.95
 
-    def test_mask_plus_offset_equals_mean(self):
+    def test_mask_plus_offset_equals_mean(self) -> None:
         """Verifies that taper_mask * value + offset preserves the reference mean at edges."""
         reference = np.ones((64, 64), dtype=np.float32) * 100.0
         taper_mask, mean_offset = compute_edge_taper(reference_image=reference, taper_slope=5.0)
@@ -42,7 +44,7 @@ class TestComputeEdgeTaper:
         reconstructed = taper_mask * 100.0 + mean_offset
         np.testing.assert_allclose(reconstructed, 100.0, atol=1e-4)
 
-    def test_slope_affects_taper_width(self):
+    def test_slope_affects_taper_width(self) -> None:
         """Verifies that different slopes produce different taper profiles."""
         reference = np.ones((100, 100), dtype=np.float32)
         mask_narrow, _ = compute_edge_taper(reference_image=reference, taper_slope=2.0)
@@ -55,7 +57,7 @@ class TestComputeEdgeTaper:
 class TestApplyEdgeTaper:
     """Tests for apply_edge_taper."""
 
-    def test_output_shape(self):
+    def test_output_shape(self) -> None:
         """Verifies the output shape matches the input frames shape."""
         frames = np.ones((5, 32, 32), dtype=np.float32)
         mask = np.ones((32, 32), dtype=np.float32)
@@ -63,7 +65,7 @@ class TestApplyEdgeTaper:
         result = apply_edge_taper(frames=frames, taper_mask=mask, mean_offset=offset)
         assert result.shape == (5, 32, 32)
 
-    def test_identity_mask_preserves_frames(self):
+    def test_identity_mask_preserves_frames(self) -> None:
         """Verifies identity mask with zero offset preserves original frames."""
         rng = np.random.default_rng(42)
         frames = rng.standard_normal((3, 16, 16)).astype(np.float32)
@@ -76,26 +78,26 @@ class TestApplyEdgeTaper:
 class TestComputePhaseCorrelationKernel:
     """Tests for compute_phase_correlation_kernel."""
 
-    def test_shape(self):
+    def test_shape(self) -> None:
         """Verifies the kernel shape matches rfft2 output dimensions."""
         reference = np.ones((32, 32), dtype=np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference)
         assert kernel.shape == (32, 32 // 2 + 1)
 
-    def test_dtype(self):
+    def test_dtype(self) -> None:
         """Verifies the kernel dtype is complex64."""
         reference = np.ones((16, 16), dtype=np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference)
         assert kernel.dtype == np.complex64
 
-    def test_no_smoothing(self):
+    def test_no_smoothing(self) -> None:
         """Verifies the kernel works without Gaussian smoothing."""
         rng = np.random.default_rng(42)
         reference = rng.standard_normal((32, 32)).astype(np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0)
         assert kernel.shape == (32, 32 // 2 + 1)
 
-    def test_with_smoothing(self):
+    def test_with_smoothing(self) -> None:
         """Verifies the kernel works with Gaussian smoothing."""
         rng = np.random.default_rng(42)
         reference = rng.standard_normal((32, 32)).astype(np.float32)
@@ -104,7 +106,7 @@ class TestComputePhaseCorrelationKernel:
         # Smoothed kernel should differ from unsmoothed
         assert not np.allclose(kernel_no_smooth, kernel_smooth)
 
-    def test_normalized_magnitude(self):
+    def test_normalized_magnitude(self) -> None:
         """Verifies the kernel magnitudes are approximately normalized."""
         rng = np.random.default_rng(42)
         reference = rng.standard_normal((32, 32)).astype(np.float32)
@@ -117,7 +119,7 @@ class TestComputePhaseCorrelationKernel:
 class TestComputeRigidOffsets:
     """Tests for compute_rigid_offsets."""
 
-    def test_zero_offset_for_identical_frames(self):
+    def test_zero_offset_for_identical_frames(self) -> None:
         """Verifies zero offsets when frames match the reference."""
         rng = np.random.default_rng(42)
         reference = rng.standard_normal((64, 64)).astype(np.float32)
@@ -135,7 +137,7 @@ class TestComputeRigidOffsets:
         np.testing.assert_array_equal(y_offsets, 0)
         np.testing.assert_array_equal(x_offsets, 0)
 
-    def test_detects_known_translation(self):
+    def test_detects_known_translation(self) -> None:
         """Verifies detection of a known rigid translation."""
         rng = np.random.default_rng(42)
         reference = rng.standard_normal((64, 64)).astype(np.float32)
@@ -153,7 +155,7 @@ class TestComputeRigidOffsets:
         assert y_offsets[0] == 3
         assert x_offsets[0] == -2
 
-    def test_output_dtypes(self):
+    def test_output_dtypes(self) -> None:
         """Verifies the output dtypes are correct."""
         rng = np.random.default_rng(42)
         reference = rng.standard_normal((32, 32)).astype(np.float32)
@@ -170,7 +172,7 @@ class TestComputeRigidOffsets:
         assert x_offsets.dtype == np.int32
         assert correlation.dtype == np.float32
 
-    def test_with_temporal_smoothing(self):
+    def test_with_temporal_smoothing(self) -> None:
         """Verifies offsets can be computed with temporal smoothing enabled."""
         rng = np.random.default_rng(42)
         reference = rng.standard_normal((32, 32)).astype(np.float32)
@@ -187,7 +189,7 @@ class TestComputeRigidOffsets:
         np.testing.assert_array_equal(y_offsets, 0)
         np.testing.assert_array_equal(x_offsets, 0)
 
-    def test_positive_correlation_for_matching_frames(self):
+    def test_positive_correlation_for_matching_frames(self) -> None:
         """Verifies that matching frames produce high positive correlation values."""
         rng = np.random.default_rng(42)
         reference = rng.standard_normal((32, 32)).astype(np.float32)
@@ -206,14 +208,14 @@ class TestComputeRigidOffsets:
 class TestTranslateFrame:
     """Tests for translate_frame."""
 
-    def test_zero_offset_identity(self):
+    def test_zero_offset_identity(self) -> None:
         """Verifies zero offset produces no change."""
         rng = np.random.default_rng(42)
         frame = rng.standard_normal((32, 32)).astype(np.float32)
         result = translate_frame(frame=frame, y_offset=0, x_offset=0)
         np.testing.assert_array_equal(result, frame)
 
-    def test_known_vertical_shift(self):
+    def test_known_vertical_shift(self) -> None:
         """Verifies correct vertical circular shift."""
         frame = np.zeros((8, 8), dtype=np.float32)
         frame[0, :] = 1.0
@@ -222,7 +224,7 @@ class TestTranslateFrame:
         np.testing.assert_allclose(result[6, :], 1.0)
         np.testing.assert_allclose(result[0, :], 0.0)
 
-    def test_known_horizontal_shift(self):
+    def test_known_horizontal_shift(self) -> None:
         """Verifies correct horizontal circular shift."""
         frame = np.zeros((8, 8), dtype=np.float32)
         frame[:, 0] = 1.0
@@ -231,7 +233,7 @@ class TestTranslateFrame:
         np.testing.assert_allclose(result[:, 5], 1.0)
         np.testing.assert_allclose(result[:, 0], 0.0)
 
-    def test_combined_shift(self):
+    def test_combined_shift(self) -> None:
         """Verifies correct combined vertical and horizontal shift."""
         frame = np.zeros((8, 8), dtype=np.float32)
         frame[2, 3] = 1.0
@@ -239,14 +241,14 @@ class TestTranslateFrame:
         # (2, 3) should move to (2-1, 3-1) = (1, 2)
         assert result[1, 2] == 1.0
 
-    def test_preserves_shape_and_dtype(self):
+    def test_preserves_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype match the input."""
         frame = np.ones((16, 32), dtype=np.float32)
         result = translate_frame(frame=frame, y_offset=5, x_offset=-3)
         assert result.shape == (16, 32)
         assert result.dtype == np.float32
 
-    def test_roundtrip_translation(self):
+    def test_roundtrip_translation(self) -> None:
         """Verifies that applying opposite translations returns the original frame."""
         rng = np.random.default_rng(42)
         frame = rng.standard_normal((32, 32)).astype(np.float32)

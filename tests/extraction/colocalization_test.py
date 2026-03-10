@@ -1,6 +1,15 @@
 """Contains tests for the colocalization module."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from numpy.typing import NDArray
 
 from cindra.dataclasses import ROIMask, ROIStatistics
 from cindra.extraction.colocalization import (
@@ -12,7 +21,14 @@ from cindra.extraction.colocalization import (
 )
 
 
-def _make_roi(y_pixels, x_pixels, weights, frame_width, radius=5.0, overlap_mask=None):
+def _make_roi(
+    y_pixels: Sequence[int],
+    x_pixels: Sequence[int],
+    weights: Sequence[float],
+    frame_width: int,
+    radius: float = 5.0,
+    overlap_mask: NDArray[np.bool_] | None = None,
+) -> ROIStatistics:
     """Creates a minimal ROIStatistics instance for testing."""
     mask = ROIMask(
         y_pixels=np.array(y_pixels, dtype=np.int32),
@@ -26,7 +42,13 @@ def _make_roi(y_pixels, x_pixels, weights, frame_width, radius=5.0, overlap_mask
     return ROIStatistics(mask=mask)
 
 
-def _make_circular_roi(center_y, center_x, radius, frame_height, frame_width):
+def _make_circular_roi(
+    center_y: int,
+    center_x: int,
+    radius: int,
+    frame_height: int,
+    frame_width: int,
+) -> ROIStatistics:
     """Creates a circular ROI for testing."""
     y_coords, x_coords = np.mgrid[0:frame_height, 0:frame_width]
     distance = np.sqrt((y_coords - center_y) ** 2 + (x_coords - center_x) ** 2)
@@ -40,7 +62,7 @@ def _make_circular_roi(center_y, center_x, radius, frame_height, frame_width):
 class TestCorrectBleedthrough:
     """Tests for _correct_bleedthrough."""
 
-    def test_output_non_negative(self):
+    def test_output_non_negative(self) -> None:
         """Verifies that the corrected image has no negative values."""
         rng = np.random.default_rng(42)
         functional = rng.standard_normal((30, 30)).astype(np.float32) + 100.0
@@ -51,7 +73,7 @@ class TestCorrectBleedthrough:
         )
         assert np.all(corrected >= 0)
 
-    def test_output_shape_and_dtype(self):
+    def test_output_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype match expectations."""
         functional = np.ones((30, 30), dtype=np.float32) * 100.0
         structural = np.ones((30, 30), dtype=np.float32) * 50.0
@@ -62,7 +84,7 @@ class TestCorrectBleedthrough:
         assert corrected.shape == (30, 30)
         assert corrected.dtype == np.float32
 
-    def test_zero_functional_no_correction(self):
+    def test_zero_functional_no_correction(self) -> None:
         """Verifies that zero functional image produces no bleedthrough correction."""
         functional = np.zeros((30, 30), dtype=np.float32)
         structural = np.ones((30, 30), dtype=np.float32) * 50.0
@@ -76,14 +98,14 @@ class TestCorrectBleedthrough:
 class TestBuildSparseRoiMasks:
     """Tests for _build_sparse_roi_masks."""
 
-    def test_shape(self):
+    def test_shape(self) -> None:
         """Verifies the sparse matrix has correct shape."""
         roi_1 = _make_roi(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
         roi_2 = _make_roi(y_pixels=[10, 10], x_pixels=[10, 11], weights=[1.0, 1.0], frame_width=20)
         sparse = _build_sparse_roi_masks(rois=[roi_1, roi_2], frame_height=20, frame_width=20)
         assert sparse.shape == (2, 400)
 
-    def test_correct_pixel_positions(self):
+    def test_correct_pixel_positions(self) -> None:
         """Verifies that the sparse matrix has ones at the correct flat indices."""
         roi = _make_roi(y_pixels=[2, 2], x_pixels=[3, 4], weights=[1.0, 1.0], frame_width=10)
         sparse = _build_sparse_roi_masks(rois=[roi], frame_height=10, frame_width=10)
@@ -92,7 +114,7 @@ class TestBuildSparseRoiMasks:
         assert dense[0, 2 * 10 + 4] == 1.0
         assert dense[0, 0] == 0.0
 
-    def test_binary_clipping(self):
+    def test_binary_clipping(self) -> None:
         """Verifies that duplicate pixel coordinates are clipped to binary values."""
         # Creates ROI with duplicate pixels to trigger the clipping path.
         roi = _make_roi(y_pixels=[5, 5, 5], x_pixels=[5, 5, 6], weights=[1.0, 1.0, 1.0], frame_width=20)
@@ -103,7 +125,7 @@ class TestBuildSparseRoiMasks:
 class TestComputeOverlapMatrix:
     """Tests for _compute_overlap_matrix."""
 
-    def test_identical_rois_full_overlap(self):
+    def test_identical_rois_full_overlap(self) -> None:
         """Verifies that identical ROIs produce an overlap of 1.0."""
         roi = _make_roi(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
         overlap = _compute_overlap_matrix(
@@ -114,7 +136,7 @@ class TestComputeOverlapMatrix:
         )
         np.testing.assert_allclose(overlap[0, 0], 1.0, atol=1e-6)
 
-    def test_non_overlapping_rois(self):
+    def test_non_overlapping_rois(self) -> None:
         """Verifies that non-overlapping ROIs produce zero overlap."""
         roi_1 = _make_roi(y_pixels=[2, 2], x_pixels=[2, 3], weights=[1.0, 1.0], frame_width=20)
         roi_2 = _make_roi(y_pixels=[15, 15], x_pixels=[15, 16], weights=[1.0, 1.0], frame_width=20)
@@ -126,7 +148,7 @@ class TestComputeOverlapMatrix:
         )
         assert overlap[0, 0] == 0.0
 
-    def test_empty_rois(self):
+    def test_empty_rois(self) -> None:
         """Verifies correct shape for empty ROI lists."""
         overlap = _compute_overlap_matrix(
             rois_channel_1=[],
@@ -140,7 +162,7 @@ class TestComputeOverlapMatrix:
 class TestComputeSpatialColocalization:
     """Tests for compute_spatial_colocalization."""
 
-    def test_empty_channel_1(self):
+    def test_empty_channel_1(self) -> None:
         """Verifies correct handling of empty channel 1."""
         result = compute_spatial_colocalization(
             rois_channel_1=[],
@@ -151,7 +173,7 @@ class TestComputeSpatialColocalization:
         )
         assert result.shape == (0, 2)
 
-    def test_empty_channel_2(self):
+    def test_empty_channel_2(self) -> None:
         """Verifies correct handling of empty channel 2."""
         roi = _make_roi(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=20)
         result = compute_spatial_colocalization(
@@ -165,7 +187,7 @@ class TestComputeSpatialColocalization:
         assert result[0, 0] == -1  # No match.
         assert result[0, 1] == 0.0
 
-    def test_identical_rois_match(self):
+    def test_identical_rois_match(self) -> None:
         """Verifies that identical ROIs are matched with high overlap."""
         roi = _make_roi(
             y_pixels=[5, 5, 6, 6],
@@ -183,7 +205,7 @@ class TestComputeSpatialColocalization:
         assert result[0, 0] == 0  # Matched to channel 2 ROI index 0.
         assert result[0, 1] > 0.9
 
-    def test_non_overlapping_rois_no_match(self):
+    def test_non_overlapping_rois_no_match(self) -> None:
         """Verifies that non-overlapping ROIs are not matched."""
         roi_1 = _make_roi(y_pixels=[2, 2], x_pixels=[2, 3], weights=[1.0, 1.0], frame_width=20)
         roi_2 = _make_roi(y_pixels=[15, 15], x_pixels=[15, 16], weights=[1.0, 1.0], frame_width=20)
@@ -196,7 +218,7 @@ class TestComputeSpatialColocalization:
         )
         assert result[0, 0] == -1
 
-    def test_mutual_best_match_enforced(self):
+    def test_mutual_best_match_enforced(self) -> None:
         """Verifies that mutual best-match constraint is enforced."""
         # Two channel 1 ROIs both closest to one channel 2 ROI—only one should match.
         roi_1a = _make_roi(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
@@ -217,7 +239,7 @@ class TestComputeSpatialColocalization:
 class TestComputeIntensityColocalization:
     """Tests for compute_intensity_colocalization."""
 
-    def test_empty_rois(self):
+    def test_empty_rois(self) -> None:
         """Verifies correct handling of empty ROI list."""
         functional = np.ones((30, 30), dtype=np.float32) * 100.0
         structural = np.ones((30, 30), dtype=np.float32) * 50.0
@@ -236,7 +258,7 @@ class TestComputeIntensityColocalization:
         assert result.shape == (0, 2)
         assert corrected.shape == (30, 30)
 
-    def test_output_shape_and_dtype(self):
+    def test_output_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype for intensity colocalization."""
         roi = _make_circular_roi(center_y=15, center_x=15, radius=4, frame_height=30, frame_width=30)
         functional = np.ones((30, 30), dtype=np.float32) * 100.0
@@ -258,7 +280,7 @@ class TestComputeIntensityColocalization:
         assert corrected.shape == (30, 30)
         assert corrected.dtype == np.float32
 
-    def test_bright_roi_colocalized(self):
+    def test_bright_roi_colocalized(self) -> None:
         """Verifies that an ROI bright in the structural channel is detected as colocalized."""
         roi = _make_circular_roi(center_y=20, center_x=20, radius=4, frame_height=40, frame_width=40)
         functional = np.ones((40, 40), dtype=np.float32) * 10.0

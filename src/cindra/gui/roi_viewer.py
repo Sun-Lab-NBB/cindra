@@ -34,7 +34,7 @@ from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
 from .styles import FONTS, STYLE, COLORS, ROI_STYLE
-from .widgets import ViewBox, TraceBox, plot_trace, add_plot_legend
+from .widgets import ViewBox, TraceBox, plot_trace, add_plot_legend, escape_returns_focus
 from .overlays import (
     flip_rois,
     draw_masks,
@@ -75,7 +75,6 @@ if TYPE_CHECKING:
 
     from ..dataclasses import ROIStatistics
 
-# Statistics attribute names displayed in the info bar. Centroid is handled separately via roi.mask.centroid.
 _STATISTICS_TO_SHOW: tuple[str, ...] = (
     "pixel_count",
     "skewness",
@@ -83,6 +82,7 @@ _STATISTICS_TO_SHOW: tuple[str, ...] = (
     "footprint",
     "aspect_ratio",
 )
+"""The statistics attribute names displayed in the info bar, with centroid handled separately via roi.mask.centroid."""
 
 
 class ROIViewer(QMainWindow):
@@ -308,12 +308,7 @@ class ROIViewer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        if (
-            event.type() == QtCore.QEvent.Type.KeyPress
-            and isinstance(event, QtGui.QKeyEvent)
-            and event.key() == QtCore.Qt.Key.Key_Escape
-        ):
-            self.setFocus()
+        if escape_returns_focus(self, event):
             return True
         return super().eventFilter(source, event)
 
@@ -1567,24 +1562,6 @@ class ROIViewer(QMainWindow):
     def _zoom_plot(self) -> None:
         """Resets the view range for the image panel."""
         self._view_box.autoRange()
-
-    def _flip_plot(self) -> None:
-        """Flips the selected ROIs between cell and non-cell classification.
-
-        Classification writes go directly through the r+ memory-mapped file, so no explicit save is needed.
-        """
-        if self._context_data is None or self._color_arrays is None or self._roi_maps is None:
-            return
-        flip_rois(
-            roi_statistics=self._roi_statistics,
-            cell_classification=self._cell_classification,
-            color_arrays=self._color_arrays,
-            roi_maps=self._roi_maps,
-            selected_roi_indices=self._selected_roi_indices,
-            colormap=self._roi_colormap,
-        )
-        self._last_reclassified_index = self._selected_roi_index
-        self._update_plot()
 
     def _handle_click(self, click_x: int, click_y: int, is_right_button: bool, is_multi_select: bool) -> bool:
         """Handles mouse clicks on the image panel.

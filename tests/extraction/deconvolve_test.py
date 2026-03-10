@@ -1,5 +1,7 @@
 """Contains tests for the deconvolve module."""
 
+from __future__ import annotations
+
 import numpy as np
 import pytest
 
@@ -9,7 +11,7 @@ from cindra.extraction.deconvolve import apply_oasis_deconvolution, compute_delt
 class TestComputeDeltaFluorescence:
     """Tests for compute_delta_fluorescence."""
 
-    def test_output_shape_and_dtype(self):
+    def test_output_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype match expectations."""
         rng = np.random.default_rng(42)
         cell = rng.standard_normal((5, 200)).astype(np.float32) + 100.0
@@ -27,7 +29,7 @@ class TestComputeDeltaFluorescence:
         assert result.shape == (5, 200)
         assert result.dtype == np.float32
 
-    def test_neuropil_subtraction(self):
+    def test_neuropil_subtraction(self) -> None:
         """Verifies that neuropil signal is subtracted with the given coefficient."""
         cell = np.ones((1, 100), dtype=np.float32) * 100.0
         neuropil = np.ones((1, 100), dtype=np.float32) * 50.0
@@ -45,7 +47,7 @@ class TestComputeDeltaFluorescence:
         )
         np.testing.assert_allclose(result, 0.0, atol=1e-4)
 
-    def test_maximin_baseline(self):
+    def test_maximin_baseline(self) -> None:
         """Verifies the maximin baseline method runs and produces reasonable output."""
         rng = np.random.default_rng(42)
         cell = rng.standard_normal((3, 300)).astype(np.float32) + 200.0
@@ -63,7 +65,7 @@ class TestComputeDeltaFluorescence:
         assert result.shape == (3, 300)
         assert np.isfinite(result).all()
 
-    def test_constant_baseline(self):
+    def test_constant_baseline(self) -> None:
         """Verifies the constant baseline method uses the global minimum of the smoothed trace."""
         # Flat trace with a single bump. Constant baseline = global min of smoothed trace.
         cell = np.ones((1, 200), dtype=np.float32) * 100.0
@@ -82,7 +84,7 @@ class TestComputeDeltaFluorescence:
         # The bump region should have positive delta F.
         assert np.mean(result[0, 105:115]) > np.mean(result[0, :20])
 
-    def test_constant_percentile_baseline(self):
+    def test_constant_percentile_baseline(self) -> None:
         """Verifies the constant_percentile baseline method uses per-ROI percentile."""
         rng = np.random.default_rng(42)
         cell = rng.standard_normal((2, 200)).astype(np.float32) + 100.0
@@ -101,7 +103,7 @@ class TestComputeDeltaFluorescence:
         # Baseline is 8th percentile, so most values should be positive.
         assert np.mean(result > 0) > 0.5
 
-    def test_invalid_baseline_method_raises(self):
+    def test_invalid_baseline_method_raises(self) -> None:
         """Verifies that an invalid baseline method raises ValueError."""
         cell = np.ones((1, 100), dtype=np.float32)
         neuropil = np.zeros((1, 100), dtype=np.float32)
@@ -117,7 +119,7 @@ class TestComputeDeltaFluorescence:
                 sampling_rate=30.0,
             )
 
-    def test_even_window_incremented_to_odd(self):
+    def test_even_window_incremented_to_odd(self) -> None:
         """Verifies that an even baseline window is incremented to odd for symmetric filtering."""
         cell = np.ones((1, 100), dtype=np.float32) * 100.0
         neuropil = np.zeros((1, 100), dtype=np.float32)
@@ -138,7 +140,7 @@ class TestComputeDeltaFluorescence:
 class TestApplyOasisDeconvolution:
     """Tests for apply_oasis_deconvolution."""
 
-    def test_output_shape_and_dtype(self):
+    def test_output_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype match expectations."""
         rng = np.random.default_rng(42)
         fluorescence = np.maximum(rng.standard_normal((5, 200)).astype(np.float32), 0.0)
@@ -151,7 +153,7 @@ class TestApplyOasisDeconvolution:
         assert result.shape == (5, 200)
         assert result.dtype == np.float32
 
-    def test_zero_input_gives_zero_output(self):
+    def test_zero_input_gives_zero_output(self) -> None:
         """Verifies that zero fluorescence produces zero spike traces."""
         fluorescence = np.zeros((3, 100), dtype=np.float32)
         result = apply_oasis_deconvolution(
@@ -162,7 +164,7 @@ class TestApplyOasisDeconvolution:
         )
         np.testing.assert_array_equal(result, 0.0)
 
-    def test_non_negative_spikes(self):
+    def test_non_negative_spikes(self) -> None:
         """Verifies that all deconvolved spike values are non-negative."""
         rng = np.random.default_rng(42)
         fluorescence = np.maximum(rng.standard_normal((10, 300)).astype(np.float32), 0.0)
@@ -174,7 +176,7 @@ class TestApplyOasisDeconvolution:
         )
         assert np.all(result >= -1e-6)
 
-    def test_detects_spike_in_exponential_decay(self):
+    def test_detects_spike_in_exponential_decay(self) -> None:
         """Verifies that OASIS detects a spike at the onset of an exponential decay."""
         # Creates a single ROI trace with a clear exponential decay starting at frame 50.
         time_constant = 1.0
@@ -195,7 +197,7 @@ class TestApplyOasisDeconvolution:
         spike_frame = np.argmax(result[0])
         assert spike_frame == 50
 
-    def test_batching_produces_consistent_results(self):
+    def test_batching_produces_consistent_results(self) -> None:
         """Verifies that different batch sizes produce identical results."""
         rng = np.random.default_rng(42)
         fluorescence = np.maximum(rng.standard_normal((8, 150)).astype(np.float32), 0.0)

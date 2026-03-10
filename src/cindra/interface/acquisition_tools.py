@@ -13,16 +13,8 @@ from pathlib import Path
 from natsort import natsorted
 from tifffile import TiffFile
 
+from ..io import TIFF_EXTENSIONS, PARAMETERS_FILENAME, MAXIMUM_CHANNEL_COUNT
 from .mcp_instance import mcp
-
-_PARAMETERS_FILENAME: str = "cindra_parameters.json"
-"""The name of the acquisition parameters JSON file expected in each recording's data directory."""
-
-_MAXIMUM_CHANNEL_COUNT: int = 2
-"""The maximum number of imaging channels supported by the pipeline."""
-
-_TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
-"""The supported TIFF file extensions for raw imaging data."""
 
 _MINIMUM_RECOMMENDED_FRAMES_PER_PLANE: int = 200
 """The minimum recommended number of frames per plane for reliable processing."""
@@ -96,7 +88,7 @@ def generate_acquisition_parameters_file(
     if errors:
         return {"success": False, "errors": errors}
 
-    output_path = directory / _PARAMETERS_FILENAME
+    output_path = directory / PARAMETERS_FILENAME
     with output_path.open("w") as file:
         json.dump(obj=parameters, fp=file, indent=4)
 
@@ -205,12 +197,12 @@ def validate_recording_readiness(recording_directory: str) -> dict[str, object]:
     warnings: list[str] = []
 
     # Requires cindra_parameters.json to be present and valid.
-    parameters_path = directory / _PARAMETERS_FILENAME
+    parameters_path = directory / PARAMETERS_FILENAME
     if not parameters_path.exists():
         return {
             "success": False,
             "error": (
-                f"Unable to validate recording readiness. No {_PARAMETERS_FILENAME} found in: {recording_directory}. "
+                f"Unable to validate recording readiness. No {PARAMETERS_FILENAME} found in: {recording_directory}. "
                 f"Use generate_acquisition_parameters_file to create one before validating readiness."
             ),
         }
@@ -221,14 +213,14 @@ def validate_recording_readiness(recording_directory: str) -> dict[str, object]:
     except json.JSONDecodeError as exception:
         return {
             "success": False,
-            "error": f"Unable to validate recording readiness. Failed to parse {_PARAMETERS_FILENAME}: {exception}",
+            "error": f"Unable to validate recording readiness. Failed to parse {PARAMETERS_FILENAME}: {exception}",
         }
 
     if not isinstance(parameters, dict):
         return {
             "success": False,
             "error": (
-                f"Unable to validate recording readiness. Expected a JSON object in {_PARAMETERS_FILENAME}, "
+                f"Unable to validate recording readiness. Expected a JSON object in {PARAMETERS_FILENAME}, "
                 f"but found {type(parameters).__name__}."
             ),
         }
@@ -249,7 +241,7 @@ def validate_recording_readiness(recording_directory: str) -> dict[str, object]:
 
     # Discovers TIFF files using the same pattern as the pipeline.
     tiff_paths: list[Path] = []
-    for extension in _TIFF_EXTENSIONS:
+    for extension in TIFF_EXTENSIONS:
         tiff_paths.extend(directory.glob(f"*.{extension}"))
     tiff_paths = natsorted(tiff_paths)
 
@@ -411,7 +403,7 @@ def _validate_acquisition_parameters(
         errors.append("Missing required field 'channel_number'.")
     elif not isinstance(channel_number, int):
         errors.append(f"'channel_number' must be an integer (found: {type(channel_number).__name__}).")
-    elif channel_number < 1 or channel_number > _MAXIMUM_CHANNEL_COUNT:
+    elif channel_number < 1 or channel_number > MAXIMUM_CHANNEL_COUNT:
         errors.append(f"'channel_number' must be 1 or 2 (found: {channel_number}).")
 
     # Validates roi_number and MROI fields.

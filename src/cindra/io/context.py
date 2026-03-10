@@ -24,10 +24,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-_PARAMETERS_FILENAME: str = "cindra_parameters.json"
+PARAMETERS_FILENAME: str = "cindra_parameters.json"
 """The name of the acquisition parameters JSON file expected in each recording's data directory."""
 
-_MAXIMUM_CHANNEL_COUNT: int = 2
+MAXIMUM_CHANNEL_COUNT: int = 2
 """The maximum number of imaging channels supported by the pipeline."""
 
 
@@ -52,11 +52,11 @@ def find_data_directory(data_path: Path) -> Path:
         message = f"Unable to find data directory. The data_path is not a directory: {data_path}"
         console.error(message=message, error=ValueError)
 
-    parameter_files = list(data_path.rglob(_PARAMETERS_FILENAME))
+    parameter_files = list(data_path.rglob(PARAMETERS_FILENAME))
 
     if not parameter_files:
         message = (
-            f"Unable to find '{_PARAMETERS_FILENAME}' in the data directory or its subdirectories: {data_path}. "
+            f"Unable to find '{PARAMETERS_FILENAME}' in the data directory or its subdirectories: {data_path}. "
             f"This file is required and must contain acquisition metadata."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -122,10 +122,10 @@ def resolve_single_recording_contexts(configuration: SingleRecordingConfiguratio
         acquisition = _find_acquisition_parameters(configuration.file_io.data_path)
 
     # Validates that the channel count does not exceed the maximum supported channel count.
-    if acquisition.channel_number > _MAXIMUM_CHANNEL_COUNT:
+    if acquisition.channel_number > MAXIMUM_CHANNEL_COUNT:
         message = (
             f"Unable to resolve single-recording contexts. The pipeline supports at most "
-            f"{_MAXIMUM_CHANNEL_COUNT} channels, but the acquisition parameters specify "
+            f"{MAXIMUM_CHANNEL_COUNT} channels, but the acquisition parameters specify "
             f"{acquisition.channel_number} channels."
         )
         console.error(message=message, error=ValueError)
@@ -446,7 +446,7 @@ def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
         ValueError: If the data_path is not a directory, or if required fields are missing from the JSON file.
     """
     data_directory = find_data_directory(data_path)
-    parameters_path = data_directory / _PARAMETERS_FILENAME
+    parameters_path = data_directory / PARAMETERS_FILENAME
 
     message = f"Found acquisition parameters at: {parameters_path}."
     console.echo(message=message, level=LogLevel.SUCCESS)

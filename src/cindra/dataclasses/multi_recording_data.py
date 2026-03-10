@@ -111,29 +111,11 @@ class MultiRecordingRegistrationData:
     def clear(self) -> None:
         """Clears all registration data to prepare for re-registration."""
         self.has_registration_data = False
-        self.deform_field_y = None
-        self.deform_field_x = None
-        self.transformed_mean_image = None
-        self.transformed_enhanced_mean_image = None
-        self.transformed_maximum_projection = None
-        self.transformed_mean_image_channel_2 = None
-        self.transformed_enhanced_mean_image_channel_2 = None
-        self.transformed_maximum_projection_channel_2 = None
-        self.deformed_roi_masks = None
-        self.deformed_roi_masks_channel_2 = None
+        self.release_arrays()
 
     def prepare_for_saving(self) -> None:
         """Sets array fields to None for YAML serialization."""
-        self.deform_field_y = None
-        self.deform_field_x = None
-        self.transformed_mean_image = None
-        self.transformed_enhanced_mean_image = None
-        self.transformed_maximum_projection = None
-        self.transformed_mean_image_channel_2 = None
-        self.transformed_enhanced_mean_image_channel_2 = None
-        self.transformed_maximum_projection_channel_2 = None
-        self.deformed_roi_masks = None
-        self.deformed_roi_masks_channel_2 = None
+        self.release_arrays()
 
     def release_arrays(self) -> None:
         """Releases all array fields to free memory without affecting ``has_registration_data``.
@@ -407,8 +389,7 @@ class MultiRecordingTrackingData:
 
     def prepare_for_saving(self) -> None:
         """Sets all list fields to None for YAML serialization."""
-        self.template_masks = None
-        self.template_masks_channel_2 = None
+        self.release_arrays()
 
     def release_arrays(self) -> None:
         """Releases all list fields to free memory.

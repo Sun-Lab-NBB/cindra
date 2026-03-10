@@ -31,7 +31,7 @@ from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
 from .styles import FONTS, STYLE, TRACKING_STYLE
-from .widgets import create_play_pause_group
+from .widgets import escape_returns_focus, create_play_pause_group
 from .overlays import normalize_percentile
 from .constants import (
     ROI_CONFIG,
@@ -274,12 +274,7 @@ class TrackingViewer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        if (
-            event.type() == QtCore.QEvent.Type.KeyPress
-            and isinstance(event, QtGui.QKeyEvent)
-            and event.key() == QtCore.Qt.Key.Key_Escape
-        ):
-            self.setFocus()
+        if escape_returns_focus(self, event):
             return True
         return super().eventFilter(source, event)
 
@@ -834,7 +829,7 @@ class TrackingViewer(QMainWindow):
 
     @staticmethod
     def _resolve_background(
-        rec: MultiRecordingData,
+        recording: MultiRecordingData,
         image_type: BackgroundView,
         coordinate_space: CoordinateSpace,
         channel_2: bool,
@@ -842,7 +837,7 @@ class TrackingViewer(QMainWindow):
         """Resolves the background image from a recording based on the active view settings.
 
         Args:
-            rec: The multi-recording recording to read from.
+            recording: The multi-recording recording to read from.
             image_type: The selected background image type.
             coordinate_space: Native or transformed coordinate space.
             channel_2: Determines whether to return the channel 2 variant.
@@ -855,35 +850,41 @@ class TrackingViewer(QMainWindow):
 
         if coordinate_space == CoordinateSpace.TRANSFORMED:
             if image_type == BackgroundView.MEAN_IMAGE:
-                return rec.transformed_mean_image_channel_2 if channel_2 else rec.transformed_mean_image
+                return recording.transformed_mean_image_channel_2 if channel_2 else recording.transformed_mean_image
             if image_type == BackgroundView.ENHANCED_MEAN_IMAGE:
                 return (
-                    rec.transformed_enhanced_mean_image_channel_2 if channel_2 else rec.transformed_enhanced_mean_image
+                    recording.transformed_enhanced_mean_image_channel_2
+                    if channel_2
+                    else recording.transformed_enhanced_mean_image
                 )
             if image_type == BackgroundView.MAXIMUM_PROJECTION:
-                return rec.transformed_maximum_projection_channel_2 if channel_2 else rec.transformed_maximum_projection
-            return rec.transformed_mean_image_channel_2 if channel_2 else rec.transformed_mean_image
+                return (
+                    recording.transformed_maximum_projection_channel_2
+                    if channel_2
+                    else recording.transformed_maximum_projection
+                )
+            return recording.transformed_mean_image_channel_2 if channel_2 else recording.transformed_mean_image
 
         if image_type == BackgroundView.MEAN_IMAGE:
-            return rec.mean_image_channel_2 if channel_2 else rec.mean_image
+            return recording.mean_image_channel_2 if channel_2 else recording.mean_image
         if image_type == BackgroundView.ENHANCED_MEAN_IMAGE:
-            return rec.enhanced_mean_image_channel_2 if channel_2 else rec.enhanced_mean_image
+            return recording.enhanced_mean_image_channel_2 if channel_2 else recording.enhanced_mean_image
         if image_type == BackgroundView.MAXIMUM_PROJECTION:
-            return rec.maximum_projection_channel_2 if channel_2 else rec.maximum_projection
+            return recording.maximum_projection_channel_2 if channel_2 else recording.maximum_projection
         if image_type == BackgroundView.CORRELATION_MAP:
-            return rec.correlation_map_channel_2 if channel_2 else rec.correlation_map
-        return rec.mean_image_channel_2 if channel_2 else rec.mean_image
+            return recording.correlation_map_channel_2 if channel_2 else recording.correlation_map
+        return recording.mean_image_channel_2 if channel_2 else recording.mean_image
 
     @staticmethod
     def _resolve_masks(
-        rec: MultiRecordingData,
+        recording: MultiRecordingData,
         layer: MaskLayer,
         channel_2: bool,
     ) -> Sequence[ROIMask | ROIStatistics]:
         """Resolves the mask list from a recording based on the active mask layer and channel.
 
         Args:
-            rec: The multi-recording recording to read from.
+            recording: The multi-recording recording to read from.
             layer: The selected mask layer.
             channel_2: Determines whether to return the channel 2 variant.
 
@@ -891,11 +892,11 @@ class TrackingViewer(QMainWindow):
             The resolved mask list. Channel 2 variants return an empty list when single-channel.
         """
         if layer == MaskLayer.ORIGINAL:
-            return rec.original_masks_channel_2 if channel_2 else rec.original_masks
+            return recording.original_masks_channel_2 if channel_2 else recording.original_masks
         if layer == MaskLayer.DEFORMED:
-            return rec.deformed_masks_channel_2 if channel_2 else rec.deformed_masks
+            return recording.deformed_masks_channel_2 if channel_2 else recording.deformed_masks
         if layer == MaskLayer.TEMPLATE:
-            return rec.template_masks_channel_2 if channel_2 else rec.template_masks
+            return recording.template_masks_channel_2 if channel_2 else recording.template_masks
         if layer == MaskLayer.TRACKED:
-            return rec.tracked_masks_channel_2 if channel_2 else rec.tracked_masks
+            return recording.tracked_masks_channel_2 if channel_2 else recording.tracked_masks
         return []

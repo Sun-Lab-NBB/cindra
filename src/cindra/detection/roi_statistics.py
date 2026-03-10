@@ -204,17 +204,17 @@ class _EllipseData:
 
     @property
     def area(self) -> float:
-        """Returns the area of the ellipse."""
+        """The area of the ellipse."""
         return float((self.radii[0] * self.radii[1]) ** 0.5 * np.pi)
 
     @property
     def radius(self) -> float:
-        """Returns the effective radius of the ROI ellipse scaled by the mean of y_scale and x_scale."""
+        """The effective radius of the ROI ellipse scaled by the mean of y_scale and x_scale."""
         return float(self.radii[0] * np.mean((self.x_scale, self.y_scale)))
 
     @property
     def aspect_ratio(self) -> float:
-        """Returns the normalized aspect ratio bounded between 0 and 2, where 1 indicates a circular shape."""
+        """The normalized aspect ratio bounded between 0 and 2, where 1 indicates a circular shape."""
         major, minor = self.radii
         return 2 * major / (major + minor + 0.01)
 
@@ -283,33 +283,33 @@ class _ROI:
 
     @property
     def data(self) -> ROIStatistics:
-        """Returns the underlying ROIStatistics instance."""
+        """The underlying ROIStatistics instance."""
         return self._data
 
     @property
     def y_pixels(self) -> NDArray[np.int32]:
-        """Returns the y-coordinates of the ROI pixels."""
+        """The y-coordinates of the ROI pixels."""
         return self._data.mask.y_pixels
 
     @property
     def x_pixels(self) -> NDArray[np.int32]:
-        """Returns the x-coordinates of the ROI pixels."""
+        """The x-coordinates of the ROI pixels."""
         return self._data.mask.x_pixels
 
     @property
     def pixel_weights(self) -> NDArray[np.float32]:
-        """Returns the pixel weights (lambda values) for the ROI."""
+        """The pixel weights (lambda values) for the ROI."""
         return self._data.mask.pixel_weights
 
     @property
     def centroid(self) -> tuple[int, int]:
-        """Returns the centroid (y, x) pixel position of the ROI."""
+        """The centroid (y, x) pixel position of the ROI."""
         return self._data.mask.centroid[0], self._data.mask.centroid[1]
 
     @property
     def soma_mask(self) -> NDArray[np.bool_]:
-        """Computes, caches, and returns a boolean mask indicating which pixels belong to the soma region of this
-        ROI.
+        """The boolean mask indicating which pixels belong to the soma region of this ROI, computed and cached on first
+        access.
         """
         if self._cached_soma_mask is not None:
             return self._cached_soma_mask
@@ -319,7 +319,7 @@ class _ROI:
 
     @property
     def mean_radius(self) -> float:
-        """Computes the mean diameter-normalized distance from ROI pixels to their median center."""
+        """The mean diameter-normalized distance from ROI pixels to their median center."""
         y_pixels = self.y_pixels[self.soma_mask]
         x_pixels = self.x_pixels[self.soma_mask]
         # Normalizes distances by ROI diameter for scale-invariance, matching the original suite2p approach.
@@ -331,7 +331,7 @@ class _ROI:
 
     @property
     def baseline_mean_radius(self) -> float:
-        """Computes the expected mean radius for a uniformly distributed set of pixels of the same count as the ROI."""
+        """The expected mean radius for a uniformly distributed set of pixels of the same count as the ROI."""
         # Uses a diameter-dependent kernel. The kernel is computed from a meshgrid spanning 2*diameter in each
         # direction, with distances normalized by diameter, matching the original suite2p approach.
         diameter = self._diameter
@@ -344,12 +344,12 @@ class _ROI:
 
     @property
     def compactness(self) -> float:
-        """Computes the ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
+        """The ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
         return max(1.0, self.mean_radius / (1e-10 + self.baseline_mean_radius))
 
     @property
     def solidity(self) -> float:
-        """Computes the ROI's solidity as the ratio of pixel count to convex hull area."""
+        """The ROI's solidity as the ratio of pixel count to convex hull area."""
         minimum_pixels_for_hull = 10
         default_area = 10.0
 
@@ -368,12 +368,12 @@ class _ROI:
 
     @property
     def soma_pixel_count(self) -> int:
-        """Returns the number of pixels in the soma region."""
+        """The number of pixels in the soma region."""
         return int(self.soma_mask.sum())
 
     @property
     def pixel_count(self) -> int:
-        """Returns the total number of pixels in the ROI."""
+        """The total number of pixels in the ROI."""
         return self.x_pixels.size
 
     def _compute_soma_mask(self) -> NDArray[np.bool_]:
@@ -503,7 +503,7 @@ class _ROI:
         )
 
     def get_overlap_mask(self, overlap_count_image: NDArray[np.uint16]) -> NDArray[np.bool_]:
-        """Computes a mask that communicates which pixels overlap with other ROIs.
+        """Computes a boolean mask identifying pixels that overlap with other ROIs.
 
         Args:
             overlap_count_image: A 2D array where each pixel contains the count of overlapping ROIs.

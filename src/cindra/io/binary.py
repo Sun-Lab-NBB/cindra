@@ -308,8 +308,9 @@ class BinaryFile:
         # size, whichever is smaller.
         batch_size = min(int(np.sum(good_frames)), _DEFAULT_BIN_BATCH_SIZE)
 
-        # Bins the frames in batches to reduce memory consumption
-        batches: list[NDArray[np.float32]] = []  # Stores frames of each batch
+        # Bins the frames in batches to reduce memory consumption.
+        # Stores the frames of each batch.
+        batches: list[NDArray[np.float32]] = []
         for batch_index in range(0, self.frame_number, batch_size):
             # Retrieves the frames in the processed batch.
             indices = slice(batch_index, min(batch_index + batch_size, self.frame_number))
@@ -328,7 +329,7 @@ class BinaryFile:
             # If a processed data batch has more frames than bin_size, bins the data. Otherwise, averages the batch into
             # a single bin to preserve data when there are many bad frames.
             if data.shape[0] > bin_size:
-                # Retrieves the dimensions of the data after cropping and frame rejection
+                # Retrieves the dimensions of the data after cropping and frame rejection.
                 frame_number, height, width = data.shape
 
                 # Ensures the number of frames is a multiple of bin_size for even binning. Truncates the data to a size
@@ -379,7 +380,7 @@ class BinaryFile:
         if x_range is None:
             x_range = slice(0, width)
 
-        # Convert slices to start/stop for range() function
+        # Converts slices to start/stop for the range() function.
         frame_start, frame_stop, _ = frame_range.indices(frame_number)
 
         message = (
@@ -520,7 +521,7 @@ class BinaryFileCombined:
             A NumPy array that stores the data sampled at the specified indices from each managed plane file. Note, the
             returned array uses the height and width combined from all managed planes.
         """
-        # Reads from the first plane file to determine the number of frames in the processed slice
+        # Reads from the first plane file to determine the number of frames in the processed slice.
         first_file_data = self.files[0][indices]
         actual_frames = first_file_data.shape[0]
 

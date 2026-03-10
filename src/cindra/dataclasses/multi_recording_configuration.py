@@ -98,7 +98,7 @@ class DiffeomorphicRegistration:
     calculate the deformation fields that register all recordings to a common visual space."""
 
     grid_sampling_factor: float = 1
-    """Determines how the B-spline grid spacing scales with image scale during the multi-scale registration process.
+    """Controls how the B-spline grid spacing scales with image scale during the multi-scale registration process.
     Must be between 0 and 1. Lower values produce a relatively finer grid at coarser scales, allowing for more
     detailed deformations at those scales."""
 

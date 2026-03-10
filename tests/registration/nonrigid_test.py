@@ -1,5 +1,7 @@
 """Contains tests for the nonrigid module."""
 
+from __future__ import annotations
+
 import numpy as np
 
 from cindra.detection import compute_registration_blocks
@@ -14,7 +16,7 @@ from cindra.registration.nonrigid import (
 class TestComputeNonrigidReferenceData:
     """Tests for compute_nonrigid_reference_data."""
 
-    def test_output_shapes(self):
+    def test_output_shapes(self) -> None:
         """Verifies the output arrays have correct shapes."""
         reference = np.ones((64, 64), dtype=np.float32)
         y_blocks = [np.array([0, 32], dtype=np.int32), np.array([0, 32], dtype=np.int32)]
@@ -36,7 +38,7 @@ class TestComputeNonrigidReferenceData:
         assert offset.shape == (num_blocks, block_h, block_w)
         assert kernel.shape == (num_blocks, block_h, rfft_w)
 
-    def test_output_dtypes(self):
+    def test_output_dtypes(self) -> None:
         """Verifies the output dtypes are correct."""
         reference = np.ones((64, 64), dtype=np.float32)
         y_blocks = [np.array([0, 32], dtype=np.int32)]
@@ -54,7 +56,7 @@ class TestComputeNonrigidReferenceData:
         assert offset.dtype == np.float32
         assert kernel.dtype == np.complex64
 
-    def test_taper_mask_values_bounded(self):
+    def test_taper_mask_values_bounded(self) -> None:
         """Verifies that taper mask values are in [0, 1]."""
         reference = np.ones((64, 64), dtype=np.float32) * 100.0
         y_blocks = [np.array([0, 64], dtype=np.int32)]
@@ -75,7 +77,7 @@ class TestComputeNonrigidReferenceData:
 class TestComputeNonrigidOffsets:
     """Tests for compute_nonrigid_offsets."""
 
-    def test_consistent_offsets_for_identical_frames(self):
+    def test_consistent_offsets_for_identical_frames(self) -> None:
         """Verifies consistent offsets and correct shapes when frames match the reference."""
         rng = np.random.default_rng(42)
         reference = rng.standard_normal((64, 64)).astype(np.float32)
@@ -115,7 +117,7 @@ class TestComputeNonrigidOffsets:
         assert np.max(np.abs(y_offsets)) < 1.0
         assert np.max(np.abs(x_offsets)) < 1.0
 
-    def test_output_dtypes(self):
+    def test_output_dtypes(self) -> None:
         """Verifies the output dtypes are correct."""
         rng = np.random.default_rng(42)
         reference = rng.standard_normal((64, 64)).astype(np.float32)
@@ -153,7 +155,7 @@ class TestComputeNonrigidOffsets:
 class TestApplyNonrigidCorrection:
     """Tests for apply_nonrigid_correction."""
 
-    def test_zero_offsets_preserve_frames(self):
+    def test_zero_offsets_preserve_frames(self) -> None:
         """Verifies that zero offsets preserve the original frames."""
         rng = np.random.default_rng(42)
         frames = rng.standard_normal((2, 64, 64)).astype(np.float32)
@@ -174,7 +176,7 @@ class TestApplyNonrigidCorrection:
         assert result.shape == frames.shape
         np.testing.assert_allclose(result, frames, atol=1e-4)
 
-    def test_output_shape_and_dtype(self):
+    def test_output_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype match the input."""
         frames = np.ones((3, 64, 64), dtype=np.float32)
         y_blocks, x_blocks, block_counts, _, _ = compute_registration_blocks(height=64, width=64, block_size=(32, 32))
@@ -198,7 +200,7 @@ class TestApplyNonrigidCorrection:
 class TestUpsampleBlockOffsets:
     """Tests for _upsample_block_offsets."""
 
-    def test_output_shape(self):
+    def test_output_shape(self) -> None:
         """Verifies the output offset maps have the correct shape."""
         y_blocks, x_blocks, block_counts, _, _ = compute_registration_blocks(height=64, width=64, block_size=(32, 32))
         num_blocks = len(y_blocks)
@@ -218,7 +220,7 @@ class TestUpsampleBlockOffsets:
         assert y_maps.shape == (2, 64, 64)
         assert x_maps.shape == (2, 64, 64)
 
-    def test_uniform_offsets_preserved(self):
+    def test_uniform_offsets_preserved(self) -> None:
         """Verifies that uniform block offsets produce uniform pixel offset maps."""
         y_blocks, x_blocks, block_counts, _, _ = compute_registration_blocks(height=64, width=64, block_size=(32, 32))
         num_blocks = len(y_blocks)
