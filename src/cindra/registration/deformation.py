@@ -514,7 +514,7 @@ def _make_samples_absolute(
 
 
 @numba.njit(parallel=True, cache=True)
-def _warp(
+def _warp(  # pragma: no cover
     data: NDArray[np.float32],
     result: NDArray[np.float32],
     samples_x: NDArray[np.float32],
@@ -681,7 +681,7 @@ def _warp(
 
 
 @numba.njit(parallel=True, cache=True)
-def _project(
+def _project(  # pragma: no cover
     data: NDArray[np.float32],
     result: NDArray[np.float32],
     samples_x: NDArray[np.float32],

@@ -83,7 +83,7 @@ def apply_mask(
     Returns:
         The masked frames with the same shape as input.
     """
-    return frames * mask + offset
+    return frames * mask + offset  # pragma: no cover
 
 
 def combine_rigid_offsets(

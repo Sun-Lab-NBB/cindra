@@ -949,7 +949,7 @@ class ExtractionData:
     """The deconvolved spike traces with shape (cells, frames)."""
 
     cell_classification: NDArray[np.float32] | None = None
-    """The cell classification results with shape (cells, 2) containing (probability, is_cell_boolean)."""
+    """The cell classification results with shape (cells, 2) containing (is_cell_label, probability)."""
 
     # Channel 2 extraction data (when both channels are functional).
     roi_statistics_channel_2: list[ROIStatistics] | None = None

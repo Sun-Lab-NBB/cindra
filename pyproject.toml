@@ -96,11 +96,6 @@ dev = [
     # Development Automation
     "ataraxis-automation>=8,<9",
 
-    # Testing
-    "pytest>=8,<9",
-    "pytest-cov>=6,<7",
-    "pytest-xdist>=3,<4",
-
     # Types
     "scipy-stubs>=1,<2",
 ]
@@ -205,6 +200,10 @@ exclude = [
     "recipe/",             # Ignores recipe directory (grayskull output target)
     "tests/",              # Ignores the test directory.
 ]
+
+# Pytest configuration section.
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
 
 # This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
 [tool.coverage.paths]

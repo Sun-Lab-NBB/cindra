@@ -211,7 +211,7 @@ Saved at both the combined root and per-plane levels. All files are `.npy` forma
 | `neuropil_fluorescence.npy`   | (num_rois, frames) | Neuropil fluorescence traces                                |
 | `subtracted_fluorescence.npy` | (num_rois, frames) | Neuropil-and-baseline-subtracted fluorescence               |
 | `spikes.npy`                  | (num_rois, frames) | Deconvolved spike estimates                                 |
-| `cell_classification.npy`     | (num_rois, 2)      | Column 0: classifier probability, column 1: is_cell boolean |
+| `cell_classification.npy`     | (num_rois, 2)      | Column 0: is_cell label (1.0 or 0.0), column 1: classifier probability |
 
 **Channel 2 (two-channel only, same shapes):**
 
@@ -227,7 +227,7 @@ Saved at both the combined root and per-plane levels. All files are `.npy` forma
 
 | File                                  | Shape           | Description                                                                                 |
 |---------------------------------------|-----------------|---------------------------------------------------------------------------------------------|
-| `cell_colocalization.npy`             | (num_rois, 2)   | Column 0: probability, column 1: is_colocalized boolean                                     |
+| `cell_colocalization.npy`             | (num_rois, 2)   | Column 0: is_colocalized label (1.0 or 0.0), column 1: probability                                     |
 | `corrected_structural_mean_image.npy` | (height, width) | Bleed-through-corrected structural channel mean (single-functional-channel recordings only) |
 
 ---

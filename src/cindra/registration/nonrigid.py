@@ -300,7 +300,7 @@ def apply_nonrigid_correction(
 
 
 @njit(parallel=True, cache=True)
-def _compute_correlation_snr(
+def _compute_correlation_snr(  # pragma: no cover
     correlation_data: NDArray[np.float32],
     padding: int,
 ) -> NDArray[np.float32]:
@@ -355,7 +355,7 @@ def _compute_correlation_snr(
 
 
 @njit(cache=True)
-def _apply_bilinear_interpolation(
+def _apply_bilinear_interpolation(  # pragma: no cover
     source: NDArray[np.float32],
     y_coordinates: NDArray[np.float32],
     x_coordinates: NDArray[np.float32],
@@ -404,7 +404,7 @@ def _apply_bilinear_interpolation(
 
 
 @njit(parallel=True, cache=True)
-def _apply_coordinate_offsets(
+def _apply_coordinate_offsets(  # pragma: no cover
     frames: NDArray[np.float32],
     y_offset_maps: NDArray[np.float32],
     x_offset_maps: NDArray[np.float32],
@@ -442,7 +442,7 @@ def _apply_coordinate_offsets(
 
 
 @njit(parallel=True, cache=True)
-def _interpolate_block_offsets(
+def _interpolate_block_offsets(  # pragma: no cover
     y_block_offsets: NDArray[np.float32],
     x_block_offsets: NDArray[np.float32],
     y_grid: NDArray[np.float32],
@@ -486,7 +486,7 @@ def _interpolate_block_offsets(
 
 
 @njit(parallel=True, cache=True)
-def _extract_upsampling_regions(
+def _extract_upsampling_regions(  # pragma: no cover
     correlation: NDArray[np.float32],
     y_peaks: NDArray[np.int32],
     x_peaks: NDArray[np.int32],

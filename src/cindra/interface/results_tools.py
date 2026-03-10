@@ -535,7 +535,9 @@ def query_registration_quality_tool(
     if not registration_directory.exists():
         return {
             "success": False,
-            "error": f"No registration_data directory found for plane_{plane_index}.",
+            "error": (
+                f"Unable to query registration quality. No registration_data directory found for plane_{plane_index}."
+            ),
         }
 
     result: dict[str, Any] = {
@@ -644,7 +646,10 @@ def query_detection_summary_tool(
 
     detection_directory = data_path / "detection_data"
     if not detection_directory.exists():
-        return {"success": False, "error": f"No detection_data directory found at: {data_path}."}
+        return {
+            "success": False,
+            "error": f"Unable to query detection summary. No detection_data directory found at: {data_path}.",
+        }
 
     result: dict[str, Any] = {
         "success": True,
@@ -729,7 +734,7 @@ def query_single_recording_roi_statistics_tool(
     if not stats_path.exists() or not masks_path.exists():
         return {
             "success": False,
-            "error": f"ROI data files not found at: {data_path}. Verify processing is complete.",
+            "error": f"Unable to query ROI statistics. ROI data files not found at: {data_path}.",
         }
 
     try:
@@ -865,14 +870,17 @@ def query_single_recording_traces_tool(
     if trace_type not in file_map:
         return {
             "success": False,
-            "error": f"Invalid trace_type '{trace_type}'. Valid options: {', '.join(file_map.keys())}.",
+            "error": (
+                f"Unable to query traces. Invalid trace_type '{trace_type}'. "
+                f"Valid options: {', '.join(file_map.keys())}."
+            ),
         }
 
     trace_path = data_path / file_map[trace_type]
     if not trace_path.exists():
         return {
             "success": False,
-            "error": f"Trace file not found: {file_map[trace_type]}. Verify processing is complete.",
+            "error": f"Unable to query traces. Trace file not found: {file_map[trace_type]}.",
         }
 
     try:
@@ -883,7 +891,7 @@ def query_single_recording_traces_tool(
     roi_count = traces.shape[0]
     valid_indices = [i for i in roi_indices if 0 <= i < roi_count]
     if not valid_indices:
-        return {"success": False, "error": "No valid ROI indices provided."}
+        return {"success": False, "error": "Unable to query traces. No valid ROI indices provided."}
 
     downsample_factor = max(1, downsample_factor)
     results: list[dict[str, Any]] = []
@@ -891,7 +899,7 @@ def query_single_recording_traces_tool(
         trace = traces[roi_index]
         if downsample_factor > 1:
             trace = trace[::downsample_factor]
-        results.append({"roi_index": roi_index, "trace": [round(float(v), 4) for v in trace]})
+        results.append({"roi_index": roi_index, "trace": [round(float(value), 4) for value in trace]})
 
     return {
         "success": True,
@@ -1135,7 +1143,7 @@ def query_multi_recording_tracking_summary_tool(
     if not template_path.exists():
         return {
             "success": False,
-            "error": f"Template masks not found at: {dataset_path}. Verify discovery phase completed.",
+            "error": f"Unable to query tracking summary. Template masks not found at: {dataset_path}.",
         }
 
     try:
@@ -1244,14 +1252,17 @@ def query_multi_recording_traces_tool(
     if trace_type not in file_map:
         return {
             "success": False,
-            "error": f"Invalid trace_type '{trace_type}'. Valid options: {', '.join(file_map.keys())}.",
+            "error": (
+                f"Unable to query multi-recording traces. Invalid trace_type '{trace_type}'. "
+                f"Valid options: {', '.join(file_map.keys())}."
+            ),
         }
 
     trace_path = dataset_path / file_map[trace_type]
     if not trace_path.exists():
         return {
             "success": False,
-            "error": f"Trace file not found: {file_map[trace_type]}. Verify extraction phase completed.",
+            "error": f"Unable to query multi-recording traces. Trace file not found: {file_map[trace_type]}.",
         }
 
     try:
@@ -1262,7 +1273,7 @@ def query_multi_recording_traces_tool(
     roi_count = traces.shape[0]
     valid_indices = [i for i in roi_indices if 0 <= i < roi_count]
     if not valid_indices:
-        return {"success": False, "error": "No valid ROI indices provided."}
+        return {"success": False, "error": "Unable to query multi-recording traces. No valid ROI indices provided."}
 
     downsample_factor = max(1, downsample_factor)
     results: list[dict[str, Any]] = []
@@ -1270,7 +1281,7 @@ def query_multi_recording_traces_tool(
         trace = traces[roi_index]
         if downsample_factor > 1:
             trace = trace[::downsample_factor]
-        results.append({"roi_index": roi_index, "trace": [round(float(v), 4) for v in trace]})
+        results.append({"roi_index": roi_index, "trace": [round(float(value), 4) for value in trace]})
 
     return {
         "success": True,
@@ -1367,8 +1378,8 @@ def _array_summary(array: np.ndarray) -> dict[str, object]:
 def _load_yaml(file_path: Path) -> dict[str, Any] | None:
     """Loads a YAML file and returns the parsed dictionary, or None if loading fails."""
     try:
-        with file_path.open() as f:
-            return yaml.safe_load(f)
+        with file_path.open() as yaml_file:
+            return yaml.safe_load(yaml_file)
     except Exception:
         return None
 

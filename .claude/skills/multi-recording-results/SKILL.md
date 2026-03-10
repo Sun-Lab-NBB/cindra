@@ -195,9 +195,9 @@ zeroes.
 
 **Optional colocalization file (dual-channel only):**
 
-| File                      | Shape         | Description                                             |
-|---------------------------|---------------|---------------------------------------------------------|
-| `cell_colocalization.npy` | (num_rois, 2) | Column 0: probability, column 1: is_colocalized boolean |
+| File                      | Shape         | Description                                                        |
+|---------------------------|---------------|--------------------------------------------------------------------|
+| `cell_colocalization.npy` | (num_rois, 2) | Column 0: is_colocalized label (1.0 or 0.0), column 1: probability |
 
 ---
 
