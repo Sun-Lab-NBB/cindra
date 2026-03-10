@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
 import numpy as np
@@ -210,6 +210,33 @@ class TrackingViewer(QMainWindow):
         self.setWindowTitle(f"Multi-Recording ROI Tracking — {data.dataset_name}")
 
         self._refresh_display()
+
+    def get_state(self) -> dict[str, Any]:
+        """Returns the current display state of the tracking viewer for cross-process state exchange.
+
+        Returns:
+            A dictionary containing the viewer type, active display settings, and selection state.
+        """
+        if not self.data.is_multi_recording:
+            return {"viewer_type": "tracking", "loaded": False}
+
+        return {
+            "viewer_type": "tracking",
+            "loaded": True,
+            "active_dataset": self._dataset_combo.currentText(),
+            "available_datasets": list(self.data.available_datasets),
+            "current_recording_index": self._recording_combo.currentIndex(),
+            "current_recording_id": self.data.current_recording_id,
+            "recording_count": self._recording_combo.count(),
+            "background_view": BackgroundView(self._background_combo.currentData()).name.lower(),
+            "coordinate_space": CoordinateSpace(self._space_combo.currentData()).name.lower(),
+            "mask_layer": MaskLayer(self._mask_combo.currentData()).name.lower(),
+            "channel_2_active": self._channel_2_checkbox.isChecked(),
+            "opacity": self._opacity_slider.value(),
+            "selected_roi_indices": sorted(self._selected_rois) if self._selected_rois is not None else None,
+            "mask_count": self._cached_mask_count,
+            "auto_cycling": self._auto_cycle_timer.isActive(),
+        }
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
         """Handles keyboard navigation for recording stepping, opacity controls, and auto-cycle toggling.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PySide6 import QtGui, QtCore
@@ -212,6 +212,22 @@ class PCViewer(QMainWindow):
         data.switch_view(view_index=max(0, data.view_index))
 
         self._reload_pc_data()
+
+    def get_state(self) -> dict[str, Any]:
+        """Returns the current display state of the PC viewer for cross-process state exchange.
+
+        Returns:
+            A dictionary containing the current plane, principal component, and animation status.
+        """
+        current_pc = int(self._pc_edit.text()) if self._pc_edit.text() else 1
+        return {
+            "current_plane": self._plane_selector.currentIndex(),
+            "plane_count": self.data.plane_count,
+            "current_pc": current_pc,
+            "pc_count": self._pc_count,
+            "playing": self._update_timer.isActive(),
+            "loaded": self._loaded,
+        }
 
     def _on_plane_changed(self, index: int) -> None:
         """Handles plane selector index changes by switching to the selected plane.

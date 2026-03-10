@@ -1,36 +1,25 @@
-"""Provides the MCP server for launching GUI viewers and querying neural imaging data.
+"""Provides the MCP server for managing GUI viewer subprocesses and querying their display state.
 
-Exposes tools that enable AI agents to launch GUI viewers for the user to interact with and query processed pipeline
-data directly. The server avoids importing Qt at module level so that ``cindra-gui mcp`` can start without loading
-PySide6.
+Exposes tools that enable AI agents to launch, list, close, and query the current display state of GUI viewer
+windows. All data loading and interpretation is handled by the results tools in the non-GUI MCP server; this server
+focuses exclusively on viewer lifecycle management and live display state queries.
 """
 
 from __future__ import annotations
 
 import sys
 import uuid
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 from pathlib import Path
 import subprocess
-from collections import OrderedDict
 from dataclasses import dataclass
 
 from mcp.server.fastmcp import FastMCP
 
-if TYPE_CHECKING:
-    from ..gui.viewer_context import ViewerData, SingleRecordingData
+from ..gui.viewer_state import read_viewer_state, cleanup_state_file, generate_state_path
 
 gui_mcp = FastMCP(name="cindra-gui-mcp", json_response=True)
 """The GUI MCP server instance initialized with JSON response mode for structured output."""
-
-_DATA_CACHE_MAX_SIZE: int = 4
-"""The maximum number of ViewerData instances to cache for data query tools."""
-
-_MAX_TRACE_ROIS: int = 50
-"""The maximum number of ROIs whose traces can be queried in a single request."""
-
-_CELL_LABEL_THRESHOLD: float = 0.5
-"""The threshold above which a classification label value is considered a cell."""
 
 
 @dataclass
@@ -45,15 +34,14 @@ class _ViewerProcess:
     """The path to the recording loaded in the viewer."""
     dataset: str | None
     """The multi-recording dataset name, or None for single-recording mode."""
+    state_path: str
+    """The path to the temporary state file used for cross-process state exchange."""
     process: subprocess.Popen[str]
     """The subprocess.Popen instance for the viewer process."""
 
 
 _viewer_registry: dict[str, _ViewerProcess] = {}
 """Tracks active viewer subprocesses keyed by viewer_id."""
-
-_data_cache: OrderedDict[str, Any] = OrderedDict()
-"""LRU cache for ViewerData instances used by data query tools, keyed by recording path string."""
 
 
 def run_gui_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
@@ -65,11 +53,8 @@ def run_gui_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdi
     gui_mcp.run(transport=transport)
 
 
-# Internal helpers
-
-
 def _get_viewer(viewer_id: str) -> _ViewerProcess | None:
-    """Returns the viewer process for the given ID, cleaning up dead processes.
+    """Returns the viewer process for the given ID, cleaning up dead processes and their state files.
 
     Args:
         viewer_id: The viewer identifier to look up.
@@ -82,60 +67,11 @@ def _get_viewer(viewer_id: str) -> _ViewerProcess | None:
         return None
 
     if entry.process.poll() is not None:
+        cleanup_state_file(state_path=Path(entry.state_path))
         del _viewer_registry[viewer_id]
         return None
 
     return entry
-
-
-def _get_or_load_viewer_data(recording_path: str, dataset: str | None = None) -> ViewerData:
-    """Returns a cached ViewerData instance or loads one from disk.
-
-    Uses an LRU cache with a maximum size to limit memory usage.
-
-    Args:
-        recording_path: The path to the recording's cindra output directory.
-        dataset: Optional multi-recording dataset name to load.
-
-    Returns:
-        A ViewerData instance loaded from the specified path.
-    """
-    from ..gui.viewer_context import ViewerData  # noqa: PLC0415
-
-    cache_key = f"{recording_path}|{dataset or ''}"
-
-    if cache_key in _data_cache:
-        _data_cache.move_to_end(cache_key)
-        return _data_cache[cache_key]
-
-    path = Path(recording_path)
-    if not path.exists():
-        message = f"Unable to load data from '{recording_path}'. The path does not exist."
-        raise FileNotFoundError(message)
-
-    data = ViewerData.from_data(root_path=path, dataset=dataset)
-
-    _data_cache[cache_key] = data
-    while len(_data_cache) > _DATA_CACHE_MAX_SIZE:
-        _data_cache.popitem(last=False)
-
-    return data
-
-
-def _get_or_load_single_recording_data(recording_path: str) -> SingleRecordingData:
-    """Returns a cached SingleRecordingData instance extracted from ViewerData, or loads one from disk.
-
-    Args:
-        recording_path: The path to the recording's cindra output directory.
-
-    Returns:
-        A SingleRecordingData instance loaded from the specified path.
-    """
-    viewer_data = _get_or_load_viewer_data(recording_path)
-    return viewer_data.single_recording
-
-
-# Lifecycle tools (3)
 
 
 @gui_mcp.tool()
@@ -147,7 +83,8 @@ def launch_viewer_tool(
     """Launches a GUI viewer in a subprocess for the user to interact with.
 
     Spawns the viewer as a child process using the cindra-gui CLI. The viewer window appears on screen for the user
-    to interact with directly. Returns a viewer_id that can be used to check status or close the viewer later.
+    to interact with directly. Returns a viewer_id that can be used to check status, query state, or close the
+    viewer later.
 
     Args:
         viewer_type: The type of viewer to launch. 'roi' for ROI inspection, 'tracking' for multi-recording tracking
@@ -160,9 +97,10 @@ def launch_viewer_tool(
         return {"success": False, "error": f"Unable to launch viewer. Path does not exist: {recording_path}"}
 
     viewer_id = uuid.uuid4().hex[:12]
+    state_path = generate_state_path(viewer_id=viewer_id)
 
     cindra_gui_exe = str(Path(sys.executable).parent / "cindra-gui")
-    cmd = [cindra_gui_exe, viewer_type, "--recording-path", str(path)]
+    cmd = [cindra_gui_exe, viewer_type, "--recording-path", str(path), "--state-file", state_path]
     if dataset is not None and viewer_type in ("roi", "tracking"):
         cmd.extend(["--dataset", dataset])
 
@@ -176,6 +114,7 @@ def launch_viewer_tool(
         viewer_type=viewer_type,
         recording_path=recording_path,
         dataset=dataset,
+        state_path=state_path,
         process=process,
     )
     _viewer_registry[viewer_id] = entry
@@ -214,6 +153,7 @@ def list_viewers_tool() -> dict[str, Any]:
         )
 
     for dead_id in dead_ids:
+        cleanup_state_file(state_path=Path(_viewer_registry[dead_id].state_path))
         del _viewer_registry[dead_id]
 
     return {"viewers": viewers, "count": len(viewers)}
@@ -223,7 +163,8 @@ def list_viewers_tool() -> dict[str, Any]:
 def close_viewer_tool(viewer_id: str) -> dict[str, Any]:
     """Closes a GUI viewer and terminates its subprocess.
 
-    Terminates the viewer process, waiting briefly for graceful shutdown before forcing termination.
+    Terminates the viewer process, waiting briefly for graceful shutdown before forcing termination. Cleans up the
+    state file used for cross-process state exchange.
 
     Args:
         viewer_id: The unique identifier of the viewer to close, as returned by launch_viewer_tool.
@@ -238,266 +179,38 @@ def close_viewer_tool(viewer_id: str) -> dict[str, Any]:
     except subprocess.TimeoutExpired:
         entry.process.kill()
 
+    cleanup_state_file(state_path=Path(entry.state_path))
     del _viewer_registry[viewer_id]
     return {"success": True, "viewer_id": viewer_id}
 
 
-# Data query tools (5) — no GUI needed
-
-
 @gui_mcp.tool()
-def query_recording_metadata_tool(recording_path: str) -> dict[str, Any]:
-    """Queries metadata for a cindra-processed recording.
+def query_viewer_state_tool(viewer_id: str) -> dict[str, Any]:
+    """Queries the current display state of an active GUI viewer.
 
-    Returns frame count, sampling rate, plane count, ROI count, available multi-recording datasets, and other
-    recording properties. Does not require a GUI viewer to be open.
+    Returns the viewer's live display settings including active channel, background view, mask layer, selected ROIs,
+    opacity, color mode, and other viewer-type-specific state. The state is updated by the viewer subprocess every
+    250 ms when changes are detected.
 
     Args:
-        recording_path: Absolute path to a cindra pipeline output directory.
+        viewer_id: The unique identifier of the viewer to query, as returned by launch_viewer_tool.
     """
-    try:
-        data = _get_or_load_viewer_data(recording_path)
-    except Exception as error:
+    entry = _get_viewer(viewer_id)
+    if entry is None:
+        return {"success": False, "error": f"Unable to find viewer with id '{viewer_id}'."}
+
+    state_file = Path(entry.state_path)
+    if not state_file.exists():
         return {
-            "success": False,
-            "error": (
-                f"Unable to load data from '{recording_path}'. Verify the path contains cindra pipeline output. {error}"
-            ),
-        }
-
-    single_recording = data.single_recording
-    return {
-        "success": True,
-        "recording_path": recording_path,
-        "frame_count": single_recording.frame_count,
-        "sampling_rate": single_recording.sampling_rate,
-        "tau": single_recording.tau,
-        "plane_count": single_recording.plane_count,
-        "frame_height": single_recording.frame_height,
-        "frame_width": single_recording.frame_width,
-        "roi_count": single_recording.roi_count,
-        "two_channels": single_recording.two_channels,
-        "recording_label": single_recording.recording_label,
-        "available_datasets": list(data.available_datasets),
-    }
-
-
-@gui_mcp.tool()
-def query_roi_statistics_tool(
-    recording_path: str,
-    roi_indices: list[int] | None = None,
-    sort_by: str | None = None,
-    top_n: int | None = None,
-) -> dict[str, Any]:
-    """Queries per-ROI spatial statistics for a cindra-processed recording.
-
-    Returns statistics including pixel count, skewness, compactness, footprint area, aspect ratio, and centroid
-    coordinates for the requested ROIs. Does not require a GUI viewer.
-
-    Args:
-        recording_path: Absolute path to a cindra pipeline output directory.
-        roi_indices: Specific ROI indices to query. Returns all ROIs when not provided.
-        sort_by: Sort results by this statistic name ('skewness', 'compactness', 'footprint', 'aspect_ratio',
-            'pixel_count'). Results are returned in descending order.
-        top_n: Limit results to the top N ROIs after sorting. Only effective when sort_by is also provided.
-    """
-    try:
-        single_recording = _get_or_load_single_recording_data(recording_path)
-    except Exception as error:
-        return {
-            "success": False,
-            "error": f"Unable to load data from '{recording_path}'. {error}",
-        }
-
-    all_statistics = single_recording.roi_statistics
-    if roi_indices is not None:
-        valid_indices = [i for i in roi_indices if 0 <= i < len(all_statistics)]
-        statistics = [(i, all_statistics[i]) for i in valid_indices]
-    else:
-        statistics = list(enumerate(all_statistics))
-
-    if sort_by is not None:
-        valid_sort_keys = ("skewness", "compactness", "footprint", "aspect_ratio", "pixel_count")
-        if sort_by not in valid_sort_keys:
-            return {
-                "success": False,
-                "error": f"Unable to sort by '{sort_by}'. Valid options: {', '.join(valid_sort_keys)}.",
-            }
-        statistics.sort(key=lambda pair: getattr(pair[1], sort_by, 0), reverse=True)
-
-    if top_n is not None and top_n > 0:
-        statistics = statistics[:top_n]
-
-    results: list[dict[str, Any]] = []
-    for index, roi in statistics:
-        entry: dict[str, Any] = {
-            "roi_index": index,
-            "centroid": list(roi.mask.centroid),
-            "pixel_count": roi.pixel_count,
-        }
-        for attr in ("skewness", "compactness", "footprint", "aspect_ratio"):
-            value = getattr(roi, attr, None)
-            if value is not None:
-                entry[attr] = round(float(value), 4)
-        results.append(entry)
-
-    return {"success": True, "roi_count": len(results), "rois": results}
-
-
-@gui_mcp.tool()
-def query_fluorescence_traces_tool(
-    recording_path: str,
-    roi_indices: list[int],
-    trace_type: Literal["fluorescence", "neuropil", "corrected", "spikes"] = "corrected",
-    downsample_factor: int = 1,
-) -> dict[str, Any]:
-    """Queries fluorescence trace data for specific ROIs from a cindra-processed recording.
-
-    Returns trace arrays for up to 50 ROIs at a time. Large traces can be downsampled to reduce response size.
-    Does not require a GUI viewer.
-
-    Args:
-        recording_path: Absolute path to a cindra pipeline output directory.
-        roi_indices: List of ROI indices to retrieve traces for (maximum 50).
-        trace_type: The type of fluorescence trace to return. 'fluorescence' for raw cell fluorescence,
-            'neuropil' for neuropil fluorescence, 'corrected' for neuropil-subtracted, 'spikes' for deconvolved.
-        downsample_factor: Factor by which to downsample traces (1 = no downsampling, 10 = every 10th sample).
-    """
-    if len(roi_indices) > _MAX_TRACE_ROIS:
-        return {
-            "success": False,
-            "error": f"Unable to query traces. Requested {len(roi_indices)} ROIs, maximum is {_MAX_TRACE_ROIS}.",
+            "success": True,
+            "viewer_id": viewer_id,
+            "state": {"loaded": False},
+            "note": "Viewer is starting up. State file has not been written yet.",
         }
 
     try:
-        single_recording = _get_or_load_single_recording_data(recording_path)
+        state = read_viewer_state(state_path=state_file)
     except Exception as error:
-        return {"success": False, "error": f"Unable to load data from '{recording_path}'. {error}"}
+        return {"success": False, "error": f"Unable to read viewer state. {error}"}
 
-    trace_map = {
-        "fluorescence": single_recording.cell_fluorescence,
-        "neuropil": single_recording.neuropil_fluorescence,
-        "corrected": single_recording.subtracted_fluorescence,
-        "spikes": single_recording.spikes,
-    }
-    traces = trace_map.get(trace_type)
-    if traces is None or traces.size == 0:
-        return {"success": False, "error": f"Unable to retrieve '{trace_type}' traces. Data is not available."}
-
-    roi_count = traces.shape[0]
-    valid_indices = [i for i in roi_indices if 0 <= i < roi_count]
-    if not valid_indices:
-        return {"success": False, "error": "Unable to query traces. No valid ROI indices provided."}
-
-    downsample_factor = max(1, downsample_factor)
-    results: list[dict[str, Any]] = []
-    for roi_index in valid_indices:
-        trace = traces[roi_index]
-        if downsample_factor > 1:
-            trace = trace[::downsample_factor]
-        results.append({"roi_index": roi_index, "trace": [round(float(v), 4) for v in trace]})
-
-    return {
-        "success": True,
-        "trace_type": trace_type,
-        "downsample_factor": downsample_factor,
-        "frame_count": int(traces.shape[1]),
-        "traces": results,
-    }
-
-
-@gui_mcp.tool()
-def query_cell_classification_tool(
-    recording_path: str,
-    roi_indices: list[int] | None = None,
-) -> dict[str, Any]:
-    """Queries cell/non-cell classification labels and probabilities for ROIs in a cindra-processed recording.
-
-    Returns binary labels (cell=1.0, non-cell=0.0) and classifier probability estimates for each ROI. Does not
-    require a GUI viewer.
-
-    Args:
-        recording_path: Absolute path to a cindra pipeline output directory.
-        roi_indices: Specific ROI indices to query. Returns all ROIs when not provided.
-    """
-    try:
-        single_recording = _get_or_load_single_recording_data(recording_path)
-    except Exception as error:
-        return {"success": False, "error": f"Unable to load data from '{recording_path}'. {error}"}
-
-    classification = single_recording.cell_classification
-    if classification is None or classification.size == 0:
-        return {"success": False, "error": "Unable to retrieve cell classification. Data is not available."}
-
-    total_rois = classification.shape[0]
-    indices = [i for i in roi_indices if 0 <= i < total_rois] if roi_indices is not None else list(range(total_rois))
-
-    results: list[dict[str, Any]] = [
-        {
-            "roi_index": i,
-            "is_cell": bool(classification[i, 0] > _CELL_LABEL_THRESHOLD),
-            "label": float(classification[i, 0]),
-            "probability": round(float(classification[i, 1]), 4),
-        }
-        for i in indices
-    ]
-
-    roi_count = sum(1 for r in results if r["is_cell"])
-    return {
-        "success": True,
-        "total_rois": total_rois,
-        "queried_count": len(results),
-        "roi_count": roi_count,
-        "non_roi_count": len(results) - roi_count,
-        "classifications": results,
-    }
-
-
-@gui_mcp.tool()
-def query_multi_recording_tracking_tool(
-    recording_path: str,
-    dataset: str,
-) -> dict[str, Any]:
-    """Queries multi-recording tracking data for a cindra-processed recording's dataset.
-
-    Returns the dataset structure including per-recording IDs and mask counts for each mask layer. Does not
-    require a GUI viewer.
-
-    Args:
-        recording_path: Absolute path to a cindra pipeline output directory that belongs to the multi-recording dataset.
-        dataset: The multi-recording dataset name to query.
-    """
-    try:
-        data = _get_or_load_viewer_data(recording_path, dataset=dataset)
-    except Exception as error:
-        return {"success": False, "error": f"Unable to load data from '{recording_path}'. {error}"}
-
-    if not data.is_multi_recording:
-        available = list(data.available_datasets)
-        if dataset and dataset not in available:
-            return {
-                "success": False,
-                "error": f"Unable to load dataset '{dataset}'. Available datasets: {available}.",
-            }
-        return {"success": False, "error": "Unable to query tracking data. No multi-recording dataset is loaded."}
-
-    recordings: list[dict[str, Any]] = []
-    for i in range(data.recording_count):
-        recording = data.recording(i)
-        recording_info: dict[str, Any] = {
-            "index": i,
-            "recording_id": recording.recording_id,
-            "has_channel_2": recording.has_channel_2,
-            "original_mask_count": len(recording.original_masks),
-            "deformed_mask_count": len(recording.deformed_masks),
-            "template_mask_count": len(recording.template_masks),
-            "tracked_mask_count": len(recording.tracked_masks),
-        }
-        recordings.append(recording_info)
-
-    return {
-        "success": True,
-        "dataset": data.active_dataset_name,
-        "recording_count": data.recording_count,
-        "recordings": recordings,
-    }
+    return {"success": True, "viewer_id": viewer_id, "state": state}

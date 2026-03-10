@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
 import numpy as np
@@ -217,6 +217,21 @@ class BinaryPlayer(QMainWindow):
 
         # Configures all plot views and display parameters for the stitched display.
         self._setup_views()
+
+    def get_state(self) -> dict[str, Any]:
+        """Returns the current display state of the binary player for cross-process state exchange.
+
+        Returns:
+            A dictionary containing the current frame, playback status, and channel settings.
+        """
+        return {
+            "current_frame": self._current_frame,
+            "frame_count": self.data.frame_count,
+            "channel_2_active": self._channel_2_visible,
+            "two_channels": self.data.two_channels,
+            "playing": self._update_timer.isActive(),
+            "frame_step": self._frame_delta,
+        }
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
         """Handles keyboard navigation for frame stepping and playback control.
