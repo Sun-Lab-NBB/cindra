@@ -3,16 +3,43 @@ name: single-recording-processing
 description: >-
   Orchestrates single-recording neural imaging batch processing via the cindra MCP server.
   Dispatches to configuration, validation, and results skills as needed.
+user-invocable: true
 ---
 
-# Single-Recording Processing
+# Single-recording processing
 
 Orchestrates the single-recording batch processing workflow: discover recordings, validate prerequisites,
 start batch processing, monitor progress, and hand off to downstream skills for output verification.
 
 ---
 
-## Agent Requirements
+## Scope
+
+**Covers:**
+- Batch processing workflow: discovery, validation, execution, monitoring, and completion
+- MCP batch execution tools (`start_batch_processing_tool`, `get_batch_processing_status_tool`,
+  `cancel_batch_processing_tool`)
+- Supporting tools for discovery, validation, and status checking
+- Resource management and CPU allocation guidance
+- Status formatting and progress monitoring
+- Error routing to appropriate upstream skills
+
+**Does not cover:**
+- Configuration parameters, tuning guidance, or config file creation (see `/single-recording-configuration`)
+- Output data formats, array shapes, dtypes, file references, or data interpretation (see `/single-recording-results`)
+- Input data format, TIFF requirements, or acquisition parameters (see `/acquisition-data-preparation`)
+- Multi-recording processing workflow (see `/multi-recording-processing`)
+- MCP server connectivity or environment issues (see `/mcp-environment-setup`)
+- Visual inspection of results (see `/visualization`)
+
+**Handoff rules:** If the user asks about specific output files, array shapes, data interpretation, or processing
+result verification, invoke `/single-recording-results`. If the user asks about parameter tuning or configuration
+options, invoke `/single-recording-configuration`. This skill owns the processing workflow only — not the data
+it produces or the parameters it consumes.
+
+---
+
+## Agent requirements
 
 You MUST use the cindra MCP tools for all processing operations. Do not import cindra Python functions
 directly or run processing via scripts or CLI commands. If MCP tools are not available, invoke
@@ -20,9 +47,9 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ---
 
-## Available Tools
+## Available tools
 
-### Batch Execution Tools
+### Batch execution tools
 
 | Tool                               | Purpose                                                  |
 |------------------------------------|----------------------------------------------------------|
@@ -30,7 +57,7 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 | `get_batch_processing_status_tool` | Returns in-memory status of running batch                |
 | `cancel_batch_processing_tool`     | Cancels batch processing, clears queues                  |
 
-### Supporting Tools (used during workflow)
+### Supporting tools (used during workflow)
 
 | Tool                                        | Purpose                                             |
 |---------------------------------------------|-----------------------------------------------------|
@@ -40,11 +67,11 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ---
 
-## Pipeline Architecture
+## Pipeline architecture
 
 Three-phase sequential pipeline per recording:
 
-```
+```text
 Phase 1: BINARIZE (I/O bound, up to 3 parallel)
 ├── Converts raw TIFFs to binary format
 └── Determines plane count
@@ -59,7 +86,7 @@ Phase 3: COMBINE (I/O bound, up to 3 parallel)
 
 Batch processing across multiple recordings:
 
-```
+```text
 BINARIZE: Up to 3 concurrent recordings (I/O bound)
 PROCESS:  Parallel (recording-plane pairs up to core limit)
 COMBINE:  Up to 3 concurrent recordings (I/O bound)
@@ -67,11 +94,11 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
 
 ---
 
-## Processing Workflow
+## Processing workflow
 
-### Pre-Processing Checklist
+### Pre-processing checklist
 
-```
+```text
 - [ ] Recordings discovered or paths provided
 - [ ] Raw data validated (or existing binaries confirmed via get_single_recording_status)
 - [ ] Configuration confirmed or created
@@ -81,7 +108,7 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
 
 **STOP**: If any checkbox is incomplete, do not proceed. Complete the missing steps first.
 
-### Workflow Steps
+### Workflow steps
 
 1. **Discover recordings** — Use `discover_single_recording_candidates_tool` or accept explicit paths
    from user.
@@ -109,7 +136,7 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
 
 ---
 
-## Resource Management
+## Resource management
 
 The system automatically calculates optimal resource allocation:
 
@@ -127,11 +154,11 @@ The system automatically calculates optimal resource allocation:
 
 ---
 
-## Status Formatting
+## Status formatting
 
 When presenting batch status to the user, format as a table:
 
-```
+```text
 **Single-Recording Batch Processing Status**
 
 Current Phase: PROCESS
@@ -147,9 +174,9 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
 ---
 
-## Error Routing
+## Error routing
 
-### Batch Start Errors
+### Batch start errors
 
 | Error Message                             | Resolution                               |
 |-------------------------------------------|------------------------------------------|
@@ -158,7 +185,7 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 | "Recording directory not found"           | Verify path exists                       |
 | "Batch processing already in progress"    | Wait for current batch or cancel first   |
 
-### Processing Failure Routing
+### Processing failure routing
 
 When processing fails for some recordings, read the error messages and route to the appropriate skill:
 
@@ -173,7 +200,7 @@ Wait for the current batch to complete before starting retries.
 
 ---
 
-## Related Skills
+## Related skills
 
 | Skill                              | Role                                                           |
 |------------------------------------|----------------------------------------------------------------|
@@ -183,3 +210,20 @@ Wait for the current batch to complete before starting retries.
 | `/single-recording-results`        | Output: verify and explain processing results                  |
 | `/multi-recording-processing`      | Downstream: cross-recording ROI tracking                       |
 | `/visualization`                   | Downstream: visual inspection of results                       |
+
+---
+
+## Verification checklist
+
+```text
+Single-Recording Processing Workflow:
+- [ ] MCP server connected (if not, invoke `/mcp-environment-setup`)
+- [ ] Recordings discovered or explicit paths provided
+- [ ] Raw data validated via `validate_recording_readiness` (or existing binaries confirmed)
+- [ ] Configuration file confirmed or created via `/single-recording-configuration`
+- [ ] CPU core allocation confirmed with user
+- [ ] Batch started via `start_batch_processing_tool`
+- [ ] Status monitored until all recordings complete or fail
+- [ ] Failed recordings routed to appropriate skill (see Error Routing)
+- [ ] Successful recordings verified via `/single-recording-results`
+```

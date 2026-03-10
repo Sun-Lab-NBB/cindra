@@ -135,7 +135,7 @@ def apply_oasis_deconvolution(
 
 
 @njit(cache=True, parallel=True)
-def _oasis_matrix(
+def _oasis_matrix(  # pragma: no cover
     cell_fluorescence: NDArray[np.float32],
     pool_amplitude: NDArray[np.float32],
     pool_weight: NDArray[np.float32],

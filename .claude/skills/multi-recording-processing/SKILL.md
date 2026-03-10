@@ -3,13 +3,43 @@ name: multi-recording-processing
 description: >-
   Orchestrates multi-recording neural imaging batch processing via the cindra MCP server.
   Dispatches to configuration, validation, and results skills as needed.
+user-invocable: true
 ---
 
-# Multi-Recording Processing
+# Multi-recording processing
 
 Orchestrates the multi-recording batch processing workflow: verify prerequisites, organize recordings
 by dataset, start batch processing, monitor progress, and hand off to downstream skills for output
 verification.
+
+---
+
+## Scope
+
+**Covers:**
+- Batch processing workflow: prerequisite verification, dataset organization, execution, monitoring, and completion
+- MCP batch execution tools (`start_multi_recording_batch_processing_tool`,
+  `get_multi_recording_batch_processing_status_tool`, `cancel_multi_recording_batch_processing_tool`)
+- Dataset name resolution via `resolve_dataset_name_tool`
+- Supporting tools for candidate discovery and status checking
+- Resource management and CPU allocation guidance
+- Status formatting and progress monitoring
+- Error routing to appropriate upstream skills
+
+**Does not cover:**
+- Configuration parameters, tuning guidance, or config file creation (see `/multi-recording-configuration`)
+- Output data formats, array shapes, dtypes, file references, or data interpretation
+  (see `/multi-recording-results`)
+- Single-recording processing workflow or prerequisites (see `/single-recording-processing`)
+- Input data format, TIFF requirements, or acquisition parameters (see `/acquisition-data-preparation`)
+- MCP server connectivity or environment issues (see `/mcp-environment-setup`)
+- Visual inspection of results (see `/visualization`)
+
+**Handoff rules:** If the user asks about specific output files, array shapes, data interpretation,
+registration arrays, tracking templates, or processing result verification, invoke `/multi-recording-results`.
+If the user asks about parameter tuning, registration/tracking configuration, or ROI selection criteria, invoke
+`/multi-recording-configuration`. This skill owns the processing workflow only — not the data it produces or
+the parameters it consumes.
 
 ---
 
@@ -21,7 +51,7 @@ status `combined`). If any recording is incomplete, invoke the earliest missing 
 
 ---
 
-## Agent Requirements
+## Agent requirements
 
 You MUST use the cindra MCP tools for all processing operations. Do not import cindra Python functions
 directly or run processing via scripts or CLI commands. If MCP tools are not available, invoke
@@ -29,9 +59,9 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ---
 
-## Available Tools
+## Available tools
 
-### Batch Execution Tools
+### Batch execution tools
 
 | Tool                                               | Purpose                                    |
 |----------------------------------------------------|--------------------------------------------|
@@ -39,7 +69,7 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 | `get_multi_recording_batch_processing_status_tool` | Returns in-memory status of running batch  |
 | `cancel_multi_recording_batch_processing_tool`     | Cancels batch processing, clears queues    |
 
-### Configuration & Name Resolution Tools
+### Configuration & name resolution tools
 
 | Tool                                       | Purpose                                                            |
 |--------------------------------------------|--------------------------------------------------------------------|
@@ -47,7 +77,7 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 | `discover_multi_recording_candidates_tool` | Finds recordings with completed single-recording output            |
 | `generate_config_file`                     | Generates default multi-recording configuration YAML               |
 
-### Supporting Tools (used during workflow)
+### Supporting tools (used during workflow)
 
 | Tool                                       | Purpose                                                 |
 |--------------------------------------------|---------------------------------------------------------|
@@ -56,11 +86,11 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ---
 
-## Pipeline Architecture
+## Pipeline architecture
 
 Two-phase pipeline per dataset:
 
-```
+```text
 Phase 1: DISCOVER (Mixed parallelization)
 ├── Registers all recordings to common reference frame
 ├── Clusters ROI masks across recordings
@@ -75,20 +105,20 @@ Phase 2: EXTRACT (CPU bound, parallel by recording)
 
 Batch processing across multiple datasets:
 
-```
+```text
 DISCOVER: Parallel across datasets (if cores allow)
 EXTRACT:  Parallel across all recordings from all datasets
 ```
 
 ---
 
-## Dataset Name Resolution
+## Dataset name resolution
 
 Each dataset in a batch needs a unique `dataset_name` for output directories and batch tracking. The
 `resolve_dataset_name_tool` constructs qualified names by combining a shared base name with a
 batch-specific specifier:
 
-```
+```text
 resolve_dataset_name_tool(
     dataset_name="learning_task",           # shared analysis name from user
     recording_paths=["/data/animal_A/rec1", "/data/animal_A/rec2"],
@@ -107,11 +137,11 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
 
 ---
 
-## Processing Workflow
+## Processing workflow
 
-### Pre-Processing Checklist
+### Pre-processing checklist
 
-```
+```text
 - [ ] All recordings confirmed as single-recording complete (status: combined)
 - [ ] Recordings grouped into datasets (by common parent, explicit grouping, or user instruction)
 - [ ] Dataset names resolved via resolve_dataset_name_tool
@@ -122,7 +152,7 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
 
 **STOP**: If any checkbox is incomplete, do not proceed. Complete the missing steps first.
 
-### Workflow Steps
+### Workflow steps
 
 1. **Verify prerequisites** — Use `discover_multi_recording_candidates_tool` to find eligible
    recordings and `get_single_recording_status` to confirm each has status `combined`. If any
@@ -156,7 +186,7 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
 
 ---
 
-## Resource Management
+## Resource management
 
 The system automatically calculates optimal resource allocation:
 
@@ -174,11 +204,11 @@ The system automatically calculates optimal resource allocation:
 
 ---
 
-## Status Formatting
+## Status formatting
 
 When presenting batch status to the user, format as a table:
 
-```
+```text
 **Multi-Recording Batch Processing Status**
 
 Current Phase: EXTRACT
@@ -192,9 +222,9 @@ Summary: 1/2 datasets complete | 2/4 recordings extracted | 0 failed
 
 ---
 
-## Error Routing
+## Error routing
 
-### Batch Start Errors
+### Batch start errors
 
 | Error Message                                     | Resolution                              |
 |---------------------------------------------------|-----------------------------------------|
@@ -203,7 +233,7 @@ Summary: 1/2 datasets complete | 2/4 recordings extracted | 0 failed
 | "Recording directory not found"                   | Verify path exists                      |
 | "Batch processing already in progress"            | Wait for current batch or cancel first  |
 
-### Processing Failure Routing
+### Processing failure routing
 
 When processing fails for some datasets/recordings, read the error messages and route:
 
@@ -220,7 +250,7 @@ Wait for the current batch to complete before starting retries.
 
 ---
 
-## Related Skills
+## Related skills
 
 | Skill                              | Role                                                           |
 |------------------------------------|----------------------------------------------------------------|
@@ -230,3 +260,21 @@ Wait for the current batch to complete before starting retries.
 | `/multi-recording-configuration`   | Configuration: parameter reference and file creation           |
 | `/multi-recording-results`         | Output: verify and explain processing results                  |
 | `/visualization`                   | Downstream: visual inspection of results                       |
+
+---
+
+## Verification checklist
+
+```text
+Multi-Recording Processing Workflow:
+- [ ] MCP server connected (if not, invoke `/mcp-environment-setup`)
+- [ ] All recordings confirmed as single-recording complete (status: combined)
+- [ ] Recordings grouped into datasets
+- [ ] Dataset names resolved via `resolve_dataset_name_tool`
+- [ ] Configuration file confirmed or created per dataset via `/multi-recording-configuration`
+- [ ] CPU core allocation confirmed with user
+- [ ] Batch started via `start_multi_recording_batch_processing_tool`
+- [ ] Status monitored until all datasets complete or fail
+- [ ] Failed datasets routed to appropriate skill (see Error Routing)
+- [ ] Successful datasets verified via `/multi-recording-results`
+```

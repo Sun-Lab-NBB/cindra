@@ -48,7 +48,7 @@ def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext) -> No
 
 
 @njit(cache=True, parallel=True)
-def _extract_cell_fluorescence(
+def _extract_cell_fluorescence(  # pragma: no cover
     output_prototype: NDArray[np.float32],
     data: NDArray[np.float32],
     flat_roi_masks: NDArray[np.int32],
@@ -92,7 +92,7 @@ def _extract_cell_fluorescence(
 
 
 @njit(cache=True, parallel=True)
-def _extract_neuropil_fluorescence(
+def _extract_neuropil_fluorescence(  # pragma: no cover
     output_prototype: NDArray[np.float32],
     data: NDArray[np.float32],
     flat_neuropil_masks: NDArray[np.int32],
