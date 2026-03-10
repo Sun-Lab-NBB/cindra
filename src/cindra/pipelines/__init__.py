@@ -11,8 +11,8 @@ from .pipeline import (
 
 __all__ = [
     "MULTI_RECORDING_TRACKER_NAME",
-    "MultiRecordingJobNames",
     "SINGLE_RECORDING_TRACKER_NAME",
+    "MultiRecordingJobNames",
     "SingleRecordingJobNames",
     "run_multi_recording_pipeline",
     "run_single_recording_pipeline",

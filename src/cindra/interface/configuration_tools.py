@@ -1,14 +1,16 @@
-"""Provides MCP tools for pipeline configuration generation, reading, validation, and recording discovery.
+"""Provides MCP tools for pipeline configuration generation, reading, validation, recording discovery, and dataset name
+resolution.
 
 These tools enable AI agents to generate default configuration files for both single-recording and multi-recording
-pipelines, read and validate existing configuration files, and discover recordings available for processing under a
-given root directory.
+pipelines, read and validate configuration files, discover recordings available for processing under a
+given root directory, and construct qualified dataset names for multi-recording processing.
 """
 
 from __future__ import annotations
 
 from enum import Enum
 from typing import Literal
+from os.path import commonpath
 from pathlib import Path
 from dataclasses import (
     fields as dataclass_fields,
@@ -159,6 +161,73 @@ def discover_multi_recording_candidates_tool(root_directory: str) -> dict[str, s
         result["errors"] = errors
 
     return result
+
+
+@mcp.tool()
+def resolve_dataset_name_tool(
+    dataset_name: str,
+    recording_paths: list[str],
+    specifier: str = "",
+) -> dict[str, object]:
+    """Constructs a qualified dataset name by combining a shared base name with a batch-specific specifier.
+
+    When multiple groups of recordings share the same analysis type (dataset_name), each group needs a unique qualified
+    name for its output directory and batch processing key. This tool combines the user-provided dataset name with a
+    specifier that distinguishes the group.
+
+    When no specifier is provided, one is derived automatically from the deepest common parent directory of the
+    recording paths. For example, recordings under /data/animal_A/rec1 and /data/animal_A/rec2 yield specifier
+    'animal_A'. The agent can also determine the specifier through semantic decomposition of recording names or
+    directory structure, or the user can provide one explicitly.
+
+    Args:
+        dataset_name: The shared name identifying the analysis type (e.g., 'learning_task'). This is the base name
+            common to all groups in a batch.
+        recording_paths: The absolute paths to the recording directories in this group. Used to derive the specifier
+            when none is explicitly provided.
+        specifier: An explicit batch-specific label distinguishing this group of recordings (e.g., an animal ID, brain
+            region, or session group). When empty, the specifier is derived from the common parent directory of the
+            recording paths.
+
+    Returns:
+        On success, contains the qualified 'dataset_name' (specifier_base), the 'base_name', and the 'specifier'
+        used. On failure, contains an 'error' describing the issue. Both cases include a 'success' flag.
+    """
+    if not dataset_name:
+        return {
+            "success": False,
+            "error": "Unable to resolve dataset name. The dataset_name must be a non-empty string.",
+        }
+
+    if not recording_paths:
+        return {
+            "success": False,
+            "error": "Unable to resolve dataset name. At least one recording path is required.",
+        }
+
+    # Derives specifier from the common parent directory when not explicitly provided.
+    if not specifier:
+        resolved_paths = [Path(p) for p in recording_paths]
+        if len(resolved_paths) == 1:
+            specifier = resolved_paths[0].parent.name
+        else:
+            common = Path(commonpath(resolved_paths))
+            specifier = common.name
+
+        if not specifier:
+            return {
+                "success": False,
+                "error": "Unable to resolve dataset name. Could not derive a specifier from the recording paths.",
+            }
+
+    qualified_name = f"{specifier}_{dataset_name}"
+
+    return {
+        "success": True,
+        "dataset_name": qualified_name,
+        "base_name": dataset_name,
+        "specifier": specifier,
+    }
 
 
 @mcp.tool()

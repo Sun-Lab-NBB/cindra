@@ -42,6 +42,7 @@ connectivity issues. Tool parameters and return values are self-documented via M
 |--------------------------------------------|---------------------------------------------------------------------------|
 | `generate_config_file`                     | Generates a default configuration YAML for the specified pipeline type    |
 | `discover_multi_recording_candidates_tool` | Finds recording directories with completed single-recording output        |
+| `resolve_dataset_name_tool`                | Constructs qualified dataset names from base name + specifier             |
 | `read_config_file`                         | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
 | `validate_config_file`                     | Validates a cindra config against schema, reports errors and non-defaults |
 
@@ -121,7 +122,8 @@ unless `repeat_selection` is enabled.
 ### Important notes on `recording_io`
 
 - `recording_directories` is populated by the MCP batch tool from the `recording_paths` argument.
-- `dataset_name` **must be set by the user** — it identifies the output and must be unique per animal/experiment.
+- `dataset_name` **must be set by the user** — it identifies the output and must be unique per dataset in a batch.
+  Use `resolve_dataset_name_tool` to construct qualified names from a shared base name and a batch-specific specifier.
 - The first recording (after natural sorting) becomes the "main recording" storing the shared configuration file.
 - When `repeat_selection` is True, ROI selection is re-run using current criteria even if selections already exist.
   This allows updated single-recording results or modified selection criteria to be integrated.
@@ -303,14 +305,14 @@ See `/single-recording-configuration` Section 9 for full tuning guidance. The sa
 
 ```yaml
 recording_io:
-  dataset_name: "animal1_learning_task"
+  dataset_name: "animal_A_learning_task"
 ```
 
 ### Typical configuration
 
 ```yaml
 recording_io:
-  dataset_name: "animal1_learning_task"
+  dataset_name: "animal_A_learning_task"
 
 roi_selection:
   probability_threshold: 0.85
@@ -332,7 +334,7 @@ runtime:
   display_progress_bars: false
 
 recording_io:
-  dataset_name: "animal1_vr_navigation"
+  dataset_name: "animal_A_vr_navigation"
 
 roi_selection:
   probability_threshold: 0.85
@@ -382,7 +384,9 @@ spike_deconvolution:
    continuing.
 3. **Generate a default configuration** using `generate_config_file` with `pipeline_type="multi-recording"`.
    Alternatively, use `read_config_file` to inspect an existing or legacy configuration for conversion.
-4. **Set `dataset_name`** — this is the only required user parameter.
+4. **Set `dataset_name`** — use `resolve_dataset_name_tool` to construct a qualified name from a shared
+   base name and a batch-specific specifier derived from recording paths. This is the only required user
+   parameter.
 5. **Review and tune** registration and tracking parameters based on expected tissue drift.
 6. **Validate** the configuration using `validate_config_file` to check for errors, warnings, and non-default
    parameters.
