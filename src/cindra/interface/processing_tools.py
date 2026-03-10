@@ -8,16 +8,15 @@ multi-recording processing follows a two-phase workflow (discover, extract).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock, Thread
+from dataclasses import field, dataclass
 
 from natsort import natsorted
-from ataraxis_base_utilities import resolve_parallel_job_capacity, resolve_worker_count
-from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 from ataraxis_time import PrecisionTimer, TimerPrecisions
+from ataraxis_base_utilities import resolve_worker_count, resolve_parallel_job_capacity
+from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
-from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
 from ..pipelines import (
     MULTI_RECORDING_TRACKER_NAME,
@@ -27,6 +26,7 @@ from ..pipelines import (
     run_multi_recording_pipeline,
     run_single_recording_pipeline,
 )
+from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
 from .mcp_instance import mcp
 
 _RESERVED_CORES: int = 2
@@ -85,27 +85,27 @@ class _SingleRecordingBatchState:
 class _MultiRecordingBatchState:
     """Tracks the runtime orchestration state for multi-recording batch processing.
 
-    Job completion and failure states are persisted in per-animal ProcessingTracker YAML files. This dataclass only
+    Job completion and failure states are persisted in per-dataset ProcessingTracker YAML files. This dataclass only
     holds the minimal state needed for thread orchestration: phase queues, active threads, resource limits, and
     tracker/configuration path mappings.
     """
 
     tracker_paths: dict[str, Path] = field(default_factory=dict)
-    """Animal key to ProcessingTracker file path mapping."""
+    """Dataset key to ProcessingTracker file path mapping."""
     configuration_paths: dict[str, Path] = field(default_factory=dict)
-    """Animal key to configuration file path mapping."""
+    """Dataset key to configuration file path mapping."""
     recording_paths: dict[str, list[Path]] = field(default_factory=dict)
-    """Animal key to list of recording directory paths mapping."""
+    """Dataset key to list of recording directory paths mapping."""
 
     discover_jobs: dict[str, str] = field(default_factory=dict)
-    """Animal key to discover job ID mapping."""
+    """Dataset key to discover job ID mapping."""
     extract_jobs: dict[str, list[str]] = field(default_factory=dict)
-    """Animal key to ordered list of extract job IDs mapping."""
+    """Dataset key to ordered list of extract job IDs mapping."""
 
     current_phase: str = "discover"
     """Current processing phase: 'discover' or 'extract'."""
     phase_queue: list[tuple[str, str]] = field(default_factory=list)
-    """Ordered (animal_key, job_id) pairs queued for dispatch in the current phase."""
+    """Ordered (dataset_key, job_id) pairs queued for dispatch in the current phase."""
     active_threads: dict[str, Thread] = field(default_factory=dict)
     """Currently running job_id to Thread mapping."""
 
@@ -355,8 +355,7 @@ def start_batch_processing_tool(
 
         # Builds the job list: binarize, all process planes, combine.
         jobs: list[tuple[str, str]] = [(SingleRecordingJobNames.BINARIZE, "")]
-        for plane_index in range(plane_count):
-            jobs.append((SingleRecordingJobNames.PROCESS, f"plane_{plane_index}"))
+        jobs.extend((SingleRecordingJobNames.PROCESS, f"plane_{plane_index}") for plane_index in range(plane_count))
         jobs.append((SingleRecordingJobNames.COMBINE, ""))
 
         # Initializes the ProcessingTracker with all jobs for this recording.
@@ -431,14 +430,10 @@ def get_batch_processing_status_tool() -> dict[str, object]:
             process_job_ids = _single_recording_batch_state.process_jobs[recording_key]
             plane_count = len(process_job_ids)
             process_succeeded = sum(
-                1
-                for job_id in process_job_ids
-                if tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
+                1 for job_id in process_job_ids if tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
             )
             process_failed = sum(
-                1
-                for job_id in process_job_ids
-                if tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
+                1 for job_id in process_job_ids if tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
             )
 
             if process_failed:
@@ -551,80 +546,81 @@ def cancel_batch_processing_tool() -> dict[str, object]:
 
 @mcp.tool()
 def start_multi_recording_batch_processing_tool(
-    animal_configurations: list[dict[str, object]],
+    dataset_configurations: list[dict[str, object]],
     *,
     workers_per_discover: int = 20,
     workers_per_extract: int = -1,
     progress_bars: bool = False,
 ) -> dict[str, object]:
-    """Starts batch multi-recording processing for multiple animals.
+    """Starts batch multi-recording processing for multiple datasets.
 
-    Manages a two-phase batch workflow: discover (parallel by animal), extract (parallel by recording). Each animal
+    Manages a two-phase batch workflow: discover (parallel by dataset), extract (parallel by recording). Each dataset
     configuration specifies a configuration file and its associated recording paths. Initializes ProcessingTracker
-    files per animal and dispatches jobs via background threads. Use get_multi_recording_batch_processing_status_tool
+    files per dataset and dispatches jobs via background threads. Use get_multi_recording_batch_processing_status_tool
     to monitor progress.
 
     Args:
-        animal_configurations: List of animal configurations, each a dictionary with 'configuration_path' (absolute
+        dataset_configurations: List of dataset configurations, each a dictionary with 'configuration_path' (absolute
             path to the multi-recording YAML configuration) and 'recording_paths' (list of absolute paths to
-            recording directories). At least 2 recording paths per animal are required.
+            recording directories). At least 2 recording paths per dataset are required.
         workers_per_discover: Workers for discover phase (default 20).
         workers_per_extract: Workers for extract phase (-1 for automatic, max 30).
         progress_bars: Determines whether to display progress bars during processing.
 
     Returns:
-        On success, contains a 'started' flag, 'total_animals' and 'total_recordings' counts, worker allocation
+        On success, contains a 'started' flag, 'total_datasets' and 'total_recordings' counts, worker allocation
         settings, and any 'invalid_configurations' that were skipped. On failure, contains an 'error' describing
         the issue.
     """
     global _multi_recording_batch_state
 
-    if not animal_configurations:
+    if not dataset_configurations:
         return {
-            "error": "Unable to start multi-recording batch processing. At least one animal configuration is required.",
+            "error": "Unable to start multi-recording batch processing. At least one dataset configuration is "
+            "required.",
         }
 
-    # Validates animal configurations.
-    valid_animals: list[tuple[str, Path, list[Path]]] = []
+    # Validates dataset configurations.
+    valid_datasets: list[tuple[str, Path, list[Path]]] = []
     invalid_configurations: list[str] = []
 
-    for animal_configuration in animal_configurations:
-        if "configuration_path" not in animal_configuration or "recording_paths" not in animal_configuration:
-            invalid_configurations.append(f"Missing required keys: {animal_configuration}")
+    for dataset_configuration in dataset_configurations:
+        if "configuration_path" not in dataset_configuration or "recording_paths" not in dataset_configuration:
+            invalid_configurations.append(f"Missing required keys: {dataset_configuration}")
             continue
 
-        # noinspection PyTypeChecker
-        animal_configuration_path = Path(animal_configuration["configuration_path"])
-        if not animal_configuration_path.exists():
-            invalid_configurations.append(f"Configuration not found: {animal_configuration_path}")
+        dataset_configuration_path = Path(str(dataset_configuration["configuration_path"]))
+        if not dataset_configuration_path.exists():
+            invalid_configurations.append(f"Configuration not found: {dataset_configuration_path}")
             continue
 
-        # noinspection PyTypeChecker
-        animal_recording_paths = [Path(path) for path in animal_configuration["recording_paths"]]
-        if len(animal_recording_paths) < _MINIMUM_RECORDING_COUNT:
-            invalid_configurations.append(f"Need at least 2 recordings: {animal_configuration_path}")
+        raw_recording_paths = dataset_configuration["recording_paths"]
+        if not isinstance(raw_recording_paths, list):
+            invalid_configurations.append(f"recording_paths must be a list: {dataset_configuration_path}")
+            continue
+        dataset_recording_paths = [Path(str(path)) for path in raw_recording_paths]
+        if len(dataset_recording_paths) < _MINIMUM_RECORDING_COUNT:
+            invalid_configurations.append(f"Need at least 2 recordings: {dataset_configuration_path}")
             continue
 
-        invalid_recordings = [
-            str(path) for path in animal_recording_paths if not path.exists() or not path.is_dir()
-        ]
+        invalid_recordings = [str(path) for path in dataset_recording_paths if not path.exists() or not path.is_dir()]
         if invalid_recordings:
-            invalid_configurations.append(f"Invalid recordings for {animal_configuration_path}: {invalid_recordings}")
+            invalid_configurations.append(f"Invalid recordings for {dataset_configuration_path}: {invalid_recordings}")
             continue
 
-        # Loads configuration to extract the animal key and validate the file format.
+        # Loads configuration to extract the dataset key and validate the file format.
         try:
-            configuration = MultiRecordingConfiguration.from_yaml(file_path=animal_configuration_path)
-            animal_key = configuration.recording_io.dataset_name
+            configuration = MultiRecordingConfiguration.from_yaml(file_path=dataset_configuration_path)
+            dataset_key = configuration.recording_io.dataset_name
         except Exception as error:
-            invalid_configurations.append(f"Unable to load configuration {animal_configuration_path}: {error}")
+            invalid_configurations.append(f"Unable to load configuration {dataset_configuration_path}: {error}")
             continue
 
-        valid_animals.append((animal_key, animal_configuration_path, animal_recording_paths))
+        valid_datasets.append((dataset_key, dataset_configuration_path, dataset_recording_paths))
 
-    if not valid_animals:
+    if not valid_datasets:
         return {
-            "error": "Unable to start multi-recording batch processing. No valid animal configurations provided.",
+            "error": "Unable to start multi-recording batch processing. No valid dataset configurations provided.",
             "invalid_configurations": invalid_configurations,
         }
 
@@ -661,13 +657,13 @@ def start_multi_recording_batch_processing_tool(
     )
 
     total_recordings = 0
-    for animal_key, animal_configuration_path, animal_recording_paths in valid_animals:
+    for dataset_key, dataset_configuration_path, dataset_recording_paths in valid_datasets:
         # Writes recording directories and runtime settings into the configuration file so the pipeline can read them.
-        configuration = MultiRecordingConfiguration.from_yaml(file_path=animal_configuration_path)
-        configuration.recording_io.recording_directories = tuple(natsorted(animal_recording_paths))
+        configuration = MultiRecordingConfiguration.from_yaml(file_path=dataset_configuration_path)
+        configuration.recording_io.recording_directories = tuple(natsorted(dataset_recording_paths))
         configuration.runtime.parallel_workers = actual_workers_discover
         configuration.runtime.display_progress_bars = progress_bars
-        configuration.save(file_path=animal_configuration_path)
+        configuration.save(file_path=dataset_configuration_path)
 
         # Resolves contexts to determine recording IDs and the tracker output path.
         contexts = resolve_multi_recording_contexts(configuration=configuration)
@@ -675,30 +671,29 @@ def start_multi_recording_batch_processing_tool(
         main_recording_path = contexts[0].runtime.output_path
 
         if main_recording_path is None:
-            invalid_configurations.append(f"Unable to resolve output path for animal '{animal_key}'.")
+            invalid_configurations.append(f"Unable to resolve output path for dataset '{dataset_key}'.")
             continue
 
         # Builds the job list: discover, then extract per recording.
         jobs: list[tuple[str, str]] = [(MultiRecordingJobNames.DISCOVER, "")]
-        for recording_id in recording_ids:
-            jobs.append((MultiRecordingJobNames.EXTRACT, recording_id))
+        jobs.extend((MultiRecordingJobNames.EXTRACT, recording_id) for recording_id in recording_ids)
 
-        # Initializes the ProcessingTracker with all jobs for this animal.
+        # Initializes the ProcessingTracker with all jobs for this dataset.
         tracker_path = main_recording_path / MULTI_RECORDING_TRACKER_NAME
         tracker = ProcessingTracker(file_path=tracker_path)
         job_ids = tracker.initialize_jobs(jobs=jobs)
 
-        # Stores per-animal state for orchestration.
-        batch_state.tracker_paths[animal_key] = tracker_path
-        batch_state.configuration_paths[animal_key] = animal_configuration_path
-        batch_state.recording_paths[animal_key] = animal_recording_paths
-        batch_state.discover_jobs[animal_key] = job_ids[0]
-        batch_state.extract_jobs[animal_key] = job_ids[1:]
+        # Stores per-dataset state for orchestration.
+        batch_state.tracker_paths[dataset_key] = tracker_path
+        batch_state.configuration_paths[dataset_key] = dataset_configuration_path
+        batch_state.recording_paths[dataset_key] = dataset_recording_paths
+        batch_state.discover_jobs[dataset_key] = job_ids[0]
+        batch_state.extract_jobs[dataset_key] = job_ids[1:]
         total_recordings += len(recording_ids)
 
     # Populates the discover phase queue (naturally sorted for deterministic order).
-    for animal_key in natsorted(batch_state.tracker_paths.keys()):
-        batch_state.phase_queue.append((animal_key, batch_state.discover_jobs[animal_key]))
+    for dataset_key in natsorted(batch_state.tracker_paths.keys()):
+        batch_state.phase_queue.append((dataset_key, batch_state.discover_jobs[dataset_key]))
 
     # Activates the batch state and starts the manager thread.
     _multi_recording_batch_state = batch_state
@@ -708,7 +703,7 @@ def start_multi_recording_batch_processing_tool(
 
     result: dict[str, object] = {
         "started": True,
-        "total_animals": len(batch_state.tracker_paths),
+        "total_datasets": len(batch_state.tracker_paths),
         "total_recordings": total_recordings,
         "workers_per_discover": actual_workers_discover,
         "workers_per_extract": actual_workers_extract,
@@ -727,49 +722,45 @@ def start_multi_recording_batch_processing_tool(
 def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
     """Returns the current status of multi-recording batch processing.
 
-    Reads ProcessingTracker files for each animal in the batch to report per-animal progress across both phases
+    Reads ProcessingTracker files for each dataset in the batch to report per-dataset progress across both phases
     (discover, extract), including active, completed, and failed counts.
 
     Returns:
-        Contains the 'current_phase', per-animal 'animals' status list, and a 'summary' with aggregate counts for
-        total_animals, succeeded, failed, and running. Returns empty state when no batch processing has been started.
+        Contains the 'current_phase', per-dataset 'datasets' status list, and a 'summary' with aggregate counts for
+        total_datasets, succeeded, failed, and running. Returns empty state when no batch processing has been started.
     """
     if _multi_recording_batch_state is None:
         return {
             "current_phase": "none",
-            "animals": [],
-            "summary": {"total_animals": 0, "succeeded": 0, "failed": 0, "running": 0},
+            "datasets": [],
+            "summary": {"total_datasets": 0, "succeeded": 0, "failed": 0, "running": 0},
         }
 
     with _multi_recording_batch_state.lock:
-        animals_status: list[dict[str, object]] = []
+        datasets_status: list[dict[str, object]] = []
         total_succeeded = 0
         total_failed = 0
         total_running = 0
 
-        for animal_key in natsorted(_multi_recording_batch_state.tracker_paths.keys()):
-            tracker_path = _multi_recording_batch_state.tracker_paths[animal_key]
+        for dataset_key in natsorted(_multi_recording_batch_state.tracker_paths.keys()):
+            tracker_path = _multi_recording_batch_state.tracker_paths[dataset_key]
             tracker = ProcessingTracker(file_path=tracker_path)
 
             # Reads discover job status.
-            discover_job_id = _multi_recording_batch_state.discover_jobs[animal_key]
+            discover_job_id = _multi_recording_batch_state.discover_jobs[dataset_key]
             discover_status = tracker.get_job_status(job_id=discover_job_id).name.lower()
 
             # Reads extract job statuses.
-            extract_job_ids = _multi_recording_batch_state.extract_jobs[animal_key]
+            extract_job_ids = _multi_recording_batch_state.extract_jobs[dataset_key]
             extract_total = len(extract_job_ids)
             extract_succeeded = sum(
-                1
-                for job_id in extract_job_ids
-                if tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
+                1 for job_id in extract_job_ids if tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
             )
             extract_failed = sum(
-                1
-                for job_id in extract_job_ids
-                if tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
+                1 for job_id in extract_job_ids if tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
             )
 
-            # Synthesizes overall animal status from tracker state.
+            # Synthesizes overall dataset status from tracker state.
             if tracker.complete:
                 overall_status = "SUCCEEDED"
                 total_succeeded += 1
@@ -777,16 +768,15 @@ def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
                 overall_status = "FAILED"
                 total_failed += 1
             elif any(
-                job_id in _multi_recording_batch_state.active_threads
-                for job_id in [discover_job_id, *extract_job_ids]
+                job_id in _multi_recording_batch_state.active_threads for job_id in [discover_job_id, *extract_job_ids]
             ):
                 overall_status = "PROCESSING"
                 total_running += 1
             else:
                 overall_status = "QUEUED"
 
-            animal_status: dict[str, object] = {
-                "animal_key": animal_key,
+            dataset_status: dict[str, object] = {
+                "dataset_key": dataset_key,
                 "status": overall_status,
                 "discover": discover_status,
                 "extract_completed": extract_succeeded,
@@ -801,12 +791,12 @@ def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
                 if job_info.error_message:
                     errors.append(f"{job_info.job_name}({job_info.specifier}): {job_info.error_message}")
             if errors:
-                animal_status["errors"] = errors
+                dataset_status["errors"] = errors
 
-            animals_status.append(animal_status)
+            datasets_status.append(dataset_status)
 
         summary = {
-            "total_animals": len(_multi_recording_batch_state.tracker_paths),
+            "total_datasets": len(_multi_recording_batch_state.tracker_paths),
             "succeeded": total_succeeded,
             "failed": total_failed,
             "running": total_running,
@@ -814,7 +804,7 @@ def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
 
         return {
             "current_phase": _multi_recording_batch_state.current_phase,
-            "animals": animals_status,
+            "datasets": datasets_status,
             "summary": summary,
         }
 
@@ -877,7 +867,7 @@ def _pipeline_worker(configuration_path: Path, job_id: str, *, single_recording:
     state transitions (start_job, complete_job, fail_job) internally.
 
     Args:
-        configuration_path: The path to the recording or animal configuration file.
+        configuration_path: The path to the recording or dataset configuration file.
         job_id: The unique hexadecimal job identifier registered in the ProcessingTracker.
         single_recording: Determines whether to call the single-recording or multi-recording pipeline.
     """
@@ -886,9 +876,7 @@ def _pipeline_worker(configuration_path: Path, job_id: str, *, single_recording:
             run_single_recording_pipeline(configuration_path=configuration_path, job_id=job_id)
         else:
             run_multi_recording_pipeline(configuration_path=configuration_path, job_id=job_id)
-    except Exception:
-        # The pipeline already called tracker.fail_job() before re-raising. The exception is caught here to prevent
-        # the daemon thread from propagating it, since the tracker records the failure state persistently.
+    except Exception:  # noqa: S110 - Pipeline already persisted failure via tracker.fail_job() before re-raising.
         pass
 
 
@@ -1047,11 +1035,11 @@ def _multi_recording_batch_manager() -> None:
                     < _multi_recording_batch_state.max_parallel_discovers
                     and _multi_recording_batch_state.phase_queue
                 ):
-                    animal_key, job_id = _multi_recording_batch_state.phase_queue.pop(0)
+                    dataset_key, job_id = _multi_recording_batch_state.phase_queue.pop(0)
                     thread = Thread(
                         target=_pipeline_worker,
                         kwargs={
-                            "configuration_path": _multi_recording_batch_state.configuration_paths[animal_key],
+                            "configuration_path": _multi_recording_batch_state.configuration_paths[dataset_key],
                             "job_id": job_id,
                             "single_recording": False,
                         },
@@ -1062,17 +1050,15 @@ def _multi_recording_batch_manager() -> None:
 
                 # Transitions to extract phase when all discover jobs have been dispatched and completed.
                 if not _multi_recording_batch_state.active_threads and not _multi_recording_batch_state.phase_queue:
-                    # Builds extract queue from animals whose discover job succeeded.
-                    for animal_key in natsorted(_multi_recording_batch_state.tracker_paths.keys()):
-                        tracker = ProcessingTracker(
-                            file_path=_multi_recording_batch_state.tracker_paths[animal_key]
-                        )
+                    # Builds extract queue from datasets whose discover job succeeded.
+                    for dataset_key in natsorted(_multi_recording_batch_state.tracker_paths.keys()):
+                        tracker = ProcessingTracker(file_path=_multi_recording_batch_state.tracker_paths[dataset_key])
                         discover_status = tracker.get_job_status(
-                            job_id=_multi_recording_batch_state.discover_jobs[animal_key]
+                            job_id=_multi_recording_batch_state.discover_jobs[dataset_key]
                         )
                         if discover_status == ProcessingStatus.SUCCEEDED:
-                            for extract_job_id in _multi_recording_batch_state.extract_jobs[animal_key]:
-                                _multi_recording_batch_state.phase_queue.append((animal_key, extract_job_id))
+                            for extract_job_id in _multi_recording_batch_state.extract_jobs[dataset_key]:
+                                _multi_recording_batch_state.phase_queue.append((dataset_key, extract_job_id))
 
                     _multi_recording_batch_state.current_phase = "extract"
 
@@ -1083,11 +1069,11 @@ def _multi_recording_batch_manager() -> None:
                     < _multi_recording_batch_state.max_parallel_extracts
                     and _multi_recording_batch_state.phase_queue
                 ):
-                    animal_key, job_id = _multi_recording_batch_state.phase_queue.pop(0)
+                    dataset_key, job_id = _multi_recording_batch_state.phase_queue.pop(0)
                     thread = Thread(
                         target=_pipeline_worker,
                         kwargs={
-                            "configuration_path": _multi_recording_batch_state.configuration_paths[animal_key],
+                            "configuration_path": _multi_recording_batch_state.configuration_paths[dataset_key],
                             "job_id": job_id,
                             "single_recording": False,
                         },

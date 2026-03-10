@@ -96,6 +96,11 @@ dev = [
     # Development Automation
     "ataraxis-automation>=8,<9",
 
+    # Testing
+    "pytest>=8,<9",
+    "pytest-cov>=6,<7",
+    "pytest-xdist>=3,<4",
+
     # Types
     "scipy-stubs>=1,<2",
 ]
@@ -166,6 +171,16 @@ convention = "google"
 "**/__init__.py" = [
     "F401", # Imported but unused
     "F403", # Wildcard imports
+]
+"**/tests/**/*.py" = [
+    "ANN",     # Type annotations not required in tests
+    "D",       # Docstring enforcement relaxed in tests
+    "INP001",  # Tests use implicit namespace packages
+    "PLR2004", # Magic values common in test assertions
+    "PT006",   # Parametrize argument name style
+    "S101",    # Assert statements standard in tests
+    "SLF001",  # Private member access for testing internals
+    "T201",    # Print statements allowed in tests
 ]
 
 [tool.ruff.lint.isort]

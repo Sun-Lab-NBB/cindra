@@ -8,7 +8,7 @@ description: >-
 # Multi-Recording Processing
 
 Orchestrates the multi-recording batch processing workflow: verify prerequisites, organize recordings
-by animal, start batch processing, monitor progress, and hand off to downstream skills for output
+by dataset, start batch processing, monitor progress, and hand off to downstream skills for output
 verification.
 
 ---
@@ -33,17 +33,24 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ### Batch Execution Tools
 
-| Tool                                               | Purpose                                   |
-|----------------------------------------------------|-------------------------------------------|
-| `start_multi_recording_batch_processing_tool`      | Starts batch processing (1+ animals)      |
-| `get_multi_recording_batch_processing_status_tool` | Returns in-memory status of running batch |
-| `cancel_multi_recording_batch_processing_tool`     | Cancels batch processing, clears queues   |
+| Tool                                               | Purpose                                    |
+|----------------------------------------------------|--------------------------------------------|
+| `start_multi_recording_batch_processing_tool`      | Starts batch processing (1+ datasets)      |
+| `get_multi_recording_batch_processing_status_tool` | Returns in-memory status of running batch  |
+| `cancel_multi_recording_batch_processing_tool`     | Cancels batch processing, clears queues    |
+
+### Configuration & Name Resolution Tools
+
+| Tool                                       | Purpose                                                            |
+|--------------------------------------------|--------------------------------------------------------------------|
+| `resolve_dataset_name_tool`                | Constructs qualified dataset names from base name + specifier      |
+| `discover_multi_recording_candidates_tool` | Finds recordings with completed single-recording output            |
+| `generate_config_file`                     | Generates default multi-recording configuration YAML               |
 
 ### Supporting Tools (used during workflow)
 
 | Tool                                       | Purpose                                                 |
 |--------------------------------------------|---------------------------------------------------------|
-| `discover_multi_recording_candidates_tool` | Finds recordings with completed single-recording output |
 | `get_single_recording_status`              | Verifies single-recording prerequisites                 |
 | `get_multi_recording_status`               | Checks filesystem for multi-recording outputs           |
 
@@ -51,14 +58,14 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ## Pipeline Architecture
 
-Two-phase pipeline per animal:
+Two-phase pipeline per dataset:
 
 ```
 Phase 1: DISCOVER (Mixed parallelization)
 ├── Registers all recordings to common reference frame
 ├── Clusters ROI masks across recordings
 ├── Generates template masks for tracked ROIs
-└── 20 workers per animal, registration sequential
+└── 20 workers per dataset, registration sequential
 
 Phase 2: EXTRACT (CPU bound, parallel by recording)
 ├── Applies template masks to extract fluorescence
@@ -66,12 +73,37 @@ Phase 2: EXTRACT (CPU bound, parallel by recording)
 └── Each recording uses up to 30 workers
 ```
 
-Batch processing across multiple animals:
+Batch processing across multiple datasets:
 
 ```
-DISCOVER: Parallel across animals (if cores allow)
-EXTRACT:  Parallel across all recordings from all animals
+DISCOVER: Parallel across datasets (if cores allow)
+EXTRACT:  Parallel across all recordings from all datasets
 ```
+
+---
+
+## Dataset Name Resolution
+
+Each dataset in a batch needs a unique `dataset_name` for output directories and batch tracking. The
+`resolve_dataset_name_tool` constructs qualified names by combining a shared base name with a
+batch-specific specifier:
+
+```
+resolve_dataset_name_tool(
+    dataset_name="learning_task",           # shared analysis name from user
+    recording_paths=["/data/animal_A/rec1", "/data/animal_A/rec2"],
+    specifier=""                            # auto-derived from common parent → "animal_A"
+)
+→ { "dataset_name": "animal_A_learning_task", "specifier": "animal_A", "base_name": "learning_task" }
+```
+
+**Specifier derivation strategies:**
+- **Auto (default):** Derived from the deepest common parent directory of the recording paths.
+- **Explicit:** The user or agent provides a specifier directly (e.g., brain region, session group).
+- **Semantic:** The agent determines the specifier by analyzing recording directory names or paths.
+
+This enables batch bootstrapping: discover all recordings under a project directory, group them by
+common parent, and call `resolve_dataset_name_tool` once per group to generate unique dataset names.
 
 ---
 
@@ -81,10 +113,11 @@ EXTRACT:  Parallel across all recordings from all animals
 
 ```
 - [ ] All recordings confirmed as single-recording complete (status: combined)
-- [ ] Recordings organized by animal/dataset
-- [ ] Configuration confirmed or created per animal
+- [ ] Recordings grouped into datasets (by common parent, explicit grouping, or user instruction)
+- [ ] Dataset names resolved via resolve_dataset_name_tool
+- [ ] Configuration confirmed or created per dataset
 - [ ] CPU core allocation confirmed with user
-- [ ] Recordings per animal confirmed
+- [ ] Recordings per dataset confirmed
 ```
 
 **STOP**: If any checkbox is incomplete, do not proceed. Complete the missing steps first.
@@ -95,22 +128,29 @@ EXTRACT:  Parallel across all recordings from all animals
    recordings and `get_single_recording_status` to confirm each has status `combined`. If any
    recording is incomplete, invoke `/single-recording-processing` (or upstream skills as needed).
 
-2. **Organize by animal** — Group recordings by animal/dataset.
+2. **Organize into datasets** — Group recordings by common parent directory, user-provided grouping,
+   or semantic analysis of recording paths. Each group becomes one dataset in the batch.
 
-3. **Configure** — Ask the user if they have existing configuration files per animal. If not,
-   invoke `/multi-recording-configuration` to create and customize them. Do not proceed without
-   confirmed configuration paths.
+3. **Resolve dataset names** — Ask the user for a shared base dataset name (e.g., "learning_task").
+   For each group, call `resolve_dataset_name_tool` with the base name and recording paths to
+   generate a unique qualified name. The specifier is derived automatically from the common parent
+   directory, or the user can provide one explicitly.
 
-4. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many
+4. **Configure** — Ask the user if they have existing configuration files per dataset. If not,
+   invoke `/multi-recording-configuration` to create and customize them. Set each configuration's
+   `dataset_name` to the qualified name from step 3. Do not proceed without confirmed configuration
+   paths.
+
+5. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many
    cores to use (see Resource Management section).
 
-5. **Start batch** — Call `start_multi_recording_batch_processing_tool` with the animal
+6. **Start batch** — Call `start_multi_recording_batch_processing_tool` with the dataset
    configurations and worker settings.
 
-6. **Monitor** — Use `get_multi_recording_batch_processing_status_tool` to check progress.
+7. **Monitor** — Use `get_multi_recording_batch_processing_status_tool` to check progress.
    Present status as a formatted table (see Status Formatting section).
 
-7. **Handle completion** — When all animals finish, check for failures. Route errors to the
+8. **Handle completion** — When all datasets finish, check for failures. Route errors to the
    appropriate skill (see Error Routing section). On success, invoke `/multi-recording-results`
    to verify outputs, then `/visualization` for visual inspection.
 
@@ -125,12 +165,12 @@ The system automatically calculates optimal resource allocation:
 - **Reserved cores**: 2 (for system operations)
 - **Maximum job cores**: 30 (processing saturates beyond this)
 
-| CPU Cores | Max Parallel Discovers | Max Parallel Extracts | Behavior                     |
-|-----------|------------------------|-----------------------|------------------------------|
-| 32        | 1                      | 1                     | Sequential processing        |
-| 64        | 3                      | 2                     | Multiple animals in parallel |
-| 96        | 4                      | 3                     | Higher parallelism           |
-| 128       | 6                      | 4                     | Maximum parallelism          |
+| CPU Cores | Max Parallel Discovers | Max Parallel Extracts | Behavior                      |
+|-----------|------------------------|-----------------------|-------------------------------|
+| 32        | 1                      | 1                     | Sequential processing         |
+| 64        | 3                      | 2                     | Multiple datasets in parallel |
+| 96        | 4                      | 3                     | Higher parallelism            |
+| 128       | 6                      | 4                     | Maximum parallelism           |
 
 ---
 
@@ -142,12 +182,12 @@ When presenting batch status to the user, format as a table:
 **Multi-Recording Batch Processing Status**
 
 Current Phase: EXTRACT
-Summary: 1/2 animals complete | 2/4 recordings extracted | 0 failed
+Summary: 1/2 datasets complete | 2/4 recordings extracted | 0 failed
 
-| Animal           | Discover | Extract Progress | Status     |
-|------------------|----------|------------------|------------|
-| animal1_dataset  | done     | 2/2              | SUCCEEDED  |
-| animal2_dataset  | done     | 0/2              | EXTRACTING |
+| Dataset                    | Discover | Extract Progress | Status     |
+|----------------------------|----------|------------------|------------|
+| animal_A_learning_task     | done     | 2/2              | SUCCEEDED  |
+| animal_B_learning_task     | done     | 0/2              | EXTRACTING |
 ```
 
 ---
@@ -156,16 +196,16 @@ Summary: 1/2 animals complete | 2/4 recordings extracted | 0 failed
 
 ### Batch Start Errors
 
-| Error Message                                   | Resolution                                |
-|-------------------------------------------------|-------------------------------------------|
-| "At least one animal configuration is required" | Provide animal configurations             |
-| "Configuration file not found"                  | Invoke `/multi-recording-configuration`   |
-| "Recording directory not found"                 | Verify path exists                        |
-| "Batch processing already in progress"          | Wait for current batch or cancel first    |
+| Error Message                                     | Resolution                              |
+|---------------------------------------------------|-----------------------------------------|
+| "At least one dataset configuration is required"  | Provide dataset configurations          |
+| "Configuration file not found"                    | Invoke `/multi-recording-configuration` |
+| "Recording directory not found"                   | Verify path exists                      |
+| "Batch processing already in progress"            | Wait for current batch or cancel first  |
 
 ### Processing Failure Routing
 
-When processing fails for some animals/recordings, read the error messages and route:
+When processing fails for some datasets/recordings, read the error messages and route:
 
 | Error pattern                                       | Skill to invoke                    |
 |-----------------------------------------------------|------------------------------------|
