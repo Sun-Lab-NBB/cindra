@@ -1,4 +1,4 @@
-"""Enhanced neural imaging analysis library with single-recording and multi-recording ROI tracking pipelines.
+"""A reimplementation of the suite2p library with novel data architecture and across-day tracking pipeline.
 
 cindra is a reimplementation of the popular suite2p (https://github.com/MouseLand/suite2p) library with expanded
 documentation, modern Python support, and a new multi-recording ROI tracking pipeline based on the OSM manuscript
@@ -10,7 +10,10 @@ Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer a
 Sun lab code changes copyright:
 Copyright © 2025 Cornell University, Authored by Ivan Kondratyev and Kushaan Gupta.
 
-For documentation and additional information, see: https://github.com/Sun-Lab-NBB/cindra
+See the `source code repository <https://github.com/Sun-Lab-NBB/cindra>`_ for documentation and additional
+information.
+
+Authors: Ivan Kondratyev, Natalie Yeung
 """
 
 # Configures numba threading layer for parallel execution across all modules. This must be set before any numba

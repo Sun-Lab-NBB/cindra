@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from ..dataclasses import RuntimeContext, AcquisitionParameters
 
-_TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
+TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
 """The supported TIFF file extensions."""
 
 _MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
@@ -284,7 +284,7 @@ def _discover_tiff_files(
 
     # Performs non-recursive scan for TIFF files.
     file_paths: list[Path] = []
-    for extension in _TIFF_EXTENSIONS:
+    for extension in TIFF_EXTENSIONS:
         file_paths.extend(
             file_path.resolve()
             for file_path in data_directory.glob(f"*.{extension}")

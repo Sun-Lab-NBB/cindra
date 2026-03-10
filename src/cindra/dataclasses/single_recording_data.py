@@ -10,7 +10,6 @@ from dataclasses import field, dataclass
 
 import numpy as np
 from numpy.typing import NDArray  # noqa: TC002 - needed at runtime for dacite deserialization
-from scipy.ndimage import binary_dilation, binary_fill_holes
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
@@ -18,75 +17,6 @@ from .version import version, python_version
 
 if TYPE_CHECKING:
     from numpy.lib.npyio import NpzFile
-
-
-def _save_optional_array_field(
-    field_name: str,
-    arrays: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | tuple[int, ...] | None],
-    save_dictionary: dict[str, NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | NDArray[np.uint32]],
-    dtype: type,
-) -> None:
-    """Saves an optional variable-length array field to the provided save dictionary.
-
-    Notes:
-        This function handles the serialization pattern for optional array fields in dataclasses. It stores two arrays
-        in the save dictionary: a counts array with the length of each item's array (0 if None), and a concatenated
-        data array containing only the non-None values. This enables pickle-free serialization of variable-length
-        arrays.
-
-    Args:
-        field_name: The base name for the field. The function stores '{field_name}_counts' and '{field_name}' keys.
-        arrays: The list of arrays to save. None values and empty arrays are handled by storing 0 in the counts array.
-        save_dictionary: The dictionary to populate with the serialized arrays.
-        dtype: The numpy dtype to use when converting arrays.
-    """
-    has_data = [a is not None and len(a) > 0 for a in arrays]
-    if not any(has_data):
-        return
-
-    counts = np.array(object=[len(a) if a is not None else 0 for a in arrays], dtype=np.uint32)
-    valid_arrays: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_]] = [
-        np.asarray(a=a, dtype=dtype) for a in arrays if a is not None and len(a) > 0
-    ]
-    if valid_arrays:
-        save_dictionary[f"{field_name}_counts"] = counts
-        save_dictionary[field_name] = np.concatenate(valid_arrays)  # type: ignore[assignment]
-
-
-def _load_optional_array_field(
-    field_name: str,
-    item_count: int,
-    data: NpzFile,
-    dtype: type,
-) -> list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | None]:
-    """Loads an optional variable-length array field from a numpy NpzFile.
-
-    Notes:
-        This function reverses the serialization pattern used by _save_optional_array_field. It reads the counts array
-        and concatenated data array, then splits the data back into per-item arrays based on the stored counts.
-
-    Args:
-        field_name: The base name for the field. The function reads '{field_name}_counts' and '{field_name}' keys.
-        item_count: The total number of items expected (determines the length of the returned list).
-        data: The NpzFile containing the serialized arrays.
-        dtype: The numpy dtype to cast the loaded arrays to.
-
-    Returns:
-        A list of arrays with length equal to item_count. Items that had no data (count of 0) are returned as None.
-    """
-    result: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | None] = [None] * item_count
-    counts_key = f"{field_name}_counts"
-    if counts_key not in data:
-        return result
-
-    counts = data[counts_key]
-    array_data = data[field_name]
-    index = 0
-    for i, count in enumerate(counts):
-        if count > 0:
-            result[i] = array_data[index : index + count].astype(dtype=dtype)
-            index += count
-    return result
 
 
 def is_memory_mapped(array: NDArray[np.generic] | None) -> bool:
@@ -158,7 +88,7 @@ class RegistrationData:
     """The phase offset in pixels used to correct bidirectional scanning artifacts."""
 
     bidirectional_phase_corrected: bool = False
-    """Determines whether bidirectional phase correction was applied during registration."""
+    """Indicates whether bidirectional phase correction was applied during registration."""
 
     normalization_minimum: int = 0
     """The minimum intensity value used for normalizing frames during registration."""
@@ -623,50 +553,6 @@ class ROIMask:
         return (self.y_pixels * self.frame_width + self.x_pixels).astype(np.int32)
 
     @cached_property
-    def boundary_pixels(self) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
-        """Computes the exterior boundary mask of the ROI and returns (y_boundary, x_boundary) pixel coordinate
-        arrays.
-        """
-        # Reshapes coordinate arrays into column vectors for 2D array indexing.
-        y_pixels = np.expand_dims(self.y_pixels.flatten(), axis=1)
-        x_pixels = np.expand_dims(self.x_pixels.flatten(), axis=1)
-        pixel_count = y_pixels.shape[0]
-
-        if not pixel_count:
-            return np.zeros((0,), dtype=np.int32), np.zeros((0,), dtype=np.int32)
-
-        # Builds a tight bounding box around the ROI with padding to ensure boundary pixels at the edges of the mask
-        # are not clipped during morphological operations.
-        boundary_padding = 3
-        y_min = y_pixels.min()
-        x_min = x_pixels.min()
-        mask = np.zeros(
-            (int(y_pixels.max() - y_min) + 2 * boundary_padding, int(x_pixels.max() - x_min) + 2 * boundary_padding),
-            dtype=np.bool_,
-        )
-
-        # Stamps the ROI pixels into the local coordinate system offset by the bounding box origin.
-        mask[y_pixels - y_min + boundary_padding, x_pixels - x_min + boundary_padding] = True
-
-        # Dilates the mask to close single-pixel gaps, then fills interior holes to produce a solid region.
-        mask = binary_dilation(mask)
-        mask = binary_fill_holes(mask)
-
-        # Uses a 4-connected structuring element (cross pattern) to find the exterior ring. Dilating the background
-        # into the foreground and intersecting with the original mask isolates the outermost pixel layer.
-        kernel = np.zeros((3, 3), dtype=np.int32)
-        kernel[1] = 1
-        kernel[:, 1] = 1
-        exterior = binary_dilation(mask == 0, structure=kernel) & mask
-
-        # Converts local bounding-box coordinates back to the original frame coordinate system.
-        y_boundary, x_boundary = np.nonzero(exterior)
-        y_boundary = y_boundary + y_min - boundary_padding
-        x_boundary = x_boundary + x_min - boundary_padding
-
-        return y_boundary, x_boundary
-
-    @cached_property
     def circle_pixels(self) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
         """Computes unclipped (y_circle, x_circle) pixel coordinates of a circle with ``1.25 * radius`` and
         100 sample points around the ROI centroid.
@@ -912,20 +798,6 @@ class ROIStatistics:
             roi_list.append(roi)
 
         return roi_list
-
-    @staticmethod
-    def load_masks_only(masks_path: Path) -> list[ROIMask]:
-        """Loads only the spatial ROIMask data from a masks .npz file.
-
-        Convenience method for the multi-recording pipeline when only spatial data is needed.
-
-        Args:
-            masks_path: The path to the masks .npz file.
-
-        Returns:
-            A list of ROIMask instances.
-        """
-        return ROIMask.load_list(masks_path)
 
 
 @dataclass
@@ -1602,6 +1474,27 @@ class CombinedData:
         self.extraction.save_arrays(root_path)
 
     @classmethod
+    def load(cls, root_path: Path) -> CombinedData:
+        """Loads combined metadata from the root cindra directory without loading any arrays.
+
+        After calling this method, detection and extraction arrays can be loaded individually using the
+        ``load_arrays()`` or ``memory_map_arrays()`` methods on each child (e.g., ``combined.detection.load_arrays(
+        root_path)``).
+
+        Args:
+            root_path: The root cindra output directory containing combined_metadata.npz.
+
+        Returns:
+            A CombinedData instance with metadata loaded and empty detection/extraction containers. NumPy array
+            fields remain None until explicitly loaded on the child dataclasses.
+
+        Raises:
+            FileNotFoundError: If the combined metadata file does not exist.
+        """
+        kwargs = cls._load_metadata(root_path)
+        return cls(detection=DetectionData(), extraction=ExtractionData(), **kwargs)
+
+    @classmethod
     def _load_metadata(cls, root_path: Path) -> dict:
         """Loads combined metadata from the .npz file and returns constructor keyword arguments.
 
@@ -1656,23 +1549,71 @@ class CombinedData:
 
         return kwargs
 
-    @classmethod
-    def load(cls, root_path: Path) -> CombinedData:
-        """Loads combined metadata from the root cindra directory without loading any arrays.
 
-        After calling this method, detection and extraction arrays can be loaded individually using the
-        ``load_arrays()`` or ``memory_map_arrays()`` methods on each child (e.g., ``combined.detection.load_arrays(
-        root_path)``).
+def _save_optional_array_field(
+    field_name: str,
+    arrays: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | tuple[int, ...] | None],
+    save_dictionary: dict[str, NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | NDArray[np.uint32]],
+    dtype: type,
+) -> None:
+    """Saves an optional variable-length array field to the provided save dictionary.
 
-        Args:
-            root_path: The root cindra output directory containing combined_metadata.npz.
+    Notes:
+        This function handles the serialization pattern for optional array fields in dataclasses. It stores two arrays
+        in the save dictionary: a counts array with the length of each item's array (0 if None), and a concatenated
+        data array containing only the non-None values. This enables pickle-free serialization of variable-length
+        arrays.
 
-        Returns:
-            A CombinedData instance with metadata loaded and empty detection/extraction containers. NumPy array
-            fields remain None until explicitly loaded on the child dataclasses.
+    Args:
+        field_name: The base name for the field. The function stores '{field_name}_counts' and '{field_name}' keys.
+        arrays: The list of arrays to save. None values and empty arrays are handled by storing 0 in the counts array.
+        save_dictionary: The dictionary to populate with the serialized arrays.
+        dtype: The numpy dtype to use when converting arrays.
+    """
+    has_data = [a is not None and len(a) > 0 for a in arrays]
+    if not any(has_data):
+        return
 
-        Raises:
-            FileNotFoundError: If the combined metadata file does not exist.
-        """
-        kwargs = cls._load_metadata(root_path)
-        return cls(detection=DetectionData(), extraction=ExtractionData(), **kwargs)
+    counts = np.array(object=[len(a) if a is not None else 0 for a in arrays], dtype=np.uint32)
+    valid_arrays: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_]] = [
+        np.asarray(a=a, dtype=dtype) for a in arrays if a is not None and len(a) > 0
+    ]
+    if valid_arrays:
+        save_dictionary[f"{field_name}_counts"] = counts
+        save_dictionary[field_name] = np.concatenate(valid_arrays)  # type: ignore[assignment]
+
+
+def _load_optional_array_field(
+    field_name: str,
+    item_count: int,
+    data: NpzFile,
+    dtype: type,
+) -> list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | None]:
+    """Loads an optional variable-length array field from a numpy NpzFile.
+
+    Notes:
+        This function reverses the serialization pattern used by _save_optional_array_field. It reads the counts array
+        and concatenated data array, then splits the data back into per-item arrays based on the stored counts.
+
+    Args:
+        field_name: The base name for the field. The function reads '{field_name}_counts' and '{field_name}' keys.
+        item_count: The total number of items expected (determines the length of the returned list).
+        data: The NpzFile containing the serialized arrays.
+        dtype: The numpy dtype to cast the loaded arrays to.
+
+    Returns:
+        A list of arrays with length equal to item_count. Items that had no data (count of 0) are returned as None.
+    """
+    result: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | None] = [None] * item_count
+    counts_key = f"{field_name}_counts"
+    if counts_key not in data:
+        return result
+
+    counts = data[counts_key]
+    array_data = data[field_name]
+    index = 0
+    for i, count in enumerate(counts):
+        if count > 0:
+            result[i] = array_data[index : index + count].astype(dtype=dtype)
+            index += count
+    return result

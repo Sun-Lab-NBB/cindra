@@ -45,7 +45,7 @@ def compute_intensity_colocalization(
     automatically to remove functional channel signal that leaks into the structural channel.
 
     Notes:
-        This method is appropriate when one channel contains functional data (e.g., GCaMP calcium
+        Appropriate when one channel contains functional data (e.g., GCaMP calcium
         indicator) and the other contains structural data (e.g., tdTomato cell marker). The intensity ratio
         approach assumes that colocalized ROIs will have higher signal inside the cell boundary than in the
         surrounding neuropil.
@@ -138,7 +138,7 @@ def compute_spatial_colocalization(
     enforces convergent bidirectional matching where every accepted pairing is reciprocal.
 
     Notes:
-        This method is appropriate when both channels contain functional data with independently
+        Appropriate when both channels contain functional data with independently
         detected ROIs. The overlap fraction is normalized by the smaller ROI size, ensuring that
         a small ROI fully contained within a larger ROI receives an overlap score of 1.0. The
         mutual best-match constraint guarantees one-to-one correspondence: the inverse mapping

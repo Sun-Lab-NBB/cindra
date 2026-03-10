@@ -24,7 +24,7 @@ that are not evaluated (due to centroid distance filtering) are never clustered 
 def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
     """Tracks ROIs across multiple recordings using Jaccard distance-based hierarchical clustering.
 
-    This function clusters ROI masks from multiple recordings based on spatial overlap in the shared deformed visual
+    Clusters ROI masks from multiple recordings based on spatial overlap in the shared deformed visual
     space. ROIs that consistently appear in the same location across recordings are grouped together, and a template
     mask is created for each cluster representing the consensus ROI. When dual-channel data is present, each channel
     is processed independently.
@@ -407,7 +407,8 @@ def _filter_templates(
 def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], channel_2: bool) -> None:
     """Tracks ROIs for a single channel across multiple recordings.
 
-    Performs the core tracking algorithm for either channel 1 or channel 2 ROIs.
+    Notes:
+        Performs the core tracking algorithm for either channel 1 or channel 2 ROIs.
 
     Args:
         contexts: The list of MultiRecordingRuntimeContext instances, one per recording.

@@ -205,8 +205,8 @@ def compute_colors(
         )
 
         # Computes percentile bounds for min-max normalization and stores [low, mid, high] for colorbar labels.
-        statistic_low = np.percentile(statistic_values, COMMON_CONFIG.lower_percentile)
-        statistic_high = np.percentile(statistic_values, COMMON_CONFIG.upper_percentile)
+        statistic_low = np.percentile(statistic_values, q=COMMON_CONFIG.lower_percentile)
+        statistic_high = np.percentile(statistic_values, q=COMMON_CONFIG.upper_percentile)
         colorbar.append(
             [
                 float(statistic_low),
@@ -218,7 +218,7 @@ def compute_colors(
         # Normalizes values to [0, 1] using the percentile range; collapses to zeros if the range is degenerate.
         statistic_range = statistic_high - statistic_low
         if statistic_range > 0:
-            statistic_values = np.clip((statistic_values - statistic_low) / statistic_range, 0, 1)
+            statistic_values = np.clip((statistic_values - statistic_low) / statistic_range, a_min=0, a_max=1)
         else:
             statistic_values = np.zeros_like(statistic_values)
 
@@ -486,7 +486,7 @@ def draw_colorbar(colormap: str = "hsv") -> NDArray[np.uint8]:
     Returns:
         Colorbar image array with shape (20, 101, 3) and dtype uint8.
     """
-    gradient = np.linspace(0, 1, ROI_STYLE.colorbar_sample_count).astype(np.float32)
+    gradient = np.linspace(start=0, stop=1, num=ROI_STYLE.colorbar_sample_count).astype(np.float32)
     rgb = _apply_colormap(gradient, colormap)
     color_matrix = np.expand_dims(rgb, axis=0)
     return np.tile(color_matrix, (ROI_STYLE.colorbar_row_count, 1, 1))
@@ -687,14 +687,14 @@ def normalize_percentile(
     if image.size == 0:
         return np.zeros((frame_height, frame_width), dtype=np.float32)
 
-    lower_bound = np.percentile(image, COMMON_CONFIG.lower_percentile)
-    upper_bound = np.percentile(image, COMMON_CONFIG.upper_percentile)
+    lower_bound = np.percentile(image, q=COMMON_CONFIG.lower_percentile)
+    upper_bound = np.percentile(image, q=COMMON_CONFIG.upper_percentile)
 
     if upper_bound <= lower_bound:
         return np.zeros((frame_height, frame_width), dtype=np.float32)
 
     normalized = (image - lower_bound) / (upper_bound - lower_bound)
-    return np.clip(normalized, 0, 1).astype(np.float32)
+    return np.clip(normalized, a_min=0, a_max=1).astype(np.float32)
 
 
 def _update_rgb_masks(
@@ -824,8 +824,8 @@ def _place_in_valid_region(
         return np.full((frame_height, frame_width), 0.5, dtype=np.float32)
 
     # Normalizes the image using percentile clipping.
-    lower_bound = np.percentile(image, COMMON_CONFIG.lower_percentile)
-    upper_bound = np.percentile(image, COMMON_CONFIG.upper_percentile)
+    lower_bound = np.percentile(image, q=COMMON_CONFIG.lower_percentile)
+    upper_bound = np.percentile(image, q=COMMON_CONFIG.upper_percentile)
 
     if upper_bound <= lower_bound:
         return np.zeros((frame_height, frame_width), dtype=np.float32)
@@ -836,7 +836,7 @@ def _place_in_valid_region(
     output = np.full((frame_height, frame_width), lower_bound, dtype=np.float32)
     with contextlib.suppress(ValueError, IndexError):
         output[valid_y_range[0] : valid_y_range[1], valid_x_range[0] : valid_x_range[1]] = normalized
-    np.clip(output, 0, 1, out=output)
+    np.clip(output, a_min=0, a_max=1, out=output)
     return output
 
 

@@ -15,6 +15,8 @@ from scipy.fft import (
 from scipy.ndimage import gaussian_filter1d
 from ataraxis_base_utilities import console
 
+from ..detection import mean_centered_meshgrid
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
@@ -140,7 +142,7 @@ def compute_gaussian_frequency_filter(sigma: float, height: int, width: int) -> 
         The smoothing filter in the Fourier domain with shape (height, width // 2 + 1) for real FFT compatibility.
     """
     # Creates grids of distances from center for a spatial-domain kernel.
-    column_distances, row_distances = _mean_centered_meshgrid(height=height, width=width)
+    column_distances, row_distances = mean_centered_meshgrid(height=height, width=width)
 
     # Computes separable 1D Gaussians along each axis, then combines into 2D kernel.
     gaussian_column = np.exp(-np.square(column_distances / sigma) / 2)
@@ -288,33 +290,6 @@ def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray
 
     # Casts to float32 since precision is no longer critical after inversion.
     return kernel_matrix.astype(np.float32), num_upsampled
-
-
-def _mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-    """Creates a mean-centered distance meshgrid of the specified dimensions.
-
-    Each coordinate value represents the absolute distance from the center of that axis. Used internally
-    for creating spatial taper masks and Gaussian frequency filters.
-
-    Args:
-        height: The height of the frames or images to generate the meshgrid for, in pixels.
-        width: The width of the frames or images to generate the meshgrid for, in pixels.
-
-    Returns:
-        A tuple of (column_distances, row_distances) arrays with shape (height, width), where each value
-        represents the absolute distance from the center along that axis.
-    """
-    # Computes absolute distances from center for each axis. For arange(0, n), mean is (n-1)/2. Casts centers to
-    # float32 to prevent promotion of the entire distance arrays to float64.
-    row_center = np.float32((height - 1) / 2)
-    column_center = np.float32((width - 1) / 2)
-    row_distances_1d = np.abs(np.arange(height, dtype=np.float32) - row_center)
-    column_distances_1d = np.abs(np.arange(width, dtype=np.float32) - column_center)
-
-    # Expands 1D distances into 2D grids. Meshgrid returns (column-varying, row-varying) arrays.
-    column_distances, row_distances = np.meshgrid(column_distances_1d, row_distances_1d)
-
-    return column_distances, row_distances
 
 
 def _compute_gaussian_rbf_weights(

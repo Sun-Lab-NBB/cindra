@@ -36,7 +36,7 @@ _LOG_EPSILON: float = 1e-6
 class Classifier:
     """Provides logistic regression-based classification for identifying cell ROIs.
 
-    This class loads classifier training data from the specified .npz file, fits a logistic regression model, and uses
+    Loads classifier training data from the specified .npz file, fits a logistic regression model, and uses
     it to predict whether detected ROIs represent real cells or artifacts based on their morphological features.
 
     Notes:
@@ -177,11 +177,11 @@ class Classifier:
             # Clips feature values to the grid bounds and replaces NaN with the minimum grid value.
             grid_min = self._probability_grid[0, feature_index]
             grid_max = self._probability_grid[-1, feature_index]
-            feature_values = np.clip(feature_values, grid_min, grid_max)
+            feature_values = np.clip(feature_values, a_min=grid_min, a_max=grid_max)
             feature_values[np.isnan(feature_values)] = grid_min
 
             # Maps each feature value to its corresponding grid bin index.
-            bin_indices = np.digitize(feature_values, self._probability_grid[:, feature_index], right=True) - 1
+            bin_indices = np.digitize(feature_values, bins=self._probability_grid[:, feature_index], right=True) - 1
             bin_indices = np.clip(bin_indices, a_min=0, a_max=self._grid_cell_probabilities.shape[0] - 1)
 
             # Looks up the pre-computed cell probability for each bin and converts to log-odds.
@@ -239,7 +239,7 @@ class Classifier:
         # Fits the logistic regression model using log-odds transformed features.
         log_probabilities = self._compute_log_probabilities(features=training_features)
         self._model = LogisticRegression(C=100.0, solver="liblinear")
-        self._model.fit(log_probabilities, self._training_labels)
+        self._model.fit(X=log_probabilities, y=self._training_labels)
 
     @staticmethod
     def create_training_dataset(
@@ -322,7 +322,7 @@ def classify(
 ) -> NDArray[np.float32]:
     """Classifies detected ROIs as cells or non-cells using a logistic regression model.
 
-    This function loads classifier training data from the specified file (or the built-in classifier if no custom path
+    Loads classifier training data from the specified file (or the built-in classifier if no custom path
     is provided), fits a logistic regression model, and uses it to classify the input ROIs based on their morphological
     features.
 

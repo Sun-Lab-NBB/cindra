@@ -148,7 +148,7 @@ def _oasis_matrix(  # pragma: no cover
     """Performs spike deconvolution on all ROI fluorescence traces in parallel using the OASIS algorithm.
 
     Notes:
-        This implements the unconstrained non-negative AR(1) OASIS solver from Friedrich et al. (2017). The algorithm
+        Implements the unconstrained non-negative AR(1) OASIS solver from Friedrich et al. (2017). The algorithm
         models calcium fluorescence as a series of exponentially decaying "pools", where each pool represents a
         contiguous trace segment governed by a single initial amplitude and a shared decay rate. For each new time
         point, a single-frame pool is created and the algorithm checks backward through adjacent pools: if a previous

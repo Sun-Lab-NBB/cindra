@@ -1,5 +1,9 @@
 """Contains tests for the masks module."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from cindra.dataclasses import ROIMask, ROIStatistics
@@ -10,8 +14,20 @@ from cindra.extraction.masks import (
     _create_neuropil_masks,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
-def _make_roi(y_pixels, x_pixels, weights, frame_width, radius=5.0, overlap_mask=None):
+    from numpy.typing import NDArray
+
+
+def _make_roi(
+    y_pixels: Sequence[int],
+    x_pixels: Sequence[int],
+    weights: Sequence[float],
+    frame_width: int,
+    radius: float = 5.0,
+    overlap_mask: NDArray[np.bool_] | None = None,
+) -> ROIStatistics:
     """Creates a minimal ROIStatistics instance for testing."""
     mask = ROIMask(
         y_pixels=np.array(y_pixels, dtype=np.int32),
@@ -25,7 +41,13 @@ def _make_roi(y_pixels, x_pixels, weights, frame_width, radius=5.0, overlap_mask
     return ROIStatistics(mask=mask)
 
 
-def _make_circular_roi(center_y, center_x, radius, frame_height, frame_width):
+def _make_circular_roi(
+    center_y: int,
+    center_x: int,
+    radius: int,
+    frame_height: int,
+    frame_width: int,
+) -> ROIStatistics:
     """Creates a circular ROI for testing."""
     y_coords, x_coords = np.mgrid[0:frame_height, 0:frame_width]
     distance = np.sqrt((y_coords - center_y) ** 2 + (x_coords - center_x) ** 2)
@@ -39,7 +61,7 @@ def _make_circular_roi(center_y, center_x, radius, frame_height, frame_width):
 class TestCreateMasks:
     """Tests for create_masks."""
 
-    def test_without_neuropil(self):
+    def test_without_neuropil(self) -> None:
         """Verifies that neuropil=False produces None neuropil masks."""
         roi = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         result = create_masks(roi_statistics=[roi], height=50, width=50, neuropil=False, include_overlap=True)
@@ -49,7 +71,7 @@ class TestCreateMasks:
         assert neuropil_indices is None
         assert indices.dtype == np.int32
 
-    def test_with_neuropil(self):
+    def test_with_neuropil(self) -> None:
         """Verifies that neuropil=True produces neuropil masks."""
         roi = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         result = create_masks(
@@ -67,7 +89,7 @@ class TestCreateMasks:
         assert neuropil_indices.dtype == np.int32
         assert neuropil_indices.size > 0
 
-    def test_multiple_rois(self):
+    def test_multiple_rois(self) -> None:
         """Verifies that masks are created for each ROI."""
         roi_1 = _make_circular_roi(center_y=15, center_x=15, radius=4, frame_height=50, frame_width=50)
         roi_2 = _make_circular_roi(center_y=35, center_x=35, radius=4, frame_height=50, frame_width=50)
@@ -78,7 +100,7 @@ class TestCreateMasks:
 class TestCreateRoiPixels:
     """Tests for _create_roi_pixels."""
 
-    def test_all_roi_pixels_marked(self):
+    def test_all_roi_pixels_marked(self) -> None:
         """Verifies that ROI pixel positions are marked True in the output mask."""
         roi = _make_roi(
             y_pixels=[5, 5, 6, 6],
@@ -92,7 +114,7 @@ class TestCreateRoiPixels:
         assert pixel_mask[6, 5]
         assert pixel_mask[6, 6]
 
-    def test_empty_outside_roi(self):
+    def test_empty_outside_roi(self) -> None:
         """Verifies that pixels outside ROIs are False."""
         roi = _make_roi(
             y_pixels=[5, 5],
@@ -104,7 +126,7 @@ class TestCreateRoiPixels:
         assert not pixel_mask[0, 0]
         assert not pixel_mask[19, 19]
 
-    def test_with_percentile_filtering(self):
+    def test_with_percentile_filtering(self) -> None:
         """Verifies that percentile filtering produces a valid boolean mask."""
         roi = _make_circular_roi(center_y=15, center_x=15, radius=5, frame_height=30, frame_width=30)
         pixel_mask = _create_roi_pixels(roi_statistics=[roi], height=30, width=30, cell_probability_percentile=50)
@@ -117,7 +139,7 @@ class TestCreateRoiPixels:
 class TestCreateRoiMasks:
     """Tests for _create_roi_masks."""
 
-    def test_includes_all_pixels_with_overlap(self):
+    def test_includes_all_pixels_with_overlap(self) -> None:
         """Verifies that all ROI pixels are included when include_overlap=True."""
         roi = _make_roi(
             y_pixels=[5, 5, 6, 6],
@@ -130,7 +152,7 @@ class TestCreateRoiMasks:
         indices, _weights = masks[0]
         assert len(indices) == 4
 
-    def test_excludes_overlap_pixels(self):
+    def test_excludes_overlap_pixels(self) -> None:
         """Verifies that overlapping pixels are excluded when include_overlap=False."""
         overlap = np.array([True, False, False, True], dtype=np.bool_)
         roi = _make_roi(
@@ -145,7 +167,7 @@ class TestCreateRoiMasks:
         # Only 2 non-overlapping pixels should remain.
         assert len(indices) == 2
 
-    def test_weights_sum_to_one(self):
+    def test_weights_sum_to_one(self) -> None:
         """Verifies that the normalized weights sum to 1.0."""
         roi = _make_roi(
             y_pixels=[5, 5, 6, 6],
@@ -157,7 +179,7 @@ class TestCreateRoiMasks:
         _, weights = masks[0]
         np.testing.assert_allclose(weights.sum(), 1.0, atol=1e-6)
 
-    def test_empty_weights_after_overlap_exclusion(self):
+    def test_empty_weights_after_overlap_exclusion(self) -> None:
         """Verifies that fully overlapping ROIs produce empty weight arrays."""
         overlap = np.array([True, True], dtype=np.bool_)
         roi = _make_roi(
@@ -176,7 +198,7 @@ class TestCreateRoiMasks:
 class TestCreateNeuropilMasks:
     """Tests for _create_neuropil_masks."""
 
-    def test_neuropil_does_not_overlap_roi(self):
+    def test_neuropil_does_not_overlap_roi(self) -> None:
         """Verifies that neuropil masks do not overlap with the ROI pixel region."""
         roi = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         neuropil_masks = _create_neuropil_masks(
@@ -196,7 +218,7 @@ class TestCreateNeuropilMasks:
         neuropil_set = set(neuropil_flat.tolist())
         assert len(roi_flat & neuropil_set) == 0
 
-    def test_minimum_neuropil_size(self):
+    def test_minimum_neuropil_size(self) -> None:
         """Verifies that neuropil masks have at least the minimum requested size."""
         roi = _make_circular_roi(center_y=25, center_x=25, radius=3, frame_height=50, frame_width=50)
         min_size = 100
@@ -210,7 +232,7 @@ class TestCreateNeuropilMasks:
         )
         assert neuropil_masks[0].size >= min_size
 
-    def test_cached_masks_returned(self):
+    def test_cached_masks_returned(self) -> None:
         """Verifies that cached neuropil masks are returned on second call."""
         roi = _make_circular_roi(center_y=25, center_x=25, radius=3, frame_height=50, frame_width=50)
         # First call computes and caches.
@@ -233,7 +255,7 @@ class TestCreateNeuropilMasks:
         )
         np.testing.assert_array_equal(masks_first[0], masks_second[0])
 
-    def test_recompute_overrides_cache(self):
+    def test_recompute_overrides_cache(self) -> None:
         """Verifies that recompute=True forces recomputation even with cached masks."""
         roi = _make_circular_roi(center_y=25, center_x=25, radius=3, frame_height=50, frame_width=50)
         # First call computes and caches.

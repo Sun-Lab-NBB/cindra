@@ -91,6 +91,10 @@ def launch_viewer_tool(
             quality, 'registration' for registration quality (binary player + PC viewer).
         recording_path: Absolute path to the cindra pipeline output directory for the recording to visualize.
         dataset: Multi-recording dataset name to load on startup. Only used by 'roi' and 'tracking' viewers.
+
+    Returns:
+        A JSON dictionary containing 'success' flag, and on success 'viewer_id', 'viewer_type', 'recording_path',
+        and 'dataset'. On failure, contains an 'error' message.
     """
     path = Path(recording_path)
     if not path.exists():
@@ -134,6 +138,10 @@ def list_viewers_tool() -> dict[str, Any]:
 
     Returns viewer IDs, types, recording paths, and alive status for each managed viewer. Dead viewers are
     automatically cleaned up.
+
+    Returns:
+        A JSON dictionary containing 'viewers' list (each with 'viewer_id', 'viewer_type', 'recording_path',
+        'dataset', and 'alive' flag) and 'count' of active viewers.
     """
     viewers: list[dict[str, Any]] = []
     dead_ids: list[str] = []
@@ -168,6 +176,10 @@ def close_viewer_tool(viewer_id: str) -> dict[str, Any]:
 
     Args:
         viewer_id: The unique identifier of the viewer to close, as returned by launch_viewer_tool.
+
+    Returns:
+        A JSON dictionary containing 'success' flag and 'viewer_id' on success. On failure, contains an 'error'
+        message.
     """
     entry = _get_viewer(viewer_id)
     if entry is None:
@@ -194,6 +206,10 @@ def query_viewer_state_tool(viewer_id: str) -> dict[str, Any]:
 
     Args:
         viewer_id: The unique identifier of the viewer to query, as returned by launch_viewer_tool.
+
+    Returns:
+        A JSON dictionary containing 'success' flag, 'viewer_id', and 'state' dictionary with the viewer's current
+        display settings. On failure, contains an 'error' message.
     """
     entry = _get_viewer(viewer_id)
     if entry is None:

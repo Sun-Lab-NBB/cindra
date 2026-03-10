@@ -31,7 +31,7 @@ def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext) -> No
     """Extracts fluorescence traces, classifies ROIs, and deconvolves spikes from registered binary data.
 
     Notes:
-        This is the unified extraction entry point for both single-recording and multi-recording pipelines. It
+        Serves as the unified extraction entry point for both single-recording and multi-recording pipelines. It
         dispatches to the appropriate internal handler based on the runtime context type. For single-recording
         contexts, the full extraction pipeline runs including classification and interleaved extraction statistics.
         For multi-recording contexts, backward-transformed tracked ROI masks are used without reclassification.
@@ -345,7 +345,7 @@ def _extract_single_recording(context: RuntimeContext) -> None:
     """Extracts fluorescence traces, classifies ROIs, and deconvolves spikes from registered binary data.
 
     Notes:
-        This function orchestrates the full extraction pipeline for one or both channels. For structural channel 2
+        Orchestrates the full extraction pipeline for one or both channels. For structural channel 2
         data, channel 1 masks are reused and intensity colocalization is computed. For functional channel 2 data,
         independent masks are created and spatial colocalization is computed between the two channel's ROIs. Results
         are written into context.runtime.extraction and context.runtime.timing.
@@ -598,7 +598,7 @@ def _extract_functional_channel_2(
     """Extracts functional channel 2 fluorescence with independent masks and computes spatial colocalization.
 
     Notes:
-        When both channels are functional, channel 2 has its own independently detected ROIs. This function creates
+        When both channels are functional, channel 2 has its own independently detected ROIs. Creates
         masks from those ROIs, extracts fluorescence, classifies ROIs, computes delta fluorescence and spike
         deconvolution, and finally computes spatial colocalization between channel 1 and channel 2 ROIs.
 
@@ -755,7 +755,7 @@ def _extract_multi_recording_channel(
     """Extracts fluorescence, computes delta-F, and deconvolves spikes for one channel of a multi-recording recording.
 
     Notes:
-        This is the generic multi-recording channel worker used by both channel 1 and channel 2. It always uses
+        Serves as the generic multi-recording channel worker used by both channel 1 and channel 2. It always uses
         ``allow_overlap=True`` since multi-recording template masks are spatially distinct by construction. No
         reclassification is performed because tracked ROIs are already known cells.
 
@@ -835,7 +835,7 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
     """Extracts fluorescence traces from ROIs tracked across multiple recordings for a single recording.
 
     Notes:
-        This function expects that the multi-recording discovery phase has already been completed, meaning
+        Expects that the multi-recording discovery phase has already been completed, meaning
         backward-transformed ROI statistics are available in the recording's extraction data. Tracked ROIs are always
         extracted with ``allow_overlap=True`` since multi-recording template masks are spatially distinct
         by construction.

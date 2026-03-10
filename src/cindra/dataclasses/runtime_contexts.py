@@ -14,181 +14,6 @@ from .multi_recording_configuration import MultiRecordingConfiguration
 from .single_recording_configuration import AcquisitionParameters, SingleRecordingConfiguration
 
 
-def _load_single_recording_runtime(plane_directory: Path) -> SingleRecordingRuntimeData:
-    """Loads a SingleRecordingRuntimeData instance and corrects stale paths if the dataset was relocated.
-
-    When a dataset is moved between machines, the paths cached in the plane's runtime YAML no longer match the actual
-    directory structure. This function detects the mismatch by comparing the cached output_path to the known-correct
-    plane directory, computes a prefix substitution, relocates all cached paths and persists the corrected paths to
-    disk.
-
-    Args:
-        plane_directory: The actual on-disk path to the plane directory (e.g., ``cindra/plane_0``).
-
-    Returns:
-        A fully-loaded SingleRecordingRuntimeData instance with all paths and arrays resolved against the
-        correct location.
-    """
-    runtime = SingleRecordingRuntimeData.load(output_path=plane_directory)
-
-    if runtime.output_path is not None and runtime.output_path != plane_directory:
-        old_prefix, new_prefix = _compute_relocation_prefixes(old_path=runtime.output_path, new_path=plane_directory)
-        _relocate_runtime_paths(runtime=runtime, old_prefix=old_prefix, new_prefix=new_prefix)
-
-        # Persists corrected paths so future loads find correct paths without re-relocating.
-        runtime.save(output_path=runtime.output_path)
-
-        # Reloads the runtime from the corrected YAML so that arrays are resolved against the new paths.
-        runtime = SingleRecordingRuntimeData.load(output_path=plane_directory)
-
-    # Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
-    return runtime
-
-
-def _compute_relocation_prefixes(old_path: Path, new_path: Path) -> tuple[Path, Path]:
-    """Computes the old and new path prefixes for relocating a moved dataset.
-
-    Walks both paths from the end to find the longest common suffix, then returns the diverging prefixes. The
-    assumption is that the entire processed data hierarchy was moved intact, so only the leading prefix changed.
-
-    Args:
-        old_path: The cached path from the serialized YAML data.
-        new_path: The actual resolved path on the current filesystem.
-
-    Returns:
-        A tuple of (old_prefix, new_prefix) that can be used to transform any cached path to its new location.
-    """
-    old_parts = old_path.parts
-    new_parts = new_path.parts
-
-    # Walks from the end to find the longest common suffix.
-    common_suffix_length = 0
-    for old_part, new_part in zip(reversed(old_parts), reversed(new_parts), strict=False):
-        if old_part == new_part:
-            common_suffix_length += 1
-        else:
-            break
-
-    old_prefix = Path(*old_parts[: len(old_parts) - common_suffix_length]) if common_suffix_length > 0 else old_path
-    new_prefix = Path(*new_parts[: len(new_parts) - common_suffix_length]) if common_suffix_length > 0 else new_path
-    return old_prefix, new_prefix
-
-
-def _relocate_cross_recording_path(path: Path, old_prefix: Path, new_prefix: Path) -> Path:
-    """Relocates a dataset output path from a different recording that does not share the entry recording's prefix.
-
-    Multi-recording datasets store output paths for all recordings in each recording's runtime data. When the entry
-    recording's prefix is used for relocation, paths belonging to other recordings fail ``relative_to`` because they
-    contain a different recording-specific directory segment (e.g., a different timestamp-based recording directory).
-    This function handles that case by splitting the cross-recording path at the same depth as the entry prefix,
-    substituting the differing recording-specific segments into the new prefix, and reattaching the trailing suffix.
-
-    Args:
-        path: The stale cross-recording path to relocate.
-        old_prefix: The entry recording's old prefix computed by ``_compute_relocation_prefixes``.
-        new_prefix: The entry recording's new prefix computed by ``_compute_relocation_prefixes``.
-
-    Returns:
-        The relocated cross-recording path with the correct new prefix and recording-specific segments.
-
-    Raises:
-        ValueError: If the cross-recording path has fewer segments than the entry recording prefix, indicating an
-            incompatible directory structure.
-    """
-    path_parts = path.parts
-    old_prefix_parts = old_prefix.parts
-
-    if len(path_parts) < len(old_prefix_parts):
-        message = (
-            f"Unable to relocate cross-recording path {path}. The path has {len(path_parts)} segments but the entry "
-            f"recording prefix has {len(old_prefix_parts)} segments, indicating an incompatible directory structure."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Splits the cross-recording path into a base (same depth as old_prefix) and a trailing suffix.
-    cross_base_parts = path_parts[: len(old_prefix_parts)]
-    suffix_parts = path_parts[len(old_prefix_parts) :]
-
-    # Identifies directory segments that differ between the entry recording's old prefix and the cross-recording base,
-    # then applies those differing segments to the new prefix at the corresponding positions. This preserves the
-    # structural transformation (e.g., directory insertion or rename) while swapping in the correct recording-specific
-    # segments.
-    relocated_prefix_parts = list(new_prefix.parts)
-    for index, (old_part, cross_part) in enumerate(zip(old_prefix_parts, cross_base_parts, strict=False)):
-        if old_part != cross_part and index < len(relocated_prefix_parts):
-            relocated_prefix_parts[index] = cross_part
-
-    relocated_prefix = Path(*relocated_prefix_parts)
-    if suffix_parts:
-        return relocated_prefix / Path(*suffix_parts)
-    return relocated_prefix
-
-
-def _relocate_runtime_paths(
-    runtime: SingleRecordingRuntimeData | MultiRecordingRuntimeData, old_prefix: Path, new_prefix: Path
-) -> None:
-    """Applies a prefix substitution to all cached paths in a runtime data instance.
-
-    Args:
-        runtime: The runtime data instance whose paths will be updated in-place. Accepts either
-            SingleRecordingRuntimeData or MultiRecordingRuntimeData instances.
-        old_prefix: The stale path prefix to replace.
-        new_prefix: The correct path prefix on the current filesystem.
-    """
-    if runtime.output_path is not None:
-        runtime.output_path = new_prefix / runtime.output_path.relative_to(old_prefix)
-
-    # Paths that already reside under new_prefix are skipped to prevent double-relocation. This occurs when some
-    # paths in the YAML were updated independently (e.g., single-recording pipeline re-ran after a directory
-    # rename) while others remained stale.
-    if isinstance(runtime, SingleRecordingRuntimeData):
-        if runtime.io.registered_binary_path is not None and not runtime.io.registered_binary_path.is_relative_to(
-            new_prefix
-        ):
-            runtime.io.registered_binary_path = new_prefix / runtime.io.registered_binary_path.relative_to(old_prefix)
-        if (
-            runtime.io.registered_binary_path_channel_2 is not None
-            and not runtime.io.registered_binary_path_channel_2.is_relative_to(new_prefix)
-        ):
-            runtime.io.registered_binary_path_channel_2 = (
-                new_prefix / runtime.io.registered_binary_path_channel_2.relative_to(old_prefix)
-            )
-        if runtime.io.output_path is not None and not runtime.io.output_path.is_relative_to(new_prefix):
-            runtime.io.output_path = new_prefix / runtime.io.output_path.relative_to(old_prefix)
-    else:
-        if runtime.io.data_path is not None and not runtime.io.data_path.is_relative_to(new_prefix):
-            runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
-
-        # Relocates dataset_output_paths with cross-recording fallback. Multi-recording datasets store paths for all
-        # recordings, but the prefix is recording-specific. Paths from other recordings fail relative_to and are handled
-        # by _relocate_cross_recording_path which substitutes the differing recording-specific segments.
-        relocated_paths: list[Path] = []
-        for path in runtime.io.dataset_output_paths:
-            if path.is_relative_to(new_prefix):
-                relocated_paths.append(path)
-                continue
-            try:
-                relocated_paths.append(new_prefix / path.relative_to(old_prefix))
-            except ValueError:
-                relocated_paths.append(
-                    _relocate_cross_recording_path(path=path, old_prefix=old_prefix, new_prefix=new_prefix)
-                )
-        runtime.io.dataset_output_paths = tuple(relocated_paths)
-
-
-def _load_multi_recording_data(runtime: MultiRecordingRuntimeData) -> None:
-    """Loads CombinedData metadata (scalars only) onto a deserialized MultiRecordingRuntimeData instance.
-
-    Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
-
-    Args:
-        runtime: A MultiRecordingRuntimeData instance that has been deserialized from YAML but has not had CombinedData
-            loaded yet.
-    """
-    if runtime.combined_data is None and runtime.io.data_path is not None:
-        runtime.combined_data = CombinedData.load(root_path=runtime.io.data_path)
-
-
 @dataclass
 class RuntimeContext:
     """Combines configuration, acquisition parameters, and runtime data used in the single-recording
@@ -532,3 +357,178 @@ class MultiRecordingRuntimeContext:
         runtime = MultiRecordingRuntimeData.load(output_path=target_path)
         _load_multi_recording_data(runtime)
         return cls(configuration=configuration, runtime=runtime)
+
+
+def _load_single_recording_runtime(plane_directory: Path) -> SingleRecordingRuntimeData:
+    """Loads a SingleRecordingRuntimeData instance and corrects stale paths if the dataset was relocated.
+
+    When a dataset is moved between machines, the paths cached in the plane's runtime YAML no longer match the actual
+    directory structure. This function detects the mismatch by comparing the cached output_path to the known-correct
+    plane directory, computes a prefix substitution, relocates all cached paths and persists the corrected paths to
+    disk.
+
+    Args:
+        plane_directory: The actual on-disk path to the plane directory (e.g., ``cindra/plane_0``).
+
+    Returns:
+        A fully-loaded SingleRecordingRuntimeData instance with all paths and arrays resolved against the
+        correct location.
+    """
+    runtime = SingleRecordingRuntimeData.load(output_path=plane_directory)
+
+    if runtime.output_path is not None and runtime.output_path != plane_directory:
+        old_prefix, new_prefix = _compute_relocation_prefixes(old_path=runtime.output_path, new_path=plane_directory)
+        _relocate_runtime_paths(runtime=runtime, old_prefix=old_prefix, new_prefix=new_prefix)
+
+        # Persists corrected paths so future loads find correct paths without re-relocating.
+        runtime.save(output_path=runtime.output_path)
+
+        # Reloads the runtime from the corrected YAML so that arrays are resolved against the new paths.
+        runtime = SingleRecordingRuntimeData.load(output_path=plane_directory)
+
+    # Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
+    return runtime
+
+
+def _compute_relocation_prefixes(old_path: Path, new_path: Path) -> tuple[Path, Path]:
+    """Computes the old and new path prefixes for relocating a moved dataset.
+
+    Walks both paths from the end to find the longest common suffix, then returns the diverging prefixes. The
+    assumption is that the entire processed data hierarchy was moved intact, so only the leading prefix changed.
+
+    Args:
+        old_path: The cached path from the serialized YAML data.
+        new_path: The actual resolved path on the current filesystem.
+
+    Returns:
+        A tuple of (old_prefix, new_prefix) that can be used to transform any cached path to its new location.
+    """
+    old_parts = old_path.parts
+    new_parts = new_path.parts
+
+    # Walks from the end to find the longest common suffix.
+    common_suffix_length = 0
+    for old_part, new_part in zip(reversed(old_parts), reversed(new_parts), strict=False):
+        if old_part == new_part:
+            common_suffix_length += 1
+        else:
+            break
+
+    old_prefix = Path(*old_parts[: len(old_parts) - common_suffix_length]) if common_suffix_length > 0 else old_path
+    new_prefix = Path(*new_parts[: len(new_parts) - common_suffix_length]) if common_suffix_length > 0 else new_path
+    return old_prefix, new_prefix
+
+
+def _relocate_cross_recording_path(path: Path, old_prefix: Path, new_prefix: Path) -> Path:
+    """Relocates a dataset output path from a different recording that does not share the entry recording's prefix.
+
+    Multi-recording datasets store output paths for all recordings in each recording's runtime data. When the entry
+    recording's prefix is used for relocation, paths belonging to other recordings fail ``relative_to`` because they
+    contain a different recording-specific directory segment (e.g., a different timestamp-based recording directory).
+    This function handles that case by splitting the cross-recording path at the same depth as the entry prefix,
+    substituting the differing recording-specific segments into the new prefix, and reattaching the trailing suffix.
+
+    Args:
+        path: The stale cross-recording path to relocate.
+        old_prefix: The entry recording's old prefix computed by ``_compute_relocation_prefixes``.
+        new_prefix: The entry recording's new prefix computed by ``_compute_relocation_prefixes``.
+
+    Returns:
+        The relocated cross-recording path with the correct new prefix and recording-specific segments.
+
+    Raises:
+        ValueError: If the cross-recording path has fewer segments than the entry recording prefix, indicating an
+            incompatible directory structure.
+    """
+    path_parts = path.parts
+    old_prefix_parts = old_prefix.parts
+
+    if len(path_parts) < len(old_prefix_parts):
+        message = (
+            f"Unable to relocate cross-recording path {path}. The path has {len(path_parts)} segments but the entry "
+            f"recording prefix has {len(old_prefix_parts)} segments, indicating an incompatible directory structure."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Splits the cross-recording path into a base (same depth as old_prefix) and a trailing suffix.
+    cross_base_parts = path_parts[: len(old_prefix_parts)]
+    suffix_parts = path_parts[len(old_prefix_parts) :]
+
+    # Identifies directory segments that differ between the entry recording's old prefix and the cross-recording base,
+    # then applies those differing segments to the new prefix at the corresponding positions. This preserves the
+    # structural transformation (e.g., directory insertion or rename) while swapping in the correct recording-specific
+    # segments.
+    relocated_prefix_parts = list(new_prefix.parts)
+    for index, (old_part, cross_part) in enumerate(zip(old_prefix_parts, cross_base_parts, strict=False)):
+        if old_part != cross_part and index < len(relocated_prefix_parts):
+            relocated_prefix_parts[index] = cross_part
+
+    relocated_prefix = Path(*relocated_prefix_parts)
+    if suffix_parts:
+        return relocated_prefix / Path(*suffix_parts)
+    return relocated_prefix
+
+
+def _relocate_runtime_paths(
+    runtime: SingleRecordingRuntimeData | MultiRecordingRuntimeData, old_prefix: Path, new_prefix: Path
+) -> None:
+    """Applies a prefix substitution to all cached paths in a runtime data instance.
+
+    Args:
+        runtime: The runtime data instance whose paths will be updated in-place. Accepts either
+            SingleRecordingRuntimeData or MultiRecordingRuntimeData instances.
+        old_prefix: The stale path prefix to replace.
+        new_prefix: The correct path prefix on the current filesystem.
+    """
+    if runtime.output_path is not None:
+        runtime.output_path = new_prefix / runtime.output_path.relative_to(old_prefix)
+
+    # Paths that already reside under new_prefix are skipped to prevent double-relocation. This occurs when some
+    # paths in the YAML were updated independently (e.g., single-recording pipeline re-ran after a directory
+    # rename) while others remained stale.
+    if isinstance(runtime, SingleRecordingRuntimeData):
+        if runtime.io.registered_binary_path is not None and not runtime.io.registered_binary_path.is_relative_to(
+            new_prefix
+        ):
+            runtime.io.registered_binary_path = new_prefix / runtime.io.registered_binary_path.relative_to(old_prefix)
+        if (
+            runtime.io.registered_binary_path_channel_2 is not None
+            and not runtime.io.registered_binary_path_channel_2.is_relative_to(new_prefix)
+        ):
+            runtime.io.registered_binary_path_channel_2 = (
+                new_prefix / runtime.io.registered_binary_path_channel_2.relative_to(old_prefix)
+            )
+        if runtime.io.output_path is not None and not runtime.io.output_path.is_relative_to(new_prefix):
+            runtime.io.output_path = new_prefix / runtime.io.output_path.relative_to(old_prefix)
+    else:
+        if runtime.io.data_path is not None and not runtime.io.data_path.is_relative_to(new_prefix):
+            runtime.io.data_path = new_prefix / runtime.io.data_path.relative_to(old_prefix)
+
+        # Relocates dataset_output_paths with cross-recording fallback. Multi-recording datasets store paths for all
+        # recordings, but the prefix is recording-specific. Paths from other recordings fail relative_to and are handled
+        # by _relocate_cross_recording_path which substitutes the differing recording-specific segments.
+        relocated_paths: list[Path] = []
+        for path in runtime.io.dataset_output_paths:
+            if path.is_relative_to(new_prefix):
+                relocated_paths.append(path)
+                continue
+            try:
+                relocated_paths.append(new_prefix / path.relative_to(old_prefix))
+            except ValueError:
+                relocated_paths.append(
+                    _relocate_cross_recording_path(path=path, old_prefix=old_prefix, new_prefix=new_prefix)
+                )
+        runtime.io.dataset_output_paths = tuple(relocated_paths)
+
+
+def _load_multi_recording_data(runtime: MultiRecordingRuntimeData) -> None:
+    """Loads CombinedData metadata (scalars only) onto a deserialized MultiRecordingRuntimeData instance.
+
+    Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
+
+    Args:
+        runtime: A MultiRecordingRuntimeData instance that has been deserialized from YAML but has not had CombinedData
+            loaded yet.
+    """
+    if runtime.combined_data is None and runtime.io.data_path is not None:
+        runtime.combined_data = CombinedData.load(root_path=runtime.io.data_path)

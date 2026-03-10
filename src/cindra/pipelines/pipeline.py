@@ -274,7 +274,7 @@ def run_multi_recording_pipeline(
     # path. This also validates that all recording directories contain valid single-recording outputs and
     # handles relocated data.
     contexts = resolve_multi_recording_contexts(configuration=config)
-    recording_ids: list[str] = [ctx.runtime.io.recording_id for ctx in contexts]
+    recording_ids: list[str] = [context.runtime.io.recording_id for context in contexts]
     main_recording_path = contexts[0].runtime.output_path
     if main_recording_path is None:
         message = (

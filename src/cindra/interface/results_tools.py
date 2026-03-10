@@ -441,8 +441,8 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
                 channel_2_paths = metadata["registered_binary_paths_channel_2"]
                 two_channels = len(channel_2_paths) > 0 and str(channel_2_paths[0]) != ""
             result["two_channels"] = two_channels
-        except Exception as err:
-            result["metadata_error"] = str(err)
+        except Exception as error:
+            result["metadata_error"] = str(error)
     else:
         result["combined_metadata_available"] = False
 
@@ -558,8 +558,8 @@ def query_registration_quality_tool(
                 summary = _array_summary(array)
                 summary["shape"] = list(array.shape)
                 result[key] = summary
-            except Exception as err:
-                result[f"{key}_error"] = str(err)
+            except Exception as error:
+                result[f"{key}_error"] = str(error)
 
     # Rigid correlations.
     correlation_path = registration_directory / "rigid_correlations.npy"
@@ -677,8 +677,8 @@ def query_detection_summary_tool(
                 stats = _array_summary(image)
                 stats["shape"] = list(image.shape)
                 result["images"][label] = stats
-            except Exception as err:
-                result["images"][label] = {"error": str(err)}
+            except Exception as error:
+                result["images"][label] = {"error": str(error)}
 
     # ROI diameter and aspect ratio from per-plane runtime data.
     source_plane = _list_plane_directories(cindra_root)[0] if plane_index == -1 else data_path
@@ -740,8 +740,8 @@ def query_single_recording_roi_statistics_tool(
     try:
         stats_data = np.load(stats_path, allow_pickle=False)
         masks_data = np.load(masks_path, allow_pickle=False)
-    except Exception as err:
-        return {"success": False, "error": f"Unable to load ROI data: {err}"}
+    except Exception as error:
+        return {"success": False, "error": f"Unable to load ROI data: {error}"}
 
     footprints = stats_data["footprints"]
     compactness = stats_data["compactness"]
@@ -776,8 +776,8 @@ def query_single_recording_roi_statistics_tool(
             "normalized_pixel_count": round(float(normalized_pixel_count[i]), 4),
             "plane_index": int(plane_indices[i]),
         }
-        skew_val = skewness[i]
-        entry["skewness"] = round(float(skew_val), 4) if not np.isnan(skew_val) else None
+        skewness_value = skewness[i]
+        entry["skewness"] = round(float(skewness_value), 4) if not np.isnan(skewness_value) else None
 
         if classification is not None and i < classification.shape[0]:
             entry["is_cell"] = bool(classification[i, 0] > _CELL_LABEL_THRESHOLD)
@@ -885,8 +885,8 @@ def query_single_recording_traces_tool(
 
     try:
         traces = np.load(trace_path, mmap_mode="r")
-    except Exception as err:
-        return {"success": False, "error": f"Unable to load trace data: {err}"}
+    except Exception as error:
+        return {"success": False, "error": f"Unable to load trace data: {error}"}
 
     roi_count = traces.shape[0]
     valid_indices = [i for i in roi_indices if 0 <= i < roi_count]
@@ -1148,8 +1148,8 @@ def query_multi_recording_tracking_summary_tool(
 
     try:
         data = np.load(template_path, allow_pickle=False)
-    except Exception as err:
-        return {"success": False, "error": f"Unable to load template masks: {err}"}
+    except Exception as error:
+        return {"success": False, "error": f"Unable to load template masks: {error}"}
 
     pixel_counts = data["pixel_counts"]
     centroids = data["centroids"]
@@ -1267,8 +1267,8 @@ def query_multi_recording_traces_tool(
 
     try:
         traces = np.load(trace_path, mmap_mode="r")
-    except Exception as err:
-        return {"success": False, "error": f"Unable to load trace data: {err}"}
+    except Exception as error:
+        return {"success": False, "error": f"Unable to load trace data: {error}"}
 
     roi_count = traces.shape[0]
     valid_indices = [i for i in roi_indices if 0 <= i < roi_count]
@@ -1366,7 +1366,11 @@ def _resolve_data_path(cindra_root: Path, plane_index: int) -> tuple[Path | None
 
 
 def _array_summary(array: np.ndarray) -> dict[str, object]:
-    """Computes summary statistics for a numpy array."""
+    """Computes summary statistics for a numpy array.
+
+    Returns:
+        A dictionary containing the min, max, mean, and standard deviation of the array, plus the shape and dtype.
+    """
     return {
         "min": round(float(np.nanmin(array)), 4),
         "max": round(float(np.nanmax(array)), 4),
@@ -1376,7 +1380,11 @@ def _array_summary(array: np.ndarray) -> dict[str, object]:
 
 
 def _load_yaml(file_path: Path) -> dict[str, Any] | None:
-    """Loads a YAML file and returns the parsed dictionary, or None if loading fails."""
+    """Loads a YAML file and returns the parsed dictionary, or None if loading fails.
+
+    Returns:
+        The parsed YAML dictionary, or None if loading fails.
+    """
     try:
         with file_path.open() as yaml_file:
             return yaml.safe_load(yaml_file)
@@ -1385,7 +1393,11 @@ def _load_yaml(file_path: Path) -> dict[str, Any] | None:
 
 
 def _list_plane_directories(cindra_root: Path) -> list[Path]:
-    """Returns sorted plane directories found under the cindra root."""
+    """Returns sorted plane directories found under the cindra root.
+
+    Returns:
+        A naturally-sorted list of plane directory paths found under the given root.
+    """
     return sorted(
         [p for p in cindra_root.iterdir() if p.is_dir() and p.name.startswith("plane_")],
         key=lambda p: p.name,
@@ -1393,7 +1405,11 @@ def _list_plane_directories(cindra_root: Path) -> list[Path]:
 
 
 def _discover_available_datasets(cindra_root: Path) -> list[str]:
-    """Discovers available multi-recording dataset names under the cindra root."""
+    """Discovers available multi-recording dataset names under the cindra root.
+
+    Returns:
+        A list of dataset name strings discovered under the given recording path.
+    """
     multi_recording_path = cindra_root / "multi_recording"
     if not multi_recording_path.exists():
         return []
@@ -1451,5 +1467,5 @@ def _check_npz_keys(
                 state.passed += 1
             else:
                 state.missing.append(f"{label}[{key}]")
-    except Exception as err:
-        state.warnings.append(f"Unable to read {label}: {err}")
+    except Exception as error:
+        state.warnings.append(f"Unable to read {label}: {error}")

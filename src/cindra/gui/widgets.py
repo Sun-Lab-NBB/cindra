@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
 import numpy as np
-from PySide6 import QtCore
+from PySide6 import QtGui, QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
 from pyqtgraph import functions as fn
 from PySide6.QtWidgets import QStyle, QWidget, QToolButton, QButtonGroup
@@ -29,6 +29,26 @@ Signature: (click_x, click_y, is_right_button, is_multi_select) -> handled.
 
 type _ZoomHandler = Callable[[], None]
 """The callback type for double-click zoom-to-fit events dispatched by a ViewBox to the orchestrator."""
+
+
+def escape_returns_focus(window: QWidget, event: QtCore.QEvent) -> bool:
+    """Returns True and shifts focus to the window if the event is an Escape keypress.
+
+    Args:
+        window: The main window to receive focus on Escape.
+        event: The Qt event to inspect.
+
+    Returns:
+        True if the event was an Escape keypress and focus was redirected, False otherwise.
+    """
+    if (
+        event.type() == QtCore.QEvent.Type.KeyPress
+        and isinstance(event, QtGui.QKeyEvent)
+        and event.key() == QtCore.Qt.Key.Key_Escape
+    ):
+        window.setFocus()
+        return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -157,7 +177,7 @@ class ViewBox(pg.ViewBox):
     installed callback handlers.
 
     Args:
-        border: The panel border frame pen specification forwarded to ``fn.mkPen``.
+        border: The panel border frame pen specification forwarded to ``mkPen``.
         invert_y: Determines whether to invert the Y axis.
         enable_menu: Determines whether the context menu is enabled.
         name: The unique name for the managed panel used by pyqtgraph's view-linking system.

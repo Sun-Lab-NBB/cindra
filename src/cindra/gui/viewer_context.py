@@ -397,20 +397,6 @@ class SingleRecordingData:
         return self._current_detection.aspect_ratio
 
     @property
-    def channel_1_binary(self) -> BinaryFile:
-        """Returns the channel 1 binary file for the current plane."""
-        return self._channel_1_binaries[self._current_plane_index]
-
-    @property
-    def channel_2_binary(self) -> BinaryFile:
-        """Returns the channel 2 binary file for the current plane.
-
-        Raises:
-            KeyError: If the recording is single-channel.
-        """
-        return self._channel_2_binaries[self._current_plane_index]
-
-    @property
     def rigid_y_offsets(self) -> NDArray[np.int32]:
         """Returns the vertical (Y) translation offsets from rigid registration, one value per frame or a zero array
         when the underlying data is None.
@@ -515,10 +501,13 @@ class SingleRecordingData:
         """
         registration = self._contexts[plane_index].runtime.registration
         frame_count = self._contexts[plane_index].runtime.io.frame_count
-        y = registration.rigid_y_offsets
-        x = registration.rigid_x_offsets
-        zeros = np.zeros(frame_count, dtype=np.int32)
-        return y if y is not None else zeros, x if x is not None else zeros
+        y_offsets = registration.rigid_y_offsets
+        x_offsets = registration.rigid_x_offsets
+        zero_offsets = np.zeros(frame_count, dtype=np.int32)
+        return (
+            y_offsets if y_offsets is not None else zero_offsets,
+            x_offsets if x_offsets is not None else zero_offsets,
+        )
 
     def switch_view(self, view_index: int) -> None:
         """Switches the active data view to a different plane or the combined view.

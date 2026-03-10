@@ -35,19 +35,6 @@ class BaselineMethod(StrEnum):
     """Uses a low percentile of the trace as a robust constant baseline, ignoring outliers."""
 
 
-@dataclass
-class _PipelineHeader(YamlConfig):
-    """Minimal dataclass for detecting the pipeline type from a configuration YAML file.
-
-    Declares only the ``pipeline_type`` field as a raw string. Extra keys present in the YAML are silently discarded by
-    dacite during deserialization, making this class safe to load against any cindra configuration file. The field
-    defaults to None so that a missing key is distinguishable from a valid value.
-    """
-
-    pipeline_type: str | None = None
-    """The raw pipeline type string read from the YAML file, or None if the key is absent."""
-
-
 def detect_pipeline_type(file_path: Path) -> PipelineType:
     """Detects the pipeline type stored in the specified configuration YAML file.
 
@@ -88,6 +75,19 @@ def detect_pipeline_type(file_path: Path) -> PipelineType:
     # Unreachable fallback to work around faulty RUFF error checking.
     # noinspection PyUnreachableCode
     raise ValueError(message)  # pragma: no cover
+
+
+@dataclass
+class _PipelineHeader(YamlConfig):
+    """Minimal dataclass for detecting the pipeline type from a configuration YAML file.
+
+    Declares only the ``pipeline_type`` field as a raw string. Extra keys present in the YAML are silently discarded by
+    dacite during deserialization, making this class safe to load against any cindra configuration file. The field
+    defaults to None so that a missing key is distinguishable from a valid value.
+    """
+
+    pipeline_type: str | None = None
+    """The raw pipeline type string read from the YAML file, or None if the key is absent."""
 
 
 @dataclass

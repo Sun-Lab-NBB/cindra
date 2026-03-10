@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from ataraxis_base_utilities import LogLevel, console
 
 from .styles import FONTS, STYLE, COLORS, PC_STYLE, PLOT_STYLE
-from .widgets import configure_plot, add_plot_legend, create_play_pause_group
+from .widgets import configure_plot, add_plot_legend, escape_returns_focus, create_play_pause_group
 from .constants import PC_CONFIG, COMMON_CONFIG
 
 if TYPE_CHECKING:
@@ -325,12 +325,7 @@ class PCViewer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        if (
-            event.type() == QtCore.QEvent.Type.KeyPress
-            and isinstance(event, QtGui.QKeyEvent)
-            and event.key() == QtCore.Qt.Key.Key_Escape
-        ):
-            self.setFocus()
+        if escape_returns_focus(self, event):
             return True
         return super().eventFilter(source, event)
 
