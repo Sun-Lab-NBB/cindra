@@ -1018,11 +1018,12 @@ def query_multi_recording_registration_quality_tool(
     recording_path: str,
     dataset: str,
 ) -> dict[str, object]:
-    """Queries cross-recording registration quality for all recordings in a multi-recording dataset.
+    """Queries cross-recording deformation field statistics for all recordings in a multi-recording dataset.
 
     Returns deformation field statistics (displacement magnitude summaries) and transformed image availability
-    for each recording. Large displacement magnitudes may indicate poor registration quality that could impact
-    ROI tracking accuracy.
+    for each recording. Displacement magnitude reflects how much the field of view shifted between sessions,
+    not registration quality. Visual inspection of backward-deformed template overlap is the only reliable way
+    to assess cross-day registration quality.
 
     Args:
         recording_path: Absolute path to a recording directory that belongs to the dataset.
@@ -1119,8 +1120,9 @@ def query_multi_recording_tracking_summary_tool(
     """Queries ROI tracking summary statistics for a multi-recording dataset.
 
     Returns template mask count, recording count distribution (how many recordings each tracked ROI spans),
-    cluster ID range, and per-ROI centroid and recording count data. Use this to assess tracking quality —
-    high recording counts indicate reliable cross-session ROI identification.
+    cluster ID range, and per-ROI centroid and recording count data. Recording count reflects how many sessions
+    an ROI was detected in, not tracking reliability — ROIs can be active in some sessions and inactive in
+    others.
 
     Args:
         recording_path: Absolute path to a recording directory that belongs to the dataset.
