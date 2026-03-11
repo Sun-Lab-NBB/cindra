@@ -30,6 +30,37 @@ Complete output data format documentation for the single-recording (within-recor
 
 ---
 
+## Available tools
+
+Use these cindra MCP tools to query and verify single-recording output data programmatically. Prefer these over
+manual file reads whenever possible.
+
+### Verification tool
+
+| Tool                                  | Purpose                                                                     |
+|---------------------------------------|-----------------------------------------------------------------------------|
+| `verify_single_recording_output_tool` | Verifies completeness of all expected output files and NPZ keys             |
+
+### Query tools
+
+| Tool                                         | Purpose                                                                               |
+|----------------------------------------------|---------------------------------------------------------------------------------------|
+| `query_single_recording_metadata_tool`       | Queries recording dimensions, frame count, sampling rate, ROI/cell counts, and timing |
+| `query_detection_summary_tool`               | Queries detection image intensity statistics and estimated ROI diameter               |
+| `query_registration_quality_tool`            | Queries per-plane registration offset summaries, correlations, bad frames, PC metrics |
+| `query_single_recording_roi_statistics_tool` | Queries per-ROI spatial statistics and classification with sorting and filtering      |
+| `query_single_recording_traces_tool`         | Queries fluorescence trace arrays for specific ROIs with optional downsampling        |
+
+### Recommended query order
+
+1. `query_single_recording_metadata_tool` — understand recording properties and processing status
+2. `query_registration_quality_tool` — assess motion correction quality per plane
+3. `query_detection_summary_tool` — review detection image quality and ROI diameter
+4. `query_single_recording_roi_statistics_tool` — inspect ROI quality metrics and classification
+5. `query_single_recording_traces_tool` — examine fluorescence activity for specific ROIs
+
+---
+
 ## Output data reference
 
 All results are saved under `{output_path}/cindra/`. The pipeline produces combined (multi-plane merged) data at
@@ -205,13 +236,16 @@ Saved at both the combined root and per-plane levels. All files are `.npy` forma
 
 **Channel 1 (always present):**
 
-| File                          | Shape              | Description                                                 |
-|-------------------------------|--------------------|-------------------------------------------------------------|
-| `cell_fluorescence.npy`       | (num_rois, frames) | Raw somatic fluorescence traces                             |
-| `neuropil_fluorescence.npy`   | (num_rois, frames) | Neuropil fluorescence traces                                |
-| `subtracted_fluorescence.npy` | (num_rois, frames) | Neuropil-and-baseline-subtracted fluorescence               |
-| `spikes.npy`                  | (num_rois, frames) | Deconvolved spike estimates                                 |
+| File                          | Shape              | Description                                                            |
+|-------------------------------|--------------------|------------------------------------------------------------------------|
+| `cell_fluorescence.npy`       | (num_rois, frames) | Raw somatic fluorescence traces                                        |
+| `neuropil_fluorescence.npy`   | (num_rois, frames) | Neuropil fluorescence traces                                           |
+| `subtracted_fluorescence.npy` | (num_rois, frames) | Neuropil-and-baseline-subtracted fluorescence                          |
+| `spikes.npy`                  | (num_rois, frames) | Deconvolved spike estimates                                            |
 | `cell_classification.npy`     | (num_rois, 2)      | Column 0: is_cell label (1.0 or 0.0), column 1: classifier probability |
+
+If `spike_deconvolution.extract_spikes` is False, both `subtracted_fluorescence.npy` and `spikes.npy` are filled with
+zeroes.
 
 **Channel 2 (two-channel only, same shapes):**
 
@@ -225,10 +259,10 @@ Saved at both the combined root and per-plane levels. All files are `.npy` forma
 
 **Optional colocalization files (combined root and per-plane):**
 
-| File                                  | Shape           | Description                                                                                 |
-|---------------------------------------|-----------------|---------------------------------------------------------------------------------------------|
-| `cell_colocalization.npy`             | (num_rois, 2)   | Column 0: is_colocalized label (1.0 or 0.0), column 1: probability                                     |
-| `corrected_structural_mean_image.npy` | (height, width) | Bleed-through-corrected structural channel mean (single-functional-channel recordings only) |
+| File                                  | Shape           | Description                                                                                                    |
+|---------------------------------------|-----------------|----------------------------------------------------------------------------------------------------------------|
+| `cell_colocalization.npy`             | (num_rois, 2)   | Column 0: is_colocalized label (1.0 or 0.0), column 1: probability                                             |
+| `corrected_structural_mean_image.npy` | (height, width) | Bleed-through-corrected structural channel mean (dual-channel recordings where only one channel is functional) |
 
 ---
 
@@ -269,12 +303,12 @@ Binary files store frames as contiguous float32 arrays. Each frame has `height �
 
 A YAML file containing scalar metadata from all processing stages. Key sections:
 
-| Section        | Key fields                                                                                                                                                                                           |
-|----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `io`           | `frame_height`, `frame_width`, `frame_count`, `sampling_rate`, `plane_index`                                                                                                                         |
-| `registration` | `valid_y_range`, `valid_x_range`, `bidirectional_phase_offset`, `normalization_minimum`, `normalization_maximum`                                                                                     |
-| `detection`    | `roi_diameter`, `aspect_ratio`                                                                                                                                                                       |
-| `timing`       | `binarization_time`, `registration_time`, `detection_time`, `extraction_time`, `classification_time`, `deconvolution_time`, `total_plane_time`, `date_processed`, `python_version`, `cindra_version` |
+| Section        | Key fields                                                                                                                                                                                                                                                                                                                                                                                |
+|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `io`           | `frame_height`, `frame_width`, `frame_count`, `sampling_rate`, `plane_index`                                                                                                                                                                                                                                                                                                              |
+| `registration` | `valid_y_range`, `valid_x_range`, `bidirectional_phase_offset`, `normalization_minimum`, `normalization_maximum`                                                                                                                                                                                                                                                                          |
+| `detection`    | `roi_diameter`, `aspect_ratio`                                                                                                                                                                                                                                                                                                                                                            |
+| `timing`       | `binarization_time`, `registration_time`, `two_step_registration_time`, `registration_metrics_time`, `detection_time`, `extraction_time`, `classification_time`, `deconvolution_time`, `detection_time_channel_2`, `extraction_time_channel_2`, `classification_time_channel_2`, `deconvolution_time_channel_2`, `total_plane_time`, `date_processed`, `python_version`, `cindra_version` |
 
 Array fields from registration, detection, and extraction are saved as separate `.npy` files (documented above)
 and set to None in the YAML.
@@ -300,29 +334,30 @@ All `.npy` files are saved with `allow_pickle=False`. Arrays support memory-mapp
 
 ## Multi-recording compatibility requirements
 
-For recordings intended for multi-recording processing, single-recording processing must complete all three phases (binarize,
-process, combine). The multi-recording pipeline locates single-recording output by searching for `combined_metadata.npz`
-within the recording directory tree. The pipeline always generates combined output and preserves registered binary
-files, so no special configuration is required.
+For recordings intended for multi-recording processing, single-recording processing must complete all three phases 
+(binarize, process, combine). The multi-recording pipeline locates single-recording output by searching for 
+`combined_metadata.npz` within the recording directory tree. The pipeline always generates combined output and 
+preserves registered binary files, so no special configuration is required.
 
 ---
 
 ## Related skills
 
-| Skill                              | Relationship                                                                      |
-|------------------------------------|-----------------------------------------------------------------------------------|
-| `/single-recording-configuration`  | Configuration parameter reference for the single-recording pipeline               |
-| `/single-recording-processing`     | Processing workflow that produces this output                                     |
-| `/multi-recording-results`         | Companion output data reference for the multi-recording pipeline                  |
-| `/multi-recording-configuration`   | Multi-recording configuration requires these outputs as prerequisites             |
-| `/visualization`                   | Launch viewers and query tools to visualize and inspect this output data           |
+| Skill                             | Relationship                                                             |
+|-----------------------------------|--------------------------------------------------------------------------|
+| `/single-recording-configuration` | Configuration parameter reference for the single-recording pipeline      |
+| `/single-recording-processing`    | Processing workflow that produces this output                            |
+| `/multi-recording-results`        | Companion output data reference for the multi-recording pipeline         |
+| `/multi-recording-configuration`  | Multi-recording configuration requires these outputs as prerequisites    |
+| `/visualization`                  | Launch viewers and query tools to visualize and inspect this output data |
 
 ---
 
 ## Verification checklist
 
-Use this checklist to verify that a `cindra/` output directory contains all expected files after processing
-completes. Replace N with the expected plane count from the acquisition parameters.
+Use `verify_single_recording_output_tool` to automate this verification. The tool checks all expected files and NPZ
+keys and returns a completeness verdict with any missing items listed. Fall back to the manual checklist below only
+if the MCP tool is unavailable. Replace N with the expected plane count from the acquisition parameters.
 
 ```text
 Single-Recording Output Completeness:
@@ -334,6 +369,7 @@ Root-level files:
 Combined detection images (cindra/detection_data/):
 - [ ] `mean_image.npy` exists
 - [ ] `enhanced_mean_image.npy` exists
+- [ ] `maximum_projection.npy` exists
 - [ ] `correlation_map.npy` exists
 - [ ] Channel 2 variants exist if `main.two_channels` is True and both channels are functional
 

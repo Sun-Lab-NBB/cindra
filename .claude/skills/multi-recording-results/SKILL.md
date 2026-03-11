@@ -30,12 +30,47 @@ Complete output data format documentation for the multi-recording (cross-recordi
 
 ---
 
+## Available tools
+
+Use these cindra MCP tools to query and verify multi-recording output data programmatically. Prefer these over
+manual file reads whenever possible.
+
+### Verification tool
+
+| Tool                                     | Purpose                                                                       |
+|------------------------------------------|-------------------------------------------------------------------------------|
+| `verify_multi_recording_output_tool`     | Verifies completeness of all expected output files per dataset                |
+
+### Query tools
+
+| Tool                                              | Purpose                                                                               |
+|---------------------------------------------------|---------------------------------------------------------------------------------------|
+| `query_multi_recording_overview_tool`             | Queries dataset structure, per-recording mask counts, timing, and completion status   |
+| `query_multi_recording_registration_quality_tool` | Queries deformation field statistics and transformed image availability per recording |
+| `query_multi_recording_tracking_summary_tool`     | Queries template count, recording count distribution, and cluster statistics          |
+| `query_multi_recording_traces_tool`               | Queries fluorescence traces for specific ROIs in a specific recording                 |
+
+### Recommended query order
+
+1. `query_multi_recording_overview_tool` — understand dataset composition and processing completeness
+2. `query_multi_recording_registration_quality_tool` — review deformation field magnitudes and transformed image availability
+3. `query_multi_recording_tracking_summary_tool` — review template counts, cluster IDs, and recording count distribution
+4. `query_multi_recording_traces_tool` — examine tracked ROI fluorescence activity per recording
+
+**Important:** Deformation field magnitude does not indicate registration quality — it only reflects how much the
+field of view shifted between sessions. Similarly, an ROI appearing in fewer recordings does not indicate tracking
+failure — ROIs can be active in some sessions and inactive in others. The only reliable way to assess cross-day
+registration quality is visual inspection: confirm that backward-deformed templates overlap with the same structures
+across days. Use `/visualization` for this.
+
+---
+
 ## Output data reference
 
-All results are saved under `{cindra_root}/multi_recording/{dataset_name}/` within each recording's cindra output directory.
-The pipeline produces per-recording output for every recording, plus a shared configuration file in the main recording
-(first after natural sorting). Channel 2 files are only present for dual-channel recordings where both channels
-are functional.
+All results are saved under `{cindra_root}/multi_recording/{dataset_name}/` within each recording's cindra output 
+directory. The pipeline produces per-recording output for every recording, plus a shared configuration file in the main 
+recording (first after natural sorting). Channel 2 files are only present for dual-channel recordings where both 
+channels are functional.
 
 ### Directory structure
 
@@ -62,8 +97,8 @@ are functional.
 
 ### Processing phase and file creation timeline
 
-**Phase 1 — Discovery:** Executed once across all recordings. Creates `multi_recording_configuration.yaml` (main recording
-only), `multi_recording_runtime_data.yaml` for each recording, and runs the following sub-steps:
+**Phase 1 — Discovery:** Executed once across all recordings. Creates `multi_recording_configuration.yaml` (main 
+recording only), `multi_recording_runtime_data.yaml` for each recording, and runs the following sub-steps:
 
 1. **Context resolution:** Creates output directories, saves configuration and initial runtime data.
 2. **ROI selection:** Filters single-recording ROIs by probability, size, and MROI margins. Updates
@@ -145,9 +180,9 @@ recordings contributed to the template.
 
 ### Backward-transformed extraction data (roi_masks.npz, roi_statistics.npz)
 
-Saved at the multi_recording output root. Uses the same `ROIStatistics.save_list()` serialization format as single-recording
-output. Contains template masks projected back to the recording's native coordinate system via inverse deformation,
-with full shape statistics computed for each ROI.
+Saved at the multi_recording output root. Uses the same `ROIStatistics.save_list()` serialization format as 
+single-recording output. Contains template masks projected back to the recording's native coordinate system via inverse 
+deformation, with full shape statistics computed for each ROI.
 
 **roi_masks.npz** — same NPZ keys and dtypes as the tracking template masks (see above).
 
@@ -208,9 +243,9 @@ saved as separate `.npy`/`.npz` files (documented above).
 
 | Section        | Key fields                                                                                                                                                                                                      |
 |----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `io`           | `recording_id`, `data_path`, `dataset_name`, `mroi_region_borders`, `selected_roi_indices`                                                                                                                      |
-| `registration` | `has_registration_data` (bool flag; array fields saved separately)                                                                                                                                              |
-| `tracking`     | `template_diameter`, `template_diameter_channel_2` (array fields saved separately)                                                                                                                              |
+| `io`           | `recording_id`, `data_path`, `dataset_name`, `mroi_region_borders`, `dataset_output_paths`, `selected_roi_indices`, `selected_roi_indices_channel_2`                                                            |
+| `registration` | `has_registration_data` (bool flag; deformation fields and transformed images saved as `.npy`, deformed masks saved as `.npz`, all set to None in YAML)                                                         |
+| `tracking`     | `template_masks`, `template_masks_channel_2`, `template_diameter`, `template_diameter_channel_2` (mask fields saved as NPZ, set to None in YAML)                                                                |
 | `timing`       | `registration_time`, `tracking_time`, `backward_transform_time`, `total_discovery_time`, `extraction_time`, `deconvolution_time`, `total_extraction_time`, `date_processed`, `python_version`, `cindra_version` |
 
 ---
@@ -246,8 +281,9 @@ mapping and are always eagerly loaded.
 
 ## Verification checklist
 
-Use this checklist to verify that a multi_recording output directory contains all expected files after processing
-completes.
+Use `verify_multi_recording_output_tool` to automate this verification. The tool checks all expected files and NPZ
+keys across every recording in the dataset and returns a completeness verdict with any missing items listed. Fall
+back to the manual checklist below only if the MCP tool is unavailable.
 
 ```text
 Multi-Recording Output Completeness:
