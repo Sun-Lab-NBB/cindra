@@ -67,8 +67,8 @@ class _SingleRecordingBatchState:
     """Current processing phase: 'binarize', 'process', or 'combine'."""
     phase_queue: list[tuple[str, str]] = field(default_factory=list)
     """Ordered (recording_key, job_id) pairs queued for dispatch in the current phase."""
-    active_threads: dict[str, Thread] = field(default_factory=dict)
-    """Currently running job_id to Thread mapping."""
+    active_threads: dict[tuple[str, str], Thread] = field(default_factory=dict)
+    """Currently running (recording_key, job_id) to Thread mapping."""
 
     workers_per_plane: int = 30
     """CPU cores allocated per plane processing job."""
@@ -106,8 +106,8 @@ class _MultiRecordingBatchState:
     """Current processing phase: 'discover' or 'extract'."""
     phase_queue: list[tuple[str, str]] = field(default_factory=list)
     """Ordered (dataset_key, job_id) pairs queued for dispatch in the current phase."""
-    active_threads: dict[str, Thread] = field(default_factory=dict)
-    """Currently running job_id to Thread mapping."""
+    active_threads: dict[tuple[str, str], Thread] = field(default_factory=dict)
+    """Currently running (dataset_key, job_id) to Thread mapping."""
 
     workers_per_discover: int = 20
     """Workers allocated for the discover phase."""
@@ -453,7 +453,7 @@ def get_batch_processing_status_tool() -> dict[str, object]:
                 overall_status = "FAILED"
                 total_failed += 1
             elif any(
-                job_id in _single_recording_batch_state.active_threads
+                (recording_key, job_id) in _single_recording_batch_state.active_threads
                 for job_id in [binarize_job_id, *process_job_ids, combine_job_id]
             ):
                 overall_status = "PROCESSING"
@@ -768,7 +768,8 @@ def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
                 overall_status = "FAILED"
                 total_failed += 1
             elif any(
-                job_id in _multi_recording_batch_state.active_threads for job_id in [discover_job_id, *extract_job_ids]
+                (dataset_key, job_id) in _multi_recording_batch_state.active_threads
+                for job_id in [discover_job_id, *extract_job_ids]
             ):
                 overall_status = "PROCESSING"
                 total_running += 1
@@ -896,13 +897,13 @@ def _single_recording_batch_manager() -> None:
     while True:
         with _single_recording_batch_state.lock:
             # Cleans up completed threads.
-            completed_job_ids = [
-                completed_job_id
-                for completed_job_id, thread in _single_recording_batch_state.active_threads.items()
+            completed_keys = [
+                thread_key
+                for thread_key, thread in _single_recording_batch_state.active_threads.items()
                 if not thread.is_alive()
             ]
-            for completed_job_id in completed_job_ids:
-                _single_recording_batch_state.active_threads.pop(completed_job_id, None)
+            for thread_key in completed_keys:
+                _single_recording_batch_state.active_threads.pop(thread_key, None)
 
             # Phase 1: BINARIZE (parallel — up to _MAXIMUM_PARALLEL_BINARIZE concurrent jobs).
             if _single_recording_batch_state.current_phase == "binarize":
@@ -921,7 +922,7 @@ def _single_recording_batch_manager() -> None:
                         daemon=True,
                     )
                     thread.start()
-                    _single_recording_batch_state.active_threads[job_id] = thread
+                    _single_recording_batch_state.active_threads[(recording_key, job_id)] = thread
 
                 # Transitions to process phase when all binarize jobs have been dispatched and completed.
                 if not _single_recording_batch_state.active_threads and not _single_recording_batch_state.phase_queue:
@@ -957,7 +958,7 @@ def _single_recording_batch_manager() -> None:
                         daemon=True,
                     )
                     thread.start()
-                    _single_recording_batch_state.active_threads[job_id] = thread
+                    _single_recording_batch_state.active_threads[(recording_key, job_id)] = thread
 
                 # Transitions to combine phase when all process jobs have been dispatched and completed.
                 if not _single_recording_batch_state.active_threads and not _single_recording_batch_state.phase_queue:
@@ -995,7 +996,7 @@ def _single_recording_batch_manager() -> None:
                         daemon=True,
                     )
                     thread.start()
-                    _single_recording_batch_state.active_threads[job_id] = thread
+                    _single_recording_batch_state.active_threads[(recording_key, job_id)] = thread
 
                 # Exits when all combine jobs have been dispatched and completed.
                 if not _single_recording_batch_state.active_threads and not _single_recording_batch_state.phase_queue:
@@ -1020,13 +1021,13 @@ def _multi_recording_batch_manager() -> None:
     while True:
         with _multi_recording_batch_state.lock:
             # Cleans up completed threads.
-            completed_job_ids = [
-                completed_job_id
-                for completed_job_id, thread in _multi_recording_batch_state.active_threads.items()
+            completed_keys = [
+                thread_key
+                for thread_key, thread in _multi_recording_batch_state.active_threads.items()
                 if not thread.is_alive()
             ]
-            for completed_job_id in completed_job_ids:
-                _multi_recording_batch_state.active_threads.pop(completed_job_id, None)
+            for thread_key in completed_keys:
+                _multi_recording_batch_state.active_threads.pop(thread_key, None)
 
             # Phase 1: DISCOVER (parallel — up to max_parallel_discovers concurrent jobs).
             if _multi_recording_batch_state.current_phase == "discover":
@@ -1046,7 +1047,7 @@ def _multi_recording_batch_manager() -> None:
                         daemon=True,
                     )
                     thread.start()
-                    _multi_recording_batch_state.active_threads[job_id] = thread
+                    _multi_recording_batch_state.active_threads[(dataset_key, job_id)] = thread
 
                 # Transitions to extract phase when all discover jobs have been dispatched and completed.
                 if not _multi_recording_batch_state.active_threads and not _multi_recording_batch_state.phase_queue:
@@ -1080,7 +1081,7 @@ def _multi_recording_batch_manager() -> None:
                         daemon=True,
                     )
                     thread.start()
-                    _multi_recording_batch_state.active_threads[job_id] = thread
+                    _multi_recording_batch_state.active_threads[(dataset_key, job_id)] = thread
 
                 # Exits when all extract jobs have been dispatched and completed.
                 if not _multi_recording_batch_state.active_threads and not _multi_recording_batch_state.phase_queue:
