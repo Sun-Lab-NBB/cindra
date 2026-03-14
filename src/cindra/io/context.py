@@ -496,7 +496,7 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
                     break
 
             if is_unique:
-                unique_components.append(component.lower())
+                unique_components.append(component)
                 found_unique = True
                 break
 

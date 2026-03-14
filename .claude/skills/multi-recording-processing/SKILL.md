@@ -170,9 +170,9 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
    invoke `/multi-recording-configuration` to create one. Template configs are reusable across
    datasets and live at user-chosen locations (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). Set each
    configuration's `dataset_name` to the qualified name from step 3. Do NOT create per-dataset
-   config copies — the batch tool automatically saves fine-tuned copies inside each dataset's
-   `cindra/multi_recording/{dataset_name}/` output directory as `_batch_config.yaml`, preserving
-   the original template. Pass the same template path for multiple datasets that share parameters.
+   config copies — the batch tool automatically saves resolved copies as
+   `multi_recording_configuration.yaml` inside each dataset's output directory, preserving the
+   original template. Pass the same template path for multiple datasets that share parameters.
 
 5. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many
    cores to use (see Resource Management section).

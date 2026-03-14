@@ -340,8 +340,11 @@ def start_batch_processing_tool(
         recording_configuration.file_io.output_path = output_path
         recording_configuration.runtime.parallel_workers = actual_workers
         recording_configuration.runtime.display_progress_bars = progress_bars
-        output_path.mkdir(parents=True, exist_ok=True)
-        recording_configuration_path = output_path / "_batch_config.yaml"
+
+        # Saves the resolved configuration to the canonical cindra output location.
+        cindra_root = output_path / "cindra"
+        cindra_root.mkdir(parents=True, exist_ok=True)
+        recording_configuration_path = cindra_root / "configuration.yaml"
         recording_configuration.save(file_path=recording_configuration_path)
         batch_state.configuration_paths[recording_key] = recording_configuration_path
 
@@ -696,9 +699,9 @@ def start_multi_recording_batch_processing_tool(
             invalid_configurations.append(f"Unable to resolve output path for dataset '{dataset_key}'.")
             continue
 
-        # Saves the fine-tuned configuration inside the multi-recording output directory, preserving the template.
-        batch_configuration_path = main_recording_path / "_batch_config.yaml"
-        configuration.save(file_path=batch_configuration_path)
+        # Saves the resolved configuration to the canonical multi-recording output location.
+        configuration_path = main_recording_path / "multi_recording_configuration.yaml"
+        configuration.save(file_path=configuration_path)
 
         # Builds the job list: discover, then extract per recording.
         jobs: list[tuple[str, str]] = [(MultiRecordingJobNames.DISCOVER, "")]
@@ -709,9 +712,9 @@ def start_multi_recording_batch_processing_tool(
         tracker = ProcessingTracker(file_path=tracker_path)
         job_ids = tracker.initialize_jobs(jobs=jobs)
 
-        # Stores per-dataset state for orchestration. Points to the fine-tuned copy, not the template.
+        # Stores per-dataset state for orchestration. Points to the resolved copy, not the template.
         batch_state.tracker_paths[dataset_key] = tracker_path
-        batch_state.configuration_paths[dataset_key] = batch_configuration_path
+        batch_state.configuration_paths[dataset_key] = configuration_path
         batch_state.recording_paths[dataset_key] = dataset_recording_paths
         batch_state.discover_jobs[dataset_key] = job_ids[0]
         batch_state.extract_jobs[dataset_key] = job_ids[1:]

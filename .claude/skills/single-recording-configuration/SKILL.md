@@ -354,10 +354,10 @@ Configuration files follow a two-tier lifecycle:
    Templates can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings.
    Templates are never modified by the pipeline.
 
-2. **Fine-tuned copies** — When `start_batch_processing_tool` runs, it loads the template, applies
+2. **Resolved copies** — When `start_batch_processing_tool` runs, it loads the template, applies
    recording-specific overrides (`file_io.data_path`, `file_io.output_path`, `runtime.parallel_workers`),
-   and saves the resolved copy as `_batch_config.yaml` inside each recording's output directory. These
-   fine-tuned copies are what the pipeline actually executes against.
+   and saves the resolved copy as `cindra/configuration.yaml` inside each recording's output directory.
+   These resolved copies are what the pipeline actually executes against.
 
 **Do NOT** create per-recording configuration files manually. Pass a single template path to the batch tool
 and let it handle per-recording fine-tuning automatically.
