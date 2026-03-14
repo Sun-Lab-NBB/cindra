@@ -49,7 +49,8 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:
     # Checks for existing valid binaries to allow early return.
     root_path = configuration.file_io.output_path / "cindra"
     config_path = root_path / "configuration.yaml"
-    if config_path.exists():
+    acquisition_path = root_path / "acquisition_parameters.yaml"
+    if config_path.exists() and acquisition_path.exists():
         console.echo(message=f"Found existing configuration at: {config_path}.", level=LogLevel.INFO)
 
         # Loads all existing contexts. Uses plane_index=-1 to load all planes, which always returns a list.

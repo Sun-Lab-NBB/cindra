@@ -383,10 +383,10 @@ Configuration files follow a two-tier lifecycle:
    Templates are never modified by the pipeline. One template can serve multiple datasets that share the
    same processing parameters (only `dataset_name` differs, and this is handled by the batch tool).
 
-2. **Fine-tuned copies** — When `start_multi_recording_batch_processing_tool` runs, it loads the template,
+2. **Resolved copies** — When `start_multi_recording_batch_processing_tool` runs, it loads the template,
    applies runtime-specific overrides (`recording_io.recording_directories`, `runtime.parallel_workers`),
-   and saves the resolved copy as `_batch_config.yaml` inside each dataset's multi-recording output
-   directory (`cindra/multi_recording/{dataset_name}/`). These fine-tuned copies are what the pipeline
+   and saves the resolved copy as `multi_recording_configuration.yaml` inside each dataset's output
+   directory (`cindra/multi_recording/{dataset_name}/`). These resolved copies are what the pipeline
    actually executes against.
 
 **Do NOT** create per-dataset configuration files manually. Pass a single template path to the batch tool

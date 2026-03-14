@@ -120,9 +120,9 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
 3. **Configure** — Ask the user if they have an existing template configuration file. If not,
    invoke `/single-recording-configuration` to create one. Template configs are reusable across
    recordings and live at user-chosen locations (e.g., `/Data/CA1_GCaMP6f_SD.yaml`). Do NOT create
-   per-recording config copies — the batch tool automatically saves fine-tuned copies inside each
-   recording's output directory as `_batch_config.yaml`, preserving the original template. Pass
-   the same template path for all recordings that share parameters.
+   per-recording config copies — the batch tool automatically saves resolved copies as
+   `cindra/configuration.yaml` inside each recording's output directory, preserving the original
+   template. Pass the same template path for all recordings that share parameters.
 
 4. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many cores
    to use (see Resource Management section).
