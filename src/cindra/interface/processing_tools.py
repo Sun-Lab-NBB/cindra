@@ -38,6 +38,15 @@ _MAXIMUM_PARALLEL_BINARIZE: int = 3
 _MINIMUM_RECORDING_COUNT: int = 2
 """The minimum number of recordings required for multi-recording processing."""
 
+_PREFERRED_WORKERS_PER_JOB: int = 30
+"""The preferred number of CPU cores per parallel processing job for optimal throughput."""
+
+_MINIMUM_WORKERS_PER_JOB: int = 10
+"""The minimum number of CPU cores required per job when running multiple jobs in parallel."""
+
+_WORKER_MULTIPLE: int = 5
+"""Worker counts are rounded down to the nearest multiple of this value for clean allocation."""
+
 
 @dataclass
 class _SingleRecordingBatchState:
@@ -316,20 +325,11 @@ def start_batch_processing_tool(
                     "queued_count": len(_single_recording_batch_state.phase_queue),
                 }
 
-    # Calculates resource allocation.
-    actual_workers = resolve_worker_count(requested_workers=workers_per_plane, reserved_cores=_RESERVED_CORES)
-    actual_max_parallel = (
-        max_parallel_planes
-        if max_parallel_planes > 0
-        else resolve_parallel_job_capacity(workers_per_job=actual_workers)
-    )
-
     # Creates per-recording configurations, resolves plane counts, and initializes ProcessingTracker files.
-    batch_state = _SingleRecordingBatchState(
-        workers_per_plane=actual_workers,
-        max_parallel_planes=actual_max_parallel,
-        lock=Lock(),
-    )
+    # Defers configuration saving and resource allocation until total process jobs are known.
+    batch_state = _SingleRecordingBatchState(lock=Lock())
+    deferred_configs: list[tuple[SingleRecordingConfiguration, Path]] = []
+    total_process_jobs = 0
 
     for data_path, output_path in zip(valid_paths, resolved_output_paths, strict=True):
         recording_key = str(data_path)
@@ -338,19 +338,19 @@ def start_batch_processing_tool(
         recording_configuration = SingleRecordingConfiguration.from_yaml(file_path=template_path)
         recording_configuration.file_io.data_path = data_path
         recording_configuration.file_io.output_path = output_path
-        recording_configuration.runtime.parallel_workers = actual_workers
         recording_configuration.runtime.display_progress_bars = progress_bars
 
-        # Saves the resolved configuration to the canonical cindra output location.
+        # Prepares the output directory and defers configuration saving until worker count is resolved.
         cindra_root = output_path / "cindra"
         cindra_root.mkdir(parents=True, exist_ok=True)
         recording_configuration_path = cindra_root / "configuration.yaml"
-        recording_configuration.save(file_path=recording_configuration_path)
         batch_state.configuration_paths[recording_key] = recording_configuration_path
+        deferred_configs.append((recording_configuration, recording_configuration_path))
 
         # Resolves plane count from configuration to build the complete job list.
         contexts = resolve_single_recording_contexts(configuration=recording_configuration)
         plane_count = len(contexts)
+        total_process_jobs += plane_count
 
         # Builds the job list: binarize, all process planes, combine.
         jobs: list[tuple[str, str]] = [(SingleRecordingJobNames.BINARIZE, "")]
@@ -367,6 +367,29 @@ def start_batch_processing_tool(
         batch_state.binarize_jobs[recording_key] = job_ids[0]
         batch_state.process_jobs[recording_key] = job_ids[1 : 1 + plane_count]
         batch_state.combine_jobs[recording_key] = job_ids[-1]
+
+    # Calculates resource allocation now that total process jobs are known.
+    budget = resolve_worker_count(requested_workers=-1, reserved_cores=_RESERVED_CORES)
+    if workers_per_plane <= 0 and max_parallel_planes <= 0:
+        actual_workers, actual_max_parallel = _resolve_saturating_allocation(budget, total_process_jobs)
+    elif workers_per_plane > 0 >= max_parallel_planes:
+        actual_workers = resolve_worker_count(requested_workers=workers_per_plane, reserved_cores=_RESERVED_CORES)
+        actual_max_parallel = resolve_parallel_job_capacity(workers_per_job=actual_workers)
+    elif workers_per_plane <= 0 < max_parallel_planes:
+        raw_workers = budget // max_parallel_planes
+        actual_workers = max(1, (raw_workers // _WORKER_MULTIPLE) * _WORKER_MULTIPLE)
+        actual_max_parallel = max_parallel_planes
+    else:
+        actual_workers = resolve_worker_count(requested_workers=workers_per_plane, reserved_cores=_RESERVED_CORES)
+        actual_max_parallel = max_parallel_planes
+
+    batch_state.workers_per_plane = actual_workers
+    batch_state.max_parallel_planes = actual_max_parallel
+
+    # Saves all configurations with the resolved parallel_workers value.
+    for recording_configuration, recording_configuration_path in deferred_configs:
+        recording_configuration.runtime.parallel_workers = actual_workers
+        recording_configuration.save(file_path=recording_configuration_path)
 
     # Populates the binarize phase queue (naturally sorted for deterministic order).
     for recording_key in natsorted(batch_state.tracker_paths.keys()):
@@ -663,15 +686,26 @@ def start_multi_recording_batch_processing_tool(
                     "queued_count": len(_multi_recording_batch_state.phase_queue),
                 }
 
-    # Calculates resource allocation.
-    actual_workers_discover = resolve_worker_count(
-        requested_workers=workers_per_discover, reserved_cores=_RESERVED_CORES
-    )
-    actual_workers_extract = resolve_worker_count(
-        requested_workers=workers_per_extract, reserved_cores=_RESERVED_CORES
-    )
-    max_parallel_discovers = resolve_parallel_job_capacity(workers_per_job=actual_workers_discover)
-    max_parallel_extracts = resolve_parallel_job_capacity(workers_per_job=actual_workers_extract)
+    # Calculates resource allocation using saturating allocation for auto (-1) parameters.
+    budget = resolve_worker_count(requested_workers=-1, reserved_cores=_RESERVED_CORES)
+    total_discover_jobs = len(valid_datasets)
+    total_extract_jobs = sum(len(rp) for _, _, rp in valid_datasets)
+
+    if workers_per_discover <= 0:
+        actual_workers_discover, max_parallel_discovers = _resolve_saturating_allocation(budget, total_discover_jobs)
+    else:
+        actual_workers_discover = resolve_worker_count(
+            requested_workers=workers_per_discover, reserved_cores=_RESERVED_CORES
+        )
+        max_parallel_discovers = resolve_parallel_job_capacity(workers_per_job=actual_workers_discover)
+
+    if workers_per_extract <= 0:
+        actual_workers_extract, max_parallel_extracts = _resolve_saturating_allocation(budget, total_extract_jobs)
+    else:
+        actual_workers_extract = resolve_worker_count(
+            requested_workers=workers_per_extract, reserved_cores=_RESERVED_CORES
+        )
+        max_parallel_extracts = resolve_parallel_job_capacity(workers_per_job=actual_workers_extract)
 
     # Initializes batch state.
     batch_state = _MultiRecordingBatchState(
@@ -909,6 +943,34 @@ def cancel_multi_recording_batch_processing_tool() -> dict[str, object]:
     }
 
 
+def _resolve_saturating_allocation(budget: int, total_jobs: int) -> tuple[int, int]:
+    """Resolves worker and parallelism counts to saturate available cores across multiple jobs.
+
+    Prefers ~30 workers per job and distributes the CPU budget across as many concurrent jobs as possible, subject to
+    a minimum of 10 workers per job when running in parallel. Worker counts are rounded down to the nearest multiple
+    of 5 for clean allocation.
+
+    Args:
+        budget: The total number of available CPU cores (after reserving system cores).
+        total_jobs: The total number of jobs to execute.
+
+    Returns:
+        A (workers_per_job, max_parallel_jobs) tuple.
+    """
+    max_at_preferred = max(1, budget // _PREFERRED_WORKERS_PER_JOB)
+    max_parallel = min(total_jobs, max_at_preferred)
+    raw_workers = budget // max_parallel
+    workers = max(1, (raw_workers // _WORKER_MULTIPLE) * _WORKER_MULTIPLE)
+
+    # Reduces parallelism until each job has at least the minimum worker count.
+    while workers < _MINIMUM_WORKERS_PER_JOB and max_parallel > 1:
+        max_parallel -= 1
+        raw_workers = budget // max_parallel
+        workers = max(1, (raw_workers // _WORKER_MULTIPLE) * _WORKER_MULTIPLE)
+
+    return workers, max_parallel
+
+
 def _pipeline_worker(configuration_path: Path, job_id: str, *, single_recording: bool = True) -> None:
     """Executes a single pipeline job identified by its job ID.
 
@@ -1109,6 +1171,13 @@ def _multi_recording_batch_manager() -> None:
                         if discover_status == ProcessingStatus.SUCCEEDED:
                             for extract_job_id in _multi_recording_batch_state.extract_jobs[dataset_key]:
                                 _multi_recording_batch_state.phase_queue.append((dataset_key, extract_job_id))
+
+                            # Updates configuration to use extract-phase worker count.
+                            config = MultiRecordingConfiguration.from_yaml(
+                                file_path=_multi_recording_batch_state.configuration_paths[dataset_key]
+                            )
+                            config.runtime.parallel_workers = _multi_recording_batch_state.workers_per_extract
+                            config.save(file_path=_multi_recording_batch_state.configuration_paths[dataset_key])
 
                     _multi_recording_batch_state.current_phase = "extract"
 

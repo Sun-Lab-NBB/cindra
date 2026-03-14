@@ -53,27 +53,6 @@ def run_gui_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdi
     gui_mcp.run(transport=transport)
 
 
-def _get_viewer(viewer_id: str) -> _ViewerProcess | None:
-    """Returns the viewer process for the given ID, cleaning up dead processes and their state files.
-
-    Args:
-        viewer_id: The viewer identifier to look up.
-
-    Returns:
-        The _ViewerProcess instance, or None if not found or the process has exited.
-    """
-    entry = _viewer_registry.get(viewer_id)
-    if entry is None:
-        return None
-
-    if entry.process.poll() is not None:
-        cleanup_state_file(state_path=Path(entry.state_path))
-        del _viewer_registry[viewer_id]
-        return None
-
-    return entry
-
-
 @gui_mcp.tool()
 def launch_viewer_tool(
     viewer_type: Literal["roi", "tracking", "registration"],
@@ -230,3 +209,24 @@ def query_viewer_state_tool(viewer_id: str) -> dict[str, Any]:
         return {"success": False, "error": f"Unable to read viewer state. {error}"}
 
     return {"success": True, "viewer_id": viewer_id, "state": state}
+
+
+def _get_viewer(viewer_id: str) -> _ViewerProcess | None:
+    """Returns the viewer process for the given ID, cleaning up dead processes and their state files.
+
+    Args:
+        viewer_id: The viewer identifier to look up.
+
+    Returns:
+        The _ViewerProcess instance, or None if not found or the process has exited.
+    """
+    entry = _viewer_registry.get(viewer_id)
+    if entry is None:
+        return None
+
+    if entry.process.poll() is not None:
+        cleanup_state_file(state_path=Path(entry.state_path))
+        del _viewer_registry[viewer_id]
+        return None
+
+    return entry
