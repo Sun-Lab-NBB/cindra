@@ -54,7 +54,7 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 | Tool                               | Purpose                                                  |
 |------------------------------------|----------------------------------------------------------|
 | `start_batch_processing_tool`      | Starts batch single-recording processing (1+ recordings) |
-| `get_batch_processing_status_tool` | Returns in-memory status of running batch                |
+| `get_batch_processing_status_tool` | Returns disk-based status of running batch               |
 | `cancel_batch_processing_tool`     | Cancels batch processing, clears queues                  |
 
 ### Supporting tools (used during workflow)
@@ -78,7 +78,7 @@ Phase 1: BINARIZE (I/O bound, up to 3 parallel)
 
 Phase 2: PROCESS (CPU bound, parallel by plane)
 ├── Motion correction, ROI detection, signal extraction
-└── Up to 30 workers per plane
+└── Up to cpu_count - 2 workers per plane
 
 Phase 3: COMBINE (I/O bound, up to 3 parallel)
 └── Merges all plane results into unified dataset
@@ -101,7 +101,7 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
 ```text
 - [ ] Recordings discovered or paths provided
 - [ ] Raw data validated (or existing binaries confirmed via get_single_recording_status)
-- [ ] Configuration confirmed or created
+- [ ] Template configuration confirmed or created (one template can serve multiple recordings)
 - [ ] CPU core allocation confirmed with user
 - [ ] Recordings to process confirmed
 ```
@@ -117,9 +117,12 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
    where `get_single_recording_status` shows status `binarized` or later. If validation fails, invoke
    `/acquisition-data-preparation` to resolve issues before continuing.
 
-3. **Configure** — Ask the user if they have an existing configuration file. If not, invoke
-   `/single-recording-configuration` to create and customize one. Do not proceed without a confirmed
-   configuration path.
+3. **Configure** — Ask the user if they have an existing template configuration file. If not,
+   invoke `/single-recording-configuration` to create one. Template configs are reusable across
+   recordings and live at user-chosen locations (e.g., `/Data/CA1_GCaMP6f_SD.yaml`). Do NOT create
+   per-recording config copies — the batch tool automatically saves fine-tuned copies inside each
+   recording's output directory as `_batch_config.yaml`, preserving the original template. Pass
+   the same template path for all recordings that share parameters.
 
 4. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many cores
    to use (see Resource Management section).
@@ -140,17 +143,9 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
 
 The system automatically calculates optimal resource allocation:
 
-- **Workers per plane**: `min(cpu_count - 2, 30)` cores
-- **Reserved cores**: 2 (for system operations)
-- **Maximum job cores**: 30 (processing saturates beyond this)
-
-| CPU Cores | Max Parallel Planes | Workers/Plane | Behavior                         |
-|-----------|---------------------|---------------|----------------------------------|
-| 16        | 1                   | 12            | Sequential plane processing      |
-| 32        | 1                   | 28            | Sequential, 28 workers per plane |
-| 64        | 2                   | 30            | 2 concurrent planes              |
-| 96        | 3                   | 30            | 3 concurrent planes              |
-| 128       | 4                   | 30            | 4 concurrent planes              |
+- **Workers per plane**: Up to `cpu_count - 2` cores (reserved cores for system operations)
+- **No per-job cap**: Workers are limited only by available CPU cores minus reserved
+- **Parallel capacity**: Automatically calculated from `workers_per_plane` and available cores
 
 ---
 

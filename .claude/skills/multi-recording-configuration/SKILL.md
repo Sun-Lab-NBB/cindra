@@ -374,6 +374,26 @@ spike_deconvolution:
 
 ---
 
+## Configuration lifecycle
+
+Configuration files follow a two-tier lifecycle:
+
+1. **Template configs** — De-novo configurations generated via `generate_config_file` or manually created.
+   Templates can live anywhere (e.g., `/Data/CA1_GCaMP6f_MD.yaml`) and are reusable across datasets.
+   Templates are never modified by the pipeline. One template can serve multiple datasets that share the
+   same processing parameters (only `dataset_name` differs, and this is handled by the batch tool).
+
+2. **Fine-tuned copies** — When `start_multi_recording_batch_processing_tool` runs, it loads the template,
+   applies runtime-specific overrides (`recording_io.recording_directories`, `runtime.parallel_workers`),
+   and saves the resolved copy as `_batch_config.yaml` inside each dataset's multi-recording output
+   directory (`cindra/multi_recording/{dataset_name}/`). These fine-tuned copies are what the pipeline
+   actually executes against.
+
+**Do NOT** create per-dataset configuration files manually. Pass a single template path to the batch tool
+and let it handle per-dataset fine-tuning automatically.
+
+---
+
 ## Configuration workflow
 
 1. **Discover candidates** using `discover_multi_recording_candidates_tool` to find recordings with completed
@@ -382,15 +402,16 @@ spike_deconvolution:
    (all 3 phases). If any recording is incomplete, invoke `/single-recording-processing` (or
    `/acquisition-data-preparation` if raw data is not yet prepared) to complete the prerequisite chain before
    continuing.
-3. **Generate a default configuration** using `generate_config_file` with `pipeline_type="multi-recording"`.
-   Alternatively, use `read_config_file` to inspect an existing or legacy configuration for conversion.
+3. **Generate a template configuration** using `generate_config_file` with `pipeline_type="multi-recording"`.
+   Save it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). Alternatively, use `read_config_file`
+   to inspect an existing or legacy configuration for conversion.
 4. **Set `dataset_name`** — use `resolve_dataset_name_tool` to construct a qualified name from a shared
    base name and a batch-specific specifier derived from recording paths. This is the only required user
    parameter.
 5. **Review and tune** registration and tracking parameters based on expected tissue drift.
 6. **Validate** the configuration using `validate_config_file` to check for errors, warnings, and non-default
    parameters.
-7. **Configuration complete** — the validated configuration file is ready for use. This skill does not start
+7. **Configuration complete** — the validated template file is ready for use. This skill does not start
    processing. If invoked standalone, inform the user that the configuration is ready, and they can proceed
    when ready. If invoked from another skill, return control to the caller.
 

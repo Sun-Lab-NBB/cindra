@@ -254,7 +254,7 @@ def resolve_multi_recording_contexts(
     """
     recording_directories = configuration.recording_io.recording_directories
     recording_ids = extract_unique_components(paths=recording_directories)
-    dataset_name = configuration.recording_io.dataset_name
+    dataset_name = configuration.recording_io.dataset_name.lower()
 
     # Resolves all cindra directories and output paths upfront. These are cheap path operations needed for every
     # recording regardless of target filtering, because dataset_output_paths stores the full set.
@@ -496,7 +496,7 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
                     break
 
             if is_unique:
-                unique_components.append(component)
+                unique_components.append(component.lower())
                 found_unique = True
                 break
 
@@ -507,12 +507,43 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
     return tuple(unique_components)
 
 
+def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path, ...]:
+    """Resolves a set of discovered marker-file directories to their recording root directories.
+
+    Recording roots are the meaningful top-level directories that uniquely identify each recording session. Raw data
+    and pipeline outputs may be nested at arbitrary depths below the root, but the root itself is essential for proper
+    recording identification, display labels, and configuration paths. This function uses ``extract_unique_components``
+    to identify the first path component (from the end) that uniquely distinguishes each path, then truncates each
+    path at that component to strip shared structural subdirectories without assuming a fixed directory hierarchy.
+
+    Args:
+        paths: Directories containing discovered marker files (e.g., parents of ``cindra_parameters.json``
+            or ``combined_metadata.npz``). The pipeline resolves sub-paths to raw data and outputs internally;
+            callers should always work with recording roots rather than implementation-specific subdirectories.
+
+    Returns:
+        A deduplicated tuple of recording root paths, one per unique recording.
+
+    Raises:
+        RuntimeError: If one or more paths do not contain unique components.
+    """
+    unique_ids = extract_unique_components(paths=list(paths))
+    roots: list[Path] = []
+    for path, unique_id in zip(paths, unique_ids, strict=True):
+        # Walks up from the path to the ancestor whose name matches the unique component.
+        current = path
+        while current.name != unique_id and current != current.parent:
+            current = current.parent
+        if current not in roots:
+            roots.append(current)
+    return tuple(roots)
+
+
 def _find_cindra_directory(recording_directory: Path) -> Path:
     """Discovers the cindra output directory within a recording directory tree.
 
     Searches recursively for the combined_metadata.npz file created by the single-recording pipeline's combination step.
-    Since multi-recording recording paths are not pre-sanitized, the cindra directory may be
-    nested at an arbitrary depth below the recording root (e.g., under a processed_data/mesoscope_data/ subdirectory).
+    The cindra directory may be nested at an arbitrary depth below the recording root.
 
     Args:
         recording_directory: The path to the recording's root directory.

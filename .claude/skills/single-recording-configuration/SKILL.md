@@ -63,8 +63,8 @@ These parameters are set automatically by the pipeline and should not be manuall
 
 | Parameter                       | Set by        | Value                                               |
 |---------------------------------|---------------|-----------------------------------------------------|
-| `file_io.data_path`             | `pipeline.py` | Recording's raw data path                           |
-| `file_io.output_path`           | `pipeline.py` | Recording's processed output path                   |
+| `file_io.data_path`             | batch tool    | Recording's session root path (not raw data subdir) |
+| `file_io.output_path`           | batch tool    | Recording's processed output path                   |
 | `runtime.parallel_workers`      | CLI/MCP       | Number of workers (or auto-detected from CPU count) |
 | `runtime.display_progress_bars` | CLI/MCP       | Whether to show progress bars                       |
 
@@ -346,18 +346,37 @@ file_io:
 
 ---
 
+## Configuration lifecycle
+
+Configuration files follow a two-tier lifecycle:
+
+1. **Template configs** — De-novo configurations generated via `generate_config_file` or manually created.
+   Templates can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings.
+   Templates are never modified by the pipeline.
+
+2. **Fine-tuned copies** — When `start_batch_processing_tool` runs, it loads the template, applies
+   recording-specific overrides (`file_io.data_path`, `file_io.output_path`, `runtime.parallel_workers`),
+   and saves the resolved copy as `_batch_config.yaml` inside each recording's output directory. These
+   fine-tuned copies are what the pipeline actually executes against.
+
+**Do NOT** create per-recording configuration files manually. Pass a single template path to the batch tool
+and let it handle per-recording fine-tuning automatically.
+
+---
+
 ## Configuration workflow
 
 1. **Discover recordings** using `discover_single_recording_candidates_tool` to find directories with raw data.
 2. **Verify data readiness** — use `validate_recording_readiness` on each discovered recording to confirm that
    raw data and acquisition parameters are ready. If any recording fails validation, invoke
    `/acquisition-data-preparation` to resolve before continuing.
-3. **Generate a default configuration** using `generate_config_file` with `pipeline_type="single-recording"`.
-   Alternatively, use `read_config_file` to inspect an existing or legacy configuration for conversion.
-4. **Review and modify** the generated YAML file, setting at minimum `main.tau` and `main.two_channels`.
+3. **Generate a template configuration** using `generate_config_file` with `pipeline_type="single-recording"`.
+   Save it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_SD.yaml`). Alternatively, use `read_config_file`
+   to inspect an existing or legacy configuration for conversion.
+4. **Review and modify** the template YAML file, setting at minimum `main.tau` and `main.two_channels`.
 5. **Validate** the configuration using `validate_config_file` to check for errors, warnings, and non-default
    parameters.
-6. **Configuration complete** — the validated configuration file is ready for use. This skill does not start
+6. **Configuration complete** — the validated template file is ready for use. This skill does not start
    processing. If invoked standalone, inform the user that the configuration is ready and they can proceed
    when ready. If invoked from another skill, return control to the caller.
 

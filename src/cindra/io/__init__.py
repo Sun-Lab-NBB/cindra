@@ -7,6 +7,7 @@ from .combine import combine_planes, compute_plane_offsets
 from .context import (
     PARAMETERS_FILENAME,
     MAXIMUM_CHANNEL_COUNT,
+    resolve_recording_roots,
     extract_unique_components,
     resolve_multi_recording_contexts,
     resolve_single_recording_contexts,
@@ -23,6 +24,7 @@ __all__ = [
     "convert_tiffs_to_binary",
     "extract_unique_components",
     "resolve_multi_recording_contexts",
+    "resolve_recording_roots",
     "resolve_single_recording_contexts",
     "select_recording_rois",
 ]

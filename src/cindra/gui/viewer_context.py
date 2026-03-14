@@ -1160,7 +1160,7 @@ class ViewerData:
         if not matches:
             return ()
 
-        return tuple(natsorted({match.parent.name for match in matches}))
+        return tuple(natsorted({match.parent.name.lower() for match in matches}))
 
     def _load_dataset_from_root(self, dataset_name: str, search_root: Path) -> None:
         """Loads a specific multi-recording dataset from the search root.

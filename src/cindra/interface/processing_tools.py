@@ -211,7 +211,7 @@ def get_multi_recording_status(recording_path: str) -> dict[str, object]:
 
     dataset_statuses: dict[str, dict[str, object]] = {}
     for tracker_file in tracker_files:
-        dataset_name = tracker_file.parent.name
+        dataset_name = tracker_file.parent.name.lower()
         dataset_statuses[dataset_name] = _read_multi_recording_tracker(tracker_path=tracker_file)
 
     return {
@@ -239,13 +239,14 @@ def start_batch_processing_tool(
     get_batch_processing_status_tool to monitor progress.
 
     Args:
-        recording_paths: List of absolute paths to recording data directories (used as file_io.data_path per
-            recording).
+        recording_paths: List of absolute paths to recording root directories (used as file_io.data_path per
+            recording). These should be session-level roots, not sub-paths to raw data; the pipeline resolves
+            raw data locations internally via recursive search.
         configuration_path: The absolute path to the template configuration YAML file.
         recording_output_paths: Optional list of absolute paths for per-recording output directories (used as
             file_io.output_path). Must match the length of recording_paths when provided. When not provided, each
             recording's output_path defaults to its data_path.
-        workers_per_plane: CPU cores per plane job (-1 for automatic, max 30).
+        workers_per_plane: CPU cores per plane job (-1 for automatic, limited by cpu_count - 2).
         max_parallel_planes: Max concurrent plane jobs (-1 for automatic).
         progress_bars: Determines whether to display progress bars during processing.
 
@@ -587,7 +588,7 @@ def start_multi_recording_batch_processing_tool(
             path to the multi-recording YAML configuration) and 'recording_paths' (list of absolute paths to
             recording directories). At least 2 recording paths per dataset are required.
         workers_per_discover: Workers for discover phase (default 20).
-        workers_per_extract: Workers for extract phase (-1 for automatic, max 30).
+        workers_per_extract: Workers for extract phase (-1 for automatic, limited by cpu_count - 2).
         progress_bars: Determines whether to display progress bars during processing.
 
     Returns:
@@ -634,7 +635,7 @@ def start_multi_recording_batch_processing_tool(
         # Loads configuration to extract the dataset key and validate the file format.
         try:
             configuration = MultiRecordingConfiguration.from_yaml(file_path=dataset_configuration_path)
-            dataset_key = configuration.recording_io.dataset_name
+            dataset_key = configuration.recording_io.dataset_name.lower()
         except Exception as error:
             invalid_configurations.append(f"Unable to load configuration {dataset_configuration_path}: {error}")
             continue
@@ -680,14 +681,13 @@ def start_multi_recording_batch_processing_tool(
 
     total_recordings = 0
     for dataset_key, dataset_configuration_path, dataset_recording_paths in valid_datasets:
-        # Writes recording directories and runtime settings into the configuration file so the pipeline can read them.
+        # Loads the template configuration and applies runtime-specific overrides. The template file is never modified.
         configuration = MultiRecordingConfiguration.from_yaml(file_path=dataset_configuration_path)
         configuration.recording_io.recording_directories = tuple(natsorted(dataset_recording_paths))
         configuration.runtime.parallel_workers = actual_workers_discover
         configuration.runtime.display_progress_bars = progress_bars
-        configuration.save(file_path=dataset_configuration_path)
 
-        # Resolves contexts to determine recording IDs and the tracker output path.
+        # Resolves contexts to determine recording IDs and the output path for the fine-tuned configuration.
         contexts = resolve_multi_recording_contexts(configuration=configuration)
         recording_ids = [context.runtime.io.recording_id for context in contexts]
         main_recording_path = contexts[0].runtime.output_path
@@ -695,6 +695,10 @@ def start_multi_recording_batch_processing_tool(
         if main_recording_path is None:
             invalid_configurations.append(f"Unable to resolve output path for dataset '{dataset_key}'.")
             continue
+
+        # Saves the fine-tuned configuration inside the multi-recording output directory, preserving the template.
+        batch_configuration_path = main_recording_path / "_batch_config.yaml"
+        configuration.save(file_path=batch_configuration_path)
 
         # Builds the job list: discover, then extract per recording.
         jobs: list[tuple[str, str]] = [(MultiRecordingJobNames.DISCOVER, "")]
@@ -705,9 +709,9 @@ def start_multi_recording_batch_processing_tool(
         tracker = ProcessingTracker(file_path=tracker_path)
         job_ids = tracker.initialize_jobs(jobs=jobs)
 
-        # Stores per-dataset state for orchestration.
+        # Stores per-dataset state for orchestration. Points to the fine-tuned copy, not the template.
         batch_state.tracker_paths[dataset_key] = tracker_path
-        batch_state.configuration_paths[dataset_key] = dataset_configuration_path
+        batch_state.configuration_paths[dataset_key] = batch_configuration_path
         batch_state.recording_paths[dataset_key] = dataset_recording_paths
         batch_state.discover_jobs[dataset_key] = job_ids[0]
         batch_state.extract_jobs[dataset_key] = job_ids[1:]
