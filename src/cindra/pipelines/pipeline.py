@@ -402,8 +402,8 @@ def _execute_single_recording_job(
 
         tracker.complete_job(job_id=job_id)
 
-    except Exception:
-        tracker.fail_job(job_id=job_id)
+    except Exception as error:
+        tracker.fail_job(job_id=job_id, error_message=str(error))
         raise
 
 
@@ -447,6 +447,6 @@ def _execute_multi_recording_job(
 
         tracker.complete_job(job_id=job_id)
 
-    except Exception:
-        tracker.fail_job(job_id=job_id)
+    except Exception as error:
+        tracker.fail_job(job_id=job_id, error_message=str(error))
         raise

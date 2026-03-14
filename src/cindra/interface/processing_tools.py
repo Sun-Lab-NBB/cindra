@@ -32,9 +32,6 @@ from .mcp_instance import mcp
 _RESERVED_CORES: int = 2
 """The number of CPU cores reserved for system operations."""
 
-_MAXIMUM_JOB_CORES: int = 30
-"""The maximum number of CPU cores any single job can use."""
-
 _MAXIMUM_PARALLEL_BINARIZE: int = 3
 """The maximum number of concurrent binarization jobs (I/O bound with TIFF decompression)."""
 
@@ -319,9 +316,7 @@ def start_batch_processing_tool(
                 }
 
     # Calculates resource allocation.
-    actual_workers = min(
-        resolve_worker_count(requested_workers=workers_per_plane, reserved_cores=_RESERVED_CORES), _MAXIMUM_JOB_CORES
-    )
+    actual_workers = resolve_worker_count(requested_workers=workers_per_plane, reserved_cores=_RESERVED_CORES)
     actual_max_parallel = (
         max_parallel_planes
         if max_parallel_planes > 0
@@ -397,8 +392,9 @@ def start_batch_processing_tool(
 def get_batch_processing_status_tool() -> dict[str, object]:
     """Returns the current status of single-recording batch processing.
 
-    Reads ProcessingTracker files for each recording in the batch to report per-recording progress across all three
-    phases (binarize, process, combine), including active, completed, and failed counts.
+    Reads ProcessingTracker files from disk for each recording in the batch to report per-recording progress across
+    all three phases (binarize, process, combine), including active, completed, and failed counts. All status
+    information is derived from the on-disk tracker files rather than in-memory state.
 
     Returns:
         Contains the 'current_phase', per-recording 'recordings' status list, and a 'summary' with aggregate counts
@@ -420,20 +416,30 @@ def get_batch_processing_status_tool() -> dict[str, object]:
 
         for recording_key in natsorted(_single_recording_batch_state.tracker_paths.keys()):
             tracker_path = _single_recording_batch_state.tracker_paths[recording_key]
+
+            # Skips recordings whose tracker file no longer exists on disk.
+            if not tracker_path.exists():
+                continue
+
             tracker = ProcessingTracker(file_path=tracker_path)
 
-            # Reads binarize job status.
-            binarize_job_id = _single_recording_batch_state.binarize_jobs[recording_key]
-            binarize_status = tracker.get_job_status(job_id=binarize_job_id).name.lower()
+            # Discovers job IDs from the tracker file by job name.
+            binarize_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.BINARIZE)
+            process_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.PROCESS)
+            combine_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.COMBINE)
 
-            # Reads process job statuses.
-            process_job_ids = _single_recording_batch_state.process_jobs[recording_key]
-            plane_count = len(process_job_ids)
+            # Reads binarize job status from disk.
+            binarize_status = "pending"
+            for job_id in binarize_jobs:
+                binarize_status = tracker.get_job_status(job_id=job_id).name.lower()
+
+            # Reads process job statuses from disk.
+            plane_count = len(process_jobs)
             process_succeeded = sum(
-                1 for job_id in process_job_ids if tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
+                1 for job_id in process_jobs if tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
             )
             process_failed = sum(
-                1 for job_id in process_job_ids if tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
+                1 for job_id in process_jobs if tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
             )
 
             if process_failed:
@@ -441,11 +447,13 @@ def get_batch_processing_status_tool() -> dict[str, object]:
             else:
                 process_status = f"{process_succeeded}/{plane_count}"
 
-            # Reads combine job status.
-            combine_job_id = _single_recording_batch_state.combine_jobs[recording_key]
-            combine_status = tracker.get_job_status(job_id=combine_job_id).name.lower()
+            # Reads combine job status from disk.
+            combine_status = "pending"
+            for job_id in combine_jobs:
+                combine_status = tracker.get_job_status(job_id=job_id).name.lower()
 
-            # Synthesizes overall recording status from tracker state.
+            # Synthesizes overall recording status from the on-disk tracker state.
+            all_job_ids = [*binarize_jobs, *process_jobs, *combine_jobs]
             if tracker.complete:
                 overall_status = "SUCCEEDED"
                 total_succeeded += 1
@@ -453,8 +461,7 @@ def get_batch_processing_status_tool() -> dict[str, object]:
                 overall_status = "FAILED"
                 total_failed += 1
             elif any(
-                (recording_key, job_id) in _single_recording_batch_state.active_threads
-                for job_id in [binarize_job_id, *process_job_ids, combine_job_id]
+                tracker.get_job_status(job_id=job_id) == ProcessingStatus.RUNNING for job_id in all_job_ids
             ):
                 overall_status = "PROCESSING"
                 total_running += 1
@@ -471,7 +478,7 @@ def get_batch_processing_status_tool() -> dict[str, object]:
 
             # Includes error messages from any failed jobs.
             errors: list[str] = []
-            for job_id in [binarize_job_id, *process_job_ids, combine_job_id]:
+            for job_id in all_job_ids:
                 job_info = tracker.get_job_info(job_id=job_id)
                 if job_info.error_message:
                     errors.append(f"{job_info.job_name}({job_info.specifier}): {job_info.error_message}")
@@ -480,15 +487,31 @@ def get_batch_processing_status_tool() -> dict[str, object]:
 
             recordings_status.append(recording_status)
 
+        # Derives current phase from tracker state rather than in-memory orchestration state.
+        current_phase = "none"
+        if recordings_status:
+            has_pending_or_running_binarize = any(
+                ds["binarize"] in ("pending", "running") for ds in recordings_status
+            )
+            has_pending_or_running_combine = any(
+                ds["combine"] in ("pending", "running") for ds in recordings_status
+            )
+            if has_pending_or_running_binarize:
+                current_phase = "binarize"
+            elif has_pending_or_running_combine:
+                current_phase = "process"
+            else:
+                current_phase = "combine"
+
         summary = {
-            "total": len(_single_recording_batch_state.tracker_paths),
+            "total": len(recordings_status),
             "succeeded": total_succeeded,
             "failed": total_failed,
             "running": total_running,
         }
 
         return {
-            "current_phase": _single_recording_batch_state.current_phase,
+            "current_phase": current_phase,
             "recordings": recordings_status,
             "summary": summary,
         }
@@ -637,12 +660,11 @@ def start_multi_recording_batch_processing_tool(
                 }
 
     # Calculates resource allocation.
-    actual_workers_discover = min(
-        resolve_worker_count(requested_workers=workers_per_discover, reserved_cores=_RESERVED_CORES),
-        _MAXIMUM_JOB_CORES,
+    actual_workers_discover = resolve_worker_count(
+        requested_workers=workers_per_discover, reserved_cores=_RESERVED_CORES
     )
-    actual_workers_extract = min(
-        resolve_worker_count(requested_workers=workers_per_extract, reserved_cores=_RESERVED_CORES), _MAXIMUM_JOB_CORES
+    actual_workers_extract = resolve_worker_count(
+        requested_workers=workers_per_extract, reserved_cores=_RESERVED_CORES
     )
     max_parallel_discovers = resolve_parallel_job_capacity(workers_per_job=actual_workers_discover)
     max_parallel_extracts = resolve_parallel_job_capacity(workers_per_job=actual_workers_extract)
@@ -722,8 +744,9 @@ def start_multi_recording_batch_processing_tool(
 def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
     """Returns the current status of multi-recording batch processing.
 
-    Reads ProcessingTracker files for each dataset in the batch to report per-dataset progress across both phases
-    (discover, extract), including active, completed, and failed counts.
+    Reads ProcessingTracker files from disk for each dataset in the batch to report per-dataset progress across both
+    phases (discover, extract), including active, completed, and failed counts. All status information is derived from
+    the on-disk tracker files rather than in-memory state.
 
     Returns:
         Contains the 'current_phase', per-dataset 'datasets' status list, and a 'summary' with aggregate counts for
@@ -744,23 +767,32 @@ def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
 
         for dataset_key in natsorted(_multi_recording_batch_state.tracker_paths.keys()):
             tracker_path = _multi_recording_batch_state.tracker_paths[dataset_key]
+
+            # Skips datasets whose tracker file no longer exists on disk.
+            if not tracker_path.exists():
+                continue
+
             tracker = ProcessingTracker(file_path=tracker_path)
 
-            # Reads discover job status.
-            discover_job_id = _multi_recording_batch_state.discover_jobs[dataset_key]
-            discover_status = tracker.get_job_status(job_id=discover_job_id).name.lower()
+            # Discovers job IDs from the tracker file by job name.
+            discover_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.DISCOVER)
+            extract_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.EXTRACT)
 
-            # Reads extract job statuses.
-            extract_job_ids = _multi_recording_batch_state.extract_jobs[dataset_key]
-            extract_total = len(extract_job_ids)
+            # Reads discover job status from disk.
+            discover_status = "pending"
+            for job_id in discover_jobs:
+                discover_status = tracker.get_job_status(job_id=job_id).name.lower()
+
+            # Reads extract job statuses from disk.
+            extract_total = len(extract_jobs)
             extract_succeeded = sum(
-                1 for job_id in extract_job_ids if tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
+                1 for job_id in extract_jobs if tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
             )
             extract_failed = sum(
-                1 for job_id in extract_job_ids if tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
+                1 for job_id in extract_jobs if tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
             )
 
-            # Synthesizes overall dataset status from tracker state.
+            # Synthesizes overall dataset status from the on-disk tracker state.
             if tracker.complete:
                 overall_status = "SUCCEEDED"
                 total_succeeded += 1
@@ -768,8 +800,8 @@ def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
                 overall_status = "FAILED"
                 total_failed += 1
             elif any(
-                (dataset_key, job_id) in _multi_recording_batch_state.active_threads
-                for job_id in [discover_job_id, *extract_job_ids]
+                tracker.get_job_status(job_id=job_id) == ProcessingStatus.RUNNING
+                for job_id in [*discover_jobs, *extract_jobs]
             ):
                 overall_status = "PROCESSING"
                 total_running += 1
@@ -787,7 +819,7 @@ def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
 
             # Includes error messages from any failed jobs.
             errors: list[str] = []
-            for job_id in [discover_job_id, *extract_job_ids]:
+            for job_id in [*discover_jobs, *extract_jobs]:
                 job_info = tracker.get_job_info(job_id=job_id)
                 if job_info.error_message:
                     errors.append(f"{job_info.job_name}({job_info.specifier}): {job_info.error_message}")
@@ -796,15 +828,25 @@ def get_multi_recording_batch_processing_status_tool() -> dict[str, object]:
 
             datasets_status.append(dataset_status)
 
+        # Derives current phase from tracker state rather than in-memory orchestration state.
+        current_phase = "none"
+        if datasets_status:
+            has_running_discover = any(ds["discover"] == "running" for ds in datasets_status)
+            has_pending_discover = any(ds["discover"] == "pending" for ds in datasets_status)
+            if has_running_discover or has_pending_discover:
+                current_phase = "discover"
+            else:
+                current_phase = "extract"
+
         summary = {
-            "total_datasets": len(_multi_recording_batch_state.tracker_paths),
+            "total_datasets": len(datasets_status),
             "succeeded": total_succeeded,
             "failed": total_failed,
             "running": total_running,
         }
 
         return {
-            "current_phase": _multi_recording_batch_state.current_phase,
+            "current_phase": current_phase,
             "datasets": datasets_status,
             "summary": summary,
         }

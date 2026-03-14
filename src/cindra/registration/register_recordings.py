@@ -410,7 +410,7 @@ def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformatio
     frame_width = combined_data.combined_width
 
     # Loads single-recording ROI masks and slices by selected ROI indices for channel 1.
-    selected_indices = context.runtime.io.selected_roi_indices
+    selected_indices = tuple(i for i in context.runtime.io.selected_roi_indices if i is not None)
     single_recording_output = context.runtime.io.data_path
     if selected_indices and single_recording_output is not None:
         masks_path = single_recording_output / "roi_masks.npz"
@@ -424,7 +424,7 @@ def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformatio
             )
 
     # Loads single-recording ROI masks and slices by selected ROI indices for channel 2.
-    selected_indices_channel_2 = context.runtime.io.selected_roi_indices_channel_2
+    selected_indices_channel_2 = tuple(i for i in context.runtime.io.selected_roi_indices_channel_2 if i is not None)
     if selected_indices_channel_2 and single_recording_output is not None:
         masks_path_channel_2 = single_recording_output / "roi_masks_channel_2.npz"
         if masks_path_channel_2.exists():
