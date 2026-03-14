@@ -145,7 +145,7 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
 - [ ] All recordings confirmed as single-recording complete (status: combined)
 - [ ] Recordings grouped into datasets (by common parent, explicit grouping, or user instruction)
 - [ ] Dataset names resolved via resolve_dataset_name_tool
-- [ ] Configuration confirmed or created per dataset
+- [ ] Template configuration confirmed or created (one template can serve multiple datasets)
 - [ ] CPU core allocation confirmed with user
 - [ ] Recordings per dataset confirmed
 ```
@@ -166,10 +166,13 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
    generate a unique qualified name. The specifier is derived automatically from the common parent
    directory, or the user can provide one explicitly.
 
-4. **Configure** — Ask the user if they have existing configuration files per dataset. If not,
-   invoke `/multi-recording-configuration` to create and customize them. Set each configuration's
-   `dataset_name` to the qualified name from step 3. Do not proceed without confirmed configuration
-   paths.
+4. **Configure** — Ask the user if they have an existing template configuration file. If not,
+   invoke `/multi-recording-configuration` to create one. Template configs are reusable across
+   datasets and live at user-chosen locations (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). Set each
+   configuration's `dataset_name` to the qualified name from step 3. Do NOT create per-dataset
+   config copies — the batch tool automatically saves fine-tuned copies inside each dataset's
+   `cindra/multi_recording/{dataset_name}/` output directory as `_batch_config.yaml`, preserving
+   the original template. Pass the same template path for multiple datasets that share parameters.
 
 5. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many
    cores to use (see Resource Management section).
@@ -190,17 +193,9 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
 
 The system automatically calculates optimal resource allocation:
 
-- **Workers per discover**: 20 cores (fixed, internal parallelization)
-- **Workers per extract**: `min(cpu_count - 2, 30)` cores
-- **Reserved cores**: 2 (for system operations)
-- **Maximum job cores**: 30 (processing saturates beyond this)
-
-| CPU Cores | Max Parallel Discovers | Max Parallel Extracts | Behavior                      |
-|-----------|------------------------|-----------------------|-------------------------------|
-| 32        | 1                      | 1                     | Sequential processing         |
-| 64        | 3                      | 2                     | Multiple datasets in parallel |
-| 96        | 4                      | 3                     | Higher parallelism            |
-| 128       | 6                      | 4                     | Maximum parallelism           |
+- **Workers per job**: Up to `cpu_count - 2` cores (reserved cores for system operations)
+- **No per-job cap**: Workers are limited only by available CPU cores minus reserved
+- **Parallel capacity**: Automatically calculated from `workers_per_job` and available cores
 
 ---
 

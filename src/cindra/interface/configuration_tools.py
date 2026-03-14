@@ -19,6 +19,7 @@ from dataclasses import (
 
 import yaml  # type: ignore[import-untyped]
 
+from ..io import resolve_recording_roots
 from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
 from .mcp_instance import mcp
 
@@ -72,7 +73,9 @@ def discover_single_recording_candidates_tool(root_directory: str) -> dict[str, 
     """Discovers recordings containing raw neural imaging data that can be processed by the single-recording pipeline.
 
     Searches recursively for cindra_parameters.json files, which mark directories containing raw recording data
-    suitable for single-recording processing. Returns the parent directory of each match as a recording candidate path.
+    suitable for single-recording processing. Returns recording root directories (not raw data subdirectories) so
+    that downstream tools receive meaningful session-level paths for configuration, identification, and display.
+    Recording roots are resolved by stripping shared structural subdirectories via ``resolve_recording_roots``.
 
     Args:
         root_directory: The absolute path to the root directory to search.
@@ -93,16 +96,18 @@ def discover_single_recording_candidates_tool(root_directory: str) -> dict[str, 
             "error": f"Unable to discover single-recording candidates. The path is not a directory: {root_directory}",
         }
 
-    recording_paths: list[str] = []
+    marker_parents: list[Path] = []
     errors: list[str] = []
 
     try:
-        recording_paths.extend(str(marker_file.parent) for marker_file in root_path.rglob("cindra_parameters.json"))
+        marker_parents.extend(marker_file.parent for marker_file in root_path.rglob("cindra_parameters.json"))
     except PermissionError as error:
         errors.append(f"Access denied during search: {error}")
 
-    # Sorts paths for consistent output.
-    recording_paths.sort()
+    # Resolves marker-file directories to recording roots by stripping shared structural subdirectories.
+    recording_paths = (
+        sorted(str(root) for root in resolve_recording_roots(paths=marker_parents)) if marker_parents else []
+    )
 
     result: dict[str, str | int | list[str]] = {"recordings": recording_paths, "count": len(recording_paths)}
 
@@ -118,7 +123,9 @@ def discover_multi_recording_candidates_tool(root_directory: str) -> dict[str, s
     ROI tracking.
 
     Searches recursively for combined_metadata.npz files, which mark completed single-recording cindra outputs.
-    Returns the grandparent directory paths (recording root directories containing cindra output).
+    Returns recording root directories (not cindra output subdirectories) so that downstream tools receive meaningful
+    session-level paths for configuration, identification, and display. Recording roots are resolved by stripping
+    shared structural subdirectories via ``resolve_recording_roots``.
 
     Args:
         root_directory: The absolute path to the root directory to search.
@@ -139,21 +146,18 @@ def discover_multi_recording_candidates_tool(root_directory: str) -> dict[str, s
             "error": f"Unable to discover multi-recording candidates. The path is not a directory: {root_directory}",
         }
 
-    recording_paths: list[str] = []
+    marker_parents: list[Path] = []
     errors: list[str] = []
 
     try:
-        for marker_file in root_path.rglob("combined_metadata.npz"):
-            # Resolves the recording root from the file hierarchy. The combined_metadata.npz lives at the cindra root
-            # level (e.g., {recording}/cindra/), so its grandparent is the recording root directory.
-            recording_root = str(marker_file.parent.parent)
-            if recording_root not in recording_paths:
-                recording_paths.append(recording_root)
+        marker_parents.extend(marker_file.parent for marker_file in root_path.rglob("combined_metadata.npz"))
     except PermissionError as error:
         errors.append(f"Access denied during search: {error}")
 
-    # Sorts paths for consistent output.
-    recording_paths.sort()
+    # Resolves marker-file directories to recording roots by stripping shared structural subdirectories.
+    recording_paths = (
+        sorted(str(root) for root in resolve_recording_roots(paths=marker_parents)) if marker_parents else []
+    )
 
     result: dict[str, str | int | list[str]] = {"recordings": recording_paths, "count": len(recording_paths)}
 
@@ -220,13 +224,13 @@ def resolve_dataset_name_tool(
                 "error": "Unable to resolve dataset name. Could not derive a specifier from the recording paths.",
             }
 
-    qualified_name = f"{specifier}_{dataset_name}"
+    qualified_name = f"{specifier}_{dataset_name}".lower()
 
     return {
         "success": True,
         "dataset_name": qualified_name,
-        "base_name": dataset_name,
-        "specifier": specifier,
+        "base_name": dataset_name.lower(),
+        "specifier": specifier.lower(),
     }
 
 

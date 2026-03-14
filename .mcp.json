@@ -4,6 +4,11 @@
       "type": "stdio",
       "command": "cindra",
       "args": ["mcp"]
+    },
+    "cindra-gui": {
+      "type": "stdio",
+      "command": "cindra-gui",
+      "args": ["mcp"]
     }
   }
 }

@@ -115,8 +115,8 @@ def run_registration_viewer(recording_path: Path, *, state_path: Path | None = N
             parent=binary_player,
         )
 
-    # Computes screen-adaptive window positions. On large screens the two viewers sit side by side;
-    # on smaller screens they cascade with a visible offset so both title bars remain accessible.
+    # Computes cascaded window positions so both title bars remain accessible regardless of screen
+    # size. The PC viewer is offset from the binary viewer by a fixed step in both axes.
     screen = application.primaryScreen()
     available = screen.availableGeometry()
 
@@ -127,15 +127,9 @@ def run_registration_viewer(recording_path: Path, *, state_path: Path | None = N
     binary_viewer_height = BINARY_STYLE.window_geometry[3]
     pc_viewer_width = PC_STYLE.window_geometry[2]
     pc_viewer_height = PC_STYLE.window_geometry[3]
-    # Horizontal pixel gap between adjacent windows when placed side by side.
-    viewer_gap = 10
 
-    if binary_viewer_x + binary_viewer_width + viewer_gap + pc_viewer_width <= available.width():
-        # Side by side: PC viewer sits immediately to the right of the binary viewer.
-        pc_viewer_x, pc_viewer_y = binary_viewer_x + binary_viewer_width + viewer_gap, 50
-    else:
-        # Cascade: offset so both title bars remain accessible on smaller screens.
-        pc_viewer_x, pc_viewer_y = binary_viewer_x + 30, binary_viewer_y + 30
+    # Cascade: PC viewer is offset so both title bars remain accessible.
+    pc_viewer_x, pc_viewer_y = binary_viewer_x + 30, binary_viewer_y + 30
 
     # Clamps window dimensions to fit within the available screen area.
     binary_viewer_height = min(binary_viewer_height, available.height() - binary_viewer_y)
