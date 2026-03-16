@@ -78,7 +78,7 @@ Phase 1: BINARIZE (I/O bound, up to 3 parallel)
 
 Phase 2: PROCESS (CPU bound, parallel by plane)
 ├── Motion correction, ROI detection, signal extraction
-└── Up to cpu_count - 2 workers per plane
+└── Workers per plane via saturating allocation (see Resource Management)
 
 Phase 3: COMBINE (I/O bound, up to 3 parallel)
 └── Merges all plane results into unified dataset
@@ -102,6 +102,7 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
 - [ ] Recordings discovered or paths provided
 - [ ] Raw data validated (or existing binaries confirmed via get_single_recording_status)
 - [ ] Template configuration confirmed or created (one template can serve multiple recordings)
+- [ ] Output directory confirmed with user
 - [ ] CPU core allocation confirmed with user
 - [ ] Recordings to process confirmed
 ```
@@ -124,16 +125,24 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
    `cindra/configuration.yaml` inside each recording's output directory, preserving the original
    template. Pass the same template path for all recordings that share parameters.
 
-4. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many cores
+4. **Confirm output directory** — Ask the user where processed data should be written. By default,
+   output is written alongside the raw data (each recording's output directory equals its data
+   directory, producing a `cindra/` subdirectory inside each recording). To write output elsewhere,
+   the user provides a root output directory; per-recording output paths are then constructed by
+   mirroring the recording directory structure under that root. Present the default behavior and ask
+   the user to confirm or provide an alternative. Pass `recording_output_paths` to
+   `start_batch_processing_tool` when the user specifies a non-default location.
+
+5. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many cores
    to use (see Resource Management section).
 
-5. **Start batch** — Call `start_batch_processing_tool` with the confirmed recording paths,
-   configuration path, and worker settings.
+6. **Start batch** — Call `start_batch_processing_tool` with the confirmed recording paths,
+   configuration path, output paths (if non-default), and worker settings.
 
-6. **Monitor** — Use `get_batch_processing_status_tool` to check progress. Present status as a
+7. **Monitor** — Use `get_batch_processing_status_tool` to check progress. Present status as a
    formatted table (see Status Formatting section).
 
-7. **Handle completion** — When all recordings finish, check for failures. Route errors to the
+8. **Handle completion** — When all recordings finish, check for failures. Route errors to the
    appropriate skill (see Error Routing section). On success, invoke `/single-recording-results`
    to verify outputs, then `/visualization` for visual inspection.
 
@@ -141,11 +150,26 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
 
 ## Resource management
 
-The system automatically calculates optimal resource allocation:
+The system uses saturating core allocation to distribute CPU cores across parallel plane jobs.
+When both `workers_per_plane` and `max_parallel_planes` are set to `-1` (automatic), the allocator
+runs the following algorithm:
 
-- **Workers per plane**: Up to `cpu_count - 2` cores (reserved cores for system operations)
-- **No per-job cap**: Workers are limited only by available CPU cores minus reserved
-- **Parallel capacity**: Automatically calculated from `workers_per_plane` and available cores
+1. **Budget**: `cpu_count - 2` (2 cores reserved for system operations)
+2. **Max parallel planes**: `min(total_planes, budget // 30)` (targets ~30 workers per job)
+3. **Raw workers per plane**: `budget // max_parallel_planes`
+4. **Round down** to the nearest multiple of 5
+5. **Saturate**: If workers per plane falls below 10 and parallelism > 1, reduce parallelism and
+   recalculate until each job has at least 10 workers
+
+| CPU Cores | Budget | Planes | Workers/Plane | Max Parallel | Total Utilized |
+|-----------|--------|--------|---------------|--------------|----------------|
+| 128       | 126    | 4      | 30            | 4            | 120            |
+| 64        | 62     | 4      | 30            | 2            | 60             |
+| 32        | 30     | 4      | 30            | 1            | 30             |
+| 16        | 14     | 4      | 14 (→ 10)     | 1            | 10             |
+
+Either or both values can be overridden explicitly via `workers_per_plane` and `max_parallel_planes`
+parameters in `start_batch_processing_tool`.
 
 ---
 
@@ -216,6 +240,7 @@ Single-Recording Processing Workflow:
 - [ ] Recordings discovered or explicit paths provided
 - [ ] Raw data validated via `validate_recording_readiness` (or existing binaries confirmed)
 - [ ] Configuration file confirmed or created via `/single-recording-configuration`
+- [ ] Output directory confirmed with user (default: alongside raw data)
 - [ ] CPU core allocation confirmed with user
 - [ ] Batch started via `start_batch_processing_tool`
 - [ ] Status monitored until all recordings complete or fail
