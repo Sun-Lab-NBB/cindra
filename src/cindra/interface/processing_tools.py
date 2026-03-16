@@ -32,8 +32,8 @@ from .mcp_instance import mcp
 _RESERVED_CORES: int = 2
 """The number of CPU cores reserved for system operations."""
 
-_MAXIMUM_PARALLEL_BINARIZE: int = 3
-"""The maximum number of concurrent binarization jobs (I/O bound with TIFF decompression)."""
+_MAXIMUM_PARALLEL_IO_JOBS: int = 3
+"""The maximum number of concurrent I/O-bound jobs (binarize and combine phases)."""
 
 _MINIMUM_RECORDING_COUNT: int = 2
 """The minimum number of recordings required for multi-recording processing."""
@@ -141,8 +141,8 @@ _multi_recording_batch_state: _MultiRecordingBatchState | None = None
 def get_single_recording_status(recording_path: str) -> dict[str, object]:
     """Gets the processing status of a single recording by reading its ProcessingTracker file.
 
-    Reads the tracker YAML file at <recording_path>/single_recording_tracker.yaml to determine how far processing has
-    progressed. Returns per-job status grouped by pipeline phase (binarize, process, combine) and an overall status
+    Reads the tracker YAML file at <recording_path>/cindra/single_recording_tracker.yaml to determine how far processing
+    has progressed. Returns per-job status grouped by pipeline phase (binarize, process, combine) and an overall status
     string synthesized from the tracker state.
 
     Args:
@@ -162,7 +162,7 @@ def get_single_recording_status(recording_path: str) -> dict[str, object]:
             "error": f"Unable to get single-recording status. Recording directory not found: {recording_path}.",
         }
 
-    tracker_path = recording / SINGLE_RECORDING_TRACKER_NAME
+    tracker_path = recording / "cindra" / SINGLE_RECORDING_TRACKER_NAME
     if not tracker_path.exists():
         return {
             "success": True,
@@ -358,7 +358,7 @@ def start_batch_processing_tool(
         jobs.append((SingleRecordingJobNames.COMBINE, ""))
 
         # Initializes the ProcessingTracker with all jobs for this recording.
-        tracker_path = output_path / SINGLE_RECORDING_TRACKER_NAME
+        tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_NAME
         tracker = ProcessingTracker(file_path=tracker_path)
         job_ids = tracker.initialize_jobs(jobs=jobs)
         batch_state.tracker_paths[recording_key] = tracker_path
@@ -592,7 +592,7 @@ def cancel_batch_processing_tool() -> dict[str, object]:
 def start_multi_recording_batch_processing_tool(
     dataset_configurations: list[dict[str, object]],
     *,
-    workers_per_discover: int = 20,
+    workers_per_discover: int = -1,
     workers_per_extract: int = -1,
     progress_bars: bool = False,
 ) -> dict[str, object]:
@@ -605,10 +605,11 @@ def start_multi_recording_batch_processing_tool(
 
     Args:
         dataset_configurations: List of dataset configurations, each a dictionary with 'configuration_path' (absolute
-            path to the multi-recording YAML configuration) and 'recording_paths' (list of absolute paths to
-            recording directories). At least 2 recording paths per dataset are required.
-        workers_per_discover: Workers for discover phase (default 20).
-        workers_per_extract: Workers for extract phase (-1 for automatic, limited by cpu_count - 2).
+            path to the multi-recording YAML configuration), 'recording_paths' (list of absolute paths to recording
+            directories), and 'dataset_name' (unique name for this dataset). At least 2 recording paths per dataset
+            are required.
+        workers_per_discover: Workers for discover phase (-1 for automatic via saturating allocation).
+        workers_per_extract: Workers for extract phase (-1 for automatic via saturating allocation).
         progress_bars: Determines whether to display progress bars during processing.
 
     Returns:
@@ -629,8 +630,14 @@ def start_multi_recording_batch_processing_tool(
     invalid_configurations: list[str] = []
 
     for dataset_configuration in dataset_configurations:
-        if "configuration_path" not in dataset_configuration or "recording_paths" not in dataset_configuration:
+        required_keys = {"configuration_path", "recording_paths", "dataset_name"}
+        if not required_keys.issubset(dataset_configuration):
             invalid_configurations.append(f"Missing required keys: {dataset_configuration}")
+            continue
+
+        dataset_name = str(dataset_configuration["dataset_name"]).strip()
+        if not dataset_name:
+            invalid_configurations.append(f"Empty dataset_name: {dataset_configuration}")
             continue
 
         dataset_configuration_path = Path(str(dataset_configuration["configuration_path"]))
@@ -652,14 +659,14 @@ def start_multi_recording_batch_processing_tool(
             invalid_configurations.append(f"Invalid recordings for {dataset_configuration_path}: {invalid_recordings}")
             continue
 
-        # Loads configuration to extract the dataset key and validate the file format.
+        # Validates the configuration file format.
         try:
-            configuration = MultiRecordingConfiguration.from_yaml(file_path=dataset_configuration_path)
-            dataset_key = configuration.recording_io.dataset_name.lower()
+            MultiRecordingConfiguration.from_yaml(file_path=dataset_configuration_path)
         except Exception as error:
             invalid_configurations.append(f"Unable to load configuration {dataset_configuration_path}: {error}")
             continue
 
+        dataset_key = dataset_name.lower()
         valid_datasets.append((dataset_key, dataset_configuration_path, dataset_recording_paths))
 
     if not valid_datasets:
@@ -714,6 +721,7 @@ def start_multi_recording_batch_processing_tool(
     for dataset_key, dataset_configuration_path, dataset_recording_paths in valid_datasets:
         # Loads the template configuration and applies runtime-specific overrides. The template file is never modified.
         configuration = MultiRecordingConfiguration.from_yaml(file_path=dataset_configuration_path)
+        configuration.recording_io.dataset_name = dataset_key
         configuration.recording_io.recording_directories = tuple(natsorted(dataset_recording_paths))
         configuration.runtime.parallel_workers = actual_workers_discover
         configuration.runtime.display_progress_bars = progress_bars
@@ -962,16 +970,20 @@ def _resolve_saturating_allocation(budget: int, total_jobs: int) -> tuple[int, i
     return workers, max_parallel
 
 
-def _pipeline_worker(configuration_path: Path, job_id: str, *, single_recording: bool = True) -> None:
+def _pipeline_worker(
+    configuration_path: Path, job_id: str, tracker_path: Path, *, single_recording: bool = True
+) -> None:
     """Executes a single pipeline job identified by its job ID.
 
     Calls the appropriate pipeline function in REMOTE mode, passing the job_id so the pipeline reads the job definition
-    from the ProcessingTracker and updates tracker state on completion or failure. The pipeline handles all tracker
-    state transitions (start_job, complete_job, fail_job) internally.
+    from the ProcessingTracker and updates tracker state on completion or failure. After the pipeline returns or raises,
+    verifies that the tracker reached a terminal state and marks the job as failed if the pipeline terminated without
+    updating the tracker.
 
     Args:
         configuration_path: The path to the recording or dataset configuration file.
         job_id: The unique hexadecimal job identifier registered in the ProcessingTracker.
+        tracker_path: The path to the ProcessingTracker file for this job.
         single_recording: Determines whether to call the single-recording or multi-recording pipeline.
     """
     try:
@@ -979,8 +991,15 @@ def _pipeline_worker(configuration_path: Path, job_id: str, *, single_recording:
             run_single_recording_pipeline(configuration_path=configuration_path, job_id=job_id)
         else:
             run_multi_recording_pipeline(configuration_path=configuration_path, job_id=job_id)
-    except Exception:  # noqa: S110 - Pipeline already persisted failure via tracker.fail_job() before re-raising.
+    except Exception:  # noqa: S110 - Pipeline may have persisted failure via tracker.fail_job() before re-raising.
         pass
+    finally:
+        tracker = ProcessingTracker(file_path=tracker_path)
+        if tracker.get_job_status(job_id=job_id) not in (ProcessingStatus.SUCCEEDED, ProcessingStatus.FAILED):
+            tracker.fail_job(
+                job_id=job_id,
+                error_message="Unable to complete job. Worker terminated without reaching a terminal state.",
+            )
 
 
 def _single_recording_batch_manager() -> None:
@@ -993,115 +1012,95 @@ def _single_recording_batch_manager() -> None:
     """
     timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
-    if _single_recording_batch_state is None:
-        return
-
     while True:
-        with _single_recording_batch_state.lock:
+        state = _single_recording_batch_state
+        if state is None:
+            return
+
+        with state.lock:
             # Cleans up completed threads.
             completed_keys = [
-                thread_key
-                for thread_key, thread in _single_recording_batch_state.active_threads.items()
-                if not thread.is_alive()
+                thread_key for thread_key, thread in state.active_threads.items() if not thread.is_alive()
             ]
             for thread_key in completed_keys:
-                _single_recording_batch_state.active_threads.pop(thread_key, None)
+                state.active_threads.pop(thread_key, None)
 
-            # Phase 1: BINARIZE (parallel — up to _MAXIMUM_PARALLEL_BINARIZE concurrent jobs).
-            if _single_recording_batch_state.current_phase == "binarize":
-                while (
-                    len(_single_recording_batch_state.active_threads) < _MAXIMUM_PARALLEL_BINARIZE
-                    and _single_recording_batch_state.phase_queue
-                ):
-                    recording_key, job_id = _single_recording_batch_state.phase_queue.pop(0)
+            # Phase 1: BINARIZE (parallel — up to _MAXIMUM_PARALLEL_IO_JOBS concurrent jobs).
+            if state.current_phase == "binarize":
+                while len(state.active_threads) < _MAXIMUM_PARALLEL_IO_JOBS and state.phase_queue:
+                    recording_key, job_id = state.phase_queue.pop(0)
                     thread = Thread(
                         target=_pipeline_worker,
                         kwargs={
-                            "configuration_path": _single_recording_batch_state.configuration_paths[recording_key],
+                            "configuration_path": state.configuration_paths[recording_key],
                             "job_id": job_id,
+                            "tracker_path": state.tracker_paths[recording_key],
                             "single_recording": True,
                         },
                         daemon=True,
                     )
                     thread.start()
-                    _single_recording_batch_state.active_threads[(recording_key, job_id)] = thread
+                    state.active_threads[(recording_key, job_id)] = thread
 
                 # Transitions to process phase when all binarize jobs have been dispatched and completed.
-                if not _single_recording_batch_state.active_threads and not _single_recording_batch_state.phase_queue:
-                    # Builds process queue from recordings whose binarize job succeeded.
-                    for recording_key in natsorted(_single_recording_batch_state.tracker_paths.keys()):
-                        tracker = ProcessingTracker(
-                            file_path=_single_recording_batch_state.tracker_paths[recording_key]
-                        )
-                        binarize_status = tracker.get_job_status(
-                            job_id=_single_recording_batch_state.binarize_jobs[recording_key]
-                        )
+                if not state.active_threads and not state.phase_queue:
+                    for recording_key in natsorted(state.tracker_paths.keys()):
+                        tracker = ProcessingTracker(file_path=state.tracker_paths[recording_key])
+                        binarize_status = tracker.get_job_status(job_id=state.binarize_jobs[recording_key])
                         if binarize_status == ProcessingStatus.SUCCEEDED:
-                            for process_job_id in _single_recording_batch_state.process_jobs[recording_key]:
-                                _single_recording_batch_state.phase_queue.append((recording_key, process_job_id))
-
-                    _single_recording_batch_state.current_phase = "process"
+                            for process_job_id in state.process_jobs[recording_key]:
+                                state.phase_queue.append((recording_key, process_job_id))
+                    state.current_phase = "process"
 
             # Phase 2: PROCESS (parallel — up to max_parallel_planes concurrent jobs).
-            elif _single_recording_batch_state.current_phase == "process":
-                while (
-                    len(_single_recording_batch_state.active_threads)
-                    < _single_recording_batch_state.max_parallel_planes
-                    and _single_recording_batch_state.phase_queue
-                ):
-                    recording_key, job_id = _single_recording_batch_state.phase_queue.pop(0)
+            elif state.current_phase == "process":
+                while len(state.active_threads) < state.max_parallel_planes and state.phase_queue:
+                    recording_key, job_id = state.phase_queue.pop(0)
                     thread = Thread(
                         target=_pipeline_worker,
                         kwargs={
-                            "configuration_path": _single_recording_batch_state.configuration_paths[recording_key],
+                            "configuration_path": state.configuration_paths[recording_key],
                             "job_id": job_id,
+                            "tracker_path": state.tracker_paths[recording_key],
                             "single_recording": True,
                         },
                         daemon=True,
                     )
                     thread.start()
-                    _single_recording_batch_state.active_threads[(recording_key, job_id)] = thread
+                    state.active_threads[(recording_key, job_id)] = thread
 
                 # Transitions to combine phase when all process jobs have been dispatched and completed.
-                if not _single_recording_batch_state.active_threads and not _single_recording_batch_state.phase_queue:
-                    # Builds combine queue from recordings whose process jobs succeeded.
-                    for recording_key in natsorted(_single_recording_batch_state.tracker_paths.keys()):
-                        tracker = ProcessingTracker(
-                            file_path=_single_recording_batch_state.tracker_paths[recording_key]
-                        )
-                        process_job_ids = _single_recording_batch_state.process_jobs[recording_key]
+                if not state.active_threads and not state.phase_queue:
+                    for recording_key in natsorted(state.tracker_paths.keys()):
+                        tracker = ProcessingTracker(file_path=state.tracker_paths[recording_key])
+                        process_job_ids = state.process_jobs[recording_key]
                         all_succeeded = all(
                             tracker.get_job_status(job_id=job_id) == ProcessingStatus.SUCCEEDED
                             for job_id in process_job_ids
                         )
                         if all_succeeded:
-                            _single_recording_batch_state.phase_queue.append(
-                                (recording_key, _single_recording_batch_state.combine_jobs[recording_key])
-                            )
+                            state.phase_queue.append((recording_key, state.combine_jobs[recording_key]))
+                    state.current_phase = "combine"
 
-                    _single_recording_batch_state.current_phase = "combine"
-
-            # Phase 3: COMBINE (parallel — up to _MAXIMUM_PARALLEL_BINARIZE concurrent jobs, I/O bound).
-            elif _single_recording_batch_state.current_phase == "combine":
-                while (
-                    len(_single_recording_batch_state.active_threads) < _MAXIMUM_PARALLEL_BINARIZE
-                    and _single_recording_batch_state.phase_queue
-                ):
-                    recording_key, job_id = _single_recording_batch_state.phase_queue.pop(0)
+            # Phase 3: COMBINE (parallel — up to _MAXIMUM_PARALLEL_IO_JOBS concurrent jobs, I/O bound).
+            elif state.current_phase == "combine":
+                while len(state.active_threads) < _MAXIMUM_PARALLEL_IO_JOBS and state.phase_queue:
+                    recording_key, job_id = state.phase_queue.pop(0)
                     thread = Thread(
                         target=_pipeline_worker,
                         kwargs={
-                            "configuration_path": _single_recording_batch_state.configuration_paths[recording_key],
+                            "configuration_path": state.configuration_paths[recording_key],
                             "job_id": job_id,
+                            "tracker_path": state.tracker_paths[recording_key],
                             "single_recording": True,
                         },
                         daemon=True,
                     )
                     thread.start()
-                    _single_recording_batch_state.active_threads[(recording_key, job_id)] = thread
+                    state.active_threads[(recording_key, job_id)] = thread
 
                 # Exits when all combine jobs have been dispatched and completed.
-                if not _single_recording_batch_state.active_threads and not _single_recording_batch_state.phase_queue:
+                if not state.active_threads and not state.phase_queue:
                     break
 
         # Polls at 1-second intervals before checking again.
@@ -1117,83 +1116,74 @@ def _multi_recording_batch_manager() -> None:
     """
     timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
-    if _multi_recording_batch_state is None:
-        return
-
     while True:
-        with _multi_recording_batch_state.lock:
+        state = _multi_recording_batch_state
+        if state is None:
+            return
+
+        with state.lock:
             # Cleans up completed threads.
             completed_keys = [
-                thread_key
-                for thread_key, thread in _multi_recording_batch_state.active_threads.items()
-                if not thread.is_alive()
+                thread_key for thread_key, thread in state.active_threads.items() if not thread.is_alive()
             ]
             for thread_key in completed_keys:
-                _multi_recording_batch_state.active_threads.pop(thread_key, None)
+                state.active_threads.pop(thread_key, None)
 
             # Phase 1: DISCOVER (parallel — up to max_parallel_discovers concurrent jobs).
-            if _multi_recording_batch_state.current_phase == "discover":
-                while (
-                    len(_multi_recording_batch_state.active_threads)
-                    < _multi_recording_batch_state.max_parallel_discovers
-                    and _multi_recording_batch_state.phase_queue
-                ):
-                    dataset_key, job_id = _multi_recording_batch_state.phase_queue.pop(0)
+            if state.current_phase == "discover":
+                while len(state.active_threads) < state.max_parallel_discovers and state.phase_queue:
+                    dataset_key, job_id = state.phase_queue.pop(0)
                     thread = Thread(
                         target=_pipeline_worker,
                         kwargs={
-                            "configuration_path": _multi_recording_batch_state.configuration_paths[dataset_key],
+                            "configuration_path": state.configuration_paths[dataset_key],
                             "job_id": job_id,
+                            "tracker_path": state.tracker_paths[dataset_key],
                             "single_recording": False,
                         },
                         daemon=True,
                     )
                     thread.start()
-                    _multi_recording_batch_state.active_threads[(dataset_key, job_id)] = thread
+                    state.active_threads[(dataset_key, job_id)] = thread
 
                 # Transitions to extract phase when all discover jobs have been dispatched and completed.
-                if not _multi_recording_batch_state.active_threads and not _multi_recording_batch_state.phase_queue:
+                if not state.active_threads and not state.phase_queue:
                     # Builds extract queue from datasets whose discover job succeeded.
-                    for dataset_key in natsorted(_multi_recording_batch_state.tracker_paths.keys()):
-                        tracker = ProcessingTracker(file_path=_multi_recording_batch_state.tracker_paths[dataset_key])
-                        discover_status = tracker.get_job_status(
-                            job_id=_multi_recording_batch_state.discover_jobs[dataset_key]
-                        )
+                    for dataset_key in natsorted(state.tracker_paths.keys()):
+                        tracker = ProcessingTracker(file_path=state.tracker_paths[dataset_key])
+                        discover_status = tracker.get_job_status(job_id=state.discover_jobs[dataset_key])
                         if discover_status == ProcessingStatus.SUCCEEDED:
-                            for extract_job_id in _multi_recording_batch_state.extract_jobs[dataset_key]:
-                                _multi_recording_batch_state.phase_queue.append((dataset_key, extract_job_id))
+                            for extract_job_id in state.extract_jobs[dataset_key]:
+                                state.phase_queue.append((dataset_key, extract_job_id))
 
                             # Updates configuration to use extract-phase worker count.
                             config = MultiRecordingConfiguration.from_yaml(
-                                file_path=_multi_recording_batch_state.configuration_paths[dataset_key]
+                                file_path=state.configuration_paths[dataset_key]
                             )
-                            config.runtime.parallel_workers = _multi_recording_batch_state.workers_per_extract
-                            config.save(file_path=_multi_recording_batch_state.configuration_paths[dataset_key])
+                            config.runtime.parallel_workers = state.workers_per_extract
+                            config.save(file_path=state.configuration_paths[dataset_key])
 
-                    _multi_recording_batch_state.current_phase = "extract"
+                    state.current_phase = "extract"
 
             # Phase 2: EXTRACT (parallel — up to max_parallel_extracts concurrent jobs).
-            elif _multi_recording_batch_state.current_phase == "extract":
-                while (
-                    len(_multi_recording_batch_state.active_threads)
-                    < _multi_recording_batch_state.max_parallel_extracts
-                    and _multi_recording_batch_state.phase_queue
-                ):
-                    dataset_key, job_id = _multi_recording_batch_state.phase_queue.pop(0)
+            elif state.current_phase == "extract":
+                while len(state.active_threads) < state.max_parallel_extracts and state.phase_queue:
+                    dataset_key, job_id = state.phase_queue.pop(0)
                     thread = Thread(
                         target=_pipeline_worker,
                         kwargs={
-                            "configuration_path": _multi_recording_batch_state.configuration_paths[dataset_key],
+                            "configuration_path": state.configuration_paths[dataset_key],
                             "job_id": job_id,
+                            "tracker_path": state.tracker_paths[dataset_key],
                             "single_recording": False,
                         },
                         daemon=True,
                     )
                     thread.start()
-                    _multi_recording_batch_state.active_threads[(dataset_key, job_id)] = thread
+                    state.active_threads[(dataset_key, job_id)] = thread
 
                 # Exits when all extract jobs have been dispatched and completed.
-                if not _multi_recording_batch_state.active_threads and not _multi_recording_batch_state.phase_queue:
+                if not state.active_threads and not state.phase_queue:
                     break
 
         # Polls at 1-second intervals before checking again.

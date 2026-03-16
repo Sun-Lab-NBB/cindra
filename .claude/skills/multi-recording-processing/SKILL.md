@@ -100,7 +100,7 @@ Phase 1: DISCOVER (Mixed parallelization)
 Phase 2: EXTRACT (CPU bound, parallel by recording)
 ├── Applies template masks to extract fluorescence
 ├── Computes neuropil signals, spike deconvolution
-└── Each recording uses up to 30 workers
+└── Workers per recording via saturating allocation (see Resource Management)
 ```
 
 Batch processing across multiple datasets:
@@ -174,8 +174,19 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
    `multi_recording_configuration.yaml` inside each dataset's output directory, preserving the
    original template. Pass the same template path for multiple datasets that share parameters.
 
-5. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many
-   cores to use (see Resource Management section).
+5. **Confirm CPU allocation** — Compute the saturating allocation for both phases using the
+   algorithm in the Resource Management section. Present the computed values to the user as a
+   summary table before starting:
+
+   ```text
+   Phase     | Jobs | Workers/Job | Max Parallel | Total Cores
+   ----------|------|-------------|--------------|------------
+   Discover  |    2 |          60 |            2 |         120
+   Extract   |   30 |          30 |            4 |         120
+   ```
+
+   Ask the user to confirm or override. Both `workers_per_discover` and `workers_per_extract`
+   default to `-1` (automatic). Only pass explicit values if the user requests an override.
 
 6. **Start batch** — Call `start_multi_recording_batch_processing_tool` with the dataset
    configurations and worker settings.
@@ -191,11 +202,28 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
 
 ## Resource management
 
-The system automatically calculates optimal resource allocation:
+The system uses saturating core allocation to distribute CPU cores across parallel jobs.
+When both `workers_per_job` and `max_parallel_jobs` are set to `-1` (automatic), the allocator
+runs the following algorithm:
 
-- **Workers per job**: Up to `cpu_count - 2` cores (reserved cores for system operations)
-- **No per-job cap**: Workers are limited only by available CPU cores minus reserved
-- **Parallel capacity**: Automatically calculated from `workers_per_job` and available cores
+1. **Budget**: `cpu_count - 2` (2 cores reserved for system operations)
+2. **Max parallel jobs**: `min(total_jobs, budget // 30)` (targets ~30 workers per job)
+3. **Raw workers per job**: `budget // max_parallel_jobs`
+4. **Round down** to the nearest multiple of 5
+5. **Saturate**: If workers per job falls below 10 and parallelism > 1, reduce parallelism and
+   recalculate until each job has at least 10 workers
+
+| CPU Cores | Budget | Jobs | Workers/Job | Max Parallel | Total Utilized |
+|-----------|--------|------|-------------|--------------|----------------|
+| 128       | 126    | 4    | 30          | 4            | 120            |
+| 64        | 62     | 4    | 30          | 2            | 60             |
+| 32        | 30     | 4    | 30          | 1            | 30             |
+| 16        | 14     | 4    | 14 (→ 10)   | 1            | 10             |
+
+Both phases use this same allocation model independently. The discover phase treats each dataset
+as a job; the extract phase treats each recording as a job. Both `workers_per_discover` and
+`workers_per_extract` default to `-1` (automatic) and can be overridden explicitly in
+`start_multi_recording_batch_processing_tool`.
 
 ---
 

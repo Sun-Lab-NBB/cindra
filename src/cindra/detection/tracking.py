@@ -41,6 +41,26 @@ def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -
     if not contexts:
         return
 
+    # Skips tracking when template masks already exist on disk and registration was not repeated. Re-running
+    # registration produces fresh deformed masks with reset cluster IDs, which requires re-tracking. When
+    # registration is skipped, the existing deformed masks retain their cluster assignments from the prior tracking
+    # run, making re-tracking both unnecessary and incorrect (the cluster_id filter would find no unclustered ROIs).
+    first_output = contexts[0].runtime.output_path
+    repeat_registration = contexts[0].configuration.diffeomorphic_registration.repeat_registration
+    if (
+        not repeat_registration
+        and first_output is not None
+        and (first_output / "tracking_template_masks.npz").exists()
+    ):
+        console.echo(
+            message="Multi-recording tracking: skipped. Template masks already exist and re-registration is disabled.",
+            level=LogLevel.INFO,
+        )
+        for context in contexts:
+            if context.runtime.output_path is not None:
+                context.runtime.tracking.load_arrays(context.runtime.output_path)
+        return
+
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
