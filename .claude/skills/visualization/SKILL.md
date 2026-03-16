@@ -58,12 +58,12 @@ tools manage the viewer window; the headless query tools provide the underlying 
 
 ### Viewer lifecycle tools (cindra-gui MCP server)
 
-| Tool                      | Purpose                                                         |
-|---------------------------|-----------------------------------------------------------------|
-| `launch_viewer_tool`      | Spawns a GUI viewer subprocess for the user to interact with    |
-| `list_viewers_tool`       | Lists all active viewer instances with type, path, alive status |
-| `close_viewer_tool`       | Terminates a viewer subprocess and cleans up state files        |
-| `query_viewer_state_tool` | Returns the live display state of an active viewer              |
+| Tool                      | Purpose                                                                     |
+|---------------------------|-----------------------------------------------------------------------------|
+| `launch_viewer_tool`      | Spawns a GUI viewer subprocess for the user to interact with                |
+| `list_viewers_tool`       | Lists active viewers with type, path, alive status, and live active dataset |
+| `close_viewer_tool`       | Terminates a viewer subprocess and cleans up state files                    |
+| `query_viewer_state_tool` | Returns the live display state of an active viewer                          |
 
 ### Data query tools (cindra MCP server)
 
@@ -357,6 +357,22 @@ When the user asks questions about what they see in a viewer:
 
 3. **Explain in context** — Combine the viewer state with the queried data to give the user a
    contextual answer about what they are seeing.
+
+### Runtime state awareness
+
+Viewers are interactive — the user can switch datasets, change display settings, and navigate
+recordings at any time via the GUI controls. The launch-time parameters passed to
+`launch_viewer_tool` may not reflect the current viewer state.
+
+**Always re-query before answering.** Before responding to any user question about a viewer,
+call `query_viewer_state_tool` to read the live display state. Do not rely on cached state from
+previous queries or launch-time parameters.
+
+**Dataset tracking.** Both `list_viewers_tool` and `query_viewer_state_tool` report the
+`active_dataset` field, which reflects the dataset currently displayed by the viewer. This may
+differ from the `dataset` parameter provided at launch if the user switched datasets via the
+viewer's dropdown controls. Use `active_dataset` (not `dataset`) when determining what the
+viewer is currently showing.
 
 ### Multi-viewer workflow
 

@@ -115,12 +115,14 @@ def launch_viewer_tool(
 def list_viewers_tool() -> dict[str, Any]:
     """Lists all active GUI viewer instances managed by this server.
 
-    Returns viewer IDs, types, recording paths, and alive status for each managed viewer. Dead viewers are
-    automatically cleaned up.
+    Returns viewer IDs, types, recording paths, alive status, and live active dataset for each managed viewer. Dead
+    viewers are automatically cleaned up. The ``active_dataset`` field reflects the dataset currently displayed by the
+    viewer, which may differ from the ``dataset`` value provided at launch if the user switched datasets inside the
+    viewer.
 
     Returns:
         A JSON dictionary containing 'viewers' list (each with 'viewer_id', 'viewer_type', 'recording_path',
-        'dataset', and 'alive' flag) and 'count' of active viewers.
+        'dataset', 'active_dataset', and 'alive' flag) and 'count' of active viewers.
     """
     viewers: list[dict[str, Any]] = []
     dead_ids: list[str] = []
@@ -129,15 +131,26 @@ def list_viewers_tool() -> dict[str, Any]:
         alive = entry.process.poll() is None
         if not alive:
             dead_ids.append(viewer_id)
-        viewers.append(
-            {
-                "viewer_id": viewer_id,
-                "viewer_type": entry.viewer_type,
-                "recording_path": entry.recording_path,
-                "dataset": entry.dataset,
-                "alive": alive,
-            }
-        )
+
+        viewer_info: dict[str, Any] = {
+            "viewer_id": viewer_id,
+            "viewer_type": entry.viewer_type,
+            "recording_path": entry.recording_path,
+            "dataset": entry.dataset,
+            "alive": alive,
+            "active_dataset": None,
+        }
+
+        if alive:
+            state_file = Path(entry.state_path)
+            if state_file.exists():
+                try:
+                    state = read_viewer_state(state_path=state_file)
+                    viewer_info["active_dataset"] = state.get("active_dataset")
+                except Exception:
+                    pass
+
+        viewers.append(viewer_info)
 
     for dead_id in dead_ids:
         cleanup_state_file(state_path=Path(_viewer_registry[dead_id].state_path))
