@@ -38,13 +38,14 @@ These tools are registered on the `cindra-mcp` server. You MUST verify the MCP s
 using these tools. If the tools are unavailable, invoke `/mcp-environment-setup` to diagnose and resolve
 connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
 
-| Tool                                       | Purpose                                                                   |
-|--------------------------------------------|---------------------------------------------------------------------------|
-| `generate_config_file`                     | Generates a default configuration YAML for the specified pipeline type    |
-| `discover_multi_recording_candidates_tool` | Finds recording directories with completed single-recording output        |
-| `resolve_dataset_name_tool`                | Constructs qualified dataset names from base name + specifier             |
-| `read_config_file`                         | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
-| `validate_config_file`                     | Validates a cindra config against schema, reports errors and non-defaults |
+| Tool                                       | Purpose                                                                     |
+|--------------------------------------------|-----------------------------------------------------------------------------|
+| `generate_config_file`                     | Generates a default configuration YAML for the specified pipeline type      |
+| `discover_multi_recording_candidates_tool` | Finds recording directories with completed single-recording output          |
+| `resolve_dataset_name_tool`                | Constructs qualified dataset names from base name + specifier               |
+| `read_config_file`                         | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)    |
+| `validate_config_file`                     | Validates a cindra config against schema, reports errors and non-defaults   |
+| `compare_config_files_tool`                | Compares two cindra configs and returns structural differences between them |
 
 ---
 
@@ -383,7 +384,7 @@ Configuration files follow a two-tier lifecycle:
    Templates are never modified by the pipeline. One template can serve multiple datasets that share the
    same processing parameters (only `dataset_name` differs, and this is handled by the batch tool).
 
-2. **Resolved copies** — When `start_multi_recording_batch_processing_tool` runs, it loads the template,
+2. **Resolved copies** — When `prepare_multi_recording_batch_tool` runs, it loads the template,
    applies runtime-specific overrides (`recording_io.recording_directories`, `runtime.parallel_workers`),
    and saves the resolved copy as `multi_recording_configuration.yaml` inside each dataset's output
    directory (`cindra/multi_recording/{dataset_name}/`). These resolved copies are what the pipeline

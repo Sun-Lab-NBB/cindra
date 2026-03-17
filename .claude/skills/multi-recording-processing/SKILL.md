@@ -9,17 +9,21 @@ user-invocable: true
 # Multi-recording processing
 
 Orchestrates the multi-recording batch processing workflow: verify prerequisites, organize recordings
-by dataset, start batch processing, monitor progress, and hand off to downstream skills for output
-verification.
+by dataset, prepare execution manifests, dispatch jobs, monitor progress, and hand off to downstream
+skills for output verification.
 
 ---
 
 ## Scope
 
 **Covers:**
-- Batch processing workflow: prerequisite verification, dataset organization, execution, monitoring, and completion
-- MCP batch execution tools (`start_multi_recording_batch_processing_tool`,
-  `get_multi_recording_batch_processing_status_tool`, `cancel_multi_recording_batch_processing_tool`)
+- Batch processing workflow: prerequisite verification, dataset organization, preparation, execution,
+  monitoring, and completion
+- MCP preparation tools (`prepare_multi_recording_batch_tool`, `execute_full_pipeline_tool`)
+- MCP execution tools (`execute_processing_jobs_tool`, `get_processing_jobs_status_tool`,
+  `get_active_execution_timing_tool`, `cancel_processing_jobs_tool`)
+- MCP management tools (`get_batch_status_overview_tool`, `reset_processing_phases_tool`,
+  `clean_processing_output_tool`)
 - Dataset name resolution via `resolve_dataset_name_tool`
 - Supporting tools for candidate discovery and status checking
 - Resource management and CPU allocation guidance
@@ -46,7 +50,7 @@ the parameters it consumes.
 ## Prerequisites
 
 All recordings must have completed single-recording processing (`get_single_recording_status` returns
-status `combined`). If any recording is incomplete, invoke the earliest missing step in the chain:
+status `completed`). If any recording is incomplete, invoke the earliest missing step in the chain:
 `/acquisition-data-preparation` → `/single-recording-configuration` → `/single-recording-processing`.
 
 ---
@@ -61,13 +65,29 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ## Available tools
 
-### Batch execution tools
+### Preparation tools
 
-| Tool                                               | Purpose                                    |
-|----------------------------------------------------|--------------------------------------------|
-| `start_multi_recording_batch_processing_tool`      | Starts batch processing (1+ datasets)      |
-| `get_multi_recording_batch_processing_status_tool` | Returns in-memory status of running batch  |
-| `cancel_multi_recording_batch_processing_tool`     | Cancels batch processing, clears queues    |
+| Tool                                 | Purpose                                                                 |
+|--------------------------------------|-------------------------------------------------------------------------|
+| `prepare_multi_recording_batch_tool` | Prepares execution manifest without starting execution (idempotent)     |
+| `execute_full_pipeline_tool`         | Convenience: prepares and executes all phases with automatic sequencing |
+
+### Execution tools
+
+| Tool                               | Purpose                                             |
+|------------------------------------|-----------------------------------------------------|
+| `execute_processing_jobs_tool`     | Dispatches prepared jobs for background execution   |
+| `get_processing_jobs_status_tool`  | Returns per-job status of active execution session  |
+| `get_active_execution_timing_tool` | Returns per-job timing and session-level throughput |
+| `cancel_processing_jobs_tool`      | Cancels active execution, clears pending queues     |
+
+### Management tools
+
+| Tool                             | Purpose                                                           |
+|----------------------------------|-------------------------------------------------------------------|
+| `get_batch_status_overview_tool` | Bird's-eye view of all processing status under a root directory   |
+| `reset_processing_phases_tool`   | Selectively reset completed phases for re-runs                    |
+| `clean_processing_output_tool`   | Delete output files for specific phases to reclaim disk space     |
 
 ### Configuration & name resolution tools
 
@@ -139,10 +159,25 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
 
 ## Processing workflow
 
+### Execution model
+
+The processing workflow uses a **prepare-then-execute** model:
+
+1. **Prepare** creates an execution manifest (tracker files, per-dataset configurations, job lists) without
+   starting any computation. This step is idempotent — calling it again on the same datasets returns the
+   existing manifest.
+
+2. **Execute** dispatches jobs from the manifest with prerequisite validation, resource allocation, and automatic
+   phase sequencing. Only one execution session can be active at a time.
+
+For simple cases, `execute_full_pipeline_tool` combines both steps into a single call with automatic phase
+advancement. For fine-grained control (e.g., running only specific phases, custom resource allocation, or
+selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execute_processing_jobs_tool`.
+
 ### Pre-processing checklist
 
 ```text
-- [ ] All recordings confirmed as single-recording complete (status: combined)
+- [ ] All recordings confirmed as single-recording complete (status: completed)
 - [ ] Recordings grouped into datasets (by common parent, explicit grouping, or user instruction)
 - [ ] Dataset names resolved via resolve_dataset_name_tool
 - [ ] Template configuration confirmed or created (one template can serve multiple datasets)
@@ -155,7 +190,7 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
 ### Workflow steps
 
 1. **Verify prerequisites** — Use `discover_multi_recording_candidates_tool` to find eligible
-   recordings and `get_single_recording_status` to confirm each has status `combined`. If any
+   recordings and `get_single_recording_status` to confirm each has status `completed`. If any
    recording is incomplete, invoke `/single-recording-processing` (or upstream skills as needed).
 
 2. **Organize into datasets** — Group recordings by common parent directory, user-provided grouping,
@@ -170,7 +205,7 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
    invoke `/multi-recording-configuration` to create one. Template configs are reusable across
    datasets and live at user-chosen locations (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). Set each
    configuration's `dataset_name` to the qualified name from step 3. Do NOT create per-dataset
-   config copies — the batch tool automatically saves resolved copies as
+   config copies — the prepare tool automatically saves resolved copies as
    `multi_recording_configuration.yaml` inside each dataset's output directory, preserving the
    original template. Pass the same template path for multiple datasets that share parameters.
 
@@ -185,24 +220,48 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
    Extract   |   30 |          30 |            4 |         120
    ```
 
-   Ask the user to confirm or override. Both `workers_per_discover` and `workers_per_extract`
-   default to `-1` (automatic). Only pass explicit values if the user requests an override.
+   Ask the user to confirm or override. Both `workers_per_job` and `max_parallel_jobs` default to
+   `-1` (automatic). Only pass explicit values if the user requests an override.
 
-6. **Start batch** — Call `start_multi_recording_batch_processing_tool` with the dataset
-   configurations and worker settings.
+6. **Execute** — Choose one of two approaches:
 
-7. **Monitor** — Use `get_multi_recording_batch_processing_status_tool` to check progress.
-   Present status as a formatted table (see Status Formatting section).
+   **Simple (recommended for straightforward runs):**
+   Call `execute_full_pipeline_tool` with `pipeline_type="multi-recording"` and
+   `dataset_configurations` containing each dataset's `configuration_path`, `recording_paths`, and
+   `dataset_name`. This prepares and executes all phases automatically.
+
+   **Fine-grained (for selective execution or re-runs):**
+   a. Call `prepare_multi_recording_batch_tool` with the dataset configurations. This returns a
+      manifest with job IDs and statuses.
+   b. Select the jobs to execute from the manifest (e.g., only SCHEDULED jobs, only specific phases).
+   c. Call `execute_processing_jobs_tool` with the selected job descriptors and worker settings. Each
+      job descriptor needs `configuration_path`, `tracker_path`, `job_id`, and `pipeline_type` from
+      the manifest.
+
+7. **Monitor** — Use `get_processing_jobs_status_tool` to check progress. Optionally use
+   `get_active_execution_timing_tool` for per-job timing and session throughput. Present status as a
+   formatted table (see Status Formatting section).
 
 8. **Handle completion** — When all datasets finish, check for failures. Route errors to the
    appropriate skill (see Error Routing section). On success, invoke `/multi-recording-results`
    to verify outputs, then `/visualization` for visual inspection.
 
+### Re-running specific phases
+
+To re-run specific phases (e.g., after changing tracking parameters):
+
+1. Use `reset_processing_phases_tool` to reset the target phases to SCHEDULED status. Downstream
+   phases are automatically reset (e.g., resetting `discovery` also resets `extraction`).
+2. Optionally modify the configuration file before re-execution.
+3. Optionally use `clean_processing_output_tool` to delete output files from the reset phases
+   (requires the `dataset` parameter for multi-recording).
+4. Call `execute_processing_jobs_tool` with the reset jobs from the manifest.
+
 ---
 
 ## Resource management
 
-The system uses saturating core allocation to distribute CPU cores across parallel jobs.
+The system uses saturating core allocation to distribute CPU cores across parallel compute-bound jobs.
 When both `workers_per_job` and `max_parallel_jobs` are set to `-1` (automatic), the allocator
 runs the following algorithm:
 
@@ -221,9 +280,9 @@ runs the following algorithm:
 | 16        | 14     | 4    | 14 (→ 10)   | 1            | 10             |
 
 Both phases use this same allocation model independently. The discover phase treats each dataset
-as a job; the extract phase treats each recording as a job. Both `workers_per_discover` and
-`workers_per_extract` default to `-1` (automatic) and can be overridden explicitly in
-`start_multi_recording_batch_processing_tool`.
+as a job; the extract phase treats each recording as a job. Both `workers_per_job` and
+`max_parallel_jobs` default to `-1` (automatic) and can be overridden explicitly in
+`execute_processing_jobs_tool` or `execute_full_pipeline_tool`.
 
 ---
 
@@ -247,14 +306,22 @@ Summary: 1/2 datasets complete | 2/4 recordings extracted | 0 failed
 
 ## Error routing
 
-### Batch start errors
+### Preparation errors
 
 | Error Message                                     | Resolution                              |
 |---------------------------------------------------|-----------------------------------------|
 | "At least one dataset configuration is required"  | Provide dataset configurations          |
-| "Configuration file not found"                    | Invoke `/multi-recording-configuration` |
-| "Recording directory not found"                   | Verify path exists                      |
-| "Batch processing already in progress"            | Wait for current batch or cancel first  |
+| "Configuration not found"                         | Invoke `/multi-recording-configuration` |
+| "Need at least 2 recordings"                      | Provide at least 2 recording paths      |
+| "Invalid recordings"                              | Verify paths exist and are directories  |
+
+### Execution errors
+
+| Error Message                                   | Resolution                                     |
+|-------------------------------------------------|------------------------------------------------|
+| "An execution session is already active"        | Wait for current session or cancel first       |
+| "Job ID not found in tracker"                   | Re-prepare the batch to regenerate manifests   |
+| "Prerequisites not satisfied"                   | Execute prerequisite phases first              |
 
 ### Processing failure routing
 
@@ -269,7 +336,7 @@ When processing fails for some datasets/recordings, read the error messages and 
 | No trackable ROIs found                             | `/multi-recording-configuration`   |
 | MCP tools unavailable, server connection errors     | `/mcp-environment-setup`           |
 
-Wait for the current batch to complete before starting retries.
+Wait for the current execution session to complete before starting retries.
 
 ---
 
@@ -291,12 +358,12 @@ Wait for the current batch to complete before starting retries.
 ```text
 Multi-Recording Processing Workflow:
 - [ ] MCP server connected (if not, invoke `/mcp-environment-setup`)
-- [ ] All recordings confirmed as single-recording complete (status: combined)
+- [ ] All recordings confirmed as single-recording complete (status: completed)
 - [ ] Recordings grouped into datasets
 - [ ] Dataset names resolved via `resolve_dataset_name_tool`
 - [ ] Configuration file confirmed or created per dataset via `/multi-recording-configuration`
 - [ ] CPU core allocation confirmed with user
-- [ ] Batch started via `start_multi_recording_batch_processing_tool`
+- [ ] Batch prepared or full pipeline executed
 - [ ] Status monitored until all datasets complete or fail
 - [ ] Failed datasets routed to appropriate skill (see Error Routing)
 - [ ] Successful datasets verified via `/multi-recording-results`
