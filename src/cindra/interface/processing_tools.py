@@ -2239,6 +2239,6 @@ def _load_runtime_yaml(path: Path) -> dict[str, Any] | None:
         return None
     try:
         with path.open() as yaml_file:
-            return yaml.safe_load(yaml_file)  # type: ignore[no-any-return]
+            return yaml.safe_load(yaml_file)
     except Exception:
         return None
