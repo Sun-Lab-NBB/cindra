@@ -176,11 +176,7 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
     # extraction phase directly.
     first_output = contexts[0].runtime.output_path
     repeat_registration = contexts[0].configuration.diffeomorphic_registration.repeat_registration
-    if (
-        not repeat_registration
-        and first_output is not None
-        and (first_output / "tracking_template_masks.npz").exists()
-    ):
+    if not repeat_registration and first_output is not None and (first_output / "tracking_template_masks.npz").exists():
         console.echo(
             message="Template projection: skipped. Projection output already exists and re-registration is disabled.",
             level=LogLevel.INFO,
