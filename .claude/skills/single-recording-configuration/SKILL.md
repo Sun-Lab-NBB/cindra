@@ -38,12 +38,13 @@ These tools are registered on the `cindra-mcp` server. You MUST verify the MCP s
 using these tools. If the tools are unavailable, invoke `/mcp-environment-setup` to diagnose and resolve
 connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
 
-| Tool                                        | Purpose                                                                   |
-|---------------------------------------------|---------------------------------------------------------------------------|
-| `generate_config_file`                      | Generates a default configuration YAML for the specified pipeline type    |
-| `discover_single_recording_candidates_tool` | Finds recording directories containing `cindra_parameters.json`           |
-| `read_config_file`                          | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
-| `validate_config_file`                      | Validates a cindra config against schema, reports errors and non-defaults |
+| Tool                                        | Purpose                                                                     |
+|---------------------------------------------|-----------------------------------------------------------------------------|
+| `generate_config_file`                      | Generates a default configuration YAML for the specified pipeline type      |
+| `discover_single_recording_candidates_tool` | Finds recording directories containing `cindra_parameters.json`             |
+| `read_config_file`                          | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)    |
+| `validate_config_file`                      | Validates a cindra config against schema, reports errors and non-defaults   |
+| `compare_config_files_tool`                 | Compares two cindra configs and returns structural differences between them |
 
 ---
 
@@ -354,7 +355,7 @@ Configuration files follow a two-tier lifecycle:
    Templates can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings.
    Templates are never modified by the pipeline.
 
-2. **Resolved copies** — When `start_batch_processing_tool` runs, it loads the template, applies
+2. **Resolved copies** — When `prepare_single_recording_batch_tool` runs, it loads the template, applies
    recording-specific overrides (`file_io.data_path`, `file_io.output_path`, `runtime.parallel_workers`),
    and saves the resolved copy as `cindra/configuration.yaml` inside each recording's output directory.
    These resolved copies are what the pipeline actually executes against.
@@ -377,7 +378,7 @@ and let it handle per-recording fine-tuning automatically.
 5. **Validate** the configuration using `validate_config_file` to check for errors, warnings, and non-default
    parameters.
 6. **Configuration complete** — the validated template file is ready for use. This skill does not start
-   processing. If invoked standalone, inform the user that the configuration is ready and they can proceed
+   processing. If invoked standalone, inform the user that the configuration is ready, and they can proceed
    when ready. If invoked from another skill, return control to the caller.
 
 ---

@@ -80,7 +80,9 @@ tools are documented in detail by `/single-recording-results` and `/multi-record
 | `query_multi_recording_overview_tool`             | ROI, Tracking     |
 | `query_multi_recording_registration_quality_tool` | Tracking          |
 | `query_multi_recording_tracking_summary_tool`     | Tracking          |
+| `query_multi_recording_roi_statistics_tool`       | ROI (multi-rec)   |
 | `query_multi_recording_traces_tool`               | ROI (multi-rec)   |
+| `query_cross_recording_traces_tool`               | ROI (multi-rec)   |
 
 ---
 

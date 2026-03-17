@@ -9,16 +9,20 @@ user-invocable: true
 # Single-recording processing
 
 Orchestrates the single-recording batch processing workflow: discover recordings, validate prerequisites,
-start batch processing, monitor progress, and hand off to downstream skills for output verification.
+prepare execution manifests, dispatch jobs, monitor progress, and hand off to downstream skills for output
+verification.
 
 ---
 
 ## Scope
 
 **Covers:**
-- Batch processing workflow: discovery, validation, execution, monitoring, and completion
-- MCP batch execution tools (`start_batch_processing_tool`, `get_batch_processing_status_tool`,
-  `cancel_batch_processing_tool`)
+- Batch processing workflow: discovery, validation, preparation, execution, monitoring, and completion
+- MCP preparation tools (`prepare_single_recording_batch_tool`, `execute_full_pipeline_tool`)
+- MCP execution tools (`execute_processing_jobs_tool`, `get_processing_jobs_status_tool`,
+  `get_active_execution_timing_tool`, `cancel_processing_jobs_tool`)
+- MCP management tools (`get_batch_status_overview_tool`, `reset_processing_phases_tool`,
+  `clean_processing_output_tool`)
 - Supporting tools for discovery, validation, and status checking
 - Resource management and CPU allocation guidance
 - Status formatting and progress monitoring
@@ -49,13 +53,29 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ## Available tools
 
-### Batch execution tools
+### Preparation tools
 
-| Tool                               | Purpose                                                  |
-|------------------------------------|----------------------------------------------------------|
-| `start_batch_processing_tool`      | Starts batch single-recording processing (1+ recordings) |
-| `get_batch_processing_status_tool` | Returns disk-based status of running batch               |
-| `cancel_batch_processing_tool`     | Cancels batch processing, clears queues                  |
+| Tool                                  | Purpose                                                                 |
+|---------------------------------------|-------------------------------------------------------------------------|
+| `prepare_single_recording_batch_tool` | Prepares execution manifest without starting execution (idempotent)     |
+| `execute_full_pipeline_tool`          | Convenience: prepares and executes all phases with automatic sequencing |
+
+### Execution tools
+
+| Tool                               | Purpose                                             |
+|------------------------------------|-----------------------------------------------------|
+| `execute_processing_jobs_tool`     | Dispatches prepared jobs for background execution   |
+| `get_processing_jobs_status_tool`  | Returns per-job status of active execution session  |
+| `get_active_execution_timing_tool` | Returns per-job timing and session-level throughput |
+| `cancel_processing_jobs_tool`      | Cancels active execution, clears pending queues     |
+
+### Management tools
+
+| Tool                             | Purpose                                                           |
+|----------------------------------|-------------------------------------------------------------------|
+| `get_batch_status_overview_tool` | Bird's-eye view of all processing status under a root directory   |
+| `reset_processing_phases_tool`   | Selectively reset completed phases for re-runs                    |
+| `clean_processing_output_tool`   | Delete output files for specific phases to reclaim disk space     |
 
 ### Supporting tools (used during workflow)
 
@@ -72,7 +92,7 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 Three-phase sequential pipeline per recording:
 
 ```text
-Phase 1: BINARIZE (I/O bound, up to 3 parallel)
+Phase 1: BINARIZE (I/O bound, up to 4 parallel)
 ├── Converts raw TIFFs to binary format
 └── Determines plane count
 
@@ -80,21 +100,36 @@ Phase 2: PROCESS (CPU bound, parallel by plane)
 ├── Motion correction, ROI detection, signal extraction
 └── Workers per plane via saturating allocation (see Resource Management)
 
-Phase 3: COMBINE (I/O bound, up to 3 parallel)
+Phase 3: COMBINE (I/O bound, up to 4 parallel)
 └── Merges all plane results into unified dataset
 ```
 
 Batch processing across multiple recordings:
 
 ```text
-BINARIZE: Up to 3 concurrent recordings (I/O bound)
+BINARIZE: Up to 4 concurrent recordings (I/O bound, fixed concurrency)
 PROCESS:  Parallel (recording-plane pairs up to core limit)
-COMBINE:  Up to 3 concurrent recordings (I/O bound)
+COMBINE:  Up to 4 concurrent recordings (I/O bound, fixed concurrency)
 ```
 
 ---
 
 ## Processing workflow
+
+### Execution model
+
+The processing workflow uses a **prepare-then-execute** model:
+
+1. **Prepare** creates an execution manifest (tracker files, per-recording configurations, job lists) without
+   starting any computation. This step is idempotent — calling it again on the same recordings returns the
+   existing manifest.
+
+2. **Execute** dispatches jobs from the manifest with prerequisite validation, resource allocation, and automatic
+   phase sequencing. Only one execution session can be active at a time.
+
+For simple cases, `execute_full_pipeline_tool` combines both steps into a single call with automatic phase
+advancement. For fine-grained control (e.g., running only specific phases, custom resource allocation, or
+selective re-runs), use `prepare_single_recording_batch_tool` followed by `execute_processing_jobs_tool`.
 
 ### Pre-processing checklist
 
@@ -121,7 +156,7 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
 3. **Configure** — Ask the user if they have an existing template configuration file. If not,
    invoke `/single-recording-configuration` to create one. Template configs are reusable across
    recordings and live at user-chosen locations (e.g., `/Data/CA1_GCaMP6f_SD.yaml`). Do NOT create
-   per-recording config copies — the batch tool automatically saves resolved copies as
+   per-recording config copies — the prepare tool automatically saves resolved copies as
    `cindra/configuration.yaml` inside each recording's output directory, preserving the original
    template. Pass the same template path for all recordings that share parameters.
 
@@ -130,35 +165,60 @@ COMBINE:  Up to 3 concurrent recordings (I/O bound)
    directory, producing a `cindra/` subdirectory inside each recording). To write output elsewhere,
    the user provides a root output directory; per-recording output paths are then constructed by
    mirroring the recording directory structure under that root. Present the default behavior and ask
-   the user to confirm or provide an alternative. Pass `recording_output_paths` to
-   `start_batch_processing_tool` when the user specifies a non-default location.
+   the user to confirm or provide an alternative. Pass `recording_output_paths` to the prepare tool
+   when the user specifies a non-default location.
 
 5. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many cores
    to use (see Resource Management section).
 
-6. **Start batch** — Call `start_batch_processing_tool` with the confirmed recording paths,
-   configuration path, output paths (if non-default), and worker settings.
+6. **Execute** — Choose one of two approaches:
 
-7. **Monitor** — Use `get_batch_processing_status_tool` to check progress. Present status as a
+   **Simple (recommended for straightforward runs):**
+   Call `execute_full_pipeline_tool` with `pipeline_type="single-recording"`, the confirmed recording
+   paths, configuration path, output paths (if non-default), and worker settings. This prepares and
+   executes all phases automatically.
+
+   **Fine-grained (for selective execution or re-runs):**
+   a. Call `prepare_single_recording_batch_tool` with recording paths, configuration path, and output
+      paths. This returns a manifest with job IDs and statuses.
+   b. Select the jobs to execute from the manifest (e.g., only SCHEDULED jobs, only specific phases).
+   c. Call `execute_processing_jobs_tool` with the selected job descriptors and worker settings. Each
+      job descriptor needs `configuration_path`, `tracker_path`, `job_id`, and `pipeline_type` from
+      the manifest.
+
+7. **Monitor** — Use `get_processing_jobs_status_tool` to check progress. Optionally use
+   `get_active_execution_timing_tool` for per-job timing and session throughput. Present status as a
    formatted table (see Status Formatting section).
 
 8. **Handle completion** — When all recordings finish, check for failures. Route errors to the
    appropriate skill (see Error Routing section). On success, invoke `/single-recording-results`
    to verify outputs, then `/visualization` for visual inspection.
 
+### Re-running specific phases
+
+To re-run specific phases (e.g., after changing ROI detection parameters):
+
+1. Use `reset_processing_phases_tool` to reset the target phases to SCHEDULED status. Downstream
+   phases are automatically reset (e.g., resetting `processing` also resets `combination`).
+2. Optionally modify the configuration file before re-execution.
+3. Optionally use `clean_processing_output_tool` to delete output files from the reset phases.
+4. Call `execute_processing_jobs_tool` with the reset jobs from the manifest.
+
 ---
 
 ## Resource management
 
-The system uses saturating core allocation to distribute CPU cores across parallel plane jobs.
-When both `workers_per_plane` and `max_parallel_planes` are set to `-1` (automatic), the allocator
-runs the following algorithm:
+The system uses saturating core allocation to distribute CPU cores across parallel compute-bound jobs.
+I/O-bound jobs (binarize, combine) always use a fixed concurrency of 4 regardless of resource settings.
+
+When both `workers_per_job` and `max_parallel_jobs` are set to `-1` (automatic), the allocator
+runs the following algorithm for compute-bound jobs:
 
 1. **Budget**: `cpu_count - 2` (2 cores reserved for system operations)
-2. **Max parallel planes**: `min(total_planes, budget // 30)` (targets ~30 workers per job)
-3. **Raw workers per plane**: `budget // max_parallel_planes`
+2. **Max parallel jobs**: `min(total_jobs, budget // 30)` (targets ~30 workers per job)
+3. **Raw workers per job**: `budget // max_parallel_jobs`
 4. **Round down** to the nearest multiple of 5
-5. **Saturate**: If workers per plane falls below 10 and parallelism > 1, reduce parallelism and
+5. **Saturate**: If workers per job falls below 10 and parallelism > 1, reduce parallelism and
    recalculate until each job has at least 10 workers
 
 | CPU Cores | Budget | Planes | Workers/Plane | Max Parallel | Total Utilized |
@@ -168,8 +228,8 @@ runs the following algorithm:
 | 32        | 30     | 4      | 30            | 1            | 30             |
 | 16        | 14     | 4      | 14 (→ 10)     | 1            | 10             |
 
-Either or both values can be overridden explicitly via `workers_per_plane` and `max_parallel_planes`
-parameters in `start_batch_processing_tool`.
+Either or both values can be overridden explicitly via `workers_per_job` and `max_parallel_jobs`
+parameters in `execute_processing_jobs_tool` or `execute_full_pipeline_tool`.
 
 ---
 
@@ -195,14 +255,22 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
 ## Error routing
 
-### Batch start errors
+### Preparation errors
 
 | Error Message                             | Resolution                               |
 |-------------------------------------------|------------------------------------------|
 | "At least one recording path is required" | Provide recording paths                  |
 | "Configuration file not found"            | Invoke `/single-recording-configuration` |
 | "Recording directory not found"           | Verify path exists                       |
-| "Batch processing already in progress"    | Wait for current batch or cancel first   |
+| "No valid recording paths provided"       | Check paths exist and are directories    |
+
+### Execution errors
+
+| Error Message                                   | Resolution                                     |
+|-------------------------------------------------|------------------------------------------------|
+| "An execution session is already active"        | Wait for current session or cancel first       |
+| "Job ID not found in tracker"                   | Re-prepare the batch to regenerate manifests   |
+| "Prerequisites not satisfied"                   | Execute prerequisite phases first              |
 
 ### Processing failure routing
 
@@ -215,7 +283,7 @@ When processing fails for some recordings, read the error messages and route to 
 | Configuration parameter issues                    | `/single-recording-configuration` |
 | MCP tools unavailable, server connection errors   | `/mcp-environment-setup`          |
 
-Wait for the current batch to complete before starting retries.
+Wait for the current execution session to complete before starting retries.
 
 ---
 
@@ -242,7 +310,7 @@ Single-Recording Processing Workflow:
 - [ ] Configuration file confirmed or created via `/single-recording-configuration`
 - [ ] Output directory confirmed with user (default: alongside raw data)
 - [ ] CPU core allocation confirmed with user
-- [ ] Batch started via `start_batch_processing_tool`
+- [ ] Batch prepared or full pipeline executed
 - [ ] Status monitored until all recordings complete or fail
 - [ ] Failed recordings routed to appropriate skill (see Error Routing)
 - [ ] Successful recordings verified via `/single-recording-results`

@@ -48,14 +48,18 @@ manual file reads whenever possible.
 | `query_multi_recording_overview_tool`             | Queries dataset structure, per-recording mask counts, timing, and completion status   |
 | `query_multi_recording_registration_quality_tool` | Queries deformation field statistics and transformed image availability per recording |
 | `query_multi_recording_tracking_summary_tool`     | Queries template count, recording count distribution, and cluster statistics          |
+| `query_multi_recording_roi_statistics_tool`       | Queries per-ROI spatial statistics for a specific recording within a dataset          |
 | `query_multi_recording_traces_tool`               | Queries fluorescence traces for specific ROIs in a specific recording                 |
+| `query_cross_recording_traces_tool`               | Queries fluorescence traces for specific ROIs across all recordings in a dataset      |
 
 ### Recommended query order
 
 1. `query_multi_recording_overview_tool` — understand dataset composition and processing completeness
 2. `query_multi_recording_registration_quality_tool` — review deformation field magnitudes and transformed image availability
 3. `query_multi_recording_tracking_summary_tool` — review template counts, cluster IDs, and recording count distribution
-4. `query_multi_recording_traces_tool` — examine tracked ROI fluorescence activity per recording
+4. `query_multi_recording_roi_statistics_tool` — inspect per-ROI spatial statistics and tracking metadata
+5. `query_multi_recording_traces_tool` — examine tracked ROI fluorescence activity per recording
+6. `query_cross_recording_traces_tool` — compare longitudinal activity patterns for the same ROIs across sessions
 
 **Important:** Deformation field magnitude does not indicate registration quality — it only reflects how much the
 field of view shifted between sessions. Similarly, an ROI appearing in fewer recordings does not indicate tracking

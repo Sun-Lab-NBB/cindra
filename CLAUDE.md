@@ -151,8 +151,11 @@ pipeline outputs.
   files, avoiding Qt dependency loading during headless pipeline execution. The `cindra-gui` CLI entry point is
   separate from `cindra` for this reason.
 - **MCP tool organization**: Tools are split across four modules (`acquisition_tools`, `configuration_tools`,
-  `processing_tools`, `results_tools`) imported at module level to trigger `@mcp.tool()` registration. Batch
-  processing uses background manager threads with per-job worker threads and saturating core allocation.
+  `processing_tools`, `results_tools`) imported at module level to trigger `@mcp.tool()` registration.
+  Processing uses a prepare-then-execute model: preparation tools create execution manifests (trackers,
+  per-recording configurations, job lists) without starting computation, and execution tools dispatch jobs
+  with prerequisite validation, saturating core allocation, and automatic phase sequencing. I/O-bound jobs
+  (binarize, combine) use fixed concurrency; compute-bound jobs use saturating allocation.
 
 ### Core components
 
