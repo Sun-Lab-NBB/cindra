@@ -1206,6 +1206,168 @@ def query_multi_recording_tracking_summary_tool(
 
 
 @mcp.tool()
+def query_multi_recording_roi_statistics_tool(
+    recording_path: str,
+    dataset: str,
+    recording_index: int | None = None,
+    roi_indices: list[int] | None = None,
+    sort_by: str | None = None,
+    top_n: int | None = None,
+) -> dict[str, object]:
+    """Queries per-ROI spatial statistics for a specific recording within a multi-recording dataset.
+
+    Returns statistics including pixel count, skewness, compactness, footprint area, aspect ratio, solidity,
+    and centroid coordinates for ROIs extracted using backward-transformed template masks. When template metadata
+    is available, enriches each ROI entry with its cluster ID and recording count from the tracking stage.
+
+    Args:
+        recording_path: Absolute path to a recording directory that belongs to the dataset.
+        dataset: The multi-recording dataset name to query.
+        recording_index: The recording index within the dataset to query (0-based). Defaults to 0 (entry recording)
+            when not provided.
+        roi_indices: Specific ROI indices to query. Returns all ROIs when not provided (up to 500).
+        sort_by: Sort results by this statistic name ('skewness', 'compactness', 'footprint', 'aspect_ratio',
+            'pixel_count', 'solidity', 'normalized_pixel_count'). Results are returned in descending order.
+        top_n: Limit results to the top N ROIs after sorting. Only effective when sort_by is also provided.
+
+    Returns:
+        On success, contains 'total_rois', 'queried_count', 'has_template_metadata', and 'rois' list with per-ROI
+        statistics and optional tracking metadata. On failure, contains an 'error' message. Both cases include a
+        'success' flag.
+    """
+    cindra_root, error = _find_cindra_root(recording_path)
+    if cindra_root is None:
+        return {"success": False, "error": f"Unable to query multi-recording ROI statistics. {error}"}
+
+    dataset_path, error = _find_multi_recording_root(cindra_root, dataset)
+    if dataset_path is None:
+        return {"success": False, "error": f"Unable to query multi-recording ROI statistics. {error}"}
+
+    runtime = _load_yaml(dataset_path / "multi_recording_runtime_data.yaml")
+    if runtime is None:
+        return {
+            "success": False,
+            "error": f"Unable to load runtime data from: {dataset_path / 'multi_recording_runtime_data.yaml'}",
+        }
+
+    dataset_output_paths = runtime.get("io", {}).get("dataset_output_paths", [str(dataset_path)])
+    effective_index = recording_index if recording_index is not None else 0
+
+    if effective_index < 0 or effective_index >= len(dataset_output_paths):
+        return {
+            "success": False,
+            "error": (
+                f"Unable to query multi-recording ROI statistics. Recording index {effective_index} is out of range "
+                f"(dataset has {len(dataset_output_paths)} recordings)."
+            ),
+        }
+
+    output_path = Path(dataset_output_paths[effective_index])
+
+    # Resolves recording ID from per-recording runtime data.
+    recording_runtime = _load_yaml(output_path / "multi_recording_runtime_data.yaml")
+    recording_id = (
+        recording_runtime.get("io", {}).get("recording_id", f"unknown_{effective_index}")
+        if recording_runtime is not None
+        else f"unknown_{effective_index}"
+    )
+
+    stats_path = output_path / "roi_statistics.npz"
+    masks_path = output_path / "roi_masks.npz"
+    if not stats_path.exists() or not masks_path.exists():
+        return {
+            "success": False,
+            "error": f"Unable to query multi-recording ROI statistics. ROI data files not found at: {output_path}.",
+        }
+
+    try:
+        stats_data = np.load(stats_path, allow_pickle=False)
+        masks_data = np.load(masks_path, allow_pickle=False)
+    except Exception as load_error:
+        return {"success": False, "error": f"Unable to load ROI data: {load_error}"}
+
+    footprints = stats_data["footprints"]
+    compactness = stats_data["compactness"]
+    solidity = stats_data["solidity"]
+    pixel_count = stats_data["pixel_count"]
+    aspect_ratio = stats_data["aspect_ratio"]
+    normalized_pixel_count = stats_data["normalized_pixel_count"]
+    skewness = stats_data["skewness"]
+    centroids = masks_data["centroids"]
+    total_rois = len(footprints)
+
+    # Loads template metadata for cluster ID and recording count enrichment.
+    template_data: dict[str, Any] | None = None
+    template_path = output_path / "tracking_template_masks.npz"
+    with contextlib.suppress(Exception):
+        if template_path.exists():
+            raw_template = np.load(template_path, allow_pickle=False)
+            if "cluster_id" in raw_template and "recording_count" in raw_template:
+                template_data = {
+                    "cluster_id": raw_template["cluster_id"],
+                    "recording_count": raw_template["recording_count"],
+                }
+
+    # Builds ROI entries following the same pattern as single-recording statistics.
+    indices = list(range(total_rois)) if roi_indices is None else [i for i in roi_indices if 0 <= i < total_rois]
+    entries: list[tuple[int, dict[str, Any]]] = []
+    for i in indices:
+        entry: dict[str, Any] = {
+            "roi_index": i,
+            "centroid": [int(centroids[i, 0]), int(centroids[i, 1])],
+            "pixel_count": int(pixel_count[i]),
+            "footprint": int(footprints[i]),
+            "compactness": round(float(compactness[i]), 4),
+            "solidity": round(float(solidity[i]), 4),
+            "aspect_ratio": round(float(aspect_ratio[i]), 4),
+            "normalized_pixel_count": round(float(normalized_pixel_count[i]), 4),
+        }
+        skewness_value = skewness[i]
+        entry["skewness"] = round(float(skewness_value), 4) if not np.isnan(skewness_value) else None
+
+        if template_data is not None and i < len(template_data["cluster_id"]):
+            entry["cluster_id"] = int(template_data["cluster_id"][i])
+            entry["recording_count"] = int(template_data["recording_count"][i])
+
+        entries.append((i, entry))
+
+    # Sorts if requested.
+    if sort_by is not None:
+        valid_sort_keys = (
+            "skewness",
+            "compactness",
+            "footprint",
+            "aspect_ratio",
+            "pixel_count",
+            "solidity",
+            "normalized_pixel_count",
+        )
+        if sort_by not in valid_sort_keys:
+            return {
+                "success": False,
+                "error": f"Unable to sort by '{sort_by}'. Valid options: {', '.join(valid_sort_keys)}.",
+            }
+        entries.sort(key=lambda pair: pair[1].get(sort_by) or 0, reverse=True)
+
+    if top_n is not None and top_n > 0:
+        entries = entries[:top_n]
+    if len(entries) > _MAX_STATS_ROIS:
+        entries = entries[:_MAX_STATS_ROIS]
+
+    return {
+        "success": True,
+        "recording_path": recording_path,
+        "dataset": dataset,
+        "recording_index": effective_index,
+        "recording_id": recording_id,
+        "total_rois": total_rois,
+        "queried_count": len(entries),
+        "has_template_metadata": template_data is not None,
+        "rois": [entry for _, entry in entries],
+    }
+
+
+@mcp.tool()
 def query_multi_recording_traces_tool(
     recording_path: str,
     dataset: str,
@@ -1295,6 +1457,151 @@ def query_multi_recording_traces_tool(
         "total_rois": roi_count,
         "traces": results,
     }
+
+
+@mcp.tool()
+def query_cross_recording_traces_tool(
+    recording_path: str,
+    dataset: str,
+    roi_indices: list[int],
+    trace_type: str = "corrected",
+    downsample_factor: int = 1,
+) -> dict[str, object]:
+    """Queries fluorescence traces for specific ROIs across all recordings in a multi-recording dataset.
+
+    For each requested ROI, retrieves trace data from every recording in the dataset, enabling cross-recording
+    comparison of tracked ROI activity. Recordings where extraction is incomplete are skipped and reported.
+    Use this to compare longitudinal activity patterns for the same ROIs across sessions.
+
+    Args:
+        recording_path: Absolute path to a recording directory that belongs to the dataset.
+        dataset: The multi-recording dataset name to query.
+        roi_indices: List of ROI indices to retrieve traces for across all recordings (maximum 50).
+        trace_type: The type of fluorescence trace to return. 'fluorescence' for raw cell fluorescence,
+            'neuropil' for neuropil fluorescence, 'corrected' for neuropil-subtracted, 'spikes' for deconvolved.
+        downsample_factor: Factor by which to downsample traces (1 = no downsampling, 10 = every 10th sample).
+
+    Returns:
+        On success, contains 'recording_count', per-ROI 'rois' with per-recording traces, and optional
+        'skipped_recordings'. On failure, contains an 'error' message. Both cases include a 'success' flag.
+    """
+    if len(roi_indices) > _MAX_TRACE_ROIS:
+        return {
+            "success": False,
+            "error": (
+                f"Unable to query cross-recording traces. Requested {len(roi_indices)} ROIs, "
+                f"maximum is {_MAX_TRACE_ROIS}."
+            ),
+        }
+
+    file_map = {
+        "fluorescence": "cell_fluorescence.npy",
+        "neuropil": "neuropil_fluorescence.npy",
+        "corrected": "subtracted_fluorescence.npy",
+        "spikes": "spikes.npy",
+    }
+    if trace_type not in file_map:
+        return {
+            "success": False,
+            "error": (
+                f"Unable to query cross-recording traces. Invalid trace_type '{trace_type}'. "
+                f"Valid options: {', '.join(file_map.keys())}."
+            ),
+        }
+
+    cindra_root, error = _find_cindra_root(recording_path)
+    if cindra_root is None:
+        return {"success": False, "error": f"Unable to query cross-recording traces. {error}"}
+
+    dataset_path, error = _find_multi_recording_root(cindra_root, dataset)
+    if dataset_path is None:
+        return {"success": False, "error": f"Unable to query cross-recording traces. {error}"}
+
+    runtime = _load_yaml(dataset_path / "multi_recording_runtime_data.yaml")
+    if runtime is None:
+        return {
+            "success": False,
+            "error": f"Unable to load runtime data from: {dataset_path / 'multi_recording_runtime_data.yaml'}",
+        }
+
+    dataset_output_paths = runtime.get("io", {}).get("dataset_output_paths", [str(dataset_path)])
+
+    # Builds recording info list from per-recording runtime data.
+    recording_info: list[tuple[int, str, Path]] = []
+    for i, output_path_str in enumerate(dataset_output_paths):
+        output_path = Path(output_path_str)
+        recording_runtime = _load_yaml(output_path / "multi_recording_runtime_data.yaml")
+        recording_id = (
+            recording_runtime.get("io", {}).get("recording_id", f"unknown_{i}")
+            if recording_runtime is not None
+            else f"unknown_{i}"
+        )
+        recording_info.append((i, recording_id, output_path))
+
+    downsample_factor = max(1, downsample_factor)
+    skipped_recordings: list[dict[str, object]] = []
+
+    # Collects traces for each ROI across all recordings.
+    rois_result: list[dict[str, object]] = []
+    for roi_index in roi_indices:
+        per_recording: list[dict[str, object]] = []
+
+        for recording_index, recording_id, output_path in recording_info:
+            trace_path = output_path / file_map[trace_type]
+            if not trace_path.exists():
+                skipped_entry: dict[str, object] = {
+                    "recording_index": recording_index,
+                    "recording_id": recording_id,
+                    "reason": f"Trace file not found: {file_map[trace_type]}",
+                }
+                if skipped_entry not in skipped_recordings:
+                    skipped_recordings.append(skipped_entry)
+                continue
+
+            try:
+                traces = np.load(trace_path, mmap_mode="r")
+            except Exception:
+                skipped_entry = {
+                    "recording_index": recording_index,
+                    "recording_id": recording_id,
+                    "reason": f"Unable to load trace file: {file_map[trace_type]}",
+                }
+                if skipped_entry not in skipped_recordings:
+                    skipped_recordings.append(skipped_entry)
+                continue
+
+            if roi_index < 0 or roi_index >= traces.shape[0]:
+                continue
+
+            trace = traces[roi_index]
+            if downsample_factor > 1:
+                trace = trace[::downsample_factor]
+
+            per_recording.append(
+                {
+                    "recording_index": recording_index,
+                    "recording_id": recording_id,
+                    "frame_count": int(traces.shape[1]),
+                    "trace": [round(float(value), 4) for value in trace],
+                }
+            )
+
+        rois_result.append({"roi_index": roi_index, "recordings": per_recording})
+
+    result: dict[str, object] = {
+        "success": True,
+        "recording_path": recording_path,
+        "dataset": dataset,
+        "trace_type": trace_type,
+        "downsample_factor": downsample_factor,
+        "recording_count": len(recording_info),
+        "rois": rois_result,
+    }
+
+    if skipped_recordings:
+        result["skipped_recordings"] = skipped_recordings
+
+    return result
 
 
 def _find_cindra_root(recording_path: str) -> tuple[Path | None, str | None]:

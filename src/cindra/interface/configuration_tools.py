@@ -400,6 +400,120 @@ def validate_config_file(file_path: str) -> dict[str, str | bool | list[str] | d
     return result
 
 
+@mcp.tool()
+def compare_config_files_tool(file_path_a: str, file_path_b: str) -> dict[str, object]:
+    """Compares two cindra configuration files and returns structural differences between them.
+
+    Loads both files through the appropriate configuration dataclass, computes a field-by-field diff showing
+    parameters that differ between the two files, and identifies non-default parameters in each file independently.
+    Both files must be valid cindra configurations of the same pipeline type.
+
+    Args:
+        file_path_a: The absolute path to the first configuration file.
+        file_path_b: The absolute path to the second configuration file.
+
+    Returns:
+        On success, contains 'difference_count', 'differences' mapping parameter paths to value_a and value_b pairs,
+        and 'non_defaults_a' and 'non_defaults_b' for context against factory defaults. On failure, contains an
+        'error' describing the issue. Both cases include a 'success' flag.
+    """
+    path_a = Path(file_path_a)
+    path_b = Path(file_path_b)
+
+    # Validates both file paths exist and have correct extensions.
+    for label, path in [("A", path_a), ("B", path_b)]:
+        if not path.exists():
+            return {
+                "success": False,
+                "error": f"Unable to compare configuration files. File {label} does not exist: {path}",
+            }
+        if path.suffix not in (".yaml", ".yml"):
+            return {
+                "success": False,
+                "error": (
+                    f"Unable to compare configuration files. File {label} must be a '.yaml' or '.yml' file: {path}"
+                ),
+            }
+
+    # Parses raw YAML to detect pipeline types before dataclass deserialization.
+    try:
+        with path_a.open() as file:
+            raw_a = yaml.safe_load(file)
+        with path_b.open() as file:
+            raw_b = yaml.safe_load(file)
+    except yaml.YAMLError as error:
+        return {"success": False, "error": f"Unable to parse YAML: {error}"}
+
+    type_a = raw_a.get("pipeline_type") if isinstance(raw_a, dict) else None
+    type_b = raw_b.get("pipeline_type") if isinstance(raw_b, dict) else None
+
+    if type_a not in ("single-recording", "multi-recording"):
+        return {
+            "success": False,
+            "error": (f"Unable to compare configuration files. File A has unrecognized pipeline_type: {type_a!r}."),
+        }
+    if type_b not in ("single-recording", "multi-recording"):
+        return {
+            "success": False,
+            "error": (f"Unable to compare configuration files. File B has unrecognized pipeline_type: {type_b!r}."),
+        }
+    if type_a != type_b:
+        return {
+            "success": False,
+            "error": (
+                f"Unable to compare configuration files. Pipeline types differ: "
+                f"file A is '{type_a}', file B is '{type_b}'."
+            ),
+        }
+
+    pipeline_type = type_a
+
+    # Loads both files through the appropriate configuration dataclass.
+    config_a: SingleRecordingConfiguration | MultiRecordingConfiguration
+    config_b: SingleRecordingConfiguration | MultiRecordingConfiguration
+    default: SingleRecordingConfiguration | MultiRecordingConfiguration
+    try:
+        if pipeline_type == "single-recording":
+            config_a = SingleRecordingConfiguration.load(file_path=path_a)
+            config_b = SingleRecordingConfiguration.load(file_path=path_b)
+            default = SingleRecordingConfiguration()
+        else:
+            config_a = MultiRecordingConfiguration.load(file_path=path_a)
+            config_b = MultiRecordingConfiguration.load(file_path=path_b)
+            default = MultiRecordingConfiguration()
+    except Exception as error:
+        return {
+            "success": False,
+            "error": f"Unable to deserialize configuration files: {type(error).__name__}: {error}",
+        }
+
+    # Computes A-vs-B differences by reusing the non-default parameter comparison with B as the baseline.
+    raw_differences = _identify_non_default_parameters(config=config_a, default=config_b)
+    differences = {
+        path: {"value_a": entry["current"], "value_b": entry["default"]} for path, entry in raw_differences.items()
+    }
+
+    # Computes non-defaults for each file independently against factory defaults.
+    non_defaults_a = _identify_non_default_parameters(config=config_a, default=default)
+    non_defaults_b = _identify_non_default_parameters(config=config_b, default=default)
+
+    result: dict[str, object] = {
+        "success": True,
+        "file_path_a": str(path_a),
+        "file_path_b": str(path_b),
+        "pipeline_type": pipeline_type,
+        "difference_count": len(differences),
+        "differences": differences,
+    }
+
+    if non_defaults_a:
+        result["non_defaults_a"] = non_defaults_a
+    if non_defaults_b:
+        result["non_defaults_b"] = non_defaults_b
+
+    return result
+
+
 def _to_json_compatible(value: object) -> object:
     """Converts a Python value to a JSON-compatible type for MCP tool output.
 

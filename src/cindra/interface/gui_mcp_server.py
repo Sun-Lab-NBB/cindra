@@ -147,7 +147,7 @@ def list_viewers_tool() -> dict[str, Any]:
                 try:
                     state = read_viewer_state(state_path=state_file)
                     viewer_info["active_dataset"] = state.get("active_dataset")
-                except Exception:
+                except Exception:  # noqa: S110 - Best-effort state read; viewer list should not fail.
                     pass
 
         viewers.append(viewer_info)
