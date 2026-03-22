@@ -70,6 +70,13 @@ class _PendingJob:
     io_bound: bool
     """Determines whether this job is I/O-bound (binarize, combine) and should use fixed concurrency limits."""
 
+    @property
+    def dispatch_key(self) -> tuple[str, str]:
+        """Returns the composite key that uniquely identifies this job across the entire batch, combining the tracker
+        path with the job ID.
+        """
+        return (str(self.tracker_path), self.job_id)
+
 
 @dataclass(slots=True)
 class _JobExecutionState:
@@ -80,16 +87,16 @@ class _JobExecutionState:
     regardless of the ``max_parallel_jobs`` parameter.
     """
 
-    all_jobs: dict[str, _PendingJob] = field(default_factory=dict)
-    """All submitted jobs keyed by job_id, used for status reporting."""
+    all_jobs: dict[tuple[str, str], _PendingJob] = field(default_factory=dict)
+    """All submitted jobs keyed by (tracker_path, job_id) dispatch key, used for status reporting."""
     io_pending_queue: list[_PendingJob] = field(default_factory=list)
     """I/O-bound jobs awaiting dispatch, capped at _MAXIMUM_PARALLEL_IO_JOBS concurrent."""
     compute_pending_queue: list[_PendingJob] = field(default_factory=list)
     """Compute-bound jobs awaiting dispatch, capped at max_parallel_jobs concurrent."""
-    io_active_threads: dict[str, Thread] = field(default_factory=dict)
-    """Currently running I/O-bound job_id to Thread mapping."""
-    compute_active_threads: dict[str, Thread] = field(default_factory=dict)
-    """Currently running compute-bound job_id to Thread mapping."""
+    io_active_threads: dict[tuple[str, str], Thread] = field(default_factory=dict)
+    """Currently running I/O-bound (tracker_path, job_id) dispatch key to Thread mapping."""
+    compute_active_threads: dict[tuple[str, str], Thread] = field(default_factory=dict)
+    """Currently running compute-bound (tracker_path, job_id) dispatch key to Thread mapping."""
     max_parallel_jobs: int = 1
     """The maximum number of compute-bound jobs to execute concurrently."""
     lock: Lock = field(default_factory=Lock)
@@ -1138,7 +1145,7 @@ def execute_processing_jobs_tool(
     required_keys = {"configuration_path", "tracker_path", "job_id", "pipeline_type"}
     io_jobs: list[_PendingJob] = []
     compute_jobs: list[_PendingJob] = []
-    all_jobs_map: dict[str, _PendingJob] = {}
+    all_jobs_map: dict[tuple[str, str], _PendingJob] = {}
     invalid_jobs: list[dict[str, str]] = []
 
     for job_entry in jobs:
@@ -1197,7 +1204,7 @@ def execute_processing_jobs_tool(
         else:
             compute_jobs.append(pending_job)
 
-        all_jobs_map[job_id] = pending_job
+        all_jobs_map[pending_job.dispatch_key] = pending_job
 
     if not all_jobs_map:
         return {
@@ -1301,10 +1308,10 @@ def get_processing_jobs_status_tool() -> dict[str, object]:
     jobs_status: list[dict[str, object]] = []
     summary_counts: dict[str, int] = {"pending": 0, "running": 0, "succeeded": 0, "failed": 0}
 
-    for job_id, pending_job in _job_execution_state.all_jobs.items():
+    for pending_job in _job_execution_state.all_jobs.values():
         tracker = ProcessingTracker(file_path=pending_job.tracker_path)
-        status = tracker.get_job_status(job_id=job_id)
-        job_info = tracker.get_job_info(job_id=job_id)
+        status = tracker.get_job_status(job_id=pending_job.job_id)
+        job_info = tracker.get_job_info(job_id=pending_job.job_id)
         status_name = status.name.lower()
 
         # Counts by status category.
@@ -1318,7 +1325,7 @@ def get_processing_jobs_status_tool() -> dict[str, object]:
             summary_counts["failed"] += 1
 
         job_entry: dict[str, object] = {
-            "job_id": job_id,
+            "job_id": pending_job.job_id,
             "name": job_info.job_name,
             "specifier": job_info.specifier,
             "status": status_name,
@@ -1698,10 +1705,10 @@ def execute_full_pipeline_tool(
         }
 
     # Collects all jobs across all phases for the execution state.
-    all_jobs_map: dict[str, _PendingJob] = {}
+    all_jobs_map: dict[tuple[str, str], _PendingJob] = {}
     for _phase_name, phase_jobs in phase_groups:
         for job in phase_jobs:
-            all_jobs_map[job.job_id] = job
+            all_jobs_map[job.dispatch_key] = job
 
     total_jobs = len(all_jobs_map)
 
@@ -1928,16 +1935,14 @@ def _job_execution_manager() -> None:
 
         with state.lock:
             # Cleans up completed I/O threads.
-            completed_io = [job_id for job_id, thread in state.io_active_threads.items() if not thread.is_alive()]
-            for job_id in completed_io:
-                state.io_active_threads.pop(job_id, None)
+            completed_io = [key for key, thread in state.io_active_threads.items() if not thread.is_alive()]
+            for key in completed_io:
+                state.io_active_threads.pop(key, None)
 
             # Cleans up completed compute threads.
-            completed_compute = [
-                job_id for job_id, thread in state.compute_active_threads.items() if not thread.is_alive()
-            ]
-            for job_id in completed_compute:
-                state.compute_active_threads.pop(job_id, None)
+            completed_compute = [key for key, thread in state.compute_active_threads.items() if not thread.is_alive()]
+            for key in completed_compute:
+                state.compute_active_threads.pop(key, None)
 
             # Dispatches I/O-bound jobs up to the fixed concurrency limit.
             while len(state.io_active_threads) < _MAXIMUM_PARALLEL_IO_JOBS and state.io_pending_queue:
@@ -1953,7 +1958,7 @@ def _job_execution_manager() -> None:
                     daemon=True,
                 )
                 thread.start()
-                state.io_active_threads[pending_job.job_id] = thread
+                state.io_active_threads[pending_job.dispatch_key] = thread
 
             # Dispatches compute-bound jobs up to the resolved parallelism limit.
             while len(state.compute_active_threads) < state.max_parallel_jobs and state.compute_pending_queue:
@@ -1969,7 +1974,7 @@ def _job_execution_manager() -> None:
                     daemon=True,
                 )
                 thread.start()
-                state.compute_active_threads[pending_job.job_id] = thread
+                state.compute_active_threads[pending_job.dispatch_key] = thread
 
             # Phase advancement: when current phase drains, advances to the next phase group.
             all_empty = (
@@ -2154,18 +2159,18 @@ def _check_current_phase_failures(state: _JobExecutionState) -> bool:
     Returns:
         True if any job outside the remaining phase groups has a FAILED status, False otherwise.
     """
-    # Collects job IDs that belong to remaining phase groups.
-    remaining_job_ids: set[str] = set()
+    # Collects dispatch keys that belong to remaining phase groups.
+    remaining_keys: set[tuple[str, str]] = set()
     for group in state.phase_groups:
         for job in group:
-            remaining_job_ids.add(job.job_id)
+            remaining_keys.add(job.dispatch_key)
 
     # Checks all jobs not in remaining groups for failures.
-    for job_id, pending_job in state.all_jobs.items():
-        if job_id in remaining_job_ids:
+    for dispatch_key, pending_job in state.all_jobs.items():
+        if dispatch_key in remaining_keys:
             continue
         tracker = ProcessingTracker(file_path=pending_job.tracker_path)
-        if tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED:
+        if tracker.get_job_status(job_id=pending_job.job_id) == ProcessingStatus.FAILED:
             return True
 
     return False
