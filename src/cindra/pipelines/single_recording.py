@@ -42,9 +42,13 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:
         )
         console.error(message=message, error=ValueError)
 
-    # Defaults output_path to data_path if not explicitly set.
+    # Validates that output_path is configured.
     if configuration.file_io.output_path is None:
-        configuration.file_io.output_path = configuration.file_io.data_path
+        message = (
+            "Unable to binarize the recording. The output_path must be configured in the FileIO section of the "
+            "configuration, but it is currently None."
+        )
+        console.error(message=message, error=ValueError)
 
     # Checks for existing valid binaries to allow early return.
     root_path = configuration.file_io.output_path / "cindra"

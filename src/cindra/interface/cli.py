@@ -192,7 +192,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=None,
     help=(
         "[Single-recording] The path to the root directory where to create the cindra's output hierarchy and store the "
-        "processed data. When provided, this path overrides the matching field in the pipeline's configuration file."
+        "processed data. When provided, this path overrides the matching field in the pipeline's configuration file. "
+        "The output_path must be set either in the configuration file or via this flag."
     ),
 )
 @click.option(
@@ -277,6 +278,12 @@ def cindra_run(
             configuration.file_io.data_path = data_path
         if output_path is not None:
             configuration.file_io.output_path = output_path
+        if configuration.file_io.output_path is None:
+            message = (
+                "Unable to run the single-recording pipeline. The output_path must be configured either in the "
+                "configuration file or via the --output-path flag, but it is currently None."
+            )
+            console.error(message=message, error=ValueError)
         configuration.save(file_path=input_path)
 
         run_single_recording_pipeline(

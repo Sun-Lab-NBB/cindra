@@ -65,7 +65,7 @@ These parameters are set automatically by the pipeline and should not be manuall
 | Parameter                       | Set by        | Value                                               |
 |---------------------------------|---------------|-----------------------------------------------------|
 | `file_io.data_path`             | batch tool    | Recording's session root path (not raw data subdir) |
-| `file_io.output_path`           | batch tool    | Recording's processed output path                   |
+| `file_io.output_path`           | user/batch    | Recording's processed output path (required)        |
 | `runtime.parallel_workers`      | CLI/MCP       | Number of workers (or auto-detected from CPU count) |
 | `runtime.display_progress_bars` | CLI/MCP       | Whether to show progress bars                       |
 
@@ -119,7 +119,7 @@ This TIFF-to-binary conversion only runs once unless `repeat_binarization` is en
 | Parameter             | Type          | Default | Description                                                 |
 |-----------------------|---------------|---------|-------------------------------------------------------------|
 | `data_path`           | Path or None  | None    | Root directory containing input TIFFs. **Set by pipeline.** |
-| `output_path`         | Path or None  | None    | Output directory root. **Set by pipeline.**                 |
+| `output_path`         | Path or None  | None    | Output directory root. **Required; set by user or batch.**  |
 | `ignored_file_names`  | tuple[str]    | ()      | File stems (without extension) to skip when loading TIFFs.  |
 | `repeat_binarization` | bool          | False   | Re-run TIFF to binary conversion even if binaries exist.    |
 
@@ -356,9 +356,10 @@ Configuration files follow a two-tier lifecycle:
    Templates are never modified by the pipeline.
 
 2. **Resolved copies** — When `prepare_single_recording_batch_tool` runs, it loads the template, applies
-   recording-specific overrides (`file_io.data_path`, `file_io.output_path`, `runtime.parallel_workers`),
-   and saves the resolved copy as `cindra/configuration.yaml` inside each recording's output directory.
-   These resolved copies are what the pipeline actually executes against.
+   recording-specific overrides (`file_io.data_path`, `file_io.output_path` from the required
+   `recording_output_paths` parameter, `runtime.parallel_workers`), and saves the resolved copy as
+   `cindra/configuration.yaml` inside each recording's output directory. These resolved copies are what
+   the pipeline actually executes against.
 
 **Do NOT** create per-recording configuration files manually. Pass a single template path to the batch tool
 and let it handle per-recording fine-tuning automatically.

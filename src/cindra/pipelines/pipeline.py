@@ -109,10 +109,6 @@ def run_single_recording_pipeline(
     else:
         console.disable_progress()
 
-    # Defaults output_path to data_path if not explicitly set.
-    if configuration.file_io.output_path is None:
-        configuration.file_io.output_path = configuration.file_io.data_path
-
     # Validates that the output_path is configured.
     if configuration.file_io.output_path is None:
         message = (

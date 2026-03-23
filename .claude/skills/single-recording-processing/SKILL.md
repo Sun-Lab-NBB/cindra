@@ -160,13 +160,12 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
    `cindra/configuration.yaml` inside each recording's output directory, preserving the original
    template. Pass the same template path for all recordings that share parameters.
 
-4. **Confirm output directory** — Ask the user where processed data should be written. By default,
-   output is written alongside the raw data (each recording's output directory equals its data
-   directory, producing a `cindra/` subdirectory inside each recording). To write output elsewhere,
-   the user provides a root output directory; per-recording output paths are then constructed by
-   mirroring the recording directory structure under that root. Present the default behavior and ask
-   the user to confirm or provide an alternative. Pass `recording_output_paths` to the prepare tool
-   when the user specifies a non-default location.
+4. **Confirm output directory** — Ask the user where processed data should be written. Each
+   recording requires an explicit output path; the pipeline does not auto-resolve output locations.
+   Common patterns include writing output alongside the raw data (producing a `cindra/` subdirectory
+   inside each recording) or writing to a separate root by mirroring the recording directory
+   structure. `recording_output_paths` is a required parameter for both `prepare_single_recording_batch_tool`
+   and `execute_full_pipeline_tool`.
 
 5. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many cores
    to use (see Resource Management section).
@@ -175,12 +174,12 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
 
    **Simple (recommended for straightforward runs):**
    Call `execute_full_pipeline_tool` with `pipeline_type="single-recording"`, the confirmed recording
-   paths, configuration path, output paths (if non-default), and worker settings. This prepares and
-   executes all phases automatically.
+   paths, configuration path, output paths, and worker settings. This prepares and executes all
+   phases automatically.
 
    **Fine-grained (for selective execution or re-runs):**
-   a. Call `prepare_single_recording_batch_tool` with recording paths, configuration path, and output
-      paths. This returns a manifest with job IDs and statuses.
+   a. Call `prepare_single_recording_batch_tool` with recording paths, configuration path, and
+      output paths. This returns a manifest with job IDs and statuses.
    b. Select the jobs to execute from the manifest (e.g., only SCHEDULED jobs, only specific phases).
    c. Call `execute_processing_jobs_tool` with the selected job descriptors and worker settings. Each
       job descriptor needs `configuration_path`, `tracker_path`, `job_id`, and `pipeline_type` from
@@ -308,7 +307,7 @@ Single-Recording Processing Workflow:
 - [ ] Recordings discovered or explicit paths provided
 - [ ] Raw data validated via `validate_recording_readiness` (or existing binaries confirmed)
 - [ ] Configuration file confirmed or created via `/single-recording-configuration`
-- [ ] Output directory confirmed with user (default: alongside raw data)
+- [ ] Output directory confirmed with user (required, no default)
 - [ ] CPU core allocation confirmed with user
 - [ ] Batch prepared or full pipeline executed
 - [ ] Status monitored until all recordings complete or fail
