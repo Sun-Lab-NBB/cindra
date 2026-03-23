@@ -16,18 +16,18 @@ if TYPE_CHECKING:
 
 
 def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10) -> int:
-    """Estimates the cell diameter from the pixel counts of a list of ROIs.
+    """Estimates the ROI diameter from the pixel counts of a list of ROIs.
 
     This function computes the median pixel count across all ROIs and derives an equivalent circular diameter. This is
-    useful when the original cell diameter is unavailable or when ROI geometry has been transformed (e.g., after
+    useful when the original ROI diameter is unavailable or when ROI geometry has been transformed (e.g., after
     diffeomorphic registration or template mask generation).
 
     Args:
-        rois: The list of ROIStatistics instances to analyze.
+        rois: The list of ROIMask instances to analyze.
         default_diameter: The fallback diameter to return if the ROI list is empty or all ROIs have zero pixels.
 
     Returns:
-        The estimated cell diameter in pixels, computed as the diameter of a circle with area equal to the median
+        The estimated ROI diameter in pixels, computed as the diameter of a circle with area equal to the median
         ROI pixel count.
     """
     if not rois:
@@ -88,7 +88,7 @@ def compute_roi_statistics(
         frame_width: The width of the recording frames from which ROIs are segmented, in pixels.
         aspect: The aspect ratio of the recording. If provided, adjusts ROI ellipse fitting. Ignored in lightweight
             mode.
-        diameter: The expected cell diameter in pixels. Used for ROI ellipse fitting normalization. Ignored in
+        diameter: The expected ROI diameter in pixels. Used for ROI ellipse fitting normalization. Ignored in
             lightweight mode.
         maximum_overlap_fraction: The maximum fraction of pixels that can overlap with other ROIs. If specified, ROIs
             exceeding this threshold are removed from the list in-place. Ignored in lightweight mode.
@@ -109,7 +109,7 @@ def compute_roi_statistics(
         if not roi.mask.centroid or roi.mask.centroid == (0, 0):
             roi.mask.centroid = compute_median_pixel_position(y_pixels=roi.mask.y_pixels, x_pixels=roi.mask.x_pixels)
 
-    # Resolves the cell diameter for distance normalization. A sensible default is used when no diameter is provided.
+    # Resolves the ROI diameter for distance normalization. A sensible default is used when no diameter is provided.
     default_diameter = 10
     effective_diameter = default_diameter if diameter is None or diameter == 0 else diameter
 
@@ -126,21 +126,16 @@ def compute_roi_statistics(
 
         overlap_counts = _ROI.get_overlap_count_image(rois=roi_wrappers, height=frame_height, width=frame_width)
 
-    # Pre-allocates arrays to collect statistics for normalization during the computation loop.
+    # Pre-allocates an array to collect soma pixel counts for normalization during the computation loop.
     roi_count = len(rois)
-    mean_radius_values = np.empty(roi_count, dtype=np.float32)
-    pixel_count_values = np.empty(roi_count, dtype=np.float32)
     soma_pixel_count_values = np.empty(roi_count, dtype=np.float32)
 
     # Computes shape statistics for each ROI and writes them back to the ROIStatistics instances. In lightweight mode,
     # skips the expensive ellipse fitting, convex hull solidity, and overlap mask computations.
     for i, wrapper in enumerate(roi_wrappers):
         data = wrapper.data
-        data.mean_radius = wrapper.mean_radius
-        data.baseline_mean_radius = wrapper.baseline_mean_radius
         data.compactness = wrapper.compactness
         data.pixel_count = wrapper.pixel_count
-        data.soma_pixel_count = wrapper.soma_pixel_count
         data.soma_mask = wrapper.soma_mask
 
         if not lightweight:
@@ -153,26 +148,15 @@ def compute_roi_statistics(
             data.mask.radius = ellipse.radius
             data.aspect_ratio = ellipse.aspect_ratio
 
-        # Collects values for normalization to avoid re-iterating over ROIs.
-        mean_radius_values[i] = data.mean_radius
-        pixel_count_values[i] = data.pixel_count
-        soma_pixel_count_values[i] = data.soma_pixel_count
+        # Collects soma pixel counts for normalization to avoid re-iterating over ROIs.
+        soma_pixel_count_values[i] = wrapper.soma_pixel_count
 
-    # Normalizes statistics relative to the first 100 ROIs. Detection algorithms typically find high-confidence ROIs
-    # first, so early ROIs serve as a reliable baseline for comparing later, lower-confidence detections.
+    # Normalizes soma pixel count relative to the first 100 ROIs. Detection algorithms typically find high-confidence
+    # ROIs first, so early ROIs serve as a reliable baseline for comparing later, lower-confidence detections.
     normalization_count = 100
-    normalization_epsilon = 1e-10
-
-    mean_radius_baseline = np.nanmedian(mean_radius_values[:normalization_count]) + normalization_epsilon
-    mean_radius_normalized = mean_radius_values / mean_radius_baseline
-    pixel_count_normalized = pixel_count_values / np.mean(pixel_count_values[:normalization_count])
     soma_pixel_count_normalized = soma_pixel_count_values / np.mean(soma_pixel_count_values[:normalization_count])
 
-    for roi, radius_norm, count_norm, soma_count_norm in zip(
-        rois, mean_radius_normalized, pixel_count_normalized, soma_pixel_count_normalized, strict=True
-    ):
-        roi.mean_radius = float(radius_norm)
-        roi.normalized_pixel_count_full = float(count_norm)
+    for roi, soma_count_norm in zip(rois, soma_pixel_count_normalized, strict=True):
         roi.normalized_pixel_count = float(soma_count_norm)
 
     # Removes ROIs with excessive overlap. High overlap often indicates over-segmentation or neuropil contamination.
@@ -220,17 +204,17 @@ class _EllipseData:
 
     @property
     def area(self) -> float:
-        """Returns the area of the ellipse."""
+        """The area of the ellipse."""
         return float((self.radii[0] * self.radii[1]) ** 0.5 * np.pi)
 
     @property
     def radius(self) -> float:
-        """Returns the effective radius of the ROI ellipse scaled by the mean of y_scale and x_scale."""
+        """The effective radius of the ROI ellipse scaled by the mean of y_scale and x_scale."""
         return float(self.radii[0] * np.mean((self.x_scale, self.y_scale)))
 
     @property
     def aspect_ratio(self) -> float:
-        """Returns the normalized aspect ratio bounded between 0 and 2, where 1 indicates a circular shape."""
+        """The normalized aspect ratio bounded between 0 and 2, where 1 indicates a circular shape."""
         major, minor = self.radii
         return 2 * major / (major + minor + 0.01)
 
@@ -258,28 +242,30 @@ class _ROI:
     Notes:
         The class uses a shared class variable for the distance kernel to avoid recomputation across instances. The
         soma mask is cached after first computation to avoid redundant calculations when accessing dependent
-        properties. Distance-based statistics (mean_radius, compactness) are normalized by the cell diameter to make
-        them scale-invariant across different cell sizes and imaging magnifications.
-
-    Args:
-        data: The ROIStatistics instance to wrap.
-        diameter: The estimated cell diameter in pixels, used to normalize distance-based statistics.
-        crop: Determines whether to crop to soma region when computing statistics.
+        properties. Distance-based statistics (mean_radius, compactness) are normalized by the ROI diameter to make
+        them scale-invariant across different ROI sizes and imaging magnifications.
 
     Attributes:
         _data: The underlying ROIStatistics instance.
-        _diameter: The cell diameter used for distance normalization.
+        _diameter: The ROI diameter used for distance normalization.
         _crop: Determines whether to crop to soma region when computing statistics.
         _cached_soma_mask: Cached soma mask array, computed on first access.
-
-    Raises:
-        TypeError: If the x_pixels, y_pixels, and pixel_weights arrays do not have the same shape.
     """
 
     _baseline_cache: ClassVar[dict[int, NDArray[np.float32]]] = {}
     """Cache of sorted baseline distances keyed by diameter, avoiding recomputation across instances."""
 
     def __init__(self, data: ROIStatistics, diameter: int, crop: bool = True) -> None:
+        """Initializes the _ROI wrapper for computing derived statistics from an ROIStatistics instance.
+
+        Args:
+            data: The ROIStatistics instance to wrap.
+            diameter: The estimated ROI diameter in pixels, used to normalize distance-based statistics.
+            crop: Determines whether to crop to soma region when computing statistics.
+
+        Raises:
+            TypeError: If the x_pixels, y_pixels, and pixel_weights arrays do not have the same shape.
+        """
         if (
             data.mask.x_pixels.shape != data.mask.y_pixels.shape
             or data.mask.x_pixels.shape != data.mask.pixel_weights.shape
@@ -297,35 +283,33 @@ class _ROI:
 
     @property
     def data(self) -> ROIStatistics:
-        """Returns the underlying ROIStatistics instance."""
+        """The underlying ROIStatistics instance."""
         return self._data
 
     @property
     def y_pixels(self) -> NDArray[np.int32]:
-        """Returns the y-coordinates of the ROI pixels."""
+        """The y-coordinates of the ROI pixels."""
         return self._data.mask.y_pixels
 
     @property
     def x_pixels(self) -> NDArray[np.int32]:
-        """Returns the x-coordinates of the ROI pixels."""
+        """The x-coordinates of the ROI pixels."""
         return self._data.mask.x_pixels
 
     @property
     def pixel_weights(self) -> NDArray[np.float32]:
-        """Returns the pixel weights (lambda values) for the ROI."""
+        """The pixel weights (lambda values) for the ROI."""
         return self._data.mask.pixel_weights
 
     @property
     def centroid(self) -> tuple[int, int]:
-        """Returns the centroid (y, x) pixel position of the ROI."""
+        """The centroid (y, x) pixel position of the ROI."""
         return self._data.mask.centroid[0], self._data.mask.centroid[1]
 
     @property
     def soma_mask(self) -> NDArray[np.bool_]:
-        """Computes and caches the soma mask for this ROI.
-
-        Returns:
-            A boolean mask indicating which pixels belong to the soma region.
+        """The boolean mask indicating which pixels belong to the soma region of this ROI, computed and cached on first
+        access.
         """
         if self._cached_soma_mask is not None:
             return self._cached_soma_mask
@@ -335,10 +319,10 @@ class _ROI:
 
     @property
     def mean_radius(self) -> float:
-        """Computes the mean diameter-normalized distance from ROI pixels to their median center."""
+        """The mean diameter-normalized distance from ROI pixels to their median center."""
         y_pixels = self.y_pixels[self.soma_mask]
         x_pixels = self.x_pixels[self.soma_mask]
-        # Normalizes distances by cell diameter for scale-invariance, matching the original suite2p approach.
+        # Normalizes distances by ROI diameter for scale-invariance, matching the original suite2p approach.
         distances = np.hypot(
             (y_pixels - np.median(y_pixels)) / self._diameter,
             (x_pixels - np.median(x_pixels)) / self._diameter,
@@ -347,7 +331,7 @@ class _ROI:
 
     @property
     def baseline_mean_radius(self) -> float:
-        """Computes the expected mean radius for a uniformly distributed set of pixels of the same count as the ROI."""
+        """The expected mean radius for a uniformly distributed set of pixels of the same count as the ROI."""
         # Uses a diameter-dependent kernel. The kernel is computed from a meshgrid spanning 2*diameter in each
         # direction, with distances normalized by diameter, matching the original suite2p approach.
         diameter = self._diameter
@@ -360,12 +344,12 @@ class _ROI:
 
     @property
     def compactness(self) -> float:
-        """Computes the ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
+        """The ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
         return max(1.0, self.mean_radius / (1e-10 + self.baseline_mean_radius))
 
     @property
     def solidity(self) -> float:
-        """Computes the ROI's solidity as the ratio of pixel count to convex hull area."""
+        """The ROI's solidity as the ratio of pixel count to convex hull area."""
         minimum_pixels_for_hull = 10
         default_area = 10.0
 
@@ -384,12 +368,12 @@ class _ROI:
 
     @property
     def soma_pixel_count(self) -> int:
-        """Returns the number of pixels in the soma region."""
+        """The number of pixels in the soma region."""
         return int(self.soma_mask.sum())
 
     @property
     def pixel_count(self) -> int:
-        """Returns the total number of pixels in the ROI."""
+        """The total number of pixels in the ROI."""
         return self.x_pixels.size
 
     def _compute_soma_mask(self) -> NDArray[np.bool_]:
@@ -519,7 +503,7 @@ class _ROI:
         )
 
     def get_overlap_mask(self, overlap_count_image: NDArray[np.uint16]) -> NDArray[np.bool_]:
-        """Computes a mask that communicates which pixels overlap with other ROIs.
+        """Computes a boolean mask identifying pixels that overlap with other ROIs.
 
         Args:
             overlap_count_image: A 2D array where each pixel contains the count of overlapping ROIs.

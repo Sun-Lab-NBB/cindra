@@ -89,7 +89,7 @@ def compute_nonrigid_reference_data(
     return taper_mask, mean_offset, reference_kernel
 
 
-def compute_nonrigid_shifts(
+def compute_nonrigid_offsets(
     frames: NDArray[np.float32],
     taper_mask: NDArray[np.float32],
     mean_offset: NDArray[np.float32],
@@ -98,12 +98,12 @@ def compute_nonrigid_shifts(
     smoothing_kernel: NDArray[np.float32],
     x_blocks: list[NDArray[np.int32]],
     y_blocks: list[NDArray[np.int32]],
-    maximum_shift: float,
+    maximum_offset: float,
     workers: int,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
-    """Computes nonrigid shifts using block-wise phase correlation.
+    """Computes nonrigid offsets using block-wise phase correlation.
 
-    Estimates per-block (y, x) subpixel shifts by computing phase correlation between each frame
+    Estimates per-block (y, x) subpixel offsets by computing phase correlation between each frame
     block and the corresponding reference kernel. Applies adaptive smoothing based on correlation
     SNR to improve reliability in low-quality regions. Subpixel precision is determined by the
     module constants _SUBPIXEL_FACTOR (0.1 pixel) and _UPSAMPLING_PADDING (7x7 fitting region).
@@ -122,22 +122,21 @@ def compute_nonrigid_shifts(
             adaptive smoothing of correlation peaks across neighboring blocks.
         x_blocks: The list of x-coordinate ranges for each block from compute_registration_blocks.
         y_blocks: The list of y-coordinate ranges for each block from compute_registration_blocks.
-        maximum_shift: The maximum allowed shift in pixels. Constrains the correlation search window.
+        maximum_offset: The maximum allowed offset in pixels. Constrains the correlation search window.
         workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
-        A tuple of (y_shifts, x_shifts, correlation_maxima) arrays with shape (num_frames, num_blocks).
-        The shifts have subpixel precision determined by _SUBPIXEL_FACTOR.
+        A tuple of (y_offsets, x_offsets, correlation_maxima) arrays with shape (num_frames, num_blocks).
+        The offsets have subpixel precision determined by _SUBPIXEL_FACTOR.
     """
     upsampling_kernel, upsampled_size = compute_upsampling_kernel(padding=_UPSAMPLING_PADDING)
 
     num_frames = frames.shape[0]
     block_height, block_width = taper_mask.shape[-2], taper_mask.shape[-1]
 
-    # Computes maximum registration shift, constrained by block dimensions.
-    correlation_radius = int(
-        np.minimum(np.round(maximum_shift), np.floor(np.minimum(block_height, block_width) / 2.0) - _UPSAMPLING_PADDING)
-    )
+    # Computes maximum registration offset, constrained by block dimensions.
+    max_block_radius = np.floor(np.minimum(block_height, block_width) / 2.0) - _UPSAMPLING_PADDING
+    correlation_radius = int(np.minimum(np.round(maximum_offset), max_block_radius))
     num_blocks = len(y_blocks)
 
     # Extracts all blocks from the frame data.
@@ -200,7 +199,7 @@ def compute_nonrigid_shifts(
                 padding=_UPSAMPLING_PADDING,
             )
 
-    # Computes subpixel shifts using DFT upsampling (vectorized over all blocks and frames).
+    # Computes subpixel offsets using DFT upsampling (vectorized over all blocks and frames).
     midpoint = upsampled_size // 2
     region_size = 2 * _UPSAMPLING_PADDING + 1
     central_size = 2 * correlation_radius + 1
@@ -235,13 +234,13 @@ def compute_nonrigid_shifts(
     y_subpixel = y_subpixel.reshape(num_blocks, num_frames)
     x_subpixel = x_subpixel.reshape(num_blocks, num_frames)
 
-    # Computes final shifts by combining integer and subpixel components.
-    y_integer_shifts = y_peaks - correlation_radius
-    x_integer_shifts = x_peaks - correlation_radius
-    y_shifts = ((y_subpixel - midpoint) / _SUBPIXEL_FACTOR + y_integer_shifts).T.astype(np.float32)
-    x_shifts = ((x_subpixel - midpoint) / _SUBPIXEL_FACTOR + x_integer_shifts).T.astype(np.float32)
+    # Computes final offsets by combining integer and subpixel components.
+    y_integer_offsets = y_peaks - correlation_radius
+    x_integer_offsets = x_peaks - correlation_radius
+    y_offsets = ((y_subpixel - midpoint) / _SUBPIXEL_FACTOR + y_integer_offsets).T.astype(np.float32)
+    x_offsets = ((x_subpixel - midpoint) / _SUBPIXEL_FACTOR + x_integer_offsets).T.astype(np.float32)
 
-    return y_shifts, x_shifts, correlation_maxima
+    return y_offsets, x_offsets, correlation_maxima
 
 
 def apply_nonrigid_correction(
@@ -249,12 +248,12 @@ def apply_nonrigid_correction(
     block_counts: tuple[int, int],
     x_blocks: list[NDArray[np.int32]],
     y_blocks: list[NDArray[np.int32]],
-    y_block_shifts: NDArray[np.float32],
-    x_block_shifts: NDArray[np.float32],
+    y_block_offsets: NDArray[np.float32],
+    x_block_offsets: NDArray[np.float32],
 ) -> NDArray[np.float32]:
-    """Applies nonrigid motion correction to the input batch of frames using block shifts.
+    """Applies nonrigid motion correction to the input batch of frames using block offsets.
 
-    Transforms frame data by upsampling block-level shift estimates to per-pixel shift maps
+    Transforms frame data by upsampling block-level offset estimates to per-pixel offset maps
     and applying bilinear interpolation to warp each frame.
 
     Args:
@@ -262,24 +261,24 @@ def apply_nonrigid_correction(
         block_counts: The number of blocks as (y_count, x_count) from compute_registration_blocks.
         x_blocks: The list of x-coordinate ranges for each block from compute_registration_blocks.
         y_blocks: The list of y-coordinate ranges for each block from compute_registration_blocks.
-        y_block_shifts: The y-shifts per block with shape (num_frames, num_blocks) from compute_nonrigid_shifts.
+        y_block_offsets: The y-offsets per block with shape (num_frames, num_blocks) from compute_nonrigid_offsets.
             Positive values shift content upward.
-        x_block_shifts: The x-shifts per block with shape (num_frames, num_blocks) from compute_nonrigid_shifts.
+        x_block_offsets: The x-offsets per block with shape (num_frames, num_blocks) from compute_nonrigid_offsets.
             Positive values shift content leftward.
 
     Returns:
         The corrected frames with shape (num_frames, height, width).
     """
-    # Converts the shifts from block space to the frame space.
+    # Converts the offsets from block space to the frame space.
     _, height, width = frames.shape
-    y_shift_maps, x_shift_maps = _upsample_block_shifts(
+    y_offset_maps, x_offset_maps = _upsample_block_offsets(
         width=width,
         height=height,
         block_counts=block_counts,
         x_blocks=x_blocks,
         y_blocks=y_blocks,
-        y_block_shifts=y_block_shifts,
-        x_block_shifts=x_block_shifts,
+        y_block_offsets=y_block_offsets,
+        x_block_offsets=x_block_offsets,
     )
 
     # Creates coordinate grids and applies the transformation.
@@ -288,10 +287,10 @@ def apply_nonrigid_correction(
         np.arange(height, dtype=np.float32),
     )
     output = np.empty_like(frames, dtype=np.float32)
-    _apply_coordinate_shifts(
+    _apply_coordinate_offsets(
         frames=frames,
-        y_shift_maps=y_shift_maps,
-        x_shift_maps=x_shift_maps,
+        y_offset_maps=y_offset_maps,
+        x_offset_maps=x_offset_maps,
         y_grid=y_grid,
         x_grid=x_grid,
         output=output,
@@ -301,14 +300,14 @@ def apply_nonrigid_correction(
 
 
 @njit(parallel=True, cache=True)
-def _compute_correlation_snr(
+def _compute_correlation_snr(  # pragma: no cover
     correlation_data: NDArray[np.float32],
     padding: int,
 ) -> NDArray[np.float32]:
     """Computes signal-to-noise ratio of phase correlation peaks.
 
     Estimates the SNR by comparing the maximum correlation value to the maximum value outside a
-    padding region around the peak. Low SNR indicates unreliable shift estimates that may benefit
+    padding region around the peak. Low SNR indicates unreliable offset estimates that may benefit
     from additional smoothing.
 
     Args:
@@ -356,7 +355,7 @@ def _compute_correlation_snr(
 
 
 @njit(cache=True)
-def _apply_bilinear_interpolation(
+def _apply_bilinear_interpolation(  # pragma: no cover
     source: NDArray[np.float32],
     y_coordinates: NDArray[np.float32],
     x_coordinates: NDArray[np.float32],
@@ -405,30 +404,30 @@ def _apply_bilinear_interpolation(
 
 
 @njit(parallel=True, cache=True)
-def _apply_coordinate_shifts(
+def _apply_coordinate_offsets(  # pragma: no cover
     frames: NDArray[np.float32],
-    y_shift_maps: NDArray[np.float32],
-    x_shift_maps: NDArray[np.float32],
+    y_offset_maps: NDArray[np.float32],
+    x_offset_maps: NDArray[np.float32],
     y_grid: NDArray[np.float32],
     x_grid: NDArray[np.float32],
     output: NDArray[np.float32],
 ) -> None:
-    """Applies per-pixel coordinate shifts to a batch of frames.
+    """Applies per-pixel coordinate offsets to a batch of frames.
 
-    Transforms each frame by adding the shift maps to the base coordinate grids and applying
-    bilinear interpolation. This is the core operation for nonrigid motion correction that shifts all frames to align
-    them to the reference image.
+    Transforms each frame by adding the offset maps to the base coordinate grids and applying
+    bilinear interpolation. This is the core operation for nonrigid motion correction that translates all frames to
+    align them to the reference image.
 
     Args:
         frames: The input frame data with shape (num_frames, height, width) to be transformed.
-        y_shift_maps: The per-pixel vertical shifts with shape (num_frames, height, width). Positive values shift
+        y_offset_maps: The per-pixel vertical offsets with shape (num_frames, height, width). Positive values shift
             content upward (sample from lower y-coordinates).
-        x_shift_maps: The per-pixel horizontal shifts with shape (num_frames, height, width). Positive values shift
+        x_offset_maps: The per-pixel horizontal offsets with shape (num_frames, height, width). Positive values shift
             content leftward (sample from lower x-coordinates).
         y_grid: The base y-coordinate grid with shape (height, width) containing row indices (0 to height-1). Combined
-            with y_shift_maps to determine source sampling locations.
+            with y_offset_maps to determine source sampling locations.
         x_grid: The base x-coordinate grid with shape (height, width) containing column indices (0 to width-1).
-            Combined with x_shift_maps to determine source sampling locations.
+            Combined with x_offset_maps to determine source sampling locations.
         output: The pre-allocated output array with shape (num_frames, height, width) where transformed frames are
             stored.
     """
@@ -436,58 +435,58 @@ def _apply_coordinate_shifts(
     for frame_index in prange(frames.shape[0]):
         _apply_bilinear_interpolation(
             source=frames[frame_index],
-            y_coordinates=y_grid + y_shift_maps[frame_index],
-            x_coordinates=x_grid + x_shift_maps[frame_index],
+            y_coordinates=y_grid + y_offset_maps[frame_index],
+            x_coordinates=x_grid + x_offset_maps[frame_index],
             output=output[frame_index],
         )
 
 
 @njit(parallel=True, cache=True)
-def _interpolate_block_shifts(
-    y_block_shifts: NDArray[np.float32],
-    x_block_shifts: NDArray[np.float32],
+def _interpolate_block_offsets(  # pragma: no cover
+    y_block_offsets: NDArray[np.float32],
+    x_block_offsets: NDArray[np.float32],
     y_grid: NDArray[np.float32],
     x_grid: NDArray[np.float32],
-    y_shift_maps: NDArray[np.float32],
-    x_shift_maps: NDArray[np.float32],
+    y_offset_maps: NDArray[np.float32],
+    x_offset_maps: NDArray[np.float32],
 ) -> None:
-    """Interpolates block-level shifts to pixel-level shift maps.
+    """Interpolates block-level offsets to pixel-level offset maps.
 
-    Converts the sparse block shift values to dense per-pixel shift maps using bilinear
+    Converts the sparse block offset values to dense per-pixel offset maps using bilinear
     interpolation. This enables smooth transitions between adjacent blocks.
 
     Args:
-        y_block_shifts: The vertical shifts computed for each block with shape (num_frames, y_blocks, x_blocks). Each
+        y_block_offsets: The vertical offsets computed for each block with shape (num_frames, y_blocks, x_blocks). Each
             value represents the estimated y-displacement for that block region.
-        x_block_shifts: The horizontal shifts computed for each block with shape (num_frames, y_blocks, x_blocks). Each
-            value represents the estimated x-displacement for that block region.
+        x_block_offsets: The horizontal offsets computed for each block with shape
+            (num_frames, y_blocks, x_blocks). Each value represents the estimated x-displacement for that block region.
         y_grid: The interpolation grid for y with shape (height, width) containing normalized block coordinates that
             map each pixel to its position in block space.
         x_grid: The interpolation grid for x with shape (height, width) containing normalized block coordinates that
             map each pixel to its position in block space.
-        y_shift_maps: The pre-allocated output array with shape (num_frames, height, width) where interpolated
-            per-pixel y-shifts are stored.
-        x_shift_maps: The pre-allocated output array with shape (num_frames, height, width) where interpolated
-            per-pixel x-shifts are stored.
+        y_offset_maps: The pre-allocated output array with shape (num_frames, height, width) where interpolated
+            per-pixel y-offsets are stored.
+        x_offset_maps: The pre-allocated output array with shape (num_frames, height, width) where interpolated
+            per-pixel x-offsets are stored.
     """
     # Parallelizes processing over frames.
-    for frame_index in prange(y_block_shifts.shape[0]):
+    for frame_index in prange(y_block_offsets.shape[0]):
         _apply_bilinear_interpolation(
-            source=y_block_shifts[frame_index],
+            source=y_block_offsets[frame_index],
             y_coordinates=y_grid,
             x_coordinates=x_grid,
-            output=y_shift_maps[frame_index],
+            output=y_offset_maps[frame_index],
         )
         _apply_bilinear_interpolation(
-            source=x_block_shifts[frame_index],
+            source=x_block_offsets[frame_index],
             y_coordinates=y_grid,
             x_coordinates=x_grid,
-            output=x_shift_maps[frame_index],
+            output=x_offset_maps[frame_index],
         )
 
 
 @njit(parallel=True, cache=True)
-def _extract_upsampling_regions(
+def _extract_upsampling_regions(  # pragma: no cover
     correlation: NDArray[np.float32],
     y_peaks: NDArray[np.int32],
     x_peaks: NDArray[np.int32],
@@ -521,18 +520,18 @@ def _extract_upsampling_regions(
                 output[block_index, frame_index, row, col] = correlation[block_index, frame_index, y + row, x + col]
 
 
-def _upsample_block_shifts(
+def _upsample_block_offsets(
     width: int,
     height: int,
     block_counts: tuple[int, int],
     x_blocks: list[NDArray[np.int32]],
     y_blocks: list[NDArray[np.int32]],
-    y_block_shifts: NDArray[np.float32],
-    x_block_shifts: NDArray[np.float32],
+    y_block_offsets: NDArray[np.float32],
+    x_block_offsets: NDArray[np.float32],
 ) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-    """Upsamples block-level shifts to dense per-pixel shift maps.
+    """Upsamples block-level offsets to dense per-pixel offset maps.
 
-    Converts the sparse block shift estimates to full-resolution shift maps for applying
+    Converts the sparse block offset estimates to full-resolution offset maps for applying
     nonrigid corrections. Uses bilinear interpolation to create smooth transitions between blocks.
 
     Args:
@@ -541,12 +540,12 @@ def _upsample_block_shifts(
         block_counts: The number of blocks as (y_count, x_count).
         x_blocks: The list of x-coordinate ranges for each block.
         y_blocks: The list of y-coordinate ranges for each block.
-        y_block_shifts: The y-shifts per block with shape (num_frames, num_blocks).
-        x_block_shifts: The x-shifts per block with shape (num_frames, num_blocks).
+        y_block_offsets: The y-offsets per block with shape (num_frames, num_blocks).
+        x_block_offsets: The x-offsets per block with shape (num_frames, num_blocks).
 
     Returns:
-        A tuple of (y_shift_maps, x_shift_maps) arrays with shape (num_frames, height, width)
-        containing per-pixel shift values.
+        A tuple of (y_offset_maps, x_offset_maps) arrays with shape (num_frames, height, width)
+        containing per-pixel offset values.
     """
     # Recovers the block center coordinates from the block boundary arrays.
     y_centers = np.array(y_blocks[:: block_counts[1]], dtype=np.float32).mean(axis=1)
@@ -557,21 +556,21 @@ def _upsample_block_shifts(
     x_indices = np.interp(np.arange(width), x_centers, np.arange(x_centers.size)).astype(np.float32)
     x_grid, y_grid = np.meshgrid(x_indices, y_indices)
 
-    # Reshapes block shifts from flat to grid format.
-    num_frames = y_block_shifts.shape[0]
-    y_block_shifts = y_block_shifts.reshape(num_frames, block_counts[0], block_counts[1])
-    x_block_shifts = x_block_shifts.reshape(num_frames, block_counts[0], block_counts[1])
+    # Reshapes block offsets from flat to grid format.
+    num_frames = y_block_offsets.shape[0]
+    y_block_offsets = y_block_offsets.reshape(num_frames, block_counts[0], block_counts[1])
+    x_block_offsets = x_block_offsets.reshape(num_frames, block_counts[0], block_counts[1])
 
     # Interpolates to full resolution.
-    y_shift_maps = np.empty((num_frames, height, width), dtype=np.float32)
-    x_shift_maps = np.empty((num_frames, height, width), dtype=np.float32)
-    _interpolate_block_shifts(
-        y_block_shifts=y_block_shifts,
-        x_block_shifts=x_block_shifts,
+    y_offset_maps = np.empty((num_frames, height, width), dtype=np.float32)
+    x_offset_maps = np.empty((num_frames, height, width), dtype=np.float32)
+    _interpolate_block_offsets(
+        y_block_offsets=y_block_offsets,
+        x_block_offsets=x_block_offsets,
         y_grid=y_grid,
         x_grid=x_grid,
-        y_shift_maps=y_shift_maps,
-        x_shift_maps=x_shift_maps,
+        y_offset_maps=y_offset_maps,
+        x_offset_maps=x_offset_maps,
     )
 
-    return y_shift_maps, x_shift_maps
+    return y_offset_maps, x_offset_maps

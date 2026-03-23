@@ -129,9 +129,8 @@ class Deformation:
     def __repr__(self) -> str:
         """Returns a string representation of the Deformation instance."""
         if self.is_identity:
-            return f"<Deformation {self.ndim}D identity>"
-        shape_string = "x".join(str(size) for size in self.field_shape)
-        return f"<Deformation shape {shape_string}>"
+            return f"Deformation(field_shape={self.field_shape}, identity=True)"
+        return f"Deformation(field_shape={self.field_shape})"
 
     @property
     def is_identity(self) -> bool:
@@ -379,9 +378,9 @@ class Deformation:
 
         Args:
             grid_sampling: The B-spline grid spacing (knot spacing) in pixels.
-            injective: Whether to apply injectivity constraint to prevent grid folding.
+            injective: Determines whether to apply injectivity constraint to prevent grid folding.
             injective_factor: Scaling factor for the injectivity limit (0 < factor <= 1).
-            freeze_edges: Whether to freeze edges to zero deformation.
+            freeze_edges: Determines whether to freeze edges to zero deformation.
 
         Returns:
             A new regularized Deformation instance, or None if the grid is too small for the requested constraints.
@@ -514,7 +513,7 @@ def _make_samples_absolute(
 
 
 @numba.njit(parallel=True, cache=True)
-def _warp(
+def _warp(  # pragma: no cover
     data: NDArray[np.float32],
     result: NDArray[np.float32],
     samples_x: NDArray[np.float32],
@@ -681,7 +680,7 @@ def _warp(
 
 
 @numba.njit(parallel=True, cache=True)
-def _project(
+def _project(  # pragma: no cover
     data: NDArray[np.float32],
     result: NDArray[np.float32],
     samples_x: NDArray[np.float32],

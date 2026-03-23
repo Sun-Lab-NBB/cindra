@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 [project]
 name = "cindra"
 version = "1.0.0rc1"
-description = "A reimplementation of the suite2p library with novel data arhetecture and accross-day tracking pipeline."
+description = "A reimplementation of the suite2p library with novel data architecture and across-day tracking pipeline."
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
@@ -51,13 +51,10 @@ dependencies = [
 
     # Visualization
     "matplotlib>=3,<4",
-    "rastermap>=1,<2",
 
     # GUI
     "pyside6>=6,<7",
     "pyqtgraph>=0,<1",
-    "ipywidgets>=8,<9",
-    "ipython>=9,<10",
 
     # CLI and MCP Server
     "click>=8,<9",
@@ -106,7 +103,7 @@ exclude = [".github", "recipe"]
 
 # Specifies the library structure.
 [tool.hatch.build.targets.wheel]
-packages = ["src/cindra", "notebooks"]
+packages = ["src/cindra"]
 
 # Ruff Configuration.
 [tool.ruff]
@@ -167,6 +164,16 @@ convention = "google"
     "F401", # Imported but unused
     "F403", # Wildcard imports
 ]
+"**/tests/**/*.py" = [
+    "ANN",     # Type annotations not required in tests
+    "D",       # Docstring enforcement relaxed in tests
+    "INP001",  # Tests use implicit namespace packages
+    "PLR2004", # Magic values common in test assertions
+    "PT006",   # Parametrize argument name style
+    "S101",    # Assert statements standard in tests
+    "SLF001",  # Private member access for testing internals
+    "T201",    # Print statements allowed in tests
+]
 
 [tool.ruff.lint.isort]
 case-sensitive = true              # Takes case into account when sorting imports
@@ -190,6 +197,10 @@ exclude = [
     "recipe/",             # Ignores recipe directory (grayskull output target)
     "tests/",              # Ignores the test directory.
 ]
+
+# Pytest configuration section.
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
 
 # This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
 [tool.coverage.paths]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
 import numpy as np
@@ -26,9 +26,9 @@ from PySide6.QtWidgets import (
 from ataraxis_base_utilities import LogLevel, console
 
 from .styles import FONTS, STYLE, COLORS, PLOT_STYLE, BINARY_STYLE
-from .widgets import configure_plot, add_plot_legend, create_play_pause_group
+from .widgets import configure_plot, add_plot_legend, escape_returns_focus, create_play_pause_group
 from .constants import BINARY_CONFIG
-from .viewer_context import SingleDayData
+from .viewer_context import SingleRecordingData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -41,7 +41,7 @@ class BinaryPlayer(QMainWindow):
         data: Pre-loaded registration data to display on startup.
 
     Attributes:
-        data: The SingleDayData instance that stores the visualized recording's data.
+        data: The SingleRecordingData instance that stores the visualized recording's data.
         _channel_2_visible: Determines whether the channel 2 overlay is currently displayed.
         _current_frame: Index of the currently displayed frame.
         _frame_delta: Frame step size for arrow key navigation.
@@ -54,8 +54,8 @@ class BinaryPlayer(QMainWindow):
         _main_view_box: View box for the primary registered image display.
         _main_image: Image item for the primary frame display.
         _channel_2_button: Button for toggling channel 2 overlay.
-        _shift_plot: Plot widget for rigid registration X-Y offsets.
-        _shift_scatter: Scatter plot overlay indicating the current frame on the shift plot.
+        _offset_plot: Plot widget for rigid registration X-Y offsets.
+        _offset_scatter: Scatter plot overlay indicating the current frame on the offset plot.
         _average_rigid_y_offsets: Average rigid Y offsets across all planes.
         _average_rigid_x_offsets: Average rigid X offsets across all planes.
 
@@ -70,7 +70,7 @@ class BinaryPlayer(QMainWindow):
     # Notifies listeners when the user loads a new recording via the File menu.
     recording_changed = QtCore.Signal()
 
-    def __init__(self, data: SingleDayData) -> None:
+    def __init__(self, data: SingleRecordingData) -> None:
         super().__init__()
 
         # Adds the main UI window.
@@ -83,7 +83,7 @@ class BinaryPlayer(QMainWindow):
         self._central_widget.setLayout(self._layout)
         # Initializes state flags and recording data.
         self._channel_2_visible: bool = False
-        self.data: SingleDayData = data
+        self.data: SingleRecordingData = data
 
         # Initializes playback state.
         self._current_frame: int = 0
@@ -109,10 +109,10 @@ class BinaryPlayer(QMainWindow):
         self._file_button.setMenu(file_menu)
         toolbar.addWidget(self._file_button)
 
-        # Channel 2 toggle button. Disabled until a recording with two channels is loaded.
+        # Channel 2 toggle button. Hidden until a recording with two channels is loaded.
         self._channel_2_button: QPushButton = QPushButton("View Channel 2")
         self._channel_2_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self._channel_2_button.setEnabled(False)
+        self._channel_2_button.setVisible(False)
         self._channel_2_button.setToolTip("Toggle the channel 2 overlay.")
         self._channel_2_button.clicked.connect(self._toggle_channel_2)
         toolbar.addWidget(self._channel_2_button)
@@ -144,11 +144,11 @@ class BinaryPlayer(QMainWindow):
 
         # Configures rigid registration offset plot.
         # noinspection PyUnresolvedReferences
-        self._shift_plot = self._graphics_widget.addPlot(name="plot_shift", row=1, col=0, colspan=2)
+        self._offset_plot = self._graphics_widget.addPlot(name="plot_offset", row=1, col=0, colspan=2)
         configure_plot(
-            self._shift_plot,
+            self._offset_plot,
             title="Rigid Registration Offsets",
-            left_label="Shift (px)",
+            left_label="Offset (px)",
             bottom_label="Frame",
         )
 
@@ -201,11 +201,11 @@ class BinaryPlayer(QMainWindow):
 
         self.load_data(data=data)
 
-    def load_data(self, data: SingleDayData) -> None:
-        """Caches the input SingleDayData instance and uses it to populate the managed UI window.
+    def load_data(self, data: SingleRecordingData) -> None:
+        """Caches the input SingleRecordingData instance and uses it to populate the managed UI window.
 
         Args:
-            data: The SingleDayData instance that stores the visualized recording's data.
+            data: The SingleRecordingData instance that stores the visualized recording's data.
         """
         self.data = data
 
@@ -217,6 +217,21 @@ class BinaryPlayer(QMainWindow):
 
         # Configures all plot views and display parameters for the stitched display.
         self._setup_views()
+
+    def get_state(self) -> dict[str, Any]:
+        """Returns the current display state of the binary player for cross-process state exchange.
+
+        Returns:
+            A dictionary containing the current frame, playback status, and channel settings.
+        """
+        return {
+            "current_frame": self._current_frame,
+            "frame_count": self.data.frame_count,
+            "channel_2_active": self._channel_2_visible,
+            "two_channels": self.data.two_channels,
+            "playing": self._update_timer.isActive(),
+            "frame_step": self._frame_delta,
+        }
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
         """Handles keyboard navigation for frame stepping and playback control.
@@ -260,12 +275,7 @@ class BinaryPlayer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        if (
-            event.type() == QtCore.QEvent.Type.KeyPress
-            and isinstance(event, QtGui.QKeyEvent)
-            and event.key() == QtCore.Qt.Key.Key_Escape
-        ):
-            self.setFocus()
+        if escape_returns_focus(self, event):
             return True
         return super().eventFilter(source, event)
 
@@ -339,7 +349,7 @@ class BinaryPlayer(QMainWindow):
 
         recording_path = Path(directory)
         try:
-            data = SingleDayData.from_data(root_path=recording_path, view_index=-1)
+            data = SingleRecordingData.from_data(root_path=recording_path, view_index=-1)
         except Exception:
             console.echo(message="Unable to load recording data.", level=LogLevel.ERROR)
             result = QMessageBox.question(
@@ -357,8 +367,8 @@ class BinaryPlayer(QMainWindow):
 
     def _setup_views(self) -> None:
         """Configures all plot views and display parameters for the stitched multi-plane display."""
-        self._shift_plot.clear()
-        self._shift_plot.disableAutoRange()
+        self._offset_plot.clear()
+        self._offset_plot.disableAutoRange()
 
         # Computes dynamic range from subsampled per-plane frames, avoiding zero-border bias from stitched frames.
         # Ravels each plane's samples before concatenation since planes may have different FOV dimensions.
@@ -403,33 +413,33 @@ class BinaryPlayer(QMainWindow):
         self._average_rigid_x_offsets = average_x
 
         # Plots average Y (gold) and X (green) offset curves with a horizontal legend.
-        add_plot_legend(self._shift_plot, column_count=BINARY_STYLE.legend_column_count)
-        self._shift_plot.plot(x_values, average_y, pen=pg.mkPen(COLORS.gold), name="Average Y offset")
-        self._shift_plot.plot(x_values, average_x, pen=pg.mkPen(COLORS.green), name="Average X offset")
+        add_plot_legend(self._offset_plot, column_count=BINARY_STYLE.legend_column_count)
+        self._offset_plot.plot(x_values, average_y, pen=pg.mkPen(COLORS.gold), name="Average Y offset")
+        self._offset_plot.plot(x_values, average_x, pen=pg.mkPen(COLORS.green), name="Average X offset")
         shift_min = min(float(average_y.min()), float(average_x.min()))
         shift_max = max(float(average_y.max()), float(average_x.max()))
         if shift_min == shift_max:
             shift_min -= 1
             shift_max += 1
         shift_max += (shift_max - shift_min) * PLOT_STYLE.legend_headroom
-        self._shift_plot.setLimits(xMin=0, xMax=last_frame)
-        self._shift_plot.setRange(xRange=(0, last_frame), yRange=(shift_min, shift_max), padding=0.0)
-        self._shift_scatter = pg.ScatterPlotItem()
-        self._shift_plot.addItem(self._shift_scatter)
-        self._update_shift_scatter(0)
+        self._offset_plot.setLimits(xMin=0, xMax=last_frame)
+        self._offset_plot.setRange(xRange=(0, last_frame), yRange=(shift_min, shift_max), padding=0.0)
+        self._offset_scatter = pg.ScatterPlotItem()
+        self._offset_plot.addItem(self._offset_scatter)
+        self._update_offset_scatter(0)
 
-        self._channel_2_button.setEnabled(self.data.two_channels)
+        self._channel_2_button.setVisible(self.data.two_channels)
 
         self._current_frame = 0
         self._render_frame()
 
-    def _update_shift_scatter(self, frame_index: int) -> None:
-        """Updates the scatter overlay on the shift plot to mark the current frame on the average offset curves.
+    def _update_offset_scatter(self, frame_index: int) -> None:
+        """Updates the scatter overlay on the offset plot to mark the current frame on the average offset curves.
 
         Args:
             frame_index: The frame index to highlight on the offset plot.
         """
-        self._shift_scatter.setData(
+        self._offset_scatter.setData(
             [frame_index, frame_index],
             [float(self._average_rigid_y_offsets[frame_index]), float(self._average_rigid_x_offsets[frame_index])],
             size=PLOT_STYLE.scatter_point_size,
@@ -464,7 +474,7 @@ class BinaryPlayer(QMainWindow):
         self._frame_number_label.setText(f"Current frame: {self._current_frame}")
 
         # Moves the red dot indicators on the rigid registration offset plot to the current frame.
-        self._update_shift_scatter(self._current_frame)
+        self._update_offset_scatter(self._current_frame)
 
     def _go_to_frame(self) -> None:
         """Seeks to the frame indicated by the frame slider position.
@@ -524,8 +534,8 @@ class BinaryPlayer(QMainWindow):
         seek_to_frame = False
         for item in items:
             # Click landed on a time-series plot: maps the scene position to a frame index.
-            if item == self._shift_plot:
-                view_box = self._shift_plot.vb
+            if item == self._offset_plot:
+                view_box = self._offset_plot.vb
                 position = view_box.mapSceneToView(event.scenePos())  # type: ignore[attr-defined]
                 position_x = position.x()
                 is_time_plot = True
@@ -544,7 +554,7 @@ class BinaryPlayer(QMainWindow):
         # Resets x-axis zoom on all time-series plots when double-clicked.
         frame_count = self.data.frame_count
         if zoom:
-            self._shift_plot.setRange(xRange=(0, frame_count - 1))
+            self._offset_plot.setRange(xRange=(0, frame_count - 1))
 
         # Seeks to the clicked frame when playback is paused.
         if seek_to_frame and self._play_button.isEnabled():

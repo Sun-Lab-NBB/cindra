@@ -114,6 +114,11 @@ def _fit_and_reconstruct_block(
     Returns:
         The reconstructed block data with shape (num_frames, num_pixels).
     """
+    # Uniform blocks have zero variance, making PCA undefined. Returns the block unchanged to avoid a
+    # division-by-zero warning inside sklearn.
+    if np.ptp(block) == 0.0:
+        return block.copy()
+
     model = PCA(n_components=num_components, random_state=0).fit(block)
     # noinspection PyUnresolvedReferences
     reconstructed: NDArray[np.float32] = ((block @ model.components_.T) @ model.components_).astype(np.float32)

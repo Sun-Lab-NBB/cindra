@@ -1,7 +1,7 @@
 Welcome to cindra API documentation page
 ============================================
 
-cindra is an enhanced suite2p implementation that includes a pipeline to track cell activity across sessions (days).
+cindra is an enhanced suite2p implementation that includes a pipeline to track ROI activity across recordings.
 
 This library is developed in the `Sun lab <https://neuroai.github.io/sunlab/>`_ at Cornell University. It is an
 extension of the original `suite2p <https://github.com/MouseLand/suite2p>`_ library that features a new pipeline,
@@ -14,7 +14,7 @@ GitHub repository for installation instructions and library usage examples:
 
 Note! Currently, the work on converting cindra to the latest Sun lab documentation standards is still ongoing and
 a large portion of the original source code remains undocumented. Future incremental patches will iteratively add
-documentation for the entire original (single-day) pipeline codebase, while also optimizing the source code where
+documentation for the entire original (single-recording) pipeline codebase, while also optimizing the source code where
 necessary.
 
 .. _`cindra GitHub repository`: https://github.com/Sun-Lab-NBB/cindra

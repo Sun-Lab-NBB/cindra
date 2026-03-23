@@ -1,10 +1,16 @@
 """Statically resolves and stores the Python and library version information used in timing dataclasses."""
 
+from __future__ import annotations
+
 import sys
+from typing import TYPE_CHECKING
 
 from importlib_metadata import metadata as _metadata
 
-_package_metadata = _metadata("cindra")
+if TYPE_CHECKING:
+    from importlib_metadata import PackageMetadata
+
+_package_metadata: PackageMetadata | None = _metadata("cindra")
 
 if _package_metadata is None:
     version: str = "unknown"

@@ -131,9 +131,10 @@ def compute_thresholded_variance(frames: NDArray[np.float32], intensity_threshol
 def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray[np.float32]:
     """Creates a spatial taper mask with sigmoid falloff at the edges.
 
-    The mask smoothly transitions from 1.0 in the center to ~0 at the edges, suppressing border artifacts
-    during phase correlation. The transition follows a sigmoid curve controlled by sigma. Results are cached
-    since the same mask is reused across all frames in a recording.
+    Notes:
+        The mask smoothly transitions from 1.0 in the center to ~0 at the edges, suppressing border artifacts
+        during phase correlation. The transition follows a sigmoid curve controlled by sigma. Results are cached
+        since the same mask is reused across all frames in a recording.
 
     Args:
         sigma: Controls the steepness of the edge falloff. Larger values produce a more gradual taper.
@@ -144,7 +145,7 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
         The multiplicative taper mask with shape (height, width), values in range [0, 1].
     """
     # Creates grids of absolute distances from center for each axis.
-    column_distances, row_distances = _mean_centered_meshgrid(height=height, width=width)
+    column_distances, row_distances = mean_centered_meshgrid(height=height, width=width)
 
     # Computes where taper begins: 2*sigma pixels inward from the edge. This ensures the sigmoid reaches
     # ~0.12 at the edge (when distance equals half-width).
@@ -163,10 +164,11 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
 
 @lru_cache(maxsize=5)
 def compute_block_smoothing_kernel(x_block_count: int, y_block_count: int) -> NDArray[np.float32]:
-    """Computes a normalized Gaussian kernel matrix for smoothing nonrigid block shifts.
+    """Computes a normalized Gaussian kernel matrix for smoothing nonrigid block offsets.
 
-    Creates a kernel that weights neighboring blocks based on their spatial distance, used to enforce smoothness
-    constraints in nonrigid registration. Results are cached since block counts don't change during a recording.
+    Notes:
+        Creates a kernel that weights neighboring blocks based on their spatial distance, used to enforce smoothness
+        constraints in nonrigid registration. Results are cached since block counts don't change during a recording.
 
     Args:
         x_block_count: Number of blocks along the x-axis.
@@ -200,9 +202,10 @@ def compute_registration_blocks(
 ) -> tuple[list[NDArray[np.int32]], list[NDArray[np.int32]], tuple[int, int], tuple[int, int], NDArray[np.float32]]:
     """Computes overlapping blocks for nonrigid registration.
 
-    Divides the field of view into overlapping blocks that are registered independently. The blocks
-    are arranged in a regular grid with positions computed to provide approximately 50% overlap
-    between adjacent blocks.
+    Notes:
+        Divides the field of view into overlapping blocks that are registered independently. The blocks
+        are arranged in a regular grid with positions computed to provide approximately 50% overlap
+        between adjacent blocks.
 
     Args:
         height: The imaging field height in pixels.
@@ -214,7 +217,7 @@ def compute_registration_blocks(
         A tuple of (y_blocks, x_blocks, block_counts, actual_block_size, smoothing_kernel). The
         y_blocks and x_blocks are lists of 2-element arrays specifying the start and end indices for
         each block. The block_counts tuple gives (y_count, x_count). The actual_block_size tuple gives
-        the final block dimensions. The smoothing_kernel is used for interpolating block shifts.
+        the final block dimensions. The smoothing_kernel is used for interpolating block offsets.
     """
     # Computes block dimensions and counts for each axis. If the requested block size exceeds the image
     # dimension, uses the full dimension as a single block. Otherwise, the 1.5x multiplier produces
@@ -247,7 +250,7 @@ def compute_registration_blocks(
         for x_index in range(x_block_count)
     ]
 
-    # Computes the smoothing kernel used for SNR-based adaptive smoothing during shift estimation.
+    # Computes the smoothing kernel used for SNR-based adaptive smoothing during offset estimation.
     smoothing_kernel = compute_block_smoothing_kernel(
         x_block_count=x_block_count,
         y_block_count=y_block_count,
@@ -295,11 +298,12 @@ def _apply_rolling_mean_high_pass(frames: NDArray[np.float32], kernel_size: int)
         frames[-remainder:] -= frames[-remainder:].mean(axis=0)
 
 
-def _mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+def mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     """Creates a mean-centered distance meshgrid of the specified dimensions.
 
-    Each coordinate value represents the absolute distance from the center of that axis. Used internally
-    for creating spatial taper masks.
+    Notes:
+        Each coordinate value represents the absolute distance from the center of that axis. Used for creating spatial
+        taper masks and Gaussian frequency filters.
 
     Args:
         height: The height of the frames or images to generate the meshgrid for, in pixels.

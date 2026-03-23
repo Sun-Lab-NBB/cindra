@@ -80,3 +80,4 @@ data/test_data
 
 # Project: Add any project-specific exclusions here
 /temp
+*.lock

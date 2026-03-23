@@ -116,7 +116,7 @@ def detect(
     split_variance_threshold = 1.25
     reference_frame_count = 1200
 
-    # Preprocessing.
+    # Preprocesses the frames by removing temporal drift and normalizing spatial variability.
     # Removes slow temporal drift so that transient calcium events dominate the signal.
     apply_temporal_high_pass_filter(frames=frames, kernel_size=int(temporal_highpass_window))
 
@@ -132,7 +132,7 @@ def detect(
 
     _, height, width = frames.shape
 
-    # Multiscale pyramid construction.
+    # Constructs the multiscale pyramid by alternating convolution and downsampling.
     # Builds the finest-resolution coordinate grid in float32 to avoid an int64 intermediate and copy. The grid
     # tracks each scale's pixel positions for mapping detected peaks back to the finest resolution.
     coordinate_grid = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
@@ -177,7 +177,7 @@ def detect(
     # Computes the cross-scale maximum as the correlation map for visualization and downstream quality assessment.
     correlation_map = scale_images.max(axis=0)
 
-    # Scale selection and threshold computation.
+    # Selects the best spatial scale and computes the detection threshold.
     scale = _find_best_scale(scale_images=scale_images)
 
     spatial_scale_pixels = base_filter_size * 2**scale
@@ -188,12 +188,12 @@ def detect(
     # Precomputes the effective detection threshold since both factors are constant across iterations.
     scaled_threshold = time_multiplier * peak_threshold
     message = (
-        f"Plane {plane_index} detection: estimated target cell diameter ~{int(spatial_scale_pixels)} pixels, "
+        f"Plane {plane_index} detection: estimated target ROI diameter ~{int(spatial_scale_pixels)} pixels, "
         f"using {frames.shape[0]} binned frames and a minimum peak activity threshold of {round(scaled_threshold, 2)}."
     )
     console.echo(message=message, level=LogLevel.INFO)
 
-    # Detection loop setup.
+    # Sets up the detection loop with variance maps and flattened frame data.
     # Initializes variance maps as activity heatmaps from which peaks are drawn. Updates after each ROI subtraction
     # ensure that already-explained activity no longer contributes to future detections.
     variance_maps = [
@@ -210,7 +210,7 @@ def detect(
     exhausted_activity = False
     roi_statistics: list[ROIStatistics] = []
     for _ in range(maximum_iterations):
-        # Peak selection.
+        # Selects the globally strongest peak across all spatial scales.
         # Selects the globally strongest peak across all spatial scales, then maps it back to the finest grid so that
         # the ROI is grown in full-resolution coordinates.
         scale_maxima = np.array([variance_maps[scale_index].max() for scale_index in range(scale_count)])
@@ -232,9 +232,9 @@ def detect(
             break
         filter_size = filter_sizes[best_scale_index]
 
-        # Initial ROI seed.
+        # Seeds the ROI as a square patch at the peak location.
         # Seeds the ROI as a square patch at the peak location. The patch size matches the spatial scale's filter size
-        # so that the initial footprint is proportional to the expected cell diameter at this scale.
+        # so that the initial footprint is proportional to the expected ROI diameter at this scale.
         y_pixels, x_pixels, pixel_weights = _create_initial_square(
             center_y=int(peak_y),
             center_x=int(peak_x),
@@ -248,9 +248,9 @@ def detect(
         time_projection = frames[:, flat_indices] @ pixel_weights
         active_frame_indices = np.nonzero(time_projection > peak_threshold)[0]
 
-        # ROI growth.
+        # Grows the ROI by iteratively extending the boundary and re-estimating weights.
         # Repeatedly extends the ROI boundary and re-estimates weights from the residual. Multiple passes allow the
-        # mask to converge to the cell's true spatial extent by incorporating increasingly distant correlated pixels.
+        # mask to converge to the ROI's true spatial extent by incorporating increasingly distant correlated pixels.
         for _extension_pass in range(extension_iterations):
             y_pixels, x_pixels, pixel_weights = _extend_iteratively(
                 y_pixels=y_pixels,
@@ -268,9 +268,9 @@ def detect(
         if len(active_frame_indices) < 1:
             continue
 
-        # Component splitting.
+        # Tests whether splitting into two components improves explained variance.
         # Tests whether a two-component model explains significantly more variance than the single-component model. If
-        # so, the ROI likely contains two overlapping cells and the dominant component is retained.
+        # so, the ROI likely contains two overlapping ROIs and the dominant component is retained.
         split_ratio, component_pack = _check_split_components(
             pixel_frames=frames[:, flat_indices],
             weights=pixel_weights,
@@ -292,9 +292,9 @@ def detect(
             centroid = (int(y_pixels[closest_pixel_index]), int(x_pixels[closest_pixel_index]))
             flat_indices = y_pixels * width + x_pixels
 
-        # Residual subtraction.
+        # Subtracts the detected ROI's contribution from the residual frames.
         # Removes the detected ROI's contribution from the residual frames so that subsequent iterations detect new
-        # cells rather than re-detecting the same activity.
+        # ROIs rather than re-detecting the same activity.
         frames[np.ix_(active_frame_indices, flat_indices)] -= (
             time_projection[active_frame_indices][:, np.newaxis] * pixel_weights
         )

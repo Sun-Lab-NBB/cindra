@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "cindra-mcp": {
-      "type": "stdio",
-      "command": "cindra",
-      "args": ["mcp"]
-    }
-  }
-}

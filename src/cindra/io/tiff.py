@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from ..dataclasses import RuntimeContext, AcquisitionParameters
 
-_TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
+TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
 """The supported TIFF file extensions."""
 
 _MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
@@ -39,8 +39,9 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
         images in each context's runtime data.
 
     Args:
-        contexts: A list of RuntimeContext instances created by resolve_single_day_contexts(). Each context must have
-            valid configuration, acquisition parameters, and IOData with binary file paths configured.
+        contexts: A list of RuntimeContext instances created by resolve_single_recording_contexts(). Each
+            context must have valid configuration, acquisition parameters, and IOData with binary file paths
+            configured.
 
     Raises:
         ValueError: If contexts is empty or data_path is not configured.
@@ -283,7 +284,7 @@ def _discover_tiff_files(
 
     # Performs non-recursive scan for TIFF files.
     file_paths: list[Path] = []
-    for extension in _TIFF_EXTENSIONS:
+    for extension in TIFF_EXTENSIONS:
         file_paths.extend(
             file_path.resolve()
             for file_path in data_directory.glob(f"*.{extension}")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PySide6 import QtGui, QtCore
@@ -19,13 +19,13 @@ from PySide6.QtWidgets import (
 from ataraxis_base_utilities import LogLevel, console
 
 from .styles import FONTS, STYLE, COLORS, PC_STYLE, PLOT_STYLE
-from .widgets import configure_plot, add_plot_legend, create_play_pause_group
+from .widgets import configure_plot, add_plot_legend, escape_returns_focus, create_play_pause_group
 from .constants import PC_CONFIG, COMMON_CONFIG
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from .viewer_context import SingleDayData
+    from .viewer_context import SingleRecordingData
 
 
 class PCViewer(QMainWindow):
@@ -35,19 +35,19 @@ class PCViewer(QMainWindow):
         data: Pre-loaded registration data to display on startup.
 
     Attributes:
-        data: The SingleDayData instance that stores the visualized recording's data.
+        data: The SingleRecordingData instance that stores the visualized recording's data.
         _loaded: Determines whether PC data has been loaded and is ready for display.
         _current_frame: Animation toggle state for PC extreme image cycling.
         _pc_count: Number of principal components available.
         _pc_images: PC extreme images array with shape (2, num_pcs, height, width), or None.
         _image_height: Height of PC images in pixels.
         _image_width: Width of PC images in pixels.
-        _pc_metrics: Registration shift metrics array with shape (num_pcs, 3), or None.
+        _pc_metrics: Registration offset metrics array with shape (num_pcs, 3), or None.
         _pc_projections: Per-frame PC projection array with shape (num_frames, num_pcs), or None.
         _central_widget: Central widget container.
         _layout: Grid layout for arranging all controls and views.
         _graphics_widget: PyQtGraph graphics layout for image and plot views.
-        _metrics_plot: Plot widget for PC shift metrics.
+        _metrics_plot: Plot widget for PC offset metrics.
         _difference_view_box: View box for the PC difference image.
         _merged_view_box: View box for the merged PC overlay image.
         _animated_view_box: View box for the animated PC extreme image.
@@ -57,7 +57,7 @@ class PCViewer(QMainWindow):
         _projection_plot: Plot widget for the PC time-course projection.
         _plane_selector: Dropdown for selecting the imaging plane.
         _pc_edit: Input field for the current principal component number.
-        _metric_labels: Labels displaying per-PC registration shift values.
+        _metric_labels: Labels displaying per-PC registration offset values.
         _title_labels: Text items anchored inside each image view box, positioned at the bottom center.
         _play_button: Button to start PC animation playback.
         _pause_button: Button to pause PC animation playback.
@@ -68,7 +68,7 @@ class PCViewer(QMainWindow):
         _projection_y_range: Per-plane y-axis range for the projection plot, computed across all PCs.
     """
 
-    def __init__(self, data: SingleDayData) -> None:
+    def __init__(self, data: SingleRecordingData) -> None:
         # Initializes the main viewer window.
         super().__init__()
         pg.setConfigOptions(imageAxisOrder="row-major")
@@ -80,7 +80,7 @@ class PCViewer(QMainWindow):
         self._central_widget.setLayout(self._layout)
 
         # Initializes state and data.
-        self.data: SingleDayData = data
+        self.data: SingleRecordingData = data
         self._loaded: bool = False
         self._current_frame: int = 0
         self._pc_count: int = data.principal_component_count
@@ -120,15 +120,15 @@ class PCViewer(QMainWindow):
         self._layout.setRowStretch(1, 1)
         self._layout.setRowStretch(2, 0)
 
-        # Configures pixel shift metrics plot. Top content margin provides space for the legend row.
+        # Configures pixel offset metrics plot. Top content margin provides space for the legend row.
         # noinspection PyUnresolvedReferences
         self._metrics_plot = self._graphics_widget.addPlot(row=0, col=0)
         configure_plot(
             self._metrics_plot,
             mouse_x=False,
             mouse_y=False,
-            title="PC Registration Shifts",
-            left_label="Shift (px)",
+            title="PC Registration Offsets",
+            left_label="Offset (px)",
             bottom_label="PC #",
         )
 
@@ -188,14 +188,14 @@ class PCViewer(QMainWindow):
 
         self.load_data(data=data)
 
-    def load_data(self, data: SingleDayData) -> None:
-        """Loads principal component registration data from the SingleDayData instance.
+    def load_data(self, data: SingleRecordingData) -> None:
+        """Loads principal component registration data from the SingleRecordingData instance.
 
         Populates the plane selector from the recording's view labels and switches to the appropriate plane before
         loading PC data.
 
         Args:
-            data: The SingleDayData instance that stores the visualized recording's data.
+            data: The SingleRecordingData instance that stores the visualized recording's data.
         """
         self.data = data
 
@@ -212,6 +212,22 @@ class PCViewer(QMainWindow):
         data.switch_view(view_index=max(0, data.view_index))
 
         self._reload_pc_data()
+
+    def get_state(self) -> dict[str, Any]:
+        """Returns the current display state of the PC viewer for cross-process state exchange.
+
+        Returns:
+            A dictionary containing the current plane, principal component, and animation status.
+        """
+        current_pc = int(self._pc_edit.text()) if self._pc_edit.text() else 1
+        return {
+            "current_plane": self._plane_selector.currentIndex(),
+            "plane_count": self.data.plane_count,
+            "current_pc": current_pc,
+            "pc_count": self._pc_count,
+            "playing": self._update_timer.isActive(),
+            "loaded": self._loaded,
+        }
 
     def _on_plane_changed(self, index: int) -> None:
         """Handles plane selector index changes by switching to the selected plane.
@@ -309,12 +325,7 @@ class PCViewer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        if (
-            event.type() == QtCore.QEvent.Type.KeyPress
-            and isinstance(event, QtGui.QKeyEvent)
-            and event.key() == QtCore.Qt.Key.Key_Escape
-        ):
-            self.setFocus()
+        if escape_returns_focus(self, event):
             return True
         return super().eventFilter(source, event)
 
@@ -347,7 +358,7 @@ class PCViewer(QMainWindow):
         panel.addWidget(self._pc_edit)
         panel.addSpacing(group_spacing)
 
-        # Metric value labels showing per-PC registration shift magnitudes.
+        # Metric value labels showing per-PC registration offset magnitudes.
         self._metric_labels: list[QLabel] = []
         for _ in range(3):
             metric_label = QLabel("")
@@ -449,7 +460,7 @@ class PCViewer(QMainWindow):
         self._animated_image.setLevels([pc_low.min(), pc_low.max()])
         self._zoom_plot()
 
-        # Metrics plot: shows rigid, nonrigid, and nonrigid-max shift magnitudes across all PCs.
+        # Metrics plot: shows rigid, nonrigid, and nonrigid-max offset magnitudes across all PCs.
         # The legend is recreated on every update because clear() removes it from the plot.
         self._metrics_plot.clear()
         self._metrics_plot.disableAutoRange()

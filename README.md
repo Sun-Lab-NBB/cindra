@@ -1,6 +1,6 @@
 # cindra
 The Sun lab reimplementation of the suite2p library that provides clean and modern code, expanded documentation, and a 
-new pipeline to track cells across multiple days.
+new pipeline to track ROIs across multiple recordings.
 
 
 ![PyPI - Version](https://img.shields.io/pypi/v/cindra)
@@ -17,15 +17,15 @@ ___
 ## Detailed Description
 
 This library contains the refactored, re-documented and repackaged [suite2p](https://github.com/MouseLand/suite2p) 
-source code, merged with the refactored, re-documented and repackaged multi-day cell tracking pipeline referenced 
-[here](https://github.com/sprustonlab/multiday-suite2p-public).
+source code, merged with the refactored, re-documented and repackaged multi-recording ROI tracking pipeline referenced 
+[here](https://github.com/sprustonlab/multi_recording-suite2p-public).
 
 The scope of the changes realized in this implementation is extensive and still ongoing. Overall, the goal of this 
 project is to preserve the algorithmic core of the suite2p library while optimizing the documentation, typing, and 
 implementation where possible. Once this refactoring is over, the project would transition to exploring further 
-algorithmic and computation optimizations, such as adding GPU support and fine-tuning both single-day and multi-day 
-pipelines. Currently, there are no plans to keep up with the existing suite2p implementation unless it receives an 
-update that majorly expands or enhances its functionality relative to this project.
+algorithmic and computation optimizations, such as adding GPU support and fine-tuning both single-recording and 
+multi-recording pipelines. Currently, there are no plans to keep up with the existing suite2p implementation unless it 
+receives an update that majorly expands or enhances its functionality relative to this project.
 
 **Warning!** The resultant cindra is now largely ***incompatible*** with both 'source' pipelines due to extensive 
 modifications to the APIs, CLIs, and configuration parameters in this project relative to both sources. Currently, 
@@ -41,10 +41,10 @@ All original suite2p source code rights belong to the original authors and fall 
 For the original suite2p API and, importantly, algorithm documentation, see the original documentation available 
 [here](https://suite2p.readthedocs.io/en/latest/settings.html).
 
-All original multi-day pipeline code rights belong to the original authors of the 
+All original multi-recording pipeline code rights belong to the original authors of the 
 [OSM Manuscript](https://www.nature.com/articles/s41586-024-08548-w).
 
-Multi-day registration code (diffeomorphic.py, deformation.py, spline_grid.py, pyramid.py): 
+Multi-recording registration code (diffeomorphic.py, deformation.py, spline_grid.py, pyramid.py): 
 Original pirt library Copyright 2010-2017 Almar Klein, University of Twente.
 
 All enhancements introduced in this library belong to the original authors and fall under the following copyright 
@@ -70,16 +70,16 @@ ___
   been deprecated and, moving forward, the library will only support the latest available Python version.
 - All dependencies have been pinned to specific versions, eliminating compatibility issues.
 - The library has been repackaged using modern toml-based standards.
-- The high-level API has been revised to allow flexibly executing specific single-day and multi-day pipeline steps via 
-  API or CLI calls. This allows experienced users to more easily parallelize pipeline steps locally or on remote compute
-  servers and clusters.
+- The high-level API has been revised to allow flexibly executing specific single-recording and multi-recording 
+  pipeline steps via API or CLI calls. This allows experienced users to more easily parallelize pipeline steps locally 
+  or on remote compute servers and clusters.
 - The source-code has been reformatted and refactored to improve readability and include explicit typing and improved 
   docstrings. This effort is still ongoing and, eventually, will cover the entire codebase.
 - The source code has been augmented with many fixes and small optimizations to improve library performance and make it
   easier to maintain the source code in the future.
-- Critically, the library now includes a similarly reimplemented multi-day cell tracking pipeline from the 
-  [OSM manuscript](https://www.nature.com/articles/s41586-024-08548-w), enabling cindra to track cells both 
-  within-days and across-days.
+- Critically, the library now includes a similarly reimplemented multi-recording ROI tracking pipeline from the 
+  [OSM manuscript](https://www.nature.com/articles/s41586-024-08548-w), enabling cindra to track ROIs both 
+  within-recordings and across-recordings.
 
 ---
 
@@ -116,8 +116,8 @@ additional dependencies that enhance library performance in some processing scen
 
 To learn about using this library to process your data, see detailed pipeline guides in the [notebooks](/notebooks)
 folder. Note, both example notebooks are shipped with the source code of the library each time it is installed from 
-pip or source. The notebook examples fully cover the single-day and multi-day pipeline API and are recommended for all
-users, even those that intend to use the CLI commands to work with the library.
+pip or source. The notebook examples fully cover the single-recording and multi-recording pipeline API and are 
+recommended for all users, even those that intend to use the CLI commands to work with the library.
 
 ### CLI
 All functions demonstrated in the example notebooks can also be called via the Command-Line Interface exposed by this 
@@ -158,7 +158,7 @@ ___
 - All Sun lab [members](https://neuroai.github.io/sunlab/people) for providing the inspiration and comments during the
   development of this library.
 - The authors and maintainers of the original [suite2p](https://github.com/MouseLand/suite2p) and 
-[multi-day pipeline](https://github.com/sprustonlab/multiday-suite2p-public).
+[multi-recording pipeline](https://github.com/sprustonlab/multi_recording-suite2p-public).
 - The creators of all other projects used in our development automation pipelines and source code 
   [see pyproject.toml](pyproject.toml).
 

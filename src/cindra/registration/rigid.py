@@ -96,44 +96,44 @@ def compute_phase_correlation_kernel(
     return reference_fft.astype(np.complex64)
 
 
-def compute_rigid_shifts(
+def compute_rigid_offsets(
     frames: NDArray[np.float32],
     reference_kernel: NDArray[np.complex64],
-    maximum_shift_fraction: float,
+    maximum_offset_fraction: float,
     temporal_smoothing_sigma: float,
     workers: int,
 ) -> tuple[NDArray[np.int32], NDArray[np.int32], NDArray[np.float32]]:
-    """Computes rigid translation shifts using phase correlation.
+    """Computes rigid translation offsets using phase correlation.
 
-    Estimates per-frame (y, x) pixel shifts by finding the peak of the phase correlation between
+    Estimates per-frame (y, x) pixel offsets by finding the peak of the phase correlation between
     each frame and the reference kernel. Optionally applies temporal smoothing to the correlation
     maps before peak detection.
 
     Args:
         frames: The frame data with shape (num_frames, height, width) after edge tapering.
         reference_kernel: The phase correlation kernel from compute_phase_correlation_kernel.
-        maximum_shift_fraction: The maximum allowed shift as a fraction of the minimum spatial dimension.
-            The search window is limited to min(height, width) * maximum_shift_fraction pixels.
+        maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension.
+            The search window is limited to min(height, width) * maximum_offset_fraction pixels.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation
             maps. If 0, no smoothing is applied.
         workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
-        A tuple of (y_shifts, x_shifts, correlation_maxima) arrays with shape (num_frames,). The shifts
-        are pixel offsets from the reference, and correlation_maxima indicates the peak correlation
+        A tuple of (y_offsets, x_offsets, correlation_maxima) arrays with shape (num_frames,). The offsets
+        are pixel displacements from the reference, and correlation_maxima indicates the peak correlation
         value for each frame.
     """
-    # Computes the correlation search window size based on maximum allowed shift.
+    # Computes the correlation search window size based on maximum allowed offset.
     minimum_dimension = np.minimum(*frames.shape[1:])
     maximum_radius = minimum_dimension // 2
-    correlation_radius = int(np.minimum(np.round(maximum_shift_fraction * minimum_dimension), maximum_radius))
+    correlation_radius = int(np.minimum(np.round(maximum_offset_fraction * minimum_dimension), maximum_radius))
 
     # Applies phase correlation in frequency domain.
     correlation_data = apply_phase_correlation(frames=frames, kernel=reference_kernel, workers=workers)
 
     # Extracts the central region containing valid correlation peaks. The correlation surface wraps around,
-    # so negative shifts appear at the end of each axis. This block rearranges the four quadrants into a
-    # contiguous window centered at zero shift.
+    # so negative offsets appear at the end of each axis. This block rearranges the four quadrants into a
+    # contiguous window centered at zero offset.
     correlation_window = np.real(
         np.block(
             [
@@ -157,28 +157,28 @@ def compute_rigid_shifts(
     num_frames = frames.shape[0]
     window_size = 2 * correlation_radius + 1
     flat_indices = np.argmax(correlation_window.reshape(num_frames, -1), axis=1)
-    y_shifts = (flat_indices // window_size - correlation_radius).astype(np.int32)
-    x_shifts = (flat_indices % window_size - correlation_radius).astype(np.int32)
+    y_offsets = (flat_indices // window_size - correlation_radius).astype(np.int32)
+    x_offsets = (flat_indices % window_size - correlation_radius).astype(np.int32)
 
     # Extracts correlation maxima at peak locations.
     correlation_maxima = correlation_window.reshape(num_frames, -1)[np.arange(num_frames), flat_indices]
 
-    return y_shifts, x_shifts, correlation_maxima.astype(np.float32)
+    return y_offsets, x_offsets, correlation_maxima.astype(np.float32)
 
 
-def shift_frame(frame: NDArray[np.float32], y_shift: int, x_shift: int) -> NDArray[np.float32]:
-    """Applies a rigid translation to a single frame using circular shift.
+def translate_frame(frame: NDArray[np.float32], y_offset: int, x_offset: int) -> NDArray[np.float32]:
+    """Applies a rigid translation to a single frame using circular shifting.
 
-    Shifts the frame by the specified pixel amounts using numpy roll. Positive shift values move the
+    Translates the frame by the specified pixel amounts using numpy roll. Positive offset values move the
     image content in the negative direction (i.e., a positive y_shift moves content upward).
 
     Args:
-        frame: The frame with shape (height, width) to be shifted.
-        y_shift: The vertical shift amount in pixels from compute_rigid_shifts. Positive values shift content upward.
-        x_shift: The horizontal shift amount in pixels from compute_rigid_shifts. Positive values shift content
+        frame: The frame with shape (height, width) to translate.
+        y_offset: The vertical offset in pixels from compute_rigid_offsets. Positive values shift content upward.
+        x_offset: The horizontal offset in pixels from compute_rigid_offsets. Positive values shift content
             leftward.
 
     Returns:
-        The shifted frame with the same shape as input.
+        The translated frame with the same shape as input.
     """
-    return np.roll(frame, shift=(-y_shift, -x_shift), axis=(0, 1))
+    return np.roll(frame, shift=(-y_offset, -x_offset), axis=(0, 1))

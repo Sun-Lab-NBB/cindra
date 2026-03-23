@@ -11,14 +11,14 @@ from ataraxis_base_utilities import LogLevel, console
 
 from ..io import BinaryFile
 from .rigid import (
-    shift_frame,
+    translate_frame,
     apply_edge_taper,
     compute_edge_taper,
-    compute_rigid_shifts,
+    compute_rigid_offsets,
     compute_phase_correlation_kernel,
 )
 from .utils import apply_spatial_high_pass, apply_spatial_smoothing
-from .nonrigid import compute_nonrigid_shifts, compute_nonrigid_reference_data
+from .nonrigid import compute_nonrigid_offsets, compute_nonrigid_reference_data
 from ..detection import compute_registration_blocks
 from .bidiphase_correction import apply_bidirectional_phase_correction
 
@@ -58,7 +58,7 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
         The computed metrics are stored in context.runtime.registration. The principal_component_extreme_images field
         contains mean images from low and high PC projections. The principal_component_projections field contains PC
         projection values for each sampled frame. The principal_component_shift_metrics field contains registration
-        shift metrics computed by aligning PC extremes.
+        offset metrics computed by aligning PC extremes.
 
     Args:
         context: The runtime context containing pipeline configuration and runtime data for the current plane. Modified
@@ -96,14 +96,14 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
     # Extracts registration configuration parameters.
     num_components = context.configuration.registration.registration_metric_principal_components
     spatial_smoothing_sigma = context.configuration.registration.spatial_smoothing_sigma
-    maximum_shift_fraction = context.configuration.registration.maximum_shift_fraction
+    maximum_offset_fraction = context.configuration.registration.maximum_offset_fraction
     parallel_workers = context.configuration.runtime.parallel_workers
 
     # Extracts nonrigid registration parameters.
     nonrigid_enabled = context.configuration.nonrigid_registration.enabled
     block_size = context.configuration.nonrigid_registration.block_size
     snr_threshold = context.configuration.nonrigid_registration.signal_to_noise_threshold
-    maximum_nonrigid_shift = context.configuration.nonrigid_registration.maximum_block_shift
+    maximum_nonrigid_offset = context.configuration.nonrigid_registration.maximum_block_offset
 
     # Extracts one-photon registration parameters.
     one_photon_mode = context.configuration.one_photon_registration.enabled
@@ -119,7 +119,6 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
     edge_taper_slope = edge_taper_pixels if one_photon_mode else 3.0 * spatial_smoothing_sigma
 
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
-    timer.reset()
 
     console.echo(
         message=(
@@ -185,8 +184,8 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
         bidirectional_corrected=bidirectional_corrected,
         smoothing_sigma=spatial_smoothing_sigma,
         block_size=block_size,
-        maximum_shift_fraction=maximum_shift_fraction,
-        maximum_nonrigid_shift=maximum_nonrigid_shift,
+        maximum_offset_fraction=maximum_offset_fraction,
+        maximum_nonrigid_offset=maximum_nonrigid_offset,
         one_photon_mode=one_photon_mode,
         snr_threshold=snr_threshold,
         nonrigid_enabled=nonrigid_enabled,
@@ -268,8 +267,8 @@ def _register_pc_extremes(
     pre_smoothing_window: int | None = None,
     smoothing_sigma: float = 1.15,
     block_size: tuple[int, int] = (128, 128),
-    maximum_shift_fraction: float = 0.1,
-    maximum_nonrigid_shift: float = 5.0,
+    maximum_offset_fraction: float = 0.1,
+    maximum_nonrigid_offset: float = 5.0,
     one_photon_mode: bool = False,
     snr_threshold: float = 1.2,
     nonrigid_enabled: bool = True,
@@ -280,8 +279,8 @@ def _register_pc_extremes(
     """Registers images at the extreme ends of each principal components to each-other to measure registration quality.
 
     Attempts to align the high-projection PC images to the low-projection PC images using rigid and optionally
-    nonrigid registration. The magnitude of the required shifts indicates how much residual motion remains after
-    registration. Large shifts suggest poor registration.
+    nonrigid registration. The magnitude of the required offsets indicates how much residual motion remains after
+    registration. Large offsets suggest poor registration.
 
     Args:
         pc_low: The mean images from low PC projections with shape (num_components, height, width).
@@ -291,8 +290,8 @@ def _register_pc_extremes(
         pre_smoothing_window: The window size for spatial smoothing before high-pass filtering.
         smoothing_sigma: The standard deviation for Gaussian smoothing of the phase correlation surface.
         block_size: The target block size as (height, width) for nonrigid registration.
-        maximum_shift_fraction: The maximum allowed rigid shift as a fraction of the minimum dimension.
-        maximum_nonrigid_shift: The maximum allowed nonrigid shift in pixels.
+        maximum_offset_fraction: The maximum allowed rigid offset as a fraction of the minimum dimension.
+        maximum_nonrigid_offset: The maximum allowed nonrigid offset in pixels.
         one_photon_mode: Determines whether to apply one-photon preprocessing.
         snr_threshold: The SNR threshold for adaptive smoothing during nonrigid registration.
         nonrigid_enabled: Determines whether to compute nonrigid registration metrics.
@@ -302,8 +301,8 @@ def _register_pc_extremes(
 
     Returns:
         A 2D array with shape (num_components, 3) containing registration metrics. Column 0 contains the mean rigid
-        shift magnitude in pixels. Column 1 contains the mean nonrigid shift magnitude. Column 2 contains the maximum
-        nonrigid shift magnitude. When nonrigid registration is disabled, columns 1 and 2 are zero.
+        offset magnitude in pixels. Column 1 contains the mean nonrigid offset magnitude. Column 2 contains the maximum
+        nonrigid offset magnitude. When nonrigid registration is disabled, columns 1 and 2 are zero.
     """
     num_components, height, width = pc_low.shape
 
@@ -360,27 +359,27 @@ def _register_pc_extremes(
         np.clip(target_frame, intensity_min, intensity_max, out=target_frame)
         preprocessed_target = target_frame[np.newaxis, :, :]
 
-        # Computes rigid registration shifts.
+        # Computes rigid registration offsets.
         tapered_target = apply_edge_taper(frames=preprocessed_target, taper_mask=taper_mask, mean_offset=mean_offset)
-        y_shifts, x_shifts, _ = compute_rigid_shifts(
+        y_offsets, x_offsets, _ = compute_rigid_offsets(
             frames=tapered_target,
             reference_kernel=reference_kernel,
-            maximum_shift_fraction=maximum_shift_fraction,
+            maximum_offset_fraction=maximum_offset_fraction,
             temporal_smoothing_sigma=0,
             workers=workers,
         )
 
-        # Records rigid shift magnitude.
-        rigid_magnitude = float(np.sqrt(y_shifts[0] ** 2 + x_shifts[0] ** 2))
+        # Records rigid offset magnitude.
+        rigid_magnitude = float(np.sqrt(y_offsets[0] ** 2 + x_offsets[0] ** 2))
         metrics[component_index, 0] = rigid_magnitude
 
         # Computes nonrigid registration metrics if enabled.
         if nonrigid_enabled:
-            # Applies rigid shift to target before nonrigid registration.
-            shifted_target = shift_frame(
+            # Applies rigid offset to target before nonrigid registration.
+            translated_target = translate_frame(
                 frame=preprocessed_target[0],
-                y_shift=int(y_shifts[0]),
-                x_shift=int(x_shifts[0]),
+                y_offset=int(y_offsets[0]),
+                x_offset=int(x_offsets[0]),
             )[np.newaxis, :, :]
 
             # Prepares nonrigid reference data.
@@ -392,8 +391,8 @@ def _register_pc_extremes(
                 x_blocks=x_blocks,
             )
 
-            y_nonrigid, x_nonrigid, _ = compute_nonrigid_shifts(
-                frames=shifted_target,
+            y_nonrigid, x_nonrigid, _ = compute_nonrigid_offsets(
+                frames=translated_target,
                 taper_mask=nonrigid_taper,
                 mean_offset=nonrigid_offset,
                 reference_kernel=nonrigid_kernel,
@@ -401,11 +400,11 @@ def _register_pc_extremes(
                 smoothing_kernel=smoothing_kernel,
                 x_blocks=x_blocks,
                 y_blocks=y_blocks,
-                maximum_shift=maximum_nonrigid_shift,
+                maximum_offset=maximum_nonrigid_offset,
                 workers=workers,
             )
 
-            # Computes nonrigid shift magnitudes.
+            # Computes nonrigid offset magnitudes.
             nonrigid_magnitudes = np.sqrt(y_nonrigid**2 + x_nonrigid**2)
             metrics[component_index, 1] = float(np.mean(nonrigid_magnitudes))
             metrics[component_index, 2] = float(np.amax(nonrigid_magnitudes))

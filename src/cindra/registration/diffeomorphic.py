@@ -12,12 +12,12 @@ from .pyramid import ScaleSpacePyramid
 from .deformation import Deformation
 from .spline_grid import SplineGrid
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
 _MINIMUM_GRID_DIMENSION: int = 4
 """The minimum B-spline grid dimension required for frozen edge constraints. Grids smaller than this cannot properly
 constrain edge deformations."""
-
-if TYPE_CHECKING:
-    from numpy.typing import NDArray
 
 
 class DiffeomorphicDemonsRegistration:
@@ -156,7 +156,7 @@ class DiffeomorphicDemonsRegistration:
             # Main registration loop: processes scales from coarse to fine.
             with console.progress(
                 total=total_iterations,
-                description="Registering sessions to a shared visual space",
+                description="Registering recordings to a shared visual space",
                 unit="iteration",
             ) as progress_bar:
                 for level in reversed(range(scale_level_count)):
@@ -370,7 +370,7 @@ class DiffeomorphicDemonsRegistration:
         """
         # Validates that pyramids have been initialized (should always be true when this method is called).
         if self._pyramids is None:
-            message = "Cannot retrieve image: pyramids have not been initialized. Call register() first."
+            message = "Unable to retrieve image. The pyramids have not been initialized, call register() first."
             console.error(message=message, error=RuntimeError)
 
         # noinspection PyUnresolvedReferences
