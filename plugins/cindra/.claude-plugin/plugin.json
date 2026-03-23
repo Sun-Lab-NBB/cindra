@@ -1,0 +1,18 @@
+{
+  "name": "cindra",
+  "version": "1.0.0",
+  "description": "Provides neural imaging pipeline configuration, batch processing orchestration, results analysis, data preparation, visualization, and MCP environment setup skills for cindra. Includes MCP bindings for data processing and GUI viewer management.",
+  "repository": "https://github.com/Sun-Lab-NBB/cindra",
+  "license": "GPL-3.0",
+  "skills": "./skills/",
+  "mcpServers": {
+    "cindra-mcp": {
+      "command": "cindra",
+      "args": ["mcp"]
+    },
+    "cindra-gui": {
+      "command": "cindra-gui",
+      "args": ["mcp"]
+    }
+  }
+}

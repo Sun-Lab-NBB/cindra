@@ -61,28 +61,9 @@ configures Claude Code to launch the headless server automatically:
 }
 ```
 
-The cindra-gui server is not configured in `.mcp.json` by default because it requires a display
-environment. When visualization tools are needed, the user must add the cindra-gui server entry:
-
-```json
-{
-  "mcpServers": {
-    "cindra-mcp": {
-      "type": "stdio",
-      "command": "cindra",
-      "args": ["mcp"]
-    },
-    "cindra-gui-mcp": {
-      "type": "stdio",
-      "command": "cindra-gui",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-Both `cindra` and `cindra-gui` commands must be on PATH when Claude Code starts. This means the
-Python environment where cindra is installed must be active before launching Claude Code.
+Both servers are configured in `.mcp.json` by default. The `cindra` and `cindra-gui` commands must
+be on PATH when Claude Code starts. This means the Python environment where cindra is installed
+must be active before launching Claude Code.
 
 ### Dual-distribution model
 

@@ -75,13 +75,11 @@ tools are documented in detail by `/single-recording-results` and `/multi-record
 | `query_single_recording_metadata_tool`            | Any viewer        |
 | `query_registration_quality_tool`                 | Registration      |
 | `query_detection_summary_tool`                    | ROI               |
-| `query_single_recording_roi_statistics_tool`      | ROI               |
-| `query_single_recording_traces_tool`              | ROI               |
+| `query_roi_statistics_tool`                       | ROI               |
+| `query_traces_tool`                               | ROI               |
 | `query_multi_recording_overview_tool`             | ROI, Tracking     |
 | `query_multi_recording_registration_quality_tool` | Tracking          |
 | `query_multi_recording_tracking_summary_tool`     | Tracking          |
-| `query_multi_recording_roi_statistics_tool`       | ROI (multi-rec)   |
-| `query_multi_recording_traces_tool`               | ROI (multi-rec)   |
 | `query_cross_recording_traces_tool`               | ROI (multi-rec)   |
 
 ---
@@ -323,7 +321,7 @@ Reported in `coordinate_space` state field (tracking viewer only).
 ### Launch and inspect workflow
 
 1. **Check prerequisites** — Verify processing is complete for the recording. Use
-   `get_single_recording_status` or `get_multi_recording_status` from the cindra MCP server.
+   `get_recording_status_tool` from the cindra MCP server.
 
 2. **Launch viewer** — Call `launch_viewer_tool` with the appropriate `viewer_type`,
    `recording_path`, and optional `dataset`. Store the returned `viewer_id`.
@@ -334,7 +332,7 @@ Reported in `coordinate_space` state field (tracking viewer only).
 
 4. **Assist the user** — Respond to user questions by combining viewer state with headless query
    tools. For example, if the user asks about a specific ROI, query its statistics via
-   `query_single_recording_roi_statistics_tool` while referencing the viewer state to understand
+   `query_roi_statistics_tool` while referencing the viewer state to understand
    what the user is currently seeing.
 
 5. **Clean up** — When the user is done, close the viewer with `close_viewer_tool`. If the user
@@ -351,9 +349,9 @@ When the user asks questions about what they see in a viewer:
 2. **Query underlying data** — Use the appropriate headless query tool to retrieve the actual
    data values. For example:
    - User sees colored ROIs → query `roi_color_mode` from state, then use
-     `query_single_recording_roi_statistics_tool` to get the statistic values
+     `query_roi_statistics_tool` to get the statistic values
    - User asks about a trace → check `trace_visibility` and `selected_roi_indices` from state,
-     then use `query_single_recording_traces_tool` for the actual trace data
+     then use `query_traces_tool` for the actual trace data
    - User asks about registration quality → check `binary_player.current_frame` from state,
      then use `query_registration_quality_tool` for offset statistics
 
@@ -397,7 +395,7 @@ number of ROIs, whether classification filter is active, and which traces are vi
 
 **"Are these good ROIs?"** — Query `roi_color_mode` and `classify_mode` from state. If not
 already in classification mode, suggest switching to `cell_classification` or `cell_probability`
-color mode. Use `query_single_recording_roi_statistics_tool` to retrieve compactness, solidity,
+color mode. Use `query_roi_statistics_tool` to retrieve compactness, solidity,
 and skewness statistics for the visible ROIs. Explain what each statistic means:
 - **Compactness** near 1.0 indicates circular footprints (typical neurons)
 - **Solidity** near 1.0 indicates filled footprints without holes
@@ -405,12 +403,12 @@ and skewness statistics for the visible ROIs. Explain what each statistic means:
 
 **"Show me the most active cells"** — Suggest coloring by `skewness` (high skewness correlates
 with activity) or by `cell_probability` to see classifier confidence. Use
-`query_single_recording_roi_statistics_tool` sorted by skewness descending to identify the top
+`query_roi_statistics_tool` sorted by skewness descending to identify the top
 ROIs.
 
 **"What do the traces look like?"** — Check `trace_visibility` and `selected_roi_indices` from
 state. If no ROIs are selected, inform the user they need to click ROIs in the image panel. Use
-`query_single_recording_traces_tool` for the selected ROI indices to provide quantitative trace
+`query_traces_tool` for the selected ROI indices to provide quantitative trace
 information.
 
 ### Tracking viewer assistance

@@ -123,7 +123,7 @@ def run_single_recording_pipeline(
     plane_count = len(contexts)
 
     # Derives the tracker path from the configuration. The tracker lives under the cindra/ subdirectory, consistent
-    # with where batch tools create it and where get_single_recording_status looks for it.
+    # with where batch tools create it and where get_recording_status_tool looks for it.
     tracker_path: Path = configuration.file_io.output_path / "cindra" / SINGLE_RECORDING_TRACKER_NAME
 
     # Determines which jobs to run based on the flags.

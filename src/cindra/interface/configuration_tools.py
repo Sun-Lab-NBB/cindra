@@ -29,6 +29,12 @@ _MAX_SPEED_FACTOR: int = 5
 _MAX_PERCENTAGE: int = 100
 """The maximum valid value for percentage-based parameters (prevalence, percentile)."""
 
+_FORBIDDEN_FILESYSTEM_CHARACTERS: frozenset[str] = frozenset('\\/:*?"<>|\x00')
+"""Characters that are invalid in directory names on common filesystems."""
+
+_MAXIMUM_CONTROL_CHARACTER_ORDINAL: int = 32
+"""The exclusive upper bound of the ASCII control character range."""
+
 
 @mcp.tool()
 def generate_config_file(
@@ -69,97 +75,72 @@ def generate_config_file(
 
 
 @mcp.tool()
-def discover_single_recording_candidates_tool(root_directory: str) -> dict[str, str | int | list[str]]:
-    """Discovers recordings containing raw neural imaging data that can be processed by the single-recording pipeline.
+def discover_recordings_tool(root_directory: str) -> dict[str, object]:
+    """Discovers recordings available for single-recording and multi-recording processing under a root directory.
 
-    Searches recursively for cindra_parameters.json files, which mark directories containing raw recording data
-    suitable for single-recording processing. Returns recording root directories (not raw data subdirectories) so
-    that downstream tools receive meaningful session-level paths for configuration, identification, and display.
-    Recording roots are resolved by stripping shared structural subdirectories via ``resolve_recording_roots``.
-
-    Args:
-        root_directory: The absolute path to the root directory to search.
-
-    Returns:
-        On success, contains the discovered 'recordings' paths and their 'count', with any permission 'errors'
-        encountered during the search. On failure, contains an 'error' describing the issue.
-    """
-    root_path = Path(root_directory)
-
-    if not root_path.exists():
-        return {
-            "error": f"Unable to discover single-recording candidates. The directory does not exist: {root_directory}",
-        }
-
-    if not root_path.is_dir():
-        return {
-            "error": f"Unable to discover single-recording candidates. The path is not a directory: {root_directory}",
-        }
-
-    marker_parents: list[Path] = []
-    errors: list[str] = []
-
-    try:
-        marker_parents.extend(marker_file.parent for marker_file in root_path.rglob("cindra_parameters.json"))
-    except PermissionError as error:
-        errors.append(f"Access denied during search: {error}")
-
-    # Resolves marker-file directories to recording roots by stripping shared structural subdirectories.
-    recording_paths = (
-        sorted(str(root) for root in resolve_recording_roots(paths=marker_parents)) if marker_parents else []
-    )
-
-    result: dict[str, str | int | list[str]] = {"recordings": recording_paths, "count": len(recording_paths)}
-
-    if errors:
-        result["errors"] = errors
-
-    return result
-
-
-@mcp.tool()
-def discover_multi_recording_candidates_tool(root_directory: str) -> dict[str, str | int | list[str]]:
-    """Discovers recordings with completed single-recording processing that are candidates for multi-recording
-    ROI tracking.
-
-    Searches recursively for combined_metadata.npz files, which mark completed single-recording cindra outputs.
-    Returns recording root directories (not cindra output subdirectories) so that downstream tools receive meaningful
-    session-level paths for configuration, identification, and display. Recording roots are resolved by stripping
-    shared structural subdirectories via ``resolve_recording_roots``.
+    Searches recursively for cindra_parameters.json files (marking raw recordings ready for single-recording
+    processing) and combined_metadata.npz files (marking completed single-recording outputs ready for
+    multi-recording processing). Returns recording root directories (not raw data or output subdirectories) so
+    that downstream tools receive meaningful session-level paths. Recording roots are resolved by stripping shared
+    structural subdirectories via ``resolve_recording_roots``.
 
     Args:
         root_directory: The absolute path to the root directory to search.
 
     Returns:
-        On success, contains the discovered recording root 'recordings' paths and their 'count', with any permission
-        'errors' encountered during the search. On failure, contains an 'error' describing the issue.
+        On success, contains 'single_recording_candidates' and 'multi_recording_candidates' lists of recording root
+        paths with their respective counts, and any permission 'errors' encountered during the search. On failure,
+        contains an 'error' describing the issue.
     """
     root_path = Path(root_directory)
 
     if not root_path.exists():
         return {
-            "error": f"Unable to discover multi-recording candidates. The directory does not exist: {root_directory}",
+            "success": False,
+            "error": f"Unable to discover recordings. The directory does not exist: {root_directory}",
         }
 
     if not root_path.is_dir():
         return {
-            "error": f"Unable to discover multi-recording candidates. The path is not a directory: {root_directory}",
+            "success": False,
+            "error": f"Unable to discover recordings. The path is not a directory: {root_directory}",
         }
 
-    marker_parents: list[Path] = []
     errors: list[str] = []
 
+    # Discovers single-recording candidates via cindra_parameters.json marker files.
+    single_marker_parents: list[Path] = []
     try:
-        marker_parents.extend(marker_file.parent for marker_file in root_path.rglob("combined_metadata.npz"))
+        single_marker_parents.extend(marker_file.parent for marker_file in root_path.rglob("cindra_parameters.json"))
     except PermissionError as error:
-        errors.append(f"Access denied during search: {error}")
+        errors.append(f"Access denied during single-recording search: {error}")
 
-    # Resolves marker-file directories to recording roots by stripping shared structural subdirectories.
-    recording_paths = (
-        sorted(str(root) for root in resolve_recording_roots(paths=marker_parents)) if marker_parents else []
+    single_recording_paths = (
+        sorted(str(root) for root in resolve_recording_roots(paths=single_marker_parents))
+        if single_marker_parents
+        else []
     )
 
-    result: dict[str, str | int | list[str]] = {"recordings": recording_paths, "count": len(recording_paths)}
+    # Discovers multi-recording candidates via combined_metadata.npz marker files.
+    multi_marker_parents: list[Path] = []
+    try:
+        multi_marker_parents.extend(marker_file.parent for marker_file in root_path.rglob("combined_metadata.npz"))
+    except PermissionError as error:
+        errors.append(f"Access denied during multi-recording search: {error}")
+
+    multi_recording_paths = (
+        sorted(str(root) for root in resolve_recording_roots(paths=multi_marker_parents))
+        if multi_marker_parents
+        else []
+    )
+
+    result: dict[str, object] = {
+        "success": True,
+        "single_recording_candidates": single_recording_paths,
+        "single_recording_count": len(single_recording_paths),
+        "multi_recording_candidates": multi_recording_paths,
+        "multi_recording_count": len(multi_recording_paths),
+    }
 
     if errors:
         result["errors"] = errors
@@ -203,6 +184,10 @@ def resolve_dataset_name_tool(
             "error": "Unable to resolve dataset name. The dataset_name must be a non-empty string.",
         }
 
+    dataset_name_error = _validate_filesystem_name(name=dataset_name, field_label="dataset_name")
+    if dataset_name_error is not None:
+        return {"success": False, "error": dataset_name_error}
+
     if not recording_paths:
         return {
             "success": False,
@@ -223,6 +208,10 @@ def resolve_dataset_name_tool(
                 "success": False,
                 "error": "Unable to resolve dataset name. Could not derive a specifier from the recording paths.",
             }
+
+    specifier_error = _validate_filesystem_name(name=specifier, field_label="specifier")
+    if specifier_error is not None:
+        return {"success": False, "error": specifier_error}
 
     qualified_name = f"{specifier}_{dataset_name}".lower()
 
@@ -396,120 +385,6 @@ def validate_config_file(file_path: str) -> dict[str, str | bool | list[str] | d
         result["warnings"] = warnings
     if non_defaults:
         result["non_default_parameters"] = non_defaults
-
-    return result
-
-
-@mcp.tool()
-def compare_config_files_tool(file_path_a: str, file_path_b: str) -> dict[str, object]:
-    """Compares two cindra configuration files and returns structural differences between them.
-
-    Loads both files through the appropriate configuration dataclass, computes a field-by-field diff showing
-    parameters that differ between the two files, and identifies non-default parameters in each file independently.
-    Both files must be valid cindra configurations of the same pipeline type.
-
-    Args:
-        file_path_a: The absolute path to the first configuration file.
-        file_path_b: The absolute path to the second configuration file.
-
-    Returns:
-        On success, contains 'difference_count', 'differences' mapping parameter paths to value_a and value_b pairs,
-        and 'non_defaults_a' and 'non_defaults_b' for context against factory defaults. On failure, contains an
-        'error' describing the issue. Both cases include a 'success' flag.
-    """
-    path_a = Path(file_path_a)
-    path_b = Path(file_path_b)
-
-    # Validates both file paths exist and have correct extensions.
-    for label, path in [("A", path_a), ("B", path_b)]:
-        if not path.exists():
-            return {
-                "success": False,
-                "error": f"Unable to compare configuration files. File {label} does not exist: {path}",
-            }
-        if path.suffix not in (".yaml", ".yml"):
-            return {
-                "success": False,
-                "error": (
-                    f"Unable to compare configuration files. File {label} must be a '.yaml' or '.yml' file: {path}"
-                ),
-            }
-
-    # Parses raw YAML to detect pipeline types before dataclass deserialization.
-    try:
-        with path_a.open() as file:
-            raw_a = yaml.safe_load(file)
-        with path_b.open() as file:
-            raw_b = yaml.safe_load(file)
-    except yaml.YAMLError as error:
-        return {"success": False, "error": f"Unable to parse YAML: {error}"}
-
-    type_a = raw_a.get("pipeline_type") if isinstance(raw_a, dict) else None
-    type_b = raw_b.get("pipeline_type") if isinstance(raw_b, dict) else None
-
-    if type_a not in ("single-recording", "multi-recording"):
-        return {
-            "success": False,
-            "error": (f"Unable to compare configuration files. File A has unrecognized pipeline_type: {type_a!r}."),
-        }
-    if type_b not in ("single-recording", "multi-recording"):
-        return {
-            "success": False,
-            "error": (f"Unable to compare configuration files. File B has unrecognized pipeline_type: {type_b!r}."),
-        }
-    if type_a != type_b:
-        return {
-            "success": False,
-            "error": (
-                f"Unable to compare configuration files. Pipeline types differ: "
-                f"file A is '{type_a}', file B is '{type_b}'."
-            ),
-        }
-
-    pipeline_type = type_a
-
-    # Loads both files through the appropriate configuration dataclass.
-    config_a: SingleRecordingConfiguration | MultiRecordingConfiguration
-    config_b: SingleRecordingConfiguration | MultiRecordingConfiguration
-    default: SingleRecordingConfiguration | MultiRecordingConfiguration
-    try:
-        if pipeline_type == "single-recording":
-            config_a = SingleRecordingConfiguration.load(file_path=path_a)
-            config_b = SingleRecordingConfiguration.load(file_path=path_b)
-            default = SingleRecordingConfiguration()
-        else:
-            config_a = MultiRecordingConfiguration.load(file_path=path_a)
-            config_b = MultiRecordingConfiguration.load(file_path=path_b)
-            default = MultiRecordingConfiguration()
-    except Exception as error:
-        return {
-            "success": False,
-            "error": f"Unable to deserialize configuration files: {type(error).__name__}: {error}",
-        }
-
-    # Computes A-vs-B differences by reusing the non-default parameter comparison with B as the baseline.
-    raw_differences = _identify_non_default_parameters(config=config_a, default=config_b)
-    differences = {
-        path: {"value_a": entry["current"], "value_b": entry["default"]} for path, entry in raw_differences.items()
-    }
-
-    # Computes non-defaults for each file independently against factory defaults.
-    non_defaults_a = _identify_non_default_parameters(config=config_a, default=default)
-    non_defaults_b = _identify_non_default_parameters(config=config_b, default=default)
-
-    result: dict[str, object] = {
-        "success": True,
-        "file_path_a": str(path_a),
-        "file_path_b": str(path_b),
-        "pipeline_type": pipeline_type,
-        "difference_count": len(differences),
-        "differences": differences,
-    }
-
-    if non_defaults_a:
-        result["non_defaults_a"] = non_defaults_a
-    if non_defaults_b:
-        result["non_defaults_b"] = non_defaults_b
 
     return result
 
@@ -924,3 +799,35 @@ def _validate_multi_recording(
         )
 
     return errors, warnings
+
+
+def _validate_filesystem_name(name: str, field_label: str) -> str | None:
+    """Validates that a name is safe for use as a filesystem directory name.
+
+    Rejects names containing characters that are invalid in directory names on common filesystems, names that consist
+    entirely of whitespace, and reserved names like '.' and '..'.
+
+    Args:
+        name: The name string to validate.
+        field_label: The label of the field being validated, used in error messages.
+
+    Returns:
+        An error message string if the name is invalid, or None if the name is safe.
+    """
+    if not name.strip():
+        return f"Unable to resolve dataset name. The {field_label} must not be empty or consist entirely of whitespace."
+
+    if name in (".", ".."):
+        return f"Unable to resolve dataset name. The {field_label} must not be '{name}'."
+
+    found = sorted({character for character in name if character in _FORBIDDEN_FILESYSTEM_CHARACTERS})
+    if found:
+        display = ", ".join(repr(character) for character in found)
+        return f"Unable to resolve dataset name. The {field_label} contains filesystem-unsafe characters: {display}."
+
+    # Rejects names with control characters (ordinal < 32).
+    control_characters = [character for character in name if ord(character) < _MAXIMUM_CONTROL_CHARACTER_ORDINAL]
+    if control_characters:
+        return f"Unable to resolve dataset name. The {field_label} contains control characters."
+
+    return None

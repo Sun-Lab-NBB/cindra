@@ -49,8 +49,8 @@ the parameters it consumes.
 
 ## Prerequisites
 
-All recordings must have completed single-recording processing (`get_single_recording_status` returns
-status `completed`). If any recording is incomplete, invoke the earliest missing step in the chain:
+All recordings must have completed single-recording processing (`get_recording_status_tool` returns
+single-recording status `completed`). If any recording is incomplete, invoke the earliest missing step in the chain:
 `/acquisition-data-preparation` → `/single-recording-configuration` → `/single-recording-processing`.
 
 ---
@@ -94,15 +94,14 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 | Tool                                       | Purpose                                                            |
 |--------------------------------------------|--------------------------------------------------------------------|
 | `resolve_dataset_name_tool`                | Constructs qualified dataset names from base name + specifier      |
-| `discover_multi_recording_candidates_tool` | Finds recordings with completed single-recording output            |
+| `discover_recordings_tool`                 | Discovers single and multi-recording candidates under a root dir   |
 | `generate_config_file`                     | Generates default multi-recording configuration YAML               |
 
 ### Supporting tools (used during workflow)
 
 | Tool                                       | Purpose                                                 |
 |--------------------------------------------|---------------------------------------------------------|
-| `get_single_recording_status`              | Verifies single-recording prerequisites                 |
-| `get_multi_recording_status`               | Checks filesystem for multi-recording outputs           |
+| `get_recording_status_tool`                | Checks single and multi-recording processing status     |
 
 ---
 
@@ -189,9 +188,10 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
 
 ### Workflow steps
 
-1. **Verify prerequisites** — Use `discover_multi_recording_candidates_tool` to find eligible
-   recordings and `get_single_recording_status` to confirm each has status `completed`. If any
-   recording is incomplete, invoke `/single-recording-processing` (or upstream skills as needed).
+1. **Verify prerequisites** — Use `discover_recordings_tool` to find eligible recordings (check the
+   `multi_recording_candidates` list) and `get_recording_status_tool` to confirm each has
+   single-recording status `completed`. If any recording is incomplete, invoke
+   `/single-recording-processing` (or upstream skills as needed).
 
 2. **Organize into datasets** — Group recordings by common parent directory, user-provided grouping,
    or semantic analysis of recording paths. Each group becomes one dataset in the batch.

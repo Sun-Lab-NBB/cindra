@@ -1,0 +1,13 @@
+{
+  "name": "cindra",
+  "owner": {
+    "name": "Sun (NeuroAI) lab at Cornell University"
+  },
+  "plugins": [
+    {
+      "name": "cindra",
+      "source": "./plugins/cindra",
+      "description": "Provides neural imaging pipeline configuration, batch processing orchestration, results analysis, data preparation, visualization, and MCP environment setup skills for cindra. Includes MCP bindings for data processing and GUI viewer management."
+    }
+  ]
+}
