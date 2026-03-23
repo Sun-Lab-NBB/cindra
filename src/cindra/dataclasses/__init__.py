@@ -1,14 +1,15 @@
-"""Provides configuration and runtime data classes for the single-day and multi-day cindra pipelines."""
+"""Provides configuration and runtime data classes for the single-recording and multi-recording cindra pipelines."""
 
 from .version import version, python_version
-from .multi_day_data import (
-    MultiDayIOData,
-    MultiDayTimingData,
-    MultiDayRuntimeData,
-    MultiDayTrackingData,
-    MultiDayRegistrationData,
+from .runtime_contexts import RuntimeContext, MultiRecordingRuntimeContext
+from .multi_recording_data import (
+    MultiRecordingIOData,
+    MultiRecordingTimingData,
+    MultiRecordingRuntimeData,
+    MultiRecordingTrackingData,
+    MultiRecordingRegistrationData,
 )
-from .single_day_data import (
+from .single_recording_data import (
     IOData,
     ROIMask,
     TimingData,
@@ -17,11 +18,10 @@ from .single_day_data import (
     ROIStatistics,
     ExtractionData,
     RegistrationData,
-    SingleDayRuntimeData,
+    SingleRecordingRuntimeData,
 )
-from .runtime_contexts import RuntimeContext, MultiDayRuntimeContext
-from .multi_day_configuration import ReferenceImageType, MultiDayConfiguration
-from .single_day_configuration import (
+from .multi_recording_configuration import ReferenceImageType, MultiRecordingConfiguration
+from .single_recording_configuration import (
     Main,
     FileIO,
     PipelineType,
@@ -34,7 +34,7 @@ from .single_day_configuration import (
     NonrigidRegistration,
     AcquisitionParameters,
     OnePhotonRegistration,
-    SingleDayConfiguration,
+    SingleRecordingConfiguration,
     detect_pipeline_type,
 )
 
@@ -47,13 +47,13 @@ __all__ = [
     "FileIO",
     "IOData",
     "Main",
-    "MultiDayConfiguration",
-    "MultiDayIOData",
-    "MultiDayRegistrationData",
-    "MultiDayRuntimeContext",
-    "MultiDayRuntimeData",
-    "MultiDayTimingData",
-    "MultiDayTrackingData",
+    "MultiRecordingConfiguration",
+    "MultiRecordingIOData",
+    "MultiRecordingRegistrationData",
+    "MultiRecordingRuntimeContext",
+    "MultiRecordingRuntimeData",
+    "MultiRecordingTimingData",
+    "MultiRecordingTrackingData",
     "NonrigidRegistration",
     "OnePhotonRegistration",
     "PipelineType",
@@ -66,8 +66,8 @@ __all__ = [
     "RuntimeContext",
     "RuntimeSettings",
     "SignalExtraction",
-    "SingleDayConfiguration",
-    "SingleDayRuntimeData",
+    "SingleRecordingConfiguration",
+    "SingleRecordingRuntimeData",
     "SpikeDeconvolution",
     "TimingData",
     "detect_pipeline_type",

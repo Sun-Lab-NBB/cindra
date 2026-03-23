@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
 import numpy as np
-from PySide6 import QtCore
+from PySide6 import QtGui, QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
 from pyqtgraph import functions as fn
 from PySide6.QtWidgets import QStyle, QWidget, QToolButton, QButtonGroup
@@ -31,6 +31,40 @@ type _ZoomHandler = Callable[[], None]
 """The callback type for double-click zoom-to-fit events dispatched by a ViewBox to the orchestrator."""
 
 
+def escape_returns_focus(window: QWidget, event: QtCore.QEvent) -> bool:
+    """Returns True and shifts focus to the window if the event is an Escape keypress.
+
+    Args:
+        window: The main window to receive focus on Escape.
+        event: The Qt event to inspect.
+
+    Returns:
+        True if the event was an Escape keypress and focus was redirected, False otherwise.
+    """
+    if (
+        event.type() == QtCore.QEvent.Type.KeyPress
+        and isinstance(event, QtGui.QKeyEvent)
+        and event.key() == QtCore.Qt.Key.Key_Escape
+    ):
+        window.setFocus()
+        return True
+    return False
+
+
+@dataclass(frozen=True)
+class PlayPauseGroup:
+    """Stores a play/pause button pair and their exclusive button group."""
+
+    play_button: QToolButton
+    """The play button."""
+
+    pause_button: QToolButton
+    """The pause button."""
+
+    button_group: QButtonGroup
+    """The exclusive button group containing both buttons."""
+
+
 def configure_plot(
     plot: pg.PlotItem,
     *,
@@ -43,7 +77,7 @@ def configure_plot(
     """Applies the shared pyqtgraph plot configuration backbone.
 
     Disables the context menu, sets mouse interaction axes, fixes axis widths to prevent layout
-    shifts, and optionally sets the plot title and axis labels.
+    offsets, and optionally sets the plot title and axis labels.
 
     Args:
         plot: The pyqtgraph PlotItem to configure.
@@ -143,7 +177,7 @@ class ViewBox(pg.ViewBox):
     installed callback handlers.
 
     Args:
-        border: The panel border frame pen specification forwarded to ``fn.mkPen``.
+        border: The panel border frame pen specification forwarded to ``mkPen``.
         invert_y: Determines whether to invert the Y axis.
         enable_menu: Determines whether the context menu is enabled.
         name: The unique name for the managed panel used by pyqtgraph's view-linking system.
@@ -476,7 +510,7 @@ def _plot_multi_trace(
     y_minimum = 0.0
     average_pen = COLORS.silver
 
-    # Plots average trace at bottom when enough cells are selected.
+    # Plots average trace at bottom when enough ROIs are selected.
     if len(selected) > ROI_CONFIG.average_threshold:
         trace_box.plot(
             frame_indices,
@@ -489,26 +523,6 @@ def _plot_multi_trace(
     y_maximum = (len(selected) - 1) * trace_spacing + 1
     axis.setTicks([tick_labels])
     return y_minimum, y_maximum
-
-
-@dataclass(frozen=True)
-class PlayPauseGroup:
-    """Stores a play/pause button pair and their exclusive button group.
-
-    Attributes:
-        play_button: The play button.
-        pause_button: The pause button.
-        button_group: The exclusive button group containing both buttons.
-    """
-
-    play_button: QToolButton
-    """The play button."""
-
-    pause_button: QToolButton
-    """The pause button."""
-
-    button_group: QButtonGroup
-    """The exclusive button group containing both buttons."""
 
 
 def create_play_pause_group(

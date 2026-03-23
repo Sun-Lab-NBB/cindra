@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 def compute_delta_fluorescence(
-    roi_fluorescence: NDArray[np.float32],
+    cell_fluorescence: NDArray[np.float32],
     neuropil_fluorescence: NDArray[np.float32],
     neuropil_coefficient: float,
     baseline_method: str,
@@ -31,7 +31,7 @@ def compute_delta_fluorescence(
         level is estimated and subtracted, isolating activity-dependent transients suitable for spike deconvolution.
 
     Args:
-        roi_fluorescence: The ROI fluorescence traces with shape (roi_count, frame_count).
+        cell_fluorescence: The ROI fluorescence traces with shape (roi_count, frame_count).
         neuropil_fluorescence: The surrounding neuropil fluorescence traces with shape (roi_count, frame_count).
         neuropil_coefficient: The scaling factor applied to neuropil fluorescence before subtracting it from the ROI
             fluorescence. The corrected signal is computed as F_corrected = F_roi - coefficient * F_neuropil.
@@ -50,7 +50,7 @@ def compute_delta_fluorescence(
     """
     # Subtracts the scaled neuropil fluorescence from the ROI fluorescence. Casts the coefficient to float32 to
     # prevent Python's native float64 from promoting the entire computation chain to double precision.
-    subtracted = roi_fluorescence - np.float32(neuropil_coefficient) * neuropil_fluorescence
+    subtracted = cell_fluorescence - np.float32(neuropil_coefficient) * neuropil_fluorescence
 
     # Converts the baseline window from seconds to frames using the acquisition sampling rate. Forces the window to be
     # odd for symmetric min/max filtering.
@@ -83,7 +83,7 @@ def compute_delta_fluorescence(
 
 
 def apply_oasis_deconvolution(
-    roi_fluorescence: NDArray[np.float32],
+    cell_fluorescence: NDArray[np.float32],
     batch_size: int,
     time_constant: float,
     sampling_rate: float,
@@ -97,7 +97,7 @@ def apply_oasis_deconvolution(
         corresponding slice of the output array.
 
     Args:
-        roi_fluorescence: The baseline-corrected fluorescence traces with shape (roi_count, frame_count).
+        cell_fluorescence: The baseline-corrected fluorescence traces with shape (roi_count, frame_count).
         batch_size: The number of ROIs to process per batch.
         time_constant: The exponential decay time constant of the calcium indicator, in seconds.
         sampling_rate: The imaging sampling rate for the processed recording plane, in Hz.
@@ -105,8 +105,8 @@ def apply_oasis_deconvolution(
     Returns:
         The deconvolved spike traces with shape (roi_count, frame_count).
     """
-    roi_count, frame_count = roi_fluorescence.shape
-    roi_fluorescence = np.ascontiguousarray(roi_fluorescence, dtype=np.float32)
+    roi_count, frame_count = cell_fluorescence.shape
+    cell_fluorescence = np.ascontiguousarray(cell_fluorescence, dtype=np.float32)
     spike_traces: NDArray[np.float32] = np.zeros((roi_count, frame_count), dtype=np.float32)
 
     # Runs the OASIS algorithm on all detected ROIs in batches.
@@ -121,7 +121,7 @@ def apply_oasis_deconvolution(
 
         # Runs the OASIS algorithm that modifies spike_traces in-place.
         _oasis_matrix(
-            roi_fluorescence=roi_fluorescence[start_index:end_index],
+            cell_fluorescence=cell_fluorescence[start_index:end_index],
             pool_amplitude=pool_amplitude,
             pool_weight=pool_weight,
             pool_start_frame=pool_start_frame,
@@ -135,8 +135,8 @@ def apply_oasis_deconvolution(
 
 
 @njit(cache=True, parallel=True)
-def _oasis_matrix(
-    roi_fluorescence: NDArray[np.float32],
+def _oasis_matrix(  # pragma: no cover
+    cell_fluorescence: NDArray[np.float32],
     pool_amplitude: NDArray[np.float32],
     pool_weight: NDArray[np.float32],
     pool_start_frame: NDArray[np.int32],
@@ -148,7 +148,7 @@ def _oasis_matrix(
     """Performs spike deconvolution on all ROI fluorescence traces in parallel using the OASIS algorithm.
 
     Notes:
-        This implements the unconstrained non-negative AR(1) OASIS solver from Friedrich et al. (2017). The algorithm
+        Implements the unconstrained non-negative AR(1) OASIS solver from Friedrich et al. (2017). The algorithm
         models calcium fluorescence as a series of exponentially decaying "pools", where each pool represents a
         contiguous trace segment governed by a single initial amplitude and a shared decay rate. For each new time
         point, a single-frame pool is created and the algorithm checks backward through adjacent pools: if a previous
@@ -159,7 +159,7 @@ def _oasis_matrix(
         current pool's amplitude and the predicted (decayed) value from the preceding pool.
 
     Args:
-        roi_fluorescence: The batch of ROI fluorescence signals with shape (roi_count, frame_count).
+        cell_fluorescence: The batch of ROI fluorescence signals with shape (roi_count, frame_count).
         pool_amplitude: The workspace array that stores the optimal initial fluorescence amplitude for each pool, with
             shape (roi_count, frame_count). Each value represents the best-fit starting amplitude of a contiguous
             trace segment under the AR(1) decay model.
@@ -180,14 +180,14 @@ def _oasis_matrix(
     # gives the calcium decay factor over n frames.
     decay_constant = -1.0 / (time_constant * sampling_rate)
 
-    for roi_index in prange(roi_fluorescence.shape[0]):
-        trace_length = roi_fluorescence[roi_index].shape[0]
+    for roi_index in prange(cell_fluorescence.shape[0]):
+        trace_length = cell_fluorescence[roi_index].shape[0]
         pool_index = 0
 
         for time_index in range(trace_length):
             # Creates a new single-frame pool for the current time point. Each pool starts with unit weight,
             # unit length, and an amplitude equal to the observed fluorescence value.
-            pool_amplitude[roi_index, pool_index] = roi_fluorescence[roi_index, time_index]
+            pool_amplitude[roi_index, pool_index] = cell_fluorescence[roi_index, time_index]
             pool_weight[roi_index, pool_index] = 1
             pool_start_frame[roi_index, pool_index] = time_index
             pool_length[roi_index, pool_index] = 1

@@ -15,6 +15,8 @@ from scipy.fft import (
 from scipy.ndimage import gaussian_filter1d
 from ataraxis_base_utilities import console
 
+from ..detection import mean_centered_meshgrid
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
@@ -53,7 +55,7 @@ def apply_phase_correlation(
     # Multiplies by conjugate of reference spectrum. In frequency domain, this computes cross-correlation.
     frames_fft *= kernel
 
-    # Transforms back to spatial domain to get correlation surface. The peak location indicates the shift.
+    # Transforms back to spatial domain to get correlation surface. The peak location indicates the offset.
     return scipy_irfft2(frames_fft, s=(frames.shape[-2], width), axes=(-2, -1), workers=workers).astype(
         np.float32, copy=False
     )
@@ -83,7 +85,7 @@ def apply_mask(
     Returns:
         The masked frames with the same shape as input.
     """
-    return frames * mask + offset
+    return frames * mask + offset  # pragma: no cover
 
 
 def combine_rigid_offsets(
@@ -91,7 +93,7 @@ def combine_rigid_offsets(
 ) -> tuple[NDArray[np.int32], NDArray[np.int32], NDArray[np.float32]]:
     """Combines rigid registration offsets from multiple processing batches.
 
-    Rigid offsets are 1D arrays with one integer pixel shift per frame, so horizontal stacking
+    Rigid offsets are 1D arrays with one integer pixel offset per frame, so horizontal stacking
     concatenates all frames into a single array.
 
     Args:
@@ -110,7 +112,7 @@ def combine_nonrigid_offsets(
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """Combines nonrigid registration offsets from multiple processing batches.
 
-    Nonrigid offsets are 2D arrays with subpixel shifts per block per frame, so vertical stacking
+    Nonrigid offsets are 2D arrays with subpixel offsets per block per frame, so vertical stacking
     preserves the block structure across batches.
 
     Args:
@@ -140,7 +142,7 @@ def compute_gaussian_frequency_filter(sigma: float, height: int, width: int) -> 
         The smoothing filter in the Fourier domain with shape (height, width // 2 + 1) for real FFT compatibility.
     """
     # Creates grids of distances from center for a spatial-domain kernel.
-    column_distances, row_distances = _mean_centered_meshgrid(height=height, width=width)
+    column_distances, row_distances = mean_centered_meshgrid(height=height, width=width)
 
     # Computes separable 1D Gaussians along each axis, then combines into 2D kernel.
     gaussian_column = np.exp(-np.square(column_distances / sigma) / 2)
@@ -254,10 +256,10 @@ def compute_reference_fft(reference_image: NDArray[np.float32]) -> NDArray[np.co
 
 @lru_cache(maxsize=5)
 def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray[np.float32], int]:
-    """Computes the upsampling matrix for subpixel shift estimation using Gaussian RBF interpolation.
+    """Computes the upsampling matrix for subpixel offset estimation using Gaussian RBF interpolation.
 
     Builds a kernel that maps low-resolution correlation peaks to a high-resolution grid for precise subpixel
-    shift detection. Uses the RBF interpolation formula: inv(K(low, low)) @ K(low, high). Results are cached
+    offset detection. Uses the RBF interpolation formula: inv(K(low, low)) @ K(low, high). Results are cached
     since the same kernel is reused across all frames.
 
     Args:
@@ -288,33 +290,6 @@ def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray
 
     # Casts to float32 since precision is no longer critical after inversion.
     return kernel_matrix.astype(np.float32), num_upsampled
-
-
-def _mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-    """Creates a mean-centered distance meshgrid of the specified dimensions.
-
-    Each coordinate value represents the absolute distance from the center of that axis. Used internally
-    for creating spatial taper masks and Gaussian frequency filters.
-
-    Args:
-        height: The height of the frames or images to generate the meshgrid for, in pixels.
-        width: The width of the frames or images to generate the meshgrid for, in pixels.
-
-    Returns:
-        A tuple of (column_distances, row_distances) arrays with shape (height, width), where each value
-        represents the absolute distance from the center along that axis.
-    """
-    # Computes absolute distances from center for each axis. For arange(0, n), mean is (n-1)/2. Casts centers to
-    # float32 to prevent promotion of the entire distance arrays to float64.
-    row_center = np.float32((height - 1) / 2)
-    column_center = np.float32((width - 1) / 2)
-    row_distances_1d = np.abs(np.arange(height, dtype=np.float32) - row_center)
-    column_distances_1d = np.abs(np.arange(width, dtype=np.float32) - column_center)
-
-    # Expands 1D distances into 2D grids. Meshgrid returns (column-varying, row-varying) arrays.
-    column_distances, row_distances = np.meshgrid(column_distances_1d, row_distances_1d)
-
-    return column_distances, row_distances
 
 
 def _compute_gaussian_rbf_weights(
