@@ -290,8 +290,8 @@ Saved in `plane_N/registration_data/`. All files are `.npy` format.
 
 | File                 | Format             | Description                                                          |
 |----------------------|--------------------|----------------------------------------------------------------------|
-| `channel_1_data.bin` | Contiguous int16 | Motion-corrected frames: `[frame0_row0_col0, frame0_row0_col1, ...]` |
-| `channel_2_data.bin` | Contiguous int16 | Channel 2 motion-corrected frames (two-channel only)                 |
+| `channel_1_data.bin` | Contiguous int16   | Motion-corrected frames: `[frame0_row0_col0, frame0_row0_col1, ...]` |
+| `channel_2_data.bin` | Contiguous int16   | Channel 2 motion-corrected frames (two-channel only)                 |
 
 Binary files store frames as contiguous int16 arrays. Each frame has `height × width` values. Read with
 `np.memmap(path, dtype=np.int16, mode='r', shape=(frame_count, height, width))` using dimensions from

@@ -56,8 +56,10 @@ state to prevent integration errors.
 
 ## MCP server integration
 
-This library provides two MCP servers that expose neural imaging pipeline tools for agentic AI interaction. When
-working with this project or its dependencies, prefer using available MCP tools over direct code execution when
+The cindra Claude Code plugin registers two MCP servers that expose neural imaging pipeline tools for agentic AI
+interaction. The plugin provides the server registrations and skills; the cindra pip package provides the server
+implementations (`cindra mcp` and `cindra-gui mcp` CLI commands). Both must be installed for MCP tools to function.
+When working with this project or its dependencies, prefer using available MCP tools over direct code execution when
 appropriate.
 
 **Servers:**
@@ -84,27 +86,37 @@ appropriate.
 
 ## Available skills
 
-| Skill                             | Description                                                               |
-|-----------------------------------|---------------------------------------------------------------------------|
-| `/explore-codebase`               | Perform in-depth codebase exploration at session start                    |
-| `/explore-dependencies`           | Explore ataraxis dependency APIs for a live API snapshot                  |
-| `/python-style`                   | Apply Sun Lab Python coding conventions (REQUIRED for all Python changes) |
-| `/readme-style`                   | Apply Sun Lab README conventions (REQUIRED for README changes)            |
-| `/commit`                         | Draft Sun Lab style-compliant git commit messages                         |
-| `/skill-design`                   | Generate and verify skill files and CLAUDE.md project instructions        |
-| `/pyproject-style`                | Apply Sun Lab pyproject.toml conventions                                  |
-| `/tox-config`                     | Apply Sun Lab tox.ini conventions                                         |
-| `/api-docs`                       | Apply Sun Lab API documentation conventions                               |
-| `/single-recording-processing`    | Orchestrate single-recording batch processing via MCP                     |
-| `/multi-recording-processing`     | Orchestrate multi-recording batch processing via MCP                      |
-| `/single-recording-configuration` | Reference for single-recording pipeline configuration parameters          |
-| `/multi-recording-configuration`  | Reference for multi-recording pipeline configuration parameters           |
-| `/single-recording-results`       | Reference for single-recording pipeline output data formats               |
-| `/multi-recording-results`        | Reference for multi-recording pipeline output data formats                |
-| `/acquisition-data-preparation`   | Guide for preparing raw imaging data for cindra processing                |
-| `/visualization`                  | Launch and manage cindra GUI viewers for visual inspection                |
-| `/mcp-environment-setup`          | Diagnose and resolve MCP server connectivity issues                       |
-| `/data-migration`                 | Migrate legacy Sun Lab session data to current schema                     |
+Skills are provided via Claude Code plugins, not the cindra pip package. The cindra plugin provides project-specific
+skills (processing, configuration, results, visualization, MCP setup). The ataraxis automation plugin provides shared
+Sun Lab workflow skills (style guides, commit, codebase exploration).
+
+**Ataraxis automation plugin skills:**
+
+| Skill                   | Description                                                               |
+|-------------------------|---------------------------------------------------------------------------|
+| `/explore-codebase`     | Perform in-depth codebase exploration at session start                    |
+| `/explore-dependencies` | Explore ataraxis dependency APIs for a live API snapshot                  |
+| `/python-style`         | Apply Sun Lab Python coding conventions (REQUIRED for all Python changes) |
+| `/readme-style`         | Apply Sun Lab README conventions (REQUIRED for README changes)            |
+| `/commit`               | Draft Sun Lab style-compliant git commit messages                         |
+| `/skill-design`         | Generate and verify skill files and CLAUDE.md project instructions        |
+| `/pyproject-style`      | Apply Sun Lab pyproject.toml conventions                                  |
+| `/tox-config`           | Apply Sun Lab tox.ini conventions                                         |
+| `/api-docs`             | Apply Sun Lab API documentation conventions                               |
+
+**Cindra plugin skills:**
+
+| Skill                             | Description                                                      |
+|-----------------------------------|------------------------------------------------------------------|
+| `/single-recording-processing`    | Orchestrate single-recording batch processing via MCP            |
+| `/multi-recording-processing`     | Orchestrate multi-recording batch processing via MCP             |
+| `/single-recording-configuration` | Reference for single-recording pipeline configuration parameters |
+| `/multi-recording-configuration`  | Reference for multi-recording pipeline configuration parameters  |
+| `/single-recording-results`       | Reference for single-recording pipeline output data formats      |
+| `/multi-recording-results`        | Reference for multi-recording pipeline output data formats       |
+| `/acquisition-data-preparation`   | Guide for preparing raw imaging data for cindra processing       |
+| `/visualization`                  | Launch and manage cindra GUI viewers for visual inspection       |
+| `/mcp-environment-setup`          | Diagnose and resolve MCP server connectivity issues              |
 
 ## Project context
 
@@ -241,8 +253,7 @@ pipeline outputs.
 | `natsort`                  | Semantic file path sorting (1, 2, 10 vs 1, 10, 2)             |
 | `tifffile`                 | TIFF file loading and metadata extraction                     |
 | `imagecodecs`              | Image codec support for TIFF decompression                    |
-| `matplotlib`               | Visualization support for rastermap                           |
-| `rastermap`                | ROI activity sorting for visualization                        |
+| `matplotlib`               | Visualization support for GUI viewers                         |
 | `pyside6`                  | Qt6 GUI framework for interactive viewers                     |
 | `pyqtgraph`                | High-performance plotting for GUI image display               |
 | `click`                    | CLI framework for command-line interfaces                     |
