@@ -138,7 +138,7 @@ all files are treated as one continuous sequence following the interleave patter
 
 | Field            | Type  | Description                                                                                                                                                                               |
 |------------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `frame_rate`     | float | Volume acquisition rate in Hz. For multi-plane recordings, this is the rate at which complete volumes are acquired, not the per-plane rate. Per-plane rate = `frame_rate * plane_number`. |
+| `frame_rate`     | float | Volume acquisition rate in Hz. For multi-plane recordings, this is the rate at which complete volumes are acquired, not the per-plane rate. Per-plane rate = `frame_rate / plane_number`. |
 | `plane_number`   | int   | Number of Z-planes acquired per volume. 1 for single-plane imaging.                                                                                                                       |
 | `channel_number` | int   | Number of channels per plane. Must be 1 or 2.                                                                                                                                             |
 

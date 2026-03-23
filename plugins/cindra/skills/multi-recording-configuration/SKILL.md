@@ -41,11 +41,10 @@ connectivity issues. Tool parameters and return values are self-documented via M
 | Tool                                       | Purpose                                                                     |
 |--------------------------------------------|-----------------------------------------------------------------------------|
 | `generate_config_file`                     | Generates a default configuration YAML for the specified pipeline type      |
-| `discover_multi_recording_candidates_tool` | Finds recording directories with completed single-recording output          |
+| `discover_recordings_tool`                 | Discovers single and multi-recording candidates under a root directory      |
 | `resolve_dataset_name_tool`                | Constructs qualified dataset names from base name + specifier               |
 | `read_config_file`                         | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)    |
 | `validate_config_file`                     | Validates a cindra config against schema, reports errors and non-defaults   |
-| `compare_config_files_tool`                | Compares two cindra configs and returns structural differences between them |
 
 ---
 
@@ -397,8 +396,8 @@ and let it handle per-dataset fine-tuning automatically.
 
 ## Configuration workflow
 
-1. **Discover candidates** using `discover_multi_recording_candidates_tool` to find recordings with completed
-   single-recording output.
+1. **Discover candidates** using `discover_recordings_tool` to find recordings with completed single-recording
+   output (check the `multi_recording_candidates` list in the response).
 2. **Verify prerequisites** — confirm all discovered recordings have completed single-recording processing
    (all 3 phases). If any recording is incomplete, invoke `/single-recording-processing` (or
    `/acquisition-data-preparation` if raw data is not yet prepared) to complete the prerequisite chain before

@@ -41,10 +41,9 @@ connectivity issues. Tool parameters and return values are self-documented via M
 | Tool                                        | Purpose                                                                     |
 |---------------------------------------------|-----------------------------------------------------------------------------|
 | `generate_config_file`                      | Generates a default configuration YAML for the specified pipeline type      |
-| `discover_single_recording_candidates_tool` | Finds recording directories containing `cindra_parameters.json`             |
+| `discover_recordings_tool`                  | Discovers single and multi-recording candidates under a root directory      |
 | `read_config_file`                          | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)    |
 | `validate_config_file`                      | Validates a cindra config against schema, reports errors and non-defaults   |
-| `compare_config_files_tool`                 | Compares two cindra configs and returns structural differences between them |
 
 ---
 
@@ -100,7 +99,7 @@ independent ROI detection on both channels.
 
 ### Tuning guidance
 
-- **Different calcium indicator**: Set `tau` to the sensor's decay time constant. GCaMP6f ≈ 0.4, GCaMP6s ≈ 1.25,
+- **Different calcium indicator**: Set `tau` to the sensor's decay time constant. GCaMP6f ≈ 0.4, GCaMP6s ≈ 1.5,
   GCaMP7f ≈ 0.4, GCaMP8f ≈ 0.2. Incorrect `tau` degrades spike deconvolution and ROI detection.
 - **Structural channel**: Set `two_channels=True`, keep only `first_channel_functional=True`. The second channel
   is stored for colocalization analysis but not used for ROI detection.
@@ -368,7 +367,8 @@ and let it handle per-recording fine-tuning automatically.
 
 ## Configuration workflow
 
-1. **Discover recordings** using `discover_single_recording_candidates_tool` to find directories with raw data.
+1. **Discover recordings** using `discover_recordings_tool` (check the `single_recording_candidates` list) to find
+   directories with raw data.
 2. **Verify data readiness** — use `validate_recording_readiness` on each discovered recording to confirm that
    raw data and acquisition parameters are ready. If any recording fails validation, invoke
    `/acquisition-data-preparation` to resolve before continuing.

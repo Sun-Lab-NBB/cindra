@@ -48,16 +48,16 @@ manual file reads whenever possible.
 | `query_single_recording_metadata_tool`       | Queries recording dimensions, frame count, sampling rate, ROI/cell counts, and timing |
 | `query_detection_summary_tool`               | Queries detection image intensity statistics and estimated ROI diameter               |
 | `query_registration_quality_tool`            | Queries per-plane registration offset summaries, correlations, bad frames, PC metrics |
-| `query_single_recording_roi_statistics_tool` | Queries per-ROI spatial statistics and classification with sorting and filtering      |
-| `query_single_recording_traces_tool`         | Queries fluorescence trace arrays for specific ROIs with optional downsampling        |
+| `query_roi_statistics_tool`                  | Queries per-ROI spatial statistics and classification with sorting and filtering      |
+| `query_traces_tool`                          | Queries fluorescence trace arrays for specific ROIs with optional downsampling        |
 
 ### Recommended query order
 
 1. `query_single_recording_metadata_tool` — understand recording properties and processing status
 2. `query_registration_quality_tool` — assess motion correction quality per plane
 3. `query_detection_summary_tool` — review detection image quality and ROI diameter
-4. `query_single_recording_roi_statistics_tool` — inspect ROI quality metrics and classification
-5. `query_single_recording_traces_tool` — examine fluorescence activity for specific ROIs
+4. `query_roi_statistics_tool` — inspect ROI quality metrics and classification
+5. `query_traces_tool` — examine fluorescence activity for specific ROIs
 
 ---
 
@@ -290,11 +290,11 @@ Saved in `plane_N/registration_data/`. All files are `.npy` format.
 
 | File                 | Format             | Description                                                          |
 |----------------------|--------------------|----------------------------------------------------------------------|
-| `channel_1_data.bin` | Contiguous float32 | Motion-corrected frames: `[frame0_row0_col0, frame0_row0_col1, ...]` |
-| `channel_2_data.bin` | Contiguous float32 | Channel 2 motion-corrected frames (two-channel only)                 |
+| `channel_1_data.bin` | Contiguous int16 | Motion-corrected frames: `[frame0_row0_col0, frame0_row0_col1, ...]` |
+| `channel_2_data.bin` | Contiguous int16 | Channel 2 motion-corrected frames (two-channel only)                 |
 
-Binary files store frames as contiguous float32 arrays. Each frame has `height × width` values. Read with
-`np.memmap(path, dtype=np.float32, mode='r', shape=(frame_count, height, width))` using dimensions from
+Binary files store frames as contiguous int16 arrays. Each frame has `height × width` values. Read with
+`np.memmap(path, dtype=np.int16, mode='r', shape=(frame_count, height, width))` using dimensions from
 `runtime_data.yaml`.
 
 ---

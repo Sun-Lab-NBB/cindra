@@ -75,7 +75,7 @@ class _PendingJob:
         """Returns the composite key that uniquely identifies this job across the entire batch, combining the tracker
         path with the job ID.
         """
-        return (str(self.tracker_path), self.job_id)
+        return str(self.tracker_path), self.job_id
 
 
 @dataclass(slots=True)
@@ -112,57 +112,22 @@ _job_execution_state: _JobExecutionState | None = None
 
 
 @mcp.tool()
-def get_single_recording_status(recording_path: str) -> dict[str, object]:
-    """Gets the processing status of a single recording by reading its ProcessingTracker file.
+def get_recording_status_tool(recording_path: str) -> dict[str, object]:
+    """Gets the processing status for a recording by reading all available ProcessingTracker files.
 
-    Reads the tracker YAML file at <recording_path>/cindra/single_recording_tracker.yaml to determine how far processing
-    has progressed. Returns per-job status grouped by pipeline phase (binarize, process, combine) and an overall status
-    string synthesized from the tracker state.
+    Checks for both single-recording and multi-recording trackers under the recording's cindra output directory and
+    returns status for all pipelines found. For single-recording, reads the tracker at
+    <recording_path>/cindra/single_recording_tracker.yaml and returns per-phase job status (binarize, process,
+    combine). For multi-recording, searches under <recording_path>/cindra/multi_recording/<dataset>/ for tracker files
+    and returns per-dataset status (discover, extract).
 
     Args:
         recording_path: The absolute path to the recording data directory.
 
     Returns:
-        On success, contains the 'recording_path', 'tracker_path', per-phase job status in 'jobs', a 'summary' with
-        counts by status, and a synthesized 'status' string ('not_started', 'binarizing', 'processing', 'combining',
-        'completed', or 'failed'). When no tracker exists, returns 'status' of 'not_started'. On failure, contains an
-        'error' describing the issue. Both cases include a 'success' flag.
-    """
-    recording = Path(recording_path)
-
-    if not recording.exists():
-        return {
-            "success": False,
-            "error": f"Unable to get single-recording status. Recording directory not found: {recording_path}.",
-        }
-
-    tracker_path = recording / "cindra" / SINGLE_RECORDING_TRACKER_NAME
-    if not tracker_path.exists():
-        return {
-            "success": True,
-            "recording_path": str(recording),
-            "status": "not_started",
-            "message": "No single-recording tracker found.",
-        }
-
-    return _read_single_recording_tracker(tracker_path=tracker_path, recording_path=recording)
-
-
-@mcp.tool()
-def get_multi_recording_status(recording_path: str) -> dict[str, object]:
-    """Gets the multi-recording processing status for a recording by reading ProcessingTracker files.
-
-    Searches for multi-recording tracker YAML files under <recording_path>/cindra/multi_recording/<dataset>/ and reads
-    each tracker to determine per-dataset processing progress. Returns per-job status grouped by pipeline phase
-    (discover, extract) for each dataset found.
-
-    Args:
-        recording_path: The absolute path to a recording directory.
-
-    Returns:
-        On success, contains the 'recording_path' and a 'datasets' mapping where each dataset key maps to its tracker
-        status, including per-phase job states, summary counts, and overall status. When no trackers exist, returns
-        'status' of 'not_started'. On failure, contains an 'error' describing the issue. Both cases include a 'success'
+        On success, contains the 'recording_path', 'single_recording' status (per-phase jobs, summary, and synthesized
+        status string), and 'multi_recording' status (per-dataset tracker status). Each section reports 'not_started'
+        when no tracker exists. On failure, contains an 'error' describing the issue. Both cases include a 'success'
         flag.
     """
     recording = Path(recording_path)
@@ -170,38 +135,39 @@ def get_multi_recording_status(recording_path: str) -> dict[str, object]:
     if not recording.exists():
         return {
             "success": False,
-            "error": f"Unable to get multi-recording status. Recording directory not found: {recording_path}.",
+            "error": f"Unable to get recording status. Recording directory not found: {recording_path}.",
         }
 
-    # Searches for multi-recording tracker files under the cindra output hierarchy.
+    # Reads single-recording tracker status.
+    single_tracker_path = recording / "cindra" / SINGLE_RECORDING_TRACKER_NAME
+    if single_tracker_path.exists():
+        single_recording_status = _read_single_recording_tracker(
+            tracker_path=single_tracker_path, recording_path=recording
+        )
+    else:
+        single_recording_status = {"status": "not_started"}
+
+    # Reads multi-recording tracker status from all datasets.
+    multi_recording_status: dict[str, object]
     multi_recording_base = recording / "cindra" / "multi_recording"
-    if not multi_recording_base.exists():
-        return {
-            "success": True,
-            "recording_path": str(recording),
-            "status": "not_started",
-            "message": "No multi-recording output directory found.",
-        }
-
-    tracker_files = list(multi_recording_base.rglob(MULTI_RECORDING_TRACKER_NAME))
-    if not tracker_files:
-        return {
-            "success": True,
-            "recording_path": str(recording),
-            "status": "not_started",
-            "message": "No multi-recording tracker files found.",
-        }
-
-    # Reads status from each discovered tracker file.
-    datasets: dict[str, object] = {}
-    for tracker_file in natsorted(tracker_files):
-        dataset_key = tracker_file.parent.name
-        datasets[dataset_key] = _read_multi_recording_tracker(tracker_path=tracker_file)
+    if multi_recording_base.exists():
+        tracker_files = list(multi_recording_base.rglob(MULTI_RECORDING_TRACKER_NAME))
+        if tracker_files:
+            datasets: dict[str, object] = {}
+            for tracker_file in natsorted(tracker_files):
+                dataset_key = tracker_file.parent.name
+                datasets[dataset_key] = _read_multi_recording_tracker(tracker_path=tracker_file)
+            multi_recording_status = {"datasets": datasets}
+        else:
+            multi_recording_status = {"status": "not_started"}
+    else:
+        multi_recording_status = {"status": "not_started"}
 
     return {
         "success": True,
         "recording_path": str(recording),
-        "datasets": datasets,
+        "single_recording": single_recording_status,
+        "multi_recording": multi_recording_status,
     }
 
 
@@ -331,9 +297,9 @@ def prepare_single_recording_batch_tool(
     reset_processing_phases_tool to selectively reset completed phases for re-runs.
 
     Important:
-        Worker allocation and parallelism are controlled by execute_processing_jobs_tool, not this tool. This tool only
-        builds the manifest and saves configurations with placeholder worker counts. The execute tool resolves resource
-        allocation at dispatch time and rewrites configuration files for compute-bound jobs accordingly.
+        Worker allocation and parallelism are controlled by execute_processing_jobs_tool, not this tool. The execute
+        tool resolves resource allocation at dispatch time and rewrites configuration files for compute-bound jobs
+        accordingly.
 
     Args:
         recording_paths: List of absolute paths to recording root directories (used as file_io.data_path per
@@ -455,12 +421,11 @@ def prepare_single_recording_batch_tool(
                 "combine_job": combine_entry,
             }
         else:
-            # New recording: creates config with placeholder workers, resolves planes, initializes tracker.
+            # New recording: creates per-recording config, resolves planes, and initializes tracker.
             recording_configuration = SingleRecordingConfiguration.from_yaml(file_path=template_path)
             recording_configuration.file_io.data_path = data_path
             recording_configuration.file_io.output_path = output_path
             recording_configuration.runtime.display_progress_bars = False
-            recording_configuration.runtime.parallel_workers = -1
 
             cindra_root.mkdir(parents=True, exist_ok=True)
             recording_configuration_path = cindra_root / "configuration.yaml"
@@ -469,8 +434,7 @@ def prepare_single_recording_batch_tool(
             contexts = resolve_single_recording_contexts(configuration=recording_configuration)
             plane_count = len(contexts)
 
-            # Saves configuration with placeholder worker count. The execute tool overwrites parallel_workers
-            # at dispatch time based on its own resource allocation.
+            # Saves per-recording configuration. The execute tool overwrites parallel_workers at dispatch time.
             recording_configuration.save(file_path=recording_configuration_path)
 
             # Builds the job list: binarize, all process planes, combine.
@@ -542,9 +506,9 @@ def prepare_multi_recording_batch_tool(
     reset completed phases for re-runs.
 
     Important:
-        Worker allocation and parallelism are controlled by execute_processing_jobs_tool, not this tool. This tool only
-        builds the manifest and saves configurations with placeholder worker counts. The execute tool resolves resource
-        allocation at dispatch time and rewrites configuration files for compute-bound jobs accordingly.
+        Worker allocation and parallelism are controlled by execute_processing_jobs_tool, not this tool. The execute
+        tool resolves resource allocation at dispatch time and rewrites configuration files for compute-bound jobs
+        accordingly.
 
     Args:
         dataset_configurations: List of dataset configurations, each a dictionary with 'configuration_path' (absolute
@@ -625,7 +589,6 @@ def prepare_multi_recording_batch_tool(
         configuration.recording_io.dataset_name = dataset_key
         configuration.recording_io.recording_directories = tuple(natsorted(dataset_recording_paths))
         configuration.runtime.display_progress_bars = False
-        configuration.runtime.parallel_workers = -1
 
         # Resolves contexts to determine recording IDs and the output path.
         contexts = resolve_multi_recording_contexts(configuration=configuration)
@@ -676,7 +639,7 @@ def prepare_multi_recording_batch_tool(
                 "extract_jobs": extract_entries,
             }
         else:
-            # New dataset: saves configuration with placeholder workers and initializes tracker.
+            # New dataset: saves configuration and initializes tracker.
             configuration.save(file_path=configuration_file_path)
 
             # Builds the job list: discover, then extract per recording.
@@ -1112,8 +1075,6 @@ def execute_processing_jobs_tool(
         'workers_per_job' and 'max_parallel_jobs' for compute-bound work, and 'invalid_jobs' listing any jobs that
         failed validation with reasons.
     """
-    global _job_execution_state
-
     if not jobs:
         return {"success": False, "error": "Unable to execute jobs. At least one job descriptor is required."}
 
@@ -1206,71 +1167,15 @@ def execute_processing_jobs_tool(
             "invalid_jobs": invalid_jobs,
         }
 
-    # Resolves resource allocation for compute-bound jobs using saturating allocation.
-    budget = resolve_worker_count(requested_workers=-1, reserved_cores=_RESERVED_CORES)
-    compute_job_count = max(1, len(compute_jobs))
-
-    if workers_per_job <= 0 and max_parallel_jobs <= 0:
-        actual_workers, actual_max_parallel = _resolve_saturating_allocation(
-            budget=budget, total_jobs=compute_job_count
-        )
-    elif workers_per_job > 0 >= max_parallel_jobs:
-        actual_workers = resolve_worker_count(requested_workers=workers_per_job, reserved_cores=_RESERVED_CORES)
-        actual_max_parallel = resolve_parallel_job_capacity(workers_per_job=actual_workers)
-    elif workers_per_job <= 0 < max_parallel_jobs:
-        raw_workers = budget // max_parallel_jobs
-        actual_workers = max(1, (raw_workers // _WORKER_MULTIPLE) * _WORKER_MULTIPLE)
-        actual_max_parallel = max_parallel_jobs
-    else:
-        actual_workers = resolve_worker_count(requested_workers=workers_per_job, reserved_cores=_RESERVED_CORES)
-        actual_max_parallel = max_parallel_jobs
-
-    # Rewrites runtime.parallel_workers in configuration files for compute-bound jobs. Groups by config path to
-    # avoid redundant rewrites when multiple jobs share the same configuration file.
-    rewritten_configs: set[Path] = set()
-    for pending_job in compute_jobs:
-        if pending_job.configuration_path in rewritten_configs:
-            continue
-        rewritten_configs.add(pending_job.configuration_path)
-
-        if pending_job.single_recording:
-            single_config = SingleRecordingConfiguration.from_yaml(file_path=pending_job.configuration_path)
-            single_config.runtime.parallel_workers = actual_workers
-            single_config.save(file_path=pending_job.configuration_path)
-        else:
-            multi_config = MultiRecordingConfiguration.from_yaml(file_path=pending_job.configuration_path)
-            multi_config.runtime.parallel_workers = actual_workers
-            multi_config.save(file_path=pending_job.configuration_path)
-
-    # Creates the execution state and starts the manager thread.
-    execution_state = _JobExecutionState(
+    return _start_execution_session(
         all_jobs=all_jobs_map,
-        io_pending_queue=list(io_jobs),
-        compute_pending_queue=list(compute_jobs),
-        max_parallel_jobs=max(1, actual_max_parallel),
-        lock=Lock(),
+        io_jobs=io_jobs,
+        compute_jobs=compute_jobs,
+        phase_groups=[],
+        workers_per_job=workers_per_job,
+        max_parallel_jobs=max_parallel_jobs,
+        extra_result_fields={"invalid_jobs": invalid_jobs} if invalid_jobs else {},
     )
-
-    manager = Thread(target=_job_execution_manager, daemon=True)
-    manager.start()
-    execution_state.manager_thread = manager
-    _job_execution_state = execution_state
-
-    result: dict[str, object] = {
-        "success": True,
-        "started": True,
-        "total_jobs": len(all_jobs_map),
-        "compute_jobs": len(compute_jobs),
-        "io_jobs": len(io_jobs),
-        "workers_per_job": actual_workers,
-        "max_parallel_jobs": actual_max_parallel,
-        "max_parallel_io_jobs": _MAXIMUM_PARALLEL_IO_JOBS,
-    }
-
-    if invalid_jobs:
-        result["invalid_jobs"] = invalid_jobs
-
-    return result
 
 
 @mcp.tool()
@@ -1535,8 +1440,6 @@ def execute_full_pipeline_tool(
         resource allocation. On failure, contains an 'error' describing the issue. Both cases include a 'success'
         flag.
     """
-    global _job_execution_state
-
     if pipeline_type not in ("single-recording", "multi-recording"):
         return {
             "success": False,
@@ -1710,19 +1613,92 @@ def execute_full_pipeline_tool(
         for job in phase_jobs:
             all_jobs_map[job.dispatch_key] = job
 
-    total_jobs = len(all_jobs_map)
+    # Splits first phase into initial queues and remaining phases into groups for sequential advancement.
+    _first_phase_name, first_phase_jobs = phase_groups[0]
+    remaining_groups = [jobs for _, jobs in phase_groups[1:]]
+
+    first_phase_io: list[_PendingJob] = []
+    first_phase_compute: list[_PendingJob] = []
+    for job in first_phase_jobs:
+        if job.io_bound:
+            first_phase_io.append(job)
+        else:
+            first_phase_compute.append(job)
+
+    # Builds phase summary for response before delegating to shared execution setup.
+    phases_summary: list[dict[str, object]] = []
+    for phase_name, phase_job_list in phase_groups:
+        phases_summary.append(
+            {
+                "phase_name": phase_name,
+                "job_count": len(phase_job_list),
+                "job_ids": [job.job_id for job in phase_job_list],
+            }
+        )
+
+    # Delegates to the shared execution session setup.
+    extra_fields: dict[str, object] = {
+        "pipeline_type": pipeline_type,
+        "phase_count": len(phase_groups),
+        "phases": phases_summary,
+    }
+    if "invalid_paths" in manifest:
+        extra_fields["invalid_paths"] = manifest["invalid_paths"]
+    if "invalid_configurations" in manifest:
+        extra_fields["invalid_configurations"] = manifest["invalid_configurations"]
+
+    return _start_execution_session(
+        all_jobs=all_jobs_map,
+        io_jobs=first_phase_io,
+        compute_jobs=first_phase_compute,
+        phase_groups=remaining_groups,
+        workers_per_job=workers_per_job,
+        max_parallel_jobs=max_parallel_jobs,
+        extra_result_fields=extra_fields,
+    )
+
+
+def _start_execution_session(
+    all_jobs: dict[tuple[str, str], _PendingJob],
+    io_jobs: list[_PendingJob],
+    compute_jobs: list[_PendingJob],
+    phase_groups: list[list[_PendingJob]],
+    workers_per_job: int,
+    max_parallel_jobs: int,
+    extra_result_fields: dict[str, object],
+) -> dict[str, object]:
+    """Resolves resource allocation, rewrites configuration files, and starts the background execution manager.
+
+    Centralizes the execution setup logic shared by ``execute_processing_jobs_tool`` (flat dispatch) and
+    ``execute_full_pipeline_tool`` (phased dispatch). The caller is responsible for validating jobs and checking
+    for active sessions before calling this function.
+
+    Args:
+        all_jobs: All submitted jobs keyed by dispatch key, used for status reporting.
+        io_jobs: I/O-bound jobs to place in the initial pending queue.
+        compute_jobs: Compute-bound jobs to place in the initial pending queue.
+        phase_groups: Remaining phase groups for sequential advancement (empty for flat dispatch).
+        workers_per_job: Requested CPU cores per compute-bound job (-1 for automatic).
+        max_parallel_jobs: Requested maximum concurrent compute-bound jobs (-1 for automatic).
+        extra_result_fields: Additional key-value pairs to include in the result dictionary.
+
+    Returns:
+        A result dictionary containing 'success', 'started', resource allocation details, and any extra fields.
+    """
+    global _job_execution_state
 
     # Resolves resource allocation for compute-bound jobs using saturating allocation.
-    compute_job_count = sum(1 for job in all_jobs_map.values() if not job.io_bound)
     budget = resolve_worker_count(requested_workers=-1, reserved_cores=_RESERVED_CORES)
+    compute_job_count = max(1, len(compute_jobs))
 
-    if compute_job_count == 0:
-        actual_workers = budget
-        actual_max_parallel = 1
-    elif workers_per_job <= 0 and max_parallel_jobs <= 0:
-        actual_workers, actual_max_parallel = _resolve_saturating_allocation(
-            budget=budget, total_jobs=max(1, compute_job_count)
-        )
+    # Accounts for compute jobs across all phase groups when computing total count.
+    total_compute = compute_job_count
+    for group in phase_groups:
+        total_compute += sum(1 for job in group if not job.io_bound)
+    total_compute = max(1, total_compute)
+
+    if workers_per_job <= 0 and max_parallel_jobs <= 0:
+        actual_workers, actual_max_parallel = _resolve_saturating_allocation(budget=budget, total_jobs=total_compute)
     elif workers_per_job > 0 >= max_parallel_jobs:
         actual_workers = resolve_worker_count(requested_workers=workers_per_job, reserved_cores=_RESERVED_CORES)
         actual_max_parallel = resolve_parallel_job_capacity(workers_per_job=actual_workers)
@@ -1734,9 +1710,11 @@ def execute_full_pipeline_tool(
         actual_workers = resolve_worker_count(requested_workers=workers_per_job, reserved_cores=_RESERVED_CORES)
         actual_max_parallel = max_parallel_jobs
 
-    # Rewrites configuration files for compute-bound jobs with the resolved worker count.
+    # Rewrites runtime.parallel_workers in configuration files for compute-bound jobs. Groups by config path to
+    # avoid redundant rewrites when multiple jobs share the same configuration file.
     rewritten_configs: set[Path] = set()
-    for pending_job in all_jobs_map.values():
+    all_pending = list(all_jobs.values())
+    for pending_job in all_pending:
         if pending_job.io_bound or pending_job.configuration_path in rewritten_configs:
             continue
         rewritten_configs.add(pending_job.configuration_path)
@@ -1750,25 +1728,14 @@ def execute_full_pipeline_tool(
             multi_config.runtime.parallel_workers = actual_workers
             multi_config.save(file_path=pending_job.configuration_path)
 
-    # Creates execution state with the first phase active and remaining phases queued.
-    _first_phase_name, first_phase_jobs = phase_groups[0]
-    remaining_groups = [jobs for _, jobs in phase_groups[1:]]
-
-    io_pending: list[_PendingJob] = []
-    compute_pending: list[_PendingJob] = []
-    for job in first_phase_jobs:
-        if job.io_bound:
-            io_pending.append(job)
-        else:
-            compute_pending.append(job)
-
+    # Creates the execution state and starts the manager thread.
     execution_state = _JobExecutionState(
-        all_jobs=all_jobs_map,
-        io_pending_queue=io_pending,
-        compute_pending_queue=compute_pending,
+        all_jobs=all_jobs,
+        io_pending_queue=list(io_jobs),
+        compute_pending_queue=list(compute_jobs),
         max_parallel_jobs=max(1, actual_max_parallel),
         lock=Lock(),
-        phase_groups=remaining_groups,
+        phase_groups=phase_groups,
     )
 
     manager = Thread(target=_job_execution_manager, daemon=True)
@@ -1776,34 +1743,17 @@ def execute_full_pipeline_tool(
     execution_state.manager_thread = manager
     _job_execution_state = execution_state
 
-    # Builds phase summary for response.
-    phases_summary: list[dict[str, object]] = []
-    for phase_name, phase_job_list in phase_groups:
-        phases_summary.append(
-            {
-                "phase_name": phase_name,
-                "job_count": len(phase_job_list),
-                "job_ids": [job.job_id for job in phase_job_list],
-            }
-        )
-
     result: dict[str, object] = {
         "success": True,
         "started": True,
-        "pipeline_type": pipeline_type,
-        "total_jobs": total_jobs,
-        "phase_count": len(phase_groups),
-        "phases": phases_summary,
+        "total_jobs": len(all_jobs),
+        "compute_jobs": len(compute_jobs),
+        "io_jobs": len(io_jobs),
         "workers_per_job": actual_workers,
         "max_parallel_jobs": actual_max_parallel,
         "max_parallel_io_jobs": _MAXIMUM_PARALLEL_IO_JOBS,
     }
-
-    # Includes validation warnings from manifest.
-    if "invalid_paths" in manifest:
-        result["invalid_paths"] = manifest["invalid_paths"]
-    if "invalid_configurations" in manifest:
-        result["invalid_configurations"] = manifest["invalid_configurations"]
+    result.update(extra_result_fields)
 
     return result
 
@@ -1926,6 +1876,8 @@ def _job_execution_manager() -> None:
     to the next phase after the current phase drains. Runs as a daemon thread, polling at 1-second intervals. Exits
     when both queues are empty, no active threads remain, and no phase groups are pending.
     """
+    global _job_execution_state
+
     timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
     while True:
@@ -1985,11 +1937,13 @@ def _job_execution_manager() -> None:
             )
             if all_empty:
                 if not state.phase_groups:
+                    _job_execution_state = None
                     return
 
                 # Checks if the preceding phase had any failures before advancing.
                 if _check_current_phase_failures(state):
                     _fail_remaining_phase_groups(state)
+                    _job_execution_state = None
                     return
 
                 # Pops the next phase group and distributes jobs into pending queues.
