@@ -320,8 +320,7 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
 def prepare_single_recording_batch_tool(
     recording_paths: list[str],
     configuration_path: str,
-    *,
-    recording_output_paths: list[str] | None = None,
+    recording_output_paths: list[str],
 ) -> dict[str, object]:
     """Prepares an execution manifest for single-recording batch processing without starting execution.
 
@@ -341,9 +340,8 @@ def prepare_single_recording_batch_tool(
             recording). These should be session-level roots, not sub-paths to raw data; the pipeline resolves
             raw data locations internally via recursive search.
         configuration_path: The absolute path to the template configuration YAML file.
-        recording_output_paths: Optional list of absolute paths for per-recording output directories (used as
-            file_io.output_path). Must match the length of recording_paths when provided. When not provided, each
-            recording's output_path defaults to its data_path.
+        recording_output_paths: List of absolute paths for per-recording output directories (used as
+            file_io.output_path). Must match the length of recording_paths.
 
     Returns:
         On success, contains per-recording manifests in 'recordings' keyed by recording path, with each entry listing
@@ -354,7 +352,7 @@ def prepare_single_recording_batch_tool(
     if not recording_paths:
         return {"success": False, "error": "Unable to prepare batch. At least one recording path is required."}
 
-    if recording_output_paths is not None and len(recording_output_paths) != len(recording_paths):
+    if len(recording_output_paths) != len(recording_paths):
         return {
             "success": False,
             "error": (
@@ -396,13 +394,8 @@ def prepare_single_recording_batch_tool(
             "invalid_paths": invalid_paths,
         }
 
-    # Resolves per-recording output paths. Defaults to data_path when recording_output_paths is not provided.
-    resolved_output_paths: list[Path] = []
-    for index, data_path in zip(valid_indices, valid_paths, strict=True):
-        if recording_output_paths is not None:
-            resolved_output_paths.append(Path(recording_output_paths[index]))
-        else:
-            resolved_output_paths.append(data_path)
+    # Resolves per-recording output paths from the provided list.
+    resolved_output_paths: list[Path] = [Path(recording_output_paths[index]) for index in valid_indices]
 
     # Builds the manifest for each recording.
     recordings_manifest: dict[str, dict[str, object]] = {}
@@ -1529,8 +1522,8 @@ def execute_full_pipeline_tool(
         pipeline_type: The pipeline type, either 'single-recording' or 'multi-recording'.
         recording_paths: List of absolute paths to recording directories. Required for single-recording pipelines.
         configuration_path: Absolute path to the template configuration file. Required for single-recording pipelines.
-        recording_output_paths: Optional list of per-recording output paths for single-recording pipelines. Must
-            match the length of recording_paths when provided.
+        recording_output_paths: List of per-recording output paths for single-recording pipelines. Required for
+            single-recording pipelines and must match the length of recording_paths.
         dataset_configurations: List of dataset configuration dictionaries. Required for multi-recording pipelines.
             Each must contain 'configuration_path', 'recording_paths', and 'dataset_name'.
         workers_per_job: CPU cores per compute-bound job. Set to -1 for automatic resolution via saturating
@@ -1576,6 +1569,13 @@ def execute_full_pipeline_tool(
             return {
                 "success": False,
                 "error": "Unable to execute full pipeline. 'configuration_path' is required for single-recording.",
+            }
+        if not recording_output_paths:
+            return {
+                "success": False,
+                "error": (
+                    "Unable to execute full pipeline. 'recording_output_paths' is required for single-recording."
+                ),
             }
 
         manifest = prepare_single_recording_batch_tool(

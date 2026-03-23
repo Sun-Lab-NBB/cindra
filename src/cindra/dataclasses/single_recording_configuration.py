@@ -218,8 +218,9 @@ class FileIO:
     directory and all subdirectories for .tiff/.tif files to process."""
 
     output_path: Path | None = None
-    """The path to the root output directory where processing results are saved. The pipeline automatically creates a
-    'cindra' subdirectory under this path to store all output files."""
+    """The path to the root output directory where processing results are saved. This field is required for pipeline
+    execution and must be explicitly configured before running any processing step. The pipeline creates a 'cindra'
+    subdirectory under this path to store all output files."""
 
     ignored_file_names: tuple[str, ...] = ()
     """The tuple of file names to ignore when searching for and loading raw data. Any file whose name exactly matches
