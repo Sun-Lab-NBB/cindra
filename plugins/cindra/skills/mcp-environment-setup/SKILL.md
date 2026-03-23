@@ -46,34 +46,37 @@ cindra-gui = "cindra.interface.gui_cli:cindra_gui"
 | `cindra-mcp`     | `cindra mcp`     | Headless processing: discovery, configuration, batch jobs   |
 | `cindra-gui-mcp` | `cindra-gui mcp` | GUI viewers and data querying (ROI, registration, tracking) |
 
-Both servers accept a `--transport` option (defaults to `stdio`). The project's `.mcp.json`
-configures Claude Code to launch the headless server automatically:
+Both servers accept a `--transport` option (defaults to `stdio`). The cindra Claude Code plugin
+registers both servers in its `plugin.json`:
 
 ```json
 {
   "mcpServers": {
     "cindra-mcp": {
-      "type": "stdio",
       "command": "cindra",
+      "args": ["mcp"]
+    },
+    "cindra-gui": {
+      "command": "cindra-gui",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-Both servers are configured in `.mcp.json` by default. The `cindra` and `cindra-gui` commands must
-be on PATH when Claude Code starts. This means the Python environment where cindra is installed
-must be active before launching Claude Code.
+When the plugin is installed, Claude Code automatically discovers and starts both servers. The
+`cindra` and `cindra-gui` commands must be on PATH when Claude Code starts. This means the Python
+environment where cindra is installed must be active before launching Claude Code.
 
 ### Dual-distribution model
 
 cindra's Claude Code integration is split across two distribution channels:
 
-| Component                                        | Distributed via           | What it provides                                                   |
-|--------------------------------------------------|---------------------------|--------------------------------------------------------------------|
-| Skills (`/single-recording-processing`, etc.)    | cindra Claude Code plugin | Skill files that guide agents through workflows                    |
-| MCP server registrations                         | cindra Claude Code plugin | `.mcp.json` entries that tell Claude Code how to start the servers |
-| MCP server code (`cindra mcp`, `cindra-gui mcp`) | cindra pip package        | The actual CLI commands and server implementations                 |
+| Component                                        | Distributed via           | What it provides                                                          |
+|--------------------------------------------------|---------------------------|---------------------------------------------------------------------------|
+| Skills (`/single-recording-processing`, etc.)    | cindra Claude Code plugin | Skill files that guide agents through workflows                           |
+| MCP server registrations                         | cindra Claude Code plugin | `plugin.json` mcpServers entries that register servers with Claude Code   |
+| MCP server code (`cindra mcp`, `cindra-gui mcp`) | cindra pip package        | The actual CLI commands and server implementations                        |
 
 Installing the plugin alone registers the MCP servers and makes skills available, but the servers
 will fail to start because the `cindra` and `cindra-gui` CLI commands are not present. The pip
@@ -190,7 +193,7 @@ Qt dependencies are missing.
 ### Step 6: Restart the MCP server
 
 After the user resolves the environment issue, they must restart Claude Code for the MCP servers
-to pick up the changes. The `.mcp.json` at the project root will automatically configure the
+to pick up the changes. The plugin's server registrations will automatically configure the
 servers on the next session.
 
 ---
@@ -207,7 +210,7 @@ servers on the next session.
 | Python version mismatch                 | Wrong environment activated          | Activate environment with Python 3.14              |
 | MCP server starts but tools are missing | Outdated cindra version              | `pip install --upgrade cindra`                     |
 | MCP server connected but tools fail     | Not an environment issue             | Check tool-specific error messages                 |
-| cindra-gui tools unavailable            | Server not in `.mcp.json`            | Add `cindra-gui-mcp` entry to `.mcp.json`          |
+| cindra-gui tools unavailable            | Plugin not installed or outdated     | Reinstall the cindra Claude Code plugin            |
 | Skills available but MCP tools missing  | Plugin installed without pip package | `pip install cindra` in the active environment     |
 
 ---
@@ -244,6 +247,6 @@ MCP Environment Setup:
 - [ ] Confirmed Python version matches >=3.14,<3.15
 - [ ] Identified environment type (conda, venv, system)
 - [ ] Provided environment-specific resolution steps
-- [ ] Verified cindra-gui-mcp entry exists in .mcp.json if GUI tools are needed
+- [ ] Verified cindra plugin is installed (provides both server registrations)
 - [ ] Informed user that Claude Code must be restarted after environment changes
 ```
