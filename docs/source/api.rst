@@ -1,49 +1,80 @@
- .. This file provides the instructions for how to display the API documentation generated using sphinx autodoc
-   extension. Use it to declare Python documentation sub-directories via appropriate modules (autodoc, etc.).
+.. This file provides the instructions for how to display the API documentation generated using sphinx autodoc
+   extension. Use it to declare Python documentation sub-directories via appropriate modules (automodule, etc.).
 
-Command Line Interfaces
-=======================
+Data Structures
+===============
+
+.. automodule:: cindra.dataclasses
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Pipelines
+=========
+
+.. automodule:: cindra.pipelines
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Registration
+============
+
+.. automodule:: cindra.registration
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Detection
+=========
+
+.. automodule:: cindra.detection
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Extraction
+==========
+
+.. automodule:: cindra.extraction
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Classification
+==============
+
+.. automodule:: cindra.classification
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+File I/O
+========
+
+.. automodule:: cindra.io
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+GUI Viewers
+===========
+
+.. automodule:: cindra.gui
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Main CLI
+========
 
 .. click:: cindra.interface.cli:cindra_cli
+   :prog: cindra
+   :nested: full
 
-Single-Recording Pipeline Configuration
-=================================
-.. automodule:: cindra.configuration.single_recording
-   :members:
-   :undoc-members:
-   :show-inheritance:
+GUI CLI
+=======
 
-Single-Recording Pipeline API
-=======================
-.. automodule:: cindra.single_recording
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Multi-Recording Pipeline Configuration
-=================================
-.. automodule:: cindra.configuration.multi_recording
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Multi-Recording Pipeline API
-======================
-.. automodule:: cindra.multi_recording
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Multi-recording Pipeline Algorithms
-=============================
-.. automodule:: cindra.multi_recording
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-Version API
-===========
-.. automodule:: cindra.version
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. click:: cindra.interface.gui_cli:cindra_gui
+   :prog: cindra-gui
+   :nested: full

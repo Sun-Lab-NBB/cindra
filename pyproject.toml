@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 [project]
 name = "cindra"
 version = "1.0.0rc1"
-description = "A reimplementation of the suite2p library with novel data architecture and across-day tracking pipeline."
+description = "Provides pipelines for processing neural imaging data and tracking Regions of Interest across multiple recordings."
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
@@ -76,6 +76,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/Sun-Lab-NBB/cindra"
+Documentation = "https://cindra-api-docs.netlify.app/"
 
 # All interactions with the library are performed via the 'cindra' and 'cindra-gui' CLI commands.
 [project.scripts]

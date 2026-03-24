@@ -1,6 +1,5 @@
 # cindra
-The Sun lab reimplementation of the suite2p library that provides clean and modern code, expanded documentation, and a 
-new pipeline to track ROIs across multiple recordings.
+Provides pipelines for processing neural imaging data and tracking Regions of Interest across multiple recordings.
 
 
 ![PyPI - Version](https://img.shields.io/pypi/v/cindra)
@@ -16,20 +15,12 @@ ___
 
 ## Detailed Description
 
-This library contains the refactored, re-documented and repackaged [suite2p](https://github.com/MouseLand/suite2p) 
-source code, merged with the refactored, re-documented and repackaged multi-recording ROI tracking pipeline referenced 
-[here](https://github.com/sprustonlab/multi_recording-suite2p-public).
-
-The scope of the changes realized in this implementation is extensive and still ongoing. Overall, the goal of this 
-project is to preserve the algorithmic core of the suite2p library while optimizing the documentation, typing, and 
-implementation where possible. Once this refactoring is over, the project would transition to exploring further 
-algorithmic and computation optimizations, such as adding GPU support and fine-tuning both single-recording and 
-multi-recording pipelines. Currently, there are no plans to keep up with the existing suite2p implementation unless it 
-receives an update that majorly expands or enhances its functionality relative to this project.
-
-**Warning!** The resultant cindra is now largely ***incompatible*** with both 'source' pipelines due to extensive 
-modifications to the APIs, CLIs, and configuration parameters in this project relative to both sources. Currently, 
-there are no plans to make cindra compatible with the existing or future suite2p library implementations.
+This library is a ground-up reimplementation of the [suite2p](https://github.com/MouseLand/suite2p) project, merged 
+with the similarly reimplemented multi-recording ROI tracking pipeline referenced 
+[here](https://github.com/sprustonlab/multi_recording-suite2p-public). Cindra maintains the algorithmic core of these
+projects with extensive code architecture, structure, documentation, and implementation enhancements 
+focused on improving memory efficiency and runtime speed. On top of these changes, cindra also offers CLI, GUI. and 
+a Claude-based agentic interface to streamline user interaction with the library.
 
 ---
 

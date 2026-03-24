@@ -1285,12 +1285,12 @@ def get_active_execution_timing_tool() -> dict[str, object]:
     running_count = 0
     pending_count = 0
 
-    for job_id, pending_job in _job_execution_state.all_jobs.items():
+    for pending_job in _job_execution_state.all_jobs.values():
         tracker = ProcessingTracker(file_path=pending_job.tracker_path)
-        job_info = tracker.get_job_info(job_id=job_id)
+        job_info = tracker.get_job_info(job_id=pending_job.job_id)
 
         entry: dict[str, object] = {
-            "job_id": job_id,
+            "job_id": pending_job.job_id,
             "name": job_info.job_name,
             "specifier": job_info.specifier,
             "status": job_info.status.name.lower(),

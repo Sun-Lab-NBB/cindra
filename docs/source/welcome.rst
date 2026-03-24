@@ -1,22 +1,17 @@
 Welcome to cindra API documentation page
-============================================
+=========================================
 
-cindra is an enhanced suite2p implementation that includes a pipeline to track ROI activity across recordings.
+Provides pipelines for processing neural imaging data and tracking Regions of Interest across multiple recordings.
 
-This library is developed in the `Sun lab <https://neuroai.github.io/sunlab/>`_ at Cornell University. It is an
-extension of the original `suite2p <https://github.com/MouseLand/suite2p>`_ library that features a new pipeline,
-optimized source code, improved documentation and more flexible API and CLI architectures. At this time, it is fully
-compatible and interchangeable with the original suite2p library.
+This library is developed in the `Sun (NeuroAI) lab <https://neuroai.github.io/sunlab/>`_ at Cornell University. It is
+a ground-up reimplementation of the `suite2p <https://github.com/MouseLand/suite2p>`_ library that features a novel
+multi-recording ROI tracking pipeline, optimized algorithms, expanded documentation, and an agentic interface based on
+Claude.
 
 This website only contains the API documentation for the classes and methods offered by this library. See the project
 GitHub repository for installation instructions and library usage examples:
 `cindra GitHub repository <https://github.com/Sun-Lab-NBB/cindra>`_.
 
-Note! Currently, the work on converting cindra to the latest Sun lab documentation standards is still ongoing and
-a large portion of the original source code remains undocumented. Future incremental patches will iteratively add
-documentation for the entire original (single-recording) pipeline codebase, while also optimizing the source code where
-necessary.
-
 .. _`cindra GitHub repository`: https://github.com/Sun-Lab-NBB/cindra
-.. _`Sun lab`: https://neuroai.github.io/sunlab/
+.. _`Sun (NeuroAI) lab`: https://neuroai.github.io/sunlab/
 .. _`suite2p`: https://github.com/MouseLand/suite2p

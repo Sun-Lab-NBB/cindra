@@ -8,7 +8,7 @@
 
 .. Adds the left-hand-side navigation panel to the documentation website. Uses the API file to generate content list.
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
    :caption: Contents:
    :hidden:
 
