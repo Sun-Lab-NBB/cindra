@@ -1,17 +1,10 @@
-"""A reimplementation of the suite2p library with novel data architecture and across-day tracking pipeline.
+"""Provides pipelines for processing neural imaging data and tracking Regions of Interest across multiple recordings.
 
-cindra is a reimplementation of the popular suite2p (https://github.com/MouseLand/suite2p) library with expanded
-documentation, modern Python support, and a new multi-recording ROI tracking pipeline based on the OSM manuscript
-(https://www.nature.com/articles/s41586-024-08548-w).
+Cindra is a ground-up reimplementation of the suite2p (https://github.com/MouseLand/suite2p) library that features a
+novel multi-recording ROI tracking pipeline, optimized algorithms, expanded documentation, and an agentic interface
+based on Claude.
 
-Original suite2p copyright:
-Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.
-
-Sun lab code changes copyright:
-Copyright © 2025 Cornell University, Authored by Ivan Kondratyev and Kushaan Gupta.
-
-See the `source code repository <https://github.com/Sun-Lab-NBB/cindra>`_ for documentation and additional
-information.
+See the source code repository (https://github.com/Sun-Lab-NBB/cindra) for documentation and additional information.
 
 Authors: Ivan Kondratyev, Natalie Yeung
 """

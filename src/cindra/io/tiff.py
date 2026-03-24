@@ -11,13 +11,12 @@ from ataraxis_base_utilities import LogLevel, console
 
 from .binary import BinaryFile
 from .context import find_data_directory
+from ..dataclasses import RuntimeContext, AcquisitionParameters  # noqa: TC001
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from numpy.typing import NDArray
-
-    from ..dataclasses import RuntimeContext, AcquisitionParameters
 
 TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
 """The supported TIFF file extensions."""
