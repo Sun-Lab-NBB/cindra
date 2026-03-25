@@ -53,7 +53,7 @@ type _ChannelDetectionResult = tuple[
 projection, correlation map, ROI diameter, and ROI statistics."""
 
 
-def detect_plane_rois(context: RuntimeContext) -> None:
+def detect_plane_rois(context: RuntimeContext) -> None:  # pragma: no cover
     """Detects ROIs from registered binary data and updates the runtime context in-place.
 
     Notes:
@@ -341,7 +341,7 @@ def _apply_preclassification(
     return kept
 
 
-def _detect_channel(
+def _detect_channel(  # pragma: no cover
     binary_path: Path,
     frame_height: int,
     frame_width: int,

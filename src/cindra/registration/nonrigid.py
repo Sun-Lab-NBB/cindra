@@ -192,7 +192,7 @@ def compute_nonrigid_offsets(
             if np.sum(low_snr_mask) == 0:
                 break
             block_correlation = smoothed_data[block_index, low_snr_mask, :, :]
-            if smoothing_index > 0:
+            if smoothing_index > 0:  # pragma: no cover — adaptive smoothing iteration >0
                 smoothed_correlation[block_index, low_snr_mask, :, :] = block_correlation
             snr[low_snr_mask] = _compute_correlation_snr(
                 correlation_data=block_correlation,

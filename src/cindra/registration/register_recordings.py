@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-def register_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
+def register_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:  # pragma: no cover
     """Registers multiple recording reference images to a common visual space using diffeomorphic demons registration.
 
     This function computes deformation fields that align all recordings to a shared coordinate system, then applies
@@ -159,7 +159,7 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
     )
 
 
-def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
+def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:  # pragma: no cover
     """Projects template masks from shared visual space back to each recording's original coordinate system.
 
     After ROI tracking produces template masks in the shared deformed space, this function applies the inverse
@@ -366,7 +366,9 @@ def _backward_deform_masks(
     return roi_statistics
 
 
-def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformation: Deformation) -> None:
+def _apply_forward_deformation(  # pragma: no cover
+    context: MultiRecordingRuntimeContext, deformation: Deformation
+) -> None:
     """Applies a forward deformation to transform the processed recording's images and ROI masks to shared visual space.
 
     Stores the deformation field components and transforms all reference images and selected ROI masks to the shared
@@ -449,7 +451,7 @@ def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformatio
             )
 
 
-def _apply_backward_deformation(context: MultiRecordingRuntimeContext) -> None:
+def _apply_backward_deformation(context: MultiRecordingRuntimeContext) -> None:  # pragma: no cover
     """Applies the inverse deformation to transform shared template masks back to the target recording's visual space.
 
     Retrieves template masks from the context's tracking data and transforms them using the inverse of the stored

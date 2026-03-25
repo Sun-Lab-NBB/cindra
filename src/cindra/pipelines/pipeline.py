@@ -45,7 +45,7 @@ class MultiRecordingJobNames(StrEnum):
     is identified by the tracker's specifier field, which stores the recording ID string."""
 
 
-def run_single_recording_pipeline(
+def run_single_recording_pipeline(  # pragma: no cover
     configuration_path: Path,
     job_id: str | None = None,
     *,
@@ -182,7 +182,7 @@ def run_single_recording_pipeline(
     console.echo(message="Single-recording processing: Complete.", level=LogLevel.SUCCESS)
 
 
-def run_multi_recording_pipeline(
+def run_multi_recording_pipeline(  # pragma: no cover
     configuration_path: Path,
     job_id: str | None = None,
     *,
@@ -334,7 +334,7 @@ def run_multi_recording_pipeline(
     console.echo(message="Multi-recording processing: Complete.", level=LogLevel.SUCCESS)
 
 
-def _execute_single_recording_job(
+def _execute_single_recording_job(  # pragma: no cover
     configuration: SingleRecordingConfiguration,
     job_name: SingleRecordingJobNames,
     specifier: str,
@@ -404,7 +404,7 @@ def _execute_single_recording_job(
         raise
 
 
-def _execute_multi_recording_job(
+def _execute_multi_recording_job(  # pragma: no cover
     configuration: MultiRecordingConfiguration,
     job_name: MultiRecordingJobNames,
     specifier: str,

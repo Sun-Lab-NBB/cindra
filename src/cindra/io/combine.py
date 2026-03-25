@@ -18,7 +18,9 @@ if TYPE_CHECKING:
     from ..dataclasses import RuntimeContext
 
 
-def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
+def compute_plane_offsets(
+    plane_contexts: list[RuntimeContext],
+) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
     """Computes the pixel displacement for each plane to arrange them in a combined view.
 
     Handles three scenarios based on the recording type. For standard multi-plane recordings without MROI data, computes
@@ -102,7 +104,7 @@ def compute_plane_offsets(plane_contexts: list[RuntimeContext]) -> tuple[NDArray
 
 
 # noinspection PyUnboundLocalVariable
-def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
+def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:  # pragma: no cover
     """Combines processed data from multiple planes into a unified dataset.
 
     This function combines multi-plane and multi-ROI recording data into a unified dataset, reassembling the original

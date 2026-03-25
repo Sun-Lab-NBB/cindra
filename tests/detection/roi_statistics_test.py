@@ -396,3 +396,40 @@ class TestComputeRoiStatistics:
         compute_roi_statistics(rois=rois, frame_height=50, frame_width=50, diameter=10, maximum_overlap_fraction=0.5)
         # At least one ROI should be removed due to complete overlap.
         assert len(rois) < 2
+
+    def test_aspect_ratio_scales_ellipse_fitting(self) -> None:
+        """Verifies that providing an aspect ratio triggers the asymmetric ellipse fitting branch."""
+        roi = _make_circular_roi_stats(center_y=30, center_x=30, radius=8, frame_height=64, frame_width=64)
+        rois = [roi]
+        compute_roi_statistics(rois=rois, frame_height=64, frame_width=64, diameter=16, aspect=1.5)
+        assert roi.aspect_ratio > 0
+
+    def test_non_diagonal_covariance_eigenvectors(self) -> None:
+        """Verifies that an elongated ROI triggers the non-diagonal covariance eigenvector branch."""
+        # Creates an elongated diagonal stripe of pixels with significant off-diagonal covariance.
+        y_pixels = np.arange(20, dtype=np.int32)
+        x_pixels = np.arange(20, dtype=np.int32)
+        weights = np.ones(20, dtype=np.float32)
+        mask = ROIMask(
+            y_pixels=y_pixels,
+            x_pixels=x_pixels,
+            pixel_weights=weights,
+            centroid=(10, 10),
+            frame_width=64,
+            radius=5.0,
+        )
+        roi = ROIStatistics(mask=mask)
+        rois = [roi]
+        compute_roi_statistics(rois=rois, frame_height=64, frame_width=64, diameter=10)
+        # The aspect ratio should differ from 1.0 because the pixels are elongated along the diagonal.
+        assert roi.aspect_ratio != 1.0
+
+
+class TestEstimateDiameterFromRoisZeroPixels:
+    """Tests for estimate_diameter_from_rois edge case with zero-pixel ROIs."""
+
+    def test_zero_pixel_rois_return_default(self) -> None:
+        """Verifies that ROIs with zero pixels return the default diameter."""
+        mask = _make_mask(y_pixels=[], x_pixels=[], weights=[], frame_width=64, radius=0.0, centroid=(0, 0))
+        result = estimate_diameter_from_rois(rois=[mask], default_diameter=12)
+        assert result == 12
