@@ -473,10 +473,7 @@ def _create_diffusion_kernel(sigma: float) -> NDArray[np.float32]:
 
     # Normalizes to unit sum. The analytical kernel sums to 1 by definition, but floating-point truncation at the tails
     # can introduce a small residual.
-    kernel_sum = kernel.sum()
-    if kernel_sum == 0:  # pragma: no cover — unreachable for any sigma >= _MINIMUM_DIFFUSION_SIGMA
-        return np.array([1.0], dtype=np.float32)
-    return (kernel / kernel_sum).astype(np.float32)
+    return (kernel / kernel.sum()).astype(np.float32)
 
 
 def _make_samples_absolute(
