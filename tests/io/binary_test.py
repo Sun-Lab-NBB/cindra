@@ -34,9 +34,9 @@ def _create_test_binary(file_path: Path, frame_count: int = _FRAME_COUNT) -> NDA
     Returns:
         The int16 data array that was written to the file, with shape (frame_count, height, width).
     """
-    data = np.arange(
-        frame_count * _FRAME_HEIGHT * _FRAME_WIDTH, dtype=np.int16
-    ).reshape(frame_count, _FRAME_HEIGHT, _FRAME_WIDTH)
+    data = np.arange(frame_count * _FRAME_HEIGHT * _FRAME_WIDTH, dtype=np.int16).reshape(
+        frame_count, _FRAME_HEIGHT, _FRAME_WIDTH
+    )
     data.tofile(file_path)
     return data
 
@@ -182,9 +182,10 @@ class TestBinaryFileContextManager:
         _create_test_binary(file_path=file_path)
 
         simulated_error = RuntimeError("Simulated error")
-        with pytest.raises(RuntimeError), BinaryFile(
-            height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path
-        ) as binary_file:
+        with (
+            pytest.raises(RuntimeError),
+            BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file,
+        ):
             raise simulated_error
 
         # Verifies the underlying memory map is closed despite the exception.
@@ -222,9 +223,7 @@ class TestBinaryFileSetItem:
         with BinaryFile(
             height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path, frame_number=_FRAME_COUNT
         ) as binary_file:
-            frame_data = np.full(
-                (3, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=100, dtype=np.int16
-            )
+            frame_data = np.full((3, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=100, dtype=np.int16)
             binary_file[2:5] = frame_data
             np.testing.assert_array_equal(binary_file[2:5], frame_data)
 
@@ -236,9 +235,7 @@ class TestBinaryFileSetItem:
             height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path, frame_number=_FRAME_COUNT
         ) as binary_file:
             # Uses float32 data with values exceeding int16 range.
-            large_value_data = np.full(
-                (_FRAME_HEIGHT, _FRAME_WIDTH), fill_value=50000.0, dtype=np.float32
-            )
+            large_value_data = np.full((_FRAME_HEIGHT, _FRAME_WIDTH), fill_value=50000.0, dtype=np.float32)
             binary_file[0] = large_value_data
 
             # The maximum representable int16 value used by cindra is 2**15 - 2 = 32766.
@@ -252,9 +249,7 @@ class TestBinaryFileSetItem:
         file_path = tmp_path / "test.bin"
         _create_test_binary(file_path=file_path)
 
-        with BinaryFile(
-            height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path, read_only=True
-        ) as binary_file:
+        with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path, read_only=True) as binary_file:
             frame_data = np.ones((_FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.int16)
             with pytest.raises(PermissionError):
                 binary_file[0] = frame_data
@@ -400,9 +395,9 @@ class TestBinMovie:
         file_path = tmp_path / "test.bin"
         # Creates a binary with 20 frames so that batch_size is large enough to trigger the below-threshold path.
         frame_count = 20
-        data = np.arange(
-            frame_count * _FRAME_HEIGHT * _FRAME_WIDTH, dtype=np.int16
-        ).reshape(frame_count, _FRAME_HEIGHT, _FRAME_WIDTH)
+        data = np.arange(frame_count * _FRAME_HEIGHT * _FRAME_WIDTH, dtype=np.int16).reshape(
+            frame_count, _FRAME_HEIGHT, _FRAME_WIDTH
+        )
         data.tofile(file_path)
 
         # Marks 15 out of 20 frames as bad (25% good < 50% threshold), so no frames are rejected within batches.
@@ -423,9 +418,7 @@ class TestBinMovie:
         file_path = tmp_path / "test.bin"
         # Creates a binary with only 3 frames.
         small_frame_count = 3
-        data = np.ones(
-            (small_frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.int16
-        ) * 10
+        data = np.ones((small_frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.int16) * 10
         data.tofile(file_path)
 
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:

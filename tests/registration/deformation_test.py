@@ -58,7 +58,6 @@ class TestCreateDiffusionKernel:
         assert np.all(np.diff(right_half) <= 0)
 
 
-
 class TestDiffuse:
     """Tests for the diffuse function."""
 

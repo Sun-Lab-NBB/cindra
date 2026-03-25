@@ -30,9 +30,7 @@ class TestIsMemoryMapped:
     def test_returns_true_for_memory_mapped_array(self) -> None:
         """Verifies that a numpy memmap array is correctly identified as memory-mapped."""
         with tempfile.NamedTemporaryFile(suffix=".dat") as temporary_file:
-            memory_mapped_array = np.memmap(
-                temporary_file.name, dtype=np.float32, mode="w+", shape=(10,)
-            )
+            memory_mapped_array = np.memmap(temporary_file.name, dtype=np.float32, mode="w+", shape=(10,))
             assert is_memory_mapped(array=memory_mapped_array)
 
     def test_returns_false_for_none(self) -> None:
