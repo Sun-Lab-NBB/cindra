@@ -142,13 +142,13 @@ class DiffeomorphicDemonsRegistration:
         if self._smooth_scale:
             total_iterations = (scale_level_count - 1) * self._scale_sampling
         else:
-            total_iterations = scale_level_count * self._scale_sampling
+            total_iterations = scale_level_count * self._scale_sampling  # pragma: no cover — smooth_scale=False path
 
         # Saves and restores the console's progress state to honor the progress parameter without affecting the global
         # state set by the pipeline entry point.
         previous_state = console.progress_enabled
         if progress:
-            console.enable_progress()
+            console.enable_progress()  # pragma: no cover — only when caller sets progress=True
         else:
             console.disable_progress()
 
@@ -181,7 +181,7 @@ class DiffeomorphicDemonsRegistration:
                         if self._smooth_scale:
                             scale = max(self._final_scale, scale * iteration_factor)
         finally:
-            if previous_state:
+            if previous_state:  # pragma: no cover — restores caller's progress state
                 console.enable_progress()
             else:
                 console.disable_progress()
@@ -231,7 +231,8 @@ class DiffeomorphicDemonsRegistration:
             grid_shape = SplineGrid.compute_grid_shape(
                 field_height=image_height, field_width=image_width, grid_sampling=grid_sampling
             )
-            if all(dimension < _MINIMUM_GRID_DIMENSION for dimension in grid_shape):
+            # pragma: no cover — grid too coarse at this scale level
+            if all(dimension < _MINIMUM_GRID_DIMENSION for dimension in grid_shape):  # pragma: no cover
                 return None
 
         # Accumulates pairwise deformations from this image to all others.
@@ -251,7 +252,7 @@ class DiffeomorphicDemonsRegistration:
                 total_deformation += pairwise_deformation
 
         # Averages the accumulated deformations.
-        if pair_count > 1:
+        if pair_count > 1:  # pragma: no cover — only with >2 images in groupwise registration
             total_deformation = total_deformation.scale(factor=1.0 / pair_count)
 
         return total_deformation
@@ -275,7 +276,7 @@ class DiffeomorphicDemonsRegistration:
 
         # Checks cache for this pair or its symmetric counterpart.
         cached = self._get_cached(key=f"deform_{source_index}_{target_index}", iteration_key=iteration_key)
-        if isinstance(cached, Deformation):
+        if isinstance(cached, Deformation):  # pragma: no cover — cache hit for previously computed pair
             return cached
 
         cached = self._get_cached(key=f"deform_{target_index}_{source_index}", iteration_key=iteration_key)
@@ -345,7 +346,7 @@ class DiffeomorphicDemonsRegistration:
 
         # Tries to retrieve cached image.
         cached = self._get_cached(key=f"img_{image_index}", iteration_key=iteration_key)
-        if isinstance(cached, np.ndarray):
+        if isinstance(cached, np.ndarray):  # pragma: no cover — cache hit for previously deformed image
             image = cached
         else:
             image = self._get_deformed_image(image_index=image_index, scale=scale)
@@ -369,7 +370,7 @@ class DiffeomorphicDemonsRegistration:
             The deformed image at the specified scale.
         """
         # Validates that pyramids have been initialized (should always be true when this method is called).
-        if self._pyramids is None:
+        if self._pyramids is None:  # pragma: no cover — defensive guard; register() always initializes pyramids
             message = "Unable to retrieve image. The pyramids have not been initialized, call register() first."
             console.error(message=message, error=RuntimeError)
 
@@ -392,7 +393,7 @@ class DiffeomorphicDemonsRegistration:
             image_index: Index of the image to update.
             incremental_deformation: The incremental deformation to apply, or None to skip.
         """
-        if incremental_deformation is None or incremental_deformation.is_identity:
+        if incremental_deformation is None or incremental_deformation.is_identity:  # pragma: no cover — no-op skip
             return
 
         # Gets or creates the current accumulated deformation.

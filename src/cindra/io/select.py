@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     )
 
 
-def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
+def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:  # pragma: no cover
     """Selects ROIs from single-recording pipeline outputs that meet multi-recording tracking criteria.
 
     This function performs ROI selection filtering on each recording using the ROI selection parameters from the

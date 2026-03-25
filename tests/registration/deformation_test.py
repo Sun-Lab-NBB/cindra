@@ -39,6 +39,24 @@ class TestCreateDiffusionKernel:
         kernel = _create_diffusion_kernel(sigma=2.0)
         assert kernel.dtype == np.float32
 
+    def test_large_sigma_produces_wide_kernel(self) -> None:
+        """Verifies that sigma above threshold produces a multi-element kernel, not a delta."""
+        kernel = _create_diffusion_kernel(sigma=2.0)
+        assert kernel.size > 1
+
+    def test_kernel_peak_is_at_center(self) -> None:
+        """Verifies that the kernel's maximum value is at the center element."""
+        kernel = _create_diffusion_kernel(sigma=3.0)
+        assert np.argmax(kernel) == kernel.size // 2
+
+    def test_kernel_values_decrease_from_center(self) -> None:
+        """Verifies that kernel values monotonically decrease from center to tails."""
+        kernel = _create_diffusion_kernel(sigma=2.0)
+        center = kernel.size // 2
+        right_half = kernel[center:]
+        # Each element should be >= the next (monotonically non-increasing).
+        assert np.all(np.diff(right_half) <= 0)
+
 
 class TestDiffuse:
     """Tests for the diffuse function."""
