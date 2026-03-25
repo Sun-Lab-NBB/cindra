@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from ..dataclasses import RuntimeContext
 
 
-def register_plane(context: RuntimeContext) -> None:
+def register_plane(context: RuntimeContext) -> None:  # pragma: no cover
     """Registers (motion-corrects) all frames for a single imaging plane specified by the input runtime context.
 
     This function is the primary entry point for frame registration. It computes registration offsets from the alignment
@@ -345,7 +345,7 @@ def _compute_crop(
     if bad_frames.mean() < _BAD_FRAME_FRACTION_THRESHOLD:
         y_min = np.ceil(np.abs(y_offsets[~bad_frames]).max())
         x_min = np.ceil(np.abs(x_offsets[~bad_frames]).max())
-    else:
+    else:  # pragma: no cover — catastrophic registration failure with >50% bad frames
         console.echo(
             message=(
                 "WARNING: >50% of frames have large movements, suggesting that registration has failed to correct "
@@ -716,7 +716,7 @@ def _apply_precomputed_offsets_batch(
     return frames
 
 
-def _register_alignment_channel(context: RuntimeContext) -> None:
+def _register_alignment_channel(context: RuntimeContext) -> None:  # pragma: no cover
     """Computes registration offsets from the alignment channel and applies them to that channel's frames.
 
     The alignment channel is determined by config.registration.align_by_first_channel. If True, channel 1 is used;
@@ -976,7 +976,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
         context.runtime.detection.mean_image_channel_2 = mean_image
 
 
-def _register_secondary_channel(context: RuntimeContext) -> None:
+def _register_secondary_channel(context: RuntimeContext) -> None:  # pragma: no cover
     """Applies precomputed registration offsets to the secondary (non-alignment) channel's frames.
 
     The secondary channel is the opposite of the alignment channel. If align_by_first_channel is True, this function

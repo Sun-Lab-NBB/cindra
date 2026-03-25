@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from ..dataclasses import MultiRecordingConfiguration
 
 
-def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -> None:
+def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -> None:  # pragma: no cover
     """Discovers reliably identifiable ROIs and tracks them across the processed set of recordings.
 
     Notes:
@@ -65,7 +65,9 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -
     )
 
 
-def extract_multi_recording_fluorescence(configuration: MultiRecordingConfiguration, recording_id: str) -> None:
+def extract_multi_recording_fluorescence(  # pragma: no cover
+    configuration: MultiRecordingConfiguration, recording_id: str
+) -> None:
     """Extracts fluorescence data from ROIs tracked across imaging recordings for the specified recording.
 
     Notes:

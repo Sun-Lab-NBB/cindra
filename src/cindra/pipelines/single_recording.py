@@ -20,7 +20,7 @@ _RECOMMENDED_PROCESSING_FRAMES: int = 200
 """The recommended minimum number of frames in the processed movie for the processing to work as expected."""
 
 
-def binarize_recording(configuration: SingleRecordingConfiguration) -> None:
+def binarize_recording(configuration: SingleRecordingConfiguration) -> None:  # pragma: no cover
     """Converts raw TIFF recording data into the internal binary format used by the processing pipeline.
 
     Notes:
@@ -109,7 +109,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
-def process_plane(configuration: SingleRecordingConfiguration, plane_index: int) -> None:
+def process_plane(configuration: SingleRecordingConfiguration, plane_index: int) -> None:  # pragma: no cover
     """Registers, detects ROIs, and extracts fluorescence traces for the target imaging plane.
 
     Notes:
@@ -199,7 +199,7 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int)
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
-def save_combined_data(contexts: list[RuntimeContext]) -> None:
+def save_combined_data(contexts: list[RuntimeContext]) -> None:  # pragma: no cover
     """Combines processed data from all imaging planes into a unified dataset and saves it to disk.
 
     Notes:

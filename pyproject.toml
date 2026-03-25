@@ -204,6 +204,12 @@ exclude = [
 addopts = "--import-mode=importlib"
 
 # This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
+[tool.coverage.run]
+
+# Excludes GUI and interface modules from coverage measurement. GUI modules require PySide6/PyQtGraph runtime and
+# cannot be meaningfully unit tested. Interface modules (CLI, MCP servers, MCP tools) require external infrastructure.
+omit = ["src/cindra/gui/*", "src/cindra/interface/*", "*/cindra/gui/*", "*/cindra/interface/*"]
+
 [tool.coverage.paths]
 
 # Maps coverage measured in site-packages to source files in src
@@ -215,6 +221,7 @@ directory = "reports/coverage_html"
 
 # Specifies additional ignore directives
 [tool.coverage.report]
+omit = ["src/cindra/gui/*", "src/cindra/interface/*"]
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",

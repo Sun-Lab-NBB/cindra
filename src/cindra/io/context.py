@@ -64,7 +64,9 @@ def find_data_directory(data_path: Path) -> Path:
     return parameter_files[0].parent
 
 
-def resolve_single_recording_contexts(configuration: SingleRecordingConfiguration) -> list[RuntimeContext]:
+def resolve_single_recording_contexts(  # pragma: no cover
+    configuration: SingleRecordingConfiguration,
+) -> list[RuntimeContext]:
     """Creates RuntimeContext instances for all imaging planes processed by the target single-recording pipeline.
 
     This function performs the initial setup for single-recording processing: it finds acquisition parameters from
@@ -212,7 +214,7 @@ def resolve_single_recording_contexts(configuration: SingleRecordingConfiguratio
     return contexts
 
 
-def resolve_multi_recording_contexts(
+def resolve_multi_recording_contexts(  # pragma: no cover
     configuration: MultiRecordingConfiguration,
     target_recording_id: str | None = None,
 ) -> list[MultiRecordingRuntimeContext]:

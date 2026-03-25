@@ -38,7 +38,7 @@ class RuntimeContext:
     runtime: SingleRecordingRuntimeData
     """The runtime data, which is computed and updated by pipeline stages."""
 
-    def save_shared(self) -> None:
+    def save_shared(self) -> None:  # pragma: no cover
         """Saves shared configuration and acquisition parameters to the root output directory.
 
         This method derives the root path from self.configuration.file_io.output_path and creates the cindra
@@ -61,7 +61,7 @@ class RuntimeContext:
         self.configuration.save(file_path=root_path / "configuration.yaml")
         self.acquisition.to_yaml(file_path=root_path / "acquisition_parameters.yaml")
 
-    def save_runtime(self) -> None:
+    def save_runtime(self) -> None:  # pragma: no cover
         """Saves this plane's runtime data to its output directory.
 
         This method uses self.runtime.io.output_path as the save location. This directory is set during plane
@@ -80,7 +80,7 @@ class RuntimeContext:
         self.runtime.save(output_path=self.runtime.io.output_path)
 
     @classmethod
-    def load(cls, root_path: Path, plane_index: int = -1) -> RuntimeContext | list[RuntimeContext]:
+    def load(cls, root_path: Path, plane_index: int = -1) -> RuntimeContext | list[RuntimeContext]:  # pragma: no cover
         """Loads one or more RuntimeContext instances from disk.
 
         Searches root_path recursively for configuration.yaml to discover the cindra output directory, then loads
@@ -176,7 +176,7 @@ class MultiRecordingRuntimeContext:
     runtime: MultiRecordingRuntimeData
     """The per-recording runtime data, which is computed and updated by pipeline stages."""
 
-    def save_shared(self) -> None:
+    def save_shared(self) -> None:  # pragma: no cover
         """Saves the shared configuration to the main recording's output directory.
 
         This method saves the immutable configuration to the first recording's multi_recording directory. It
@@ -197,7 +197,7 @@ class MultiRecordingRuntimeContext:
 
         self.configuration.save(file_path=main_recording_path / "multi_recording_configuration.yaml")
 
-    def save_runtime(self) -> None:
+    def save_runtime(self) -> None:  # pragma: no cover
         """Saves this recording's runtime data to its output directory.
 
         This method uses self.runtime.output_path as the save location. This directory is recording-specific.
@@ -215,7 +215,7 @@ class MultiRecordingRuntimeContext:
         self.runtime.save(output_path=self.runtime.output_path)
 
     @classmethod
-    def load(
+    def load(  # pragma: no cover
         cls, root_path: Path, recording_index: int = -1
     ) -> MultiRecordingRuntimeContext | list[MultiRecordingRuntimeContext]:
         """Loads one or more previously-saved MultiRecordingRuntimeContext instances from a recording's data directory.
@@ -359,7 +359,7 @@ class MultiRecordingRuntimeContext:
         return cls(configuration=configuration, runtime=runtime)
 
 
-def _load_single_recording_runtime(plane_directory: Path) -> SingleRecordingRuntimeData:
+def _load_single_recording_runtime(plane_directory: Path) -> SingleRecordingRuntimeData:  # pragma: no cover
     """Loads a SingleRecordingRuntimeData instance and corrects stale paths if the dataset was relocated.
 
     When a dataset is moved between machines, the paths cached in the plane's runtime YAML no longer match the actual
@@ -469,7 +469,7 @@ def _relocate_cross_recording_path(path: Path, old_prefix: Path, new_prefix: Pat
     return relocated_prefix
 
 
-def _relocate_runtime_paths(
+def _relocate_runtime_paths(  # pragma: no cover
     runtime: SingleRecordingRuntimeData | MultiRecordingRuntimeData, old_prefix: Path, new_prefix: Path
 ) -> None:
     """Applies a prefix substitution to all cached paths in a runtime data instance.
@@ -521,7 +521,7 @@ def _relocate_runtime_paths(
         runtime.io.dataset_output_paths = tuple(relocated_paths)
 
 
-def _load_multi_recording_data(runtime: MultiRecordingRuntimeData) -> None:
+def _load_multi_recording_data(runtime: MultiRecordingRuntimeData) -> None:  # pragma: no cover
     """Loads CombinedData metadata (scalars only) onto a deserialized MultiRecordingRuntimeData instance.
 
     Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).

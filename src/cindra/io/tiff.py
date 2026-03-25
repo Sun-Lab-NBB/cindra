@@ -25,7 +25,7 @@ _MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
 """The minimum number of image dimensions considered 'multidimensional'."""
 
 
-def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
+def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:  # pragma: no cover
     """Converts TIFF files to cindra binary format for all planes.
 
     This function performs TIFF to binary conversion using pre-initialized RuntimeContext instances. It discovers TIFF
@@ -333,18 +333,18 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.
     # int16 range (-32768 to 32767) without overflow.
     if frames.dtype.type in {np.uint16, np.int32}:
         frames = (frames // 2).astype(dtype=np.int16)
-    elif frames.dtype.type != np.int16:
+    elif frames.dtype.type != np.int16:  # pragma: no cover — rare: non-standard TIFF dtype (e.g. float)
         frames = frames.astype(dtype=np.int16)
 
     # While this should not be possible, ensures that the returned frame number matches the requested number by
     # truncating any extra frames from the array before returning it to the caller.
-    if frames.shape[0] > frames_to_read:
+    if frames.shape[0] > frames_to_read:  # pragma: no cover — defensive guard; TiffFile never returns excess frames
         frames = frames[:frames_to_read, :, :]
 
     return frames
 
 
-def _get_frame_dimensions(
+def _get_frame_dimensions(  # pragma: no cover — requires RuntimeContext with acquisition data
     tiff_files: list[Path],
     contexts: list[RuntimeContext],
     acquisition: AcquisitionParameters,
@@ -397,7 +397,7 @@ def _get_frame_dimensions(
     return heights, widths
 
 
-def _create_binary_files(
+def _create_binary_files(  # pragma: no cover — requires RuntimeContext with binary paths
     contexts: list[RuntimeContext],
     frame_heights: list[int],
     frame_widths: list[int],

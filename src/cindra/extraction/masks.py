@@ -209,7 +209,7 @@ def _create_neuropil_masks(
         cached_masks: list[NDArray[np.int32]] = []
         for roi in roi_statistics:
             # Unreachable due to the all() guard; included for type narrowing.
-            if roi.neuropil_mask is None:
+            if roi.neuropil_mask is None:  # pragma: no cover — unreachable; guarded by all() check above
                 continue
             cached_masks.append(roi.neuropil_mask)
         return tuple(cached_masks)
