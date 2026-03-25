@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import numba  # type: ignore[import-untyped]
 import numpy as np
 import scipy.ndimage
+import scipy.special
 
 from .spline_grid import SplineGrid, compute_cardinal_coefficients
 
@@ -443,50 +444,36 @@ class Deformation:
 
 
 def _create_diffusion_kernel(sigma: float) -> NDArray[np.float32]:
-    """Creates a discrete analog to the continuous Gaussian kernel.
+    """Creates a Lindeberg discrete diffusion kernel using modified Bessel functions.
 
-    Uses Lindeberg's discrete diffusion kernel based on modified Bessel functions. This kernel provides true
-    scale-space properties for image filtering.
+    Evaluates the discrete Gaussian kernel T(n, t) = exp(-t) * I_n(t) where t = sigma² and I_n is the modified Bessel
+    function of the first kind. This kernel provides true scale-space properties for discrete signals, unlike sampled
+    continuous Gaussians which violate the discrete scale-space axioms.
 
     Args:
         sigma: The smoothing parameter (scale) controlling the kernel's width.
 
     Returns:
-        The normalized diffusion kernel as a 1D array. Returns a delta kernel [1.0] if sigma is too small.
+        The normalized diffusion kernel as a 1D float32 array. Returns a delta kernel [1.0] if sigma is too small.
     """
-    # For very small sigma, return a delta kernel (no smoothing).
+    # For very small sigma, returns a delta kernel (no smoothing).
     if sigma < _MINIMUM_DIFFUSION_SIGMA:
         return np.array([1.0], dtype=np.float32)
 
     sigma_squared = sigma * sigma
 
-    # Computes the tail length. The kernel extends to ceil(4 * sigma) + 1 samples in each direction.
+    # Computes the tail length. The kernel extends to ceil(4 * sigma) + 1 samples in each direction, which captures
+    # >99.99% of the kernel mass for all practical sigma values.
     half_length = int(np.ceil(4 * sigma)) + 1
 
-    # Allocates kernel array. Uses 2 * half_length + 1 elements, trimmed to 2 * half_length - 1 after computation.
-    kernel = np.zeros(2 * half_length + 1, dtype=np.float32)
+    # Evaluates the discrete Gaussian kernel: T(n, t) = exp(-t) * I_n(t). Uses scipy.special.iv for numerically stable
+    # evaluation of the modified Bessel function across all orders simultaneously.
+    indices = np.arange(-half_length, half_length + 1)
+    kernel = np.exp(-sigma_squared) * scipy.special.iv(np.abs(indices), sigma_squared)
 
-    # Initializes the recurrence relation with seed values.
-    kernel[half_length] = 0.0
-    kernel[half_length - 1] = 0.01
-
-    # Computes kernel values using the Bessel function recurrence relation.
-    for n in range(half_length - 1, 0, -1):
-        kernel[(n - 1) + half_length] = (2 * n / sigma_squared) * kernel[n + half_length] + kernel[
-            (n + 1) + half_length
-        ]
-
-    # Mirrors the computed values to create the symmetric kernel.
-    kernel[:half_length] = np.flipud(kernel[-half_length:])
-
-    # Removes the zero-padded boundary elements.
-    kernel = kernel[1:-1]
-
-    # Normalizes the kernel to sum to 1. Falls back to delta kernel if sum is zero (numerical edge case).
-    kernel_sum = kernel.sum()
-    if kernel_sum == 0:
-        return np.array([1.0], dtype=np.float32)
-    return (kernel / kernel_sum).astype(np.float32)
+    # Normalizes to unit sum. The analytical kernel sums to 1 by definition, but floating-point truncation at the tails
+    # can introduce a small residual.
+    return (kernel / kernel.sum()).astype(np.float32)
 
 
 def _make_samples_absolute(

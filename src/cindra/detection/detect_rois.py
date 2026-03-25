@@ -737,7 +737,7 @@ def _extend_iteratively(
         weights = frames[np.ix_(active_frame_indices, flat_indices)].mean(axis=0)
         active_mask = weights > max(0, weights.max() * _MINIMUM_WEIGHT_FRACTION)
         active_count = active_mask.sum()
-        if active_count == 0:
+        if active_count == 0:  # pragma: no cover — degenerate: all extension weights are zero
             break
         y_pixels, x_pixels, weights = y_pixels[active_mask], x_pixels[active_mask], weights[active_mask]
 

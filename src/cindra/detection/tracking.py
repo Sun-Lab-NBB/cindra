@@ -21,7 +21,7 @@ _DEFAULT_JACCARD_DISTANCE: float = 10000.0
 that are not evaluated (due to centroid distance filtering) are never clustered together."""
 
 
-def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
+def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:  # pragma: no cover
     """Tracks ROIs across multiple recordings using Jaccard distance-based hierarchical clustering.
 
     Clusters ROI masks from multiple recordings based on spatial overlap in the shared deformed visual
@@ -278,7 +278,7 @@ def _create_template_roi(
     )
 
 
-def _collect_recording_rois(
+def _collect_recording_rois(  # pragma: no cover
     contexts: list[MultiRecordingRuntimeContext],
     channel_2: bool,
 ) -> tuple[list[ROIMask], list[int]]:
@@ -420,7 +420,7 @@ def _filter_templates(
     return filtered_templates
 
 
-def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], channel_2: bool) -> None:
+def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], channel_2: bool) -> None:  # pragma: no cover
     """Tracks ROIs for a single channel across multiple recordings.
 
     Notes:

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 _package_metadata: PackageMetadata | None = _metadata("cindra")
 
-if _package_metadata is None:
+if _package_metadata is None:  # pragma: no cover — unreachable when package is installed
     version: str = "unknown"
 else:
     version = _package_metadata["version"]
