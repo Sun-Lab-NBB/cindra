@@ -336,11 +336,6 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.
     elif frames.dtype.type != np.int16:  # pragma: no cover — rare: non-standard TIFF dtype (e.g. float)
         frames = frames.astype(dtype=np.int16)
 
-    # While this should not be possible, ensures that the returned frame number matches the requested number by
-    # truncating any extra frames from the array before returning it to the caller.
-    if frames.shape[0] > frames_to_read:  # pragma: no cover — defensive guard; TiffFile never returns excess frames
-        frames = frames[:frames_to_read, :, :]
-
     return frames
 
 
