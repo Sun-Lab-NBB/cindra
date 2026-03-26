@@ -20,7 +20,19 @@ maintainers = [
     { name = "Ivan Kondratyev", email = "ik278@cornell.edu" },
 ]
 
-keywords = ["suite2p", "sunlab", "photometry", "mesoscope"]
+keywords = [
+    "calcium-imaging",
+    "two-photon",
+    "one-photon",
+    "neural-imaging",
+    "roi-detection",
+    "motion-correction",
+    "spike-deconvolution",
+    "neuroscience",
+    "fluorescence",
+    "cell-tracking",
+    "sunlab"
+]
 
 classifiers = [
     # Development status
