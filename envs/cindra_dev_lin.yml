@@ -31,7 +31,7 @@ dependencies:
   - pyproject-api=1.10.0=pyhcf101f3_0
   - python=3.14.3=h32b2ec7_101_cp314
   - python-discovery=1.2.0=pyhcf101f3_0
-  - python-uv=0.10.12=pyhcf101f3_0
+  - python-uv=0.11.1=pyhcf101f3_0
   - python_abi=3.14=8_cp314
   - readline=8.3=h853b02a_0
   - tk=8.6.13=noxft_h366c992_103
@@ -41,7 +41,7 @@ dependencies:
   - tox-uv=1.29.0=pyhd8ed1ab_0
   - typing_extensions=4.15.0=pyhcf101f3_0
   - tzdata=2025c=hc9c84f9_1
-  - uv=0.10.12=h0f56927_0
+  - uv=0.11.1=h0f56927_0
   - virtualenv=21.2.0=pyhcf101f3_0
   - zipp=3.23.0=pyhcf101f3_1
   - zstd=1.5.7=hb78ec9c_6
@@ -60,7 +60,7 @@ dependencies:
     - accessible-pygments==0.0.5
     - alabaster==1.0.0
     - annotated-types==0.7.0
-    - anyio==4.12.1
+    - anyio==4.13.0
     - ataraxis-automation==8.1.0
     - ataraxis-base-utilities==6.0.0
     - ataraxis-data-structures==6.0.0
@@ -71,7 +71,7 @@ dependencies:
     - beautifulsoup4==4.14.3
     - bracex==2.6
     - breathe==4.36.0
-    - build==1.4.0
+    - build==1.4.2
     - certifi==2026.2.25
     - cffi==2.0.0
     - charset-normalizer==3.4.6
@@ -79,7 +79,7 @@ dependencies:
     - click==8.3.1
     - contourpy==1.3.3
     - coverage==7.13.5
-    - cryptography==46.0.5
+    - cryptography==46.0.6
     - cycler==0.12.1
     - dacite==1.9.2
     - dependency-groups==1.3.1
@@ -100,7 +100,7 @@ dependencies:
     - imagecodecs==2026.3.6
     - imagesize==2.0.0
     - iniconfig==2.3.0
-    - intel-cmplr-lib-rt==2025.3.2
+    - intel-cmplr-lib-rt==2025.3.3
     - jaraco.classes==3.4.0
     - jaraco.context==6.1.2
     - jaraco.functools==4.4.0
@@ -123,7 +123,7 @@ dependencies:
     - mypy_extensions==1.1.0
     - nanobind==2.12.0
     - natsort==8.4.0
-    - nh3==0.3.3
+    - nh3==0.3.4
     - numba==0.65.0rc1
     - numpy==2.4.3
     - numpy-typing-compat==20251206.2.4
@@ -147,7 +147,7 @@ dependencies:
     - python-multipart==0.0.22
     - readme_renderer==44.0
     - referencing==0.37.0
-    - requests==2.32.5
+    - requests==2.33.0
     - requests-toolbelt==1.0.0
     - rfc3986==2.0.0
     - rich==14.3.3
@@ -163,7 +163,7 @@ dependencies:
     - smmap==5.0.2
     - snowballstemmer==3.0.1
     - soupsieve==2.8.3
-    - sphinx-autodoc-typehints==3.9.9
+    - sphinx-autodoc-typehints==3.9.11
     - sphinx-basic-ng==1.0.0b2
     - sphinx-click==6.2.0
     - sphinxcontrib-applehelp==2.0.0

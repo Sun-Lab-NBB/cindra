@@ -128,7 +128,7 @@ https://conda.anaconda.org/conda-forge/linux-64/python-3.14.3-h32b2ec7_101_cp314
 https://conda.anaconda.org/conda-forge/noarch/python-discovery-1.2.0-pyhcf101f3_0.conda
 
 
-https://conda.anaconda.org/conda-forge/noarch/python-uv-0.10.12-pyhcf101f3_0.conda
+https://conda.anaconda.org/conda-forge/noarch/python-uv-0.11.1-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
 https://conda.anaconda.org/conda-forge/linux-64/readline-8.3-h853b02a_0.conda
 
@@ -177,7 +177,7 @@ https://conda.anaconda.org/conda-forge/noarch/tox-uv-1.29.0-pyhd8ed1ab_0.conda
 https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.15.0-pyhcf101f3_0.conda
 https://conda.anaconda.org/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda
 
-https://conda.anaconda.org/conda-forge/linux-64/uv-0.10.12-h0f56927_0.conda
+https://conda.anaconda.org/conda-forge/linux-64/uv-0.11.1-h0f56927_0.conda
 
 https://conda.anaconda.org/conda-forge/noarch/virtualenv-21.2.0-pyhcf101f3_0.conda
 
