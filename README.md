@@ -44,7 +44,7 @@ The diffeomorphic registration algorithms reimplemented in this library originat
 All implementation details in this library, including the complete reimplementation of the above algorithms, the
 codebase architecture, documentation, CLI, GUI, and MCP interfaces, belong to the original authors and fall under the
 following copyright notice:
-**Copyright © 2025 Cornell University, Authored by Ivan Kondratyev and Natalie Yeung.**
+**Copyright © 2026 Sun (NeuroAI) lab, Authored by Ivan Kondratyev and Natalie Yeung.**
 
 ___
 
@@ -63,6 +63,8 @@ ___
   multi-recording tracking results.
 - Exposes two MCP servers for AI agent integration: a data processing server with 30 tools for pipeline orchestration
   and results querying, and a GUI server with 4 tools for viewer lifecycle management.
+- Natively supports two-channel functional imaging with independent ROI detection, colocalization analysis, and
+  fluorescence extraction per channel.
 - Uses Numba JIT compilation with Intel TBB threading for parallelized frame-level computation.
 - GPL-3.0-or-later License.
 
@@ -73,6 +75,16 @@ ___
 - [Dependencies](#dependencies)
 - [Installation](#installation)
 - [Usage](#usage)
+  - [Input Data Format](#input-data-format)
+  - [Configuration](#configuration)
+  - [Data Structures](#data-structures)
+  - [Single-Recording Pipeline](#single-recording-pipeline)
+    - [Phase 1: Binarization](#phase-1-binarization)
+    - [Phase 2: Processing](#phase-2-processing)
+    - [Phase 3: Combination](#phase-3-combination)
+  - [Multi-Recording Pipeline](#multi-recording-pipeline)
+    - [Phase 1: Discovery](#phase-1-discovery)
+    - [Phase 2: Multi-Recording Extraction](#phase-2-multi-recording-extraction)
   - [API](#api)
   - [CLI Commands](#cli-commands)
   - [GUI Viewers](#gui-viewers)
@@ -118,11 +130,547 @@ ___
 
 ## Usage
 
+### Input Data Format
+
+Cindra processes two-photon (or one-photon) calcium imaging data stored as TIFF files. Before running any pipeline,
+the raw data directory must be prepared with the correct structure.
+
+#### TIFF Files
+
+The pipeline expects a flat directory containing one or more `.tif` / `.tiff` files. For multi-plane or multichannel
+acquisitions, frames must be interleaved in the following order within each TIFF file:
+plane0_channel1, plane0_channel2, plane1_channel1, plane1_channel2, and so on, repeating for each time point. This
+interleaving pattern continues seamlessly across TIFF file boundaries when a recording spans multiple files.
+
+For MROI (multi-region of interest) line-scanning acquisitions, each raw TIFF frame must contain the full imaging strip
+with all ROI regions arranged vertically. The interleaving order across planes and channels is the same as standard
+acquisitions. During binarization, the pipeline uses the `roi_lines` field from `cindra_parameters.json` to slice each
+frame into region-specific strips. Each ROI-plane combination becomes a separate virtual plane for processing.
+
+#### Acquisition Parameters
+
+Each raw data directory must contain a `cindra_parameters.json` file that describes how the data was acquired. This
+file can be generated using the `generate_acquisition_parameters_file` [MCP tool](#mcp-servers) or constructed
+manually. The required fields are:
+
+| Field            | Type  | Description                                                 |
+|------------------|-------|-------------------------------------------------------------|
+| `frame_rate`     | float | Volume acquisition rate in Hz (frames per second per plane) |
+| `plane_number`   | int   | Number of physical imaging planes                           |
+| `channel_number` | int   | Number of channels per plane (1 or 2)                       |
+
+For MROI (multi-region of interest) line-scanning recordings, additional fields describe the geometry of each acquired
+region:
+
+| Field               | Type                | Description                                                                           |
+|---------------------|---------------------|---------------------------------------------------------------------------------------|
+| `roi_number`        | int                 | Number of ROI regions acquired per plane (> 1 for MROI)                               |
+| `roi_lines`         | list of list of int | Line indices in the raw frame belonging to each ROI region                            |
+| `roi_x_coordinates` | list of int         | Horizontal pixel position of each ROI's top-left corner in the combined field of view |
+| `roi_y_coordinates` | list of int         | Vertical pixel position of each ROI's top-left corner in the combined field of view   |
+
+In MROI mode, each ROI-plane combination is treated as a separate virtual plane for processing. The pipeline uses
+`roi_lines` to slice each raw frame into region-specific strips and uses `roi_x_coordinates` / `roi_y_coordinates` to
+position the regions in the combined field of view during the combination phase.
+
+#### Example Directory Structure
+
+```
+recording_2025_03_10/
+├── scan_00001.tif
+├── scan_00002.tif
+├── scan_00003.tif
+└── cindra_parameters.json
+```
+
+### Configuration
+
+All pipeline behavior is controlled through YAML configuration files. Generate a default configuration using the CLI
+or API, then modify it as needed before running the pipeline.
+
+To generate a default single-recording configuration via the CLI:
+`cindra configure --pipeline single-recording --output-path /path/to/output`
+
+To generate a default multi-recording configuration:
+`cindra configure --pipeline multi-recording --output-path /path/to/output`
+
+Configuration files are structured as nested sections, each controlling a different aspect of the pipeline. See the
+[API documentation](https://cindra-api-docs.netlify.app/) for the complete description of every configuration field,
+including defaults and valid ranges.
+
+#### Single-Recording Configuration Sections
+
+| Section                   | Purpose                                                                                                                     |
+|---------------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| `main`                    | General pipeline behavior: time constant (tau), channel roles, flyback planes, custom classifier path                       |
+| `file_io`                 | Input TIFF directory, output directory, file exclusion patterns                                                             |
+| `runtime`                 | Parallel worker count, progress bar display                                                                                 |
+| `registration`            | Motion correction: reference frame selection, smoothing, offset limits, bidirectional phase correction, two-step refinement |
+| `nonrigid_registration`   | Block-based nonrigid correction: block size, SNR threshold, maximum block offset                                            |
+| `one_photon_registration` | One-photon specific preprocessing: spatial high-pass filtering, edge tapering                                               |
+| `roi_detection`           | ROI detection: threshold scaling, temporal/spatial high-pass windows, PCA denoising, overlap limits, preclassification      |
+| `signal_extraction`       | Fluorescence extraction: neuropil settings, batch size, classification threshold, overlap handling                          |
+| `spike_deconvolution`     | OASIS deconvolution: baseline method and parameters, spike extraction toggle                                                |
+
+#### Multi-Recording Configuration Sections
+
+| Section                      | Purpose                                                                                                                  |
+|------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| `recording_io`               | Recording directory paths, dataset naming, output location                                                               |
+| `runtime`                    | Parallel worker count, progress bar display                                                                              |
+| `roi_selection`              | ROI filtering: probability threshold, maximum size, MROI region margin                                                   |
+| `diffeomorphic_registration` | Diffeomorphic demons: reference image type, speed factor, grid sampling, iterations per scale                            |
+| `roi_tracking`               | Cross-recording clustering: Jaccard distance threshold, mask/pixel prevalence, spatial bin size, centroid distance limit |
+| `signal_extraction`          | Same extraction parameters as single-recording (applied to tracked ROIs)                                                 |
+| `spike_deconvolution`        | Same deconvolution parameters as single-recording                                                                        |
+
+### Data Structures
+
+This section describes the key data files produced by the pipelines. All per-plane data is stored under
+`<output_path>/cindra/plane_<i>/`, and combined data at the `<output_path>/cindra/` root.
+
+#### Binary Imaging Data
+
+Registration writes corrected frames back to the same binary files created during binarization. There are no separate
+"registered" binary files — `channel_1_data.bin` is overwritten in place with motion-corrected data.
+
+| File                 | Format               | Description                                                                            |
+|----------------------|----------------------|----------------------------------------------------------------------------------------|
+| `channel_1_data.bin` | int16 (frames, h, w) | Channel 1 imaging frames (raw after binarization, motion-corrected after registration) |
+| `channel_2_data.bin` | int16 (frames, h, w) | Channel 2 imaging frames (two-channel recordings only)                                 |
+
+#### Per-Plane Registration Data
+
+Stored under `plane_<i>/registration_data/`:
+
+| File                                     | Format                   | Description                                                |
+|------------------------------------------|--------------------------|------------------------------------------------------------|
+| `reference_image.npy`                    | float32 (h, w)           | Alignment target computed from the most stable frames      |
+| `rigid_y_offsets.npy`                    | int32 (frames,)          | Per-frame vertical translation from phase correlation      |
+| `rigid_x_offsets.npy`                    | int32 (frames,)          | Per-frame horizontal translation from phase correlation    |
+| `rigid_correlations.npy`                 | float32 (frames,)        | Phase correlation quality per frame                        |
+| `bad_frames.npy`                         | bool (frames,)           | Flags frames with excessive motion                         |
+| `nonrigid_y_offsets.npy`                 | float32 (frames, by, bx) | Per-block vertical offsets (when nonrigid enabled)         |
+| `nonrigid_x_offsets.npy`                 | float32 (frames, by, bx) | Per-block horizontal offsets (when nonrigid enabled)       |
+| `nonrigid_correlations.npy`              | float32 (frames, by, bx) | Per-block correlation quality (when nonrigid enabled)      |
+| `principal_component_projections.npy`    | float32 (frames, n_pcs)  | Frame projections onto principal components (when enabled) |
+| `principal_component_extreme_images.npy` | float32 (2, n_pcs, h, w) | Mean images of low/high projection frames per PC           |
+| `principal_component_shift_metrics.npy`  | float32 (n_pcs, 3)       | Registration quality metrics per PC                        |
+
+#### Per-Plane Detection Data
+
+Stored under `plane_<i>/detection_data/`:
+
+| File                              | Format          | Description                                          |
+|-----------------------------------|-----------------|------------------------------------------------------|
+| `mean_image.npy`                  | float32 (h, w)  | Average of all registered frames                     |
+| `enhanced_mean_image.npy`         | float32 (h, w)  | Background-subtracted and contrast-normalized mean   |
+| `maximum_projection.npy`          | float32 (h, w)  | Maximum intensity projection across all frames       |
+| `correlation_map.npy`             | float32 (h, w)  | Pixel-wise correlation with neighboring pixels       |
+
+Channel 2 variants (`mean_image_channel_2.npy`, etc.) are saved when both channels are functional.
+
+#### Per-Plane ROI and Extraction Data
+
+Stored under `plane_<i>/`:
+
+| File                          | Format                   | Description                                                              |
+|-------------------------------|--------------------------|--------------------------------------------------------------------------|
+| `roi_masks.npz`               | variable-length arrays   | Per-ROI pixel coordinates, weights, centroids                            |
+| `roi_statistics.npz`          | float arrays             | Per-ROI shape properties (compactness, solidity, aspect ratio, skewness) |
+| `cell_fluorescence.npy`       | float32 (n_rois, frames) | Raw fluorescence time series per ROI                                     |
+| `neuropil_fluorescence.npy`   | float32 (n_rois, frames) | Background fluorescence from surround masks                              |
+| `subtracted_fluorescence.npy` | float32 (n_rois, frames) | Neuropil-corrected and baseline-subtracted traces                        |
+| `spikes.npy`                  | float32 (n_rois, frames) | Inferred spike amplitudes from OASIS                                     |
+| `cell_classification.npy`     | float32 (n_rois,)        | Cell probability per ROI                                                 |
+
+Channel 2 variants (`cell_fluorescence_channel_2.npy`, etc.) are saved when both channels are functional.
+
+#### Combined Data
+
+Stored at `<output_path>/cindra/`:
+
+| File                    | Description                                                                                |
+|-------------------------|--------------------------------------------------------------------------------------------|
+| `combined_metadata.npz` | Plane geometry (offsets, dimensions), sampling rate, tau, and paths to registered binaries |
+| `roi_masks.npz`         | ROI masks with coordinates adjusted to the combined coordinate system                      |
+| `roi_statistics.npz`    | ROI statistics tagged with source plane index                                              |
+| `cell_fluorescence.npy` | Concatenated fluorescence traces across all planes                                         |
+| `spikes.npy`            | Concatenated spike trains across all planes                                                |
+| `detection_data/`       | Combined detection images (mean, enhanced mean, maximum projection, correlation map)       |
+
+The same set of extraction files (`neuropil_fluorescence.npy`, `subtracted_fluorescence.npy`, `cell_classification.npy`,
+and channel 2 variants) follows the same naming convention at the combined level.
+
+#### Multi-Recording Data
+
+Stored under `<output_path>/cindra/multi_recording/<dataset_name>/` per recording:
+
+| File / Directory                         | Description                                               |
+|------------------------------------------|-----------------------------------------------------------|
+| `multi_recording_runtime_data.yaml`      | Per-recording runtime metadata and timing                 |
+| `multi_recording_configuration.yaml`     | Shared multi-recording configuration                      |
+| `registration_arrays/deform_field_y.npy` | Vertical deformation field component                      |
+| `registration_arrays/deform_field_x.npy` | Horizontal deformation field component                    |
+| `registration_arrays/transformed_*.npy`  | Reference images warped to the shared coordinate space    |
+| `registration_deformed_masks.npz`        | Forward-transformed ROI masks in the shared space         |
+| `tracking_template_masks.npz`            | Consensus template masks for tracked cells                |
+| `roi_masks.npz`                          | Backward-transformed template masks in native coordinates |
+| `roi_statistics.npz`                     | Shape statistics for backward-transformed templates       |
+| `cell_fluorescence.npy`                  | Fluorescence traces for tracked ROIs in this recording    |
+| `neuropil_fluorescence.npy`              | Background fluorescence from surround masks               |
+| `subtracted_fluorescence.npy`            | Neuropil-corrected and baseline-subtracted traces         |
+| `spikes.npy`                             | Spike trains for tracked ROIs in this recording           |
+| `cell_classification.npy`                | Cell probability per tracked ROI                          |
+
+### Single-Recording Pipeline
+
+The single-recording pipeline processes a single calcium imaging session through three sequential phases: binarization,
+processing, and combination. Phase 2 (processing) runs independently per imaging plane, enabling parallel execution
+across planes.
+
+#### Phase 1: Binarization
+
+The binarization phase converts raw TIFF files into an internal memory-mapped binary format that the rest of the
+pipeline reads from. During conversion, interleaved frames are separated by plane and channel, and a mean image is
+computed for each plane. TIFF files are slow to read frame-by-frame due to file format overhead, and the binary format
+provides instant random access to any frame through memory mapping — essential for reading frames out of order or in 
+parallel.
+
+Reads:
+
+| File / Data              | Description                                         |
+|--------------------------|-----------------------------------------------------|
+| `*.tif` / `*.tiff`       | Raw TIFF imaging files in the data directory        |
+| `cindra_parameters.json` | Acquisition metadata (frame rate, planes, channels) |
+
+Produces:
+
+| File / Data                    | Description                                                   |
+|--------------------------------|---------------------------------------------------------------|
+| `configuration.yaml`           | Pipeline configuration copy (output root)                     |
+| `acquisition_parameters.yaml`  | Acquisition metadata copy (output root)                       |
+| `plane_<i>/channel_1_data.bin` | Binary imaging data for channel 1                             |
+| `plane_<i>/channel_2_data.bin` | Binary imaging data for channel 2 (if two-channel)            |
+| `plane_<i>/runtime_data.yaml`  | Per-plane metadata: frame dimensions, frame count, mean image |
+
+**Run via CLI:** `cindra run --input-path config.yaml --binarize`
+
+#### Phase 2: Processing
+
+Phase 2 runs four steps sequentially on each imaging plane: registration, detection, extraction (with classification),
+and spike deconvolution. Each plane is processed independently, so multiple planes can be processed in parallel by
+running separate `cindra run --process --target-plane <index>` commands.
+
+**Run via CLI:** `cindra run --input-path config.yaml --process`
+
+##### Registration (Motion Correction)
+
+Registration aligns every frame in the recording to a stable reference image, correcting for brain motion that occurs
+during imaging. Even small motion artifacts corrupt downstream analysis — if a cell drifts by a few pixels between
+frames, its fluorescence trace will mix with signals from neighboring cells or neuropil. Registration ensures that
+each pixel corresponds to the same physical location across all frames.
+
+The algorithm proceeds in two stages. Rigid registration shifts each frame as a whole using phase correlation, and
+optional nonrigid registration corrects local deformations by dividing the frame into blocks and aligning each block
+independently.
+
+Reads:
+
+| File / Data                        | Description                                          |
+|------------------------------------|------------------------------------------------------|
+| `plane_<i>/channel_1_data.bin`     | Raw binary imaging data from binarization            |
+| `plane_<i>/channel_2_data.bin`     | Channel 2 binary data (two-channel recordings only)  |
+| `plane_<i>/runtime_data.yaml`      | Mean image and frame dimensions from binarization    |
+
+Produces:
+
+| File / Data                                          | Description                                   |
+|------------------------------------------------------|-----------------------------------------------|
+| `plane_<i>/channel_1_data.bin` (overwritten)         | Motion-corrected frames written back in place |
+| `plane_<i>/registration_data/reference_image.npy`    | Alignment target computed from stable frames  |
+| `plane_<i>/registration_data/rigid_y_offsets.npy`    | Per-frame vertical translation offsets        |
+| `plane_<i>/registration_data/rigid_x_offsets.npy`    | Per-frame horizontal translation offsets      |
+| `plane_<i>/registration_data/bad_frames.npy`         | Boolean mask flagging excessive-motion frames |
+| `plane_<i>/registration_data/nonrigid_*_offsets.npy` | Per-block deformation offsets (when enabled)  |
+
+When the `registration_metric_principal_components` configuration parameter is set above zero, the registration step
+also computes principal component projections of the registered movie. These projections capture the dominant spatial
+patterns of residual variance after motion correction. A well-registered recording should show principal components
+dominated by neural activity rather than motion artifacts. The projections are saved as
+`principal_component_projections.npy`, `principal_component_extreme_images.npy`, and
+`principal_component_shift_metrics.npy` under `registration_data/`, and can be inspected interactively using the
+registration quality GUI viewer (`cindra-gui registration`).
+
+##### ROI Detection
+
+Detection identifies regions of interest (ROIs) — typically neuronal cell bodies — in the registered imaging data.
+Locating individual neurons is the prerequisite for extracting their activity. The sparse detection approach identifies
+sources based on their spatiotemporal fluorescence patterns rather than morphological templates, making it robust to
+variations in cell shape and brightness.
+
+The algorithm temporally bins frames to improve signal-to-noise ratio, optionally applies PCA denoising, then runs a
+sparse iterative detection procedure that identifies compact fluorescent sources. Detected ROIs are filtered by a
+lightweight preclassification step, and shape statistics (area, compactness, aspect ratio) are computed for each
+surviving ROI.
+
+Reads:
+
+| File / Data                                        | Description                                  |
+|----------------------------------------------------|----------------------------------------------|
+| `plane_<i>/channel_1_data.bin`                     | Motion-corrected binary data                 |
+| `plane_<i>/registration_data/bad_frames.npy`       | Bad-frame mask from registration             |
+| Valid pixel ranges (from `runtime_data.yaml`)      | Usable frame region after border cropping    |
+
+Produces:
+
+| File / Data                                        | Description                                                |
+|----------------------------------------------------|------------------------------------------------------------|
+| `plane_<i>/roi_masks.npz`                          | Per-ROI pixel coordinates, weights, and centroids          |
+| `plane_<i>/roi_statistics.npz`                     | Per-ROI shape properties (area, compactness, aspect ratio) |
+| `plane_<i>/detection_data/mean_image.npy`          | Average of all registered frames                           |
+| `plane_<i>/detection_data/enhanced_mean_image.npy` | Background-subtracted and contrast-normalized mean         |
+| `plane_<i>/detection_data/maximum_projection.npy`  | Maximum intensity projection across all frames             |
+| `plane_<i>/detection_data/correlation_map.npy`     | Pixel-wise correlation with neighboring pixels             |
+
+##### Signal Extraction and Classification
+
+Extraction pulls raw fluorescence time series from each detected ROI. Raw pixel values include contributions from
+out-of-focus neuropil that must be removed to isolate each cell's true activity. Classification separates real neurons
+from blood vessels, dendrite fragments, and noise artifacts, saving the researcher from manually curating potentially
+thousands of ROIs.
+
+For each ROI, a weighted spatial mask is created from its detected pixels, and a surrounding neuropil mask captures
+local background fluorescence. The raw ROI trace is corrected by subtracting a scaled neuropil signal, and a baseline
+is estimated and removed to produce a delta-fluorescence (dF) trace. A logistic regression classifier then scores each
+ROI based on its shape statistics and fluorescence skewness, assigning a probability that it represents a genuine cell
+rather than an artifact.
+
+Reads:
+
+| File / Data                                    | Description                                          |
+|------------------------------------------------|------------------------------------------------------|
+| `plane_<i>/channel_1_data.bin`                 | Motion-corrected binary data for trace extraction    |
+| `plane_<i>/channel_2_data.bin`                 | Channel 2 data (two-channel recordings only)         |
+| `plane_<i>/roi_masks.npz`                      | ROI pixel masks from detection                       |
+| `plane_<i>/roi_statistics.npz`                 | ROI shape properties from detection                  |
+
+Produces:
+
+| File / Data                                    | Description                                          |
+|------------------------------------------------|------------------------------------------------------|
+| `plane_<i>/cell_fluorescence.npy`              | Raw fluorescence time series per ROI                 |
+| `plane_<i>/neuropil_fluorescence.npy`          | Background fluorescence from surround masks          |
+| `plane_<i>/subtracted_fluorescence.npy`        | Neuropil-corrected and baseline-subtracted traces    |
+| `plane_<i>/cell_classification.npy`            | Cell probability per ROI                             |
+| `plane_<i>/cell_colocalization.npy`            | Channel colocalization scores (two-channel only)     |
+
+##### Spike Deconvolution
+
+Deconvolution infers the underlying spike activity from each ROI's neuropil-corrected fluorescence trace using the
+OASIS algorithm. Calcium fluorescence is a smoothed, delayed version of the underlying neural spiking activity.
+Deconvolution recovers spike timing at a resolution finer than the indicator's decay time, enabling analyses that
+depend on precise temporal relationships between neurons.
+
+OASIS models the calcium indicator as an AR(1) exponential decay process: each spike produces a rapid fluorescence
+increase that decays with time constant tau. The algorithm estimates when spikes occurred and their relative amplitudes
+while enforcing a non-negativity constraint (fluorescence can only increase from a spike).
+
+Reads:
+
+| File / Data                                | Description                                      |
+|--------------------------------------------|--------------------------------------------------|
+| `plane_<i>/subtracted_fluorescence.npy`    | Neuropil-corrected traces from extraction        |
+
+Produces:
+
+| File / Data            | Description                                |
+|------------------------|--------------------------------------------|
+| `plane_<i>/spikes.npy` | Inferred spike amplitude per ROI per frame |
+
+#### Phase 3: Combination
+
+The combination phase merges the per-plane processing results into a single unified dataset. Multi-plane recordings
+produce independent results per plane, and this step creates a single coordinate system and dataset that represents the
+entire recording volume. The combined dataset is also the required input for the multi-recording pipeline.
+
+Plane images are tiled into combined images using computed spatial offsets, ROI coordinates are adjusted to the combined
+coordinate system, and fluorescence arrays are concatenated across planes.
+
+Reads:
+
+| File / Data                       | Description                                                    |
+|-----------------------------------|----------------------------------------------------------------|
+| `plane_<i>/runtime_data.yaml`     | Per-plane metadata for each processed plane                    |
+| `plane_<i>/roi_masks.npz`         | Per-plane ROI masks                                            |
+| `plane_<i>/roi_statistics.npz`    | Per-plane ROI shape statistics                                 |
+| `plane_<i>/cell_fluorescence.npy` | Per-plane fluorescence traces (and all other extraction files) |
+| `plane_<i>/detection_data/*.npy`  | Per-plane detection images                                     |
+
+Produces:
+
+| File / Data             | Description                                                 |
+|-------------------------|-------------------------------------------------------------|
+| `combined_metadata.npz` | Plane geometry, sampling rate, tau, registered binary paths |
+| `roi_masks.npz`         | ROI masks with plane-adjusted coordinates                   |
+| `roi_statistics.npz`    | ROI statistics tagged with source plane index               |
+| `cell_fluorescence.npy` | Concatenated fluorescence traces across all planes          |
+| `spikes.npy`            | Concatenated spike trains across all planes                 |
+| `detection_data/*.npy`  | Combined detection images tiled across planes               |
+
+**Run via CLI:** `cindra run --input-path config.yaml --combine`
+
+### Multi-Recording Pipeline
+
+The multi-recording pipeline tracks ROIs across multiple recordings of the same specimen captured on different days.
+It requires that each recording has already been processed through the full single-recording pipeline. The pipeline
+runs in two phases: discovery (identifying which ROIs correspond to the same cell across recordings) and extraction
+(pulling fluorescence traces for tracked ROIs from each recording).
+
+#### Phase 1: Discovery
+
+The discovery phase performs four sequential steps across all recordings simultaneously.
+
+**Run via CLI:** `cindra run --input-path md_config.yaml --discover`
+
+##### ROI Selection
+
+The first step filters each recording's detected ROIs to retain only high-confidence cells suitable for cross-recording
+tracking. Including low-confidence ROIs or artifacts in the tracking step would produce spurious cross-recording
+matches, so strict filtering ensures that only reliably detected neurons enter the alignment and clustering stages.
+ROIs are filtered by their classification probability, pixel count, and (for MROI acquisitions) distance from MROI
+region borders.
+
+Reads:
+
+| File / Data               | Description                                  |
+|---------------------------|----------------------------------------------|
+| `combined_metadata.npz`   | Plane geometry and registered binary paths   |
+| `roi_statistics.npz`      | ROI shape properties from each recording     |
+| `cell_classification.npy` | Cell probability per ROI from each recording |
+
+Produces:
+
+| File / Data                                                   | Description                                |
+|---------------------------------------------------------------|--------------------------------------------|
+| Selected ROI indices (in `multi_recording_runtime_data.yaml`) | Per-recording lists of passing ROI indices |
+
+##### Cross-Recording Registration
+
+The second step aligns the reference images from all recordings into a shared visual coordinate space. The same neuron
+appears at slightly different positions across recording days due to tissue changes, slight repositioning of the
+specimen, or slow biological drift. Diffeomorphic registration brings all recordings into spatial correspondence so
+that ROIs from different days can be compared by their pixel overlap.
+
+The algorithm uses diffeomorphic demons registration, a nonlinear image registration method that iteratively computes a
+smooth, invertible deformation field for each recording. It operates on a multiscale image pyramid, starting from coarse
+alignment and progressively refining at finer scales. B-spline regularization ensures the deformation remains smooth 
+and diffeomorphic (no folding or tearing).
+
+Reads:
+
+| File / Data            | Description                                                                       |
+|------------------------|-----------------------------------------------------------------------------------|
+| `detection_data/*.npy` | Reference images (mean, enhanced mean, or maximum projection) from each recording |
+| `roi_masks.npz`        | Selected ROI pixel masks from each recording                                      |
+
+Produces:
+
+| File / Data                              | Description                                       |
+|------------------------------------------|---------------------------------------------------|
+| `registration_arrays/deform_field_y.npy` | Vertical deformation field component              |
+| `registration_arrays/deform_field_x.npy` | Horizontal deformation field component            |
+| `registration_arrays/transformed_*.npy`  | Reference images warped to the shared space       |
+| `registration_deformed_masks.npz`        | Forward-transformed ROI masks in the shared space |
+
+##### ROI Tracking
+
+The third step clusters spatially overlapping ROIs across recordings to identify cells that appear in multiple
+sessions. This is the core step that enables longitudinal analysis. By identifying the same neuron across days,
+researchers can study how neural representations evolve over time — whether cells maintain stable tuning, remap, or
+drop in and out of the active population.
+
+The algorithm divides the shared coordinate space into spatial bins and performs hierarchical clustering within each bin
+using the Jaccard distance between ROI pixel masks (1 minus the intersection-over-union). Only cross-recording pairs
+within a maximum centroid distance are considered as candidates. Clusters that appear in a sufficient fraction of 
+recordings (controlled by `mask_prevalence`) are accepted as tracked templates. Template masks are constructed from 
+the consensus pixels that appear in at least `pixel_prevalence` percent of cluster members.
+
+Reads:
+
+| File / Data                       | Description                                                                      |
+|-----------------------------------|----------------------------------------------------------------------------------|
+| `registration_deformed_masks.npz` | Forward-transformed ROI masks from each recording in the shared coordinate space |
+
+Produces:
+
+| File / Data                   | Description                                                                  |
+|-------------------------------|------------------------------------------------------------------------------|
+| `tracking_template_masks.npz` | Consensus template masks with source ROI and recording metadata per template |
+
+##### Template Projection
+
+The fourth step projects the tracked template masks from the shared coordinate space back into each recording's native
+coordinates by inverting the diffeomorphic deformation field. Fluorescence extraction must operate on the original 
+registered binary data, which is in each recording's native coordinate space. The inverse projection ensures that 
+template masks align precisely with the recorded pixel data. Full ROI statistics (shape metrics, spatial properties) 
+are recomputed for each projected template in native coordinates.
+
+Reads:
+
+| File / Data                              | Description                                                 |
+|------------------------------------------|-------------------------------------------------------------|
+| `tracking_template_masks.npz`            | Consensus template masks in the shared coordinate space     |
+| `registration_arrays/deform_field_*.npy` | Per-recording deformation fields for inverse transformation |
+
+Produces:
+
+| File / Data          | Description                                                  |
+|----------------------|--------------------------------------------------------------|
+| `roi_masks.npz`      | Template masks projected to native coordinates per recording |
+| `roi_statistics.npz` | Shape statistics for projected templates                     |
+
+All Phase 1 results are persisted under `multi_recording/<dataset_name>/` within each recording's cindra output
+directory, along with a `multi_recording_runtime_data.yaml` file and a copy of the multi-recording configuration.
+
+#### Phase 2: Multi-Recording Extraction
+
+The extraction phase pulls fluorescence traces from the tracked template ROIs in each recording. The discovery phase
+identifies *which* cells are present across recordings; the extraction phase recovers *what those cells did* during
+each recording session. The result is a set of aligned fluorescence traces for the same neurons across multiple days.
+
+This step uses the same extraction pipeline as the single-recording phase: mask creation, fluorescence extraction,
+neuropil correction, baseline subtraction, and optional spike deconvolution. It operates on the backward-projected
+template masks instead of the originally detected ROIs. Since tracked ROIs are already confirmed cells, no
+reclassification is performed.
+
+Reads:
+
+| File / Data                    | Description                                                 |
+|--------------------------------|-------------------------------------------------------------|
+| `roi_masks.npz`                | Backward-transformed template masks in native coordinates   |
+| `plane_<i>/channel_1_data.bin` | Motion-corrected binary data from single-recording pipeline |
+| `plane_<i>/channel_2_data.bin` | Channel 2 data (two-channel recordings only)                |
+
+Produces:
+
+| File / Data                   | Description                                            |
+|-------------------------------|--------------------------------------------------------|
+| `cell_fluorescence.npy`       | Fluorescence traces for tracked ROIs in this recording |
+| `neuropil_fluorescence.npy`   | Background fluorescence from surround masks            |
+| `subtracted_fluorescence.npy` | Neuropil-corrected and baseline-subtracted traces      |
+| `spikes.npy`                  | Spike amplitudes for tracked ROIs (when enabled)       |
+
+**Run via CLI:** `cindra run --input-path md_config.yaml --extract`
+
+Each recording is extracted independently, enabling parallel execution across recordings by running separate
+`cindra run --extract --target-recording <recording_id>` commands.
+
 ### API
 
 The library exposes a high-level Python API for programmatic pipeline execution. The two primary entry points are
-`run_single_recording_pipeline()` and `run_multi_recording_pipeline()`, which accept YAML configuration files generated
-via `SingleRecordingConfiguration` and `MultiRecordingConfiguration` dataclasses respectively.
+`run_single_recording_pipeline()` and `run_multi_recording_pipeline()`, which accept YAML configuration files and
+support executing specific pipeline phases.
 
 ```python
 from pathlib import Path
@@ -142,15 +690,16 @@ config.to_yaml(Path("/path/to/config.yaml"))
 # Execute the full single-recording pipeline (binarize, process, combine).
 run_single_recording_pipeline(configuration_path=Path("/path/to/config.yaml"))
 
+# Execute individual phases for finer control.
+run_single_recording_pipeline(configuration_path=Path("/path/to/config.yaml"), binarize=True)
+run_single_recording_pipeline(configuration_path=Path("/path/to/config.yaml"), process=True)
+run_single_recording_pipeline(configuration_path=Path("/path/to/config.yaml"), combine=True)
+
 # For multi-recording pipelines, configure and run similarly.
 md_config = MultiRecordingConfiguration()
 md_config.to_yaml(Path("/path/to/md_config.yaml"))
 run_multi_recording_pipeline(configuration_path=Path("/path/to/md_config.yaml"))
 ```
-
-***Note,*** raw imaging data directories must contain a `cindra_parameters.json` file specifying acquisition metadata
-(frame rate, plane count, channel count) before pipeline execution. This file can be generated using the
-`generate_acquisition_parameters_file` MCP tool or constructed manually.
 
 ### CLI Commands
 
