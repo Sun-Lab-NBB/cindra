@@ -1738,10 +1738,12 @@ def _start_execution_session(
         phase_groups=phase_groups,
     )
 
+    # Assigns the global state before starting the manager thread to prevent a race condition where the manager
+    # reads _job_execution_state as None and exits immediately.
+    _job_execution_state = execution_state
     manager = Thread(target=_job_execution_manager, daemon=True)
     manager.start()
     execution_state.manager_thread = manager
-    _job_execution_state = execution_state
 
     result: dict[str, object] = {
         "success": True,
