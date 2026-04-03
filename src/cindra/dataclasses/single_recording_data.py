@@ -70,10 +70,6 @@ class IOData:
 class RegistrationData:
     """Stores runtime data from the registration stage."""
 
-    has_registration_data: bool = False
-    """Indicates whether registration arrays have been saved to disk. When True, ``is_registered()`` returns True even
-    if array fields are None (released to free memory). Set to True by ``save_arrays()`` and reset by ``clear()``."""
-
     valid_y_range: tuple[int, int] = (0, 0)
     """The valid Y pixel range (start, end) defining the usable recording region after border cropping."""
 
@@ -132,21 +128,28 @@ class RegistrationData:
     magnitude, and column 2 contains maximum nonrigid offset magnitude. Large values indicate poor registration
     quality."""
 
-    def is_registered(self) -> bool:
-        """Checks whether registration data exists.
+    def is_registered(self, output_path: Path | None = None) -> bool:
+        """Checks whether registration data exists in memory or on disk.
+
+        Args:
+            output_path: The directory containing the ``registration_data/`` subdirectory. When provided and arrays
+                are not loaded in memory, checks for registration files on disk. The calling context is responsible for
+                resolving the correct path.
 
         Returns:
-            True if the plane has been registered (has reference image and offsets in memory, or arrays were previously
-            saved to disk), False otherwise.
+            True if registration arrays are loaded in memory or exist on disk at the given output path, False otherwise.
         """
         arrays_loaded = (
             self.reference_image is not None and self.rigid_y_offsets is not None and self.rigid_x_offsets is not None
         )
-        return arrays_loaded or self.has_registration_data
+        if arrays_loaded:
+            return True
+        if output_path is not None:
+            return (output_path / "registration_data" / "reference_image.npy").exists()
+        return False
 
     def clear(self) -> None:
         """Clears all registration data to prepare for re-registration."""
-        self.has_registration_data = False
         self.valid_y_range = (0, 0)
         self.valid_x_range = (0, 0)
         self.bad_frames = None
@@ -180,11 +183,10 @@ class RegistrationData:
         self.principal_component_shift_metrics = None
 
     def release_arrays(self) -> None:
-        """Releases all array fields to free memory without affecting ``has_registration_data``.
+        """Releases all array fields to free memory.
 
-        After calling this method, ``is_registered()`` continues to return True if arrays were previously saved,
-        because ``has_registration_data`` is preserved. Scalar fields (valid ranges, normalization bounds, etc.) are
-        also preserved. Use ``memory_map_arrays()`` or ``load_arrays()`` to re-acquire the data on demand.
+        Scalar fields (valid ranges, normalization bounds, etc.) are preserved. Use ``memory_map_arrays()`` or
+        ``load_arrays()`` to re-acquire the data on demand.
         """
         self.bad_frames = None
         self.reference_image = None
@@ -211,7 +213,6 @@ class RegistrationData:
             np.save(registration_directory / "bad_frames.npy", self.bad_frames)
         if self.reference_image is not None and not is_memory_mapped(self.reference_image):
             np.save(registration_directory / "reference_image.npy", self.reference_image)
-            self.has_registration_data = True
         if self.rigid_y_offsets is not None and not is_memory_mapped(self.rigid_y_offsets):
             np.save(registration_directory / "rigid_y_offsets.npy", self.rigid_y_offsets)
         if self.rigid_x_offsets is not None and not is_memory_mapped(self.rigid_x_offsets):
@@ -1276,8 +1277,7 @@ class SingleRecordingRuntimeData(YamlConfig):
     def release_arrays(self) -> None:
         """Releases all array fields across registration, detection, and extraction to free memory.
 
-        Delegates to the ``release_arrays()`` method on each child dataclass. Scalar fields and the
-        ``has_registration_data`` flag are preserved so that ``is_registered()`` continues to work correctly.
+        Delegates to the ``release_arrays()`` method on each child dataclass. Scalar fields are preserved.
         """
         self.registration.release_arrays()
         self.detection.release_arrays()

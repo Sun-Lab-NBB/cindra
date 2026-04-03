@@ -75,7 +75,7 @@ def register_plane(context: RuntimeContext) -> None:  # pragma: no cover
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
 
     # Checks if registration should be skipped (already registered and not forcing re-registration).
-    if registration_data.is_registered() and not config.registration.repeat_registration:
+    if registration_data.is_registered(output_path=io_data.output_path) and not config.registration.repeat_registration:
         console.echo(
             message=(
                 f"Plane {plane_index} registration: skipped. The plane is already registered and re-registration is "
@@ -86,7 +86,7 @@ def register_plane(context: RuntimeContext) -> None:  # pragma: no cover
         return
 
     # Clears existing registration data if re-registering.
-    if registration_data.is_registered():
+    if registration_data.is_registered(output_path=io_data.output_path):
         console.echo(
             message=(
                 f"Plane {plane_index} registration: forced. Clearing existing data and re-running the registration."
@@ -230,7 +230,7 @@ def register_plane(context: RuntimeContext) -> None:  # pragma: no cover
     # Persists the final registration state (including metrics if computed) to disk.
     context.save_runtime()
 
-    # Releases registration arrays to free memory. The has_registration_data flag survives re-serialization.
+    # Releases registration arrays to free memory. Arrays remain on disk for subsequent pipeline phases.
     context.runtime.registration.release_arrays()
 
 

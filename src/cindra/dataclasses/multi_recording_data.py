@@ -56,10 +56,6 @@ class MultiRecordingIOData:
 class MultiRecordingRegistrationData:
     """Stores runtime data from the registration stage."""
 
-    has_registration_data: bool = False
-    """Indicates whether registration arrays have been saved to disk. When True, ``is_registered()`` returns True even
-    if array fields are None (released to free memory). Set to True by ``save_arrays()`` and reset by ``clear()``."""
-
     # Deformation fields.
     deform_field_y: NDArray[np.float32] | None = None
     """The Y-dimension displacement field computed by DiffeomorphicDemonsRegistration. Combined with deform_field_x,
@@ -98,19 +94,25 @@ class MultiRecordingRegistrationData:
     """The channel 2 ROI spatial data after multi-recording registration deform offsets have been applied to the
     spatial coordinates of each ROI."""
 
-    def is_registered(self) -> bool:
-        """Checks whether registration data exists.
+    def is_registered(self, output_path: Path | None = None) -> bool:
+        """Checks whether registration data exists in memory or on disk.
+
+        Args:
+            output_path: The directory containing the ``registration_arrays/`` subdirectory. When provided and arrays
+                are not loaded in memory, checks for deformation field files on disk. The calling context is responsible
+                for resolving the correct path.
 
         Returns:
-            True if the recording has been registered (has deformation fields and deformed ROI masks in memory, or
-            arrays were previously saved to disk), False otherwise.
+            True if deformation fields are loaded in memory or exist on disk at the given output path, False otherwise.
         """
-        arrays_loaded = self.deform_field_y is not None and self.deformed_roi_masks is not None
-        return arrays_loaded or self.has_registration_data
+        if self.deform_field_y is not None and self.deformed_roi_masks is not None:
+            return True
+        if output_path is not None:
+            return (output_path / "registration_arrays" / "deform_field_y.npy").exists()
+        return False
 
     def clear(self) -> None:
         """Clears all registration data to prepare for re-registration."""
-        self.has_registration_data = False
         self.release_arrays()
 
     def prepare_for_saving(self) -> None:
@@ -118,11 +120,9 @@ class MultiRecordingRegistrationData:
         self.release_arrays()
 
     def release_arrays(self) -> None:
-        """Releases all array fields to free memory without affecting ``has_registration_data``.
+        """Releases all array fields to free memory.
 
-        After calling this method, ``is_registered()`` continues to return True if arrays were previously saved,
-        because ``has_registration_data`` is preserved. Use ``memory_map_arrays()`` or ``load_arrays()`` to
-        re-acquire the data on demand.
+        Use ``memory_map_arrays()`` or ``load_arrays()`` to re-acquire the data on demand.
         """
         self.deform_field_y = None
         self.deform_field_x = None
@@ -151,7 +151,6 @@ class MultiRecordingRegistrationData:
         # Saves deformation fields.
         if self.deform_field_y is not None and not is_memory_mapped(self.deform_field_y):
             np.save(registration_directory / "deform_field_y.npy", self.deform_field_y)
-            self.has_registration_data = True
         if self.deform_field_x is not None and not is_memory_mapped(self.deform_field_x):
             np.save(registration_directory / "deform_field_x.npy", self.deform_field_x)
 
@@ -469,8 +468,7 @@ class MultiRecordingRuntimeData(YamlConfig):
         """Releases all array fields across registration, tracking, extraction, and combined_data to free memory.
 
         Delegates to the ``release_arrays()`` method on each child dataclass. Also releases combined_data detection
-        and extraction arrays if combined_data is loaded. Scalar fields and the ``has_registration_data`` flag are
-        preserved so that ``is_registered()`` continues to work correctly.
+        and extraction arrays if combined_data is loaded.
         """
         self.registration.release_arrays()
         self.tracking.release_arrays()

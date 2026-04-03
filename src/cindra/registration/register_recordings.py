@@ -50,7 +50,9 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:  
     runtime_config = configuration.runtime
 
     # Checks if registration should be skipped (all recordings already registered and not forcing re-registration).
-    all_registered = all(context.runtime.registration.is_registered() for context in contexts)
+    all_registered = all(
+        context.runtime.registration.is_registered(output_path=context.runtime.output_path) for context in contexts
+    )
     if all_registered and not registration_config.repeat_registration:
         console.echo(
             message=(
