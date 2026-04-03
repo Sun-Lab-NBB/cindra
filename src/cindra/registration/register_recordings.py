@@ -171,12 +171,12 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
             deformation fields stored in runtime.registration from a prior call to register_recordings(), and
             template masks set in runtime.tracking from ROI tracking.
     """
-    # Skips projection when tracking was skipped (template masks already existed) and registration was not repeated.
-    # The prior projection output (extraction roi_statistics) is already saved on disk and will be loaded by the
-    # extraction phase directly.
+    # Skips projection when the backward-transformed ROI statistics already exist and registration was not repeated.
+    # Checks for roi_statistics.npz (the file this function produces) rather than tracking_template_masks.npz (which
+    # is produced by the tracking phase).
     first_output = contexts[0].runtime.output_path
     repeat_registration = contexts[0].configuration.diffeomorphic_registration.repeat_registration
-    if not repeat_registration and first_output is not None and (first_output / "tracking_template_masks.npz").exists():
+    if not repeat_registration and first_output is not None and (first_output / "roi_statistics.npz").exists():
         console.echo(
             message="Template projection: skipped. Projection output already exists and re-registration is disabled.",
             level=LogLevel.INFO,
