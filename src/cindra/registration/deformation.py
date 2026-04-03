@@ -466,10 +466,11 @@ def _create_diffusion_kernel(sigma: float) -> NDArray[np.float32]:
     # >99.99% of the kernel mass for all practical sigma values.
     half_length = int(np.ceil(4 * sigma)) + 1
 
-    # Evaluates the discrete Gaussian kernel: T(n, t) = exp(-t) * I_n(t). Uses scipy.special.iv for numerically stable
-    # evaluation of the modified Bessel function across all orders simultaneously.
+    # Evaluates the discrete Gaussian kernel: T(n, t) = exp(-t) * I_n(t). Uses scipy.special.ive which computes
+    # I_n(x) * exp(-x) in a single numerically stable operation, avoiding the underflow/overflow that occurs when
+    # exp(-t) and I_n(t) are computed separately for large sigma values (sigma >= 28).
     indices = np.arange(-half_length, half_length + 1)
-    kernel = np.exp(-sigma_squared) * scipy.special.iv(np.abs(indices), sigma_squared)
+    kernel = scipy.special.ive(np.abs(indices), sigma_squared)
 
     # Normalizes to unit sum. The analytical kernel sums to 1 by definition, but floating-point truncation at the tails
     # can introduce a small residual.
