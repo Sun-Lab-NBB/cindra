@@ -323,7 +323,9 @@ class DiffeomorphicDemonsRegistration:
 
         # Regularizes using B-spline grid to ensure diffeomorphism.
         force_deformation = Deformation(field_y=field_y.astype(np.float32), field_x=field_x.astype(np.float32))
-        regularized_deformation = self._regularize_deformation(scale=scale, deformation=force_deformation)
+        regularized_deformation = self._regularize_deformation(
+            scale=scale, deformation=force_deformation, image_shape=source_image.shape
+        )
 
         self._set_cached(
             key=f"deform_{source_index}_{target_index}", iteration_key=iteration_key, data=regularized_deformation
@@ -408,22 +410,36 @@ class DiffeomorphicDemonsRegistration:
         )
         self._deformations[image_index] = current_deformation.compose(incremental_deformation)
 
-    def _regularize_deformation(self, scale: float, deformation: Deformation) -> Deformation:
+    def _regularize_deformation(
+        self, scale: float, deformation: Deformation, image_shape: tuple[int, ...] | None = None
+    ) -> Deformation:
         """Regularizes a deformation to ensure diffeomorphism using B-spline constraints.
 
         Args:
             scale: The current scale level.
             deformation: The raw deformation to regularize.
+            image_shape: The shape of the image at the current working resolution. When provided and different from
+                the original image resolution, the grid sampling is scaled by the downsample ratio to maintain
+                correct regularization strength at reduced resolutions.
 
         Returns:
             The regularized deformation.
         """
         grid_sampling = self._compute_grid_sampling(scale=scale)
 
-        # Computes injectivity constraint factor based on scale and grid sampling.
+        # Scales grid_sampling to match the working resolution when images are downsampled. The injectivity constraint
+        # uses the original-pixel-unit grid_sampling since both scale and grid_sampling must be in the same coordinate
+        # system.
+        original_grid_sampling = grid_sampling
+        if image_shape is not None and self._images is not None and len(self._images) > 0:
+            downsample_ratio = image_shape[0] / self._images[0].shape[0]
+            if downsample_ratio < 1.0:
+                grid_sampling = grid_sampling * downsample_ratio
+
+        # Computes injectivity constraint factor based on scale and grid sampling in original-pixel units.
         injective_factor = 0.9
         if self._injective:
-            injective_factor = min(self._deformation_limit * scale / grid_sampling, 0.9)
+            injective_factor = min(self._deformation_limit * scale / original_grid_sampling, 0.9)
 
         regularized = deformation.regularize(
             grid_sampling=grid_sampling,
