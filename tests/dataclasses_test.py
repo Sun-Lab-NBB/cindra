@@ -60,20 +60,24 @@ class TestRegistrationDataIsRegistered:
         data.reference_image = np.zeros((64, 64), dtype=np.float32)
         assert not data.is_registered()
 
-    def test_returns_true_when_has_registration_data_flag_set(self) -> None:
-        """Verifies that the has_registration_data flag alone indicates registration even without arrays."""
+    def test_returns_true_when_registration_files_exist_on_disk(self, tmp_path: Path) -> None:
+        """Verifies that is_registered detects registration files on disk even without arrays in memory."""
         data = RegistrationData()
-        data.has_registration_data = True
-        assert data.is_registered()
+        data.reference_image = np.zeros((64, 64), dtype=np.float32)
+        data.rigid_y_offsets = np.zeros(10, dtype=np.int32)
+        data.rigid_x_offsets = np.zeros(10, dtype=np.int32)
+        data.save_arrays(output_path=tmp_path)
+
+        empty_data = RegistrationData()
+        assert empty_data.is_registered(output_path=tmp_path)
 
 
 class TestRegistrationDataClear:
     """Tests for RegistrationData.clear()."""
 
     def test_resets_all_fields_to_defaults(self) -> None:
-        """Verifies that clear() resets all fields including the registration flag and scalar values."""
+        """Verifies that clear() resets all fields including scalar values."""
         data = RegistrationData()
-        data.has_registration_data = True
         data.valid_y_range = (10, 200)
         data.valid_x_range = (5, 150)
         data.bad_frames = np.ones(10, dtype=np.bool_)
@@ -94,7 +98,6 @@ class TestRegistrationDataClear:
 
         data.clear()
 
-        assert not data.has_registration_data
         assert data.valid_y_range == (0, 0)
         assert data.valid_x_range == (0, 0)
         assert data.bad_frames is None
@@ -116,7 +119,6 @@ class TestRegistrationDataClear:
     def test_instance_not_registered_after_clear(self) -> None:
         """Verifies that is_registered() returns False after clearing."""
         data = RegistrationData()
-        data.has_registration_data = True
         data.reference_image = np.zeros((64, 64), dtype=np.float32)
         data.rigid_y_offsets = np.zeros(10, dtype=np.int32)
         data.rigid_x_offsets = np.zeros(10, dtype=np.int32)
@@ -161,7 +163,6 @@ class TestRegistrationDataPrepareForSaving:
     def test_preserves_scalar_fields(self) -> None:
         """Verifies that prepare_for_saving() does not modify scalar fields."""
         data = RegistrationData()
-        data.has_registration_data = True
         data.valid_y_range = (10, 200)
         data.valid_x_range = (5, 150)
         data.bidirectional_phase_offset = 3
@@ -170,7 +171,6 @@ class TestRegistrationDataPrepareForSaving:
 
         data.prepare_for_saving()
 
-        assert data.has_registration_data
         assert data.valid_y_range == (10, 200)
         assert data.valid_x_range == (5, 150)
         assert data.bidirectional_phase_offset == 3
@@ -210,29 +210,17 @@ class TestRegistrationDataReleaseArrays:
         assert data.principal_component_projections is None
         assert data.principal_component_shift_metrics is None
 
-    def test_preserves_has_registration_data_flag(self) -> None:
-        """Verifies that release_arrays() preserves the has_registration_data flag."""
+    def test_is_registered_remains_true_after_release_with_disk_files(self, tmp_path: Path) -> None:
+        """Verifies that is_registered returns True after release when registration files exist on disk."""
         data = RegistrationData()
-        data.has_registration_data = True
         data.reference_image = np.zeros((64, 64), dtype=np.float32)
         data.rigid_y_offsets = np.zeros(10, dtype=np.int32)
         data.rigid_x_offsets = np.zeros(10, dtype=np.int32)
+        data.save_arrays(output_path=tmp_path)
 
         data.release_arrays()
 
-        assert data.has_registration_data
-
-    def test_is_registered_remains_true_after_release(self) -> None:
-        """Verifies that is_registered() returns True after release when has_registration_data is set."""
-        data = RegistrationData()
-        data.has_registration_data = True
-        data.reference_image = np.zeros((64, 64), dtype=np.float32)
-        data.rigid_y_offsets = np.zeros(10, dtype=np.int32)
-        data.rigid_x_offsets = np.zeros(10, dtype=np.int32)
-
-        data.release_arrays()
-
-        assert data.is_registered()
+        assert data.is_registered(output_path=tmp_path)
 
     def test_preserves_scalar_fields(self) -> None:
         """Verifies that release_arrays() preserves all scalar fields."""
@@ -581,20 +569,24 @@ class TestMultiRecordingRegistrationDataIsRegistered:
         data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
         assert not data.is_registered()
 
-    def test_returns_true_when_has_registration_data_flag_set(self) -> None:
-        """Verifies that the has_registration_data flag alone indicates registration even without arrays."""
+    def test_returns_true_when_registration_files_exist_on_disk(self, tmp_path: Path) -> None:
+        """Verifies that is_registered detects registration files on disk even without arrays in memory."""
         data = MultiRecordingRegistrationData()
-        data.has_registration_data = True
-        assert data.is_registered()
+        data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
+        data.deform_field_x = np.zeros((64, 64), dtype=np.float32)
+        data.deformed_roi_masks = []
+        data.save_arrays(output_path=tmp_path)
+
+        empty_data = MultiRecordingRegistrationData()
+        assert empty_data.is_registered(output_path=tmp_path)
 
 
 class TestMultiRecordingRegistrationDataClear:
     """Tests for MultiRecordingRegistrationData.clear()."""
 
-    def test_resets_flag_and_releases_arrays(self) -> None:
-        """Verifies that clear() resets the registration flag and nullifies all array fields."""
+    def test_releases_arrays(self) -> None:
+        """Verifies that clear() nullifies all array fields."""
         data = MultiRecordingRegistrationData()
-        data.has_registration_data = True
         data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
         data.deform_field_x = np.zeros((64, 64), dtype=np.float32)
         data.transformed_mean_image = np.zeros((64, 64), dtype=np.float32)
@@ -602,7 +594,6 @@ class TestMultiRecordingRegistrationDataClear:
 
         data.clear()
 
-        assert not data.has_registration_data
         assert data.deform_field_y is None
         assert data.deform_field_x is None
         assert data.transformed_mean_image is None
@@ -611,7 +602,8 @@ class TestMultiRecordingRegistrationDataClear:
     def test_not_registered_after_clear(self) -> None:
         """Verifies that is_registered() returns False after clearing."""
         data = MultiRecordingRegistrationData()
-        data.has_registration_data = True
+        data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
+        data.deformed_roi_masks = []
 
         data.clear()
 
@@ -648,16 +640,6 @@ class TestMultiRecordingRegistrationDataPrepareForSaving:
         assert data.deformed_roi_masks is None
         assert data.deformed_roi_masks_channel_2 is None
 
-    def test_preserves_has_registration_data_flag(self) -> None:
-        """Verifies that prepare_for_saving() preserves the has_registration_data flag."""
-        data = MultiRecordingRegistrationData()
-        data.has_registration_data = True
-        data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
-
-        data.prepare_for_saving()
-
-        assert data.has_registration_data
-
 
 class TestMultiRecordingRegistrationDataReleaseArrays:
     """Tests for MultiRecordingRegistrationData.release_arrays()."""
@@ -689,27 +671,17 @@ class TestMultiRecordingRegistrationDataReleaseArrays:
         assert data.deformed_roi_masks is None
         assert data.deformed_roi_masks_channel_2 is None
 
-    def test_preserves_has_registration_data_flag(self) -> None:
-        """Verifies that release_arrays() preserves the has_registration_data flag."""
+    def test_is_registered_remains_true_after_release_with_disk_files(self, tmp_path: Path) -> None:
+        """Verifies that is_registered returns True after release when registration files exist on disk."""
         data = MultiRecordingRegistrationData()
-        data.has_registration_data = True
         data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
+        data.deform_field_x = np.zeros((64, 64), dtype=np.float32)
         data.deformed_roi_masks = []
+        data.save_arrays(output_path=tmp_path)
 
         data.release_arrays()
 
-        assert data.has_registration_data
-
-    def test_is_registered_remains_true_after_release(self) -> None:
-        """Verifies that is_registered() returns True after release when has_registration_data is set."""
-        data = MultiRecordingRegistrationData()
-        data.has_registration_data = True
-        data.deform_field_y = np.zeros((64, 64), dtype=np.float32)
-        data.deformed_roi_masks = []
-
-        data.release_arrays()
-
-        assert data.is_registered()
+        assert data.is_registered(output_path=tmp_path)
 
 
 class TestMultiRecordingTrackingDataPrepareForSaving:
