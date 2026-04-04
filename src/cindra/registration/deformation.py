@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np.float32]:
-    """Filters the input data using the Lindeberg's discrete diffusion kernel.
+    """Filters the input data using Lindeberg's discrete diffusion kernel.
 
     Args:
         data: The data to filter with the kernel.
@@ -266,7 +266,7 @@ class Deformation:
         return Deformation(field_y=field_y, field_x=field_x)
 
     def resize_field(self, new_height: int, new_width: int) -> Deformation:
-        """Creates a new Deformation with the field resized to the specified dimensions.
+        """Creates a new Deformation with the field spatially resized without scaling displacement magnitudes.
 
         Args:
             new_height: The target height in pixels.

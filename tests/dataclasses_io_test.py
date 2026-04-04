@@ -276,12 +276,14 @@ class TestRegistrationDataSaveLoad:
             original.principal_component_shift_metrics, loaded.principal_component_shift_metrics, rtol=1e-6
         )
 
-    def test_save_sets_has_registration_data(self, tmp_path: Path) -> None:
-        """Verifies that save_arrays sets has_registration_data to True when reference_image is saved."""
+    def test_is_registered_returns_true_after_save(self, tmp_path: Path) -> None:
+        """Verifies that is_registered returns True via disk check after save_arrays writes registration files."""
+        empty_data = RegistrationData()
+        assert not empty_data.is_registered(output_path=tmp_path)
+
         data = _populate_registration_data()
-        assert not data.has_registration_data
         data.save_arrays(output_path=tmp_path)
-        assert data.has_registration_data
+        assert empty_data.is_registered(output_path=tmp_path)
 
     def test_memory_map_round_trip(self, tmp_path: Path) -> None:
         """Verifies that memory_map_arrays produces memory-mapped arrays matching the original data."""
@@ -803,7 +805,6 @@ class TestMultiRecordingRegistrationDataSaveLoad:
             deformed_roi_masks_channel_2=[_make_roi_mask(pixel_count=4, cluster_id=2)],
         )
         original.save_arrays(output_path=tmp_path)
-        assert original.has_registration_data
 
         loaded = MultiRecordingRegistrationData()
         loaded.load_arrays(output_path=tmp_path)
@@ -870,15 +871,15 @@ class TestMultiRecordingRegistrationDataSaveLoad:
         assert mapped.deformed_roi_masks is not None
         assert len(mapped.deformed_roi_masks) == 1
 
-    def test_save_sets_has_registration_data(self, tmp_path: Path) -> None:
-        """Verifies that saving deformation fields sets has_registration_data to True."""
+    def test_is_registered_returns_true_after_save(self, tmp_path: Path) -> None:
+        """Verifies that is_registered returns True via disk check after save_arrays writes deformation fields."""
         data = MultiRecordingRegistrationData(
             deform_field_y=np.zeros(shape=(4, 4), dtype=np.float32),
             deform_field_x=np.zeros(shape=(4, 4), dtype=np.float32),
         )
-        assert not data.has_registration_data
+        assert not data.is_registered(output_path=tmp_path)
         data.save_arrays(output_path=tmp_path)
-        assert data.has_registration_data
+        assert data.is_registered(output_path=tmp_path)
 
 
 # ------------------------------------------------------------------
