@@ -281,21 +281,22 @@ def _discover_tiff_files(
         message = f"Unable to discover TIFF files. The path is not a directory: {data_directory}."
         console.error(message=message, error=ValueError)
 
-    # Performs non-recursive scan for TIFF files.
-    file_paths: list[Path] = []
+    # Performs non-recursive scan for TIFF files. Uses a set to deduplicate matches on case-insensitive filesystems
+    # (e.g., Windows, macOS default) where a single file is returned by multiple case-variant globs.
+    discovered_paths: set[Path] = set()
     for extension in TIFF_EXTENSIONS:
-        file_paths.extend(
+        discovered_paths.update(
             file_path.resolve()
             for file_path in data_directory.glob(f"*.{extension}")
             if file_path.stem not in ignored_file_names
         )
 
-    if not file_paths:
+    if not discovered_paths:
         message = f"Unable to find any TIFF files in the data directory: {data_directory}."
         console.error(message=message, error=FileNotFoundError)
 
     # Sorts files naturally by filename.
-    file_paths = natsorted(file_paths)
+    file_paths = natsorted(discovered_paths)
 
     message = f"Found {len(file_paths)} valid TIFF files."
     console.echo(message=message, level=LogLevel.INFO)

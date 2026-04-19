@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -v \"\\\\.pyi$\")",
+      "Bash(python *)",
+      "Bash(conda env *)",
+      "Bash(conda run *)",
+      "Bash(.tox/py314-test/Scripts/python.exe -m pytest tests/ --co -q)"
+    ]
+  }
+}

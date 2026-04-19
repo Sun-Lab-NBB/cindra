@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import tempfile
 
 import numpy as np
 
@@ -27,11 +26,11 @@ class TestIsMemoryMapped:
         array = np.zeros(10, dtype=np.float32)
         assert not is_memory_mapped(array=array)
 
-    def test_returns_true_for_memory_mapped_array(self) -> None:
+    def test_returns_true_for_memory_mapped_array(self, tmp_path: Path) -> None:
         """Verifies that a numpy memmap array is correctly identified as memory-mapped."""
-        with tempfile.NamedTemporaryFile(suffix=".dat") as temporary_file:
-            memory_mapped_array = np.memmap(temporary_file.name, dtype=np.float32, mode="w+", shape=(10,))
-            assert is_memory_mapped(array=memory_mapped_array)
+        memory_map_path = tmp_path / "memmap.dat"
+        memory_mapped_array = np.memmap(memory_map_path, dtype=np.float32, mode="w+", shape=(10,))
+        assert is_memory_mapped(array=memory_mapped_array)
 
     def test_returns_false_for_none(self) -> None:
         """Verifies that None input returns False."""
