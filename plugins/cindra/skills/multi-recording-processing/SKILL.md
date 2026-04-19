@@ -36,7 +36,7 @@ skills for output verification.
   (see `/multi-recording-results`)
 - Single-recording processing workflow or prerequisites (see `/single-recording-processing`)
 - Input data format, TIFF requirements, or acquisition parameters (see `/acquisition-data-preparation`)
-- MCP server connectivity or environment issues (see `/mcp-environment-setup`)
+- MCP server connectivity or environment issues (see `/cindra-mcp-environment-setup`)
 - Visual inspection of results (see `/visualization`)
 
 **Handoff rules:** If the user asks about specific output files, array shapes, data interpretation,
@@ -59,7 +59,7 @@ single-recording status `completed`). If any recording is incomplete, invoke the
 
 You MUST use the cindra MCP tools for all processing operations. Do not import cindra Python functions
 directly or run processing via scripts or CLI commands. If MCP tools are not available, invoke
-`/mcp-environment-setup` to diagnose and resolve connectivity issues.
+`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
 
 ---
 
@@ -334,7 +334,7 @@ When processing fails for some datasets/recordings, read the error messages and 
 | Configuration parameter issues, bad dataset name    | `/multi-recording-configuration`   |
 | Registration tuning needed (too much/little drift)  | `/multi-recording-configuration`   |
 | No trackable ROIs found                             | `/multi-recording-configuration`   |
-| MCP tools unavailable, server connection errors     | `/mcp-environment-setup`           |
+| MCP tools unavailable, server connection errors     | `/cindra-mcp-environment-setup`           |
 
 Wait for the current execution session to complete before starting retries.
 
@@ -344,7 +344,7 @@ Wait for the current execution session to complete before starting retries.
 
 | Skill                              | Role                                                           |
 |------------------------------------|----------------------------------------------------------------|
-| `/mcp-environment-setup`           | Prerequisite: MCP server connectivity                          |
+| `/cindra-mcp-environment-setup`           | Prerequisite: MCP server connectivity                          |
 | `/acquisition-data-preparation`    | Upstream: raw data preparation                                 |
 | `/single-recording-processing`     | Prerequisite: all recordings must be single-recording complete |
 | `/multi-recording-configuration`   | Configuration: parameter reference and file creation           |
@@ -357,7 +357,7 @@ Wait for the current execution session to complete before starting retries.
 
 ```text
 Multi-Recording Processing Workflow:
-- [ ] MCP server connected (if not, invoke `/mcp-environment-setup`)
+- [ ] MCP server connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] All recordings confirmed as single-recording complete (status: completed)
 - [ ] Recordings grouped into datasets
 - [ ] Dataset names resolved via `resolve_dataset_name_tool`

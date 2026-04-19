@@ -32,13 +32,13 @@ Launches, manages, and assists with cindra GUI viewers for visual inspection of 
   `/multi-recording-results`)
 - Configuration parameters or tuning guidance (see `/single-recording-configuration`,
   `/multi-recording-configuration`)
-- MCP server connectivity or environment issues (see `/mcp-environment-setup`)
+- MCP server connectivity or environment issues (see `/cindra-mcp-environment-setup`)
 
 **Handoff rules:** If the user asks about processing status or batch jobs, invoke
 `/single-recording-processing` or `/multi-recording-processing`. If the user asks about output
 file formats or data interpretation without a viewer, invoke `/single-recording-results` or
 `/multi-recording-results`. If cindra-gui MCP tools are unavailable, invoke
-`/mcp-environment-setup`.
+`/cindra-mcp-environment-setup`.
 
 ---
 
@@ -46,7 +46,7 @@ file formats or data interpretation without a viewer, invoke `/single-recording-
 
 You MUST use the cindra-gui MCP tools for all viewer operations. Do not launch viewer windows via
 CLI commands, scripts, or Python imports. If cindra-gui MCP tools are not available, invoke
-`/mcp-environment-setup` to diagnose and resolve connectivity issues.
+`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
 
 When assisting the user with data interpretation in a viewer, combine `query_viewer_state_tool`
 from the cindra-gui MCP server with query tools from the cindra MCP server (headless). The GUI
@@ -443,7 +443,7 @@ high extremes indicate residual motion or optical artifacts not captured by regi
 
 | Skill                             | Relationship                                                    |
 |-----------------------------------|-----------------------------------------------------------------|
-| `/mcp-environment-setup`          | Prerequisite: cindra-gui MCP server connectivity                |
+| `/cindra-mcp-environment-setup`          | Prerequisite: cindra-gui MCP server connectivity                |
 | `/single-recording-processing`    | Upstream: produces the data this skill visualizes               |
 | `/multi-recording-processing`     | Upstream: produces the data this skill visualizes               |
 | `/single-recording-results`       | Reference: output data formats for single-recording query tools |
@@ -467,7 +467,7 @@ You SHOULD proactively invoke this skill when:
 
 ```text
 Visualization Workflow:
-- [ ] cindra-gui MCP server connected (if not, invoke `/mcp-environment-setup`)
+- [ ] cindra-gui MCP server connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] Processing complete for the target recording(s)
 - [ ] Correct viewer type selected for the inspection goal
 - [ ] Viewer launched via `launch_viewer_tool` with correct parameters
