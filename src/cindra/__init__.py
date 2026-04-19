@@ -1,10 +1,7 @@
 """Provides pipelines for processing neural imaging data and tracking Regions of Interest across multiple recordings.
 
-Cindra is a ground-up reimplementation of the suite2p (https://github.com/MouseLand/suite2p) library that features a
-novel multi-recording ROI tracking pipeline, optimized algorithms, expanded documentation, and an agentic interface
-based on Claude.
-
-See the source code repository (https://github.com/Sun-Lab-NBB/cindra) for documentation and additional information.
+See the `documentation <https://cindra-api-docs.netlify.app/>`_ for the description of available assets. See the
+`source code repository <https://github.com/Sun-Lab-NBB/cindra>`_ for more details.
 
 Authors: Ivan Kondratyev, Natalie Yeung
 """

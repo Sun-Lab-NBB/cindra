@@ -38,12 +38,12 @@ These tools are registered on the `cindra-mcp` server. You MUST verify the MCP s
 using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
 connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
 
-| Tool                                        | Purpose                                                                     |
-|---------------------------------------------|-----------------------------------------------------------------------------|
-| `generate_config_file`                      | Generates a default configuration YAML for the specified pipeline type      |
-| `discover_recordings_tool`                  | Discovers single and multi-recording candidates under a root directory      |
-| `read_config_file`                          | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)    |
-| `validate_config_file`                      | Validates a cindra config against schema, reports errors and non-defaults   |
+| Tool                       | Purpose                                                                   |
+|----------------------------|---------------------------------------------------------------------------|
+| `generate_config_file`     | Generates a default configuration YAML for the specified pipeline type    |
+| `discover_recordings_tool` | Discovers single and multi-recording candidates under a root directory    |
+| `read_config_file`         | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
+| `validate_config_file`     | Validates a cindra config against schema, reports errors and non-defaults |
 
 ---
 
@@ -61,12 +61,12 @@ configuration directly from the file without any runtime overrides.
 
 These parameters are set automatically by the pipeline and should not be manually configured:
 
-| Parameter                       | Set by        | Value                                               |
-|---------------------------------|---------------|-----------------------------------------------------|
-| `file_io.data_path`             | batch tool    | Recording's session root path (not raw data subdir) |
-| `file_io.output_path`           | user/batch    | Recording's processed output path (required)        |
-| `runtime.parallel_workers`      | CLI/MCP       | Number of workers (or auto-detected from CPU count) |
-| `runtime.display_progress_bars` | CLI/MCP       | Whether to show progress bars                       |
+| Parameter                       | Set by     | Value                                               |
+|---------------------------------|------------|-----------------------------------------------------|
+| `file_io.data_path`             | batch tool | Recording's session root path (not raw data subdir) |
+| `file_io.output_path`           | user/batch | Recording's processed output path (required)        |
+| `runtime.parallel_workers`      | CLI/MCP    | Number of workers (or auto-detected from CPU count) |
+| `runtime.display_progress_bars` | CLI/MCP    | Whether to show progress bars                       |
 
 ---
 
@@ -115,12 +115,12 @@ pipeline reads raw multipage TIFF files from the data directory, splits them by 
 plane's frames into a contiguous binary file optimized for fast random access during processing.
 This TIFF-to-binary conversion only runs once unless `repeat_binarization` is enabled.
 
-| Parameter             | Type          | Default | Description                                                 |
-|-----------------------|---------------|---------|-------------------------------------------------------------|
-| `data_path`           | Path or None  | None    | Root directory containing input TIFFs. **Set by pipeline.** |
-| `output_path`         | Path or None  | None    | Output directory root. **Required; set by user or batch.**  |
-| `ignored_file_names`  | tuple[str]    | ()      | File stems (without extension) to skip when loading TIFFs.  |
-| `repeat_binarization` | bool          | False   | Re-run TIFF to binary conversion even if binaries exist.    |
+| Parameter             | Type         | Default | Description                                                 |
+|-----------------------|--------------|---------|-------------------------------------------------------------|
+| `data_path`           | Path or None | None    | Root directory containing input TIFFs. **Set by pipeline.** |
+| `output_path`         | Path or None | None    | Output directory root. **Required; set by user or batch.**  |
+| `ignored_file_names`  | tuple[str]   | ()      | File stems (without extension) to skip when loading TIFFs.  |
+| `repeat_binarization` | bool         | False   | Re-run TIFF to binary conversion even if binaries exist.    |
 
 ---
 
@@ -355,10 +355,12 @@ Configuration files follow a two-tier lifecycle:
    Templates are never modified by the pipeline.
 
 2. **Resolved copies** — When `prepare_single_recording_batch_tool` runs, it loads the template, applies
-   recording-specific overrides (`file_io.data_path`, `file_io.output_path` from the required
-   `recording_output_paths` parameter, `runtime.parallel_workers`), and saves the resolved copy as
-   `cindra/configuration.yaml` inside each recording's output directory. These resolved copies are what
-   the pipeline actually executes against.
+   recording-specific overrides (`file_io.data_path` from `recording_paths`, `file_io.output_path` from the
+   required `recording_output_paths` parameter, `runtime.display_progress_bars=False`), and saves the
+   resolved copy as `cindra/configuration.yaml` inside each recording's output directory. The
+   `runtime.parallel_workers` value is rewritten later by `execute_processing_jobs_tool` at dispatch time
+   based on saturating allocation, not by the prepare step. These resolved copies are what the pipeline
+   actually executes against.
 
 **Do NOT** create per-recording configuration files manually. Pass a single template path to the batch tool
 and let it handle per-recording fine-tuning automatically.
@@ -388,7 +390,7 @@ and let it handle per-recording fine-tuning automatically.
 
 | Skill                            | Relationship                                                                    |
 |----------------------------------|---------------------------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`         | Prerequisite: MCP server must be connected for configuration tools              |
+| `/cindra-mcp-environment-setup`  | Prerequisite: MCP server must be connected for configuration tools              |
 | `/acquisition-data-preparation`  | Prerequisite: raw data must be prepared before configuring the pipeline         |
 | `/single-recording-processing`   | Next step: processing workflow that consumes this configuration                 |
 | `/single-recording-results`      | Output data format reference for evaluating processing results                  |

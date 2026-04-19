@@ -97,9 +97,12 @@ Sun Lab workflow skills (style guides, commit, codebase exploration).
 | `/explore-codebase`     | Perform in-depth codebase exploration at session start                    |
 | `/explore-dependencies` | Explore ataraxis dependency APIs for a live API snapshot                  |
 | `/python-style`         | Apply Sun Lab Python coding conventions (REQUIRED for all Python changes) |
+| `/cpp-style`            | Apply Sun Lab C++ coding conventions (not used by this Python-only repo)  |
+| `/csharp-style`         | Apply Sun Lab C# coding conventions (not used by this Python-only repo)   |
 | `/readme-style`         | Apply Sun Lab README conventions (REQUIRED for README changes)            |
 | `/commit`               | Draft Sun Lab style-compliant git commit messages                         |
 | `/skill-design`         | Generate and verify skill files and CLAUDE.md project instructions        |
+| `/project-layout`       | Apply Sun Lab project directory layout conventions                        |
 | `/pyproject-style`      | Apply Sun Lab pyproject.toml conventions                                  |
 | `/tox-config`           | Apply Sun Lab tox.ini conventions                                         |
 | `/api-docs`             | Apply Sun Lab API documentation conventions                               |
@@ -116,7 +119,7 @@ Sun Lab workflow skills (style guides, commit, codebase exploration).
 | `/multi-recording-results`        | Reference for multi-recording pipeline output data formats       |
 | `/acquisition-data-preparation`   | Guide for preparing raw imaging data for cindra processing       |
 | `/visualization`                  | Launch and manage cindra GUI viewers for visual inspection       |
-| `/cindra-mcp-environment-setup`          | Diagnose and resolve MCP server connectivity issues              |
+| `/cindra-mcp-environment-setup`   | Diagnose and resolve MCP server connectivity issues              |
 
 ## Project context
 
@@ -128,20 +131,20 @@ pipeline outputs.
 
 ### Key areas
 
-| Directory                      | Purpose                                                         |
-|--------------------------------|-----------------------------------------------------------------|
-| `src/cindra/`                  | Main library source code                                        |
-| `src/cindra/classification/`   | Cell type classification (distinguishing cells from artifacts)  |
-| `src/cindra/dataclasses/`      | Configuration and runtime data structures (YamlConfig-based)    |
-| `src/cindra/detection/`        | ROI detection, tracking, and statistics computation             |
-| `src/cindra/extraction/`       | Fluorescence trace extraction, neuropil subtraction, OASIS      |
-| `src/cindra/gui/`              | Interactive PySide6/PyQtGraph viewers for pipeline outputs      |
-| `src/cindra/interface/`        | CLI, MCP servers, and tool modules for user-facing entry points |
-| `src/cindra/io/`               | TIFF loading, binary file management, multi-plane combination   |
-| `src/cindra/pipelines/`        | High-level pipeline orchestration for single/multi-recording    |
-| `src/cindra/registration/`     | Motion correction, diffeomorphic registration, deformation      |
-| `tests/`                       | Test suite (mirrors source module structure)                    |
-| `docs/`                        | Sphinx API documentation source                                 |
+| Directory                    | Purpose                                                         |
+|------------------------------|-----------------------------------------------------------------|
+| `src/cindra/`                | Main library source code                                        |
+| `src/cindra/classification/` | Cell type classification (distinguishing cells from artifacts)  |
+| `src/cindra/dataclasses/`    | Configuration and runtime data structures (YamlConfig-based)    |
+| `src/cindra/detection/`      | ROI detection, tracking, and statistics computation             |
+| `src/cindra/extraction/`     | Fluorescence trace extraction, neuropil subtraction, OASIS      |
+| `src/cindra/gui/`            | Interactive PySide6/PyQtGraph viewers for pipeline outputs      |
+| `src/cindra/interface/`      | CLI, MCP servers, and tool modules for user-facing entry points |
+| `src/cindra/io/`             | TIFF loading, binary file management, multi-plane combination   |
+| `src/cindra/pipelines/`      | High-level pipeline orchestration for single/multi-recording    |
+| `src/cindra/registration/`   | Motion correction, diffeomorphic registration, deformation      |
+| `tests/`                     | Test suite (mirrors source module structure)                    |
+| `docs/`                      | Sphinx API documentation source                                 |
 
 ### Architecture
 
@@ -227,11 +230,11 @@ pipeline outputs.
 
 **`cindra` commands:**
 
-| Command              | Description                                                          |
-|----------------------|----------------------------------------------------------------------|
-| `cindra configure`   | Generate default config files for single or multi-recording pipeline |
-| `cindra run`         | Execute pipeline with CLI overrides for config parameters            |
-| `cindra mcp`         | Start MCP server (stdio, sse, or streamable-http transport)          |
+| Command            | Description                                                          |
+|--------------------|----------------------------------------------------------------------|
+| `cindra configure` | Generate default config files for single or multi-recording pipeline |
+| `cindra run`       | Execute pipeline with CLI overrides for config parameters            |
+| `cindra mcp`       | Start MCP server (stdio, sse, or streamable-http transport)          |
 
 **`cindra-gui` commands:**
 
@@ -258,10 +261,13 @@ pipeline outputs.
 | `pyqtgraph`                | High-performance plotting for GUI image display               |
 | `click`                    | CLI framework for command-line interfaces                     |
 | `mcp`                      | FastMCP server for agentic AI tool integration                |
+| `httpx`                    | HTTP client used by the MCP transport layer                   |
 | `ataraxis-time`            | PrecisionTimer for pipeline step timing                       |
 | `ataraxis-base-utilities`  | Console for unified message handling and error reporting      |
 | `ataraxis-data-structures` | YamlConfig, ProcessingTracker, and data logging utilities     |
+| `importlib_metadata`       | Runtime version introspection for the cindra package          |
 | `tbb4py`                   | Intel TBB threading layer for Numba parallelization (non-Mac) |
+| `intel-cmplr-lib-rt`       | Intel compiler runtime paired with `tbb4py` (non-Mac)         |
 
 ### Code standards
 

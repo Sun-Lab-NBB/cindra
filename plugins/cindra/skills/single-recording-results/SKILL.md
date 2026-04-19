@@ -37,19 +37,19 @@ manual file reads whenever possible.
 
 ### Verification tool
 
-| Tool                                  | Purpose                                                                     |
-|---------------------------------------|-----------------------------------------------------------------------------|
-| `verify_single_recording_output_tool` | Verifies completeness of all expected output files and NPZ keys             |
+| Tool                                  | Purpose                                                         |
+|---------------------------------------|-----------------------------------------------------------------|
+| `verify_single_recording_output_tool` | Verifies completeness of all expected output files and NPZ keys |
 
 ### Query tools
 
-| Tool                                         | Purpose                                                                               |
-|----------------------------------------------|---------------------------------------------------------------------------------------|
-| `query_single_recording_metadata_tool`       | Queries recording dimensions, frame count, sampling rate, ROI/cell counts, and timing |
-| `query_detection_summary_tool`               | Queries detection image intensity statistics and estimated ROI diameter               |
-| `query_registration_quality_tool`            | Queries per-plane registration offset summaries, correlations, bad frames, PC metrics |
-| `query_roi_statistics_tool`                  | Queries per-ROI spatial statistics and classification with sorting and filtering      |
-| `query_traces_tool`                          | Queries fluorescence trace arrays for specific ROIs with optional downsampling        |
+| Tool                                   | Purpose                                                                               |
+|----------------------------------------|---------------------------------------------------------------------------------------|
+| `query_single_recording_metadata_tool` | Queries recording dimensions, frame count, sampling rate, ROI/cell counts, and timing |
+| `query_detection_summary_tool`         | Queries detection image intensity statistics and estimated ROI diameter               |
+| `query_registration_quality_tool`      | Queries per-plane registration offset summaries, correlations, bad frames, PC metrics |
+| `query_roi_statistics_tool`            | Queries per-ROI spatial statistics and classification with sorting and filtering      |
+| `query_traces_tool`                    | Queries fluorescence trace arrays for specific ROIs with optional downsampling        |
 
 ### Recommended query order
 
@@ -202,16 +202,16 @@ Channel 2 data uses identical keys in `roi_masks_channel_2.npz`.
 
 Saved at both the combined root and per-plane levels. Companion file to `roi_masks.npz`.
 
-| NPZ key                       | Dtype   | Shape       | Description                                            |
-|-------------------------------|---------|-------------|--------------------------------------------------------|
-| `footprints`                  | uint16  | (num_rois,) | Spatial scale (hop size) used during detection         |
-| `compactness`                 | float32 | (num_rois,) | Ratio of actual to expected mean radius (1.0=circular) |
-| `solidity`                    | float32 | (num_rois,) | Ratio of soma pixels to convex hull area               |
-| `pixel_count`                 | uint32  | (num_rois,) | Total pixels in complete ROI                           |
-| `aspect_ratio`                | float32 | (num_rois,) | Ellipse axis ratio indicating elongation               |
-| `normalized_pixel_count`      | float32 | (num_rois,) | Pixel count normalized by expected ROI size (soma)     |
-| `skewness`                    | float32 | (num_rois,) | Fluorescence skewness (NaN if unavailable)             |
-| `plane_index`                 | int32   | (num_rois,) | Imaging plane index for each ROI                       |
+| NPZ key                  | Dtype   | Shape       | Description                                            |
+|--------------------------|---------|-------------|--------------------------------------------------------|
+| `footprints`             | uint16  | (num_rois,) | Spatial scale (hop size) used during detection         |
+| `compactness`            | float32 | (num_rois,) | Ratio of actual to expected mean radius (1.0=circular) |
+| `solidity`               | float32 | (num_rois,) | Ratio of soma pixels to convex hull area               |
+| `pixel_count`            | uint32  | (num_rois,) | Total pixels in complete ROI                           |
+| `aspect_ratio`           | float32 | (num_rois,) | Ellipse axis ratio indicating elongation               |
+| `normalized_pixel_count` | float32 | (num_rois,) | Pixel count normalized by expected ROI size (soma)     |
+| `skewness`               | float32 | (num_rois,) | Fluorescence skewness (NaN if unavailable)             |
+| `plane_index`            | int32   | (num_rois,) | Imaging plane index for each ROI                       |
 
 **Optional variable-length arrays** (present only when the data exists):
 
@@ -249,13 +249,13 @@ zeroes.
 
 **Channel 2 (two-channel only, same shapes):**
 
-| File                                    | Description                           |
-|-----------------------------------------|---------------------------------------|
-| `cell_fluorescence_channel_2.npy`       | Channel 2 raw somatic fluorescence    |
-| `neuropil_fluorescence_channel_2.npy`   | Channel 2 neuropil fluorescence       |
-| `subtracted_fluorescence_channel_2.npy` | Channel 2 subtracted fluorescence     |
-| `spikes_channel_2.npy`                  | Channel 2 deconvolved spikes          |
-| `cell_classification_channel_2.npy`     | Channel 2 classification results      |
+| File                                    | Description                        |
+|-----------------------------------------|------------------------------------|
+| `cell_fluorescence_channel_2.npy`       | Channel 2 raw somatic fluorescence |
+| `neuropil_fluorescence_channel_2.npy`   | Channel 2 neuropil fluorescence    |
+| `subtracted_fluorescence_channel_2.npy` | Channel 2 subtracted fluorescence  |
+| `spikes_channel_2.npy`                  | Channel 2 deconvolved spikes       |
+| `cell_classification_channel_2.npy`     | Channel 2 classification results   |
 
 **Optional colocalization files (combined root and per-plane):**
 
@@ -288,10 +288,10 @@ Saved in `plane_N/registration_data/`. All files are `.npy` format.
 
 ### Per-plane binary data
 
-| File                 | Format             | Description                                                          |
-|----------------------|--------------------|----------------------------------------------------------------------|
-| `channel_1_data.bin` | Contiguous int16   | Motion-corrected frames: `[frame0_row0_col0, frame0_row0_col1, ...]` |
-| `channel_2_data.bin` | Contiguous int16   | Channel 2 motion-corrected frames (two-channel only)                 |
+| File                 | Format           | Description                                                          |
+|----------------------|------------------|----------------------------------------------------------------------|
+| `channel_1_data.bin` | Contiguous int16 | Motion-corrected frames: `[frame0_row0_col0, frame0_row0_col1, ...]` |
+| `channel_2_data.bin` | Contiguous int16 | Channel 2 motion-corrected frames (two-channel only)                 |
 
 Binary files store frames as contiguous int16 arrays. Each frame has `height × width` values. Read with
 `np.memmap(path, dtype=np.int16, mode='r', shape=(frame_count, height, width))` using dimensions from

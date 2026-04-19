@@ -211,12 +211,12 @@ metadata to extract:
 
 For MROI (multi-region) recordings, additional metadata is needed:
 
-| ScanImage metadata                         | cindra field         |
-|--------------------------------------------|----------------------|
-| Number of scan ROIs                        | `roi_number`         |
-| Per-ROI line indices from scan field       | `roi_lines`          |
-| Per-ROI position in combined FOV           | `roi_x_coordinates`  |
-| Per-ROI position in combined FOV           | `roi_y_coordinates`  |
+| ScanImage metadata                   | cindra field        |
+|--------------------------------------|---------------------|
+| Number of scan ROIs                  | `roi_number`        |
+| Per-ROI line indices from scan field | `roi_lines`         |
+| Per-ROI position in combined FOV     | `roi_x_coordinates` |
+| Per-ROI position in combined FOV     | `roi_y_coordinates` |
 
 ScanImage typically handles the frame interleaving correctly. Flyback frames (if included in the TIFF) should
 be accounted for using `main.ignored_flyback_planes` in the pipeline configuration.
@@ -367,7 +367,7 @@ each ROI.
 
 | Skill                             | Relationship                                                          |
 |-----------------------------------|-----------------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`          | Prerequisite: MCP server must be connected for data preparation tools |
+| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server must be connected for data preparation tools |
 | `/single-recording-configuration` | Next step: configure the pipeline using prepared data                 |
 | `/single-recording-processing`    | Downstream: processing workflow that uses the prepared data           |
 | `/single-recording-results`       | Downstream: output data format reference for processing results       |

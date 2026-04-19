@@ -104,7 +104,7 @@ class RuntimeContext:
         # Discovers the cindra output directory within the root_path directory tree.
         matches = list(root_path.rglob("configuration.yaml"))
 
-        if len(matches) == 0:
+        if not matches:
             message = (
                 f"Unable to load RuntimeContext. No configuration.yaml file was found under {root_path}. "
                 f"Ensure the single-recording pipeline has been run for this recording."
@@ -242,7 +242,7 @@ class MultiRecordingRuntimeContext:
         # Discovers the multi_recording_runtime_data.yaml file within the root_path directory tree.
         matches = list(root_path.rglob("multi_recording_runtime_data.yaml"))
 
-        if len(matches) == 0:
+        if not matches:
             message = (
                 f"Unable to load MultiRecordingRuntimeContext. No multi_recording_runtime_data.yaml file was "
                 f"found under {root_path}. Ensure the multi-recording pipeline has been run for this recording."
