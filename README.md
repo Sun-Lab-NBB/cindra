@@ -126,6 +126,20 @@ project developer.
 Use the following command to install the library and all of its dependencies via
 [pip](https://pip.pypa.io/en/stable/): `pip install cindra`
 
+### macOS OpenMP Runtime
+
+On macOS, cindra uses Numba's OpenMP threading layer for parallel execution because `tbb4py` is not published for
+Apple Silicon. The OpenMP runtime (`libomp.dylib`) is not shipped with macOS or Apple's clang toolchain and must be
+provided separately. The recommended path is a conda environment with `llvm-openmp` from conda-forge:
+
+`conda install -c conda-forge llvm-openmp` (or `mamba install -c conda-forge llvm-openmp`)
+
+For `pip`-only installs, install libomp via [Homebrew](https://brew.sh/) (`brew install libomp`) and either symlink
+`$(brew --prefix libomp)/lib/libomp.dylib` into the active virtual environment's `lib/` directory or set
+`DYLD_LIBRARY_PATH` to include that path before importing cindra. Without a loadable `libomp.dylib`, importing
+cindra fails with `ValueError: No threading layer could be loaded`. Linux and Windows installations require no
+additional steps.
+
 ___
 
 ## Usage

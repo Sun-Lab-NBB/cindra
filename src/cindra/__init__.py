@@ -7,10 +7,13 @@ Authors: Ivan Kondratyev, Natalie Yeung
 """
 
 # Configures numba threading layer for parallel execution across all modules. This must be set before any numba
-# functions are compiled, hence it appears before other imports.
+# functions are compiled, hence it appears before other imports. macOS uses OpenMP (libomp via llvm-openmp) because
+# tbb4py publishes no Apple Silicon wheel; all other platforms use TBB for lower overhead on flat prange loops.
+import sys
+
 from numba import config  # type: ignore[import-untyped]
 
-config.THREADING_LAYER = "tbb"
+config.THREADING_LAYER = "omp" if sys.platform == "darwin" else "tbb"
 
 from ataraxis_base_utilities import console  # noqa: E402
 

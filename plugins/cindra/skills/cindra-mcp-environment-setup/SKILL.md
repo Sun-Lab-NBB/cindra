@@ -190,28 +190,91 @@ Report any missing or incompatible dependencies to the user. Note that `cindra-g
 GUI dependencies (PySide6) at import time, so it may fail even when `cindra --help` succeeds if
 Qt dependencies are missing.
 
-### Step 6: Restart the MCP server
+### Step 6: Verify OpenMP runtime on macOS
+
+On macOS, cindra selects Numba's OpenMP threading layer because `tbb4py` has no Apple Silicon
+wheel. Numba's `omppool.cpython-314-darwin.so` dynamically loads `libomp.dylib` at import time.
+This library is not part of macOS or Apple's clang toolchain and must be provided by the active
+Python environment. When `libomp.dylib` is not resolvable, `import cindra` (and therefore
+`cindra --help` and `cindra mcp`) fails with:
+
+```
+ValueError: No threading layer could be loaded.
+HINT:
+Intel TBB is required, try:
+$ conda/pip install tbb
+```
+
+The error message mentions TBB, but on macOS the correct runtime is OpenMP. Run:
+
+```bash
+python -c "from numba.np.ufunc import omppool"
+```
+
+If this command fails with `Library not loaded: @rpath/libomp.dylib`, guide the user through the
+resolution that matches their environment:
+
+**Conda environment (recommended):**
+
+```bash
+conda install -c conda-forge llvm-openmp
+```
+
+or
+
+```bash
+mamba install -c conda-forge llvm-openmp
+```
+
+This installs `libomp.dylib` into `$CONDA_PREFIX/lib/`, where Numba's compiled omppool extension
+locates it via its build-time rpath.
+
+**pip-only virtual environment:**
+
+Install libomp via Homebrew, then make it visible to the venv's Python. Either symlink:
+
+```bash
+brew install libomp
+ln -s "$(brew --prefix libomp)/lib/libomp.dylib" "${VIRTUAL_ENV}/lib/libomp.dylib"
+```
+
+or export `DYLD_LIBRARY_PATH` before launching Claude Code:
+
+```bash
+export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib:${DYLD_LIBRARY_PATH}"
+```
+
+You MUST skip this step on Linux and Windows — the OpenMP runtime is present by default (via
+`libgomp` on Linux, Intel OpenMP bundled with the Intel compiler runtime on Windows) and this
+diagnostic does not apply.
+
+### Step 7: Restart the MCP server
 
 After the user resolves the environment issue, they must restart Claude Code for the MCP servers
 to pick up the changes. The plugin's server registrations will automatically configure the
 servers on the next session.
 
+On macOS, if the resolution was a `DYLD_LIBRARY_PATH` export, the export MUST be in effect in the
+shell that launches Claude Code — subsequently activating it from within Claude Code does not
+propagate to already-spawned MCP server subprocesses.
+
 ---
 
 ## Common issues and resolutions
 
-| Symptom                                 | Cause                                | Resolution                                                                          |
-|-----------------------------------------|--------------------------------------|-------------------------------------------------------------------------------------|
-| `cindra: command not found`             | Environment not activated            | Activate conda/venv, then restart Claude Code                                       |
-| `cindra: command not found`             | cindra not installed                 | `pip install cindra` in the active environment                                      |
-| `cindra-gui: command not found`         | Environment not activated            | Activate conda/venv, then restart Claude Code                                       |
-| Import error on `cindra mcp`            | Missing or incompatible dependency   | `pip install --force-reinstall cindra`                                              |
-| Import error on `cindra-gui mcp`        | Broken Qt/PySide6 install            | `pip install --force-reinstall cindra` (PySide6 is a core dependency, not an extra) |
-| Python version mismatch                 | Wrong environment activated          | Activate environment with Python 3.14                                               |
-| MCP server starts but tools are missing | Outdated cindra version              | `pip install --upgrade cindra`                                                      |
-| MCP server connected but tools fail     | Not an environment issue             | Check tool-specific error messages                                                  |
-| cindra-gui tools unavailable            | Plugin not installed or outdated     | Reinstall the cindra Claude Code plugin                                             |
-| Skills available but MCP tools missing  | Plugin installed without pip package | `pip install cindra` in the active environment                                      |
+| Symptom                                                   | Cause                                                       | Resolution                                                                                                           |
+|-----------------------------------------------------------|-------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `cindra: command not found`                               | Environment not activated                                   | Activate conda/venv, then restart Claude Code                                                                        |
+| `cindra: command not found`                               | cindra not installed                                        | `pip install cindra` in the active environment                                                                       |
+| `cindra-gui: command not found`                           | Environment not activated                                   | Activate conda/venv, then restart Claude Code                                                                        |
+| Import error on `cindra mcp`                              | Missing or incompatible dependency                          | `pip install --force-reinstall cindra`                                                                               |
+| Import error on `cindra-gui mcp`                          | Broken Qt/PySide6 install                                   | `pip install --force-reinstall cindra` (PySide6 is a core dependency, not an extra)                                  |
+| Python version mismatch                                   | Wrong environment activated                                 | Activate environment with Python 3.14                                                                                |
+| MCP server starts but tools are missing                   | Outdated cindra version                                     | `pip install --upgrade cindra`                                                                                       |
+| MCP server connected but tools fail                       | Not an environment issue                                    | Check tool-specific error messages                                                                                   |
+| cindra-gui tools unavailable                              | Plugin not installed or outdated                            | Reinstall the cindra Claude Code plugin                                                                              |
+| Skills available but MCP tools missing                    | Plugin installed without pip package                        | `pip install cindra` in the active environment                                                                       |
+| `ValueError: No threading layer could be loaded` on macOS | `libomp.dylib` not on rpath (Apple ships no OpenMP runtime) | `conda install -c conda-forge llvm-openmp` (conda) or `brew install libomp` + symlink/`DYLD_LIBRARY_PATH` (pip-only) |
 
 ---
 
@@ -247,6 +310,7 @@ MCP Environment Setup:
 - [ ] Confirmed Python version matches >=3.14,<3.15
 - [ ] Identified environment type (conda, venv, system)
 - [ ] Provided environment-specific resolution steps
+- [ ] On macOS, verified 'libomp.dylib' is resolvable (python -c "from numba.np.ufunc import omppool")
 - [ ] Verified cindra plugin is installed (provides both server registrations)
 - [ ] Informed user that Claude Code must be restarted after environment changes
 ```

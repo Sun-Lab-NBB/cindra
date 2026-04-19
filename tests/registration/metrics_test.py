@@ -124,9 +124,13 @@ class TestComputePcExtremes:
         num_components = 1
         num_extreme_frames = 10
 
-        # Creates frames where intensity increases linearly over time.
+        # Creates frames with spatial noise plus a temporal ramp. Spatial variance is required for PCA over pixels to
+        # find a non-degenerate first component; without it, centering collapses the input to numerical noise and the
+        # returned PC direction is arbitrary.
+        rng = np.random.default_rng(seed=42)
         temporal_gradient = np.linspace(start=0.0, stop=10.0, num=num_frames, dtype=np.float32)
-        frames = np.ones((num_frames, height, width), dtype=np.float32) * temporal_gradient[:, np.newaxis, np.newaxis]
+        frames = rng.standard_normal(size=(num_frames, height, width)).astype(np.float32)
+        frames += temporal_gradient[:, np.newaxis, np.newaxis]
 
         pc_low, pc_high, _ = _compute_pc_extremes(
             frames=frames,
