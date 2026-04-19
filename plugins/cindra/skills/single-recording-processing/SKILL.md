@@ -33,7 +33,7 @@ verification.
 - Output data formats, array shapes, dtypes, file references, or data interpretation (see `/single-recording-results`)
 - Input data format, TIFF requirements, or acquisition parameters (see `/acquisition-data-preparation`)
 - Multi-recording processing workflow (see `/multi-recording-processing`)
-- MCP server connectivity or environment issues (see `/mcp-environment-setup`)
+- MCP server connectivity or environment issues (see `/cindra-mcp-environment-setup`)
 - Visual inspection of results (see `/visualization`)
 
 **Handoff rules:** If the user asks about specific output files, array shapes, data interpretation, or processing
@@ -47,7 +47,7 @@ it produces or the parameters it consumes.
 
 You MUST use the cindra MCP tools for all processing operations. Do not import cindra Python functions
 directly or run processing via scripts or CLI commands. If MCP tools are not available, invoke
-`/mcp-environment-setup` to diagnose and resolve connectivity issues.
+`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
 
 ---
 
@@ -280,7 +280,7 @@ When processing fails for some recordings, read the error messages and route to 
 | Missing `cindra_parameters.json`, TIFF read error | `/acquisition-data-preparation`   |
 | Invalid parameter values, wrong plane/channel     | `/acquisition-data-preparation`   |
 | Configuration parameter issues                    | `/single-recording-configuration` |
-| MCP tools unavailable, server connection errors   | `/mcp-environment-setup`          |
+| MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`          |
 
 Wait for the current execution session to complete before starting retries.
 
@@ -290,7 +290,7 @@ Wait for the current execution session to complete before starting retries.
 
 | Skill                              | Role                                                           |
 |------------------------------------|----------------------------------------------------------------|
-| `/mcp-environment-setup`           | Prerequisite: MCP server connectivity                          |
+| `/cindra-mcp-environment-setup`           | Prerequisite: MCP server connectivity                          |
 | `/acquisition-data-preparation`    | Input: raw data preparation and validation                     |
 | `/single-recording-configuration`  | Configuration: parameter reference and file creation           |
 | `/single-recording-results`        | Output: verify and explain processing results                  |
@@ -303,7 +303,7 @@ Wait for the current execution session to complete before starting retries.
 
 ```text
 Single-Recording Processing Workflow:
-- [ ] MCP server connected (if not, invoke `/mcp-environment-setup`)
+- [ ] MCP server connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] Recordings discovered or explicit paths provided
 - [ ] Raw data validated via `validate_recording_readiness` (or existing binaries confirmed)
 - [ ] Configuration file confirmed or created via `/single-recording-configuration`

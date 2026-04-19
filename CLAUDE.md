@@ -116,7 +116,7 @@ Sun Lab workflow skills (style guides, commit, codebase exploration).
 | `/multi-recording-results`        | Reference for multi-recording pipeline output data formats       |
 | `/acquisition-data-preparation`   | Guide for preparing raw imaging data for cindra processing       |
 | `/visualization`                  | Launch and manage cindra GUI viewers for visual inspection       |
-| `/mcp-environment-setup`          | Diagnose and resolve MCP server connectivity issues              |
+| `/cindra-mcp-environment-setup`          | Diagnose and resolve MCP server connectivity issues              |
 
 ## Project context
 

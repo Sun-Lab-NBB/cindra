@@ -140,23 +140,48 @@ def run_single_recording_pipeline(  # pragma: no cover
     # Builds the list of jobs to run.
     jobs_to_run = [job_name for job_name, requested in requested_jobs.items() if requested]
 
+    # Builds the universe of every valid job the pipeline could execute for this configuration. PROCESS always
+    # expands to every available plane regardless of ``target_plane`` so that foreign-entry detection treats
+    # the universe as a configuration fingerprint, not an invocation fingerprint.
+    universe: list[tuple[str, str]] = [
+        (SingleRecordingJobNames.BINARIZE, ""),
+        *((SingleRecordingJobNames.PROCESS, f"plane_{plane_index}") for plane_index in range(plane_count)),
+        (SingleRecordingJobNames.COMBINE, ""),
+    ]
+
     # Initializes the tracker instance.
     tracker = ProcessingTracker(file_path=tracker_path)
 
     # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
-        # REMOTE mode: Retrieves the job name and specifier directly from the tracker using the provided job_id.
-        job_info = tracker.get_job_info(job_id=job_id)
+        # REMOTE mode: Validates the requested job_id against the pipeline's universe, aligns the tracker with
+        # every valid job so that ``start_job`` finds the requested ID, and executes the matching job.
+        id_to_job: dict[str, tuple[str, str]] = {
+            ProcessingTracker.generate_job_id(job_name=name, specifier=spec): (name, spec) for name, spec in universe
+        }
+
+        if job_id not in id_to_job:
+            message = (
+                f"Unable to execute the requested job with ID '{job_id}'. The input identifier does not match "
+                f"any jobs available for the current pipeline configuration. Valid job IDs: "
+                f"{sorted(id_to_job.keys())}."
+            )
+            console.error(message=message, error=ValueError)
+
+        _prepare_tracker(tracker=tracker, jobs=universe, universe=universe)
+
+        resolved_name, resolved_specifier = id_to_job[job_id]
         _execute_single_recording_job(
             configuration=configuration,
-            job_name=SingleRecordingJobNames(job_info.job_name),
-            specifier=job_info.specifier,
+            job_name=SingleRecordingJobNames(resolved_name),
+            specifier=resolved_specifier,
             job_id=job_id,
             tracker=tracker,
         )
     else:
-        # LOCAL mode: Builds all requested jobs upfront using the pre-resolved plane count, then runs them
-        # sequentially. This mirrors the approach used by run_multi_recording_pipeline.
+        # LOCAL mode: Builds all requested jobs upfront using the pre-resolved plane count, aligns the tracker
+        # with the requested subset, then runs them sequentially. This mirrors the approach used by
+        # run_multi_recording_pipeline.
         jobs: list[tuple[str, str]] = []
         for base_job_name in jobs_to_run:
             if base_job_name == SingleRecordingJobNames.PROCESS:
@@ -167,15 +192,14 @@ def run_single_recording_pipeline(  # pragma: no cover
             else:
                 jobs.append((base_job_name, ""))
 
-        console.echo(message=f"Initializing the processing tracker for {len(jobs)} job(s)...")
-        job_ids = tracker.initialize_jobs(jobs=jobs)
+        _prepare_tracker(tracker=tracker, jobs=jobs, universe=universe)
 
-        for (name, spec), jid in zip(jobs, job_ids, strict=True):
+        for name, spec in jobs:
             _execute_single_recording_job(
                 configuration=configuration,
                 job_name=SingleRecordingJobNames(name),
                 specifier=spec,
-                job_id=jid,
+                job_id=ProcessingTracker.generate_job_id(job_name=name, specifier=spec),
                 tracker=tracker,
             )
 
@@ -293,21 +317,45 @@ def run_multi_recording_pipeline(  # pragma: no cover
     # Builds the list of jobs to run.
     jobs_to_run = [job_name for job_name, requested in requested_jobs.items() if requested]
 
+    # Builds the universe of every valid job the pipeline could execute for this configuration. EXTRACT always
+    # expands to every resolved recording ID regardless of ``target_recording`` so that foreign-entry detection
+    # treats the universe as a configuration fingerprint, not an invocation fingerprint.
+    universe: list[tuple[str, str]] = [
+        (MultiRecordingJobNames.DISCOVER, ""),
+        *((MultiRecordingJobNames.EXTRACT, recording_id) for recording_id in recording_ids),
+    ]
+
+    tracker = ProcessingTracker(file_path=main_recording_path.joinpath(MULTI_RECORDING_TRACKER_NAME))
+
     # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
-        # REMOTE mode: Retrieves the job name and specifier directly from the tracker using the provided job_id.
-        tracker = ProcessingTracker(file_path=main_recording_path.joinpath(MULTI_RECORDING_TRACKER_NAME))
-        job_info = tracker.get_job_info(job_id=job_id)
+        # REMOTE mode: Validates the requested job_id against the pipeline's universe, aligns the tracker with
+        # every valid job so that ``start_job`` finds the requested ID, and executes the matching job.
+        id_to_job: dict[str, tuple[str, str]] = {
+            ProcessingTracker.generate_job_id(job_name=name, specifier=spec): (name, spec) for name, spec in universe
+        }
+
+        if job_id not in id_to_job:
+            message = (
+                f"Unable to execute the requested job with ID '{job_id}'. The input identifier does not match "
+                f"any jobs available for the current pipeline configuration. Valid job IDs: "
+                f"{sorted(id_to_job.keys())}."
+            )
+            console.error(message=message, error=ValueError)
+
+        _prepare_tracker(tracker=tracker, jobs=universe, universe=universe)
+
+        resolved_name, resolved_specifier = id_to_job[job_id]
         _execute_multi_recording_job(
             configuration=config,
-            job_name=MultiRecordingJobNames(job_info.job_name),
-            specifier=job_info.specifier,
+            job_name=MultiRecordingJobNames(resolved_name),
+            specifier=resolved_specifier,
             job_id=job_id,
             tracker=tracker,
         )
     else:
-        # LOCAL mode: Initializes the tracker and runs all requested jobs. For EXTRACT jobs, expands to
-        # recording-specific jobs if target_recording is None.
+        # LOCAL mode: Builds all requested jobs, aligns the tracker with the requested subset, then runs
+        # them sequentially. For EXTRACT jobs, expands to recording-specific jobs if target_recording is None.
         jobs: list[tuple[str, str]] = []
         for base_job_name in jobs_to_run:
             if base_job_name == MultiRecordingJobNames.EXTRACT:
@@ -318,20 +366,84 @@ def run_multi_recording_pipeline(  # pragma: no cover
             else:
                 jobs.append((base_job_name, ""))
 
-        console.echo(message=f"Initializing the processing tracker for {len(jobs)} job(s)...")
-        tracker = ProcessingTracker(file_path=main_recording_path.joinpath(MULTI_RECORDING_TRACKER_NAME))
-        job_ids = tracker.initialize_jobs(jobs=jobs)
+        _prepare_tracker(tracker=tracker, jobs=jobs, universe=universe)
 
-        for (name, spec), jid in zip(jobs, job_ids, strict=True):
+        for name, spec in jobs:
             _execute_multi_recording_job(
                 configuration=config,
                 job_name=MultiRecordingJobNames(name),
                 specifier=spec,
-                job_id=jid,
+                job_id=ProcessingTracker.generate_job_id(job_name=name, specifier=spec),
                 tracker=tracker,
             )
 
     console.echo(message="Multi-recording processing: Complete.", level=LogLevel.SUCCESS)
+
+
+def _prepare_tracker(  # pragma: no cover
+    tracker: ProcessingTracker,
+    jobs: list[tuple[str, str]],
+    universe: list[tuple[str, str]],
+) -> None:
+    """Aligns the processing tracker's job registry with the jobs requested for the current pipeline invocation.
+
+    Notes:
+        Applies the same regeneration strategy in local and remote modes so that foreign or stale tracker
+        entries consistently trigger a reset instead of silently persisting across invocations. Foreign
+        entries are detected by comparing the tracker's existing job IDs against the configuration-derived
+        universe of all possible jobs for the current pipeline (all phases expanded across their plane or
+        recording specifiers), not against the flag-selected subset, so switching flags between runs does
+        not wipe previously-completed job state. Any existing entries that are not part of the universe are
+        treated as architectural drift (the pipeline configuration itself has changed since the tracker was
+        last written) and surfaced through a warning before the tracker is rebuilt.
+
+        If the tracker file does not yet exist on disk, the helper initializes it from scratch with the
+        jobs requested for this invocation. If the file exists and contains job IDs that are not part of
+        the current configuration's universe, those entries are classified as foreign and the helper emits
+        a warning before resetting and reinitializing the tracker with the requested jobs. If the file
+        exists with only universe-valid entries but is missing some of the jobs the current invocation
+        wants to run, the helper performs an additive ``initialize_jobs`` call that registers the missing
+        entries without clobbering any existing state for previously-tracked jobs. If the file already
+        contains every requested job, the helper is a no-op, which keeps ``initialize_jobs`` from emitting
+        duplicate-entry warnings for the fully-aligned case.
+
+    Args:
+        tracker: The ProcessingTracker instance bound to the pipeline's output directory.
+        jobs: The list of (job_name, specifier) tuples the current invocation intends to execute.
+        universe: The list of (job_name, specifier) tuples enumerating every valid job the pipeline could
+            run for the current configuration. Used exclusively for foreign-entry detection.
+    """
+    universe_ids = {
+        ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier)
+        for job_name, specifier in universe
+    }
+    requested_ids = {
+        ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier) for job_name, specifier in jobs
+    }
+
+    if not tracker.file_path.exists():
+        tracker.initialize_jobs(jobs=jobs)
+        return
+
+    existing_ids = set(tracker.find_jobs(job_name="").keys())
+    foreign_ids = existing_ids - universe_ids
+
+    if foreign_ids:
+        console.echo(
+            message=(
+                f"The processing tracker at '{tracker.file_path}' contains {len(foreign_ids)} job entries "
+                f"that are not part of the current pipeline configuration's job universe. Resetting and "
+                f"reinitializing the tracker to match the requested jobs. Foreign job IDs: "
+                f"{sorted(foreign_ids)}."
+            ),
+            level=LogLevel.WARNING,
+        )
+        tracker.reset()
+        tracker.initialize_jobs(jobs=jobs)
+        return
+
+    if not requested_ids.issubset(existing_ids):
+        tracker.initialize_jobs(jobs=jobs)
 
 
 def _execute_single_recording_job(  # pragma: no cover

@@ -35,7 +35,7 @@ Complete parameter reference for the multi-recording (cross-recording) cindra RO
 ## MCP configuration tools
 
 These tools are registered on the `cindra-mcp` server. You MUST verify the MCP server is connected before
-using these tools. If the tools are unavailable, invoke `/mcp-environment-setup` to diagnose and resolve
+using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
 connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
 
 | Tool                                       | Purpose                                                                     |
@@ -421,7 +421,7 @@ and let it handle per-dataset fine-tuning automatically.
 
 | Skill                             | Relationship                                                                      |
 |-----------------------------------|-----------------------------------------------------------------------------------|
-| `/mcp-environment-setup`          | Prerequisite: MCP server must be connected for configuration tools                |
+| `/cindra-mcp-environment-setup`          | Prerequisite: MCP server must be connected for configuration tools                |
 | `/single-recording-processing`    | Prerequisite: single-recording processing must complete before multi-recording    |
 | `/single-recording-results`       | Prerequisite: single-recording output files required as input for multi-recording |
 | `/single-recording-configuration` | Companion configuration reference for the single-recording pipeline               |
@@ -439,7 +439,7 @@ parameter detection.
 
 ```text
 Multi-Recording Configuration Compliance:
-- [ ] cindra MCP server is connected (if not, invoke `/mcp-environment-setup`)
+- [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] `validate_config_file` reports no errors (run this first)
 - [ ] `recording_io.dataset_name` is set to a unique, non-empty string
 - [ ] `roi_selection.probability_threshold` is appropriate for the dataset (0.85 default)
