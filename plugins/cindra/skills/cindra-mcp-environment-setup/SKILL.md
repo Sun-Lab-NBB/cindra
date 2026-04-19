@@ -1,5 +1,5 @@
 ---
-name: mcp-environment-setup
+name: cindra-mcp-environment-setup
 description: >-
   Diagnoses and resolves cindra and cindra-gui MCP server connectivity issues. Covers environment
   verification, command availability, Python version checks, dependency validation, and conda/pip/uv

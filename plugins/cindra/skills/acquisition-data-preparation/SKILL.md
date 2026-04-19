@@ -37,7 +37,7 @@ Complete guide for preparing raw neural imaging data for the cindra single-recor
 ## MCP acquisition tools
 
 These tools are registered on the `cindra-mcp` server. You MUST verify the MCP server is connected before
-using these tools. If the tools are unavailable, invoke `/mcp-environment-setup` to diagnose and resolve
+using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
 connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
 
 | Tool                                   | Purpose                                                                         |
@@ -367,7 +367,7 @@ each ROI.
 
 | Skill                             | Relationship                                                          |
 |-----------------------------------|-----------------------------------------------------------------------|
-| `/mcp-environment-setup`          | Prerequisite: MCP server must be connected for data preparation tools |
+| `/cindra-mcp-environment-setup`          | Prerequisite: MCP server must be connected for data preparation tools |
 | `/single-recording-configuration` | Next step: configure the pipeline using prepared data                 |
 | `/single-recording-processing`    | Downstream: processing workflow that uses the prepared data           |
 | `/single-recording-results`       | Downstream: output data format reference for processing results       |
@@ -381,7 +381,7 @@ You MUST verify data preparation against this checklist before proceeding to pip
 
 ```text
 Acquisition Data Preparation Compliance:
-- [ ] cindra MCP server is connected (if not, invoke `/mcp-environment-setup`)
+- [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] TIFF files present in the data directory (.tif or .tiff extension)
 - [ ] Total frame count is divisible by plane_number * channel_number
 - [ ] `cindra_parameters.json` exists in the data directory (or a subdirectory)

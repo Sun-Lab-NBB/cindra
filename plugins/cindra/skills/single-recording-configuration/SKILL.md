@@ -35,7 +35,7 @@ Complete parameter reference for the single-recording (within-recording) cindra 
 ## MCP configuration tools
 
 These tools are registered on the `cindra-mcp` server. You MUST verify the MCP server is connected before
-using these tools. If the tools are unavailable, invoke `/mcp-environment-setup` to diagnose and resolve
+using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
 connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
 
 | Tool                                        | Purpose                                                                     |
@@ -388,7 +388,7 @@ and let it handle per-recording fine-tuning automatically.
 
 | Skill                            | Relationship                                                                    |
 |----------------------------------|---------------------------------------------------------------------------------|
-| `/mcp-environment-setup`         | Prerequisite: MCP server must be connected for configuration tools              |
+| `/cindra-mcp-environment-setup`         | Prerequisite: MCP server must be connected for configuration tools              |
 | `/acquisition-data-preparation`  | Prerequisite: raw data must be prepared before configuring the pipeline         |
 | `/single-recording-processing`   | Next step: processing workflow that consumes this configuration                 |
 | `/single-recording-results`      | Output data format reference for evaluating processing results                  |
@@ -406,7 +406,7 @@ parameter detection.
 
 ```text
 Single-Recording Configuration Compliance:
-- [ ] cindra MCP server is connected (if not, invoke `/mcp-environment-setup`)
+- [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] `validate_config_file` reports no errors (run this first)
 - [ ] `main.tau` matches the calcium indicator used (0.4 for GCaMP6f, ~1.5 for GCaMP6s)
 - [ ] `main.two_channels` set correctly for the recording type
