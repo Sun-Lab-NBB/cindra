@@ -37,9 +37,9 @@ manual file reads whenever possible.
 
 ### Verification tool
 
-| Tool                                     | Purpose                                                                       |
-|------------------------------------------|-------------------------------------------------------------------------------|
-| `verify_multi_recording_output_tool`     | Verifies completeness of all expected output files per dataset                |
+| Tool                                 | Purpose                                                        |
+|--------------------------------------|----------------------------------------------------------------|
+| `verify_multi_recording_output_tool` | Verifies completeness of all expected output files per dataset |
 
 ### Query tools
 
@@ -134,19 +134,19 @@ Saved in `registration_arrays/` subdirectory. All files are `.npy` format, float
 
 **Channel 1 transformed images:**
 
-| File                                    | Shape           | Description                                         |
-|-----------------------------------------|-----------------|-----------------------------------------------------|
-| `transformed_mean_image.npy`            | (height, width) | Mean image warped to shared visual space            |
-| `transformed_enhanced_mean_image.npy`   | (height, width) | Enhanced mean image warped to shared visual space   |
-| `transformed_maximum_projection.npy`    | (height, width) | Maximum projection warped to shared visual space    |
+| File                                  | Shape           | Description                                       |
+|---------------------------------------|-----------------|---------------------------------------------------|
+| `transformed_mean_image.npy`          | (height, width) | Mean image warped to shared visual space          |
+| `transformed_enhanced_mean_image.npy` | (height, width) | Enhanced mean image warped to shared visual space |
+| `transformed_maximum_projection.npy`  | (height, width) | Maximum projection warped to shared visual space  |
 
 **Channel 2 transformed images (dual-channel only, same shape and dtype):**
 
-| File                                              | Description                              |
-|---------------------------------------------------|------------------------------------------|
-| `transformed_mean_image_channel_2.npy`            | Channel 2 mean image in shared space     |
-| `transformed_enhanced_mean_image_channel_2.npy`   | Channel 2 enhanced mean in shared space  |
-| `transformed_maximum_projection_channel_2.npy`    | Channel 2 max projection in shared space |
+| File                                            | Description                              |
+|-------------------------------------------------|------------------------------------------|
+| `transformed_mean_image_channel_2.npy`          | Channel 2 mean image in shared space     |
+| `transformed_enhanced_mean_image_channel_2.npy` | Channel 2 enhanced mean in shared space  |
+| `transformed_maximum_projection_channel_2.npy`  | Channel 2 max projection in shared space |
 
 ---
 
@@ -192,16 +192,16 @@ deformation, with full shape statistics computed for each ROI.
 
 **roi_statistics.npz:**
 
-| NPZ key                       | Dtype   | Shape       | Description                                            |
-|-------------------------------|---------|-------------|--------------------------------------------------------|
-| `footprints`                  | uint16  | (num_rois,) | Set to pixel_count for tracked ROIs (bypass detection) |
-| `compactness`                 | float32 | (num_rois,) | Ratio of actual to expected mean radius (1.0=circular) |
-| `solidity`                    | float32 | (num_rois,) | Ratio of soma pixels to convex hull area               |
-| `pixel_count`                 | uint32  | (num_rois,) | Total pixels in complete ROI                           |
-| `aspect_ratio`                | float32 | (num_rois,) | Ellipse axis ratio indicating elongation               |
-| `normalized_pixel_count`      | float32 | (num_rois,) | Pixel count normalized by expected ROI size (soma)     |
-| `skewness`                    | float32 | (num_rois,) | Neuropil-corrected fluorescence skewness               |
-| `plane_index`                 | int32   | (num_rois,) | Imaging plane index for each ROI                       |
+| NPZ key                  | Dtype   | Shape       | Description                                            |
+|--------------------------|---------|-------------|--------------------------------------------------------|
+| `footprints`             | uint16  | (num_rois,) | Set to pixel_count for tracked ROIs (bypass detection) |
+| `compactness`            | float32 | (num_rois,) | Ratio of actual to expected mean radius (1.0=circular) |
+| `solidity`               | float32 | (num_rois,) | Ratio of soma pixels to convex hull area               |
+| `pixel_count`            | uint32  | (num_rois,) | Total pixels in complete ROI                           |
+| `aspect_ratio`           | float32 | (num_rois,) | Ellipse axis ratio indicating elongation               |
+| `normalized_pixel_count` | float32 | (num_rois,) | Pixel count normalized by expected ROI size (soma)     |
+| `skewness`               | float32 | (num_rois,) | Neuropil-corrected fluorescence skewness               |
+| `plane_index`            | int32   | (num_rois,) | Imaging plane index for each ROI                       |
 
 Channel 2 uses identical keys in `roi_masks_channel_2.npz` and `roi_statistics_channel_2.npz`.
 
@@ -245,12 +245,12 @@ zeroes.
 A YAML file containing scalar metadata from all processing stages. Array fields are set to None in the YAML and
 saved as separate `.npy`/`.npz` files (documented above).
 
-| Section        | Key fields                                                                                                                                                                                                      |
-|----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `io`           | `recording_id`, `data_path`, `dataset_name`, `mroi_region_borders`, `dataset_output_paths`, `selected_roi_indices`, `selected_roi_indices_channel_2`                                                            |
-| `registration` | `has_registration_data` (bool flag; deformation fields and transformed images saved as `.npy`, deformed masks saved as `.npz`, all set to None in YAML)                                                         |
-| `tracking`     | `template_masks`, `template_masks_channel_2`, `template_diameter`, `template_diameter_channel_2` (mask fields saved as NPZ, set to None in YAML)                                                                |
-| `timing`       | `registration_time`, `tracking_time`, `backward_transform_time`, `total_discovery_time`, `extraction_time`, `deconvolution_time`, `total_extraction_time`, `date_processed`, `python_version`, `cindra_version` |
+| Section        | Key fields                                                                                                                                                                                                                                                                                                                                                                         |
+|----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `io`           | `recording_id`, `data_path`, `dataset_name`, `mroi_region_borders`, `dataset_output_paths`, `selected_roi_indices`, `selected_roi_indices_channel_2`                                                                                                                                                                                                                               |
+| `registration` | `deform_field_y`, `deform_field_x`, `transformed_mean_image`, `transformed_enhanced_mean_image`, `transformed_maximum_projection` (and `*_channel_2` variants), `deformed_roi_masks`, `deformed_roi_masks_channel_2` — all array fields, set to None in YAML because their data is saved separately as `.npy` files in `registration_arrays/` and `.npz` files at the dataset root |
+| `tracking`     | `template_masks`, `template_masks_channel_2`, `template_diameter`, `template_diameter_channel_2` (mask fields saved as NPZ, set to None in YAML)                                                                                                                                                                                                                                   |
+| `timing`       | `registration_time`, `tracking_time`, `backward_transform_time`, `total_discovery_time`, `extraction_time`, `deconvolution_time`, `total_extraction_time`, `date_processed`, `python_version`, `cindra_version`                                                                                                                                                                    |
 
 ---
 
@@ -274,12 +274,12 @@ mapping and are always eagerly loaded.
 
 ## Related skills
 
-| Skill                              | Relationship                                                                             |
-|------------------------------------|------------------------------------------------------------------------------------------|
-| `/multi-recording-configuration`   | Configuration parameter reference for the multi-recording pipeline                       |
-| `/multi-recording-processing`      | Processing workflow that produces this output                                            |
-| `/single-recording-results`        | Companion output data reference for the single-recording pipeline                        |
-| `/visualization`                   | Launch viewers and query tools to visualize and inspect this output data                 |
+| Skill                            | Relationship                                                             |
+|----------------------------------|--------------------------------------------------------------------------|
+| `/multi-recording-configuration` | Configuration parameter reference for the multi-recording pipeline       |
+| `/multi-recording-processing`    | Processing workflow that produces this output                            |
+| `/single-recording-results`      | Companion output data reference for the single-recording pipeline        |
+| `/visualization`                 | Launch viewers and query tools to visualize and inspect this output data |
 
 ---
 

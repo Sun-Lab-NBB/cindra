@@ -414,8 +414,7 @@ def _prepare_tracker(  # pragma: no cover
             run for the current configuration. Used exclusively for foreign-entry detection.
     """
     universe_ids = {
-        ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier)
-        for job_name, specifier in universe
+        ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier) for job_name, specifier in universe
     }
     requested_ids = {
         ProcessingTracker.generate_job_id(job_name=job_name, specifier=specifier) for job_name, specifier in jobs

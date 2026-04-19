@@ -38,13 +38,13 @@ These tools are registered on the `cindra-mcp` server. You MUST verify the MCP s
 using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
 connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
 
-| Tool                                       | Purpose                                                                     |
-|--------------------------------------------|-----------------------------------------------------------------------------|
-| `generate_config_file`                     | Generates a default configuration YAML for the specified pipeline type      |
-| `discover_recordings_tool`                 | Discovers single and multi-recording candidates under a root directory      |
-| `resolve_dataset_name_tool`                | Constructs qualified dataset names from base name + specifier               |
-| `read_config_file`                         | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)    |
-| `validate_config_file`                     | Validates a cindra config against schema, reports errors and non-defaults   |
+| Tool                        | Purpose                                                                   |
+|-----------------------------|---------------------------------------------------------------------------|
+| `generate_config_file`      | Generates a default configuration YAML for the specified pipeline type    |
+| `discover_recordings_tool`  | Discovers single and multi-recording candidates under a root directory    |
+| `resolve_dataset_name_tool` | Constructs qualified dataset names from base name + specifier             |
+| `read_config_file`          | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
+| `validate_config_file`      | Validates a cindra config against schema, reports errors and non-defaults |
 
 ---
 
@@ -384,10 +384,13 @@ Configuration files follow a two-tier lifecycle:
    same processing parameters (only `dataset_name` differs, and this is handled by the batch tool).
 
 2. **Resolved copies** — When `prepare_multi_recording_batch_tool` runs, it loads the template,
-   applies runtime-specific overrides (`recording_io.recording_directories`, `runtime.parallel_workers`),
-   and saves the resolved copy as `multi_recording_configuration.yaml` inside each dataset's output
-   directory (`cindra/multi_recording/{dataset_name}/`). These resolved copies are what the pipeline
-   actually executes against.
+   applies runtime-specific overrides (`recording_io.dataset_name` lowercased to a filesystem-safe key,
+   `recording_io.recording_directories` natural-sorted from the supplied `recording_paths`, and
+   `runtime.display_progress_bars=False`), and saves the resolved copy as
+   `multi_recording_configuration.yaml` inside the main recording's dataset output directory
+   (`cindra/multi_recording/{dataset_name}/`). The `runtime.parallel_workers` value is rewritten later
+   by `execute_processing_jobs_tool` at dispatch time based on saturating allocation, not by the
+   prepare step. These resolved copies are what the pipeline actually executes against.
 
 **Do NOT** create per-dataset configuration files manually. Pass a single template path to the batch tool
 and let it handle per-dataset fine-tuning automatically.
@@ -421,7 +424,7 @@ and let it handle per-dataset fine-tuning automatically.
 
 | Skill                             | Relationship                                                                      |
 |-----------------------------------|-----------------------------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`          | Prerequisite: MCP server must be connected for configuration tools                |
+| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server must be connected for configuration tools                |
 | `/single-recording-processing`    | Prerequisite: single-recording processing must complete before multi-recording    |
 | `/single-recording-results`       | Prerequisite: single-recording output files required as input for multi-recording |
 | `/single-recording-configuration` | Companion configuration reference for the single-recording pipeline               |

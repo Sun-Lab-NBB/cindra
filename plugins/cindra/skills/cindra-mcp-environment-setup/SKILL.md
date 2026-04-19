@@ -72,11 +72,11 @@ environment where cindra is installed must be active before launching Claude Cod
 
 cindra's Claude Code integration is split across two distribution channels:
 
-| Component                                        | Distributed via           | What it provides                                                          |
-|--------------------------------------------------|---------------------------|---------------------------------------------------------------------------|
-| Skills (`/single-recording-processing`, etc.)    | cindra Claude Code plugin | Skill files that guide agents through workflows                           |
-| MCP server registrations                         | cindra Claude Code plugin | `plugin.json` mcpServers entries that register servers with Claude Code   |
-| MCP server code (`cindra mcp`, `cindra-gui mcp`) | cindra pip package        | The actual CLI commands and server implementations                        |
+| Component                                        | Distributed via           | What it provides                                                        |
+|--------------------------------------------------|---------------------------|-------------------------------------------------------------------------|
+| Skills (`/single-recording-processing`, etc.)    | cindra Claude Code plugin | Skill files that guide agents through workflows                         |
+| MCP server registrations                         | cindra Claude Code plugin | `plugin.json` mcpServers entries that register servers with Claude Code |
+| MCP server code (`cindra mcp`, `cindra-gui mcp`) | cindra pip package        | The actual CLI commands and server implementations                      |
 
 Installing the plugin alone registers the MCP servers and makes skills available, but the servers
 will fail to start because the `cindra` and `cindra-gui` CLI commands are not present. The pip
@@ -200,31 +200,31 @@ servers on the next session.
 
 ## Common issues and resolutions
 
-| Symptom                                 | Cause                                | Resolution                                         |
-|-----------------------------------------|--------------------------------------|----------------------------------------------------|
-| `cindra: command not found`             | Environment not activated            | Activate conda/venv, then restart Claude Code      |
-| `cindra: command not found`             | cindra not installed                 | `pip install cindra` in the active environment     |
-| `cindra-gui: command not found`         | Environment not activated            | Activate conda/venv, then restart Claude Code      |
-| Import error on `cindra mcp`            | Missing or incompatible dependency   | `pip install --force-reinstall cindra`             |
-| Import error on `cindra-gui mcp`        | Missing Qt/PySide6 dependency        | `pip install cindra[gui]` or `pip install PySide6` |
-| Python version mismatch                 | Wrong environment activated          | Activate environment with Python 3.14              |
-| MCP server starts but tools are missing | Outdated cindra version              | `pip install --upgrade cindra`                     |
-| MCP server connected but tools fail     | Not an environment issue             | Check tool-specific error messages                 |
-| cindra-gui tools unavailable            | Plugin not installed or outdated     | Reinstall the cindra Claude Code plugin            |
-| Skills available but MCP tools missing  | Plugin installed without pip package | `pip install cindra` in the active environment     |
+| Symptom                                 | Cause                                | Resolution                                                                          |
+|-----------------------------------------|--------------------------------------|-------------------------------------------------------------------------------------|
+| `cindra: command not found`             | Environment not activated            | Activate conda/venv, then restart Claude Code                                       |
+| `cindra: command not found`             | cindra not installed                 | `pip install cindra` in the active environment                                      |
+| `cindra-gui: command not found`         | Environment not activated            | Activate conda/venv, then restart Claude Code                                       |
+| Import error on `cindra mcp`            | Missing or incompatible dependency   | `pip install --force-reinstall cindra`                                              |
+| Import error on `cindra-gui mcp`        | Broken Qt/PySide6 install            | `pip install --force-reinstall cindra` (PySide6 is a core dependency, not an extra) |
+| Python version mismatch                 | Wrong environment activated          | Activate environment with Python 3.14                                               |
+| MCP server starts but tools are missing | Outdated cindra version              | `pip install --upgrade cindra`                                                      |
+| MCP server connected but tools fail     | Not an environment issue             | Check tool-specific error messages                                                  |
+| cindra-gui tools unavailable            | Plugin not installed or outdated     | Reinstall the cindra Claude Code plugin                                             |
+| Skills available but MCP tools missing  | Plugin installed without pip package | `pip install cindra` in the active environment                                      |
 
 ---
 
 ## Related skills
 
-| Skill                              | Relationship                                                              |
-|------------------------------------|---------------------------------------------------------------------------|
-| `/acquisition-data-preparation`    | Requires the cindra MCP server for data preparation tools                 |
-| `/single-recording-configuration`  | Requires the cindra MCP server for configuration tool access              |
-| `/single-recording-processing`     | Requires the cindra MCP server to be connected before processing          |
-| `/multi-recording-configuration`   | Requires the cindra MCP server for configuration tool access              |
-| `/multi-recording-processing`      | Requires the cindra MCP server to be connected before processing          |
-| `/visualization`                   | Requires the cindra-gui MCP server for viewer and query tool access       |
+| Skill                             | Relationship                                                        |
+|-----------------------------------|---------------------------------------------------------------------|
+| `/acquisition-data-preparation`   | Requires the cindra MCP server for data preparation tools           |
+| `/single-recording-configuration` | Requires the cindra MCP server for configuration tool access        |
+| `/single-recording-processing`    | Requires the cindra MCP server to be connected before processing    |
+| `/multi-recording-configuration`  | Requires the cindra MCP server for configuration tool access        |
+| `/multi-recording-processing`     | Requires the cindra MCP server to be connected before processing    |
+| `/visualization`                  | Requires the cindra-gui MCP server for viewer and query tool access |
 
 ---
 

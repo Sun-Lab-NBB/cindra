@@ -243,30 +243,30 @@ Registration writes corrected frames back to the same binary files created durin
 
 Stored under `plane_<i>/registration_data/`:
 
-| File                                     | Format                   | Description                                                |
-|------------------------------------------|--------------------------|------------------------------------------------------------|
-| `reference_image.npy`                    | float32 (h, w)           | Alignment target computed from the most stable frames      |
-| `rigid_y_offsets.npy`                    | int32 (frames,)          | Per-frame vertical translation from phase correlation      |
-| `rigid_x_offsets.npy`                    | int32 (frames,)          | Per-frame horizontal translation from phase correlation    |
-| `rigid_correlations.npy`                 | float32 (frames,)        | Phase correlation quality per frame                        |
-| `bad_frames.npy`                         | bool (frames,)           | Flags frames with excessive motion                         |
-| `nonrigid_y_offsets.npy`                 | float32 (frames, by, bx) | Per-block vertical offsets (when nonrigid enabled)         |
-| `nonrigid_x_offsets.npy`                 | float32 (frames, by, bx) | Per-block horizontal offsets (when nonrigid enabled)       |
-| `nonrigid_correlations.npy`              | float32 (frames, by, bx) | Per-block correlation quality (when nonrigid enabled)      |
-| `principal_component_projections.npy`    | float32 (frames, n_pcs)  | Frame projections onto principal components (when enabled) |
-| `principal_component_extreme_images.npy` | float32 (2, n_pcs, h, w) | Mean images of low/high projection frames per PC           |
-| `principal_component_shift_metrics.npy`  | float32 (n_pcs, 3)       | Registration quality metrics per PC                        |
+| File                                     | Format                       | Description                                                |
+|------------------------------------------|------------------------------|------------------------------------------------------------|
+| `reference_image.npy`                    | float32 (h, w)               | Alignment target computed from the most stable frames      |
+| `rigid_y_offsets.npy`                    | int32 (frames,)              | Per-frame vertical translation from phase correlation      |
+| `rigid_x_offsets.npy`                    | int32 (frames,)              | Per-frame horizontal translation from phase correlation    |
+| `rigid_correlations.npy`                 | float32 (frames,)            | Phase correlation quality per frame                        |
+| `bad_frames.npy`                         | bool (frames,)               | Flags frames with excessive motion                         |
+| `nonrigid_y_offsets.npy`                 | float32 (frames, num_blocks) | Per-block vertical offsets (when nonrigid enabled)         |
+| `nonrigid_x_offsets.npy`                 | float32 (frames, num_blocks) | Per-block horizontal offsets (when nonrigid enabled)       |
+| `nonrigid_correlations.npy`              | float32 (frames, num_blocks) | Per-block correlation quality (when nonrigid enabled)      |
+| `principal_component_projections.npy`    | float32 (frames, n_pcs)      | Frame projections onto principal components (when enabled) |
+| `principal_component_extreme_images.npy` | float32 (2, n_pcs, h, w)     | Mean images of low/high projection frames per PC           |
+| `principal_component_shift_metrics.npy`  | float32 (n_pcs, 3)           | Registration quality metrics per PC                        |
 
 #### Per-Plane Detection Data
 
 Stored under `plane_<i>/detection_data/`:
 
-| File                              | Format          | Description                                          |
-|-----------------------------------|-----------------|------------------------------------------------------|
-| `mean_image.npy`                  | float32 (h, w)  | Average of all registered frames                     |
-| `enhanced_mean_image.npy`         | float32 (h, w)  | Background-subtracted and contrast-normalized mean   |
-| `maximum_projection.npy`          | float32 (h, w)  | Maximum intensity projection across all frames       |
-| `correlation_map.npy`             | float32 (h, w)  | Pixel-wise correlation with neighboring pixels       |
+| File                      | Format         | Description                                        |
+|---------------------------|----------------|----------------------------------------------------|
+| `mean_image.npy`          | float32 (h, w) | Average of all registered frames                   |
+| `enhanced_mean_image.npy` | float32 (h, w) | Background-subtracted and contrast-normalized mean |
+| `maximum_projection.npy`  | float32 (h, w) | Maximum intensity projection across all frames     |
+| `correlation_map.npy`     | float32 (h, w) | Pixel-wise correlation with neighboring pixels     |
 
 Channel 2 variants (`mean_image_channel_2.npy`, etc.) are saved when both channels are functional.
 
@@ -282,7 +282,7 @@ Stored under `plane_<i>/`:
 | `neuropil_fluorescence.npy`   | float32 (n_rois, frames) | Background fluorescence from surround masks                              |
 | `subtracted_fluorescence.npy` | float32 (n_rois, frames) | Neuropil-corrected and baseline-subtracted traces                        |
 | `spikes.npy`                  | float32 (n_rois, frames) | Inferred spike amplitudes from OASIS                                     |
-| `cell_classification.npy`     | float32 (n_rois,)        | Cell probability per ROI                                                 |
+| `cell_classification.npy`     | float32 (n_rois, 2)      | Column 0: is_cell label (1.0 or 0.0); column 1: classifier probability   |
 
 Channel 2 variants (`cell_fluorescence_channel_2.npy`, etc.) are saved when both channels are functional.
 
@@ -321,7 +321,7 @@ Stored under `<output_path>/cindra/multi_recording/<dataset_name>/` per recordin
 | `neuropil_fluorescence.npy`              | Background fluorescence from surround masks               |
 | `subtracted_fluorescence.npy`            | Neuropil-corrected and baseline-subtracted traces         |
 | `spikes.npy`                             | Spike trains for tracked ROIs in this recording           |
-| `cell_classification.npy`                | Cell probability per tracked ROI                          |
+| `cell_colocalization.npy`                | Channel colocalization scores (dual-channel only)         |
 
 ### Single-Recording Pipeline
 
@@ -346,13 +346,15 @@ Reads:
 
 Produces:
 
-| File / Data                    | Description                                                   |
-|--------------------------------|---------------------------------------------------------------|
-| `configuration.yaml`           | Pipeline configuration copy (output root)                     |
-| `acquisition_parameters.yaml`  | Acquisition metadata copy (output root)                       |
-| `plane_<i>/channel_1_data.bin` | Binary imaging data for channel 1                             |
-| `plane_<i>/channel_2_data.bin` | Binary imaging data for channel 2 (if two-channel)            |
-| `plane_<i>/runtime_data.yaml`  | Per-plane metadata: frame dimensions, frame count, mean image |
+| File / Data                                         | Description                                                             |
+|-----------------------------------------------------|-------------------------------------------------------------------------|
+| `configuration.yaml`                                | Pipeline configuration copy (output root)                               |
+| `acquisition_parameters.yaml`                       | Acquisition metadata copy (output root)                                 |
+| `plane_<i>/channel_1_data.bin`                      | Binary imaging data for channel 1                                       |
+| `plane_<i>/channel_2_data.bin`                      | Binary imaging data for channel 2 (if two-channel)                      |
+| `plane_<i>/runtime_data.yaml`                       | Per-plane scalar metadata: frame dimensions, frame count, sampling rate |
+| `plane_<i>/detection_data/mean_image.npy`           | Per-plane temporal mean image computed during binarization              |
+| `plane_<i>/detection_data/mean_image_channel_2.npy` | Channel 2 mean image (if two-channel)                                   |
 
 **Run via CLI:** `cindra run --input-path config.yaml --binarize`
 
@@ -377,11 +379,11 @@ independently.
 
 Reads:
 
-| File / Data                        | Description                                          |
-|------------------------------------|------------------------------------------------------|
-| `plane_<i>/channel_1_data.bin`     | Raw binary imaging data from binarization            |
-| `plane_<i>/channel_2_data.bin`     | Channel 2 binary data (two-channel recordings only)  |
-| `plane_<i>/runtime_data.yaml`      | Mean image and frame dimensions from binarization    |
+| File / Data                    | Description                                         |
+|--------------------------------|-----------------------------------------------------|
+| `plane_<i>/channel_1_data.bin` | Raw binary imaging data from binarization           |
+| `plane_<i>/channel_2_data.bin` | Channel 2 binary data (two-channel recordings only) |
+| `plane_<i>/runtime_data.yaml`  | Mean image and frame dimensions from binarization   |
 
 Produces:
 
@@ -416,11 +418,11 @@ surviving ROI.
 
 Reads:
 
-| File / Data                                        | Description                                  |
-|----------------------------------------------------|----------------------------------------------|
-| `plane_<i>/channel_1_data.bin`                     | Motion-corrected binary data                 |
-| `plane_<i>/registration_data/bad_frames.npy`       | Bad-frame mask from registration             |
-| Valid pixel ranges (from `runtime_data.yaml`)      | Usable frame region after border cropping    |
+| File / Data                                   | Description                               |
+|-----------------------------------------------|-------------------------------------------|
+| `plane_<i>/channel_1_data.bin`                | Motion-corrected binary data              |
+| `plane_<i>/registration_data/bad_frames.npy`  | Bad-frame mask from registration          |
+| Valid pixel ranges (from `runtime_data.yaml`) | Usable frame region after border cropping |
 
 Produces:
 
@@ -448,22 +450,22 @@ rather than an artifact.
 
 Reads:
 
-| File / Data                                    | Description                                          |
-|------------------------------------------------|------------------------------------------------------|
-| `plane_<i>/channel_1_data.bin`                 | Motion-corrected binary data for trace extraction    |
-| `plane_<i>/channel_2_data.bin`                 | Channel 2 data (two-channel recordings only)         |
-| `plane_<i>/roi_masks.npz`                      | ROI pixel masks from detection                       |
-| `plane_<i>/roi_statistics.npz`                 | ROI shape properties from detection                  |
+| File / Data                    | Description                                       |
+|--------------------------------|---------------------------------------------------|
+| `plane_<i>/channel_1_data.bin` | Motion-corrected binary data for trace extraction |
+| `plane_<i>/channel_2_data.bin` | Channel 2 data (two-channel recordings only)      |
+| `plane_<i>/roi_masks.npz`      | ROI pixel masks from detection                    |
+| `plane_<i>/roi_statistics.npz` | ROI shape properties from detection               |
 
 Produces:
 
-| File / Data                                    | Description                                          |
-|------------------------------------------------|------------------------------------------------------|
-| `plane_<i>/cell_fluorescence.npy`              | Raw fluorescence time series per ROI                 |
-| `plane_<i>/neuropil_fluorescence.npy`          | Background fluorescence from surround masks          |
-| `plane_<i>/subtracted_fluorescence.npy`        | Neuropil-corrected and baseline-subtracted traces    |
-| `plane_<i>/cell_classification.npy`            | Cell probability per ROI                             |
-| `plane_<i>/cell_colocalization.npy`            | Channel colocalization scores (two-channel only)     |
+| File / Data                             | Description                                       |
+|-----------------------------------------|---------------------------------------------------|
+| `plane_<i>/cell_fluorescence.npy`       | Raw fluorescence time series per ROI              |
+| `plane_<i>/neuropil_fluorescence.npy`   | Background fluorescence from surround masks       |
+| `plane_<i>/subtracted_fluorescence.npy` | Neuropil-corrected and baseline-subtracted traces |
+| `plane_<i>/cell_classification.npy`     | Cell probability per ROI                          |
+| `plane_<i>/cell_colocalization.npy`     | Channel colocalization scores (two-channel only)  |
 
 ##### Spike Deconvolution
 
@@ -478,9 +480,9 @@ while enforcing a non-negativity constraint (fluorescence can only increase from
 
 Reads:
 
-| File / Data                                | Description                                      |
-|--------------------------------------------|--------------------------------------------------|
-| `plane_<i>/subtracted_fluorescence.npy`    | Neuropil-corrected traces from extraction        |
+| File / Data                             | Description                               |
+|-----------------------------------------|-------------------------------------------|
+| `plane_<i>/subtracted_fluorescence.npy` | Neuropil-corrected traces from extraction |
 
 Produces:
 
@@ -856,22 +858,22 @@ dependencies:
 
 This project uses `tox` for development automation. The following tox environments are available:
 
-| Environment    | Description                                                  |
-|----------------|--------------------------------------------------------------|
-| `lint`         | Runs ruff formatting, ruff linting, and mypy type checking   |
-| `stubs`        | Generates py.typed marker and .pyi stub files                |
-| `py314-test`   | Runs the test suite via pytest for Python 3.14               |
-| `coverage`     | Aggregates test coverage into an HTML report                 |
-| `docs`         | Builds the API documentation via Sphinx                      |
-| `build`        | Builds sdist and wheel distributions                         |
-| `upload`       | Uploads distributions to PyPI via twine                      |
-| `install`      | Builds and installs the project into its mamba environment   |
-| `uninstall`    | Uninstalls the project from its mamba environment            |
-| `create`       | Creates the project's mamba development environment          |
-| `remove`       | Removes the project's mamba development environment          |
-| `provision`    | Recreates the mamba environment from scratch                 |
-| `export`       | Exports the mamba environment as .yml and spec.txt files     |
-| `import`       | Creates or updates the mamba environment from a .yml file    |
+| Environment  | Description                                                |
+|--------------|------------------------------------------------------------|
+| `lint`       | Runs ruff formatting, ruff linting, and mypy type checking |
+| `stubs`      | Generates py.typed marker and .pyi stub files              |
+| `py314-test` | Runs the test suite via pytest for Python 3.14             |
+| `coverage`   | Aggregates test coverage into an HTML report               |
+| `docs`       | Builds the API documentation via Sphinx                    |
+| `build`      | Builds sdist and wheel distributions                       |
+| `upload`     | Uploads distributions to PyPI via twine                    |
+| `install`    | Builds and installs the project into its mamba environment |
+| `uninstall`  | Uninstalls the project from its mamba environment          |
+| `create`     | Creates the project's mamba development environment        |
+| `remove`     | Removes the project's mamba development environment        |
+| `provision`  | Recreates the mamba environment from scratch               |
+| `export`     | Exports the mamba environment as .yml and spec.txt files   |
+| `import`     | Creates or updates the mamba environment from a .yml file  |
 
 Run any environment using `tox -e ENVIRONMENT`. For example, `tox -e lint`.
 

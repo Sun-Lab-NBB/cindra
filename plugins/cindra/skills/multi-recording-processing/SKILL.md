@@ -83,25 +83,25 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ### Management tools
 
-| Tool                             | Purpose                                                           |
-|----------------------------------|-------------------------------------------------------------------|
-| `get_batch_status_overview_tool` | Bird's-eye view of all processing status under a root directory   |
-| `reset_processing_phases_tool`   | Selectively reset completed phases for re-runs                    |
-| `clean_processing_output_tool`   | Delete output files for specific phases to reclaim disk space     |
+| Tool                             | Purpose                                                         |
+|----------------------------------|-----------------------------------------------------------------|
+| `get_batch_status_overview_tool` | Bird's-eye view of all processing status under a root directory |
+| `reset_processing_phases_tool`   | Selectively reset completed phases for re-runs                  |
+| `clean_processing_output_tool`   | Delete output files for specific phases to reclaim disk space   |
 
 ### Configuration & name resolution tools
 
-| Tool                                       | Purpose                                                            |
-|--------------------------------------------|--------------------------------------------------------------------|
-| `resolve_dataset_name_tool`                | Constructs qualified dataset names from base name + specifier      |
-| `discover_recordings_tool`                 | Discovers single and multi-recording candidates under a root dir   |
-| `generate_config_file`                     | Generates default multi-recording configuration YAML               |
+| Tool                        | Purpose                                                          |
+|-----------------------------|------------------------------------------------------------------|
+| `resolve_dataset_name_tool` | Constructs qualified dataset names from base name + specifier    |
+| `discover_recordings_tool`  | Discovers single and multi-recording candidates under a root dir |
+| `generate_config_file`      | Generates default multi-recording configuration YAML             |
 
 ### Supporting tools (used during workflow)
 
-| Tool                                       | Purpose                                                 |
-|--------------------------------------------|---------------------------------------------------------|
-| `get_recording_status_tool`                | Checks single and multi-recording processing status     |
+| Tool                        | Purpose                                             |
+|-----------------------------|-----------------------------------------------------|
+| `get_recording_status_tool` | Checks single and multi-recording processing status |
 
 ---
 
@@ -110,11 +110,11 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 Two-phase pipeline per dataset:
 
 ```text
-Phase 1: DISCOVER (Mixed parallelization)
+Phase 1: DISCOVER (CPU bound, parallel by dataset)
 ├── Registers all recordings to common reference frame
 ├── Clusters ROI masks across recordings
 ├── Generates template masks for tracked ROIs
-└── 20 workers per dataset, registration sequential
+└── Workers per dataset via saturating allocation (see Resource Management)
 
 Phase 2: EXTRACT (CPU bound, parallel by recording)
 ├── Applies template masks to extract fluorescence
@@ -308,33 +308,33 @@ Summary: 1/2 datasets complete | 2/4 recordings extracted | 0 failed
 
 ### Preparation errors
 
-| Error Message                                     | Resolution                              |
-|---------------------------------------------------|-----------------------------------------|
-| "At least one dataset configuration is required"  | Provide dataset configurations          |
-| "Configuration not found"                         | Invoke `/multi-recording-configuration` |
-| "Need at least 2 recordings"                      | Provide at least 2 recording paths      |
-| "Invalid recordings"                              | Verify paths exist and are directories  |
+| Error Message                                    | Resolution                              |
+|--------------------------------------------------|-----------------------------------------|
+| "At least one dataset configuration is required" | Provide dataset configurations          |
+| "Configuration not found"                        | Invoke `/multi-recording-configuration` |
+| "Need at least 2 recordings"                     | Provide at least 2 recording paths      |
+| "Invalid recordings"                             | Verify paths exist and are directories  |
 
 ### Execution errors
 
-| Error Message                                   | Resolution                                     |
-|-------------------------------------------------|------------------------------------------------|
-| "An execution session is already active"        | Wait for current session or cancel first       |
-| "Job ID not found in tracker"                   | Re-prepare the batch to regenerate manifests   |
-| "Prerequisites not satisfied"                   | Execute prerequisite phases first              |
+| Error Message                            | Resolution                                   |
+|------------------------------------------|----------------------------------------------|
+| "An execution session is already active" | Wait for current session or cancel first     |
+| "Job ID not found in tracker"            | Re-prepare the batch to regenerate manifests |
+| "Prerequisites not satisfied"            | Execute prerequisite phases first            |
 
 ### Processing failure routing
 
 When processing fails for some datasets/recordings, read the error messages and route:
 
-| Error pattern                                       | Skill to invoke                    |
-|-----------------------------------------------------|------------------------------------|
-| Missing cindra output, incomplete single-recording  | `/single-recording-processing`     |
-| Missing raw data, no `cindra_parameters.json`       | `/acquisition-data-preparation`    |
-| Configuration parameter issues, bad dataset name    | `/multi-recording-configuration`   |
-| Registration tuning needed (too much/little drift)  | `/multi-recording-configuration`   |
-| No trackable ROIs found                             | `/multi-recording-configuration`   |
-| MCP tools unavailable, server connection errors     | `/cindra-mcp-environment-setup`           |
+| Error pattern                                      | Skill to invoke                  |
+|----------------------------------------------------|----------------------------------|
+| Missing cindra output, incomplete single-recording | `/single-recording-processing`   |
+| Missing raw data, no `cindra_parameters.json`      | `/acquisition-data-preparation`  |
+| Configuration parameter issues, bad dataset name   | `/multi-recording-configuration` |
+| Registration tuning needed (too much/little drift) | `/multi-recording-configuration` |
+| No trackable ROIs found                            | `/multi-recording-configuration` |
+| MCP tools unavailable, server connection errors    | `/cindra-mcp-environment-setup`  |
 
 Wait for the current execution session to complete before starting retries.
 
@@ -342,14 +342,14 @@ Wait for the current execution session to complete before starting retries.
 
 ## Related skills
 
-| Skill                              | Role                                                           |
-|------------------------------------|----------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`           | Prerequisite: MCP server connectivity                          |
-| `/acquisition-data-preparation`    | Upstream: raw data preparation                                 |
-| `/single-recording-processing`     | Prerequisite: all recordings must be single-recording complete |
-| `/multi-recording-configuration`   | Configuration: parameter reference and file creation           |
-| `/multi-recording-results`         | Output: verify and explain processing results                  |
-| `/visualization`                   | Downstream: visual inspection of results                       |
+| Skill                            | Role                                                           |
+|----------------------------------|----------------------------------------------------------------|
+| `/cindra-mcp-environment-setup`  | Prerequisite: MCP server connectivity                          |
+| `/acquisition-data-preparation`  | Upstream: raw data preparation                                 |
+| `/single-recording-processing`   | Prerequisite: all recordings must be single-recording complete |
+| `/multi-recording-configuration` | Configuration: parameter reference and file creation           |
+| `/multi-recording-results`       | Output: verify and explain processing results                  |
+| `/visualization`                 | Downstream: visual inspection of results                       |
 
 ---
 

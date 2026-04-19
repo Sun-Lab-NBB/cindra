@@ -71,19 +71,19 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ### Management tools
 
-| Tool                             | Purpose                                                           |
-|----------------------------------|-------------------------------------------------------------------|
-| `get_batch_status_overview_tool` | Bird's-eye view of all processing status under a root directory   |
-| `reset_processing_phases_tool`   | Selectively reset completed phases for re-runs                    |
-| `clean_processing_output_tool`   | Delete output files for specific phases to reclaim disk space     |
+| Tool                             | Purpose                                                         |
+|----------------------------------|-----------------------------------------------------------------|
+| `get_batch_status_overview_tool` | Bird's-eye view of all processing status under a root directory |
+| `reset_processing_phases_tool`   | Selectively reset completed phases for re-runs                  |
+| `clean_processing_output_tool`   | Delete output files for specific phases to reclaim disk space   |
 
 ### Supporting tools (used during workflow)
 
-| Tool                                        | Purpose                                             |
-|---------------------------------------------|-----------------------------------------------------|
-| `discover_recordings_tool`                  | Discovers single and multi-recording candidates     |
-| `validate_recording_readiness`              | Validates raw data and parameters before processing |
-| `get_recording_status_tool`                 | Checks single and multi-recording processing status |
+| Tool                           | Purpose                                             |
+|--------------------------------|-----------------------------------------------------|
+| `discover_recordings_tool`     | Discovers single and multi-recording candidates     |
+| `validate_recording_readiness` | Validates raw data and parameters before processing |
+| `get_recording_status_tool`    | Checks single and multi-recording processing status |
 
 ---
 
@@ -265,11 +265,11 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
 ### Execution errors
 
-| Error Message                                   | Resolution                                     |
-|-------------------------------------------------|------------------------------------------------|
-| "An execution session is already active"        | Wait for current session or cancel first       |
-| "Job ID not found in tracker"                   | Re-prepare the batch to regenerate manifests   |
-| "Prerequisites not satisfied"                   | Execute prerequisite phases first              |
+| Error Message                            | Resolution                                   |
+|------------------------------------------|----------------------------------------------|
+| "An execution session is already active" | Wait for current session or cancel first     |
+| "Job ID not found in tracker"            | Re-prepare the batch to regenerate manifests |
+| "Prerequisites not satisfied"            | Execute prerequisite phases first            |
 
 ### Processing failure routing
 
@@ -280,7 +280,7 @@ When processing fails for some recordings, read the error messages and route to 
 | Missing `cindra_parameters.json`, TIFF read error | `/acquisition-data-preparation`   |
 | Invalid parameter values, wrong plane/channel     | `/acquisition-data-preparation`   |
 | Configuration parameter issues                    | `/single-recording-configuration` |
-| MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`          |
+| MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`   |
 
 Wait for the current execution session to complete before starting retries.
 
@@ -288,14 +288,14 @@ Wait for the current execution session to complete before starting retries.
 
 ## Related skills
 
-| Skill                              | Role                                                           |
-|------------------------------------|----------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`           | Prerequisite: MCP server connectivity                          |
-| `/acquisition-data-preparation`    | Input: raw data preparation and validation                     |
-| `/single-recording-configuration`  | Configuration: parameter reference and file creation           |
-| `/single-recording-results`        | Output: verify and explain processing results                  |
-| `/multi-recording-processing`      | Downstream: cross-recording ROI tracking                       |
-| `/visualization`                   | Downstream: visual inspection of results                       |
+| Skill                             | Role                                                 |
+|-----------------------------------|------------------------------------------------------|
+| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server connectivity                |
+| `/acquisition-data-preparation`   | Input: raw data preparation and validation           |
+| `/single-recording-configuration` | Configuration: parameter reference and file creation |
+| `/single-recording-results`       | Output: verify and explain processing results        |
+| `/multi-recording-processing`     | Downstream: cross-recording ROI tracking             |
+| `/visualization`                  | Downstream: visual inspection of results             |
 
 ---
 

@@ -70,17 +70,17 @@ tools manage the viewer window; the headless query tools provide the underlying 
 Use these headless query tools alongside viewer state to provide data-driven assistance. These
 tools are documented in detail by `/single-recording-results` and `/multi-recording-results`.
 
-| Tool                                              | Use with viewer   |
-|---------------------------------------------------|-------------------|
-| `query_single_recording_metadata_tool`            | Any viewer        |
-| `query_registration_quality_tool`                 | Registration      |
-| `query_detection_summary_tool`                    | ROI               |
-| `query_roi_statistics_tool`                       | ROI               |
-| `query_traces_tool`                               | ROI               |
-| `query_multi_recording_overview_tool`             | ROI, Tracking     |
-| `query_multi_recording_registration_quality_tool` | Tracking          |
-| `query_multi_recording_tracking_summary_tool`     | Tracking          |
-| `query_cross_recording_traces_tool`               | ROI (multi-rec)   |
+| Tool                                              | Use with viewer |
+|---------------------------------------------------|-----------------|
+| `query_single_recording_metadata_tool`            | Any viewer      |
+| `query_registration_quality_tool`                 | Registration    |
+| `query_detection_summary_tool`                    | ROI             |
+| `query_roi_statistics_tool`                       | ROI             |
+| `query_traces_tool`                               | ROI             |
+| `query_multi_recording_overview_tool`             | ROI, Tracking   |
+| `query_multi_recording_registration_quality_tool` | Tracking        |
+| `query_multi_recording_tracking_summary_tool`     | Tracking        |
+| `query_cross_recording_traces_tool`               | ROI (multi-rec) |
 
 ---
 
@@ -198,12 +198,12 @@ dictionary structure depends on the viewer type.
 
 **`trace_visibility` sub-fields:**
 
-| Field          | Type | Description                                  |
-|----------------|------|----------------------------------------------|
-| `fluorescence` | bool | Raw cell fluorescence trace visible          |
-| `neuropil`     | bool | Neuropil fluorescence trace visible          |
-| `corrected`    | bool | Neuropil-subtracted corrected trace visible  |
-| `spikes`       | bool | Deconvolved spike estimate trace visible     |
+| Field          | Type | Description                                 |
+|----------------|------|---------------------------------------------|
+| `fluorescence` | bool | Raw cell fluorescence trace visible         |
+| `neuropil`     | bool | Neuropil fluorescence trace visible         |
+| `corrected`    | bool | Neuropil-subtracted corrected trace visible |
+| `spikes`       | bool | Deconvolved spike estimate trace visible    |
 
 ### Tracking viewer state
 
@@ -229,33 +229,33 @@ dictionary structure depends on the viewer type.
 
 Returns a nested dictionary with two sub-viewers:
 
-| Field            | Type | Description                               |
-|------------------|------|-------------------------------------------|
-| `viewer_type`    | str  | Always `"registration"`                   |
-| `binary_player`  | dict | Binary player state (see below)           |
-| `pc_viewer`      | dict | PC viewer state (see below)               |
+| Field           | Type | Description                     |
+|-----------------|------|---------------------------------|
+| `viewer_type`   | str  | Always `"registration"`         |
+| `binary_player` | dict | Binary player state (see below) |
+| `pc_viewer`     | dict | PC viewer state (see below)     |
 
 **`binary_player` sub-fields:**
 
-| Field              | Type | Description                                       |
-|--------------------|------|---------------------------------------------------|
-| `current_frame`    | int  | Currently displayed frame index                   |
-| `frame_count`      | int  | Total number of frames                            |
-| `channel_2_active` | bool | Whether channel 2 is displayed                    |
-| `two_channels`     | bool | Whether the recording has two channels            |
-| `playing`          | bool | Whether playback is active                        |
-| `frame_step`       | int  | Frame step size for navigation (default 100)      |
+| Field              | Type | Description                                  |
+|--------------------|------|----------------------------------------------|
+| `current_frame`    | int  | Currently displayed frame index              |
+| `frame_count`      | int  | Total number of frames                       |
+| `channel_2_active` | bool | Whether channel 2 is displayed               |
+| `two_channels`     | bool | Whether the recording has two channels       |
+| `playing`          | bool | Whether playback is active                   |
+| `frame_step`       | int  | Frame step size for navigation (default 100) |
 
 **`pc_viewer` sub-fields:**
 
-| Field           | Type | Description                                          |
-|-----------------|------|------------------------------------------------------|
-| `current_plane` | int  | Currently displayed plane index                      |
-| `plane_count`   | int  | Total number of imaging planes                       |
-| `current_pc`    | int  | Currently displayed principal component number       |
-| `pc_count`      | int  | Total number of principal components                 |
-| `playing`       | bool | Whether PC extreme animation is active               |
-| `loaded`        | bool | Whether PC data has finished loading                 |
+| Field           | Type | Description                                    |
+|-----------------|------|------------------------------------------------|
+| `current_plane` | int  | Currently displayed plane index                |
+| `plane_count`   | int  | Total number of imaging planes                 |
+| `current_pc`    | int  | Currently displayed principal component number |
+| `pc_count`      | int  | Total number of principal components           |
+| `playing`       | bool | Whether PC extreme animation is active         |
+| `loaded`        | bool | Whether PC data has finished loading           |
 
 ---
 
@@ -266,14 +266,14 @@ Returns a nested dictionary with two sub-viewers:
 Reported in `background_view` state field. Values correspond to the background image behind ROI
 overlays.
 
-| Value                  | Description                                                  |
-|------------------------|--------------------------------------------------------------|
-| `rois_only`            | Blank background with ROI overlays only                      |
-| `mean_image`           | Temporal mean image (channel 1 or 2 based on toggle)         |
-| `enhanced_mean_image`  | High-pass filtered mean image                                |
-| `correlation_map`      | Pixel-wise activity correlation map                          |
-| `maximum_projection`   | Maximum intensity projection                                 |
-| `corrected_structural` | Bleed-through-corrected structural channel (dual-channel)    |
+| Value                  | Description                                               |
+|------------------------|-----------------------------------------------------------|
+| `rois_only`            | Blank background with ROI overlays only                   |
+| `mean_image`           | Temporal mean image (channel 1 or 2 based on toggle)      |
+| `enhanced_mean_image`  | High-pass filtered mean image                             |
+| `correlation_map`      | Pixel-wise activity correlation map                       |
+| `maximum_projection`   | Maximum intensity projection                              |
+| `corrected_structural` | Bleed-through-corrected structural channel (dual-channel) |
 
 ### ROI color modes
 
@@ -298,21 +298,21 @@ overlays.
 
 Reported in `mask_layer` state field (tracking viewer only).
 
-| Value      | Description                                                            |
-|------------|------------------------------------------------------------------------|
-| `original` | Original ROI masks from single-recording extraction (native coords)    |
-| `deformed` | Original masks warped to shared cross-recording coordinate space       |
-| `template` | Consensus template masks from cross-recording clustering               |
-| `tracked`  | Template masks backward-deformed to each recording's native coords     |
+| Value      | Description                                                         |
+|------------|---------------------------------------------------------------------|
+| `original` | Original ROI masks from single-recording extraction (native coords) |
+| `deformed` | Original masks warped to shared cross-recording coordinate space    |
+| `template` | Consensus template masks from cross-recording clustering            |
+| `tracked`  | Template masks backward-deformed to each recording's native coords  |
 
 ### Coordinate spaces
 
 Reported in `coordinate_space` state field (tracking viewer only).
 
-| Value         | Description                                                     |
-|---------------|-----------------------------------------------------------------|
-| `native`      | Original recording coordinate space                             |
-| `transformed` | Warped to align with cross-recording template coordinate space  |
+| Value         | Description                                                    |
+|---------------|----------------------------------------------------------------|
+| `native`      | Original recording coordinate space                            |
+| `transformed` | Warped to align with cross-recording template coordinate space |
 
 ---
 
@@ -443,7 +443,7 @@ high extremes indicate residual motion or optical artifacts not captured by regi
 
 | Skill                             | Relationship                                                    |
 |-----------------------------------|-----------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`          | Prerequisite: cindra-gui MCP server connectivity                |
+| `/cindra-mcp-environment-setup`   | Prerequisite: cindra-gui MCP server connectivity                |
 | `/single-recording-processing`    | Upstream: produces the data this skill visualizes               |
 | `/multi-recording-processing`     | Upstream: produces the data this skill visualizes               |
 | `/single-recording-results`       | Reference: output data formats for single-recording query tools |
