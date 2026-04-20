@@ -393,10 +393,10 @@ def resolve_multi_recording_contexts(  # pragma: no cover
         # multi_recording_runtime_data.yaml as a hard error rather than silently persisting concurrently alongside
         # peer workers, which would race on the same files and corrupt them.
         for context in contexts:
-            output_path = context.runtime.output_path
-            if output_path is None:
+            runtime_output_path = context.runtime.output_path
+            if runtime_output_path is None:
                 continue
-            runtime_yaml = output_path / "multi_recording_runtime_data.yaml"
+            runtime_yaml = runtime_output_path / "multi_recording_runtime_data.yaml"
             if not runtime_yaml.exists():
                 message = (
                     f"Unable to resolve multi-recording contexts without bootstrap persistence. The runtime data "
