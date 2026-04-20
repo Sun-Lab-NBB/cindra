@@ -91,16 +91,16 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:  # 
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
-    # Creates RuntimeContext instances for all planes.
-    contexts = resolve_single_recording_contexts(configuration=configuration)
+    # Creates RuntimeContext instances for all planes. The outer pipeline entry (run_single_recording_pipeline) or
+    # the prepare_single_recording_batch_tool already wrote the shared configuration, acquisition parameters, and
+    # per-plane runtime_data.yaml files, so this call is load-only to avoid racing against peer worker threads.
+    contexts = resolve_single_recording_contexts(configuration=configuration, persist=False)
 
     # Converts TIFF data to binary format.
     convert_tiffs_to_binary(contexts=contexts)
 
-    # Saves shared configuration and acquisition parameters once (using first plane's context).
-    contexts[0].save_shared()
-
-    # Records the binarization time and saves runtime data for each plane.
+    # Records the binarization time and saves runtime data for each plane. Each plane's runtime_data.yaml has only
+    # one writer here (the single BINARIZE worker for this recording), so the per-plane save is race-free.
     for context in contexts:
         context.runtime.timing.binarization_time = timer.elapsed
         context.save_runtime()

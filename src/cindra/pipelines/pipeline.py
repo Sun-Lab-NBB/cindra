@@ -119,7 +119,11 @@ def run_single_recording_pipeline(  # pragma: no cover
 
     # Resolves RuntimeContext instances for all planes upfront. This determines the plane count without requiring
     # binarization to run first, mirroring how run_multi_recording_pipeline resolves contexts before building jobs.
-    contexts = resolve_single_recording_contexts(configuration=configuration)
+    # In REMOTE mode (job_id provided, i.e., when dispatched by the MCP job executor), disables bootstrap persistence
+    # because the prepare tool already wrote the shared configuration and per-plane runtime_data.yaml files
+    # single-threaded. Skipping the per-worker re-save prevents concurrent worker threads from racing on the same
+    # YAML files and producing corrupted output.
+    contexts = resolve_single_recording_contexts(configuration=configuration, persist=job_id is None)
     plane_count = len(contexts)
 
     # Derives the tracker path from the configuration. The tracker lives under the cindra/ subdirectory, consistent
@@ -293,8 +297,11 @@ def run_multi_recording_pipeline(  # pragma: no cover
 
     # Resolves MultiRecordingRuntimeContext instances to extract recording IDs and the main recording output
     # path. This also validates that all recording directories contain valid single-recording outputs and
-    # handles relocated data.
-    contexts = resolve_multi_recording_contexts(configuration=config)
+    # handles relocated data. In REMOTE mode (job_id provided, i.e., when dispatched by the MCP job executor),
+    # disables bootstrap persistence because the prepare tool already wrote the shared configuration and every
+    # recording's multi_recording_runtime_data.yaml single-threaded. Skipping the per-worker re-save prevents
+    # concurrent worker threads from racing on the same YAML files and producing corrupted output.
+    contexts = resolve_multi_recording_contexts(configuration=config, persist=job_id is None)
     recording_ids: list[str] = [context.runtime.io.recording_id for context in contexts]
     main_recording_path = contexts[0].runtime.output_path
     if main_recording_path is None:
