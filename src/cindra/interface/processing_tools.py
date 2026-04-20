@@ -929,7 +929,9 @@ def clean_processing_output_tool(
                 _delete_directory(path=plane_dir / "detection_data", deleted=deleted_dirs, errors=errors)
                 for name in (
                     "roi_masks.npz",
+                    "roi_masks_channel_2.npz",
                     "roi_statistics.npz",
+                    "roi_statistics_channel_2.npz",
                     "cell_fluorescence.npy",
                     "neuropil_fluorescence.npy",
                     "subtracted_fluorescence.npy",
@@ -941,6 +943,7 @@ def clean_processing_output_tool(
                     "spikes_channel_2.npy",
                     "cell_classification_channel_2.npy",
                     "cell_colocalization.npy",
+                    "corrected_structural_mean_image.npy",
                 ):
                     _delete_file(path=plane_dir / name, deleted=deleted_files, errors=errors)
 
@@ -950,7 +953,9 @@ def clean_processing_output_tool(
             for name in (
                 "combined_metadata.npz",
                 "roi_masks.npz",
+                "roi_masks_channel_2.npz",
                 "roi_statistics.npz",
+                "roi_statistics_channel_2.npz",
                 "cell_fluorescence.npy",
                 "neuropil_fluorescence.npy",
                 "subtracted_fluorescence.npy",
@@ -962,6 +967,7 @@ def clean_processing_output_tool(
                 "spikes_channel_2.npy",
                 "cell_classification_channel_2.npy",
                 "cell_colocalization.npy",
+                "corrected_structural_mean_image.npy",
             ):
                 _delete_file(path=cindra_root / name, deleted=deleted_files, errors=errors)
 
@@ -1004,13 +1010,18 @@ def clean_processing_output_tool(
                     "registration_deformed_masks_channel_2.npz",
                     "tracking_template_masks.npz",
                     "tracking_template_masks_channel_2.npz",
+                    # Backward-projected per-recording mask and statistics files are produced by the final
+                    # discovery step (project_templates_to_recordings), not by extraction, and deleting them under
+                    # EXTRACT strands the pipeline because extraction consumes them as inputs.
+                    "roi_masks.npz",
+                    "roi_masks_channel_2.npz",
+                    "roi_statistics.npz",
+                    "roi_statistics_channel_2.npz",
                 ):
                     _delete_file(path=output_path / name, deleted=deleted_files, errors=errors)
 
             if MultiRecordingJobNames.EXTRACT in effective_set:
                 for name in (
-                    "roi_masks.npz",
-                    "roi_statistics.npz",
                     "cell_fluorescence.npy",
                     "neuropil_fluorescence.npy",
                     "subtracted_fluorescence.npy",
