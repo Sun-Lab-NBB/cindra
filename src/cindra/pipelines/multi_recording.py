@@ -32,9 +32,11 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -
 
     console.echo(message="Initializing multi-recording discovery phase...", level=LogLevel.INFO)
 
-    # Resolves or reloads MultiRecordingRuntimeContext instances for all recordings. Saves configuration and runtime
-    # data to disk during resolution.
-    contexts = resolve_multi_recording_contexts(configuration=configuration)
+    # Resolves or reloads MultiRecordingRuntimeContext instances for all recordings. The outer pipeline entry
+    # (run_multi_recording_pipeline) or the prepare_multi_recording_batch_tool already wrote the shared configuration
+    # and every recording's multi_recording_runtime_data.yaml, so this call is load-only to avoid racing against
+    # peer worker threads on the same YAML files.
+    contexts = resolve_multi_recording_contexts(configuration=configuration, persist=False)
 
     # Filters ROIs from each recording's single-recording outputs based on the configured selection criteria. Respects
     # the repeat_selection flag to skip recordings with existing selections.
@@ -87,8 +89,13 @@ def extract_multi_recording_fluorescence(  # pragma: no cover
             not completed.
     """
     # Reloads only the target recording's context from disk. The target_recording_id parameter avoids loading
-    # CombinedData and runtime arrays for every other recording in the dataset.
-    contexts = resolve_multi_recording_contexts(configuration=configuration, target_recording_id=recording_id)
+    # CombinedData and runtime arrays for every other recording in the dataset. The outer pipeline entry
+    # (run_multi_recording_pipeline) or the prepare_multi_recording_batch_tool already wrote the shared configuration
+    # and the target recording's multi_recording_runtime_data.yaml, so this call is load-only to avoid racing against
+    # peer worker threads on the same YAML files (every EXTRACT worker otherwise re-saves the shared configuration).
+    contexts = resolve_multi_recording_contexts(
+        configuration=configuration, target_recording_id=recording_id, persist=False
+    )
     target_context = contexts[0]
 
     # Memory-maps extraction arrays from disk. resolve_multi_recording_contexts() only loads YAML scalars, so
