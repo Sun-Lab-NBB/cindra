@@ -66,6 +66,8 @@ def find_data_directory(data_path: Path) -> Path:
 
 def resolve_single_recording_contexts(  # pragma: no cover
     configuration: SingleRecordingConfiguration,
+    *,
+    persist: bool = True,
 ) -> list[RuntimeContext]:
     """Creates RuntimeContext instances for all imaging planes processed by the target single-recording pipeline.
 
@@ -77,8 +79,16 @@ def resolve_single_recording_contexts(  # pragma: no cover
         For standard single-ROI data, one context is created per physical plane. For MROI (Multi-ROI) data, one context
         is created per virtual plane, where virtual planes are ROI x physical plane combinations.
 
-        The configuration and acquisition parameters are always saved to disk, ensuring they reflect the current
-        settings passed to this function.
+        With ``persist=True`` (the default), the shared configuration and acquisition parameters plus every plane's
+        runtime data file are saved to disk at the end of resolution, ensuring they reflect the current settings. This
+        is the correct mode for single-threaded bootstrap (e.g., the prepare_single_recording_batch_tool invocation).
+
+        With ``persist=False``, no files are written. This mode is required for worker-thread entry (REMOTE mode)
+        because the MCP executor dispatches multiple worker threads in the same process: if each worker bootstraps
+        the shared configuration and every plane's runtime_data.yaml on entry, concurrent ``open(file, "w")`` calls
+        on the same paths race at the byte level and produce corrupted YAML. Workers must therefore only *load* the
+        bootstrap written by the earlier prepare step. When ``persist=False``, any missing runtime_data.yaml is
+        treated as a hard error because it indicates prepare_single_recording_batch_tool was not run first.
 
         When loading previously processed data (e.g., data moved to a different machine), acquisition parameters are
         loaded from the saved output directory if available, allowing the pipeline to work without raw TIFF data.
@@ -87,6 +97,10 @@ def resolve_single_recording_contexts(  # pragma: no cover
         configuration: The single-recording pipeline configuration. Must have output_path configured in
             file_io. The data_path is only required when raw data needs to be processed (rebinarization) or
             when no processed data exists.
+        persist: When True (default), writes the shared configuration plus every plane's runtime_data.yaml at the
+            end of resolution. When False, treats the call as load-only; raises FileNotFoundError if any expected
+            runtime_data.yaml is missing. Worker entry points (REMOTE mode) must call with ``persist=False``; the
+            prepare_single_recording_batch_tool owns bootstrap persistence in a single-threaded context.
 
     Returns:
         A list of RuntimeContext instances, one per plane (or virtual plane for MROI data). Each context contains
@@ -95,7 +109,8 @@ def resolve_single_recording_contexts(  # pragma: no cover
 
     Raises:
         ValueError: If output_path is not configured, or if the acquisition parameters specify more than 2 channels.
-        FileNotFoundError: If neither processed data nor raw data with acquisition parameters is available.
+        FileNotFoundError: If neither processed data nor raw data with acquisition parameters is available, or if
+            ``persist=False`` and any plane's runtime_data.yaml does not already exist on disk.
     """
     # Validates that the save path is configured.
     output_path_root = configuration.file_io.output_path
@@ -204,12 +219,28 @@ def resolve_single_recording_contexts(  # pragma: no cover
 
         contexts.append(context)
 
-    # Saves shared configuration and acquisition parameters to ensure they are always up to date.
-    contexts[0].save_shared()
+    if persist:
+        # Saves shared configuration and acquisition parameters to ensure they are always up to date.
+        contexts[0].save_shared()
 
-    # Saves each runtime to persist the initialized IO data.
-    for context in contexts:
-        context.save_runtime()
+        # Saves each runtime to persist the initialized IO data.
+        for context in contexts:
+            context.save_runtime()
+    else:
+        # Worker entry (REMOTE mode): bootstrap must already exist on disk from a prior prepare step. Treat missing
+        # runtime_data.yaml as a hard error rather than silently persisting concurrently alongside peer workers.
+        for context in contexts:
+            if context.runtime.io.output_path is None:
+                continue
+            runtime_yaml = context.runtime.io.output_path / "runtime_data.yaml"
+            if not runtime_yaml.exists():
+                message = (
+                    f"Unable to resolve single-recording contexts without bootstrap persistence. The runtime data "
+                    f"file was not found at: {runtime_yaml}. Run prepare_single_recording_batch_tool before "
+                    f"dispatching workers so the filesystem bootstrap is written exactly once in a single-threaded "
+                    f"context."
+                )
+                console.error(message=message, error=FileNotFoundError)
 
     return contexts
 
@@ -217,6 +248,8 @@ def resolve_single_recording_contexts(  # pragma: no cover
 def resolve_multi_recording_contexts(  # pragma: no cover
     configuration: MultiRecordingConfiguration,
     target_recording_id: str | None = None,
+    *,
+    persist: bool = True,
 ) -> list[MultiRecordingRuntimeContext]:
     """Creates MultiRecordingRuntimeContext instances for recordings processed by the target multi-recording pipeline.
 
@@ -229,7 +262,18 @@ def resolve_multi_recording_contexts(  # pragma: no cover
         combined_metadata.npz file from a completed single-recording pipeline run. The function extracts
         unique recording identifiers from the directory paths to distinguish recordings within the dataset.
 
-        The configuration is always saved to disk, ensuring it reflects the current settings passed to this function.
+        With ``persist=True`` (the default), the shared dataset configuration and every recording's runtime data
+        file are saved to disk at the end of resolution, ensuring they reflect the current settings. This is the
+        correct mode for single-threaded bootstrap (e.g., the prepare_multi_recording_batch_tool invocation).
+
+        With ``persist=False``, no files are written. This mode is required for worker-thread entry (REMOTE mode)
+        because the MCP executor dispatches multiple worker threads in the same process: if each worker bootstraps
+        the shared configuration and every recording's multi_recording_runtime_data.yaml on entry, concurrent
+        ``open(file, "w")`` calls on the same paths race at the byte level and produce corrupted YAML that
+        subsequent workers fail to parse. Workers must therefore only *load* the bootstrap written by the earlier
+        prepare step. When ``persist=False``, any missing multi_recording_runtime_data.yaml is treated as a hard
+        error because it indicates prepare_multi_recording_batch_tool was not run first.
+
         ROI selection is performed as a separate step using select_recording_rois(), not during context resolution.
 
         When target_recording_id is provided, only the matching recording's CombinedData and runtime data are loaded.
@@ -241,6 +285,11 @@ def resolve_multi_recording_contexts(  # pragma: no cover
             dataset_name configured in recording_io.
         target_recording_id: When provided, only resolves the context for the recording matching this identifier. The
             returned list contains a single element. When None (default), all recordings are resolved.
+        persist: When True (default), writes the shared configuration and every resolved context's
+            multi_recording_runtime_data.yaml at the end of resolution. When False, treats the call as load-only;
+            raises FileNotFoundError if any expected runtime data file is missing. Worker entry points (REMOTE mode)
+            must call with ``persist=False``; the prepare_multi_recording_batch_tool owns bootstrap persistence in
+            a single-threaded context.
 
     Returns:
         A list of MultiRecordingRuntimeContext instances, one per recording (or one element when
@@ -249,7 +298,9 @@ def resolve_multi_recording_contexts(  # pragma: no cover
         instance with MultiRecordingIOData fields initialized.
 
     Raises:
-        FileNotFoundError: If no combined_metadata.npz file is found in a recording directory.
+        FileNotFoundError: If no combined_metadata.npz file is found in a recording directory, or if
+            ``persist=False`` and any resolved recording's multi_recording_runtime_data.yaml does not already
+            exist on disk.
         RuntimeError: If multiple combined_metadata.npz files are found in a recording directory, or if recording paths
             do not contain unique identifying components.
         ValueError: If target_recording_id does not match any resolved recording identifier.
@@ -330,12 +381,30 @@ def resolve_multi_recording_contexts(  # pragma: no cover
         message=f"Loaded existing multi-recording runtime data for {len(contexts)} recording(s).", level=LogLevel.INFO
     )
 
-    # Saves shared configuration once via the first context to ensure it is always up to date.
-    contexts[0].save_shared()
+    if persist:
+        # Saves shared configuration once via the first context to ensure it is always up to date.
+        contexts[0].save_shared()
 
-    # Saves each runtime to persist the fully-resolved IO data (including dataset_output_paths).
-    for context in contexts:
-        context.save_runtime()
+        # Saves each runtime to persist the fully-resolved IO data (including dataset_output_paths).
+        for context in contexts:
+            context.save_runtime()
+    else:
+        # Worker entry (REMOTE mode): bootstrap must already exist on disk from a prior prepare step. Treat missing
+        # multi_recording_runtime_data.yaml as a hard error rather than silently persisting concurrently alongside
+        # peer workers, which would race on the same files and corrupt them.
+        for context in contexts:
+            output_path = context.runtime.output_path
+            if output_path is None:
+                continue
+            runtime_yaml = output_path / "multi_recording_runtime_data.yaml"
+            if not runtime_yaml.exists():
+                message = (
+                    f"Unable to resolve multi-recording contexts without bootstrap persistence. The runtime data "
+                    f"file was not found at: {runtime_yaml}. Run prepare_multi_recording_batch_tool before "
+                    f"dispatching workers so the filesystem bootstrap is written exactly once in a single-threaded "
+                    f"context."
+                )
+                console.error(message=message, error=FileNotFoundError)
 
     return contexts
 
