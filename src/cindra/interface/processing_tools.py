@@ -383,31 +383,37 @@ def prepare_single_recording_batch_tool(
 
             binarize_entry: dict[str, object] = {}
             for job_id, (name, specifier) in binarize_jobs.items():
+                job_info = tracker.get_job_info(job_id=job_id)
                 binarize_entry = {
                     "job_id": job_id,
                     "name": name,
                     "specifier": specifier,
-                    "status": tracker.get_job_status(job_id=job_id).name.lower(),
+                    "status": job_info.status.name.lower(),
+                    "executor_id": job_info.executor_id,
                 }
 
             process_entries: list[dict[str, object]] = []
             for job_id, (name, specifier) in process_jobs.items():
+                job_info = tracker.get_job_info(job_id=job_id)
                 process_entries.append(
                     {
                         "job_id": job_id,
                         "name": name,
                         "specifier": specifier,
-                        "status": tracker.get_job_status(job_id=job_id).name.lower(),
+                        "status": job_info.status.name.lower(),
+                        "executor_id": job_info.executor_id,
                     }
                 )
 
             combine_entry: dict[str, object] = {}
             for job_id, (name, specifier) in combine_jobs.items():
+                job_info = tracker.get_job_info(job_id=job_id)
                 combine_entry = {
                     "job_id": job_id,
                     "name": name,
                     "specifier": specifier,
-                    "status": tracker.get_job_status(job_id=job_id).name.lower(),
+                    "status": job_info.status.name.lower(),
+                    "executor_id": job_info.executor_id,
                 }
 
             total_jobs += len(binarize_jobs) + len(process_jobs) + len(combine_jobs)
@@ -611,21 +617,25 @@ def prepare_multi_recording_batch_tool(
 
             discover_entry: dict[str, object] = {}
             for job_id, (name, specifier) in discover_jobs.items():
+                job_info = tracker.get_job_info(job_id=job_id)
                 discover_entry = {
                     "job_id": job_id,
                     "name": name,
                     "specifier": specifier,
-                    "status": tracker.get_job_status(job_id=job_id).name.lower(),
+                    "status": job_info.status.name.lower(),
+                    "executor_id": job_info.executor_id,
                 }
 
             extract_entries: list[dict[str, object]] = []
             for job_id, (name, specifier) in extract_jobs.items():
+                job_info = tracker.get_job_info(job_id=job_id)
                 extract_entries.append(
                     {
                         "job_id": job_id,
                         "name": name,
                         "specifier": specifier,
-                        "status": tracker.get_job_status(job_id=job_id).name.lower(),
+                        "status": job_info.status.name.lower(),
+                        "executor_id": job_info.executor_id,
                     }
                 )
 
@@ -808,12 +818,14 @@ def reset_processing_phases_tool(
     # Builds the response with updated per-job statuses.
     updated_jobs: list[dict[str, object]] = []
     for job_id, (job_name, specifier) in all_found_jobs.items():
+        job_info = tracker.get_job_info(job_id=job_id)
         updated_jobs.append(
             {
                 "job_id": job_id,
                 "name": job_name,
                 "specifier": specifier,
-                "status": tracker.get_job_status(job_id=job_id).name.lower(),
+                "status": job_info.status.name.lower(),
+                "executor_id": job_info.executor_id,
             }
         )
 
