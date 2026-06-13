@@ -40,23 +40,23 @@ These tools are registered on the `cindra-mcp` server. You MUST verify the MCP s
 using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
 connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
 
-| Tool                                   | Purpose                                                                         |
-|----------------------------------------|---------------------------------------------------------------------------------|
-| `generate_acquisition_parameters_file` | Creates a validated `cindra_parameters.json` in the specified directory         |
-| `validate_acquisition_parameters_file` | Validates an existing `cindra_parameters.json` for completeness and correctness |
-| `validate_recording_readiness`         | Final readiness gate: validates parameters, TIFFs, and cross-consistency        |
+| Tool                                        | Purpose                                                                         |
+|---------------------------------------------|---------------------------------------------------------------------------------|
+| `generate_acquisition_parameters_file_tool` | Creates a validated `cindra_parameters.json` in the specified directory         |
+| `validate_acquisition_parameters_file_tool` | Validates an existing `cindra_parameters.json` for completeness and correctness |
+| `validate_recording_readiness_tool`         | Final readiness gate: validates parameters, TIFFs, and cross-consistency        |
 
 **Notes:**
-- `generate_acquisition_parameters_file` validates all parameters before writing. MROI fields (`roi_lines`,
+- `generate_acquisition_parameters_file_tool` validates all parameters before writing. MROI fields (`roi_lines`,
   `roi_x_coordinates`, `roi_y_coordinates`) are required when `roi_number > 1`.
-- `validate_recording_readiness` requires `cindra_parameters.json` to be present. It validates the acquisition
+- `validate_recording_readiness_tool` requires `cindra_parameters.json` to be present. It validates the acquisition
   parameters, discovers and inspects all TIFF files (page count, dimensions, dtype) without loading frame data,
   and cross-validates TIFF metadata against the acquisition parameters (interleave stride divisibility,
   frames-per-plane thresholds, MROI roi_lines bounds, dtype compatibility). Use this tool as the final
   verification step before committing compute resources to pipeline processing.
-- `generate_acquisition_parameters_file` and `validate_acquisition_parameters_file` do not inspect TIFF files.
+- `generate_acquisition_parameters_file_tool` and `validate_acquisition_parameters_file_tool` do not inspect TIFF files.
   Acquisition metadata must come from the user, experiment logs, microscope software output, or other external
-  sources. Use `validate_recording_readiness` for combined parameter + TIFF validation.
+  sources. Use `validate_recording_readiness_tool` for combined parameter + TIFF validation.
 
 ---
 
@@ -183,9 +183,9 @@ When the user knows their acquisition metadata (frame rate, planes, channels):
 
 1. **Confirm TIFF files** — Ask the user to verify TIFF files are present in the data directory.
 2. **Verify divisibility** — Confirm `total_frames % (plane_number * channel_number) == 0`.
-3. **Create parameters file** — Use `generate_acquisition_parameters_file` with the known values.
-4. **Validate** — Use `validate_acquisition_parameters_file` to confirm the file is correct.
-5. **Verify readiness** — Use `validate_recording_readiness` to confirm the recording is fully ready for processing.
+3. **Create parameters file** — Use `generate_acquisition_parameters_file_tool` with the known values.
+4. **Validate** — Use `validate_acquisition_parameters_file_tool` to confirm the file is correct.
+5. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is fully ready for processing.
 
 ### Workflow 2: Unknown acquisition parameters
 
@@ -195,8 +195,8 @@ When the user has imaging data but is unsure about the acquisition configuration
 2. **Locate metadata** — Guide the user to find metadata files or headers specific to their system.
 3. **Extract parameters** — Help the user read metadata using appropriate tools or libraries.
 4. **Confirm with user** — Present the extracted parameters and ask the user to verify.
-5. **Create parameters file** — Use `generate_acquisition_parameters_file` with the confirmed values.
-6. **Verify readiness** — Use `validate_recording_readiness` to confirm the recording is fully ready for processing.
+5. **Create parameters file** — Use `generate_acquisition_parameters_file_tool` with the confirmed values.
+6. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is fully ready for processing.
 
 ### Workflow 3: ScanImage recordings
 
@@ -221,7 +221,7 @@ For MROI (multi-region) recordings, additional metadata is needed:
 ScanImage typically handles the frame interleaving correctly. Flyback frames (if included in the TIFF) should
 be accounted for using `main.ignored_flyback_planes` in the pipeline configuration.
 
-After creating the parameters file, use `validate_recording_readiness` to verify TIFF dimensions, interleave
+After creating the parameters file, use `validate_recording_readiness_tool` to verify TIFF dimensions, interleave
 consistency, and MROI roi_lines bounds against actual frame data.
 
 ### Workflow 4: Migrating from suite2p
@@ -260,7 +260,7 @@ multi-plane recordings: `frame_rate = fs / nplanes`. For single-plane recordings
 
 **Step 2: Create `cindra_parameters.json`.**
 
-Use `generate_acquisition_parameters_file` with the extracted parameters. Place it in the directory
+Use `generate_acquisition_parameters_file_tool` with the extracted parameters. Place it in the directory
 containing the original raw TIFF files. If the user no longer has the raw TIFFs, place it alongside the
 suite2p output directory.
 
@@ -284,8 +284,8 @@ When the user's data is in a format other than multipage TIFF:
 3. **Write a conversion script** — Help the user write a script that reads the source data and writes multipage
    TIFFs using `tifffile.imwrite`, ensuring the correct frame interleaving order.
 4. **Verify output** — Confirm the converted TIFFs have the expected frame count and dimensions.
-5. **Create parameters file** — Use `generate_acquisition_parameters_file` with the acquisition metadata.
-6. **Verify readiness** — Use `validate_recording_readiness` to confirm TIFF data and parameters are consistent.
+5. **Create parameters file** — Use `generate_acquisition_parameters_file_tool` with the acquisition metadata.
+6. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm TIFF data and parameters are consistent.
 
 ### Workflow 6: Direct binary file adoption (potentially unsafe)
 
@@ -312,7 +312,7 @@ You MUST ask the user to confirm all the following. Do not guess or infer these 
 
 **Step 2: Create `cindra_parameters.json`.**
 
-Use `generate_acquisition_parameters_file` with the user-provided acquisition parameters.
+Use `generate_acquisition_parameters_file_tool` with the user-provided acquisition parameters.
 
 **Step 3: Place binary files in the cindra output structure.**
 
@@ -385,11 +385,11 @@ Acquisition Data Preparation Compliance:
 - [ ] TIFF files present in the data directory (.tif or .tiff extension)
 - [ ] Total frame count is divisible by plane_number * channel_number
 - [ ] `cindra_parameters.json` exists in the data directory (or a subdirectory)
-- [ ] `validate_acquisition_parameters_file` reports no errors
+- [ ] `validate_acquisition_parameters_file_tool` reports no errors
 - [ ] `frame_rate` represents the volume rate (not per-plane rate)
 - [ ] For MROI data: roi_lines, roi_x_coordinates, roi_y_coordinates are set correctly
 - [ ] Review any warnings from validation (unrecognized fields, unused MROI fields)
-- [ ] `validate_recording_readiness` reports no errors (final readiness gate)
+- [ ] `validate_recording_readiness_tool` reports no errors (final readiness gate)
 - [ ] Review readiness warnings (interleave remainder, low frame count, dtype cast, dimension mismatches)
 ```
 

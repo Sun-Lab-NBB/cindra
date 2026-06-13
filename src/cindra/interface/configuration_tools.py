@@ -37,7 +37,7 @@ _MAXIMUM_CONTROL_CHARACTER_ORDINAL: int = 32
 
 
 @mcp.tool()
-def generate_config_file(
+def generate_config_file_tool(
     output_path: str, pipeline_type: Literal["single-recording", "multi-recording"]
 ) -> dict[str, str | bool]:
     """Generates a default configuration YAML file for the specified pipeline type.
@@ -224,7 +224,7 @@ def resolve_dataset_name_tool(
 
 
 @mcp.tool()
-def read_config_file(file_path: str) -> dict[str, str | bool | list[str] | dict[str, object] | None]:
+def read_config_file_tool(file_path: str) -> dict[str, str | bool | list[str] | dict[str, object] | None]:
     """Reads a YAML configuration file and returns its raw contents as a dictionary.
 
     Notes:
@@ -292,7 +292,7 @@ def read_config_file(file_path: str) -> dict[str, str | bool | list[str] | dict[
 
 
 @mcp.tool()
-def validate_config_file(file_path: str) -> dict[str, str | bool | list[str] | dict[str, dict[str, object]]]:
+def validate_config_file_tool(file_path: str) -> dict[str, str | bool | list[str] | dict[str, dict[str, object]]]:
     """Validates a cindra configuration YAML file by loading it through the appropriate configuration dataclass,
     checking parameter values against known constraints, and identifying parameters that differ from their defaults.
 

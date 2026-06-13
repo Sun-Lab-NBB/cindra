@@ -162,7 +162,7 @@ frame into region-specific strips. Each ROI-plane combination becomes a separate
 #### Acquisition Parameters
 
 Each raw data directory must contain a `cindra_parameters.json` file that describes how the data was acquired. This
-file can be generated using the `generate_acquisition_parameters_file` [MCP tool](#mcp-servers) or constructed
+file can be generated using the `generate_acquisition_parameters_file_tool` [MCP tool](#mcp-servers) or constructed
 manually. The required fields are:
 
 | Field            | Type  | Description                                                 |
@@ -773,14 +773,14 @@ cindra mcp
 
 | Tool                                              | Description                                                         |
 |---------------------------------------------------|---------------------------------------------------------------------|
-| `generate_acquisition_parameters_file`            | Generates a `cindra_parameters.json` file for a recording directory |
-| `validate_acquisition_parameters_file`            | Validates an existing acquisition parameters file                   |
-| `validate_recording_readiness`                    | Validates that a recording is ready for pipeline processing         |
-| `generate_config_file`                            | Generates a default YAML configuration file                         |
+| `generate_acquisition_parameters_file_tool`       | Generates a `cindra_parameters.json` file for a recording directory |
+| `validate_acquisition_parameters_file_tool`       | Validates an existing acquisition parameters file                   |
+| `validate_recording_readiness_tool`               | Validates that a recording is ready for pipeline processing         |
+| `generate_config_file_tool`                       | Generates a default YAML configuration file                         |
 | `discover_recordings_tool`                        | Discovers all recordings under a root directory                     |
 | `resolve_dataset_name_tool`                       | Constructs a qualified multi-recording dataset name                 |
-| `read_config_file`                                | Reads and returns the contents of a configuration YAML file         |
-| `validate_config_file`                            | Validates a configuration file and reports non-default parameters   |
+| `read_config_file_tool`                           | Reads and returns the contents of a configuration YAML file         |
+| `validate_config_file_tool`                       | Validates a configuration file and reports non-default parameters   |
 | `get_recording_status_tool`                       | Gets the processing status of a single recording                    |
 | `get_batch_status_overview_tool`                  | Gets an overview of batch processing status across recordings       |
 | `prepare_single_recording_batch_tool`             | Prepares single-recording batch processing jobs without execution   |
