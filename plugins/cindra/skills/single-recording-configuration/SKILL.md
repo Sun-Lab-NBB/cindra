@@ -38,12 +38,12 @@ These tools are registered on the `cindra-mcp` server. You MUST verify the MCP s
 using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
 connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
 
-| Tool                       | Purpose                                                                   |
-|----------------------------|---------------------------------------------------------------------------|
-| `generate_config_file`     | Generates a default configuration YAML for the specified pipeline type    |
-| `discover_recordings_tool` | Discovers single and multi-recording candidates under a root directory    |
-| `read_config_file`         | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
-| `validate_config_file`     | Validates a cindra config against schema, reports errors and non-defaults |
+| Tool                        | Purpose                                                                   |
+|-----------------------------|---------------------------------------------------------------------------|
+| `generate_config_file_tool` | Generates a default configuration YAML for the specified pipeline type    |
+| `discover_recordings_tool`  | Discovers single and multi-recording candidates under a root directory    |
+| `read_config_file_tool`     | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
+| `validate_config_file_tool` | Validates a cindra config against schema, reports errors and non-defaults |
 
 ---
 
@@ -350,7 +350,7 @@ file_io:
 
 Configuration files follow a two-tier lifecycle:
 
-1. **Template configs** — De-novo configurations generated via `generate_config_file` or manually created.
+1. **Template configs** — De-novo configurations generated via `generate_config_file_tool` or manually created.
    Templates can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings.
    Templates are never modified by the pipeline.
 
@@ -371,14 +371,14 @@ and let it handle per-recording fine-tuning automatically.
 
 1. **Discover recordings** using `discover_recordings_tool` (check the `single_recording_candidates` list) to find
    directories with raw data.
-2. **Verify data readiness** — use `validate_recording_readiness` on each discovered recording to confirm that
+2. **Verify data readiness** — use `validate_recording_readiness_tool` on each discovered recording to confirm that
    raw data and acquisition parameters are ready. If any recording fails validation, invoke
    `/acquisition-data-preparation` to resolve before continuing.
-3. **Generate a template configuration** using `generate_config_file` with `pipeline_type="single-recording"`.
-   Save it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_SD.yaml`). Alternatively, use `read_config_file`
+3. **Generate a template configuration** using `generate_config_file_tool` with `pipeline_type="single-recording"`.
+   Save it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_SD.yaml`). Alternatively, use `read_config_file_tool`
    to inspect an existing or legacy configuration for conversion.
 4. **Review and modify** the template YAML file, setting at minimum `main.tau` and `main.two_channels`.
-5. **Validate** the configuration using `validate_config_file` to check for errors, warnings, and non-default
+5. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
 6. **Configuration complete** — the validated template file is ready for use. This skill does not start
    processing. If invoked standalone, inform the user that the configuration is ready, and they can proceed
@@ -403,17 +403,17 @@ and let it handle per-recording fine-tuning automatically.
 ## Verification checklist
 
 You MUST verify configuration files against this checklist before starting single-recording processing.
-Use `validate_config_file` for automated validation of YAML structure, parameter constraints, and pipeline-set
+Use `validate_config_file_tool` for automated validation of YAML structure, parameter constraints, and pipeline-set
 parameter detection.
 
 ```text
 Single-Recording Configuration Compliance:
 - [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
-- [ ] `validate_config_file` reports no errors (run this first)
+- [ ] `validate_config_file_tool` reports no errors (run this first)
 - [ ] `main.tau` matches the calcium indicator used (0.4 for GCaMP6f, ~1.5 for GCaMP6s)
 - [ ] `main.two_channels` set correctly for the recording type
 - [ ] `main.ignored_flyback_planes` lists correct flyback plane indices if applicable
 - [ ] `file_io.ignored_file_names` lists any TIFFs to exclude
-- [ ] Review any warnings from `validate_config_file` (pipeline-set parameters, channel consistency)
-- [ ] Acquisition data prepared, `validate_recording_readiness` passed (if not, invoke `/acquisition-data-preparation`)
+- [ ] Review any warnings from `validate_config_file_tool` (pipeline-set parameters, channel consistency)
+- [ ] Acquisition data prepared, `validate_recording_readiness_tool` passed (if not, invoke `/acquisition-data-preparation`)
 ```

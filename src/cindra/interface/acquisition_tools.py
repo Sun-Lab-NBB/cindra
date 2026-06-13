@@ -21,7 +21,7 @@ _MINIMUM_RECOMMENDED_FRAMES_PER_PLANE: int = 200
 
 
 @mcp.tool()
-def generate_acquisition_parameters_file(
+def generate_acquisition_parameters_file_tool(
     output_directory: str,
     frame_rate: float,
     plane_number: int = 1,
@@ -105,7 +105,7 @@ def generate_acquisition_parameters_file(
 
 
 @mcp.tool()
-def validate_acquisition_parameters_file(file_path: str) -> dict[str, bool | str | list[str] | dict[str, object]]:
+def validate_acquisition_parameters_file_tool(file_path: str) -> dict[str, bool | str | list[str] | dict[str, object]]:
     """Validates an existing cindra_parameters.json file by checking that all required fields are present and have
     valid types and values, and reports any unrecognized fields or inconsistencies.
 
@@ -161,7 +161,7 @@ def validate_acquisition_parameters_file(file_path: str) -> dict[str, bool | str
 
 
 @mcp.tool()
-def validate_recording_readiness(recording_directory: str) -> dict[str, object]:
+def validate_recording_readiness_tool(recording_directory: str) -> dict[str, object]:
     """Validates that a recording directory is fully ready for cindra single-recording processing.
 
     Verifies that the cindra_parameters.json acquisition parameters file is present and valid, that raw TIFF files
