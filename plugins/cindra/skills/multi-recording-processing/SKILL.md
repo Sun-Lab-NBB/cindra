@@ -95,7 +95,7 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 |-----------------------------|------------------------------------------------------------------|
 | `resolve_dataset_name_tool` | Constructs qualified dataset names from base name + specifier    |
 | `discover_recordings_tool`  | Discovers single and multi-recording candidates under a root dir |
-| `generate_config_file`      | Generates default multi-recording configuration YAML             |
+| `generate_config_file_tool` | Generates default multi-recording configuration YAML             |
 
 ### Supporting tools (used during workflow)
 

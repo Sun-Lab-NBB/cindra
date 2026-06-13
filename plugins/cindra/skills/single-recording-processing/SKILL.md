@@ -79,11 +79,11 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ### Supporting tools (used during workflow)
 
-| Tool                           | Purpose                                             |
-|--------------------------------|-----------------------------------------------------|
-| `discover_recordings_tool`     | Discovers single and multi-recording candidates     |
-| `validate_recording_readiness` | Validates raw data and parameters before processing |
-| `get_recording_status_tool`    | Checks single and multi-recording processing status |
+| Tool                                | Purpose                                             |
+|-------------------------------------|-----------------------------------------------------|
+| `discover_recordings_tool`          | Discovers single and multi-recording candidates     |
+| `validate_recording_readiness_tool` | Validates raw data and parameters before processing |
+| `get_recording_status_tool`         | Checks single and multi-recording processing status |
 
 ---
 
@@ -149,7 +149,7 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
 1. **Discover recordings** — Use `discover_recordings_tool` (check the `single_recording_candidates` list) or
    accept explicit paths from user.
 
-2. **Validate raw data** — Use `validate_recording_readiness` on each recording. Skip for recordings
+2. **Validate raw data** — Use `validate_recording_readiness_tool` on each recording. Skip for recordings
    where `get_recording_status_tool` shows status `binarized` or later. If validation fails, invoke
    `/acquisition-data-preparation` to resolve issues before continuing.
 
@@ -305,7 +305,7 @@ Wait for the current execution session to complete before starting retries.
 Single-Recording Processing Workflow:
 - [ ] MCP server connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] Recordings discovered or explicit paths provided
-- [ ] Raw data validated via `validate_recording_readiness` (or existing binaries confirmed)
+- [ ] Raw data validated via `validate_recording_readiness_tool` (or existing binaries confirmed)
 - [ ] Configuration file confirmed or created via `/single-recording-configuration`
 - [ ] Output directory confirmed with user (required, no default)
 - [ ] CPU core allocation confirmed with user

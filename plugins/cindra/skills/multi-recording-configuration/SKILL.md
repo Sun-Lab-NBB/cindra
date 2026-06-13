@@ -40,11 +40,11 @@ connectivity issues. Tool parameters and return values are self-documented via M
 
 | Tool                        | Purpose                                                                   |
 |-----------------------------|---------------------------------------------------------------------------|
-| `generate_config_file`      | Generates a default configuration YAML for the specified pipeline type    |
+| `generate_config_file_tool` | Generates a default configuration YAML for the specified pipeline type    |
 | `discover_recordings_tool`  | Discovers single and multi-recording candidates under a root directory    |
 | `resolve_dataset_name_tool` | Constructs qualified dataset names from base name + specifier             |
-| `read_config_file`          | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
-| `validate_config_file`      | Validates a cindra config against schema, reports errors and non-defaults |
+| `read_config_file_tool`     | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
+| `validate_config_file_tool` | Validates a cindra config against schema, reports errors and non-defaults |
 
 ---
 
@@ -378,7 +378,7 @@ spike_deconvolution:
 
 Configuration files follow a two-tier lifecycle:
 
-1. **Template configs** — De-novo configurations generated via `generate_config_file` or manually created.
+1. **Template configs** — De-novo configurations generated via `generate_config_file_tool` or manually created.
    Templates can live anywhere (e.g., `/Data/CA1_GCaMP6f_MD.yaml`) and are reusable across datasets.
    Templates are never modified by the pipeline. One template can serve multiple datasets that share the
    same processing parameters (only `dataset_name` differs, and this is handled by the batch tool).
@@ -405,14 +405,14 @@ and let it handle per-dataset fine-tuning automatically.
    (all 3 phases). If any recording is incomplete, invoke `/single-recording-processing` (or
    `/acquisition-data-preparation` if raw data is not yet prepared) to complete the prerequisite chain before
    continuing.
-3. **Generate a template configuration** using `generate_config_file` with `pipeline_type="multi-recording"`.
-   Save it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). Alternatively, use `read_config_file`
+3. **Generate a template configuration** using `generate_config_file_tool` with `pipeline_type="multi-recording"`.
+   Save it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). Alternatively, use `read_config_file_tool`
    to inspect an existing or legacy configuration for conversion.
 4. **Set `dataset_name`** — use `resolve_dataset_name_tool` to construct a qualified name from a shared
    base name and a batch-specific specifier derived from recording paths. This is the only required user
    parameter.
 5. **Review and tune** registration and tracking parameters based on expected tissue drift.
-6. **Validate** the configuration using `validate_config_file` to check for errors, warnings, and non-default
+6. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
 7. **Configuration complete** — the validated template file is ready for use. This skill does not start
    processing. If invoked standalone, inform the user that the configuration is ready, and they can proceed
@@ -437,17 +437,17 @@ and let it handle per-dataset fine-tuning automatically.
 ## Verification checklist
 
 You MUST verify configuration files against this checklist before starting multi-recording processing.
-Use `validate_config_file` for automated validation of YAML structure, parameter constraints, and pipeline-set
+Use `validate_config_file_tool` for automated validation of YAML structure, parameter constraints, and pipeline-set
 parameter detection.
 
 ```text
 Multi-Recording Configuration Compliance:
 - [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
-- [ ] `validate_config_file` reports no errors (run this first)
+- [ ] `validate_config_file_tool` reports no errors (run this first)
 - [ ] `recording_io.dataset_name` is set to a unique, non-empty string
 - [ ] `roi_selection.probability_threshold` is appropriate for the dataset (0.85 default)
 - [ ] `diffeomorphic_registration.speed_factor` matches expected tissue drift (1-5 range)
 - [ ] `roi_tracking.mask_prevalence` is set appropriately for the number of recordings
 - [ ] Channel 2 roi_selection parameters are set if channel 2 ROIs have different characteristics
-- [ ] Review any warnings from `validate_config_file` (pipeline-set parameters, unusual ranges)
+- [ ] Review any warnings from `validate_config_file_tool` (pipeline-set parameters, unusual ranges)
 ```
