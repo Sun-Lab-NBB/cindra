@@ -219,8 +219,8 @@ def _cluster_rois_in_bin(
     clustered_rois: list[tuple[list[ROIMask], list[int]]] = []
     for cluster_id in np.unique(cluster_labels):
         member_indices = np.where(cluster_labels == cluster_id)[0]
-        cluster_rois = [rois[i] for i in member_indices]
-        cluster_recordings = [roi_recordings[i] for i in member_indices]
+        cluster_rois = [rois[member_index] for member_index in member_indices]
+        cluster_recordings = [roi_recordings[member_index] for member_index in member_indices]
         clustered_rois.append((cluster_rois, cluster_recordings))
 
     return clustered_rois
@@ -473,23 +473,23 @@ def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], channel_2:
     # Generates the set of unique grid positions that tile the image. Using a set prevents duplicate processing
     # when step sizes don't evenly divide the image dimensions.
     grid_positions = set()
-    for y in range(0, image_height, step_y):
-        for x in range(0, image_width, step_x):
-            grid_y = y // grid_size
-            grid_x = x // grid_size
+    for pixel_y in range(0, image_height, step_y):
+        for pixel_x in range(0, image_width, step_x):
+            grid_y = pixel_y // grid_size
+            grid_x = pixel_x // grid_size
             grid_positions.add((grid_y, grid_x))
 
     template_masks: list[ROIMask] = []
     cluster_counter = 0
 
     # Processes each spatial bin independently. Sorting ensures deterministic ordering across runs.
-    for grid_pos in console.track(
+    for grid_position in console.track(
         sorted(grid_positions),
         description=f"Tracking {'channel 2' if channel_2 else 'channel 1'} ROIs across recordings",
         unit="bins",
     ):
         # Converts grid indices back to pixel coordinates for boundary calculations.
-        grid_y, grid_x = grid_pos
+        grid_y, grid_x = grid_position
         y_position = grid_y * grid_size
         x_position = grid_x * grid_size
 

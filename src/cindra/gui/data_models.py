@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QLabel, QSlider, QCheckBox, QComboBox, QLineEdit, QPushButton
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ColorControls:
     """Holds references to color statistic control widgets."""
 
@@ -28,7 +28,7 @@ class ColorControls:
     """The slider controlling ROI mask overlay opacity (0-255)."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ColorbarWidgets:
     """Holds references to the colorbar display widgets."""
 
@@ -40,7 +40,7 @@ class ColorbarWidgets:
     """The pyqtgraph GraphicsLayoutWidget containing the colorbar."""
 
 
-@dataclass
+@dataclass(slots=True)
 class ColorArrays:
     """Holds all computed color data for ROI overlay rendering."""
 
@@ -56,7 +56,7 @@ class ColorArrays:
     """The per-ROI random hue values with shape (roi_count,)."""
 
 
-@dataclass
+@dataclass(slots=True)
 class ROIIndexMaps:
     """Holds the multi-layer ROI index maps for overlay rendering."""
 
@@ -68,7 +68,7 @@ class ROIIndexMaps:
     """The per-ROI text label items for centroid display."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TraceControls:
     """Holds references to trace panel widgets."""
 
@@ -84,7 +84,7 @@ class TraceControls:
     """The text input for the maximum number of plotted traces."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ClassifierControls:
     """Holds references to the classifier builder panel widgets."""
 

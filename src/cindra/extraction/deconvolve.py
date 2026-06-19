@@ -106,7 +106,7 @@ def apply_oasis_deconvolution(
         The deconvolved spike traces with shape (roi_count, frame_count).
     """
     roi_count, frame_count = cell_fluorescence.shape
-    cell_fluorescence = np.ascontiguousarray(cell_fluorescence, dtype=np.float32)
+    cell_fluorescence = np.ascontiguousarray(a=cell_fluorescence, dtype=np.float32)
     spike_traces: NDArray[np.float32] = np.zeros((roi_count, frame_count), dtype=np.float32)
 
     # Runs the OASIS algorithm on all detected ROIs in batches.

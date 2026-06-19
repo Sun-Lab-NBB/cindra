@@ -54,17 +54,17 @@ def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
 
         # Checks if ROI selection already exists and repeat_selection is not enabled. Both channel 1 and channel 2
         # (if applicable) must have existing selections to skip.
-        has_channel_1_selection = len(runtime.io.selected_roi_indices) > 0
+        has_channel_1_selection = bool(runtime.io.selected_roi_indices)
         has_channel_2_data = (
             runtime.combined_data is not None and runtime.combined_data.extraction.roi_statistics_channel_2 is not None
         )
-        has_channel_2_selection = len(runtime.io.selected_roi_indices_channel_2) > 0
+        has_channel_2_selection = bool(runtime.io.selected_roi_indices_channel_2)
 
         # Skips if channel 1 has selections AND (no channel 2 data OR channel 2 has selections).
         if has_channel_1_selection and (not has_channel_2_data or has_channel_2_selection) and not repeat_selection:
             channel_1_count = len(runtime.io.selected_roi_indices)
             channel_2_count = len(runtime.io.selected_roi_indices_channel_2)
-            if channel_2_count > 0:
+            if channel_2_count:
                 message = (
                     f"Recording {recording_id} already has {channel_1_count} channel 1 and {channel_2_count} channel 2 "
                     f"selected ROIs. Skipping ROI selection."
@@ -85,7 +85,7 @@ def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
         channel_1_count, channel_2_count = _filter_rois(runtime=runtime, configuration=configuration)
 
         # Formats output message based on whether channel 2 data is present.
-        if channel_2_count > 0:
+        if channel_2_count:
             count_message = f"{channel_1_count} channel 1 and {channel_2_count} channel 2 ROI candidates"
         else:
             count_message = f"{channel_1_count} ROI candidates"
@@ -165,8 +165,8 @@ def _filter_rois(
     Notes:
         This step is expected to discard some single-recording ROIs because the multi-recording pipeline
         typically uses more stringent ROI identification criteria. Channel 2 filtering only occurs when
-        roi_statistics_channel_2 is
-        present in the combined data, indicating the recording used two functional channels.
+        roi_statistics_channel_2 is present in the combined data, indicating the recording used two functional
+        channels.
 
     Args:
         runtime: The per-recording runtime data. The io.selected_roi_indices and io.selected_roi_indices_channel_2

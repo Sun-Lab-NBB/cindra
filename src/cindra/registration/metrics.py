@@ -239,7 +239,6 @@ def _compute_pc_extremes(
 
     # Fits PCA on transposed data to get frame-wise projections.
     pca = PCA(n_components=num_components).fit(frames_centered.T)
-    # noinspection PyUnresolvedReferences
     projections: NDArray[np.float32] = pca.components_.T.astype(np.float32)
 
     # Pre-computes sorted indices for all components at once.
@@ -262,6 +261,7 @@ def _compute_pc_extremes(
 def _register_pc_extremes(
     pc_low: NDArray[np.float32],
     pc_high: NDArray[np.float32],
+    *,
     bidirectional_corrected: bool,
     spatial_highpass_window: int | None = None,
     pre_smoothing_window: int | None = None,
@@ -276,7 +276,7 @@ def _register_pc_extremes(
     edge_taper_slope: float = 40.0,
     workers: int = -1,
 ) -> NDArray[np.float32]:
-    """Registers images at the extreme ends of each principal components to each-other to measure registration quality.
+    """Registers images at the extreme ends of each principal component to each other to measure registration quality.
 
     Attempts to align the high-projection PC images to the low-projection PC images using rigid and optionally
     nonrigid registration. The magnitude of the required offsets indicates how much residual motion remains after

@@ -1,6 +1,4 @@
-"""Provides algorithms for correcting within-recording motion and registering multiple recordings to the same
-reference field of view.
-"""
+"""Provides algorithms for correcting within-recording motion and registering recordings to a shared field of view."""
 
 from .register import register_plane
 from .deformation import Deformation

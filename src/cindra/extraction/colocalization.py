@@ -118,7 +118,7 @@ def compute_intensity_colocalization(
     is_colocalized = colocalization_probability > colocalization_threshold
 
     # Stacks results into (n_rois, 2) array matching the reference implementation format.
-    colocalization_result = np.stack((is_colocalized, colocalization_probability), axis=-1).astype(np.float32)
+    colocalization_result = np.stack(arrays=(is_colocalized, colocalization_probability), axis=-1).astype(np.float32)
 
     return colocalization_result, corrected_mean_image
 
@@ -179,9 +179,9 @@ def compute_spatial_colocalization(
     )
 
     # Finds the best match index and score for each ROI in both directions.
-    best_indices_1 = np.argmax(overlap_matrix, axis=1)
-    best_scores_1 = np.max(overlap_matrix, axis=1)
-    best_indices_2 = np.argmax(overlap_matrix, axis=0)
+    best_indices_1 = np.argmax(a=overlap_matrix, axis=1)
+    best_scores_1 = np.max(a=overlap_matrix, axis=1)
+    best_indices_2 = np.argmax(a=overlap_matrix, axis=0)
 
     # Enforces mutual best matching: a pair (i, j) is accepted only when channel 1 ROI i's best
     # match is j AND channel 2 ROI j's best match is i. For each channel 1 ROI i, looks up its

@@ -103,7 +103,6 @@ def compute_plane_offsets(
     return y_displacement, x_displacement
 
 
-# noinspection PyUnboundLocalVariable
 def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:  # pragma: no cover
     """Combines processed data from multiple planes into a unified dataset.
 
@@ -189,8 +188,8 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:  # pra
     max_frame_count = max(context.runtime.io.frame_count for context in plane_contexts)
 
     # Initializes lists to accumulate combined data across planes.
-    combined_roi_stats: list[ROIStatistics] = []
-    combined_roi_stats_channel_2: list[ROIStatistics] = []
+    combined_roi_statistics: list[ROIStatistics] = []
+    combined_roi_statistics_channel_2: list[ROIStatistics] = []
     combined_cell_fluorescence_list: list[NDArray[np.float32]] = []
     combined_neuropil_fluorescence_list: list[NDArray[np.float32]] = []
     combined_subtracted_fluorescence_list: list[NDArray[np.float32]] = []
@@ -298,7 +297,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:  # pra
             )
             roi_copy.plane_index = plane_index
             roi_copy.mask.frame_width = combined_width
-            combined_roi_stats.append(roi_copy)
+            combined_roi_statistics.append(roi_copy)
 
         # Processes channel 2 ROI statistics if second channel is functional.
         if second_channel_functional and context.runtime.extraction.roi_statistics_channel_2 is not None:
@@ -312,7 +311,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:  # pra
                 )
                 roi_copy.plane_index = plane_index
                 roi_copy.mask.frame_width = combined_width
-                combined_roi_stats_channel_2.append(roi_copy)
+                combined_roi_statistics_channel_2.append(roi_copy)
 
         # Extracts fluorescence and classification data from the RuntimeContext.
         plane_cell_fluorescence = context.runtime.extraction.cell_fluorescence
@@ -381,7 +380,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:  # pra
         console.echo(message=f"Appended plane {plane_index} data to combined view.", level=LogLevel.SUCCESS)
 
     # Raises an error if no valid planes were found.
-    if not combined_roi_stats:
+    if not combined_roi_statistics:
         message = (
             "Unable to combine plane data. No valid planes with ROI statistics were found. Ensure that at least one "
             "plane has been processed successfully before attempting to combine the data."
@@ -429,13 +428,13 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:  # pra
 
     # Builds the ExtractionData instance with combined extraction data.
     extraction = ExtractionData(
-        roi_statistics=combined_roi_stats or None,
+        roi_statistics=combined_roi_statistics or None,
         cell_fluorescence=combined_cell_fluorescence,
         neuropil_fluorescence=combined_neuropil_fluorescence,
         subtracted_fluorescence=combined_subtracted_fluorescence,
         spikes=combined_spikes,
         cell_classification=combined_cell_classification,
-        roi_statistics_channel_2=combined_roi_stats_channel_2 or None,
+        roi_statistics_channel_2=combined_roi_statistics_channel_2 or None,
         cell_fluorescence_channel_2=combined_cell_fluorescence_channel_2,
         neuropil_fluorescence_channel_2=combined_neuropil_fluorescence_channel_2,
         subtracted_fluorescence_channel_2=combined_subtracted_fluorescence_channel_2,

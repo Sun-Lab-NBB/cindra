@@ -95,7 +95,6 @@ def register_plane(context: RuntimeContext) -> None:  # pragma: no cover
         )
         registration_data.clear()
 
-    # Determines channel configuration.
     has_second_channel = io_data.registered_binary_path_channel_2 is not None
 
     if has_second_channel:
@@ -107,7 +106,6 @@ def register_plane(context: RuntimeContext) -> None:  # pragma: no cover
     else:
         console.echo(message=f"Registering plane {plane_index} (single channel)...", level=LogLevel.INFO)
 
-    # Starts timing for first registration step.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
@@ -118,7 +116,6 @@ def register_plane(context: RuntimeContext) -> None:  # pragma: no cover
     if has_second_channel:
         _register_secondary_channel(context)
 
-    # Records first registration step timing.
     context.runtime.timing.registration_time = timer.elapsed
     console.echo(
         message=f"Plane {plane_index} registration step 1: complete. Time taken: {timer.elapsed} seconds.",
@@ -138,7 +135,6 @@ def register_plane(context: RuntimeContext) -> None:  # pragma: no cover
         if has_second_channel:
             _register_secondary_channel(context)
 
-        # Records two-step registration timing.
         context.runtime.timing.two_step_registration_time = int(timer.elapsed)
         console.echo(
             message=f"Plane {plane_index} registration step 2: complete. Time taken: {timer.elapsed} seconds.",
@@ -317,8 +313,8 @@ def _compute_crop(
 
     # Subtracts baseline to isolate high-frequency deviations (sudden jumps indicate bad frames). Casts the medfilt
     # output to float32 to prevent float64 promotion of the entire downstream chain.
-    delta_x = x_offsets - medfilt(x_offsets, kernel_size=filter_window).astype(np.float32)
-    delta_y = y_offsets - medfilt(y_offsets, kernel_size=filter_window).astype(np.float32)
+    delta_x = x_offsets - medfilt(volume=x_offsets, kernel_size=filter_window).astype(np.float32)
+    delta_y = y_offsets - medfilt(volume=y_offsets, kernel_size=filter_window).astype(np.float32)
 
     # Computes offset magnitude normalized by mean offset. If mean is 0 (no motion), delta_xy stays as zeros.
     delta_xy = np.hypot(delta_x, delta_y)
@@ -327,7 +323,7 @@ def _compute_crop(
         delta_xy = delta_xy / delta_xy_mean
 
     # Normalizes phase correlation relative to local median to detect quality drops.
-    correlation_normalized = correlations / medfilt(correlations, kernel_size=filter_window).astype(np.float32)
+    correlation_normalized = correlations / medfilt(volume=correlations, kernel_size=filter_window).astype(np.float32)
 
     # Combines deviation and correlation metrics: bad frames have large offsets AND/OR poor correlation.
     outlier_metric = delta_xy / np.maximum(0, correlation_normalized)
@@ -441,7 +437,7 @@ def _compute_reference(
         The computed reference image with shape (height, width).
     """
     # Selects the initial reference by averaging together the most stable frames.
-    reference_image = _pick_initial_reference(frames)
+    reference_image = _pick_initial_reference(frames=frames)
 
     # Applies one-photon preprocessing.
     if one_photon_enabled:
@@ -701,16 +697,20 @@ def _apply_precomputed_offsets_batch(
     # Applies nonrigid (per-block) warping if enabled. Fallback assignments are for type checker only; these are
     # guaranteed to be present when nonrigid_enabled is True.
     if nonrigid_enabled:
-        _blocks = blocks if blocks is not None else ([], [], (0, 0), (0, 0), np.empty(0))
-        _y_nr = y_offsets_nonrigid if y_offsets_nonrigid is not None else np.empty((0, 0), dtype=np.float32)
-        _x_nr = x_offsets_nonrigid if x_offsets_nonrigid is not None else np.empty((0, 0), dtype=np.float32)
+        _blocks = blocks if blocks is not None else ([], [], (0, 0), (0, 0), np.empty(0, dtype=np.float32))
+        _y_offsets_nonrigid = (
+            y_offsets_nonrigid if y_offsets_nonrigid is not None else np.empty((0, 0), dtype=np.float32)
+        )
+        _x_offsets_nonrigid = (
+            x_offsets_nonrigid if x_offsets_nonrigid is not None else np.empty((0, 0), dtype=np.float32)
+        )
         frames = apply_nonrigid_correction(
             frames=frames,
             y_blocks=_blocks[0],
             x_blocks=_blocks[1],
             block_counts=_blocks[2],
-            y_block_offsets=_y_nr,
-            x_block_offsets=_x_nr,
+            y_block_offsets=_y_offsets_nonrigid,
+            x_block_offsets=_x_offsets_nonrigid,
         )
 
     return frames
@@ -762,7 +762,6 @@ def _register_alignment_channel(context: RuntimeContext) -> None:  # pragma: no 
         binary_path = io_data.registered_binary_path_channel_2
         channel_label = "channel 2"
 
-    # Validates binary path exists.
     if binary_path is None:
         console.error(
             message=(
@@ -859,7 +858,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:  # pragma: no 
             blocks = None
             taper_mask_nonrigid, mean_offset_nonrigid, reference_kernel_nonrigid = None, None, None
 
-        # Packages the compute reference data into a helper dictionary before applying registration offsets to batches
+        # Packages the computed reference data into a helper dataclass before applying registration offsets to batches
         # of frames.
         reference_data = _ReferenceData(
             taper_mask=taper_mask,
@@ -1005,8 +1004,16 @@ def _register_secondary_channel(context: RuntimeContext) -> None:  # pragma: no 
 
     # Extracts rigid offsets and converts to int32 for translation operations. Fallback to empty arrays is for type
     # narrowing only; offsets are always present since _register_alignment_channel populates them before this is called.
-    y_offsets = registration_data.rigid_y_offsets if registration_data.rigid_y_offsets is not None else np.empty(0)
-    x_offsets = registration_data.rigid_x_offsets if registration_data.rigid_x_offsets is not None else np.empty(0)
+    y_offsets = (
+        registration_data.rigid_y_offsets
+        if registration_data.rigid_y_offsets is not None
+        else np.empty(0, dtype=np.int32)
+    )
+    x_offsets = (
+        registration_data.rigid_x_offsets
+        if registration_data.rigid_x_offsets is not None
+        else np.empty(0, dtype=np.int32)
+    )
     y_offsets_int = y_offsets.astype(np.int32)
     x_offsets_int = x_offsets.astype(np.int32)
 
@@ -1022,7 +1029,6 @@ def _register_secondary_channel(context: RuntimeContext) -> None:  # pragma: no 
         binary_path = io_data.registered_binary_path
         channel_label = "channel 1"
 
-    # Validates binary path exists.
     if binary_path is None:
         console.error(
             message=(

@@ -1072,11 +1072,11 @@ def execute_processing_jobs_tool(
 ) -> dict[str, object]:
     """Dispatches pipeline jobs for background execution with prerequisite validation and resource allocation.
 
-    Validates that each job's prerequisites are satisfied (e.g., BINARIZE must be SUCCEEDED before PROCESS can run),
-    resolves worker and parallelism counts via saturating allocation, rewrites configuration files for compute-bound
-    jobs with the resolved worker count, then starts a background execution manager. I/O-bound jobs (binarize, combine)
-    ignore both parameters and always run with a fixed concurrency of 4. Use get_processing_jobs_status_tool to monitor
-    progress and cancel_processing_jobs_tool to stop execution.
+    Validates that each job's prerequisites are satisfied (e.g., BINARIZE must be SUCCEEDED before PROCESS can run)
+    and resolves worker and parallelism counts via saturating allocation. It then rewrites configuration files for
+    compute-bound jobs with the resolved worker count and starts a background execution manager. I/O-bound jobs
+    (binarize, combine) ignore both parameters and always run with a fixed concurrency of 4. Use
+    get_processing_jobs_status_tool to monitor progress and cancel_processing_jobs_tool to stop execution.
 
     Important:
         Only one execution session can be active at a time. Wait for the current session to complete or cancel it before

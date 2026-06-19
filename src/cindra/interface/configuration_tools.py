@@ -196,11 +196,11 @@ def resolve_dataset_name_tool(
 
     # Derives specifier from the common parent directory when not explicitly provided.
     if not specifier:
-        resolved_paths = [Path(p) for p in recording_paths]
+        resolved_paths = [Path(path) for path in recording_paths]
         if len(resolved_paths) == 1:
             specifier = resolved_paths[0].parent.name
         else:
-            common = Path(commonpath(resolved_paths))
+            common = Path(commonpath(paths=resolved_paths))
             specifier = common.name
 
         if not specifier:
@@ -293,8 +293,10 @@ def read_config_file_tool(file_path: str) -> dict[str, str | bool | list[str] | 
 
 @mcp.tool()
 def validate_config_file_tool(file_path: str) -> dict[str, str | bool | list[str] | dict[str, dict[str, object]]]:
-    """Validates a cindra configuration YAML file by loading it through the appropriate configuration dataclass,
-    checking parameter values against known constraints, and identifying parameters that differ from their defaults.
+    """Validates a cindra configuration YAML file and reports any problems found.
+
+    Loads the file through the appropriate configuration dataclass, checks parameter values against known constraints,
+    and identifies parameters that differ from their defaults.
 
     Args:
         file_path: The absolute path to the cindra configuration YAML file to validate.
@@ -356,11 +358,11 @@ def validate_config_file_tool(file_path: str) -> dict[str, str | bool | list[str
         if raw_pipeline_type == "single-recording":
             config = SingleRecordingConfiguration.load(file_path=path)
             default = SingleRecordingConfiguration()
-            errors, warnings = _validate_single_recording(config)
+            errors, warnings = _validate_single_recording(config=config)
         else:
             config = MultiRecordingConfiguration.load(file_path=path)
             default = MultiRecordingConfiguration()
-            errors, warnings = _validate_multi_recording(config)
+            errors, warnings = _validate_multi_recording(config=config)
     except Exception as error:
         return {
             "success": False,
@@ -408,8 +410,10 @@ def _to_json_compatible(value: object) -> object:
 
 
 def _identify_non_default_parameters(config: object, default: object, prefix: str = "") -> dict[str, dict[str, object]]:
-    """Compares a loaded configuration against its default instance and returns a mapping of dotted parameter paths
-    to their current and default values for all parameters that differ from the default.
+    """Compares a loaded configuration against its default instance and reports the parameters that differ.
+
+    Returns a mapping of dotted parameter paths to their current and default values for all parameters that differ
+    from the default.
 
     Args:
         config: The loaded configuration dataclass instance to compare.
@@ -422,7 +426,6 @@ def _identify_non_default_parameters(config: object, default: object, prefix: st
     """
     differences: dict[str, dict[str, object]] = {}
 
-    # noinspection PyDataclass
     for field in dataclass_fields(config):  # type: ignore[arg-type]
         if not field.init:
             continue

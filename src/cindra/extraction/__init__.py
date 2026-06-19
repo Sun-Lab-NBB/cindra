@@ -1,6 +1,4 @@
-"""Provides algorithms for extracting the fluorescence from detected ROIs and determining ROI colocalization in
-multichannel recordings.
-"""
+"""Provides algorithms for extracting fluorescence from detected ROIs and determining ROI colocalization."""
 
 from .masks import create_masks
 from .extract import extract_traces

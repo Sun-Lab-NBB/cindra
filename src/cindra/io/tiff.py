@@ -160,7 +160,7 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:  # pragma: 
                     plane_frames = frames[frame_indices]
 
                     # For MROI data, slices frames to extract only the ROI lines.
-                    if is_mroi and len(roi_lines) > 0:
+                    if is_mroi and roi_lines:
                         line_start = roi_lines[0]
                         line_end = roi_lines[-1] + 1
                         plane_frames = plane_frames[:, line_start:line_end, :]
@@ -194,7 +194,7 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:  # pragma: 
                         if channel_2_frame_indices:
                             channel_2_frames = frames[channel_2_frame_indices]
 
-                            if is_mroi and len(roi_lines) > 0:
+                            if is_mroi and roi_lines:
                                 line_start = roi_lines[0]
                                 line_end = roi_lines[-1] + 1
                                 channel_2_frames = channel_2_frames[:, line_start:line_end, :]

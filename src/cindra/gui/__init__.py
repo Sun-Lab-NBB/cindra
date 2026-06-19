@@ -1,6 +1,4 @@
-"""Provides the interactive GUIs for visualizing the processing outcomes of the single-recording and
-multi-recording pipelines.
-"""
+"""Provides interactive GUIs for visualizing single-recording and multi-recording pipeline outputs."""
 
 from .app import (
     run_roi_viewer,

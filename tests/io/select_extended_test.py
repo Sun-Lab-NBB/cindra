@@ -119,10 +119,10 @@ class TestFilterRois:
         runtime, configuration = _make_runtime_and_config(
             roi_count=2,
             probability_threshold=0.0,
-            maximum_size=50,
+            maximum_size=49,
         )
 
-        # Default ROIs have pixel_count=50, and the filter uses >= (not >), so pixel_count >= 50 is excluded.
+        # Default ROIs have pixel_count=50; maximum_size is inclusive, so 50 > 49 is excluded.
         channel_1_count, _ = _filter_rois(runtime=runtime, configuration=configuration)
 
         assert channel_1_count == 0

@@ -216,7 +216,9 @@ def detect(
         scale_maxima = np.array([variance_maps[scale_index].max() for scale_index in range(scale_count)])
         best_scale_index = np.argmax(scale_maxima)
         peak_index = np.argmax(variance_maps[best_scale_index])
-        peak_y, peak_x = np.unravel_index(peak_index, (scale_heights[best_scale_index], scale_widths[best_scale_index]))
+        peak_y, peak_x = np.unravel_index(
+            indices=peak_index, shape=(scale_heights[best_scale_index], scale_widths[best_scale_index])
+        )
 
         peak_y, peak_x = (
             grid_coordinates[best_scale_index][1, peak_y, peak_x],
@@ -263,9 +265,9 @@ def detect(
             flat_indices = y_pixels * width + x_pixels
             time_projection = frames[:, flat_indices] @ pixel_weights
             active_frame_indices = np.nonzero(time_projection > peak_threshold)[0]
-            if len(active_frame_indices) < 1:
+            if active_frame_indices.size == 0:
                 break
-        if len(active_frame_indices) < 1:
+        if active_frame_indices.size == 0:
             continue
 
         # Tests whether splitting into two components improves explained variance.
@@ -311,7 +313,7 @@ def detect(
         for scale_index in range(scale_count):
             scale_flat_indices = multiscale_x[scale_index] + scale_widths[scale_index] * multiscale_y[scale_index]
             convolved_scales[scale_index][np.ix_(active_frame_indices, scale_flat_indices)] -= np.outer(
-                time_projection[active_frame_indices], multiscale_weights[scale_index]
+                a=time_projection[active_frame_indices], b=multiscale_weights[scale_index]
             )
             # Fancy indexing produces an independent copy, so in-place zeroing avoids the extra temporary that
             # np.where would allocate.
@@ -467,7 +469,7 @@ def _check_split_components(
     projection = pixel_frames @ weights
     active_frames = projection > intensity_threshold
     active_projection = projection[active_frames]
-    pixel_frames[active_frames, :] -= np.outer(active_projection, weights)
+    pixel_frames[active_frames, :] -= np.outer(a=active_projection, b=weights)
     single_component_variance = total_energy - np.dot(pixel_frames.ravel(), pixel_frames.ravel())
 
     # Seeds the two-component split from the residual's most energetic frame: pixels with negative vs positive
@@ -479,7 +481,7 @@ def _check_split_components(
     ]
 
     # Reverses the single-component subtraction in-place rather than allocating a second full copy.
-    pixel_frames[active_frames, :] += np.outer(active_projection, weights)
+    pixel_frames[active_frames, :] += np.outer(a=active_projection, b=weights)
 
     # Sequentially subtracts each initial component so pixel_frames holds the two-component residual.
     component_frames: list[NDArray[np.bool_]] = []
@@ -487,7 +489,7 @@ def _check_split_components(
     for component_mask in component_masks:
         component_mask[:] /= norm(component_mask) + _NORMALIZATION_EPSILON
         temporal_projection = pixel_frames @ component_mask
-        pixel_frames[active_frames, :] -= np.outer(temporal_projection[active_frames], component_mask)
+        pixel_frames[active_frames, :] -= np.outer(a=temporal_projection[active_frames], b=component_mask)
         component_frames.append(active_frames)
         projections.append(temporal_projection[active_frames])
 
@@ -502,7 +504,7 @@ def _check_split_components(
 
             # Restores this component's contribution so re-projection sees the other component's residual only.
             pixel_frames[component_frames[component_index], :] += np.outer(
-                projections[component_index], component_masks[component_index]
+                a=projections[component_index], b=component_masks[component_index]
             )
             temporal_projection = pixel_frames @ component_masks[component_index]
             component_frames[component_index] = temporal_projection > intensity_threshold
@@ -521,7 +523,7 @@ def _check_split_components(
             component_masks[component_index][component_masks[component_index] < 0] = 0
             component_masks[component_index] /= _NORMALIZATION_EPSILON + norm(component_masks[component_index])
             pixel_frames[component_frames[component_index], :] -= np.outer(
-                projections[component_index], component_masks[component_index]
+                a=projections[component_index], b=component_masks[component_index]
             )
 
     # Computes the variance ratio, where values above the caller's split threshold indicate that the two-component
@@ -578,9 +580,9 @@ def _extend_mask(
     # Accumulates weights from each of the 9 directional offsets into the dense local grid. Boundary checks per
     # offset are cheaper than a single check on the full 9x-expanded array.
     accumulator = np.zeros((box_height, box_width), dtype=np.float32)
-    for dy, dx in ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)):
-        shifted_y = local_y + dy
-        shifted_x = local_x + dx
+    for delta_y, delta_x in ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)):
+        shifted_y = local_y + delta_y
+        shifted_x = local_x + delta_x
         valid = (shifted_y >= 0) & (shifted_y < box_height) & (shifted_x >= 0) & (shifted_x < box_width)
         np.add.at(accumulator, (shifted_y[valid], shifted_x[valid]), weights[valid])
 
@@ -588,7 +590,6 @@ def _extend_mask(
     nonzero_y, nonzero_x = np.nonzero(accumulator)
     extended_y = (nonzero_y + min_y).astype(np.int32)
     extended_x = (nonzero_x + min_x).astype(np.int32)
-    # noinspection PyTypeChecker
     return extended_y, extended_x, accumulator[nonzero_y, nonzero_x]
 
 

@@ -73,7 +73,7 @@ def resolve_single_recording_contexts(  # pragma: no cover
 
     This function performs the initial setup for single-recording processing: it finds acquisition parameters from
     the data directory, creates output directories, and initializes RuntimeContext instances for each of the
-    recording's plains.
+    recording's planes.
 
     Notes:
         For standard single-ROI data, one context is created per physical plane. For MROI (Multi-ROI) data, one context
@@ -136,7 +136,7 @@ def resolve_single_recording_contexts(  # pragma: no cover
                 "point to raw TIFF data."
             )
             console.error(message=message, error=ValueError)
-        acquisition = _find_acquisition_parameters(configuration.file_io.data_path)
+        acquisition = _find_acquisition_parameters(data_path=configuration.file_io.data_path)
 
     # Validates that the channel count does not exceed the maximum supported channel count.
     if acquisition.channel_number > MAXIMUM_CHANNEL_COUNT:
@@ -157,10 +157,8 @@ def resolve_single_recording_contexts(  # pragma: no cover
     # Derives the per-plane sampling rate from the acquisition frame rate and the number of physical planes.
     sampling_rate = acquisition.frame_rate / acquisition.plane_number
 
-    # Initializes the list to store RuntimeContext instances for each plane.
     contexts: list[RuntimeContext] = []
 
-    # Creates a RuntimeContext for each plane.
     for virtual_plane_index in range(plane_count):
         # Resolves the output directory for this plane. Always uses 'cindra' as the subdirectory.
         plane_output_path = output_path_root / "cindra" / f"plane_{virtual_plane_index}"
@@ -180,8 +178,7 @@ def resolve_single_recording_contexts(  # pragma: no cover
             contexts.append(context)
             continue
 
-        # Creates the output directory if it does not exist.
-        ensure_directory_exists(plane_output_path)
+        ensure_directory_exists(path=plane_output_path)
 
         # Initializes the IOData for this plane with binary file paths.
         io_data = IOData(
@@ -373,7 +370,7 @@ def resolve_multi_recording_contexts(  # pragma: no cover
         runtime = MultiRecordingRuntimeData(output_path=output_path, io=io_data, combined_data=combined_data)
 
         # Creates the output directory for this recording.
-        ensure_directory_exists(output_path)
+        ensure_directory_exists(path=output_path)
 
         contexts.append(MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime))
 
@@ -407,6 +404,91 @@ def resolve_multi_recording_contexts(  # pragma: no cover
                 console.error(message=message, error=FileNotFoundError)
 
     return contexts
+
+
+def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
+    """Extracts the first component from the end of each input path that uniquely identifies each path globally.
+
+    Notes:
+        This function adapts the multi-recording pipeline to directory structures where the unique
+        recording identifier appears at different levels of the path hierarchy. For example, given paths
+        like ``/data/day1/recording`` and ``/data/day2/recording``, the function identifies ``day1`` and
+        ``day2`` as the unique components (not ``recording``,
+        which is shared). This allows users to organize recordings using any naming convention, as long as each path
+        contains at least one unique component somewhere in its hierarchy.
+
+    Args:
+        paths: A list or tuple of Path objects.
+
+    Returns:
+        A tuple of unique components, one for each path, stored in the same order as the input paths.
+
+    Raises:
+        RuntimeError: If one or more paths do not contain unique components.
+    """
+    paths_list = list(paths)
+    unique_components: list[str] = []
+
+    for path in paths_list:
+        # Gets components from right to left.
+        components = list(path.parts)[::-1]
+        found_unique = False
+
+        for component in components:
+            # Checks if this component appears in any other path.
+            is_unique = True
+
+            for other_path in paths_list:
+                if path == other_path:
+                    continue
+
+                # If the component appears anywhere in the other path, it is not unique.
+                if component in other_path.parts:
+                    is_unique = False
+                    break
+
+            if is_unique:
+                unique_components.append(component)
+                found_unique = True
+                break
+
+        if not found_unique:
+            message = f"Unable to extract a unique component from the given path: {path}."
+            console.error(message=message, error=RuntimeError)
+
+    return tuple(unique_components)
+
+
+def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path, ...]:
+    """Resolves a set of discovered marker-file directories to their recording root directories.
+
+    Recording roots are the meaningful top-level directories that uniquely identify each recording session. Raw data
+    and pipeline outputs may be nested at arbitrary depths below the root, but the root itself is essential for proper
+    recording identification, display labels, and configuration paths. This function uses ``extract_unique_components``
+    to identify the first path component (from the end) that uniquely distinguishes each path, then truncates each
+    path at that component to strip shared structural subdirectories without assuming a fixed directory hierarchy.
+
+    Args:
+        paths: Directories containing discovered marker files (e.g., parents of ``cindra_parameters.json``
+            or ``combined_metadata.npz``). The pipeline resolves sub-paths to raw data and outputs internally;
+            callers should always work with recording roots rather than implementation-specific subdirectories.
+
+    Returns:
+        A deduplicated tuple of recording root paths, one per unique recording.
+
+    Raises:
+        RuntimeError: If one or more paths do not contain unique components.
+    """
+    unique_ids = extract_unique_components(paths=list(paths))
+    roots: list[Path] = []
+    for path, unique_id in zip(paths, unique_ids, strict=True):
+        # Walks up from the path to the ancestor whose name matches the unique component.
+        current = path
+        while current.name != unique_id and current != current.parent:
+            current = current.parent
+        if current not in roots:
+            roots.append(current)
+    return tuple(roots)
 
 
 def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
@@ -516,98 +598,13 @@ def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
         FileNotFoundError: If no acquisition parameters file is found.
         ValueError: If the data_path is not a directory, or if required fields are missing from the JSON file.
     """
-    data_directory = find_data_directory(data_path)
+    data_directory = find_data_directory(data_path=data_path)
     parameters_path = data_directory / PARAMETERS_FILENAME
 
     message = f"Found acquisition parameters at: {parameters_path}."
     console.echo(message=message, level=LogLevel.SUCCESS)
 
     return _load_acquisition_parameters(json_path=parameters_path)
-
-
-def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str, ...]:
-    """Extracts the first component from the end of each input path that uniquely identifies each path globally.
-
-    Notes:
-        This function adapts the multi-recording pipeline to directory structures where the unique
-        recording identifier appears at different levels of the path hierarchy. For example, given paths
-        like ``/data/day1/recording`` and ``/data/day2/recording``, the function identifies ``day1`` and
-        ``day2`` as the unique components (not ``recording``,
-        which is shared). This allows users to organize recordings using any naming convention, as long as each path
-        contains at least one unique component somewhere in its hierarchy.
-
-    Args:
-        paths: A list or tuple of Path objects.
-
-    Returns:
-        A tuple of unique components, one for each path, stored in the same order as the input paths.
-
-    Raises:
-        RuntimeError: If one or more paths do not contain unique components.
-    """
-    paths_list = list(paths)
-    unique_components: list[str] = []
-
-    for path in paths_list:
-        # Gets components from right to left.
-        components = list(path.parts)[::-1]
-        found_unique = False
-
-        for component in components:
-            # Checks if this component appears in any other path.
-            is_unique = True
-
-            for other_path in paths_list:
-                if path == other_path:
-                    continue
-
-                # If the component appears anywhere in the other path, it is not unique.
-                if component in other_path.parts:
-                    is_unique = False
-                    break
-
-            if is_unique:
-                unique_components.append(component)
-                found_unique = True
-                break
-
-        if not found_unique:
-            message = f"Unable to extract a unique component from the given path: {path}."
-            console.error(message=message, error=RuntimeError)
-
-    return tuple(unique_components)
-
-
-def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path, ...]:
-    """Resolves a set of discovered marker-file directories to their recording root directories.
-
-    Recording roots are the meaningful top-level directories that uniquely identify each recording session. Raw data
-    and pipeline outputs may be nested at arbitrary depths below the root, but the root itself is essential for proper
-    recording identification, display labels, and configuration paths. This function uses ``extract_unique_components``
-    to identify the first path component (from the end) that uniquely distinguishes each path, then truncates each
-    path at that component to strip shared structural subdirectories without assuming a fixed directory hierarchy.
-
-    Args:
-        paths: Directories containing discovered marker files (e.g., parents of ``cindra_parameters.json``
-            or ``combined_metadata.npz``). The pipeline resolves sub-paths to raw data and outputs internally;
-            callers should always work with recording roots rather than implementation-specific subdirectories.
-
-    Returns:
-        A deduplicated tuple of recording root paths, one per unique recording.
-
-    Raises:
-        RuntimeError: If one or more paths do not contain unique components.
-    """
-    unique_ids = extract_unique_components(paths=list(paths))
-    roots: list[Path] = []
-    for path, unique_id in zip(paths, unique_ids, strict=True):
-        # Walks up from the path to the ancestor whose name matches the unique component.
-        current = path
-        while current.name != unique_id and current != current.parent:
-            current = current.parent
-        if current not in roots:
-            roots.append(current)
-    return tuple(roots)
 
 
 def _find_cindra_directory(recording_directory: Path) -> Path:

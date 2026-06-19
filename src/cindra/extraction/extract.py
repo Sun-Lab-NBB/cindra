@@ -752,7 +752,7 @@ def _extract_multi_recording_channel(  # pragma: no cover
     tau: float,
     sampling_rate: float,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
-    """Extracts fluorescence, computes delta-F, and deconvolves spikes for one channel of a multi-recording recording.
+    """Extracts fluorescence, computes delta-F, and deconvolves spikes for one channel of a multi-recording extraction.
 
     Notes:
         Serves as the generic multi-recording channel worker used by both channel 1 and channel 2. It always uses

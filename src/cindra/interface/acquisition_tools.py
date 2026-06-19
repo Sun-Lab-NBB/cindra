@@ -31,8 +31,9 @@ def generate_acquisition_parameters_file_tool(
     roi_x_coordinates: list[int] | None = None,
     roi_y_coordinates: list[int] | None = None,
 ) -> dict[str, bool | str | list[str] | dict[str, object]]:
-    """Generates a cindra_parameters.json acquisition parameters file in the specified directory from the provided
-    acquisition metadata, validating all fields before writing.
+    """Generates a cindra_parameters.json acquisition parameters file in the specified directory.
+
+    Builds the file from the provided acquisition metadata, validating all fields before writing.
 
     Args:
         output_directory: The absolute path to the directory where the cindra_parameters.json file should be created,
@@ -414,14 +415,14 @@ def _validate_acquisition_parameters(
     elif roi_number < 1:
         errors.append(f"'roi_number' must be at least 1 (found: {roi_number}).")
     elif roi_number > 1:
-        # MROI mode — validates all MROI fields.
+        # Validates all MROI fields in MROI mode.
         roi_lines = data.get("roi_lines")
         roi_x_coordinates = data.get("roi_x_coordinates")
         roi_y_coordinates = data.get("roi_y_coordinates")
 
         if roi_lines is None:
             errors.append("Missing required field 'roi_lines' (required when roi_number > 1).")
-        elif not isinstance(roi_lines, list) or not all(isinstance(r, list) for r in roi_lines):
+        elif not isinstance(roi_lines, list) or not all(isinstance(lines, list) for lines in roi_lines):
             errors.append("'roi_lines' must be a list of lists of integers.")
         elif len(roi_lines) != roi_number:
             errors.append(f"'roi_lines' length ({len(roi_lines)}) must equal 'roi_number' ({roi_number}).")
@@ -444,7 +445,7 @@ def _validate_acquisition_parameters(
                 f"'roi_y_coordinates' length ({len(roi_y_coordinates)}) must equal 'roi_number' ({roi_number})."
             )
     else:
-        # Single-ROI mode — warns if MROI fields are present.
+        # Warns when MROI fields are present in single-ROI mode.
         if data.get("roi_lines"):
             warnings.append("'roi_lines' is set but 'roi_number' is 1 (single-ROI mode). Field will be ignored.")
         if data.get("roi_x_coordinates"):

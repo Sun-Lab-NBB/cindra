@@ -88,12 +88,10 @@ def configure_plot(
         mouse_y: Determines whether vertical mouse interaction is enabled.
     """
     plot.setMenuEnabled(False)
-    # noinspection PyUnresolvedReferences
     plot.setMouseEnabled(x=mouse_x, y=mouse_y)
     plot.getAxis("left").setWidth(PLOT_STYLE.left_axis_width)
     plot.getAxis("bottom").setHeight(PLOT_STYLE.bottom_axis_height)
     if title:
-        # noinspection PyTypeChecker
         plot.setTitle(title, size=FONTS.plot_title_size, bold=True)
     if left_label:
         plot.setLabel("left", left_label, **{"font-size": FONTS.label_size})
@@ -364,6 +362,61 @@ def plot_trace(
     return y_minimum, y_maximum
 
 
+def create_play_pause_group(
+    parent: QWidget,
+    *,
+    play_tooltip: str,
+    pause_tooltip: str,
+    no_focus: bool = False,
+) -> PlayPauseGroup:
+    """Creates a play/pause button pair with an exclusive button group.
+
+    Both buttons start disabled with pause pre-selected. Signal connections are not wired by this factory — each
+    viewer connects its own callbacks after construction.
+
+    Args:
+        parent: The parent widget that provides the icon style and owns the button group.
+        play_tooltip: Tooltip text for the play button.
+        pause_tooltip: Tooltip text for the pause button.
+        no_focus: Determines whether to disable keyboard focus on both buttons.
+
+    Returns:
+        The assembled play/pause button group.
+    """
+    icon_size = QtCore.QSize(STYLE.icon_size, STYLE.icon_size)
+
+    play_button = QToolButton()
+    play_button.setIcon(parent.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+    play_button.setIconSize(icon_size)
+    play_button.setToolTip(play_tooltip)
+    play_button.setCheckable(True)
+
+    pause_button = QToolButton()
+    pause_button.setIcon(parent.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+    pause_button.setIconSize(icon_size)
+    pause_button.setToolTip(pause_tooltip)
+    pause_button.setCheckable(True)
+
+    if no_focus:
+        play_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        pause_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
+    button_group = QButtonGroup(parent)
+    button_group.addButton(play_button, 0)
+    button_group.addButton(pause_button, 1)
+    button_group.setExclusive(True)
+
+    play_button.setEnabled(False)
+    pause_button.setEnabled(False)
+    pause_button.setChecked(True)
+
+    return PlayPauseGroup(
+        play_button=play_button,
+        pause_button=pause_button,
+        button_group=button_group,
+    )
+
+
 def _plot_single_trace(
     trace_box: pg.PlotItem,
     axis: pg.AxisItem,
@@ -373,6 +426,7 @@ def _plot_single_trace(
     spikes: NDArray[np.float32],
     frame_indices: NDArray[np.int32],
     roi_index: int,
+    *,
     fluorescence_visible: bool,
     neuropil_visible: bool,
     corrected_visible: bool,
@@ -487,20 +541,17 @@ def _plot_multi_trace(
         trace_max = float(trace.max())
         trace_min = float(trace.min())
 
-        # Normalizes trace to [0, 1] range.
         if trace_max > trace_min:  # noqa: SIM108
             normalized = (trace - trace_min) / (trace_max - trace_min)
         else:
             normalized = np.zeros_like(trace)
 
-        # Determines pen color for this ROI.
         pen_color = roi_colors[index, :] if roi_colors is not None else COLORS.white
 
         trace_box.plot(frame_indices, normalized + stack_position * trace_spacing, pen=pen_color)
         tick_labels.append((stack_position * trace_spacing + float(normalized.mean()), str(index)))
         stack_position -= 1
 
-    # Computes average trace scale.
     average_scale = len(selected) / ROI_CONFIG.average_scale_divisor + 1
     average -= average.min()
     average_max = average.max()
@@ -523,58 +574,3 @@ def _plot_multi_trace(
     y_maximum = (len(selected) - 1) * trace_spacing + 1
     axis.setTicks([tick_labels])
     return y_minimum, y_maximum
-
-
-def create_play_pause_group(
-    parent: QWidget,
-    *,
-    play_tooltip: str,
-    pause_tooltip: str,
-    no_focus: bool = False,
-) -> PlayPauseGroup:
-    """Creates a play/pause button pair with an exclusive button group.
-
-    Both buttons start disabled with pause pre-selected. Signal connections are not wired by this factory — each
-    viewer connects its own callbacks after construction.
-
-    Args:
-        parent: The parent widget that provides the icon style and owns the button group.
-        play_tooltip: Tooltip text for the play button.
-        pause_tooltip: Tooltip text for the pause button.
-        no_focus: Determines whether to disable keyboard focus on both buttons.
-
-    Returns:
-        The assembled play/pause button group.
-    """
-    icon_size = QtCore.QSize(STYLE.icon_size, STYLE.icon_size)
-
-    play_button = QToolButton()
-    play_button.setIcon(parent.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-    play_button.setIconSize(icon_size)
-    play_button.setToolTip(play_tooltip)
-    play_button.setCheckable(True)
-
-    pause_button = QToolButton()
-    pause_button.setIcon(parent.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
-    pause_button.setIconSize(icon_size)
-    pause_button.setToolTip(pause_tooltip)
-    pause_button.setCheckable(True)
-
-    if no_focus:
-        play_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        pause_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-
-    button_group = QButtonGroup(parent)
-    button_group.addButton(play_button, 0)
-    button_group.addButton(pause_button, 1)
-    button_group.setExclusive(True)
-
-    play_button.setEnabled(False)
-    pause_button.setEnabled(False)
-    pause_button.setChecked(True)
-
-    return PlayPauseGroup(
-        play_button=play_button,
-        pause_button=pause_button,
-        button_group=button_group,
-    )
