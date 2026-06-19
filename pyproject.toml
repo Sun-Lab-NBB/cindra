@@ -79,7 +79,7 @@ dependencies = [
     "ataraxis-data-structures>=6,<7",
 
     # Runtime Utilities
-    "importlib_metadata>=8,<9",
+    "importlib_metadata>=9,<10",
 
     # Platform-Specific Acceleration
     "tbb4py>=2023,<2024; sys_platform != 'darwin'",
