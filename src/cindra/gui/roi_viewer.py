@@ -245,7 +245,6 @@ class ROIViewer(QMainWindow):
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
 
-        # Builds graphics panels.
         self._build_graphics()
 
         # Prevents control panel widgets from capturing keyboard focus so spacebar and arrow keys always reach the
@@ -690,7 +689,6 @@ class ROIViewer(QMainWindow):
         # Color gradient image. Renders a 1D colormap strip that is updated whenever the active
         # color mode or colormap changes. The view box spans all three label columns.
         image = pg.ImageItem()
-        # noinspection PyUnresolvedReferences
         colorbar_view = colorbar_widget.addViewBox(row=0, col=0, colspan=3)
         colorbar_view.setMenuEnabled(False)
         colorbar_view.addItem(image)
@@ -699,13 +697,10 @@ class ROIViewer(QMainWindow):
         # color range. Updated dynamically when the color mode changes to reflect actual data
         # bounds.
         colorbar_font = FONTS.small
-        # noinspection PyUnresolvedReferences
         label_0 = colorbar_widget.addLabel("0.0", color=list(COLORS.white), row=1, col=0)
         label_0.setFont(colorbar_font)
-        # noinspection PyUnresolvedReferences
         label_half = colorbar_widget.addLabel("0.5", color=list(COLORS.white), row=1, col=1)
         label_half.setFont(colorbar_font)
-        # noinspection PyUnresolvedReferences
         label_1 = colorbar_widget.addLabel("1.0", color=list(COLORS.white), row=1, col=2)
         label_1.setFont(colorbar_font)
         labels = [label_0, label_half, label_1]
@@ -871,7 +866,6 @@ class ROIViewer(QMainWindow):
 
         # Adds the fluorescence trace panel in its own graphics widget below the image.
         self._trace_box = TraceBox()
-        # noinspection PyArgumentList
         self._trace_widget.addItem(self._trace_box, row=0, col=0)
 
     def _load_recording(self) -> None:
@@ -970,7 +964,6 @@ class ROIViewer(QMainWindow):
             self._frame_count = single_recording.frame_count
             self._roi_count = single_recording.roi_count
 
-        # Resets display controls.
         self.setWindowTitle(f"ROI Viewer — {single_recording.recording_label}")
 
         # Computes default bin size from tau and sampling rate.
@@ -1112,7 +1105,6 @@ class ROIViewer(QMainWindow):
 
         self._recording_loaded = True
 
-        # Triggers initial full redraw.
         self._update_plot()
         self.show()
 
@@ -1726,7 +1718,7 @@ class ROIViewer(QMainWindow):
             return
 
         self._trace_box.setLabel("left", "Recording", **{"font-size": FONTS.label_size})
-        add_plot_legend(self._trace_box, column_count=1)
+        add_plot_legend(plot=self._trace_box, column_count=1)
 
         roi_index = self._selected_roi_indices[0]
         axis = self._trace_box.getAxis("left")
@@ -1785,7 +1777,7 @@ class ROIViewer(QMainWindow):
             rgb = (255.0 * hsv_to_rgb(hsv)).astype(np.uint8)[0]
             pen_color = (int(rgb[0]), int(rgb[1]), int(rgb[2]))
 
-            self._trace_box.plot(frame_indices, normalized + stack_position * trace_spacing, pen=pen_color)
+            self._trace_box.plot(x=frame_indices, y=normalized + stack_position * trace_spacing, pen=pen_color)
             tick_labels.append((stack_position * trace_spacing + float(normalized.mean()), str(recording_index)))
             y_maximum = max(y_maximum, stack_position * trace_spacing + 1)
             stack_position -= 1
@@ -1823,7 +1815,7 @@ class ROIViewer(QMainWindow):
                     segment_frames = average_frames[segment]
                     segment_values = -1 * average_scale + average[segment] * average_scale
                     name = "Average" if segment is segments[0] else None
-                    self._trace_box.plot(segment_frames, segment_values, pen=COLORS.silver, name=name)
+                    self._trace_box.plot(x=segment_frames, y=segment_values, pen=COLORS.silver, name=name)
                 y_minimum = -1 * average_scale
 
         axis.setTicks([tick_labels])
@@ -1904,7 +1896,7 @@ class ROIViewer(QMainWindow):
             return
 
         try:
-            data = np.load(source_path, allow_pickle=False)
+            data = np.load(file=source_path, allow_pickle=False)
             existing_training_labels = data["training_labels"].astype(np.bool_)
             existing_normalized_pixel_count = data["normalized_pixel_count"].astype(np.float32)
             existing_compactness = data["compactness"].astype(np.float32)

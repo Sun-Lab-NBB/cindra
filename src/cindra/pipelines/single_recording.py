@@ -115,8 +115,7 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int)
     Notes:
         This function executes the second phase of the single-recording pipeline: it processes a single imaging
         plane through registration, ROI detection, and trace extraction. Multiple planes can be processed in
-        parallel, but each
-        plane may use significant memory and CPU resources.
+        parallel, but each plane may use significant memory and CPU resources.
 
     Args:
         configuration: The single-recording pipeline configuration.

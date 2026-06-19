@@ -58,6 +58,7 @@ class BinaryFile:
         file_path: str | Path,
         frame_number: int = 0,
         dtype: str = "int16",
+        *,
         read_only: bool = False,
     ) -> None:
         # Initializes class attributes using input arguments.
@@ -166,7 +167,6 @@ class BinaryFile:
 
     def close(self) -> None:
         """Closes the memory-mapped file view."""
-        # noinspection PyProtectedMember
         self.file._mmap.close()  # type: ignore[attr-defined]
 
     def __enter__(self) -> Self:
@@ -255,7 +255,6 @@ class BinaryFile:
         # Computes evenly-spaced indices across the recording.
         indices = np.linspace(start=0, stop=self.frame_number - 1, num=actual_samples).astype(dtype=np.intp)
 
-        # Reads the subsampled frames.
         movie = self.file[indices]
 
         # Applies cropping if ranges are provided.
@@ -264,7 +263,6 @@ class BinaryFile:
 
         return movie.astype(dtype=np.float32)
 
-    # noinspection PyTypeHints
     def bin_movie(
         self,
         bin_size: int,
@@ -306,7 +304,6 @@ class BinaryFile:
         batch_size = min(int(np.sum(good_frames)), _DEFAULT_BIN_BATCH_SIZE)
 
         # Bins the frames in batches to reduce memory consumption.
-        # Stores the frames of each batch.
         batches: list[NDArray[np.float32]] = []
         for batch_index in range(0, self.frame_number, batch_size):
             # Retrieves the frames in the processed batch.
@@ -540,5 +537,4 @@ class BinaryFileCombined:
                 + self.plane_widths[file_index],
             ] = file_data
 
-        # Returns the combined data.
         return data

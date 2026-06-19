@@ -138,7 +138,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:  # pragma: no cover
 
     # Computes the aggregate aspect ratio as the median across all detected ROIs.
     aspect_ratios = np.array([roi.aspect_ratio for roi in roi_statistics], dtype=np.float32)
-    detection_data.aspect_ratio = float(np.median(aspect_ratios)) if len(aspect_ratios) > 0 else 0.0
+    detection_data.aspect_ratio = float(np.median(a=aspect_ratios)) if aspect_ratios.size else 0.0
 
     # Stores channel 1 detection results.
     detection_data.mean_image = mean_image
@@ -487,7 +487,7 @@ def _detect_channel(  # pragma: no cover
     full_correlation_map[y_start:y_end, x_start:x_end] = correlation_map
     correlation_map = full_correlation_map
 
-    if len(roi_statistics) == 0:
+    if not roi_statistics:
         message = (
             f"Unable to complete ROI detection for plane {plane_index} {channel_label}. No ROIs found. "
             f"Check the binary file and consider adjusting the threshold_scaling parameter."

@@ -59,8 +59,8 @@ class TestFilterChannelRois:
         assert result == (0, 2)
 
     def test_size_filter(self) -> None:
-        """Verifies that ROIs exceeding maximum size are excluded."""
-        rois = [_make_roi(pixel_count=10), _make_roi(pixel_count=100), _make_roi(pixel_count=50)]
+        """Verifies that ROIs exceeding maximum size are excluded while the boundary value is retained."""
+        rois = [_make_roi(pixel_count=10), _make_roi(pixel_count=100), _make_roi(pixel_count=150)]
         classification = np.ones((3, 2), dtype=np.float32)
         result = _filter_channel_rois(
             roi_statistics=rois,
@@ -70,8 +70,8 @@ class TestFilterChannelRois:
             maximum_size=100,
             region_margin=0,
         )
-        # pixel_count >= maximum_size is excluded, so only 10 and 50 pass.
-        assert result == (0, 2)
+        # maximum_size is inclusive: only pixel_count > maximum_size is excluded, so 10 and the boundary 100 pass.
+        assert result == (0, 1)
 
     def test_mroi_border_filter(self) -> None:
         """Verifies that ROIs near MROI region borders are excluded."""

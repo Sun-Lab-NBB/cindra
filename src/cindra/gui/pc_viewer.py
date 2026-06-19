@@ -121,7 +121,6 @@ class PCViewer(QMainWindow):
         self._layout.setRowStretch(2, 0)
 
         # Configures pixel offset metrics plot. Top content margin provides space for the legend row.
-        # noinspection PyUnresolvedReferences
         self._metrics_plot = self._graphics_widget.addPlot(row=0, col=0)
         configure_plot(
             self._metrics_plot,
@@ -132,7 +131,6 @@ class PCViewer(QMainWindow):
             bottom_label="PC #",
         )
 
-        # noinspection PyUnresolvedReferences
         self._difference_view_box = self._graphics_widget.addViewBox(
             name="plot1",
             lockAspect=True,
@@ -140,12 +138,10 @@ class PCViewer(QMainWindow):
             col=0,
             invertY=True,
         )
-        # noinspection PyUnresolvedReferences
         self._merged_view_box = self._graphics_widget.addViewBox(lockAspect=True, row=1, col=1, invertY=True)
         self._merged_view_box.setMenuEnabled(False)
         self._merged_view_box.setXLink("plot1")
         self._merged_view_box.setYLink("plot1")
-        # noinspection PyUnresolvedReferences
         self._animated_view_box = self._graphics_widget.addViewBox(lockAspect=True, row=1, col=2, invertY=True)
         self._animated_view_box.setMenuEnabled(False)
         self._animated_view_box.setXLink("plot1")
@@ -166,10 +162,8 @@ class PCViewer(QMainWindow):
             view_box.addItem(label)
             self._title_labels.append(label)
 
-        # noinspection PyUnresolvedReferences
         self._graphics_widget.scene().sigMouseClicked.connect(self._plot_clicked)
 
-        # noinspection PyUnresolvedReferences
         self._projection_plot = self._graphics_widget.addPlot(row=0, col=1, colspan=2)
         configure_plot(
             self._projection_plot,
@@ -516,7 +510,6 @@ class PCViewer(QMainWindow):
     def _plot_clicked(self, event: object) -> None:
         """Handles double-click to zoom the PC image plots."""
         if self._loaded:
-            # noinspection PyUnresolvedReferences
             items = self._graphics_widget.scene().items(event.scenePos())  # type: ignore[attr-defined]
             for item in items:
                 if (

@@ -132,7 +132,7 @@ def compute_roi_statistics(
 
     # Computes shape statistics for each ROI and writes them back to the ROIStatistics instances. In lightweight mode,
     # skips the expensive ellipse fitting, convex hull solidity, and overlap mask computations.
-    for i, wrapper in enumerate(roi_wrappers):
+    for roi_index, wrapper in enumerate(roi_wrappers):
         data = wrapper.data
         data.compactness = wrapper.compactness
         data.pixel_count = wrapper.pixel_count
@@ -140,24 +140,22 @@ def compute_roi_statistics(
 
         if not lightweight:
             data.solidity = wrapper.solidity
-            # noinspection PyUnboundLocalVariable
             data.mask.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
 
-            # noinspection PyUnboundLocalVariable
             ellipse = wrapper.fit_ellipse(y_scale=y_scale, x_scale=x_scale)
             data.mask.radius = ellipse.radius
             data.aspect_ratio = ellipse.aspect_ratio
 
         # Collects soma pixel counts for normalization to avoid re-iterating over ROIs.
-        soma_pixel_count_values[i] = wrapper.soma_pixel_count
+        soma_pixel_count_values[roi_index] = wrapper.soma_pixel_count
 
     # Normalizes soma pixel count relative to the first 100 ROIs. Detection algorithms typically find high-confidence
     # ROIs first, so early ROIs serve as a reliable baseline for comparing later, lower-confidence detections.
     normalization_count = 100
     soma_pixel_count_normalized = soma_pixel_count_values / np.mean(soma_pixel_count_values[:normalization_count])
 
-    for roi, soma_count_norm in zip(rois, soma_pixel_count_normalized, strict=True):
-        roi.normalized_pixel_count = float(soma_count_norm)
+    for roi, soma_count_normalized in zip(rois, soma_pixel_count_normalized, strict=True):
+        roi.normalized_pixel_count = float(soma_count_normalized)
 
     # Removes ROIs with excessive overlap. High overlap often indicates over-segmentation or neuropil contamination.
     # Skipped in lightweight mode since overlap computation is not performed.

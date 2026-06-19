@@ -86,7 +86,7 @@ class Classifier:
 
             # Resolves the labels and the training dataset size.
             training_labels = data["training_labels"].astype(np.bool_)
-            n_samples = len(training_labels)
+            sample_count = len(training_labels)
 
             training_features: dict[str, NDArray[np.float32]] = {}
             available_features: list[str] = []
@@ -101,7 +101,7 @@ class Classifier:
             for feature_name in target_features:
                 if feature_name in data:
                     feature_array = data[feature_name].astype(np.float32)
-                    if len(feature_array) == n_samples and not np.all(np.isnan(feature_array)):
+                    if len(feature_array) == sample_count and not np.all(np.isnan(feature_array)):
                         training_features[feature_name] = feature_array
                         available_features.append(feature_name)
 
@@ -137,9 +137,9 @@ class Classifier:
         Returns:
             An array of shape (n_rois, n_features) containing the extracted features.
         """
-        n_rois = len(roi_statistics)
-        n_features = len(self._available_features)
-        features = np.zeros((n_rois, n_features), dtype=np.float32)
+        roi_count = len(roi_statistics)
+        feature_count = len(self._available_features)
+        features = np.zeros((roi_count, feature_count), dtype=np.float32)
 
         # Pre-creates attribute accessors to avoid repeated string lookups.
         getters = [attrgetter(name) for name in self._available_features]
@@ -211,22 +211,22 @@ class Classifier:
     def _fit_model(self) -> None:
         """Fits the logistic regression model using the loaded training data."""
         training_features = self._get_training_features()
-        n_samples, n_features = training_features.shape
+        sample_count, feature_count = training_features.shape
 
         # Sorts features and creates evenly-spaced grid boundaries for probability estimation.
         sorted_features = np.sort(training_features, axis=0)
         sort_indices = np.argsort(training_features, axis=0)
-        grid_indices = np.linspace(start=0, stop=n_samples - 1, num=_GRID_NODE_COUNT).astype(np.intp)
+        grid_indices = np.linspace(start=0, stop=sample_count - 1, num=_GRID_NODE_COUNT).astype(np.intp)
         self._probability_grid = sorted_features[grid_indices, :]
 
         # Computes the fraction of cells (vs artifacts) in each grid bin for each feature.
-        self._grid_cell_probabilities = np.zeros((_GRID_NODE_COUNT - 1, n_features), dtype=np.float32)
+        self._grid_cell_probabilities = np.zeros((_GRID_NODE_COUNT - 1, feature_count), dtype=np.float32)
         bin_sizes = grid_indices[1:] - grid_indices[:-1]
 
-        for feature_index in range(n_features):
+        for feature_index in range(feature_count):
             # Reorders labels by sorted feature values and computes cumulative sum.
             sorted_labels = self._training_labels[sort_indices[:, feature_index]].astype(np.float32)
-            cumulative_sum = np.concatenate([[0], np.cumsum(sorted_labels)])
+            cumulative_sum = np.concatenate([np.array([0], dtype=np.float32), np.cumsum(sorted_labels)])
 
             # Computes bin sums using cumulative sum differences, then converts to means.
             bin_sums = cumulative_sum[grid_indices[1:]] - cumulative_sum[grid_indices[:-1]]
@@ -262,7 +262,7 @@ class Classifier:
         Raises:
             ValueError: If feature arrays have mismatched lengths.
         """
-        n_samples = len(training_labels)
+        sample_count = len(training_labels)
 
         # Validates feature array lengths.
         features = {
@@ -271,10 +271,10 @@ class Classifier:
             "skewness": skewness,
         }
         for feature_name, feature_array in features.items():
-            if len(feature_array) != n_samples:
+            if len(feature_array) != sample_count:
                 message = (
                     f"Unable to create the classifier training dataset file. The feature '{feature_name}' has "
-                    f"{len(feature_array)} samples, but training_labels has {n_samples} samples."
+                    f"{len(feature_array)} samples, but training_labels has {sample_count} samples."
                 )
                 console.error(message=message, error=ValueError)
 
@@ -319,6 +319,7 @@ def classify(
     roi_statistics: list[ROIStatistics],
     classification_threshold: float = 0.5,
     custom_classifier_path: Path | None = None,
+    *,
     preclassification: bool = False,
 ) -> NDArray[np.float32]:
     """Classifies detected ROIs as cells or non-cells using a logistic regression model.

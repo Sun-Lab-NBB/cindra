@@ -155,10 +155,10 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
     # Applies sigmoid function: 1.0 at center, 0.5 at taper_start, approaches 0 at edges.
     sigma_f32 = np.float32(sigma)
     row_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((row_distances - taper_start_row) / sigma_f32))
-    col_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((column_distances - taper_start_column) / sigma_f32))
+    column_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((column_distances - taper_start_column) / sigma_f32))
 
     # Combines row and column tapers multiplicatively for 2D falloff.
-    taper_mask: NDArray[np.float32] = row_taper * col_taper
+    taper_mask: NDArray[np.float32] = row_taper * column_taper
     return taper_mask
 
 

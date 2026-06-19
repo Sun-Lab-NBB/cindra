@@ -7,7 +7,7 @@ lightweight numpy and YAML operations for efficient targeted queries without the
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 import contextlib
 from dataclasses import field, dataclass
@@ -16,6 +16,9 @@ import yaml  # type: ignore[import-untyped]
 import numpy as np
 
 from .mcp_instance import mcp
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 _MAX_TRACE_ROIS: int = 50
 """Maximum number of ROIs whose traces can be queried in a single request."""
@@ -1590,8 +1593,11 @@ def _resolve_data_path(cindra_root: Path, plane_index: int) -> tuple[Path | None
     return plane_path, None
 
 
-def _array_summary(array: np.ndarray) -> dict[str, object]:
+def _array_summary(array: NDArray[np.float32]) -> dict[str, object]:
     """Computes summary statistics for a numpy array.
+
+    Args:
+        array: The numpy array to summarize.
 
     Returns:
         A dictionary containing the min, max, mean, and standard deviation of the array.
@@ -1607,6 +1613,9 @@ def _array_summary(array: np.ndarray) -> dict[str, object]:
 def _load_yaml(file_path: Path) -> dict[str, Any] | None:
     """Loads a YAML file and returns the parsed dictionary, or None if loading fails.
 
+    Args:
+        file_path: The filesystem path to the YAML file to load.
+
     Returns:
         The parsed YAML dictionary, or None if loading fails.
     """
@@ -1620,6 +1629,9 @@ def _load_yaml(file_path: Path) -> dict[str, Any] | None:
 def _list_plane_directories(cindra_root: Path) -> list[Path]:
     """Returns sorted plane directories found under the cindra root.
 
+    Args:
+        cindra_root: The cindra output directory path to search for plane directories.
+
     Returns:
         A naturally-sorted list of plane directory paths found under the given root.
     """
@@ -1631,6 +1643,9 @@ def _list_plane_directories(cindra_root: Path) -> list[Path]:
 
 def _discover_available_datasets(cindra_root: Path) -> list[str]:
     """Discovers available multi-recording dataset names under the cindra root.
+
+    Args:
+        cindra_root: The cindra output directory path to search for multi-recording datasets.
 
     Returns:
         A list of dataset name strings discovered under the given recording path.
