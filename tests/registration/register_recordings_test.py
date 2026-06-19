@@ -16,18 +16,7 @@ def _make_roi_mask(
     cluster_id: int = 0,
     recording_count: int = 1,
 ) -> ROIMask:
-    """Creates a circular ROIMask instance for testing.
-
-    Args:
-        centroid: The (y, x) centroid position.
-        radius: The radius of the circular mask in pixels.
-        frame_width: The width of the frame in pixels.
-        cluster_id: The cluster assignment ID.
-        recording_count: The number of recordings containing this ROI.
-
-    Returns:
-        A ROIMask instance with circular pixel coordinates.
-    """
+    """Creates a circular ROIMask instance for testing."""
     y_pixels = []
     x_pixels = []
     for dy in range(-radius, radius + 1):
@@ -52,7 +41,7 @@ def _make_roi_mask(
 
 
 class TestWarpMaskPixels:
-    """Tests for _warp_mask_pixels."""
+    """Tests _warp_mask_pixels."""
 
     def test_identity_deformation_preserves_pixels(self) -> None:
         """Verifies that a zero-displacement deformation preserves pixel positions approximately."""
@@ -94,7 +83,7 @@ class TestWarpMaskPixels:
 
 
 class TestForwardDeformMasks:
-    """Tests for _forward_deform_masks."""
+    """Tests _forward_deform_masks."""
 
     def test_identity_deformation_preserves_mask_count(self) -> None:
         """Verifies that identity deformation preserves the number of masks and approximate positions."""
@@ -134,7 +123,7 @@ class TestForwardDeformMasks:
 
 
 class TestBackwardDeformMasks:
-    """Tests for _backward_deform_masks."""
+    """Tests _backward_deform_masks."""
 
     def test_identity_deformation_returns_roi_statistics(self) -> None:
         """Verifies that identity deformation returns ROIStatistics with computed fields."""

@@ -9,7 +9,7 @@ from cindra.registration.register import _compute_crop, _pick_initial_reference,
 
 
 class TestComputeCrop:
-    """Tests for the _compute_crop function."""
+    """Tests the _compute_crop function."""
 
     def test_returns_valid_region_for_small_offsets(self) -> None:
         """Verifies that small offsets produce a large valid region."""
@@ -110,7 +110,7 @@ class TestComputeCrop:
 
 
 class TestPickInitialReference:
-    """Tests for the _pick_initial_reference function."""
+    """Tests the _pick_initial_reference function."""
 
     def test_output_shape(self) -> None:
         """Verifies the output shape matches the spatial dimensions of the input frames."""
@@ -155,7 +155,7 @@ class TestPickInitialReference:
 
 
 class TestApplyPrecomputedOffsetsBatch:
-    """Tests for _apply_precomputed_offsets_batch."""
+    """Tests _apply_precomputed_offsets_batch."""
 
     def test_zero_offsets_preserve_frames(self) -> None:
         """Verifies that zero offsets leave frames unchanged."""

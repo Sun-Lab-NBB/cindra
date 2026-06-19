@@ -10,7 +10,7 @@ from cindra.dataclasses.runtime_contexts import _compute_relocation_prefixes, _r
 
 
 class TestComputeRelocationPrefixes:
-    """Tests for _compute_relocation_prefixes."""
+    """Tests _compute_relocation_prefixes."""
 
     def test_paths_with_shared_suffix_returns_diverging_prefixes(self) -> None:
         """Verifies that paths sharing a common suffix produce the correct diverging prefixes."""
@@ -40,7 +40,7 @@ class TestComputeRelocationPrefixes:
 
         old_prefix, new_prefix = _compute_relocation_prefixes(old_path=path, new_path=path)
 
-        # All parts are common, so prefixes should be empty of content beyond the root.
+        # Identical paths share every component, so neither prefix retains content beyond the root.
         assert old_prefix == new_prefix
 
     def test_single_component_difference(self) -> None:
@@ -65,7 +65,7 @@ class TestComputeRelocationPrefixes:
 
 
 class TestRelocateCrossRecordingPath:
-    """Tests for _relocate_cross_recording_path."""
+    """Tests _relocate_cross_recording_path."""
 
     def test_simple_path_relocation(self) -> None:
         """Verifies that a cross-recording path with the same base structure is correctly relocated."""

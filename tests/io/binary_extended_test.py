@@ -8,6 +8,8 @@ import numpy as np
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from numpy.typing import NDArray
 import pytest
 from tifffile import TiffFile
 
@@ -20,7 +22,7 @@ _FRAME_WIDTH: int = 8
 """The width of each frame used in test binary files."""
 
 
-def _create_test_binary(file_path: Path, frame_count: int, height: int, width: int) -> np.ndarray:
+def _create_test_binary(file_path: Path, frame_count: int, height: int, width: int) -> NDArray[np.int16]:
     """Creates a test binary file with sequential int16 data and returns the written data array.
 
     Args:
@@ -38,7 +40,7 @@ def _create_test_binary(file_path: Path, frame_count: int, height: int, width: i
 
 
 class TestConvertNumpyFileToBinary:
-    """Tests for BinaryFile.convert_numpy_file_to_binary."""
+    """Tests BinaryFile.convert_numpy_file_to_binary."""
 
     def test_converts_npy_to_binary(self, tmp_path: Path) -> None:
         """Verifies that a .npy file is correctly converted to a .bin file with matching contents."""
@@ -78,7 +80,7 @@ class TestConvertNumpyFileToBinary:
 
 
 class TestWriteTiff:
-    """Tests for BinaryFile.write_tiff."""
+    """Tests BinaryFile.write_tiff."""
 
     def test_writes_full_tiff(self, tmp_path: Path) -> None:
         """Verifies that binary data is correctly written to a BigTiff and can be read back."""
@@ -133,7 +135,7 @@ class TestWriteTiff:
 
 
 class TestBinaryFileCombined:
-    """Tests for the BinaryFileCombined class."""
+    """Tests the BinaryFileCombined class."""
 
     def test_reads_combined_frames_from_two_planes(self, tmp_path: Path) -> None:
         """Verifies that frames from two planes are correctly assembled into a combined array."""

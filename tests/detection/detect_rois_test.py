@@ -16,14 +16,14 @@ from cindra.detection.detect_rois import (
 
 
 class TestExtendRoi:
-    """Tests for extend_roi."""
+    """Tests extend_roi."""
 
     def test_single_pixel_one_iteration(self) -> None:
         """Verifies that a single pixel expands to a diamond of 5 pixels after one iteration."""
         y = np.array([5], dtype=np.int32)
         x = np.array([5], dtype=np.int32)
         y_out, _x_out = extend_roi(y_pixels=y, x_pixels=x, height=10, width=10, iterations=1)
-        assert len(y_out) == 5  # center + 4 cardinal neighbors
+        assert len(y_out) == 5  # center + 4 cardinal neighbors.
 
     def test_boundary_clipping(self) -> None:
         """Verifies that pixels outside the frame boundary are excluded."""
@@ -61,7 +61,7 @@ class TestExtendRoi:
 
 
 class TestSubtractNeuropil:
-    """Tests for _subtract_neuropil."""
+    """Tests _subtract_neuropil."""
 
     def test_in_place_modification(self) -> None:
         """Verifies that frames are modified in-place."""
@@ -86,7 +86,7 @@ class TestSubtractNeuropil:
 
 
 class TestConvolveSquare2d:
-    """Tests for _convolve_square_2d."""
+    """Tests _convolve_square_2d."""
 
     def test_output_shape(self) -> None:
         """Verifies that the output shape matches the input shape."""
@@ -112,7 +112,7 @@ class TestConvolveSquare2d:
 
 
 class TestCreateInitialSquare:
-    """Tests for _create_initial_square."""
+    """Tests _create_initial_square."""
 
     def test_centered_square(self) -> None:
         """Verifies that the output is a square patch centered at the given location."""
@@ -144,7 +144,7 @@ class TestCreateInitialSquare:
 
 
 class TestExtendMask:
-    """Tests for _extend_mask."""
+    """Tests _extend_mask."""
 
     def test_expands_in_all_directions(self) -> None:
         """Verifies that the mask expands into all 8 surrounding neighbors."""
@@ -176,7 +176,7 @@ class TestExtendMask:
 
 
 class TestEstimateSpatialScale:
-    """Tests for _estimate_spatial_scale."""
+    """Tests _estimate_spatial_scale."""
 
     def test_returns_dominant_scale(self) -> None:
         """Verifies that the dominant scale is returned for a clear scale pattern."""
@@ -195,7 +195,7 @@ class TestEstimateSpatialScale:
 
 
 class TestComputeMultiscaleMasks:
-    """Tests for _compute_multiscale_masks."""
+    """Tests _compute_multiscale_masks."""
 
     def test_output_list_lengths(self) -> None:
         """Verifies that the output lists have one entry per scale."""

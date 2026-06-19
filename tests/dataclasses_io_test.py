@@ -31,10 +31,6 @@ from cindra.dataclasses.single_recording_data import (
     _save_optional_array_field,
 )
 
-# ------------------------------------------------------------------
-# Helper factories
-# ------------------------------------------------------------------
-
 
 def _make_roi_mask(
     pixel_count: int = 5,
@@ -216,13 +212,8 @@ def _assert_roi_statistics_equal(original: ROIStatistics, loaded: ROIStatistics)
         assert loaded.mask.overlap_mask is None
 
 
-# ------------------------------------------------------------------
-# RegistrationData
-# ------------------------------------------------------------------
-
-
 class TestRegistrationDataSaveLoad:
-    """Tests for RegistrationData save_arrays, load_arrays, and memory_map_arrays round-trips."""
+    """Tests RegistrationData save_arrays, load_arrays, and memory_map_arrays round-trips."""
 
     def test_save_load_round_trip(self, tmp_path: Path) -> None:
         """Verifies that RegistrationData arrays survive a save/load round-trip with correct dtypes."""
@@ -318,13 +309,8 @@ class TestRegistrationDataSaveLoad:
         assert data.reference_image is None
 
 
-# ------------------------------------------------------------------
-# DetectionData
-# ------------------------------------------------------------------
-
-
 class TestDetectionDataSaveLoad:
-    """Tests for DetectionData save_arrays, load_arrays, and memory_map_arrays round-trips."""
+    """Tests DetectionData save_arrays, load_arrays, and memory_map_arrays round-trips."""
 
     def test_save_load_round_trip(self, tmp_path: Path) -> None:
         """Verifies that DetectionData arrays survive a save/load round-trip with correct dtypes."""
@@ -393,13 +379,8 @@ class TestDetectionDataSaveLoad:
         assert data.mean_image is None
 
 
-# ------------------------------------------------------------------
-# ROIMask
-# ------------------------------------------------------------------
-
-
 class TestROIMaskSaveLoadList:
-    """Tests for ROIMask.save_list and ROIMask.load_list round-trips."""
+    """Tests ROIMask.save_list and ROIMask.load_list round-trips."""
 
     def test_save_load_round_trip_multiple_masks(self, tmp_path: Path) -> None:
         """Verifies that a list of ROIMask instances survives a save/load round-trip."""
@@ -434,13 +415,8 @@ class TestROIMaskSaveLoadList:
         _assert_roi_masks_equal(mask, loaded_masks[0])
 
 
-# ------------------------------------------------------------------
-# ROIStatistics
-# ------------------------------------------------------------------
-
-
 class TestROIStatisticsSaveLoadList:
-    """Tests for ROIStatistics.save_list and ROIStatistics.load_list round-trips."""
+    """Tests ROIStatistics.save_list and ROIStatistics.load_list round-trips."""
 
     def test_save_load_round_trip_with_all_fields(self, tmp_path: Path) -> None:
         """Verifies that ROIStatistics instances with all optional fields survive a save/load round-trip."""
@@ -515,13 +491,8 @@ class TestROIStatisticsSaveLoadList:
         assert not stats_path.exists()
 
 
-# ------------------------------------------------------------------
-# ExtractionData
-# ------------------------------------------------------------------
-
-
 class TestExtractionDataSaveLoad:
-    """Tests for ExtractionData save_arrays, load_arrays, load_results, memory_map_arrays, and
+    """Tests ExtractionData save_arrays, load_arrays, load_results, memory_map_arrays, and
     memory_map_results round-trips.
     """
 
@@ -645,13 +616,8 @@ class TestExtractionDataSaveLoad:
         assert loaded.cell_fluorescence_channel_2 is None
 
 
-# ------------------------------------------------------------------
-# SingleRecordingRuntimeData
-# ------------------------------------------------------------------
-
-
 class TestSingleRecordingRuntimeDataSaveLoad:
-    """Tests for SingleRecordingRuntimeData save and load round-trips."""
+    """Tests SingleRecordingRuntimeData save and load round-trips."""
 
     def test_save_load_preserves_scalar_fields_and_arrays_none(self, tmp_path: Path) -> None:
         """Verifies that save/load preserves scalar fields while arrays remain None after YAML-only load."""
@@ -779,13 +745,8 @@ class TestSingleRecordingRuntimeDataSaveLoad:
         assert data.registration.reference_image is None
 
 
-# ------------------------------------------------------------------
-# MultiRecordingRegistrationData
-# ------------------------------------------------------------------
-
-
 class TestMultiRecordingRegistrationDataSaveLoad:
-    """Tests for MultiRecordingRegistrationData save_arrays, load_arrays, and memory_map_arrays round-trips."""
+    """Tests MultiRecordingRegistrationData save_arrays, load_arrays, and memory_map_arrays round-trips."""
 
     def test_save_load_round_trip(self, tmp_path: Path) -> None:
         """Verifies that multi-recording registration arrays survive a save/load round-trip."""
@@ -882,13 +843,8 @@ class TestMultiRecordingRegistrationDataSaveLoad:
         assert data.is_registered(output_path=tmp_path)
 
 
-# ------------------------------------------------------------------
-# MultiRecordingTrackingData
-# ------------------------------------------------------------------
-
-
 class TestMultiRecordingTrackingDataSaveLoad:
-    """Tests for MultiRecordingTrackingData save_arrays, load_arrays, and memory_map_arrays round-trips."""
+    """Tests MultiRecordingTrackingData save_arrays, load_arrays, and memory_map_arrays round-trips."""
 
     def test_save_load_round_trip(self, tmp_path: Path) -> None:
         """Verifies that tracking template masks survive a save/load round-trip."""
@@ -944,11 +900,6 @@ class TestMultiRecordingTrackingDataSaveLoad:
         assert not (tmp_path / "tracking_template_masks_channel_2.npz").exists()
 
 
-# ------------------------------------------------------------------
-# ExtractionData channel 2 round-trips
-# ------------------------------------------------------------------
-
-
 def _populate_extraction_data_with_channel_2(
     roi_count: int = 3,
     frame_count: int = 50,
@@ -976,7 +927,7 @@ def _populate_extraction_data_with_channel_2(
 
 
 class TestExtractionDataChannel2:
-    """Tests for ExtractionData save/load/memory_map round-trips with channel 2 data populated."""
+    """Tests ExtractionData save/load/memory_map round-trips with channel 2 data populated."""
 
     def test_save_load_arrays_loads_channel_2_statistics_and_classification(self, tmp_path: Path) -> None:
         """Verifies that load_arrays loads channel 2 ROI statistics and classification from disk."""
@@ -1096,13 +1047,8 @@ class TestExtractionDataChannel2:
         assert is_memory_mapped(mapped.cell_classification_channel_2)
 
 
-# ------------------------------------------------------------------
-# MultiRecordingRegistrationData channel 2 round-trips
-# ------------------------------------------------------------------
-
-
 class TestMultiRecordingRegistrationDataChannel2:
-    """Tests for MultiRecordingRegistrationData save/load/memory_map round-trips with channel 2 data."""
+    """Tests MultiRecordingRegistrationData save/load/memory_map round-trips with channel 2 data."""
 
     def test_memory_map_loads_channel_2_images_and_masks(self, tmp_path: Path) -> None:
         """Verifies that memory_map_arrays loads channel 2 transformed images and deformed masks."""
@@ -1145,13 +1091,8 @@ class TestMultiRecordingRegistrationDataChannel2:
         _assert_roi_masks_equal(original.deformed_roi_masks_channel_2[0], mapped.deformed_roi_masks_channel_2[0])
 
 
-# ------------------------------------------------------------------
-# MultiRecordingRuntimeData release_arrays with combined_data
-# ------------------------------------------------------------------
-
-
 class TestMultiRecordingRuntimeDataReleaseWithCombinedData:
-    """Tests for MultiRecordingRuntimeData.release_arrays when combined_data is loaded."""
+    """Tests MultiRecordingRuntimeData.release_arrays when combined_data is loaded."""
 
     def test_release_arrays_clears_combined_data_child_arrays(self) -> None:
         """Verifies that release_arrays delegates to combined_data detection and extraction release_arrays."""
@@ -1182,13 +1123,8 @@ class TestMultiRecordingRuntimeDataReleaseWithCombinedData:
         assert runtime.combined_data.extraction.cell_classification is None
 
 
-# ------------------------------------------------------------------
-# MultiRecordingRuntimeData
-# ------------------------------------------------------------------
-
-
 class TestMultiRecordingRuntimeDataSaveLoad:
-    """Tests for MultiRecordingRuntimeData save and load round-trips."""
+    """Tests MultiRecordingRuntimeData save and load round-trips."""
 
     def test_save_load_preserves_scalar_fields_and_arrays_none(self, tmp_path: Path) -> None:
         """Verifies that save/load preserves scalar fields while arrays remain None after YAML-only load."""
@@ -1318,13 +1254,8 @@ class TestMultiRecordingRuntimeDataSaveLoad:
         assert data.registration.deform_field_y is None
 
 
-# ------------------------------------------------------------------
-# CombinedData
-# ------------------------------------------------------------------
-
-
 class TestCombinedDataSaveLoad:
-    """Tests for CombinedData save and load round-trips."""
+    """Tests CombinedData save and load round-trips."""
 
     def test_save_load_metadata_round_trip(self, tmp_path: Path) -> None:
         """Verifies that CombinedData metadata survives a save/load round-trip."""
@@ -1462,13 +1393,8 @@ class TestCombinedDataSaveLoad:
         assert loaded.registered_binary_paths_channel_2 is None
 
 
-# ------------------------------------------------------------------
-# _save_optional_array_field / _load_optional_array_field
-# ------------------------------------------------------------------
-
-
 class TestOptionalArrayFieldSerialization:
-    """Tests for _save_optional_array_field and _load_optional_array_field round-trips."""
+    """Tests _save_optional_array_field and _load_optional_array_field round-trips."""
 
     def test_round_trip_with_mix_of_none_and_arrays(self, tmp_path: Path) -> None:
         """Verifies that a mix of None and non-None arrays survives a save/load round-trip."""

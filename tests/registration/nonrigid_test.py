@@ -14,7 +14,7 @@ from cindra.registration.nonrigid import (
 
 
 class TestComputeNonrigidReferenceData:
-    """Tests for compute_nonrigid_reference_data."""
+    """Tests compute_nonrigid_reference_data."""
 
     def test_output_shapes(self) -> None:
         """Verifies the output arrays have correct shapes."""
@@ -30,13 +30,13 @@ class TestComputeNonrigidReferenceData:
             x_blocks=x_blocks,
         )
 
-        num_blocks = 2
-        block_h, block_w = 32, 32
-        rfft_w = block_w // 2 + 1
+        block_count = 2
+        block_height, block_width = 32, 32
+        rfft_width = block_width // 2 + 1
 
-        assert taper.shape == (num_blocks, block_h, block_w)
-        assert offset.shape == (num_blocks, block_h, block_w)
-        assert kernel.shape == (num_blocks, block_h, rfft_w)
+        assert taper.shape == (block_count, block_height, block_width)
+        assert offset.shape == (block_count, block_height, block_width)
+        assert kernel.shape == (block_count, block_height, rfft_width)
 
     def test_output_dtypes(self) -> None:
         """Verifies the output dtypes are correct."""
@@ -75,7 +75,7 @@ class TestComputeNonrigidReferenceData:
 
 
 class TestComputeNonrigidOffsets:
-    """Tests for compute_nonrigid_offsets."""
+    """Tests compute_nonrigid_offsets."""
 
     def test_consistent_offsets_for_identical_frames(self) -> None:
         """Verifies consistent offsets and correct shapes when frames match the reference."""
@@ -107,9 +107,9 @@ class TestComputeNonrigidOffsets:
             workers=1,
         )
 
-        num_blocks = len(y_blocks)
-        assert y_offsets.shape == (2, num_blocks)
-        assert x_offsets.shape == (2, num_blocks)
+        block_count = len(y_blocks)
+        assert y_offsets.shape == (2, block_count)
+        assert x_offsets.shape == (2, block_count)
         # Identical frames should produce consistent offsets across frames.
         np.testing.assert_allclose(y_offsets[0], y_offsets[1], atol=1e-4)
         np.testing.assert_allclose(x_offsets[0], x_offsets[1], atol=1e-4)
@@ -153,16 +153,16 @@ class TestComputeNonrigidOffsets:
 
 
 class TestApplyNonrigidCorrection:
-    """Tests for apply_nonrigid_correction."""
+    """Tests apply_nonrigid_correction."""
 
     def test_zero_offsets_preserve_frames(self) -> None:
         """Verifies that zero offsets preserve the original frames."""
         rng = np.random.default_rng(42)
         frames = rng.standard_normal((2, 64, 64)).astype(np.float32)
         y_blocks, x_blocks, block_counts, _, _ = compute_registration_blocks(height=64, width=64, block_size=(32, 32))
-        num_blocks = len(y_blocks)
-        y_offsets = np.zeros((2, num_blocks), dtype=np.float32)
-        x_offsets = np.zeros((2, num_blocks), dtype=np.float32)
+        block_count = len(y_blocks)
+        y_offsets = np.zeros((2, block_count), dtype=np.float32)
+        x_offsets = np.zeros((2, block_count), dtype=np.float32)
 
         result = apply_nonrigid_correction(
             frames=frames,
@@ -180,9 +180,9 @@ class TestApplyNonrigidCorrection:
         """Verifies the output shape and dtype match the input."""
         frames = np.ones((3, 64, 64), dtype=np.float32)
         y_blocks, x_blocks, block_counts, _, _ = compute_registration_blocks(height=64, width=64, block_size=(32, 32))
-        num_blocks = len(y_blocks)
-        y_offsets = np.ones((3, num_blocks), dtype=np.float32) * 0.5
-        x_offsets = np.ones((3, num_blocks), dtype=np.float32) * 0.5
+        block_count = len(y_blocks)
+        y_offsets = np.ones((3, block_count), dtype=np.float32) * 0.5
+        x_offsets = np.ones((3, block_count), dtype=np.float32) * 0.5
 
         result = apply_nonrigid_correction(
             frames=frames,
@@ -198,14 +198,14 @@ class TestApplyNonrigidCorrection:
 
 
 class TestUpsampleBlockOffsets:
-    """Tests for _upsample_block_offsets."""
+    """Tests _upsample_block_offsets."""
 
     def test_output_shape(self) -> None:
         """Verifies the output offset maps have the correct shape."""
         y_blocks, x_blocks, block_counts, _, _ = compute_registration_blocks(height=64, width=64, block_size=(32, 32))
-        num_blocks = len(y_blocks)
-        y_offsets = np.ones((2, num_blocks), dtype=np.float32)
-        x_offsets = np.ones((2, num_blocks), dtype=np.float32)
+        block_count = len(y_blocks)
+        y_offsets = np.ones((2, block_count), dtype=np.float32)
+        x_offsets = np.ones((2, block_count), dtype=np.float32)
 
         y_maps, x_maps = _upsample_block_offsets(
             width=64,
@@ -223,9 +223,9 @@ class TestUpsampleBlockOffsets:
     def test_uniform_offsets_preserved(self) -> None:
         """Verifies that uniform block offsets produce uniform pixel offset maps."""
         y_blocks, x_blocks, block_counts, _, _ = compute_registration_blocks(height=64, width=64, block_size=(32, 32))
-        num_blocks = len(y_blocks)
-        y_offsets = np.ones((1, num_blocks), dtype=np.float32) * 2.5
-        x_offsets = np.ones((1, num_blocks), dtype=np.float32) * -1.5
+        block_count = len(y_blocks)
+        y_offsets = np.ones((1, block_count), dtype=np.float32) * 2.5
+        x_offsets = np.ones((1, block_count), dtype=np.float32) * -1.5
 
         y_maps, x_maps = _upsample_block_offsets(
             width=64,

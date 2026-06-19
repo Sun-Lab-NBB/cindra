@@ -8,7 +8,7 @@ from cindra.registration.diffeomorphic import DiffeomorphicDemonsRegistration
 
 
 class TestDiffeomorphicDemonsRegistration:
-    """Tests for DiffeomorphicDemonsRegistration."""
+    """Tests DiffeomorphicDemonsRegistration."""
 
     def test_constructor_stores_images(self) -> None:
         """Verifies that the constructor stores images as float32."""

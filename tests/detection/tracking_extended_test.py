@@ -9,16 +9,7 @@ from cindra.detection.tracking import _collect_bin_rois
 
 
 def _make_roi_mask(centroid: tuple[int, int], pixel_count: int = 5, cluster_id: int = 0) -> ROIMask:
-    """Creates a minimal ROIMask instance for testing.
-
-    Args:
-        centroid: The (y, x) centroid position.
-        pixel_count: The number of pixels in the mask.
-        cluster_id: The cluster assignment ID. Zero means unclustered.
-
-    Returns:
-        A ROIMask instance with the specified properties.
-    """
+    """Creates a minimal ROIMask instance for testing."""
     y_pixels = np.full(pixel_count, fill_value=centroid[0], dtype=np.int32)
     x_pixels = np.full(pixel_count, fill_value=centroid[1], dtype=np.int32)
     return ROIMask(
@@ -32,7 +23,7 @@ def _make_roi_mask(centroid: tuple[int, int], pixel_count: int = 5, cluster_id: 
 
 
 class TestCollectBinRois:
-    """Tests for _collect_bin_rois."""
+    """Tests _collect_bin_rois."""
 
     def test_collects_rois_within_bin(self) -> None:
         """Verifies that ROIs within the bin region are correctly collected."""

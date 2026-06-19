@@ -59,7 +59,7 @@ def _make_circular_roi(
 
 
 class TestCreateMasks:
-    """Tests for create_masks."""
+    """Tests create_masks."""
 
     def test_without_neuropil(self) -> None:
         """Verifies that neuropil=False produces None neuropil masks."""
@@ -98,7 +98,7 @@ class TestCreateMasks:
 
 
 class TestCreateRoiPixels:
-    """Tests for _create_roi_pixels."""
+    """Tests _create_roi_pixels."""
 
     def test_all_roi_pixels_marked(self) -> None:
         """Verifies that ROI pixel positions are marked True in the output mask."""
@@ -137,7 +137,7 @@ class TestCreateRoiPixels:
 
 
 class TestCreateRoiMasks:
-    """Tests for _create_roi_masks."""
+    """Tests _create_roi_masks."""
 
     def test_includes_all_pixels_with_overlap(self) -> None:
         """Verifies that all ROI pixels are included when include_overlap=True."""
@@ -196,7 +196,7 @@ class TestCreateRoiMasks:
 
 
 class TestCreateNeuropilMasks:
-    """Tests for _create_neuropil_masks."""
+    """Tests _create_neuropil_masks."""
 
     def test_neuropil_does_not_overlap_roi(self) -> None:
         """Verifies that neuropil masks do not overlap with the ROI pixel region."""

@@ -19,7 +19,7 @@ from cindra.dataclasses.single_recording_configuration import AcquisitionParamet
 
 
 class TestIsMemoryMapped:
-    """Tests for the is_memory_mapped() function."""
+    """Tests the is_memory_mapped() function."""
 
     def test_returns_false_for_regular_array(self) -> None:
         """Verifies that a standard numpy array is not identified as memory-mapped."""
@@ -38,7 +38,7 @@ class TestIsMemoryMapped:
 
 
 class TestRegistrationDataIsRegistered:
-    """Tests for RegistrationData.is_registered()."""
+    """Tests RegistrationData.is_registered()."""
 
     def test_returns_false_for_default_instance(self) -> None:
         """Verifies that a default RegistrationData instance is not registered."""
@@ -72,7 +72,7 @@ class TestRegistrationDataIsRegistered:
 
 
 class TestRegistrationDataClear:
-    """Tests for RegistrationData.clear()."""
+    """Tests RegistrationData.clear()."""
 
     def test_resets_all_fields_to_defaults(self) -> None:
         """Verifies that clear() resets all fields including scalar values."""
@@ -128,7 +128,7 @@ class TestRegistrationDataClear:
 
 
 class TestRegistrationDataPrepareForSaving:
-    """Tests for RegistrationData.prepare_for_saving()."""
+    """Tests RegistrationData.prepare_for_saving()."""
 
     def test_sets_all_array_fields_to_none(self) -> None:
         """Verifies that prepare_for_saving() nullifies all array fields."""
@@ -178,7 +178,7 @@ class TestRegistrationDataPrepareForSaving:
 
 
 class TestRegistrationDataReleaseArrays:
-    """Tests for RegistrationData.release_arrays()."""
+    """Tests RegistrationData.release_arrays()."""
 
     def test_sets_all_array_fields_to_none(self) -> None:
         """Verifies that release_arrays() nullifies all array fields."""
@@ -242,7 +242,7 @@ class TestRegistrationDataReleaseArrays:
 
 
 class TestDetectionDataPrepareForSaving:
-    """Tests for DetectionData.prepare_for_saving()."""
+    """Tests DetectionData.prepare_for_saving()."""
 
     def test_sets_all_array_fields_to_none(self) -> None:
         """Verifies that prepare_for_saving() nullifies all array fields for both channels."""
@@ -282,7 +282,7 @@ class TestDetectionDataPrepareForSaving:
 
 
 class TestDetectionDataReleaseArrays:
-    """Tests for DetectionData.release_arrays()."""
+    """Tests DetectionData.release_arrays()."""
 
     def test_sets_all_array_fields_to_none(self) -> None:
         """Verifies that release_arrays() nullifies all array fields for both channels."""
@@ -322,7 +322,7 @@ class TestDetectionDataReleaseArrays:
 
 
 class TestROIMaskRaveledPixels:
-    """Tests for ROIMask.raveled_pixels cached property."""
+    """Tests ROIMask.raveled_pixels cached property."""
 
     def test_computes_correct_raveled_indices(self) -> None:
         """Verifies that raveled pixel indices are computed as y * frame_width + x."""
@@ -362,7 +362,7 @@ class TestROIMaskRaveledPixels:
 
 
 class TestROIMaskCirclePixels:
-    """Tests for ROIMask.circle_pixels cached property."""
+    """Tests ROIMask.circle_pixels cached property."""
 
     def test_returns_tuple_of_two_arrays(self) -> None:
         """Verifies that circle_pixels returns a tuple of (y_circle, x_circle) arrays."""
@@ -418,7 +418,7 @@ class TestROIMaskCirclePixels:
             radius=10.0,
         )
         y_circle, x_circle = mask.circle_pixels
-        # The mean of points on a circle should be near the center.
+        # Confirms the mean of sampled circle points lies near the center.
         assert abs(float(np.mean(y_circle)) - centroid_y) < 2
         assert abs(float(np.mean(x_circle)) - centroid_x) < 2
 
@@ -436,7 +436,7 @@ class TestROIMaskCirclePixels:
             radius=radius,
         )
         y_circle, x_circle = mask.circle_pixels
-        # Checks that the maximum distance from centroid is approximately the scaled radius.
+        # For a circle, the maximum distance from the centroid equals its radius, here scaled by 1.25.
         delta_y = y_circle.astype(np.float64) - centroid_y
         delta_x = x_circle.astype(np.float64) - centroid_x
         distances = np.sqrt(delta_y**2 + delta_x**2)
@@ -458,7 +458,7 @@ class TestROIMaskCirclePixels:
 
 
 class TestExtractionDataPrepareForSaving:
-    """Tests for ExtractionData.prepare_for_saving()."""
+    """Tests ExtractionData.prepare_for_saving()."""
 
     def test_sets_all_fields_to_none(self) -> None:
         """Verifies that prepare_for_saving() nullifies all array and list fields across both channels."""
@@ -503,7 +503,7 @@ class TestExtractionDataPrepareForSaving:
 
 
 class TestExtractionDataReleaseArrays:
-    """Tests for ExtractionData.release_arrays()."""
+    """Tests ExtractionData.release_arrays()."""
 
     def test_sets_all_fields_to_none(self) -> None:
         """Verifies that release_arrays() nullifies all array and list fields across both channels."""
@@ -548,7 +548,7 @@ class TestExtractionDataReleaseArrays:
 
 
 class TestMultiRecordingRegistrationDataIsRegistered:
-    """Tests for MultiRecordingRegistrationData.is_registered()."""
+    """Tests MultiRecordingRegistrationData.is_registered()."""
 
     def test_returns_false_for_default_instance(self) -> None:
         """Verifies that a default MultiRecordingRegistrationData instance is not registered."""
@@ -581,7 +581,7 @@ class TestMultiRecordingRegistrationDataIsRegistered:
 
 
 class TestMultiRecordingRegistrationDataClear:
-    """Tests for MultiRecordingRegistrationData.clear()."""
+    """Tests MultiRecordingRegistrationData.clear()."""
 
     def test_releases_arrays(self) -> None:
         """Verifies that clear() nullifies all array fields."""
@@ -610,7 +610,7 @@ class TestMultiRecordingRegistrationDataClear:
 
 
 class TestMultiRecordingRegistrationDataPrepareForSaving:
-    """Tests for MultiRecordingRegistrationData.prepare_for_saving()."""
+    """Tests MultiRecordingRegistrationData.prepare_for_saving()."""
 
     def test_delegates_to_release_arrays(self) -> None:
         """Verifies that prepare_for_saving() nullifies all array fields identically to release_arrays()."""
@@ -641,7 +641,7 @@ class TestMultiRecordingRegistrationDataPrepareForSaving:
 
 
 class TestMultiRecordingRegistrationDataReleaseArrays:
-    """Tests for MultiRecordingRegistrationData.release_arrays()."""
+    """Tests MultiRecordingRegistrationData.release_arrays()."""
 
     def test_sets_all_array_fields_to_none(self) -> None:
         """Verifies that release_arrays() nullifies all array and list fields."""
@@ -684,7 +684,7 @@ class TestMultiRecordingRegistrationDataReleaseArrays:
 
 
 class TestMultiRecordingTrackingDataPrepareForSaving:
-    """Tests for MultiRecordingTrackingData.prepare_for_saving() and release_arrays()."""
+    """Tests MultiRecordingTrackingData.prepare_for_saving() and release_arrays()."""
 
     def test_prepare_for_saving_nullifies_template_masks(self) -> None:
         """Verifies that prepare_for_saving() sets template mask fields to None."""
@@ -720,7 +720,7 @@ class TestMultiRecordingTrackingDataPrepareForSaving:
 
 
 class TestRecordingIOPostInit:
-    """Tests for RecordingIO.__post_init__() natural sorting."""
+    """Tests RecordingIO.__post_init__() natural sorting."""
 
     def test_natural_sorts_recording_directories(self) -> None:
         """Verifies that __post_init__ natural-sorts recording directories."""
@@ -735,7 +735,7 @@ class TestRecordingIOPostInit:
 
 
 class TestAcquisitionParametersProperties:
-    """Tests for AcquisitionParameters computed properties."""
+    """Tests AcquisitionParameters computed properties."""
 
     def test_is_mroi_returns_false_for_single_roi(self) -> None:
         """Verifies that is_mroi returns False when roi_number is 1."""
