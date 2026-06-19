@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from numba import njit, prange  # type: ignore[import-untyped]
+from numba import njit, prange
 import numpy as np
 from scipy import stats
 from ataraxis_time import PrecisionTimer, TimerPrecisions

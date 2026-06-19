@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from functools import lru_cache
 
-from numba import vectorize  # type: ignore[import-untyped]
+from numba import vectorize
 import numpy as np
 from numpy.fft import ifftshift
 from scipy.fft import (

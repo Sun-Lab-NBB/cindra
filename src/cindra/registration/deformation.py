@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-import numba  # type: ignore[import-untyped]
+import numba
 import numpy as np
 import scipy.ndimage
 import scipy.special

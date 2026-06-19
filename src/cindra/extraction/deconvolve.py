@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from numba import njit, prange  # type: ignore[import-untyped]
+from numba import njit, prange
 import numpy as np
 from scipy.ndimage import gaussian_filter, maximum_filter1d, minimum_filter1d
 from ataraxis_base_utilities import console

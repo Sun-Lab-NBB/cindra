@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import numba  # type: ignore[import-untyped]
+import numba
 from numba import prange
 import numpy as np
 
