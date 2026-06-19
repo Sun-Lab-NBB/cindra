@@ -1,6 +1,6 @@
 """Provides nonrigid (piecewise) registration algorithm for motion correction."""
 
-from numba import njit, prange  # type: ignore[import-untyped]
+from numba import njit, prange
 import numpy as np
 from scipy.fft import rfft2
 from numpy.typing import NDArray  # noqa: TC002 - Required at runtime for numba function signatures

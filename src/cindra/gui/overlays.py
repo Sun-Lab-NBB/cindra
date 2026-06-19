@@ -7,7 +7,7 @@ import contextlib
 
 import numpy as np
 import pyqtgraph as pg  # type: ignore[import-untyped]
-import matplotlib.cm
+import matplotlib as mpl
 from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
@@ -871,7 +871,7 @@ def _apply_colormap(values: NDArray[np.float32], colormap: str = "hsv") -> NDArr
         return _apply_hsv_colormap(values)
 
     try:
-        color_map = matplotlib.cm.get_cmap(colormap)
+        color_map = mpl.colormaps.get_cmap(colormap)
         mapped = color_map(values)[:, :3]
         mapped *= 255
         return mapped.astype(np.uint8)

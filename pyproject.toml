@@ -211,6 +211,14 @@ exclude = [
     "tests/",              # Ignores the test directory.
 ]
 
+# Numba ships a py.typed marker, but its bundled annotations do not model prange as an iterable or expose runtime
+# config attributes such as THREADING_LAYER. Treats the package as untyped so the JIT-compiled modules type-check
+# against their actual runtime behavior rather than the incomplete bundled annotations.
+[[tool.mypy.overrides]]
+module = ["numba", "numba.*"]
+follow_imports = "skip"        # Treats all symbols imported from numba as untyped (Any)
+ignore_missing_imports = true  # Suppresses missing-stub errors for the skipped package
+
 # Pytest configuration section.
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"

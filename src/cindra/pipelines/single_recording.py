@@ -1,6 +1,6 @@
 """Provides the high-level API for the single-recording processing pipeline."""
 
-import numba  # type: ignore[import-untyped]
+import numba
 from ataraxis_time import PrecisionTimer, TimerPrecisions, get_timestamp
 from ataraxis_base_utilities import LogLevel, console
 
