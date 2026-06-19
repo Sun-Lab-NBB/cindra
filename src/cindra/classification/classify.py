@@ -47,8 +47,9 @@ class Classifier:
     Args:
         classifier_path: The path to a classifier .npz file containing training_labels and feature arrays.
         feature_names: The tuple of feature names to use for classification. Only these features will be loaded from
-            the classifier file and used for model fitting. If None, all available features in the classifier file
-            are used.
+            the classifier file and used for model fitting. If None, the default classification feature set
+            (_CLASSIFICATION_FEATURES: normalized_pixel_count, compactness, skewness) is used, restricted to the
+            features actually present in the classifier file.
 
     Attributes:
         _classifier_path: The path to the loaded classifier file.
@@ -91,7 +92,7 @@ class Classifier:
             available_features: list[str] = []
 
             # Determines which features to load. If feature_names is specified, only those features are used.
-            # Otherwise, all available features in the classifier file are used.
+            # Otherwise, the default _CLASSIFICATION_FEATURES set is used.
             target_features = feature_names if feature_names is not None else _CLASSIFICATION_FEATURES
 
             # Loads the requested features from the classifier file. As long as the dataset contains at least one

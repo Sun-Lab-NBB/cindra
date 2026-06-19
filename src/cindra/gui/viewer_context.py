@@ -201,7 +201,7 @@ class SingleRecordingData:
     def cell_count(self) -> int:
         """Returns the number of ROIs classified as cells in the current view."""
         classification = self.cell_classification
-        return int(classification[:, 1].sum()) if classification.size else 0
+        return int(classification[:, 0].sum()) if classification.size else 0
 
     @property
     def cell_fluorescence(self) -> NDArray[np.float32]:
@@ -1147,8 +1147,8 @@ class ViewerData:
     def _discover_dataset_names(root_path: Path) -> tuple[str, ...]:
         """Discovers available multi-recording dataset names under root_path.
 
-        Searches for multi_recording_runtime_data.yaml files, extracts the parent directory name (dataset name)
-        from each, deduplicates, and returns natsorted.
+        Searches for multi_recording_runtime_data.yaml files, extracts the lower-cased parent directory name
+        (dataset name) from each, deduplicates, and returns natsorted.
 
         Args:
             root_path: The root directory to search recursively.

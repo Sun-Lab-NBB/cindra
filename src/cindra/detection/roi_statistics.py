@@ -79,8 +79,8 @@ def compute_roi_statistics(
         This function computes statistics (compactness, solidity, radius, aspect ratio, etc.) for each input ROI and
         writes the computed values back to the ROIStatistics instances. If maximum_overlap_fraction is specified, ROIs
         exceeding the overlap threshold are removed from the list in-place. When lightweight is True, only the minimal
-        statistics required for preclassification (compactness and normalized_pixel_count) are computed, skipping the
-        expensive ellipse fitting, convex hull solidity, and overlap computations.
+        statistics required for preclassification (compactness, pixel_count, soma_mask, and normalized_pixel_count) are
+        computed, skipping the expensive ellipse fitting, convex hull solidity, and overlap computations.
 
     Args:
         rois: The list of ROIStatistics instances that define the ROIs to process. Modified in-place.
@@ -194,7 +194,7 @@ class _EllipseData:
     """The semi-major and semi-minor axis lengths, ordered from largest to smallest."""
 
     boundary_points: NDArray[np.float32]
-    """The (x, y) coordinates of 100 evenly spaced points along the ellipse perimeter for visualization."""
+    """The (y, x) coordinates of 100 evenly spaced points along the ellipse perimeter for visualization."""
 
     y_scale: int
     """The y-axis scaling factor that corrects for non-square pixel aspect ratios during fitting."""
@@ -204,7 +204,7 @@ class _EllipseData:
 
     @property
     def area(self) -> float:
-        """The area of the ellipse."""
+        """Pi scaled by the geometric mean of the semi-major and semi-minor axis lengths."""
         return float((self.radii[0] * self.radii[1]) ** 0.5 * np.pi)
 
     @property
@@ -240,7 +240,8 @@ class _ROI:
     """Wraps the ROIStatistics dataclass with methods to compute additional ROI properties.
 
     Notes:
-        The class uses a shared class variable for the distance kernel to avoid recomputation across instances. The
+        The class uses a shared class variable caching sorted baseline distances (keyed by diameter) to avoid
+        recomputation across instances. The
         soma mask is cached after first computation to avoid redundant calculations when accessing dependent
         properties. Distance-based statistics (mean_radius, compactness) are normalized by the ROI diameter to make
         them scale-invariant across different ROI sizes and imaging magnifications.
@@ -349,7 +350,7 @@ class _ROI:
 
     @property
     def solidity(self) -> float:
-        """The ROI's solidity as the ratio of pixel count to convex hull area."""
+        """The ROI's solidity as the ratio of soma pixel count to convex hull area."""
         minimum_pixels_for_hull = 10
         default_area = 10.0
 

@@ -76,8 +76,8 @@ def configure_plot(
 ) -> None:
     """Applies the shared pyqtgraph plot configuration backbone.
 
-    Disables the context menu, sets mouse interaction axes, fixes axis widths to prevent layout
-    offsets, and optionally sets the plot title and axis labels.
+    Disables the context menu, sets mouse interaction axes, fixes the left-axis width and bottom-axis
+    height to prevent layout offsets, and optionally sets the plot title and axis labels.
 
     Args:
         plot: The pyqtgraph PlotItem to configure.

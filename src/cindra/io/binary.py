@@ -113,21 +113,18 @@ class BinaryFile:
 
     @staticmethod
     def convert_numpy_file_to_binary(source_file_name: Path, destination_file_name: Path) -> None:
-        """Converts a NumPy file, such as a .npz or .npy file, to a cindra binary.
+        """Converts a NumPy .npy file to a cindra binary.
 
         Args:
-            source_file_name: The absolute path to the NumPy .npy or .npz file to convert to cindra binary format.
+            source_file_name: The absolute path to the NumPy .npy file to convert to cindra binary format.
             destination_file_name: The absolute path to the cindra .bin file to create using the data from the source
                 file.
 
         Raises:
-            FileNotFoundError: If the provided NumPy file does not exist.
+            FileNotFoundError: If the provided NumPy file does not exist, is not a regular file, or does not use the
+                .npy extension.
         """
-        if (
-            not source_file_name.exists()
-            or not source_file_name.is_file()
-            or source_file_name.suffix not in (".npy", ".npz")
-        ):
+        if not source_file_name.exists() or not source_file_name.is_file() or source_file_name.suffix != ".npy":
             message = (
                 f"Unable to create the target cindra binary {destination_file_name}, as the source file "
                 f"'{source_file_name}' does not exist or is not a valid NumPy file."

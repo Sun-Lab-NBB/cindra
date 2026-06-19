@@ -1,4 +1,4 @@
-"""Provides nonrigid (piecewise-affine) registration algorithm for motion correction."""
+"""Provides nonrigid (piecewise) registration algorithm for motion correction."""
 
 from numba import njit, prange  # type: ignore[import-untyped]
 import numpy as np
@@ -421,9 +421,9 @@ def _apply_coordinate_offsets(  # pragma: no cover
     Args:
         frames: The input frame data with shape (num_frames, height, width) to be transformed.
         y_offset_maps: The per-pixel vertical offsets with shape (num_frames, height, width). Positive values shift
-            content upward (sample from lower y-coordinates).
+            content upward (sample from higher y-coordinates).
         x_offset_maps: The per-pixel horizontal offsets with shape (num_frames, height, width). Positive values shift
-            content leftward (sample from lower x-coordinates).
+            content leftward (sample from higher x-coordinates).
         y_grid: The base y-coordinate grid with shape (height, width) containing row indices (0 to height-1). Combined
             with y_offset_maps to determine source sampling locations.
         x_grid: The base x-coordinate grid with shape (height, width) containing column indices (0 to width-1).

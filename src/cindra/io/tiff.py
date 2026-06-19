@@ -330,10 +330,11 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.
     if len(frames.shape) < _MULTIDIMENSIONAL_PROCESSING_THRESHOLD:
         frames = np.expand_dims(frames, axis=0)
 
-    # Converts to int16, rescaling where possible. Divides by 2 to shift uint16 (0 to 65535) or int32 values into the
-    # int16 range (-32768 to 32767) without overflow.
+    # Converts to int16, rescaling where possible. Halves uint16 (0 to 65535) and int32 values, then clips to the
+    # int16 range (-32768 to 32767) so out-of-range int32 magnitudes saturate instead of wrapping during the cast.
     if frames.dtype.type in {np.uint16, np.int32}:
-        frames = (frames // 2).astype(dtype=np.int16)
+        halved = frames // 2
+        frames = np.clip(halved, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max).astype(dtype=np.int16)
     elif frames.dtype.type != np.int16:  # pragma: no cover — rare: non-standard TIFF dtype (e.g. float)
         frames = frames.astype(dtype=np.int16)
 
@@ -359,7 +360,7 @@ def _get_frame_dimensions(  # pragma: no cover — requires RuntimeContext with 
         A tuple of two lists: (heights, widths) where each list has one entry per plane/context.
 
     Raises:
-        ValueError: If the TIFF files are empty or have invalid dimensions.
+        ValueError: If the first TIFF file is empty.
     """
     # Opens the first TIFF and reads the first frame to get base dimensions.
     tiff = TiffFile(tiff_files[0])

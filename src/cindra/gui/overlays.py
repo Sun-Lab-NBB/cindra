@@ -30,7 +30,8 @@ _STATISTIC_FIELD_MAP: dict[int, str] = {
     ROIColorMode.COLOCALIZATION_PROBABILITY: "colocalization_probability",
     ROIColorMode.RECORDING_COUNT: "recording_count",
 }
-"""Maps ROIColorMode values to the corresponding ROIStatistics attribute names for percentile-based color modes."""
+"""Maps ROIColorMode values to the corresponding ROIStatistics/ROIMask attribute names for percentile-based color
+modes; recording_count is resolved on ROIMask and unmapped attributes default to 0.0."""
 
 
 def build_views(
@@ -356,8 +357,8 @@ def draw_masks(
 ) -> NDArray[np.uint8]:
     """Draws the current mask overlay for the image panel.
 
-    Computes transparency based on ROI weights, then highlights the currently selected ROIs
-    with full-white (ROI view) or colored circles (image views).
+    Applies a flat overlay opacity (``roi_opacity``) at all ROI pixels, then highlights the currently selected ROIs
+    with overlap-depth-scaled brightness (ROI view) or colored circles (image views).
 
     Args:
         roi_statistics: The ROI statistics for the current view.

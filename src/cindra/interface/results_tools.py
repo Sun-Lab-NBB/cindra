@@ -57,9 +57,9 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
         recording_path: Absolute path to the recording data directory.
 
     Returns:
-        On success, contains 'complete' flag, 'plane_count', 'two_channels' indicator, total and per-category
-        check counts, 'missing' list of absent required files, and optional 'warnings'. On failure, contains an
-        'error' message. Both cases include a 'success' flag.
+        On success, contains 'complete' flag, 'plane_count', 'two_channels' indicator, total check counts
+        ('total_checks', 'passed', 'failed'), 'missing' list of absent required files, and optional 'warnings'. On
+        failure, contains an 'error' message. Both cases include a 'success' flag.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
@@ -717,7 +717,7 @@ def query_roi_statistics_tool(
         roi_indices: Specific ROI indices to query. Returns all ROIs when not provided (up to 500).
         sort_by: Sort results by this statistic name ('skewness', 'compactness', 'footprint', 'aspect_ratio',
             'pixel_count', 'solidity', 'normalized_pixel_count'). Results are returned in descending order.
-        top_n: Limit results to the top N ROIs after sorting. Only effective when sort_by is also provided.
+        top_n: When sort_by is provided, returns the top N after sorting; otherwise returns the first N entries.
         plane_index: -1 for combined view (default), 0+ for a specific imaging plane. Only used in single-recording
             mode.
         dataset: The multi-recording dataset name. When provided, switches to multi-recording mode and ignores
@@ -1594,7 +1594,7 @@ def _array_summary(array: np.ndarray) -> dict[str, object]:
     """Computes summary statistics for a numpy array.
 
     Returns:
-        A dictionary containing the min, max, mean, and standard deviation of the array, plus the shape and dtype.
+        A dictionary containing the min, max, mean, and standard deviation of the array.
     """
     return {
         "min": round(float(np.nanmin(array)), 4),

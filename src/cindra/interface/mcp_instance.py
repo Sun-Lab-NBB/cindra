@@ -1,4 +1,7 @@
-"""Provides the shared MCP server instance used by all cindra tool modules.
+"""Provides the shared MCP server instance used by all cindra-mcp data-processing tool modules.
+
+This instance backs the acquisition, configuration, processing, and results tool modules. The GUI MCP server uses a
+separate ``gui_mcp`` instance defined in ``gui_mcp_server`` rather than this shared instance.
 
 Each tool module (e.g., ``configuration_tools``, ``processing_tools``) imports the ``mcp`` instance from this module
 and registers tools via the ``@mcp.tool()`` decorator. The ``mcp_server`` module imports all tool modules at module

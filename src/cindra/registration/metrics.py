@@ -129,8 +129,8 @@ def compute_pc_metrics(context: RuntimeContext) -> None:  # pragma: no cover
     )
     timer.reset()
 
-    # Determines the number of frames to sample based on recording dimensions. Uses fewer samples for larger
-    # recordings or recordings with many frames to manage memory usage.
+    # Determines the number of frames to sample based on recording dimensions. Uses fewer samples for recordings with
+    # large frame dimensions or recordings with few total frames to manage memory usage.
     use_small_sample = (
         frame_count < _MAXIMUM_SAMPLE_COUNT
         or frame_height > _MAXIMUM_HEIGHT_FOR_LARGE_SAMPLE
@@ -300,7 +300,7 @@ def _register_pc_extremes(
         workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
-        A 2D array with shape (num_components, 3) containing registration metrics. Column 0 contains the mean rigid
+        A 2D array with shape (num_components, 3) containing registration metrics. Column 0 contains the rigid
         offset magnitude in pixels. Column 1 contains the mean nonrigid offset magnitude. Column 2 contains the maximum
         nonrigid offset magnitude. When nonrigid registration is disabled, columns 1 and 2 are zero.
     """
