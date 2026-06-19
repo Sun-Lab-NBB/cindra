@@ -124,7 +124,7 @@ class RegistrationData:
 
     principal_component_shift_metrics: NDArray[np.float32] | None = None
     """The registration offset metrics computed by aligning PC extreme images of the registered recording movie, with
-    shape (num_components, 3). Column 0 contains mean rigid offset magnitude, column 1 contains mean nonrigid offset
+    shape (num_components, 3). Column 0 contains the rigid offset magnitude, column 1 contains mean nonrigid offset
     magnitude, and column 2 contains maximum nonrigid offset magnitude. Large values indicate poor registration
     quality."""
 
@@ -348,7 +348,8 @@ class DetectionData:
     """The estimated ROI diameter in pixels, automatically computed from the spatial scale during detection."""
 
     aspect_ratio: float = 0.0
-    """The aspect ratio of detected ROIs, computed as the ratio of vertical to horizontal diameter."""
+    """The median normalized aspect ratio across detected ROIs, computed from the fitted ellipse semi-axes as
+    2*major/(major+minor), bounded between 0 and 2 where 1 indicates a circular shape."""
 
     mean_image: NDArray[np.float32] | None = None
     """The temporal mean of all registered frames, providing a static view of the imaging field."""
@@ -650,8 +651,8 @@ class ROIStatistics:
     This dataclass represents the complete set of properties computed for each detected ROI during the detection,
     extraction, and optional multi-recording processing stages. The fields are organized into required core properties
     (always present after detection), shape statistics (computed during ROI detection, with defaults for staged
-    construction), optional extraction properties (added during signal extraction),
-    multi-plane/multi-recording properties, and GUI visualization properties.
+    construction), optional extraction properties (added during signal extraction), and
+    multi-plane/multi-recording properties.
 
     Notes:
         This dataclass replaces the legacy dictionary-based stat.npy format. Shape statistics fields have default
@@ -705,7 +706,7 @@ class ROIStatistics:
         """Saves a list of ROIStatistics instances to two companion .npz files without pickle.
 
         Spatial pixel data (coordinates, weights, centroid) is delegated to ``ROIMask.save_list`` and written to
-        ``masks_path``. Shape statistics, extraction statistics, and GUI visualization fields are written to
+        ``masks_path``. Shape statistics and extraction statistics are written to
         ``stats_path``.
 
         Args:
@@ -847,7 +848,7 @@ class ExtractionData:
     # Colocalization data (channel 1 ROIs presence in channel 2).
     cell_colocalization: NDArray[np.float32] | None = None
     """The colocalization results indicating whether channel 1 ROIs are present in channel 2. Shape is (cells, 2)
-    containing (probability, is_colocalized_boolean)."""
+    containing (is_colocalized_boolean, probability)."""
 
     corrected_structural_mean_image: NDArray[np.float32] | None = None
     """The bleed-through-corrected mean image for the structural channel, computed during intensity-based

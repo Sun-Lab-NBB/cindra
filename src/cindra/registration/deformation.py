@@ -411,7 +411,7 @@ class Deformation:
         origin: tuple[int, int],
         crop_size: tuple[int, int],
     ) -> tuple[Deformation, tuple[int, int]]:
-        """Creates a cropped view of the deformation field centered on the specified origin.
+        """Creates a cropped view of the deformation field starting at the specified top-left origin.
 
         This method extracts a local region of the deformation field to reduce memory overhead when applying
         deformations to small regions such as individual ROI masks. The origin is automatically clamped to ensure

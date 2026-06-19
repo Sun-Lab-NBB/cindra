@@ -119,6 +119,8 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:  # pra
 
     Raises:
         ValueError: If no valid planes with ROI statistics are found.
+        RuntimeError: If a plane's registered binary path (or channel 2 registered binary path, when the second
+            channel is functional) is not set, indicating registration did not complete successfully.
     """
     # Extracts plane directories from the RuntimeContext instances.
     plane_directories = [context.runtime.io.output_path for context in plane_contexts]

@@ -185,13 +185,13 @@ def _create_neuropil_masks(
     """Creates the neuropil masks for the input ROIs, caching results on each ROIStatistics instance.
 
     Notes:
-        Computed neuropil masks are stored as boolean arrays on each ROI's ``neuropil_mask`` field. When all ROIs
-        already have cached masks and ``recompute`` is False, the cached masks are converted to flat indices and
-        returned directly, skipping the expensive cell pixel map and iterative expansion computation.
+        Computed neuropil masks are stored as flattened (raveled) int32 pixel-index arrays on each ROI's
+        ``neuropil_mask`` field. When all ROIs already have cached masks and ``recompute`` is False, the cached masks
+        are returned directly, skipping the expensive cell pixel map and iterative expansion computation.
 
     Args:
         roi_statistics: The ROI statistics for each ROI to be processed. Each ROI's ``neuropil_mask`` field is
-            updated in-place with the computed boolean mask.
+            updated in-place with the computed flattened int32 pixel-index array.
         height: The height of the imaged area in pixels.
         width: The width of the imaged area in pixels.
         inner_neuropil_border_radius: The radius of the border separating the neuropil region from the surrounded cell

@@ -119,8 +119,8 @@ def _filter_channel_rois(
 
     Args:
         roi_statistics: The list of ROIStatistics instances to filter.
-        cell_classification: The classification array for this channel. Each row contains [probability, is_cell] for
-            one ROI. Only ROIs whose classifier probability exceeds the threshold are retained.
+        cell_classification: The classification array for this channel. Each row contains [is_cell, probability] for
+            one ROI. Only ROIs whose classifier probability meets or exceeds the threshold are retained.
         mroi_region_borders: The x-coordinates of MROI region borders. ROIs near these borders are filtered out
             to avoid tracking ambiguities. Pass an empty tuple for non-MROI recordings.
         probability_threshold: The minimum classifier probability required for an ROI to be selected.
@@ -134,11 +134,11 @@ def _filter_channel_rois(
     selected_indices: list[int] = []
     for index, roi in enumerate(roi_statistics):
         # Applies the probability threshold filter.
-        if cell_classification[index, 0] < probability_threshold:
+        if cell_classification[index, 1] < probability_threshold:
             continue
 
         # Applies the maximum size filter.
-        if roi.pixel_count >= maximum_size:
+        if roi.pixel_count > maximum_size:
             continue
 
         # Applies MROI region border filter if applicable.

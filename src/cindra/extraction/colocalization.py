@@ -19,7 +19,7 @@ _BLOCK_COUNT: int = 3
 """The number of spatial blocks along each axis used for block-wise bleedthrough regression."""
 
 _SMOOTHING_FRACTION: float = 0.25
-"""The fraction of the mean block dimension used as the Gaussian smoothing sigma for quadrant masks."""
+"""The fraction of the mean block dimension used as the Gaussian smoothing sigma for the block masks."""
 
 _INTENSITY_EPSILON: float = 1e-3
 """The minimum intensity floor used to prevent division by zero in colocalization probability computation."""
@@ -109,8 +109,8 @@ def compute_intensity_colocalization(
         if neuropil_indices is not None and neuropil_indices.size > 0:
             intensity_outside[roi_index] = flattened_image[neuropil_indices].mean()
 
-    # Computes the colocalization probability as the ratio of inside to total intensity. Adds a small
-    # epsilon to prevent division by zero and ensure numerical stability.
+    # Computes the colocalization probability as the ratio of inside to total intensity. Floors
+    # intensity_inside at a small epsilon to prevent division by zero and ensure numerical stability.
     intensity_inside = np.maximum(np.float32(_INTENSITY_EPSILON), intensity_inside)
     colocalization_probability = intensity_inside / (intensity_inside + intensity_outside)
 

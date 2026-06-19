@@ -444,7 +444,7 @@ class MultiRecordingRuntimeData(YamlConfig):
     """The path to the directory where runtime data and array files are stored."""
 
     io: MultiRecordingIOData = field(default_factory=MultiRecordingIOData)
-    """The per-recording I/O data including recording ID, recording directory, and dataset name."""
+    """The per-recording I/O data including recording ID, single-recording output data path, and dataset name."""
 
     registration: MultiRecordingRegistrationData = field(default_factory=MultiRecordingRegistrationData)
     """The runtime data from the registration stage (deformation fields, transformed images, deformed masks)."""

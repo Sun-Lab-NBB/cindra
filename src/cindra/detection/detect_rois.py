@@ -697,7 +697,8 @@ def _extend_iteratively(
     Notes:
         At each iteration, the ROI boundary is expanded by one pixel in all cardinal directions. Pixels are retained
         if their mean activity on active frames exceeds a fraction of the peak activity. Growth terminates when
-        the pixel count exceeds the maximum pixel limit or when the ROI begins shrinking.
+        the pixel count exceeds the maximum pixel limit or when the ROI stops growing (its pixel count no longer
+        exceeds the pre-extension count).
 
     Args:
         y_pixels: The y-coordinates of the current ROI pixels.

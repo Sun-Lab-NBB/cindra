@@ -13,13 +13,13 @@ class ROIColorMode(IntEnum):
     """Assigns each ROI a random color from the active colormap."""
 
     SKEWNESS = 1
-    """Colors ROIs by the skewness of their spatial footprint pixel distribution."""
+    """Colors ROIs by the skewness of their baseline-subtracted fluorescence time series."""
 
     COMPACTNESS = 2
     """Colors ROIs by the compactness (circularity) of their spatial footprint."""
 
     FOOTPRINT = 3
-    """Colors ROIs by their total spatial footprint area in pixels."""
+    """Colors ROIs by the spatial detection scale (hop size) used during sparse detection."""
 
     ASPECT_RATIO = 4
     """Colors ROIs by the aspect ratio of their bounding ellipse."""
@@ -40,7 +40,8 @@ class ROIColorMode(IntEnum):
     """Colors ROIs by pairwise activity correlation with the selected ROI."""
 
     CELL_CLASSIFICATION = 10
-    """Colors ROIs by binary cell/non-cell labels (green for cell, magenta for non-cell)."""
+    """Colors ROIs by binary cell/non-cell labels (non-cell uses the active colormap low endpoint, cell uses the high
+    endpoint)."""
 
 
 class ROIColorModeLabel(StrEnum):
@@ -235,8 +236,8 @@ class _ROIViewerConstants:
     silently dropped."""
     fixed_colorbar_range: tuple[float, ...] = (0.0, 0.5, 1.0)
     """The (low, mid, high) colorbar tick values used for color modes that lack data-driven percentile ranges. Applied
-    to the random, cell classification, and correlation modes where the statistic is either categorical or already
-    normalized to [0, 1]."""
+    to the random, cell probability, cell classification, and correlation modes where the statistic is either
+    categorical or already normalized to [0, 1]."""
     channel_2_color_divisor: float = 1.4
     """The divisor applied to random hue values when channel 2 data is present. Compresses the hue range so that
     channel 1 and channel 2 ROIs occupy visually distinct color bands in the random color overlay."""
@@ -248,7 +249,7 @@ class _ROIViewerConstants:
     range to occupy a visually informative portion of the hue spectrum, preventing extreme hues from dominating the
     overlay."""
     hsv_offset: float = 0.4
-    """The normalization offset applied after HSV division for percentile-based statistics. Shifts the scaled statistic
+    """The normalization offset applied before HSV division for percentile-based statistics. Shifts the scaled statistic
     values to center the color mapping within a perceptually useful region of the hue spectrum."""
     random_color_seed: int = 0
     """The seed for the random number generator used to assign ROI hue values. Ensures reproducible color assignments
@@ -259,11 +260,10 @@ class _ROIViewerConstants:
     default_scale_factor: float = 2.0
     """The default vertical spacing multiplier used to separate stacked fluorescence traces. Controls the Y-axis
     distance between adjacent traces in both single-recording and multi-recording trace plots, with larger values
-    increasing separation."""
+    decreasing separation (trace spacing is computed as 1.0 / scale_factor)."""
     average_threshold: int = 5
-    """The minimum number of selected ROIs required before an average trace is rendered at the bottom of the trace
-    plot. Below this count, only individual traces are shown to avoid displaying a noisy average from too few
-    samples."""
+    """An average trace is rendered only when more than this many ROIs are selected; at or below this count, only
+    individual traces are shown to avoid displaying a noisy average from too few samples."""
     average_scale_divisor: float = 25.0
     """The divisor used to compute the vertical scale of the average trace relative to the number of selected ROIs.
     The average scale is calculated as (selected_count / divisor) + 1, producing a gradually increasing amplitude as
@@ -278,7 +278,7 @@ class _ROIViewerConstants:
     bin_size_divisor: int = 2
     """The divisor applied to the product of tau and sampling rate when computing the default temporal bin size. The
     bin size is calculated as max(1, int(tau * sampling_rate / divisor)) and controls the time window used for
-    correlation map computation."""
+    activity-correlation coloring (pairwise ROI correlation) computation."""
 
 
 @dataclass(frozen=True, slots=True)

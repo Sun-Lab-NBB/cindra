@@ -239,11 +239,12 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
         plane_number * channel_number if isinstance(plane_number, int) and isinstance(channel_number, int) else 0
     )
 
-    # Discovers TIFF files using the same pattern as the pipeline.
-    tiff_paths: list[Path] = []
+    # Discovers TIFF files using the same deduplicated globbing as the pipeline, resolving paths so that case-variant
+    # extension matches on case-insensitive filesystems are not counted more than once.
+    discovered_paths: set[Path] = set()
     for extension in TIFF_EXTENSIONS:
-        tiff_paths.extend(directory.glob(f"*.{extension}"))
-    tiff_paths = natsorted(tiff_paths)
+        discovered_paths.update(path.resolve() for path in directory.glob(f"*.{extension}"))
+    tiff_paths = natsorted(discovered_paths)
 
     if not tiff_paths:
         errors.append(f"No TIFF files found in: {recording_directory}")

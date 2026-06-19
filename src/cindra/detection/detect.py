@@ -67,6 +67,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:  # pragma: no cover
             in-place to store detection outputs including ROI statistics, image projections, and timing data.
 
     Raises:
+        RuntimeError: If the registered binary file path for channel 1 is not set.
         ValueError: If no ROIs are detected on either channel.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)

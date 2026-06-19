@@ -1,4 +1,4 @@
-"""Provides widget-reference and rendering-state dataclasses for all GUI applications."""
+"""Provides widget-reference and rendering-state dataclasses for the ROI viewer GUI."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ class ColorControls:
     colormap_chooser: QComboBox
     """The dropdown for selecting the active colormap."""
     threshold_edit: QLineEdit
-    """The text input for the classifier probability threshold used by cell probability and classification modes."""
+    """The text input for the classifier probability threshold used by the cell classification mode."""
     binning_edit: QLineEdit
     """The text input for the temporal bin size used by the activity correlation mode."""
     opacity_slider: QSlider

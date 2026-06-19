@@ -32,7 +32,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:  # 
         configuration: The single-recording pipeline configuration.
 
     Raises:
-        ValueError: If data_path is not configured.
+        ValueError: If data_path or output_path is not configured.
     """
     # Validates that data_path is configured.
     if configuration.file_io.data_path is None:

@@ -249,7 +249,7 @@ def _create_template_roi(
 
     # Uses np.unique with return_inverse to enable efficient weight aggregation via bincount.
     unique_pixels, inverse, counts = np.unique(cluster_pixels, return_inverse=True, return_counts=True)
-    prevalence_mask = (counts / len(cluster_rois)) > (pixel_prevalence / 100)
+    prevalence_mask = (counts / len(cluster_rois)) >= (pixel_prevalence / 100)
     filtered_pixels = unique_pixels[prevalence_mask]
 
     if len(filtered_pixels) == 0:

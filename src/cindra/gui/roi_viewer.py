@@ -89,8 +89,10 @@ class ROIViewer(QMainWindow):
     """Displays a UI window for inspecting and reclassifying single-recording pipeline results.
 
     Displays ROI overlays, background images, and fluorescence traces. Supports left-click ROI selection,
-    shift/ctrl multi-select, right-click cell/non-cell reclassification (active only in cell/non-cell color mode) with
-    auto-save, keyboard shortcuts for view/color switching, and double-click zoom-to-fit.
+    shift/ctrl multi-select, a Classify toggle that flips the clicked ROI's cell/non-cell label on any click
+    (single-recording mode only), keyboard shortcuts for view/color switching, and double-click zoom-to-fit. Flipped
+    labels are held in memory and can be exported as a classifier training dataset via the New and Add to Existing
+    buttons; they are not written back to the recording's classification results.
 
     Args:
         data: The preloaded viewer data to display on startup.
@@ -104,9 +106,9 @@ class ROIViewer(QMainWindow):
         _temporal_bin_size: Number of frames per temporal bin for activity correlation.
         _recording_loaded: Determines whether a recording has been fully loaded and initialized.
         _colocalization_threshold: Probability threshold for channel 2 colocalization display.
-        _last_reclassified_index: Index of the most recently reclassified ROI, or -1 if none.
         _classify_mode: Determines whether classifier mode is active (clicks flip ROI labels instead of selecting).
         _pre_classify_color_mode: Stores the color mode before classify was toggled on, for restoration on toggle off.
+        _saved_opacity: Mask opacity restored when the spacebar toggles opacity back on after setting it to zero.
         _all_recordings_visible: Determines whether the stacked all-recordings trace view is active.
         _context_data: The ViewerData instance that stores the visualized recording's data.
         _color_arrays: Precomputed per-ROI color arrays for each color mode, or None.
@@ -131,6 +133,7 @@ class ROIViewer(QMainWindow):
         _image_widget: PyQtGraph graphics layout for the ROI image panel.
         _trace_widget: PyQtGraph graphics layout for the fluorescence trace panel.
         _status_bar: Status bar displaying recording info and selection state.
+        _info_label: Label in the ROI info bar showing the current selection, ROI statistics, and size summary.
         _view_box: View box for the primary ROI image display.
         _background: Image item for the background image display.
         _overlay: Image item for the ROI mask overlay display.
@@ -142,11 +145,17 @@ class ROIViewer(QMainWindow):
         _trace_group: Group box for Trace Display controls.
         _top_button: Button for selecting top-n ranked ROIs by the active color statistic.
         _bottom_button: Button for selecting bottom-n ranked ROIs by the active color statistic.
+        _autoselection_label: Label for the top/bottom ranked-ROI count input field.
         _ranked_count_edit: Input field for the number of top/bottom ROIs to select.
         _background_combo: Dropdown for selecting the background image type.
+        _channel_group: Group box for the channel 2 overlay toggle; hidden when channel 2 data does not exist.
         _channel_2_button: Checkable button for toggling channel 2 overlay display.
         _color_controls: ROI color mode dropdown, colormap chooser, threshold, and temporal bins controls.
+        _params_container: Container for the threshold and bin size inputs; hidden when neither color mode is active.
+        _threshold_label: Label for the classifier probability threshold input.
+        _binning_label: Label for the temporal bin size input.
         _trace_controls: Trace display mode, visibility checkboxes, and max plotted controls.
+        _classifier_group: Group box wrapping the classifier builder controls; hidden in multi-recording mode.
         _classifier_controls: Classifier builder panel with Classify toggle, New, and Add to Existing buttons.
         _roi_index_edit: Input field for jumping to a specific ROI by number in the ROI info bar.
         _all_recordings_button: Toggle button for stacked all-recordings trace display.
@@ -165,7 +174,6 @@ class ROIViewer(QMainWindow):
         self._temporal_bin_size: int = 1
         self._recording_loaded: bool = False
         self._colocalization_threshold: float = ROI_CONFIG.default_channel_2_threshold
-        self._last_reclassified_index: int = -1
         self._classify_mode: bool = False
         self._pre_classify_color_mode: int = ROIColorMode.RANDOM
         self._saved_opacity: int = STYLE.default_mask_opacity
@@ -914,7 +922,6 @@ class ROIViewer(QMainWindow):
         self._temporal_bin_size = 1
         self._recording_loaded = False
         self._colocalization_threshold = ROI_CONFIG.default_channel_2_threshold
-        self._last_reclassified_index = -1
         self._classify_mode = False
         self._pre_classify_color_mode = ROIColorMode.RANDOM
         self._classifier_controls.classify_button.setChecked(False)
@@ -1566,8 +1573,9 @@ class ROIViewer(QMainWindow):
     def _handle_click(self, click_x: int, click_y: int, is_right_button: bool, is_multi_select: bool) -> bool:
         """Handles mouse clicks on the image panel.
 
-        Left-click chooses a cell. Shift/ctrl-click adds or removes from the merge selection. Right-click reclassifies
-        the clicked ROI when the cell/non-cell color mode is active.
+        Left-click chooses a cell. Shift/ctrl-click adds or removes from the merge selection. When classifier mode is
+        active (single-recording only), any click flips the clicked ROI's cell/non-cell label without changing the
+        selection.
 
         Args:
             click_x: Column coordinate of the click.
