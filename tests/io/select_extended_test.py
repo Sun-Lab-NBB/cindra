@@ -18,15 +18,7 @@ from cindra.dataclasses import (
 
 
 def _make_roi(centroid: tuple[int, int] = (20, 20), pixel_count: int = 50) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance for testing.
-
-    Args:
-        centroid: The (y, x) centroid position.
-        pixel_count: The number of pixels in the mask.
-
-    Returns:
-        An ROIStatistics instance with the specified properties.
-    """
+    """Creates a minimal ROIStatistics instance for testing."""
     y_pixels = np.arange(pixel_count, dtype=np.int32) % 10
     x_pixels = np.arange(pixel_count, dtype=np.int32) // 10
     mask = ROIMask(
@@ -61,7 +53,9 @@ def _make_runtime_and_config(
     rois = [_make_roi(centroid=(20 + i * 15, 20 + i * 15)) for i in range(roi_count)]
     if probabilities is None:
         probabilities = [0.9] * roi_count
-    classification = np.array([[prob, 1.0 if prob > 0.5 else 0.0] for prob in probabilities], dtype=np.float32)
+    classification = np.array(
+        [[probability, 1.0 if probability > 0.5 else 0.0] for probability in probabilities], dtype=np.float32
+    )
 
     extraction = ExtractionData()
     extraction.roi_statistics = rois
@@ -85,7 +79,7 @@ def _make_runtime_and_config(
 
 
 class TestFilterRois:
-    """Tests for _filter_rois."""
+    """Tests _filter_rois."""
 
     def test_selects_all_rois_with_permissive_filters(self) -> None:
         """Verifies that all ROIs are selected when filters are permissive."""

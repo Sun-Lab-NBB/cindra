@@ -8,7 +8,7 @@ from cindra.registration.pyramid import ScaleSpacePyramid
 
 
 class TestScaleSpacePyramid:
-    """Tests for ScaleSpacePyramid."""
+    """Tests ScaleSpacePyramid."""
 
     def test_base_level_created(self) -> None:
         """Verifies that the pyramid has at least one level after initialization."""

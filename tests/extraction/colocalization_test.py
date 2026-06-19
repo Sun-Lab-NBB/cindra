@@ -60,7 +60,7 @@ def _make_circular_roi(
 
 
 class TestCorrectBleedthrough:
-    """Tests for _correct_bleedthrough."""
+    """Tests _correct_bleedthrough."""
 
     def test_output_non_negative(self) -> None:
         """Verifies that the corrected image has no negative values."""
@@ -96,7 +96,7 @@ class TestCorrectBleedthrough:
 
 
 class TestBuildSparseRoiMasks:
-    """Tests for _build_sparse_roi_masks."""
+    """Tests _build_sparse_roi_masks."""
 
     def test_shape(self) -> None:
         """Verifies the sparse matrix has correct shape."""
@@ -123,7 +123,7 @@ class TestBuildSparseRoiMasks:
 
 
 class TestComputeOverlapMatrix:
-    """Tests for _compute_overlap_matrix."""
+    """Tests _compute_overlap_matrix."""
 
     def test_identical_rois_full_overlap(self) -> None:
         """Verifies that identical ROIs produce an overlap of 1.0."""
@@ -160,7 +160,7 @@ class TestComputeOverlapMatrix:
 
 
 class TestComputeSpatialColocalization:
-    """Tests for compute_spatial_colocalization."""
+    """Tests compute_spatial_colocalization."""
 
     def test_empty_channel_1(self) -> None:
         """Verifies correct handling of empty channel 1."""
@@ -237,7 +237,7 @@ class TestComputeSpatialColocalization:
 
 
 class TestComputeIntensityColocalization:
-    """Tests for compute_intensity_colocalization."""
+    """Tests compute_intensity_colocalization."""
 
     def test_empty_rois(self) -> None:
         """Verifies correct handling of empty ROI list."""

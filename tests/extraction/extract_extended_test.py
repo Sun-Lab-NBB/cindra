@@ -48,7 +48,7 @@ def _make_circular_roi(
 
 
 class TestCreateAndUnpackMasks:
-    """Tests for _create_and_unpack_masks."""
+    """Tests _create_and_unpack_masks."""
 
     def test_with_neuropil_extraction(self) -> None:
         """Verifies that mask creation with neuropil extraction produces both cell and neuropil masks."""

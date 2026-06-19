@@ -9,7 +9,7 @@ from cindra.extraction.deconvolve import apply_oasis_deconvolution, compute_delt
 
 
 class TestComputeDeltaFluorescence:
-    """Tests for compute_delta_fluorescence."""
+    """Tests compute_delta_fluorescence."""
 
     def test_output_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype match expectations."""
@@ -138,7 +138,7 @@ class TestComputeDeltaFluorescence:
 
 
 class TestApplyOasisDeconvolution:
-    """Tests for apply_oasis_deconvolution."""
+    """Tests apply_oasis_deconvolution."""
 
     def test_output_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype match expectations."""

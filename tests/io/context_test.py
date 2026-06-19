@@ -21,7 +21,7 @@ from cindra.dataclasses.single_recording_configuration import AcquisitionParamet
 
 
 def _write_parameters_json(directory: Path, data: dict[str, object]) -> Path:
-    """Writes a cindra_parameters.json file to the given directory and returns the file path."""
+    """Writes a cindra_parameters.json file to the given directory."""
     directory.mkdir(parents=True, exist_ok=True)
     file_path = directory / PARAMETERS_FILENAME
     file_path.write_text(json.dumps(data))
@@ -35,7 +35,7 @@ def _write_acquisition_yaml(directory: Path, acquisition: AcquisitionParameters)
 
 
 class TestFindDataDirectory:
-    """Tests for find_data_directory."""
+    """Tests find_data_directory."""
 
     def test_finds_directory_with_nested_parameters_file(self, tmp_path: Path) -> None:
         """Verifies that the function locates the correct directory when the parameters file is in a subdirectory."""
@@ -61,7 +61,7 @@ class TestFindDataDirectory:
 
 
 class TestLoadAcquisitionParameters:
-    """Tests for _load_acquisition_parameters."""
+    """Tests _load_acquisition_parameters."""
 
     def test_loads_valid_single_roi_json(self, tmp_path: Path) -> None:
         """Verifies that a valid single-ROI parameters file is loaded correctly."""
@@ -176,7 +176,7 @@ class TestLoadAcquisitionParameters:
 
 
 class TestFindAcquisitionParameters:
-    """Tests for _find_acquisition_parameters."""
+    """Tests _find_acquisition_parameters."""
 
     def test_finds_and_loads_parameters_from_nested_directory(self, tmp_path: Path) -> None:
         """Verifies that the wrapper function correctly discovers and loads acquisition parameters."""
@@ -191,7 +191,7 @@ class TestFindAcquisitionParameters:
 
 
 class TestExtractUniqueComponents:
-    """Tests for extract_unique_components."""
+    """Tests extract_unique_components."""
 
     def test_extracts_unique_leaf_directories(self) -> None:
         """Verifies that unique leaf directory names are extracted when they differ between paths."""
@@ -231,7 +231,7 @@ class TestExtractUniqueComponents:
 
 
 class TestResolveRecordingRoots:
-    """Tests for resolve_recording_roots."""
+    """Tests resolve_recording_roots."""
 
     def test_resolves_roots_from_nested_paths(self) -> None:
         """Verifies that recording roots are resolved by walking up to the unique component ancestor."""
@@ -257,7 +257,7 @@ class TestResolveRecordingRoots:
 
 
 class TestFindCindraDirectory:
-    """Tests for _find_cindra_directory."""
+    """Tests _find_cindra_directory."""
 
     def test_finds_directory_with_combined_metadata(self, tmp_path: Path) -> None:
         """Verifies that the cindra output directory is found when combined_metadata.npz exists."""
@@ -286,7 +286,7 @@ class TestFindCindraDirectory:
 
 
 class TestComputeMroiRegionBorders:
-    """Tests for _compute_mroi_region_borders."""
+    """Tests _compute_mroi_region_borders."""
 
     def test_returns_empty_tuple_for_non_mroi(self, tmp_path: Path) -> None:
         """Verifies that a non-MROI recording returns an empty tuple."""

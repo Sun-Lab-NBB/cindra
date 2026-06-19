@@ -43,7 +43,7 @@ def _make_context(
 
 
 class TestComputePlaneOffsets:
-    """Tests for compute_plane_offsets."""
+    """Tests compute_plane_offsets."""
 
     def test_single_plane_returns_zero_offsets(self) -> None:
         """Verifies that a single-plane recording produces zero displacements."""

@@ -25,7 +25,7 @@ from cindra.registration.utils import (
 
 
 class TestApplyPhaseCorrelation:
-    """Tests for apply_phase_correlation."""
+    """Tests apply_phase_correlation."""
 
     def test_output_shape(self) -> None:
         """Verifies the output shape matches the input frames shape."""
@@ -53,12 +53,12 @@ class TestApplyPhaseCorrelation:
         kernel /= NORMALIZATION_EPSILON + np.abs(kernel)
         frames = reference[np.newaxis, :, :]
         result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
-        # Peak should be at (0, 0)
+        # Peak should be at (0, 0).
         assert result[0, 0, 0] == result[0].max()
 
 
 class TestApplyMask:
-    """Tests for apply_mask (numba vectorized)."""
+    """Tests apply_mask (numba vectorized)."""
 
     def test_basic_computation(self) -> None:
         """Verifies the element-wise computation frames * mask + offset."""
@@ -96,7 +96,7 @@ class TestApplyMask:
 
 
 class TestCombineRigidOffsets:
-    """Tests for combine_rigid_offsets."""
+    """Tests combine_rigid_offsets."""
 
     def test_concatenation(self) -> None:
         """Verifies horizontal concatenation of rigid offset batches."""
@@ -128,7 +128,7 @@ class TestCombineRigidOffsets:
 
 
 class TestCombineNonrigidOffsets:
-    """Tests for combine_nonrigid_offsets."""
+    """Tests combine_nonrigid_offsets."""
 
     def test_vertical_stacking(self) -> None:
         """Verifies vertical stacking of nonrigid offset batches."""
@@ -149,7 +149,7 @@ class TestCombineNonrigidOffsets:
 
 
 class TestComputeGaussianFrequencyFilter:
-    """Tests for compute_gaussian_frequency_filter."""
+    """Tests compute_gaussian_frequency_filter."""
 
     def test_shape(self) -> None:
         """Verifies the filter shape matches rfft2 output dimensions."""
@@ -174,7 +174,7 @@ class TestComputeGaussianFrequencyFilter:
 
 
 class TestApplyTemporalSmoothing:
-    """Tests for apply_temporal_smoothing."""
+    """Tests apply_temporal_smoothing."""
 
     def test_preserves_shape(self) -> None:
         """Verifies the output shape matches the input shape."""
@@ -205,7 +205,7 @@ class TestApplyTemporalSmoothing:
 
 
 class TestApplySpatialSmoothing:
-    """Tests for apply_spatial_smoothing."""
+    """Tests apply_spatial_smoothing."""
 
     def test_3d_input(self) -> None:
         """Verifies correct output shape for 3D input."""
@@ -223,7 +223,7 @@ class TestApplySpatialSmoothing:
         """Verifies constant input produces constant output (after normalization)."""
         data = np.ones((2, 20, 20), dtype=np.float32) * 7.0
         result = apply_spatial_smoothing(data=data, window=4)
-        # Interior values should be close to original (border effects exist at edges)
+        # Interior values should be close to original (border effects exist at edges).
         np.testing.assert_allclose(result[0, 5:15, 5:15], 7.0, atol=0.5)
 
     def test_odd_window_raises_error(self) -> None:
@@ -240,7 +240,7 @@ class TestApplySpatialSmoothing:
 
 
 class TestApplySpatialHighPass:
-    """Tests for apply_spatial_high_pass."""
+    """Tests apply_spatial_high_pass."""
 
     def test_removes_uniform_background(self) -> None:
         """Verifies the high-pass filter removes uniform spatial background."""
@@ -251,10 +251,10 @@ class TestApplySpatialHighPass:
     def test_preserves_high_frequency(self) -> None:
         """Verifies the high-pass filter preserves high-frequency structure."""
         data = np.zeros((2, 20, 20), dtype=np.float32)
-        # Add a point source (high-frequency feature)
+        # Adds a point source to introduce a high-frequency feature.
         data[:, 10, 10] = 100.0
         result = apply_spatial_high_pass(data=data, window=4)
-        # The point source should still be prominent after filtering
+        # The point source should still be prominent after filtering.
         assert result[0, 10, 10] > 50.0
 
     def test_2d_input(self) -> None:
@@ -271,7 +271,7 @@ class TestApplySpatialHighPass:
 
 
 class TestComputeReferenceFft:
-    """Tests for compute_reference_fft."""
+    """Tests compute_reference_fft."""
 
     def test_shape(self) -> None:
         """Verifies the output shape matches rfft2 dimensions."""
@@ -294,22 +294,22 @@ class TestComputeReferenceFft:
 
 
 class TestComputeUpsamplingKernel:
-    """Tests for compute_upsampling_kernel."""
+    """Tests compute_upsampling_kernel."""
 
     def test_output_types(self) -> None:
         """Verifies the return types are (ndarray, int)."""
-        kernel, num_upsampled = compute_upsampling_kernel(padding=3, subpixel=10)
+        kernel, upsampled_size = compute_upsampling_kernel(padding=3, subpixel=10)
         assert isinstance(kernel, np.ndarray)
-        assert isinstance(num_upsampled, int)
+        assert isinstance(upsampled_size, int)
 
     def test_kernel_shape(self) -> None:
         """Verifies the kernel matrix shape based on padding and subpixel parameters."""
         padding = 3
         subpixel = 10
-        kernel, num_upsampled = compute_upsampling_kernel(padding=padding, subpixel=subpixel)
+        kernel, upsampled_size = compute_upsampling_kernel(padding=padding, subpixel=subpixel)
         low_resolution_size = (2 * padding + 1) ** 2
         assert kernel.shape[0] == low_resolution_size
-        assert kernel.shape[1] == num_upsampled**2
+        assert kernel.shape[1] == upsampled_size**2
 
     def test_dtype(self) -> None:
         """Verifies the kernel dtype is float32."""
@@ -324,7 +324,7 @@ class TestComputeUpsamplingKernel:
 
 
 class TestMeanCenteredMeshgridRegistration:
-    """Tests for _mean_centered_meshgrid in registration/utils."""
+    """Tests _mean_centered_meshgrid in registration/utils."""
 
     def test_shape(self) -> None:
         """Verifies meshgrid output shapes match input dimensions."""
@@ -346,7 +346,7 @@ class TestMeanCenteredMeshgridRegistration:
 
 
 class TestComputeGaussianRbfWeights:
-    """Tests for _compute_gaussian_rbf_weights (private)."""
+    """Tests _compute_gaussian_rbf_weights (private)."""
 
     def test_square_matrix_for_same_coordinates(self) -> None:
         """Verifies a square matrix is returned when source equals target."""
@@ -376,7 +376,7 @@ class TestComputeGaussianRbfWeights:
 
 
 class TestGetNormalizationWeights:
-    """Tests for _get_normalization_weights (private)."""
+    """Tests _get_normalization_weights (private)."""
 
     def test_shape(self) -> None:
         """Verifies the output shape matches (height, width)."""
@@ -386,7 +386,7 @@ class TestGetNormalizationWeights:
     def test_interior_near_one(self) -> None:
         """Verifies interior normalization weights are close to 1.0."""
         weights = _get_normalization_weights(height=30, width=30, window=4)
-        # Interior values should be close to 1.0
+        # Interior values should be close to 1.0.
         np.testing.assert_allclose(weights[10:20, 10:20], 1.0, atol=0.1)
 
     def test_border_less_than_one(self) -> None:

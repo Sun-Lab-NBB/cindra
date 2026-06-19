@@ -71,7 +71,7 @@ def _make_circular_roi_stats(
 
 
 class TestEstimateDiameterFromRois:
-    """Tests for estimate_diameter_from_rois."""
+    """Tests estimate_diameter_from_rois."""
 
     def test_empty_list_returns_default(self) -> None:
         """Verifies that an empty ROI list returns the default diameter."""
@@ -118,7 +118,7 @@ class TestEstimateDiameterFromRois:
 
 
 class TestComputeMedianPixelPosition:
-    """Tests for compute_median_pixel_position."""
+    """Tests compute_median_pixel_position."""
 
     def test_single_pixel(self) -> None:
         """Verifies that a single pixel returns itself."""
@@ -144,7 +144,7 @@ class TestComputeMedianPixelPosition:
 
 
 class TestComputeDistanceKernel:
-    """Tests for _compute_distance_kernel."""
+    """Tests _compute_distance_kernel."""
 
     def test_shape(self) -> None:
         """Verifies the output kernel has the correct shape."""
@@ -170,7 +170,7 @@ class TestComputeDistanceKernel:
 
 
 class TestROI:
-    """Tests for the _ROI wrapper class."""
+    """Tests the _ROI wrapper class."""
 
     def test_pixel_count(self) -> None:
         """Verifies the total pixel count."""
@@ -266,8 +266,8 @@ class TestROI:
         overlap_image = np.ones((20, 20), dtype=np.uint16)
         overlap_image[5, 5] = 2
         result = roi.get_overlap_mask(overlap_count_image=overlap_image)
-        assert result[0]  # pixel (5,5) overlaps
-        assert not result[1]  # pixel (5,6) does not
+        assert result[0]  # pixel (5,5) overlaps.
+        assert not result[1]  # pixel (5,6) does not.
 
     def test_get_overlap_count_image(self) -> None:
         """Verifies that the overlap count image has correct counts."""
@@ -295,7 +295,7 @@ class TestROI:
 
 
 class TestEllipseData:
-    """Tests for _EllipseData properties."""
+    """Tests _EllipseData properties."""
 
     def _make_ellipse(self, radii: tuple[float, float] = (5.0, 3.0)) -> _EllipseData:
         """Creates a minimal _EllipseData."""
@@ -332,7 +332,7 @@ class TestEllipseData:
 
 
 class TestComputeRoiStatistics:
-    """Tests for compute_roi_statistics."""
+    """Tests compute_roi_statistics."""
 
     def test_empty_list_raises(self) -> None:
         """Verifies that an empty ROI list raises ValueError."""
@@ -426,7 +426,7 @@ class TestComputeRoiStatistics:
 
 
 class TestEstimateDiameterFromRoisZeroPixels:
-    """Tests for estimate_diameter_from_rois edge case with zero-pixel ROIs."""
+    """Tests estimate_diameter_from_rois edge case with zero-pixel ROIs."""
 
     def test_zero_pixel_rois_return_default(self) -> None:
         """Verifies that ROIs with zero pixels return the default diameter."""

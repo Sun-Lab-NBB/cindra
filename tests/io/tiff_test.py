@@ -15,7 +15,7 @@ from cindra.io.tiff import _read_tiff, _discover_tiff_files
 
 
 class TestDiscoverTiffFiles:
-    """Tests for _discover_tiff_files."""
+    """Tests _discover_tiff_files."""
 
     def test_discovers_tif_and_tiff_files(self, tmp_path: Path) -> None:
         """Verifies that both .tif and .tiff files are discovered."""
@@ -77,7 +77,7 @@ class TestDiscoverTiffFiles:
 
 
 class TestReadTiff:
-    """Tests for _read_tiff."""
+    """Tests _read_tiff."""
 
     def test_reads_batch_of_frames(self, tmp_path: Path) -> None:
         """Verifies that a batch of frames is correctly read from a multi-frame TIFF."""

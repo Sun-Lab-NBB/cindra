@@ -13,16 +13,7 @@ def _make_circular_roi(
     radius: int = 5,
     frame_width: int = 64,
 ) -> ROIStatistics:
-    """Creates an ROIStatistics instance with a circular mask.
-
-    Args:
-        centroid: The (y, x) centroid position.
-        radius: The radius of the circular mask in pixels.
-        frame_width: The width of the frame in pixels.
-
-    Returns:
-        An ROIStatistics instance with circular pixel coordinates.
-    """
+    """Creates an ROIStatistics instance with a circular mask for testing."""
     y_pixels = []
     x_pixels = []
     for dy in range(-radius, radius + 1):
@@ -46,7 +37,7 @@ def _make_circular_roi(
 
 
 class TestApplyPreclassification:
-    """Tests for _apply_preclassification."""
+    """Tests _apply_preclassification."""
 
     def test_threshold_zero_keeps_all_rois(self) -> None:
         """Verifies that a threshold of 0.0 keeps all ROIs regardless of classifier output."""

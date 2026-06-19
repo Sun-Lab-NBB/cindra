@@ -8,18 +8,18 @@ from cindra.registration.metrics import _compute_pc_extremes
 
 
 class TestComputePcExtremes:
-    """Tests for _compute_pc_extremes."""
+    """Tests _compute_pc_extremes."""
 
     def test_output_shapes_two_components(self) -> None:
         """Verifies output array shapes when using two principal components."""
-        num_frames = 50
+        frame_count = 50
         height = 16
         width = 16
         num_components = 2
         num_extreme_frames = 10
 
         rng = np.random.default_rng(seed=42)
-        frames = rng.standard_normal(size=(num_frames, height, width)).astype(np.float32)
+        frames = rng.standard_normal(size=(frame_count, height, width)).astype(np.float32)
 
         pc_low, pc_high, projections = _compute_pc_extremes(
             frames=frames,
@@ -29,18 +29,18 @@ class TestComputePcExtremes:
 
         assert pc_low.shape == (num_components, height, width)
         assert pc_high.shape == (num_components, height, width)
-        assert projections.shape == (num_frames, num_components)
+        assert projections.shape == (frame_count, num_components)
 
     def test_output_shapes_one_component(self) -> None:
         """Verifies output array shapes when using a single principal component."""
-        num_frames = 50
+        frame_count = 50
         height = 16
         width = 16
         num_components = 1
         num_extreme_frames = 10
 
         rng = np.random.default_rng(seed=42)
-        frames = rng.standard_normal(size=(num_frames, height, width)).astype(np.float32)
+        frames = rng.standard_normal(size=(frame_count, height, width)).astype(np.float32)
 
         pc_low, pc_high, projections = _compute_pc_extremes(
             frames=frames,
@@ -50,18 +50,18 @@ class TestComputePcExtremes:
 
         assert pc_low.shape == (num_components, height, width)
         assert pc_high.shape == (num_components, height, width)
-        assert projections.shape == (num_frames, num_components)
+        assert projections.shape == (frame_count, num_components)
 
     def test_output_dtypes(self) -> None:
         """Verifies that pc_low and pc_high arrays have float32 dtype."""
-        num_frames = 50
+        frame_count = 50
         height = 16
         width = 16
         num_components = 2
         num_extreme_frames = 10
 
         rng = np.random.default_rng(seed=42)
-        frames = rng.standard_normal(size=(num_frames, height, width)).astype(np.float32)
+        frames = rng.standard_normal(size=(frame_count, height, width)).astype(np.float32)
 
         pc_low, pc_high, projections = _compute_pc_extremes(
             frames=frames,
@@ -75,14 +75,14 @@ class TestComputePcExtremes:
 
     def test_projections_are_finite(self) -> None:
         """Verifies that all projection values are finite (no NaN or Inf)."""
-        num_frames = 50
+        frame_count = 50
         height = 16
         width = 16
         num_components = 2
         num_extreme_frames = 10
 
         rng = np.random.default_rng(seed=42)
-        frames = rng.standard_normal(size=(num_frames, height, width)).astype(np.float32)
+        frames = rng.standard_normal(size=(frame_count, height, width)).astype(np.float32)
 
         _, _, projections = _compute_pc_extremes(
             frames=frames,
@@ -94,7 +94,7 @@ class TestComputePcExtremes:
 
     def test_extreme_means_differ(self) -> None:
         """Verifies that pc_low and pc_high produce different mean images when the input contains structured signal."""
-        num_frames = 50
+        frame_count = 50
         height = 16
         width = 16
         num_components = 1
@@ -103,8 +103,8 @@ class TestComputePcExtremes:
         # Creates frames with a temporal gradient so PCA captures a clear signal direction. Early frames are dark,
         # late frames are bright, ensuring the first PC separates low from high projections.
         rng = np.random.default_rng(seed=42)
-        temporal_gradient = np.linspace(start=0.0, stop=1.0, num=num_frames, dtype=np.float32)
-        frames = rng.standard_normal(size=(num_frames, height, width)).astype(np.float32)
+        temporal_gradient = np.linspace(start=0.0, stop=1.0, num=frame_count, dtype=np.float32)
+        frames = rng.standard_normal(size=(frame_count, height, width)).astype(np.float32)
         frames += temporal_gradient[:, np.newaxis, np.newaxis] * 10.0
 
         pc_low, pc_high, _ = _compute_pc_extremes(
@@ -118,7 +118,7 @@ class TestComputePcExtremes:
 
     def test_extreme_means_reflect_gradient_direction(self) -> None:
         """Verifies that one extreme has a higher overall intensity than the other when frames have a temporal ramp."""
-        num_frames = 50
+        frame_count = 50
         height = 16
         width = 16
         num_components = 1
@@ -128,8 +128,8 @@ class TestComputePcExtremes:
         # find a non-degenerate first component; without it, centering collapses the input to numerical noise and the
         # returned PC direction is arbitrary.
         rng = np.random.default_rng(seed=42)
-        temporal_gradient = np.linspace(start=0.0, stop=10.0, num=num_frames, dtype=np.float32)
-        frames = rng.standard_normal(size=(num_frames, height, width)).astype(np.float32)
+        temporal_gradient = np.linspace(start=0.0, stop=10.0, num=frame_count, dtype=np.float32)
+        frames = rng.standard_normal(size=(frame_count, height, width)).astype(np.float32)
         frames += temporal_gradient[:, np.newaxis, np.newaxis]
 
         pc_low, pc_high, _ = _compute_pc_extremes(

@@ -28,7 +28,7 @@ def _make_roi(
 
 
 class TestFilterChannelRois:
-    """Tests for _filter_channel_rois."""
+    """Tests _filter_channel_rois."""
 
     def test_all_pass(self) -> None:
         """Verifies that all ROIs pass when no filters are restrictive."""

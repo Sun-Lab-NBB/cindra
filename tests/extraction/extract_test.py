@@ -32,7 +32,7 @@ def _make_roi_statistics(count: int) -> list[ROIStatistics]:
 
 
 class TestUpdateRoiExtractionStatistics:
-    """Tests for _update_roi_extraction_statistics."""
+    """Tests _update_roi_extraction_statistics."""
 
     def test_skewness_set_on_all_rois(self) -> None:
         """Verifies that skewness is set on every ROIStatistics instance."""
