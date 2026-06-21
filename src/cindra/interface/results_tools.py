@@ -57,12 +57,19 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
     confirm all output was produced before moving to multi-recording processing or analysis.
 
     Args:
-        recording_path: Absolute path to the recording data directory.
+        recording_path: Absolute path to the recording output directory, which is the parent of the cindra/ folder
+            and equals the recording_output_paths entries returned by the prepare tool when the output root differs
+            from the raw-data root. The cindra/ subdirectory is resolved automatically, falling back to a recursive
+            search for configuration.yaml.
 
     Returns:
         On success, contains 'complete' flag, 'plane_count', 'two_channels' indicator, total check counts
         ('total_checks', 'passed', 'failed'), 'missing' list of absent required files, and optional 'warnings'. On
-        failure, contains an 'error' message. Both cases include a 'success' flag.
+        failure, contains an 'error' message. Both cases include a 'success' flag. A 'success' value of True only
+        means the tool ran; callers MUST gate downstream steps on the 'complete' field, which is False whenever
+        'missing' is non-empty. Each 'missing' entry is a bare filename for an absent file or 'file[key]' for an
+        absent NPZ key. The 'warnings' list holds non-fatal issues such as a registered-binary path that does not
+        resolve on disk.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
@@ -233,13 +240,21 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
     multi-recording processing completes to confirm all output was produced.
 
     Args:
-        recording_path: Absolute path to a recording directory that belongs to the dataset.
-        dataset: The multi-recording dataset name to verify.
+        recording_path: Absolute path to the recording output directory, which is the parent of the cindra/ folder
+            and equals the recording_output_paths entries returned by the prepare tool when the output root differs
+            from the raw-data root. The cindra/ subdirectory is resolved automatically.
+        dataset: The multi-recording dataset name to verify. Matched case-sensitively against the on-disk dataset
+            directory, which is lowercased at preparation time; pass the value returned by resolve_dataset_name_tool
+            or prepare_multi_recording_batch_tool.
 
     Returns:
         On success, contains 'complete' flag, 'recording_count', per-recording verification summaries, 'missing'
-        files, and optional 'warnings'. On failure, contains an 'error' message. Both cases include a
-        'success' flag.
+        files, and optional 'warnings'. On failure, contains an 'error' message. Both cases include a 'success'
+        flag. A 'success' value of True only means the tool ran; callers MUST gate downstream steps on the
+        'complete' field, which is False whenever 'missing' is non-empty. Each 'missing' entry is a bare filename
+        for an absent file, 'file[key]' for an absent NPZ key, or a 'recording_i/...' prefixed path for a
+        per-recording entry. The 'warnings' list holds non-fatal issues such as a registered-binary path that does
+        not resolve on disk.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
@@ -412,9 +427,12 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
         recording_path: Absolute path to a cindra pipeline output directory.
 
     Returns:
-        On success, contains recording metadata including 'plane_count', 'combined_height', 'combined_width',
-        'sampling_rate', 'tau', 'roi_count', 'cell_count', processing 'plane_timing' data, and
-        'available_datasets'. On failure, contains an 'error' message. Both cases include a 'success' flag.
+        Always contains 'success', 'recording_path', 'cindra_path', and 'available_datasets'. When combined metadata
+        loads, also contains 'plane_count', 'combined_height', 'combined_width', 'sampling_rate', 'tau',
+        'plane_heights', 'plane_widths', and 'two_channels'. A 'metadata_error' appears instead when that load fails,
+        and 'combined_metadata_available' is False when the combined metadata file is missing. When the relevant
+        source files exist, also contains 'roi_count', 'cell_count', 'non_cell_count', 'frame_count', and per-plane
+        'plane_timing' entries. On failure to resolve the recording, contains an 'error' message.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
@@ -521,10 +539,12 @@ def query_registration_quality_tool(
         plane_index: The imaging plane index to query (0-based). Registration data is always per-plane.
 
     Returns:
-        On success, contains registration offset summaries ('rigid_y_offsets', 'rigid_x_offsets'), correlation
-        summaries, 'bad_frame_count' and 'bad_frame_percentage', optional nonrigid offset summaries, and
-        optional 'pc_shift_metrics'. On failure, contains an 'error' message. Both cases include a
-        'success' flag.
+        On success, contains registration offset summaries ('rigid_y_offsets', 'rigid_x_offsets') and correlation
+        summaries, each a {min, max, mean, std} object. Offsets are measured in pixels. Correlation is the
+        phase-correlation coefficient, where higher means better alignment. Also contains 'bad_frame_count' and
+        'bad_frame_percentage', optional nonrigid offset summaries, and optional 'pc_shift_metrics'. A per-metric
+        '<key>_error' key may appear when that metric fails to load. On failure, contains an 'error' message. Both
+        cases include a 'success' flag.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
@@ -636,8 +656,13 @@ def query_detection_summary_tool(
         plane_index: -1 for combined view (default), 0+ for a specific imaging plane.
 
     Returns:
-        On success, contains per-image intensity statistics, 'roi_diameter', and 'aspect_ratio'. On failure,
-        contains an 'error' message. Both cases include a 'success' flag.
+        On success, per-image statistics are nested under an 'images' mapping. Its keys cover channel-1 images
+        ('mean_image', 'enhanced_mean_image', 'maximum_projection', 'correlation_map') and their channel-2 forms
+        ('mean_image_channel_2', 'enhanced_mean_image_channel_2', 'maximum_projection_channel_2',
+        'correlation_map_channel_2'). Each entry contains {min, max, mean, std, shape}, or {'error': <message>} on
+        load failure. The top-level 'roi_diameter' and 'aspect_ratio' appear only when available. This tool returns
+        no detected-ROI count; query query_roi_statistics_tool or query_single_recording_metadata_tool for ROI or
+        cell counts. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
@@ -711,9 +736,11 @@ def query_roi_statistics_tool(
 
     Returns statistics including pixel count, skewness, compactness, footprint area, aspect ratio, solidity, and
     centroid coordinates for the requested ROIs. In single-recording mode (dataset is None), also returns cell
-    classification labels. In multi-recording mode (dataset is provided), enriches entries with cluster ID and
-    recording count from tracking metadata when available. Supports sorting by any statistic and limiting to top N
-    results for efficient quality assessment.
+    classification labels and, when present, channel-2 colocalization data. In multi-recording mode (dataset is
+    provided), enriches entries with cluster ID and recording count from tracking metadata when available;
+    classification and colocalization are single-recording-only, because tracked recordings reuse the
+    backward-transformed source masks without reclassification. Supports sorting by any statistic and limiting to
+    top N results for efficient quality assessment.
 
     Args:
         recording_path: Absolute path to a cindra pipeline output directory.
@@ -730,9 +757,14 @@ def query_roi_statistics_tool(
 
     Returns:
         On success, contains 'total_rois', 'queried_count', and 'rois' list with per-ROI statistics. In
-        single-recording mode, includes 'total_cells', 'total_non_cells', and per-ROI classification data. In
-        multi-recording mode, includes 'has_template_metadata' and optional tracking metadata per ROI. On failure,
-        contains an 'error' message. Both cases include a 'success' flag.
+        single-recording mode, includes 'total_cells' and 'total_non_cells', per-ROI 'is_cell' and
+        'classification_probability' (present only when cell_classification.npy exists), and, when
+        cell_colocalization.npy exists, a per-ROI 'colocalization' value pair plus top-level 'colocalization_mode'
+        and 'colocalization_columns'. The colocalization column meaning depends on the extraction path:
+        'colocalization_mode' is 'intensity' with columns ['is_colocalized', 'probability'] when a structural channel
+        was used, or 'spatial' with columns ['matched_channel_2_index', 'overlap_score'] when both channels were
+        functional. In multi-recording mode, includes 'has_template_metadata' and optional 'cluster_id' /
+        'recording_count' per ROI. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
@@ -787,6 +819,25 @@ def query_roi_statistics_tool(
                 if i < classification.shape[0]:
                     entry["is_cell"] = bool(classification[i, 0] > _CELL_LABEL_THRESHOLD)
                     entry["classification_probability"] = round(float(classification[i, 1]), 4)
+
+        # Adds channel-2 colocalization data when present. Column semantics depend on the extraction path:
+        # intensity-based colocalization (run when one channel is structural, which also writes
+        # corrected_structural_mean_image.npy) stores (is_colocalized, probability), whereas spatial colocalization
+        # (run when both channels are functional) stores (matched_channel_2_index, overlap_score).
+        colocalization_path = data_path / "cell_colocalization.npy"
+        colocalization = None
+        if colocalization_path.exists():
+            with contextlib.suppress(Exception):
+                colocalization = np.load(colocalization_path, mmap_mode="r")
+
+        if colocalization is not None:
+            for _, entry in entries:
+                i = entry["roi_index"]
+                if i < colocalization.shape[0]:
+                    entry["colocalization"] = [
+                        round(float(colocalization[i, 0]), 4),
+                        round(float(colocalization[i, 1]), 4),
+                    ]
     else:
         # Multi-recording mode: adds tracking template metadata.
         template_data: dict[str, Any] | None = None
@@ -824,6 +875,12 @@ def query_roi_statistics_tool(
         if classification is not None:
             result["total_cells"] = int(np.sum(classification[:, 0] > _CELL_LABEL_THRESHOLD))
             result["total_non_cells"] = total_rois - result["total_cells"]
+        if colocalization is not None:
+            intensity_based = (data_path / "corrected_structural_mean_image.npy").exists()
+            result["colocalization_mode"] = "intensity" if intensity_based else "spatial"
+            result["colocalization_columns"] = (
+                ["is_colocalized", "probability"] if intensity_based else ["matched_channel_2_index", "overlap_score"]
+            )
     else:
         result["dataset"] = dataset
         result["recording_index"] = recording_index if recording_index is not None else 0
@@ -842,6 +899,8 @@ def query_traces_tool(
     plane_index: int = -1,
     dataset: str | None = None,
     recording_index: int | None = None,
+    start_frame: int = 0,
+    end_frame: int | None = None,
 ) -> dict[str, object]:
     """Queries fluorescence trace data for specific ROIs from a cindra-processed recording or multi-recording dataset.
 
@@ -863,10 +922,18 @@ def query_traces_tool(
             plane_index.
         recording_index: The recording index within the dataset to query (0-based). Only used in multi-recording mode.
             Defaults to 0 (entry recording) when not provided.
+        start_frame: The first frame index (inclusive) of the window to return. Applied before downsampling. Defaults
+            to 0 (the first frame).
+        end_frame: The end frame index (exclusive) of the window to return. Applied before downsampling. Defaults to
+            None, meaning through the final frame.
 
     Returns:
-        On success, contains 'trace_type', 'downsample_factor', 'frame_count', and 'traces' list with per-ROI
-        trace arrays. On failure, contains an 'error' message. Both cases include a 'success' flag.
+        On success, contains 'trace_type', 'downsample_factor', 'frame_count' (the recording's total frame count
+        before any windowing or downsampling), the resolved 'start_frame' (inclusive) and 'end_frame' (exclusive),
+        'returned_sample_count' (the length of each returned trace), and 'traces', a list of {'roi_index', 'trace'}
+        entries. Each 'trace' is a flat list of float fluorescence values rounded to 4 decimals; returned sample k
+        corresponds to original frame start_frame + k * downsample_factor. On failure, contains an 'error' message.
+        Both cases include a 'success' flag.
     """
     if len(roi_indices) > _MAX_TRACE_ROIS:
         return {
@@ -923,10 +990,22 @@ def query_traces_tool(
     if not valid_indices:
         return {"success": False, "error": "Unable to query traces. No valid ROI indices provided."}
 
+    frame_count = int(traces.shape[1])
+    resolved_start = max(0, start_frame)
+    resolved_end = frame_count if end_frame is None else min(end_frame, frame_count)
+    if resolved_start >= resolved_end:
+        return {
+            "success": False,
+            "error": (
+                f"Unable to query traces. The requested frame range [{start_frame}, {end_frame}) is empty for a "
+                f"recording with {frame_count} frames."
+            ),
+        }
+
     downsample_factor = max(1, downsample_factor)
     results: list[dict[str, Any]] = []
     for roi_index in valid_indices:
-        trace = traces[roi_index]
+        trace = traces[roi_index][resolved_start:resolved_end]
         if downsample_factor > 1:
             trace = trace[::downsample_factor]
         results.append({"roi_index": roi_index, "trace": [round(float(value), 4) for value in trace]})
@@ -935,7 +1014,10 @@ def query_traces_tool(
         "success": True,
         "trace_type": trace_type,
         "downsample_factor": downsample_factor,
-        "frame_count": int(traces.shape[1]),
+        "frame_count": frame_count,
+        "start_frame": resolved_start,
+        "end_frame": resolved_end,
+        "returned_sample_count": len(results[0]["trace"]) if results else 0,
         "traces": results,
     }
 
@@ -963,8 +1045,12 @@ def query_multi_recording_overview_tool(
     across recordings.
 
     Args:
-        recording_path: Absolute path to a recording directory that belongs to the dataset.
-        dataset: The multi-recording dataset name to query.
+        recording_path: Absolute path to the recording output directory, which is the parent of the cindra/ folder
+            and equals the recording_output_paths entries returned by the prepare tool when the output root differs
+            from the raw-data root. The cindra/ subdirectory is resolved automatically.
+        dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
+            directory, which is lowercased at preparation time; pass the value returned by resolve_dataset_name_tool
+            or prepare_multi_recording_batch_tool.
 
     Returns:
         On success, contains 'recording_count', 'template_roi_count', and per-recording summaries with mask
@@ -1066,11 +1152,15 @@ def query_multi_recording_registration_quality_tool(
 
     Args:
         recording_path: Absolute path to a recording directory that belongs to the dataset.
-        dataset: The multi-recording dataset name to query.
+        dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
+            directory, which is lowercased at preparation time; pass the value returned by resolve_dataset_name_tool
+            or prepare_multi_recording_batch_tool.
 
     Returns:
-        On success, contains per-recording deformation field statistics and image availability. On failure,
-        contains an 'error' message. Both cases include a 'success' flag.
+        On success, contains per-recording deformation field statistics and image availability. Each 'deform_field_y'
+        and 'deform_field_x' entry adds 'abs_mean' and 'abs_max', the mean and maximum absolute displacement in
+        pixels, to its {min, max, mean, std, shape} summary. A 'displacement_magnitude' {min, max, mean, std} summary
+        combines both fields. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
@@ -1165,7 +1255,9 @@ def query_multi_recording_tracking_summary_tool(
 
     Args:
         recording_path: Absolute path to a recording directory that belongs to the dataset.
-        dataset: The multi-recording dataset name to query.
+        dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
+            directory, which is lowercased at preparation time; pass the value returned by resolve_dataset_name_tool
+            or prepare_multi_recording_batch_tool.
 
     Returns:
         On success, contains 'template_count', 'recording_count_distribution' histogram, cluster statistics,
@@ -1251,6 +1343,8 @@ def query_cross_recording_traces_tool(
     roi_indices: list[int],
     trace_type: str = "corrected",
     downsample_factor: int = 1,
+    start_frame: int = 0,
+    end_frame: int | None = None,
 ) -> dict[str, object]:
     """Queries fluorescence traces for specific ROIs across all recordings in a multi-recording dataset.
 
@@ -1260,15 +1354,24 @@ def query_cross_recording_traces_tool(
 
     Args:
         recording_path: Absolute path to a recording directory that belongs to the dataset.
-        dataset: The multi-recording dataset name to query.
+        dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
+            directory, which is lowercased at preparation time; pass the value returned by resolve_dataset_name_tool
+            or prepare_multi_recording_batch_tool.
         roi_indices: List of ROI indices to retrieve traces for across all recordings (maximum 50).
         trace_type: The type of fluorescence trace to return. 'fluorescence' for raw cell fluorescence,
             'neuropil' for neuropil fluorescence, 'corrected' for neuropil-subtracted, 'spikes' for deconvolved.
         downsample_factor: Factor by which to downsample traces (1 = no downsampling, 10 = every 10th sample).
+        start_frame: The first frame index (inclusive) of the window to return, applied per recording before
+            downsampling. Defaults to 0 (the first frame).
+        end_frame: The end frame index (exclusive) of the window to return, applied per recording before
+            downsampling. Defaults to None, meaning through each recording's final frame.
 
     Returns:
-        On success, contains 'recording_count', per-ROI 'rois' with per-recording traces, and optional
-        'skipped_recordings'. On failure, contains an 'error' message. Both cases include a 'success' flag.
+        On success, contains 'recording_count' and per-ROI 'rois', each with a 'recordings' list of per-recording
+        entries. Each entry holds 'recording_index', 'recording_id', 'frame_count' (that recording's total frames
+        before windowing or downsampling), the resolved 'start_frame' and 'end_frame', and 'trace', a flat list of
+        float values rounded to 4 decimals. Optional 'skipped_recordings' lists recordings with incomplete
+        extraction. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
     if len(roi_indices) > _MAX_TRACE_ROIS:
         return {
@@ -1357,7 +1460,13 @@ def query_cross_recording_traces_tool(
             if roi_index < 0 or roi_index >= traces.shape[0]:
                 continue
 
-            trace = traces[roi_index]
+            frame_count = int(traces.shape[1])
+            resolved_start = max(0, start_frame)
+            resolved_end = frame_count if end_frame is None else min(end_frame, frame_count)
+            if resolved_start >= resolved_end:
+                continue
+
+            trace = traces[roi_index][resolved_start:resolved_end]
             if downsample_factor > 1:
                 trace = trace[::downsample_factor]
 
@@ -1365,7 +1474,9 @@ def query_cross_recording_traces_tool(
                 {
                     "recording_index": recording_index,
                     "recording_id": recording_id,
-                    "frame_count": int(traces.shape[1]),
+                    "frame_count": frame_count,
+                    "start_frame": resolved_start,
+                    "end_frame": resolved_end,
                     "trace": [round(float(value), 4) for value in trace],
                 }
             )

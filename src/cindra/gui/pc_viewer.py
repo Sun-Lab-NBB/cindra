@@ -216,6 +216,7 @@ class PCViewer(QMainWindow):
         current_pc = int(self._pc_edit.text()) if self._pc_edit.text() else 1
         return {
             "current_plane": self._plane_selector.currentIndex(),
+            "current_plane_label": self._plane_selector.currentText(),
             "plane_count": self.data.plane_count,
             "current_pc": current_pc,
             "pc_count": self._pc_count,

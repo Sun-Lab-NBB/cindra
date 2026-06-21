@@ -259,10 +259,17 @@ zeroes.
 
 **Optional colocalization files (combined root and per-plane):**
 
-| File                                  | Shape           | Description                                                                                                    |
-|---------------------------------------|-----------------|----------------------------------------------------------------------------------------------------------------|
-| `cell_colocalization.npy`             | (num_rois, 2)   | Column 0: is_colocalized label (1.0 or 0.0), column 1: probability                                             |
-| `corrected_structural_mean_image.npy` | (height, width) | Bleed-through-corrected structural channel mean (dual-channel recordings where only one channel is functional) |
+| File                                  | Shape           | Description                                                      |
+|---------------------------------------|-----------------|-----------------------------------------------------------------|
+| `cell_colocalization.npy`             | (num_rois, 2)   | Channel-2 colocalization; columns depend on the extraction path |
+| `corrected_structural_mean_image.npy` | (height, width) | Bleed-through-corrected structural channel mean                 |
+
+The `cell_colocalization.npy` column semantics depend on the extraction path. When one channel is structural,
+intensity-based colocalization runs (and also writes `corrected_structural_mean_image.npy`): column 0 is the
+is_colocalized label (1.0 or 0.0) and column 1 the probability. When both channels are functional, spatial
+colocalization runs instead: column 0 is the matched channel-2 ROI index (-1 if unmatched) and column 1 the
+overlap score. `query_roi_statistics_tool` surfaces this as a per-ROI `colocalization` pair plus top-level
+`colocalization_mode` and `colocalization_columns`.
 
 ---
 

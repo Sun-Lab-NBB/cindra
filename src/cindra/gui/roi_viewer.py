@@ -359,6 +359,7 @@ class ROIViewer(QMainWindow):
             "roi_color_mode": ROIColorMode(self._roi_color_mode).name.lower(),
             "colormap": self._roi_colormap,
             "selected_roi_indices": list(self._selected_roi_indices),
+            "primary_roi_index": self._selected_roi_index if self._selected_roi_indices else None,
             "opacity": self._color_controls.opacity_slider.value(),
             "classify_mode": self._classify_mode,
             "trace_visibility": {

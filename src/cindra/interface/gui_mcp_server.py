@@ -65,6 +65,10 @@ def launch_viewer_tool(
     to interact with directly. Returns a viewer_id that can be used to check status, query state, or close the
     viewer later.
 
+    Note:
+        This server only launches and observes viewers. Changing the display, such as selecting an ROI or navigating
+        frames, must be done by the user via the GUI controls.
+
     Args:
         viewer_type: The type of viewer to launch. 'roi' for ROI inspection, 'tracking' for multi-recording tracking
             quality, 'registration' for registration quality (binary player + PC viewer).
@@ -121,8 +125,8 @@ def list_viewers_tool() -> dict[str, Any]:
     viewer.
 
     Returns:
-        A JSON dictionary containing 'viewers' list (each with 'viewer_id', 'viewer_type', 'recording_path',
-        'dataset', 'active_dataset', and 'alive' flag) and 'count' of active viewers.
+        A JSON dictionary containing 'success' flag, 'viewers' list (each with 'viewer_id', 'viewer_type',
+        'recording_path', 'dataset', 'active_dataset', and 'alive' flag), and 'count' of active viewers.
     """
     viewers: list[dict[str, Any]] = []
     dead_ids: list[str] = []
@@ -156,7 +160,7 @@ def list_viewers_tool() -> dict[str, Any]:
         cleanup_state_file(state_path=Path(_viewer_registry[dead_id].state_path))
         del _viewer_registry[dead_id]
 
-    return {"viewers": viewers, "count": len(viewers)}
+    return {"success": True, "viewers": viewers, "count": len(viewers)}
 
 
 @gui_mcp.tool()
@@ -192,16 +196,22 @@ def close_viewer_tool(viewer_id: str) -> dict[str, Any]:
 def query_viewer_state_tool(viewer_id: str) -> dict[str, Any]:
     """Queries the current display state of an active GUI viewer.
 
-    Returns the viewer's live display settings including active channel, background view, mask layer, selected ROIs,
-    opacity, color mode, and other viewer-type-specific state. The state is updated by the viewer subprocess every
-    250 ms when changes are detected.
+    The shape of the returned 'state' dictionary depends on viewer_type. The 'roi' and 'tracking' viewers return flat
+    display-setting dictionaries. The 'registration' viewer instead returns a nested dictionary keyed by 'binary_player'
+    and 'pc_viewer', with no top-level 'loaded' flag. For the exact per-viewer-type key schema, consult the cindra
+    visualization skill's "Viewer state reference" section. The state is updated by the viewer subprocess every 250 ms
+    when changes are detected.
+
+    Note:
+        This tool only observes viewer state and cannot change the display. Selecting an ROI, switching the channel,
+        plane, or mask layer, and navigating frames must be done by the user via the GUI controls.
 
     Args:
         viewer_id: The unique identifier of the viewer to query, as returned by launch_viewer_tool.
 
     Returns:
-        A JSON dictionary containing 'success' flag, 'viewer_id', and 'state' dictionary with the viewer's current
-        display settings. On failure, contains an 'error' message.
+        A JSON dictionary containing 'success' flag, 'viewer_id', and 'state' dictionary holding the viewer's current
+        display settings in the viewer-type-specific shape described above. On failure, contains an 'error' message.
     """
     entry = _get_viewer(viewer_id)
     if entry is None:

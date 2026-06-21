@@ -186,8 +186,13 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
       the manifest.
 
 7. **Monitor** — Use `get_processing_jobs_status_tool` to check progress. Optionally use
-   `get_active_execution_timing_tool` for per-job timing and session throughput. Present status as a
-   formatted table (see Status Formatting section).
+   `get_active_execution_timing_tool` for per-job timing and session throughput. These two tools
+   reflect only the active in-process execution session and return `active: false` with empty jobs
+   when no session is running (for example after an MCP server restart, a reconnect, or a batch
+   dispatched by a prior process). For resume monitoring in those cases, fall back to
+   `get_batch_status_overview_tool` for a whole-tree view or `get_recording_status_tool` per
+   recording, both of which read persisted on-disk tracker state. Present status as a formatted
+   table (see Status Formatting section).
 
 8. **Handle completion** — When all recordings finish, check for failures. Route errors to the
    appropriate skill (see Error Routing section). On success, invoke `/single-recording-results`
@@ -265,8 +270,7 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 |-------------------------------------------|------------------------------------------|
 | "At least one recording path is required" | Provide recording paths                  |
 | "Configuration file not found"            | Invoke `/single-recording-configuration` |
-| "Recording directory not found"           | Verify path exists                       |
-| "No valid recording paths provided"       | Check paths exist and are directories    |
+| "No valid recording paths provided"       | Inspect `invalid_paths` in the response  |
 
 ### Execution errors
 
