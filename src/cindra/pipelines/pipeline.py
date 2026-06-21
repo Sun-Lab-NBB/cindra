@@ -1,4 +1,4 @@
-"""Provides the centralized pipeline for processing the brain activity data acquired in the Sun lab."""
+"""Provides the centralized pipeline for processing the acquired brain activity data."""
 
 from __future__ import annotations
 

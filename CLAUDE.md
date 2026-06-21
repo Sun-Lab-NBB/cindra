@@ -29,7 +29,7 @@ appropriate skill results in style violations.
 
 ## Cross-referenced library verification
 
-Sun Lab projects often depend on other `ataraxis-*` or `sl-*` libraries. These libraries may be stored locally in the
+cindra depends on several `ataraxis-*` libraries. These libraries may be stored locally in the
 same parent directory as this project (`/home/cyberaxolotl/Desktop/GitHubRepos/`).
 
 **Before writing code that interacts with a cross-referenced library, you MUST:**
@@ -88,24 +88,24 @@ appropriate.
 
 Skills are provided via Claude Code plugins, not the cindra pip package. The cindra plugin provides project-specific
 skills (processing, configuration, results, visualization, MCP setup). The ataraxis automation plugin provides shared
-Sun Lab workflow skills (style guides, commit, codebase exploration).
+workflow skills (style guides, commit, codebase exploration).
 
 **Ataraxis automation plugin skills:**
 
-| Skill                   | Description                                                               |
-|-------------------------|---------------------------------------------------------------------------|
-| `/explore-codebase`     | Perform in-depth codebase exploration at session start                    |
-| `/explore-dependencies` | Explore ataraxis dependency APIs for a live API snapshot                  |
-| `/python-style`         | Apply Sun Lab Python coding conventions (REQUIRED for all Python changes) |
-| `/cpp-style`            | Apply Sun Lab C++ coding conventions (not used by this Python-only repo)  |
-| `/csharp-style`         | Apply Sun Lab C# coding conventions (not used by this Python-only repo)   |
-| `/readme-style`         | Apply Sun Lab README conventions (REQUIRED for README changes)            |
-| `/commit`               | Draft Sun Lab style-compliant git commit messages                         |
-| `/skill-design`         | Generate and verify skill files and CLAUDE.md project instructions        |
-| `/project-layout`       | Apply Sun Lab project directory layout conventions                        |
-| `/pyproject-style`      | Apply Sun Lab pyproject.toml conventions                                  |
-| `/tox-config`           | Apply Sun Lab tox.ini conventions                                         |
-| `/api-docs`             | Apply Sun Lab API documentation conventions                               |
+| Skill                   | Description                                                              |
+|-------------------------|--------------------------------------------------------------------------|
+| `/explore-codebase`     | Perform in-depth codebase exploration at session start                   |
+| `/explore-dependencies` | Explore ataraxis dependency APIs for a live API snapshot                 |
+| `/python-style`         | Apply cindra Python coding conventions (REQUIRED for all Python changes) |
+| `/cpp-style`            | Apply cindra C++ coding conventions (not used by this Python-only repo)  |
+| `/csharp-style`         | Apply cindra C# coding conventions (not used by this Python-only repo)   |
+| `/readme-style`         | Apply cindra README conventions (REQUIRED for README changes)            |
+| `/commit`               | Draft cindra style-compliant git commit messages                         |
+| `/skill-design`         | Generate and verify skill files and CLAUDE.md project instructions       |
+| `/project-layout`       | Apply cindra project directory layout conventions                        |
+| `/pyproject-style`      | Apply cindra pyproject.toml conventions                                  |
+| `/tox-config`           | Apply cindra tox.ini conventions                                         |
+| `/api-docs`             | Apply cindra API documentation conventions                               |
 
 **Cindra plugin skills:**
 
