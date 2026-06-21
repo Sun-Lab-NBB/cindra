@@ -55,7 +55,8 @@ manual file reads whenever possible.
 ### Recommended query order
 
 1. `query_multi_recording_overview_tool` — understand dataset composition and processing completeness
-2. `query_multi_recording_registration_quality_tool` — review deformation field magnitudes and transformed image availability
+2. `query_multi_recording_registration_quality_tool` — review deformation field magnitudes and transformed
+   image availability
 3. `query_multi_recording_tracking_summary_tool` — review template counts, cluster IDs, and recording count distribution
 4. `query_roi_statistics_tool` (with `dataset` parameter) — inspect per-ROI spatial statistics and tracking metadata
 5. `query_traces_tool` (with `dataset` parameter) — examine tracked ROI fluorescence activity per recording
@@ -66,6 +67,22 @@ field of view shifted between sessions. Similarly, an ROI appearing in fewer rec
 failure — ROIs can be active in some sessions and inactive in others. The only reliable way to assess cross-day
 registration quality is visual inspection: confirm that backward-deformed templates overlap with the same structures
 across days. Use `/visualization` for this.
+
+### Query tool argument semantics
+
+The `recording_path` argument for the verify and query tools must be the recording output directory, the parent of
+the `cindra/` folder. This equals the `recording_output_paths` entries passed to and returned by the prepare tool
+when the output root differs from the raw-data root, not the raw-data path itself. The tools resolve the `cindra/`
+subdirectory automatically.
+
+The ROI indices accepted by `query_traces_tool`, `query_roi_statistics_tool`, and `query_cross_recording_traces_tool`
+are 0-based positional row indices into the per-recording arrays. They are not the tracking `cluster_id`, which is a
+separate 1-based identity (0 = unclustered). Out-of-range indices are silently dropped without an error, so a
+confidently "successful" empty result can mean a wrong index rather than missing data.
+
+`query_cross_recording_traces_tool` excludes recordings with incomplete extraction into a `skipped_recordings` list,
+so "all recordings" really means all recordings with complete extraction. Surface `skipped_recordings` to the user
+when it is present.
 
 ---
 

@@ -196,6 +196,8 @@ dictionary structure depends on the viewer type.
 | `roi_source`               | str       | Current ROI source dropdown text                    |
 | `active_dataset`           | str\|null | Active multi-recording dataset name, or null        |
 | `available_datasets`       | list[str] | List of available multi-recording dataset names     |
+| `view_index`               | int       | Active plane view: -1 combined, 0+ per-plane index  |
+| `current_recording_index`  | int\|null | Multi-rec focused recording index; null if single   |
 
 **`trace_visibility` sub-fields:**
 
@@ -263,6 +265,11 @@ Returns a nested dictionary with two sub-viewers:
 ---
 
 ## Enum value reference
+
+State fields report the lowercase enum value (e.g. `maximum_projection`), while the on-screen dropdowns
+show a title-case label (e.g. "Maximum Projection"). When telling the user which control to operate,
+translate the state value to its dropdown label. This applies to `background_view`, `roi_color_mode`,
+`mask_layer`, and `coordinate_space`.
 
 ### Background views
 
@@ -416,9 +423,15 @@ with activity) or by `cell_probability` to see classifier confidence. Use
 ROIs.
 
 **"What do the traces look like?"** — Check `trace_visibility` and `selected_roi_indices` from
-state. If no ROIs are selected, inform the user they need to click ROIs in the image panel. Use
-`query_traces_tool` for the selected ROI indices to provide quantitative trace
-information.
+state. If no ROIs are selected, tell the user they can select one by clicking it in the image panel
+or by typing its index into the ROI index field (the "Enter an ROI index to select it" box). Use
+`query_traces_tool` for the selected ROI indices to provide quantitative trace information.
+
+**"Select or highlight a specific ROI (e.g. ROI 20)?"** — These tools observe only and cannot drive
+the viewer, so ask the user to type the index into the ROI index field. ROI indices are 0-based and
+match `selected_roi_indices` / `primary_roi_index` in the state, so resolve any "cell N" wording to a
+0-based index against `roi_count` before instructing. Confirm by re-querying state and checking that
+`primary_roi_index` matches.
 
 ### Tracking viewer assistance
 
@@ -440,7 +453,10 @@ playing — suggest playing the video to look for residual jitter. Use
 counts. Key indicators:
 - **Rigid offset standard deviation** < 2 pixels indicates stable registration
 - **Bad frame percentage** < 5% indicates few motion artifacts
-- **PC shift metrics** close to zero indicate no systematic drift
+- **PC shift metrics** close to zero indicate no systematic drift (a qualitative cue — there is no
+  fixed threshold). `pc_viewer.current_pc` in the state is 1-based, while the PC component indices in
+  `query_registration_quality_tool`'s shift metrics are 0-based, so subtract 1 when looking up the
+  metric for the PC the user is viewing.
 
 **"What are these PC images?"** — Explain that PC extreme images show the average frame
 appearance at the extremes of each principal component. Large visible differences between low and

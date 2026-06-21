@@ -59,6 +59,17 @@ manual file reads whenever possible.
 4. `query_roi_statistics_tool` — inspect ROI quality metrics and classification
 5. `query_traces_tool` — examine fluorescence activity for specific ROIs
 
+### Query tool argument semantics
+
+The `recording_path` argument for the verify and query tools must be the recording output directory, the parent of
+the `cindra/` folder. This equals the `recording_output_paths` entries passed to and returned by the prepare tool
+when the output root differs from the raw-data root, not the raw-data path itself. The tools resolve the `cindra/`
+subdirectory automatically.
+
+The ROI indices accepted by `query_traces_tool` and `query_roi_statistics_tool` are 0-based positional row indices
+into the per-recording arrays, not a tracking identity. Out-of-range indices are silently dropped without an error,
+so a confidently "successful" empty result can mean a wrong index rather than missing data.
+
 ---
 
 ## Output data reference
@@ -245,7 +256,8 @@ Saved at both the combined root and per-plane levels. All files are `.npy` forma
 | `cell_classification.npy`     | (num_rois, 2)      | Column 0: is_cell label (1.0 or 0.0), column 1: classifier probability |
 
 If `spike_deconvolution.extract_spikes` is False, both `subtracted_fluorescence.npy` and `spikes.npy` are filled with
-zeroes.
+zeroes. In that case `query_traces_tool` returns an all-zero trace with `success=true` rather than an error, so an
+all-zero spike or corrected trace can mean deconvolution was disabled rather than the absence of activity.
 
 **Channel 2 (two-channel only, same shapes):**
 
@@ -270,6 +282,11 @@ is_colocalized label (1.0 or 0.0) and column 1 the probability. When both channe
 colocalization runs instead: column 0 is the matched channel-2 ROI index (-1 if unmatched) and column 1 the
 overlap score. `query_roi_statistics_tool` surfaces this as a per-ROI `colocalization` pair plus top-level
 `colocalization_mode` and `colocalization_columns`.
+
+The metadata tool's `two_channels` flag means channel 2 is present AND functional, not merely that the recording
+is dual-channel. A recording with a structural (non-functional) channel 2 reports `two_channels=False` yet still
+writes `cell_colocalization.npy`. Use the presence of `cell_colocalization.npy` (not `two_channels`) as the signal
+that channel-2 colocalization was computed.
 
 ---
 

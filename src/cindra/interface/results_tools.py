@@ -429,10 +429,14 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
     Returns:
         Always contains 'success', 'recording_path', 'cindra_path', and 'available_datasets'. When combined metadata
         loads, also contains 'plane_count', 'combined_height', 'combined_width', 'sampling_rate', 'tau',
-        'plane_heights', 'plane_widths', and 'two_channels'. A 'metadata_error' appears instead when that load fails,
-        and 'combined_metadata_available' is False when the combined metadata file is missing. When the relevant
-        source files exist, also contains 'roi_count', 'cell_count', 'non_cell_count', 'frame_count', and per-plane
-        'plane_timing' entries. On failure to resolve the recording, contains an 'error' message.
+        'plane_heights', 'plane_widths', and 'two_channels'. The 'two_channels' flag derives from the registered
+        channel-2 binary paths and means channel 2 is present AND functional, not merely that the recording is
+        dual-channel. A dual-channel recording whose second channel is structural (non-functional, such as a tdTomato
+        anatomy channel) reports 'two_channels' False yet still produces channel-2 colocalization output, so do not use
+        'two_channels' to decide whether channel-2 colocalization exists. A 'metadata_error' appears instead when that
+        load fails, and 'combined_metadata_available' is False when the combined metadata file is missing. When the
+        relevant source files exist, also contains 'roi_count', 'cell_count', 'non_cell_count', 'frame_count', and
+        per-plane 'plane_timing' entries. On failure to resolve the recording, contains an 'error' message.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
@@ -744,7 +748,9 @@ def query_roi_statistics_tool(
 
     Args:
         recording_path: Absolute path to a cindra pipeline output directory.
-        roi_indices: Specific ROI indices to query. Returns all ROIs when not provided (up to 500).
+        roi_indices: Specific ROI indices to query. Returns all ROIs when not provided (up to 500). These are 0-based
+            positional row indices, not tracking cluster IDs. Indices outside [0, total_rois) are silently dropped, so
+            'queried_count' may be smaller than the number requested and 'rois' may be empty with success True.
         sort_by: Sort results by this statistic name ('skewness', 'compactness', 'footprint', 'aspect_ratio',
             'pixel_count', 'solidity', 'normalized_pixel_count'). Results are returned in descending order.
         top_n: When sort_by is provided, returns the top N after sorting; otherwise returns the first N entries.
@@ -912,9 +918,15 @@ def query_traces_tool(
 
     Args:
         recording_path: Absolute path to a cindra pipeline output directory.
-        roi_indices: List of ROI indices to retrieve traces for (maximum 50).
+        roi_indices: List of ROI indices to retrieve traces for (maximum 50). These are 0-based positional row
+            indices into the per-recording trace arrays of shape (num_rois, frames), not tracking cluster IDs. Indices
+            outside [0, num_rois) are silently skipped, so compare the returned 'roi_index' values against what you
+            requested; the call errors only when none of the indices are valid.
         trace_type: The type of fluorescence trace to return. 'fluorescence' for raw cell fluorescence,
-            'neuropil' for neuropil fluorescence, 'corrected' for neuropil-subtracted, 'spikes' for deconvolved.
+            'neuropil' for neuropil fluorescence, 'corrected' for neuropil-subtracted, 'spikes' for deconvolved. For
+            'spikes' and 'corrected', spikes.npy and subtracted_fluorescence.npy are written but zero-filled when
+            spike_deconvolution.extract_spikes was disabled at processing time, so an all-zero returned trace can mean
+            deconvolution was off rather than absence of activity.
         downsample_factor: Factor by which to downsample traces (1 = no downsampling, 10 = every 10th sample).
         plane_index: -1 for combined view (default), 0+ for a specific imaging plane. Only used in single-recording
             mode.
@@ -1357,7 +1369,9 @@ def query_cross_recording_traces_tool(
         dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
             directory, which is lowercased at preparation time; pass the value returned by resolve_dataset_name_tool
             or prepare_multi_recording_batch_tool.
-        roi_indices: List of ROI indices to retrieve traces for across all recordings (maximum 50).
+        roi_indices: List of ROI indices to retrieve traces for across all recordings (maximum 50). These are 0-based
+            positional per-recording row indices, not the multi-recording tracking cluster_id, which is a separate
+            concept. An out-of-range ROI yields an empty 'recordings' list for that ROI with success True.
         trace_type: The type of fluorescence trace to return. 'fluorescence' for raw cell fluorescence,
             'neuropil' for neuropil fluorescence, 'corrected' for neuropil-subtracted, 'spikes' for deconvolved.
         downsample_factor: Factor by which to downsample traces (1 = no downsampling, 10 = every 10th sample).
@@ -1370,8 +1384,10 @@ def query_cross_recording_traces_tool(
         On success, contains 'recording_count' and per-ROI 'rois', each with a 'recordings' list of per-recording
         entries. Each entry holds 'recording_index', 'recording_id', 'frame_count' (that recording's total frames
         before windowing or downsampling), the resolved 'start_frame' and 'end_frame', and 'trace', a flat list of
-        float values rounded to 4 decimals. Optional 'skipped_recordings' lists recordings with incomplete
-        extraction. On failure, contains an 'error' message. Both cases include a 'success' flag.
+        float values rounded to 4 decimals. Recordings whose extraction is incomplete are reported under optional
+        'skipped_recordings' and excluded from the traces, so the result covers only the subset with complete
+        extraction, not necessarily every recording in the dataset. On failure, contains an 'error' message. Both
+        cases include a 'success' flag.
     """
     if len(roi_indices) > _MAX_TRACE_ROIS:
         return {
