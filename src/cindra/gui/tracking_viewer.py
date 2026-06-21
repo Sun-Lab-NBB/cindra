@@ -218,6 +218,9 @@ class TrackingViewer(QMainWindow):
         if not self.data.is_multi_recording:
             return {"viewer_type": "tracking", "loaded": False}
 
+        roi_text = self._roi_edit.text().strip()
+        last_clicked_roi_index = int(roi_text) if roi_text.isdigit() else None
+
         return {
             "viewer_type": "tracking",
             "loaded": True,
@@ -232,6 +235,7 @@ class TrackingViewer(QMainWindow):
             "channel_2_active": self._channel_2_checkbox.isChecked(),
             "opacity": self._opacity_slider.value(),
             "selected_roi_indices": sorted(self._selected_rois) if self._selected_rois is not None else None,
+            "last_clicked_roi_index": last_clicked_roi_index,
             "mask_count": self._cached_mask_count,
             "auto_cycling": self._auto_cycle_timer.isActive(),
         }

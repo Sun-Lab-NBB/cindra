@@ -444,7 +444,7 @@ parameter detection.
 Multi-Recording Configuration Compliance:
 - [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] `validate_config_file_tool` reports no errors (run this first)
-- [ ] `recording_io.dataset_name` is set to a unique, non-empty string
+- [ ] `recording_io.dataset_name` is set to a unique, non-empty string (prepare overwrites it with the qualified name)
 - [ ] `roi_selection.probability_threshold` is appropriate for the dataset (0.85 default)
 - [ ] `diffeomorphic_registration.speed_factor` matches expected tissue drift (1-5 range)
 - [ ] `roi_tracking.mask_prevalence` is set appropriately for the number of recordings

@@ -112,7 +112,7 @@ launch_viewer_tool(viewer_type="roi", recording_path="<path>", dataset="<name>")
   colocalization probability, recording count, cell probability, correlations, classification)
 - Inspect fluorescence traces (raw, neuropil, corrected, spikes) for selected ROIs
 - Toggle channel 2 overlay for dual-channel recordings
-- Filter ROIs by cell classification
+- Reclassify ROIs by toggling cell/non-cell labels in classify mode (a click flips the clicked ROI's label)
 - Adjust opacity and colormap
 - View multi-recording tracked ROIs across datasets
 
@@ -183,8 +183,9 @@ dictionary structure depends on the viewer type.
 | `roi_color_mode`           | str       | Active ROI coloring statistic (see ROI color modes) |
 | `colormap`                 | str       | Active colormap name                                |
 | `selected_roi_indices`     | list[int] | Indices of currently selected ROIs                  |
+| `primary_roi_index`        | int\|null | Focused ROI whose stats fill the info bar, or null  |
 | `opacity`                  | int       | ROI overlay opacity (slider value)                  |
-| `classify_mode`            | bool      | Whether cell classification filter is active        |
+| `classify_mode`            | bool      | Whether reclassify mode is on (clicks flip labels)  |
 | `trace_visibility`         | dict      | Visibility flags for each trace type (see below)    |
 | `temporal_bin_size`        | int       | Temporal binning window for correlation computation |
 | `colocalization_threshold` | float     | Probability threshold for channel 2 classification  |
@@ -222,6 +223,7 @@ dictionary structure depends on the viewer type.
 | `channel_2_active`        | bool            | Whether channel 2 overlay is toggled on                 |
 | `opacity`                 | int             | ROI overlay opacity (slider value)                      |
 | `selected_roi_indices`    | list[int]\|null | Indices of selected ROIs, or null if none               |
+| `last_clicked_roi_index`  | int\|null       | Index of the most recently clicked ROI, or null         |
 | `mask_count`              | int             | Number of masks in the active layer                     |
 | `auto_cycling`            | bool            | Whether auto-recording cycling is active                |
 
@@ -248,14 +250,15 @@ Returns a nested dictionary with two sub-viewers:
 
 **`pc_viewer` sub-fields:**
 
-| Field           | Type | Description                                    |
-|-----------------|------|------------------------------------------------|
-| `current_plane` | int  | Currently displayed plane index                |
-| `plane_count`   | int  | Total number of imaging planes                 |
-| `current_pc`    | int  | Currently displayed principal component number |
-| `pc_count`      | int  | Total number of principal components           |
-| `playing`       | bool | Whether PC extreme animation is active         |
-| `loaded`        | bool | Whether PC data has finished loading           |
+| Field                 | Type | Description                                    |
+|-----------------------|------|------------------------------------------------|
+| `current_plane`       | int  | Currently displayed plane index                |
+| `current_plane_label` | str  | Human-readable label of the displayed plane    |
+| `plane_count`         | int  | Total number of imaging planes                 |
+| `current_pc`          | int  | Currently displayed principal component number |
+| `pc_count`            | int  | Total number of principal components           |
+| `playing`             | bool | Whether PC extreme animation is active         |
+| `loaded`              | bool | Whether PC data has finished loading           |
 
 ---
 
@@ -370,6 +373,10 @@ recordings at any time via the GUI controls. The launch-time parameters passed t
 call `query_viewer_state_tool` to read the live display state. Do not rely on cached state from
 previous queries or launch-time parameters.
 
+**Allow for write latency.** The viewer writes its state at most every 250 ms, and only when it
+changes. After prompting the user to change a setting, allow a brief moment or re-query once before
+trusting the result, since a query issued immediately after the change may still return the prior state.
+
 **Dataset tracking.** Both `list_viewers_tool` and `query_viewer_state_tool` report the
 `active_dataset` field, which reflects the dataset currently displayed by the viewer. This may
 differ from the `dataset` parameter provided at launch if the user switched datasets via the
@@ -393,11 +400,11 @@ Common multi-viewer patterns:
 ### ROI viewer assistance
 
 **"What am I looking at?"** — Query viewer state. Report the background view, ROI color mode,
-number of ROIs, whether classification filter is active, and which traces are visible.
+number of ROIs, whether reclassify (classify) mode is active, and which traces are visible.
 
-**"Are these good ROIs?"** — Query `roi_color_mode` and `classify_mode` from state. If not
-already in classification mode, suggest switching to `cell_classification` or `cell_probability`
-color mode. Use `query_roi_statistics_tool` to retrieve compactness, solidity,
+**"Are these good ROIs?"** — Query `roi_color_mode` from state. If it is not `cell_classification`
+or `cell_probability`, suggest switching to one of those color modes to see classifier output. Use
+`query_roi_statistics_tool` to retrieve compactness, solidity,
 and skewness statistics for the visible ROIs. Explain what each statistic means:
 - **Compactness** near 1.0 indicates circular footprints (typical neurons)
 - **Solidity** near 1.0 indicates filled footprints without holes

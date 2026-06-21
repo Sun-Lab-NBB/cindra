@@ -205,11 +205,13 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
 
 4. **Configure** — Ask the user if they have an existing template configuration file. If not,
    invoke `/multi-recording-configuration` to create one. Template configs are reusable across
-   datasets and live at user-chosen locations (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). Set each
-   configuration's `dataset_name` to the qualified name from step 3. Do NOT create per-dataset
-   config copies — the prepare tool automatically saves resolved copies as
-   `multi_recording_configuration.yaml` inside each dataset's output directory, preserving the
-   original template. Pass the same template path for multiple datasets that share parameters.
+   datasets and live at user-chosen locations (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). The template's
+   `dataset_name` only needs to be a non-empty string to pass validation — the prepare tool
+   overwrites it with the qualified dataset name you pass per dataset (lowercased to a
+   filesystem-safe key). Do NOT create per-dataset config copies — the prepare tool automatically
+   saves resolved copies as `multi_recording_configuration.yaml` inside each dataset's output
+   directory, preserving the original template. Pass the same template path for multiple datasets
+   that share parameters.
 
 5. **Confirm CPU allocation** — Compute the saturating allocation for both phases using the
    algorithm in the Resource Management section. Present the computed values to the user as a
@@ -241,8 +243,13 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
       the manifest.
 
 7. **Monitor** — Use `get_processing_jobs_status_tool` to check progress. Optionally use
-   `get_active_execution_timing_tool` for per-job timing and session throughput. Present status as a
-   formatted table (see Status Formatting section).
+   `get_active_execution_timing_tool` for per-job timing and session throughput. These two tools
+   reflect only the active in-process execution session and return `active: false` with empty jobs
+   when no session is running (for example after an MCP server restart, a reconnect, or a batch
+   dispatched by a prior process). For resume monitoring in those cases, fall back to
+   `get_batch_status_overview_tool` for a whole-tree view or `get_recording_status_tool` per
+   recording, both of which read persisted on-disk tracker state. Present status as a formatted
+   table (see Status Formatting section).
 
 8. **Handle completion** — When all datasets finish, check for failures. Route errors to the
    appropriate skill (see Error Routing section). On success, invoke `/multi-recording-results`
