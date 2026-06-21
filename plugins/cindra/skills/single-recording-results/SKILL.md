@@ -282,7 +282,7 @@ Saved in `plane_N/registration_data/`. All files are `.npy` format.
 | `nonrigid_correlations.npy`              | float32 | (num_frames, num_blocks)           | Nonrigid correlation quality per block per frame                   |
 | `principal_component_extreme_images.npy` | float32 | (2, num_components, height, width) | Mean images at PC extremes (0=low, 1=high)                         |
 | `principal_component_projections.npy`    | float32 | (num_frames, num_components)       | Frame projections onto principal components                        |
-| `principal_component_shift_metrics.npy`  | float32 | (num_components, 3)                | Columns: mean rigid shift, mean nonrigid shift, max nonrigid shift |
+| `principal_component_shift_metrics.npy`  | float32 | (num_components, 3)                | Columns: rigid magnitude, mean nonrigid shift, max nonrigid shift  |
 
 ---
 
@@ -306,8 +306,8 @@ A YAML file containing scalar metadata from all processing stages. Key sections:
 | Section        | Key fields                                                                                                                                                                                                                                                                                                                                                                                |
 |----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `io`           | `frame_height`, `frame_width`, `frame_count`, `sampling_rate`, `plane_index`                                                                                                                                                                                                                                                                                                              |
-| `registration` | `valid_y_range`, `valid_x_range`, `bidirectional_phase_offset`, `normalization_minimum`, `normalization_maximum`                                                                                                                                                                                                                                                                          |
-| `detection`    | `roi_diameter`, `aspect_ratio`                                                                                                                                                                                                                                                                                                                                                            |
+| `registration` | `valid_y_range`, `valid_x_range`, `bidirectional_phase_offset`, `bidirectional_phase_corrected`, `normalization_minimum`, `normalization_maximum`                                                                                                                                                                                                                                         |
+| `detection`    | `roi_diameter`, `roi_diameter_channel_2`, `aspect_ratio`                                                                                                                                                                                                                                                                                                                                  |
 | `timing`       | `binarization_time`, `registration_time`, `two_step_registration_time`, `registration_metrics_time`, `detection_time`, `extraction_time`, `classification_time`, `deconvolution_time`, `detection_time_channel_2`, `extraction_time_channel_2`, `classification_time_channel_2`, `deconvolution_time_channel_2`, `total_plane_time`, `date_processed`, `python_version`, `cindra_version` |
 
 Array fields from registration, detection, and extraction are saved as separate `.npy` files (documented above)
@@ -319,7 +319,7 @@ and set to None in the YAML.
 
 | Category            | Dtype   | Examples                                       |
 |---------------------|---------|------------------------------------------------|
-| Pixel coordinates   | int32   | y_pixels, x_pixels, centroids, motion offsets  |
+| Pixel coordinates   | int32   | y_pixels, x_pixels, centroids, rigid offsets   |
 | Images and traces   | float32 | mean_image, fluorescence, spikes, correlations |
 | Counts / dimensions | uint32  | pixel_counts, frame_count, combined_height     |
 | Small counts        | uint16  | plane_heights, plane_widths, recording_count   |
@@ -398,7 +398,8 @@ Per-plane registration data (plane_N/registration_data/):
 - [ ] PC metric arrays exist if registration.registration_metric_principal_components > 0
 
 Per-plane detection and extraction data (plane_N/):
-- [ ] `detection_data/mean_image.npy` and `detection_data/enhanced_mean_image.npy` exist
+- [ ] `detection_data/` contains the four channel-1 images: `mean_image.npy`, `enhanced_mean_image.npy`,
+      `maximum_projection.npy`, and `correlation_map.npy`
 - [ ] `roi_masks.npz` and `roi_statistics.npz` exist
 - [ ] Fluorescence trace .npy files exist with consistent shapes across all traces
 - [ ] `cell_classification.npy` exists with shape (num_rois, 2)

@@ -149,9 +149,9 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
 1. **Discover recordings** — Use `discover_recordings_tool` (check the `single_recording_candidates` list) or
    accept explicit paths from user.
 
-2. **Validate raw data** — Use `validate_recording_readiness_tool` on each recording. Skip for recordings
-   where `get_recording_status_tool` shows status `binarized` or later. If validation fails, invoke
-   `/acquisition-data-preparation` to resolve issues before continuing.
+2. **Validate raw data** — Use `validate_recording_readiness_tool` on each recording. Skip for recordings where
+   `get_recording_status_tool` shows status `binarizing`, `processing`, `combining`, or `completed`. If validation
+   fails, invoke `/acquisition-data-preparation` to resolve issues before continuing.
 
 3. **Configure** — Ask the user if they have an existing template configuration file. If not,
    invoke `/single-recording-configuration` to create one. Template configs are reusable across
@@ -203,6 +203,11 @@ To re-run specific phases (e.g., after changing ROI detection parameters):
 3. Optionally use `clean_processing_output_tool` to delete output files from the reset phases.
 4. Call `execute_processing_jobs_tool` with the reset jobs from the manifest.
 
+Both `reset_processing_phases_tool` and `clean_processing_output_tool` require `pipeline_type="single-recording"`
+and a `phases` list drawn from the valid single-recording phase names: `binarization`, `processing`,
+`combination`. `reset_processing_phases_tool` also requires `tracker_path`; `clean_processing_output_tool`
+requires `recording_path`.
+
 ---
 
 ## Resource management
@@ -214,7 +219,7 @@ When both `workers_per_job` and `max_parallel_jobs` are set to `-1` (automatic),
 runs the following algorithm for compute-bound jobs:
 
 1. **Budget**: `cpu_count - 2` (2 cores reserved for system operations)
-2. **Max parallel jobs**: `min(total_jobs, budget // 30)` (targets ~30 workers per job)
+2. **Max parallel jobs**: `min(total_jobs, max(1, budget // 30))` (targets ~30 workers per job, with a floor of 1)
 3. **Raw workers per job**: `budget // max_parallel_jobs`
 4. **Round down** to the nearest multiple of 5
 5. **Saturate**: If workers per job falls below 10 and parallelism > 1, reduce parallelism and
@@ -269,7 +274,10 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 |------------------------------------------|----------------------------------------------|
 | "An execution session is already active" | Wait for current session or cancel first     |
 | "Job ID not found in tracker"            | Re-prepare the batch to regenerate manifests |
-| "Prerequisites not satisfied"            | Execute prerequisite phases first            |
+| "Prerequisite ... has not succeeded"     | Execute prerequisite phases first            |
+
+Prerequisite failures are returned inside the `invalid_jobs` list with a `reason` field (for example,
+"Prerequisite BINARIZE job X has not succeeded."), not as a top-level `error`.
 
 ### Processing failure routing
 

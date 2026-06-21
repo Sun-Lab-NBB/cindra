@@ -326,9 +326,11 @@ Reported in `coordinate_space` state field (tracking viewer only).
 2. **Launch viewer** — Call `launch_viewer_tool` with the appropriate `viewer_type`,
    `recording_path`, and optional `dataset`. Store the returned `viewer_id`.
 
-3. **Wait for loading** — Query state with `query_viewer_state_tool` until `loaded` is `true`.
-   The viewer subprocess needs time to read data from disk. If `loaded` remains `false` after
-   10-15 seconds, check for errors by verifying the viewer is still alive via `list_viewers_tool`.
+3. **Wait for loading** — Query state with `query_viewer_state_tool` until `loaded` is `true`. The viewer
+   subprocess needs time to read data from disk. The registration viewer has no top-level `loaded` flag once its
+   state file exists — poll `pc_viewer.loaded`, or treat the presence of the `binary_player` and `pc_viewer`
+   sub-states as the loaded signal. If `loaded` remains `false` after 10-15 seconds, check for errors by
+   verifying the viewer is still alive via `list_viewers_tool`.
 
 4. **Assist the user** — Respond to user questions by combining viewer state with headless query
    tools. For example, if the user asks about a specific ROI, query its statistics via
