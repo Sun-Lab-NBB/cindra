@@ -194,7 +194,7 @@ deformation, with full shape statistics computed for each ROI.
 
 | NPZ key                  | Dtype   | Shape       | Description                                            |
 |--------------------------|---------|-------------|--------------------------------------------------------|
-| `footprints`             | uint16  | (num_rois,) | Set to pixel_count for tracked ROIs (bypass detection) |
+| `footprints`             | uint16  | (num_rois,) | Set to 0 for tracked ROIs (no meaningful hop size)     |
 | `compactness`            | float32 | (num_rois,) | Ratio of actual to expected mean radius (1.0=circular) |
 | `solidity`               | float32 | (num_rois,) | Ratio of soma pixels to convex hull area               |
 | `pixel_count`            | uint32  | (num_rois,) | Total pixels in complete ROI                           |
@@ -202,6 +202,15 @@ deformation, with full shape statistics computed for each ROI.
 | `normalized_pixel_count` | float32 | (num_rois,) | Pixel count normalized by expected ROI size (soma)     |
 | `skewness`               | float32 | (num_rois,) | Neuropil-corrected fluorescence skewness               |
 | `plane_index`            | int32   | (num_rois,) | Imaging plane index for each ROI                       |
+| `soma_mask`              | bool    | (n_pixels,) | Flattened soma masks (present only when populated)     |
+| `soma_mask_counts`       | uint32  | (num_rois,) | Per-ROI lengths indexing `soma_mask`                   |
+| `overlap_mask`           | bool    | (n_pixels,) | Flattened overlap masks (present only when populated)  |
+| `overlap_mask_counts`    | uint32  | (num_rois,) | Per-ROI lengths indexing `overlap_mask`                |
+| `neuropil_mask`          | int32   | (n_pixels,) | Flattened neuropil indices (present when populated)    |
+| `neuropil_mask_counts`   | uint32  | (num_rois,) | Per-ROI lengths indexing `neuropil_mask`               |
+
+The `soma_mask`, `overlap_mask`, and `neuropil_mask` data arrays (with their `_counts` companions) appear only
+when the corresponding per-ROI data is populated; otherwise the keys are absent.
 
 Channel 2 uses identical keys in `roi_masks_channel_2.npz` and `roi_statistics_channel_2.npz`.
 
@@ -234,9 +243,12 @@ zeroes.
 
 **Optional colocalization file (dual-channel only):**
 
-| File                      | Shape         | Description                                                        |
-|---------------------------|---------------|--------------------------------------------------------------------|
-| `cell_colocalization.npy` | (num_rois, 2) | Column 0: is_colocalized label (1.0 or 0.0), column 1: probability |
+| File                      | Shape         | Description                                                                            |
+|---------------------------|---------------|----------------------------------------------------------------------------------------|
+| `cell_colocalization.npy` | (num_rois, 2) | Column 0: matched channel-2 ROI index (-1 if unmatched), column 1: pixel-overlap score |
+
+Multi-recording dual-channel processing uses spatial colocalization (pixel overlap between channel-1 and
+channel-2 ROIs), so column 0 holds the matched channel-2 ROI index (-1 when unmatched), not a 1.0/0.0 label.
 
 ---
 
@@ -256,15 +268,14 @@ saved as separate `.npy`/`.npz` files (documented above).
 
 ### Data type conventions
 
-| Category            | Dtype   | Examples                                               |
-|---------------------|---------|--------------------------------------------------------|
-| Pixel coordinates   | int32   | y_pixels, x_pixels, centroids                          |
-| Images and traces   | float32 | transformed images, fluorescence, spikes, correlations |
-| Counts / dimensions | uint32  | pixel_counts, cluster_id, frame_width                  |
-| Small counts        | uint16  | footprints, recording_count                            |
-| Plane indices       | int32   | plane_index                                            |
-| Plane counts        | uint8   | plane_count                                            |
-| Deformation fields  | float32 | deform_field_y, deform_field_x                         |
+| Category            | Dtype   | Examples                                  |
+|---------------------|---------|-------------------------------------------|
+| Pixel coordinates   | int32   | y_pixels, x_pixels, centroids             |
+| Images and traces   | float32 | transformed images, fluorescence, spikes  |
+| Counts / dimensions | uint32  | pixel_counts, cluster_id, frame_width     |
+| Small counts        | uint16  | footprints, recording_count               |
+| Plane indices       | int32   | plane_index                               |
+| Deformation fields  | float32 | deform_field_y, deform_field_x            |
 
 All `.npy` files are saved with `allow_pickle=False`. Arrays support memory-mapped loading via
 `np.load(path, mmap_mode='r+')` for efficient access to large datasets. NPZ archives do not support memory

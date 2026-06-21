@@ -111,9 +111,11 @@ Two-phase pipeline per dataset:
 
 ```text
 Phase 1: DISCOVER (CPU bound, parallel by dataset)
+├── Selects/filters ROIs from each recording's single-recording outputs
 ├── Registers all recordings to common reference frame
 ├── Clusters ROI masks across recordings
 ├── Generates template masks for tracked ROIs
+├── Projects template masks back to each recording's coordinate system
 └── Workers per dataset via saturating allocation (see Resource Management)
 
 Phase 2: EXTRACT (CPU bound, parallel by recording)
@@ -266,7 +268,7 @@ When both `workers_per_job` and `max_parallel_jobs` are set to `-1` (automatic),
 runs the following algorithm:
 
 1. **Budget**: `cpu_count - 2` (2 cores reserved for system operations)
-2. **Max parallel jobs**: `min(total_jobs, budget // 30)` (targets ~30 workers per job)
+2. **Max parallel jobs**: `min(total_jobs, max(1, budget // 30))` (targets ~30 workers per job, with a floor of 1)
 3. **Raw workers per job**: `budget // max_parallel_jobs`
 4. **Round down** to the nearest multiple of 5
 5. **Saturate**: If workers per job falls below 10 and parallelism > 1, reduce parallelism and
@@ -321,7 +323,10 @@ Summary: 1/2 datasets complete | 2/4 recordings extracted | 0 failed
 |------------------------------------------|----------------------------------------------|
 | "An execution session is already active" | Wait for current session or cancel first     |
 | "Job ID not found in tracker"            | Re-prepare the batch to regenerate manifests |
-| "Prerequisites not satisfied"            | Execute prerequisite phases first            |
+| "Prerequisite ... has not succeeded"     | Execute prerequisite phases first            |
+
+Prerequisite failures are returned inside the `invalid_jobs` list with a `reason` field (for example,
+"Prerequisite DISCOVER job X has not succeeded."), not as a top-level `error`.
 
 ### Processing failure routing
 

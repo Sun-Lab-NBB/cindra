@@ -41,10 +41,10 @@ cindra = "cindra.interface.cli:cindra_cli"
 cindra-gui = "cindra.interface.gui_cli:cindra_gui"
 ```
 
-| Server           | CLI command      | Purpose                                                     |
-|------------------|------------------|-------------------------------------------------------------|
-| `cindra-mcp`     | `cindra mcp`     | Headless processing: discovery, configuration, batch jobs   |
-| `cindra-gui-mcp` | `cindra-gui mcp` | GUI viewers and data querying (ROI, registration, tracking) |
+| Server       | CLI command      | Purpose                                                     |
+|--------------|------------------|-------------------------------------------------------------|
+| `cindra-mcp` | `cindra mcp`     | Headless processing: discovery, configuration, batch jobs   |
+| `cindra-gui` | `cindra-gui mcp` | GUI viewers and data querying (ROI, registration, tracking) |
 
 Both servers accept a `--transport` option (defaults to `stdio`). The cindra Claude Code plugin
 registers both servers in its `plugin.json`:
@@ -304,7 +304,7 @@ You SHOULD proactively invoke this skill when:
 
 ```text
 MCP Environment Setup:
-- [ ] Checked MCP server connection status (cindra-mcp and/or cindra-gui-mcp)
+- [ ] Checked MCP server connection status (cindra-mcp and/or cindra-gui)
 - [ ] Verified 'cindra' command is on PATH (which cindra)
 - [ ] Verified 'cindra-gui' command is on PATH if GUI tools are needed (which cindra-gui)
 - [ ] Confirmed Python version matches >=3.14,<3.15
