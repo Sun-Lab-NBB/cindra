@@ -11,7 +11,7 @@ from .mcp_server import run_server
 from ..dataclasses import PipelineType, MultiRecordingConfiguration, SingleRecordingConfiguration, detect_pipeline_type
 
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
-"""The Click context settings that ensure displayed help messages are formatted according to the Sun lab standard."""
+"""The Click context settings that ensure displayed help messages are formatted according to the cindra standard."""
 
 
 @click.group("cindra", context_settings=CONTEXT_SETTINGS)

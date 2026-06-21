@@ -30,8 +30,7 @@ keywords = [
     "spike-deconvolution",
     "neuroscience",
     "fluorescence",
-    "cell-tracking",
-    "sunlab"
+    "cell-tracking"
 ]
 
 classifiers = [
@@ -143,7 +142,7 @@ lint.ignore = [
     "FBT001",  # UI elements require the use of positional boolean values
     "FBT002",  # UI elements require the use of positional boolean values
     "FBT003",  # UI elements require the use of positional boolean values
-    "TID252",  # Conflicts with Sun Lab import strategy
+    "TID252",  # Conflicts with the cindra import strategy
     "SLF001",  # Sometimes accessing private members is necessary
     "SIM115",  # Sometimes it is necessary to open and close files without the context manager
     "BLE001",  # Catching blind exceptions is necessary for the functioning of this library

@@ -844,14 +844,14 @@ that want to modify the source code of this library.
 ### Installing the Project
 
 ***Note,*** this installation method requires **mamba version 2.3.2 or above**. Currently, all
-Sun lab automation pipelines require that mamba is installed through the
+cindra automation pipelines require that mamba is installed through the
 [miniforge3](https://github.com/conda-forge/miniforge) installer.
 
 1. Download this repository to the local machine using the preferred method, such as git-cloning.
 2. If the downloaded distribution is stored as a compressed archive, unpack it using the
    appropriate decompression tool.
 3. `cd` to the root directory of the prepared project distribution.
-4. Install the core Sun lab development dependencies into the ***base*** mamba environment via the
+4. Install the core cindra development dependencies into the ***base*** mamba environment via the
    `mamba install tox uv tox-uv` command.
 5. Use the `tox -e create` command to create the project-specific development environment followed
    by `tox -e install` command to install the project into that environment as a library.
@@ -902,7 +902,7 @@ Claude Code skills and AI development assets for this project are distributed th
   environment setup. Install this marketplace to register the `cindra mcp` and `cindra-gui mcp` servers with
   compatible MCP clients and make all pipeline workflow skills available.
 - [ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace: Provides shared development skills that enforce
-  Sun Lab coding conventions (Python style, README style, commit messages, pyproject.toml, tox configuration) and
+  cindra coding conventions (Python style, README style, commit messages, pyproject.toml, tox configuration) and
   general-purpose codebase exploration tools via the **automation** plugin.
 
 Install both marketplaces to make all associated skills and development tools available to compatible AI coding agents.
