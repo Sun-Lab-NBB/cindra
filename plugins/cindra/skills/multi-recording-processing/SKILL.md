@@ -245,15 +245,39 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
 7. **Monitor** — Use `get_processing_jobs_status_tool` to check progress. Optionally use
    `get_active_execution_timing_tool` for per-job timing and session throughput. These two tools
    reflect only the active in-process execution session and return `active: false` with empty jobs
-   when no session is running (for example after an MCP server restart, a reconnect, or a batch
-   dispatched by a prior process). For resume monitoring in those cases, fall back to
-   `get_batch_status_overview_tool` for a whole-tree view or `get_recording_status_tool` per
-   recording, both of which read persisted on-disk tracker state. Present status as a formatted
-   table (see Status Formatting section).
+   when no session is running. This drained state happens not only after an MCP server restart, a
+   reconnect, or a batch dispatched by a prior process, but also after NORMAL completion: the
+   manager clears session state on success AND on failure. So an all-zero, inactive status can mean
+   "finished," not "nothing ran." Do not read it as failure. For final per-job outcomes, read
+   persisted on-disk tracker state via `get_batch_status_overview_tool` for a whole-tree view,
+   `get_recording_status_tool` per recording, or `verify_multi_recording_output_tool` (all using the
+   output directory, see the Output-directory path rule). Present status as a formatted table
+   (see Status Formatting section).
 
-8. **Handle completion** — When all datasets finish, check for failures. Route errors to the
+8. **Handle completion** — When all datasets finish, check for failures. A `success: true` return
+   only means a tool ran, not that work is ready or done: gate decisions on the domain flag, not on
+   `success`. For `verify_multi_recording_output_tool`, gate on `complete` (false whenever `missing`
+   is non-empty); for validate tools, gate on `valid`; for `execute_full_pipeline_tool`, gate on
+   `started` (it returns `started: false` with a `next_step` when all phases are already complete).
+   Checking `success` alone can advance on an unready or already-complete state. Route errors to the
    appropriate skill (see Error Routing section). On success, invoke `/multi-recording-results`
    to verify outputs, then `/visualization` for visual inspection.
+
+#### Output-directory path rule
+
+`get_recording_status_tool`, `verify_multi_recording_output_tool`, and `clean_processing_output_tool`
+all take the recording OUTPUT directory (the parent of the `cindra/` folder), which equals the
+per-recording `output_path` used during single-recording processing — NOT the raw-data root. This
+matters on a separate-output layout where output and raw-data roots differ:
+
+- `get_recording_status_tool` and `clean_processing_output_tool` resolve `cindra/` directly under the
+  given path with NO fallback. Feeding the raw-data root makes them report `not_started` or
+  "directory not found" — a silent false negative.
+- `verify_multi_recording_output_tool` also recursively searches for `configuration.yaml`, so it may
+  still pass via that fallback even when fed the wrong root. The two then disagree.
+
+Always reuse the output directory captured from the prepare manifest (any recording's `output_path`
+belonging to the dataset) for status, verify, and clean.
 
 ### Re-running specific phases
 

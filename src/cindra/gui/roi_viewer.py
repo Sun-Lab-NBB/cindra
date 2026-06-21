@@ -377,6 +377,10 @@ class ROIViewer(QMainWindow):
             "roi_source": self._roi_source_combo.currentText(),
             "active_dataset": self._context_data.active_dataset_name if self._is_multi_recording else None,
             "available_datasets": list(self._context_data.available_datasets),
+            "view_index": self._context_data.single_recording.view_index,
+            "current_recording_index": (
+                self._context_data.current_recording_index if self._is_multi_recording else None
+            ),
         }
 
     @property
