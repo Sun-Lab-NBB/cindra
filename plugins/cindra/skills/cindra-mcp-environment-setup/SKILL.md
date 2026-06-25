@@ -5,6 +5,7 @@ description: >-
   verification, command availability, Python version checks, dependency validation, and conda/pip/uv
   environment configuration. Use when MCP tools are unavailable, when either MCP server fails to
   start, when the user reports connection issues, or when starting a session that requires MCP tools.
+user-invocable: true
 ---
 
 # MCP environment setup
@@ -198,7 +199,7 @@ This library is not part of macOS or Apple's clang toolchain and must be provide
 Python environment. When `libomp.dylib` is not resolvable, `import cindra` (and therefore
 `cindra --help` and `cindra mcp`) fails with:
 
-```
+```text
 ValueError: No threading layer could be loaded.
 HINT:
 Intel TBB is required, try:

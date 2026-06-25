@@ -185,7 +185,7 @@ dictionary structure depends on the viewer type.
 | `selected_roi_indices`     | list[int] | Indices of currently selected ROIs                  |
 | `primary_roi_index`        | int\|null | Focused ROI whose stats fill the info bar, or null  |
 | `opacity`                  | int       | ROI overlay opacity (slider value)                  |
-| `classify_mode`            | bool      | Whether reclassify mode is on (clicks flip labels)  |
+| `classify_mode`            | bool      | Whether classify mode is on (clicks flip labels)    |
 | `trace_visibility`         | dict      | Visibility flags for each trace type (see below)    |
 | `temporal_bin_size`        | int       | Temporal binning window for correlation computation |
 | `colocalization_threshold` | float     | Probability threshold for channel 2 classification  |
@@ -398,7 +398,7 @@ gets a unique `viewer_id`. Use `list_viewers_tool` to track all active instances
 Common multi-viewer patterns:
 - Registration viewer + ROI viewer for the same recording (verify registration then inspect ROIs)
 - ROI viewers for different recordings in a multi-recording dataset (compare across sessions)
-- Tracking viewer + ROI viewer for the same dataset (verify tracking then inspect traced activity)
+- Tracking viewer + ROI viewer for the same dataset (verify tracking then inspect ROI traces)
 
 ---
 
@@ -407,7 +407,7 @@ Common multi-viewer patterns:
 ### ROI viewer assistance
 
 **"What am I looking at?"** — Query viewer state. Report the background view, ROI color mode,
-number of ROIs, whether reclassify (classify) mode is active, and which traces are visible.
+number of ROIs, whether classify mode is active, and which traces are visible.
 
 **"Are these good ROIs?"** — Query `roi_color_mode` from state. If it is not `cell_classification`
 or `cell_probability`, suggest switching to one of those color modes to see classifier output. Use

@@ -30,6 +30,14 @@ Complete output data format documentation for the single-recording (within-recor
 
 ---
 
+## Agent requirements
+
+You MUST use the cindra MCP query and verification tools to inspect output data rather than reading output
+files directly when a tool exists for the task. If MCP tools are not available, invoke
+`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+
+---
+
 ## Available tools
 
 Use these cindra MCP tools to query and verify single-recording output data programmatically. Prefer these over

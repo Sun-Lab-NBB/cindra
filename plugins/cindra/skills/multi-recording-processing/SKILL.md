@@ -1,8 +1,10 @@
 ---
 name: multi-recording-processing
 description: >-
-  Orchestrates multi-recording neural imaging batch processing via the cindra MCP server.
-  Dispatches to configuration, validation, and results skills as needed.
+  Orchestrates multi-recording neural imaging batch processing via the cindra MCP server, dispatching to
+  configuration, validation, and results skills as needed. Use when the user asks to run multi-recording
+  (cross-day ROI tracking) processing, process multiple recordings as a tracked dataset, monitor batch
+  jobs, or re-run a processing phase, or when invoking /multi-recording-processing.
 user-invocable: true
 ---
 
@@ -47,19 +49,19 @@ the parameters it consumes.
 
 ---
 
-## Prerequisites
-
-All recordings must have completed single-recording processing (`get_recording_status_tool` returns
-single-recording status `completed`). If any recording is incomplete, invoke the earliest missing step in the chain:
-`/acquisition-data-preparation` → `/single-recording-configuration` → `/single-recording-processing`.
-
----
-
 ## Agent requirements
 
 You MUST use the cindra MCP tools for all processing operations. Do not import cindra Python functions
 directly or run processing via scripts or CLI commands. If MCP tools are not available, invoke
 `/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+
+---
+
+## Prerequisites
+
+All recordings must have completed single-recording processing (`get_recording_status_tool` returns
+single-recording status `completed`). If any recording is incomplete, invoke the earliest missing step in the chain:
+`/acquisition-data-preparation` → `/single-recording-configuration` → `/single-recording-processing`.
 
 ---
 
@@ -116,12 +118,12 @@ Phase 1: DISCOVER (CPU bound, parallel by dataset)
 ├── Clusters ROI masks across recordings
 ├── Generates template masks for tracked ROIs
 ├── Projects template masks back to each recording's coordinate system
-└── Workers per dataset via saturating allocation (see Resource Management)
+└── Workers per dataset via saturating allocation (see Resource management)
 
 Phase 2: EXTRACT (CPU bound, parallel by recording)
 ├── Applies template masks to extract fluorescence
 ├── Computes neuropil signals, spike deconvolution
-└── Workers per recording via saturating allocation (see Resource Management)
+└── Workers per recording via saturating allocation (see Resource management)
 ```
 
 Batch processing across multiple datasets:
@@ -214,7 +216,7 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
    that share parameters.
 
 5. **Confirm CPU allocation** — Compute the saturating allocation for both phases using the
-   algorithm in the Resource Management section. Present the computed values to the user as a
+   algorithm in the Resource management section. Present the computed values to the user as a
    summary table before starting:
 
    ```text
@@ -252,7 +254,7 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
    persisted on-disk tracker state via `get_batch_status_overview_tool` for a whole-tree view,
    `get_recording_status_tool` per recording, or `verify_multi_recording_output_tool` (all using the
    output directory, see the Output-directory path rule). Present status as a formatted table
-   (see Status Formatting section).
+   (see Status formatting section).
 
 8. **Handle completion** — When all datasets finish, check for failures. A `success: true` return
    only means a tool ran, not that work is ready or done: gate decisions on the domain flag, not on
@@ -260,7 +262,7 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
    is non-empty); for validate tools, gate on `valid`; for `execute_full_pipeline_tool`, gate on
    `started` (it returns `started: false` with a `next_step` when all phases are already complete).
    Checking `success` alone can advance on an unready or already-complete state. Route errors to the
-   appropriate skill (see Error Routing section). On success, invoke `/multi-recording-results`
+   appropriate skill (see Error routing section). On success, invoke `/multi-recording-results`
    to verify outputs, then `/visualization` for visual inspection.
 
 #### Output-directory path rule
@@ -378,7 +380,7 @@ Wait for the current execution session to complete before starting retries.
 
 ## Related skills
 
-| Skill                            | Role                                                           |
+| Skill                            | Relationship                                                   |
 |----------------------------------|----------------------------------------------------------------|
 | `/cindra-mcp-environment-setup`  | Prerequisite: MCP server connectivity                          |
 | `/acquisition-data-preparation`  | Upstream: raw data preparation                                 |
@@ -401,6 +403,6 @@ Multi-Recording Processing Workflow:
 - [ ] CPU core allocation confirmed with user
 - [ ] Batch prepared or full pipeline executed
 - [ ] Status monitored until all datasets complete or fail
-- [ ] Failed datasets routed to appropriate skill (see Error Routing)
+- [ ] Failed datasets routed to appropriate skill (see Error routing)
 - [ ] Successful datasets verified via `/multi-recording-results`
 ```

@@ -32,11 +32,18 @@ Complete parameter reference for the single-recording (within-recording) cindra 
 
 ---
 
-## MCP configuration tools
+## Agent requirements
 
-These tools are registered on the `cindra-mcp` server. You MUST verify the MCP server is connected before
-using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
-connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
+You MUST use the cindra MCP tools for all configuration operations. Do not hand-edit configuration files
+or import cindra Python functions directly when an MCP tool exists for the task. If MCP tools are not
+available, invoke `/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+
+---
+
+## Available tools
+
+These tools are registered on the `cindra-mcp` server. Tool parameters and return values are
+self-documented via MCP introspection.
 
 | Tool                        | Purpose                                                                   |
 |-----------------------------|---------------------------------------------------------------------------|
@@ -415,5 +422,5 @@ Single-Recording Configuration Compliance:
 - [ ] `main.ignored_flyback_planes` lists correct flyback plane indices if applicable
 - [ ] `file_io.ignored_file_names` lists any TIFFs to exclude
 - [ ] Review any warnings from `validate_config_file_tool` (pipeline-set parameters, channel consistency)
-- [ ] Acquisition data prepared, `validate_recording_readiness_tool` passed (if not, invoke `/acquisition-data-preparation`)
+- [ ] Acquisition data prepared, `validate_recording_readiness_tool` passed (else run `/acquisition-data-preparation`)
 ```
