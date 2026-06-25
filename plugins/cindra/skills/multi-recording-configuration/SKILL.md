@@ -32,11 +32,18 @@ Complete parameter reference for the multi-recording (cross-recording) cindra RO
 
 ---
 
-## MCP configuration tools
+## Agent requirements
 
-These tools are registered on the `cindra-mcp` server. You MUST verify the MCP server is connected before
-using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
-connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
+You MUST use the cindra MCP tools for all configuration operations. Do not hand-edit configuration files
+or import cindra Python functions directly when an MCP tool exists for the task. If MCP tools are not
+available, invoke `/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+
+---
+
+## Available tools
+
+These tools are registered on the `cindra-mcp` server. Tool parameters and return values are
+self-documented via MCP introspection.
 
 | Tool                        | Purpose                                                                   |
 |-----------------------------|---------------------------------------------------------------------------|

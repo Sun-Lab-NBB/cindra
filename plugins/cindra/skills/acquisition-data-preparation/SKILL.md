@@ -34,11 +34,18 @@ Complete guide for preparing raw neural imaging data for the cindra single-recor
 
 ---
 
-## MCP acquisition tools
+## Agent requirements
 
-These tools are registered on the `cindra-mcp` server. You MUST verify the MCP server is connected before
-using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
-connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
+You MUST use the cindra MCP tools for creating and validating acquisition parameter files. Verify the
+cindra MCP server is connected before use; if the tools are unavailable, invoke
+`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+
+---
+
+## Available tools
+
+These tools are registered on the `cindra-mcp` server. Tool parameters and return values are
+self-documented via MCP introspection.
 
 | Tool                                        | Purpose                                                                         |
 |---------------------------------------------|---------------------------------------------------------------------------------|
@@ -185,7 +192,7 @@ When the user knows their acquisition metadata (frame rate, planes, channels):
 2. **Verify divisibility** — Confirm `total_frames % (plane_number * channel_number) == 0`.
 3. **Create parameters file** — Use `generate_acquisition_parameters_file_tool` with the known values.
 4. **Validate** — Use `validate_acquisition_parameters_file_tool` to confirm the file is correct.
-5. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is fully ready for processing.
+5. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is ready for processing.
 
 ### Workflow 2: Unknown acquisition parameters
 
@@ -196,7 +203,7 @@ When the user has imaging data but is unsure about the acquisition configuration
 3. **Extract parameters** — Help the user read metadata using appropriate tools or libraries.
 4. **Confirm with user** — Present the extracted parameters and ask the user to verify.
 5. **Create parameters file** — Use `generate_acquisition_parameters_file_tool` with the confirmed values.
-6. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is fully ready for processing.
+6. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is ready for processing.
 
 ### Workflow 3: ScanImage recordings
 

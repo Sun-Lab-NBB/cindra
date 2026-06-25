@@ -54,36 +54,6 @@ same parent directory as this project (`/home/cyberaxolotl/Desktop/GitHubRepos/`
 **Why this matters**: Skills and documentation may reference outdated APIs. Always verify against the actual library
 state to prevent integration errors.
 
-## MCP server integration
-
-The cindra Claude Code plugin registers two MCP servers that expose neural imaging pipeline tools for agentic AI
-interaction. The plugin provides the server registrations and skills; the cindra pip package provides the server
-implementations (`cindra mcp` and `cindra-gui mcp` CLI commands). Both must be installed for MCP tools to function.
-When working with this project or its dependencies, prefer using available MCP tools over direct code execution when
-appropriate.
-
-**Servers:**
-
-| Server       | CLI command      | Purpose                                            |
-|--------------|------------------|----------------------------------------------------|
-| `cindra-mcp` | `cindra mcp`     | Data processing, configuration, discovery, results |
-| `cindra-gui` | `cindra-gui mcp` | GUI viewer lifecycle management and state queries  |
-
-**Guidelines for MCP usage:**
-
-1. **Discover available tools**: At the start of a session, check which MCP servers are connected and what tools they
-   provide. Use these tools when they offer functionality relevant to the current task.
-
-2. **Prefer MCP for runtime operations**: For operations like batch processing orchestration, configuration generation,
-   recording discovery, and result querying, use MCP tools rather than writing and executing Python code directly. MCP
-   tools provide consistent, tested interfaces with proper resource management.
-
-3. **Use MCP for cross-library operations**: When dependency libraries (e.g., `ataraxis-data-structures`,
-   `ataraxis-time`) provide MCP servers, explore and use their tools for interacting with those libraries.
-
-4. **Fall back to code when necessary**: Use direct code execution when no MCP tool exists for the required
-   functionality, the task requires custom logic, or you are writing or modifying library source code.
-
 ## Available skills
 
 Skills are provided via Claude Code plugins, not the cindra pip package. The cindra plugin provides project-specific
@@ -120,6 +90,36 @@ workflow skills (style guides, commit, codebase exploration).
 | `/acquisition-data-preparation`   | Guide for preparing raw imaging data for cindra processing       |
 | `/visualization`                  | Launch and manage cindra GUI viewers for visual inspection       |
 | `/cindra-mcp-environment-setup`   | Diagnose and resolve MCP server connectivity issues              |
+
+## MCP server integration
+
+The cindra Claude Code plugin registers two MCP servers that expose neural imaging pipeline tools for agentic AI
+interaction. The plugin provides the server registrations and skills; the cindra pip package provides the server
+implementations (`cindra mcp` and `cindra-gui mcp` CLI commands). Both must be installed for MCP tools to function.
+When working with this project or its dependencies, prefer using available MCP tools over direct code execution when
+appropriate.
+
+**Servers:**
+
+| Server       | CLI command      | Purpose                                            |
+|--------------|------------------|----------------------------------------------------|
+| `cindra-mcp` | `cindra mcp`     | Data processing, configuration, discovery, results |
+| `cindra-gui` | `cindra-gui mcp` | GUI viewer lifecycle management and state queries  |
+
+**Guidelines for MCP usage:**
+
+1. **Discover available tools**: At the start of a session, check which MCP servers are connected and what tools they
+   provide. Use these tools when they offer functionality relevant to the current task.
+
+2. **Prefer MCP for runtime operations**: For operations like batch processing orchestration, configuration generation,
+   recording discovery, and result querying, use MCP tools rather than writing and executing Python code directly. MCP
+   tools provide consistent, tested interfaces with proper resource management.
+
+3. **Use MCP for cross-library operations**: When dependency libraries (e.g., `ataraxis-data-structures`,
+   `ataraxis-time`) provide MCP servers, explore and use their tools for interacting with those libraries.
+
+4. **Fall back to code when necessary**: Use direct code execution when no MCP tool exists for the required
+   functionality, the task requires custom logic, or you are writing or modifying library source code.
 
 ## Project context
 

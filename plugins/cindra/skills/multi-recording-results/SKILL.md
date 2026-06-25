@@ -30,6 +30,14 @@ Complete output data format documentation for the multi-recording (cross-recordi
 
 ---
 
+## Agent requirements
+
+You MUST use the cindra MCP query and verification tools to inspect output data rather than reading output
+files directly when a tool exists for the task. If MCP tools are not available, invoke
+`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+
+---
+
 ## Available tools
 
 Use these cindra MCP tools to query and verify multi-recording output data programmatically. Prefer these over
@@ -219,9 +227,9 @@ deformation, with full shape statistics computed for each ROI.
 | `normalized_pixel_count` | float32 | (num_rois,) | Pixel count normalized by expected ROI size (soma)     |
 | `skewness`               | float32 | (num_rois,) | Neuropil-corrected fluorescence skewness               |
 | `plane_index`            | int32   | (num_rois,) | Imaging plane index for each ROI                       |
-| `soma_mask`              | bool    | (n_pixels,) | Flattened soma masks (present only when populated)     |
+| `soma_mask`              | bool    | (n_pixels,) | Flattened soma masks (present when populated)          |
 | `soma_mask_counts`       | uint32  | (num_rois,) | Per-ROI lengths indexing `soma_mask`                   |
-| `overlap_mask`           | bool    | (n_pixels,) | Flattened overlap masks (present only when populated)  |
+| `overlap_mask`           | bool    | (n_pixels,) | Flattened overlap masks (present when populated)       |
 | `overlap_mask_counts`    | uint32  | (num_rois,) | Per-ROI lengths indexing `overlap_mask`                |
 | `neuropil_mask`          | int32   | (n_pixels,) | Flattened neuropil indices (present when populated)    |
 | `neuropil_mask_counts`   | uint32  | (num_rois,) | Per-ROI lengths indexing `neuropil_mask`               |

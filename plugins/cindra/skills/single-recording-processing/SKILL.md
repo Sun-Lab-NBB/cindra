@@ -1,8 +1,10 @@
 ---
 name: single-recording-processing
 description: >-
-  Orchestrates single-recording neural imaging batch processing via the cindra MCP server.
-  Dispatches to configuration, validation, and results skills as needed.
+  Orchestrates single-recording neural imaging batch processing via the cindra MCP server, dispatching to
+  configuration, validation, and results skills as needed. Use when the user asks to process single-recording
+  imaging data, run the single-recording batch pipeline, monitor batch jobs, or re-run a processing phase,
+  or when invoking /single-recording-processing.
 user-invocable: true
 ---
 
@@ -98,7 +100,7 @@ Phase 1: BINARIZE (I/O bound, up to 4 parallel)
 
 Phase 2: PROCESS (CPU bound, parallel by plane)
 ├── Motion correction, ROI detection, signal extraction
-└── Workers per plane via saturating allocation (see Resource Management)
+└── Workers per plane via saturating allocation (see Resource management)
 
 Phase 3: COMBINE (I/O bound, up to 4 parallel)
 └── Merges all plane results into unified dataset
@@ -168,7 +170,7 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
    and `execute_full_pipeline_tool`.
 
 5. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many cores
-   to use (see Resource Management section).
+   to use (see Resource management section).
 
 6. **Execute** — Choose one of two approaches:
 
@@ -195,7 +197,7 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
    persisted on-disk tracker state via `get_batch_status_overview_tool` for a whole-tree view,
    `get_recording_status_tool` per recording, or `verify_single_recording_output_tool` (all using
    the output directory, see the Output-directory path rule). Present status as a formatted table
-   (see Status Formatting section).
+   (see Status formatting section).
 
 8. **Handle completion** — When all recordings finish, check for failures. A `success: true` return
    only means a tool ran, not that work is ready or done: gate decisions on the domain flag, not on
@@ -203,7 +205,7 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
    is non-empty); for validate tools, gate on `valid`; for `execute_full_pipeline_tool`, gate on
    `started` (it returns `started: false` with a `next_step` when all phases are already complete).
    Checking `success` alone can advance on an unready or already-complete state. Route errors to the
-   appropriate skill (see Error Routing section). On success, invoke `/single-recording-results`
+   appropriate skill (see Error routing section). On success, invoke `/single-recording-results`
    to verify outputs, then `/visualization` for visual inspection.
 
 #### Output-directory path rule
@@ -323,7 +325,7 @@ Wait for the current execution session to complete before starting retries.
 
 ## Related skills
 
-| Skill                             | Role                                                 |
+| Skill                             | Relationship                                         |
 |-----------------------------------|------------------------------------------------------|
 | `/cindra-mcp-environment-setup`   | Prerequisite: MCP server connectivity                |
 | `/acquisition-data-preparation`   | Input: raw data preparation and validation           |
@@ -346,6 +348,6 @@ Single-Recording Processing Workflow:
 - [ ] CPU core allocation confirmed with user
 - [ ] Batch prepared or full pipeline executed
 - [ ] Status monitored until all recordings complete or fail
-- [ ] Failed recordings routed to appropriate skill (see Error Routing)
+- [ ] Failed recordings routed to appropriate skill (see Error routing)
 - [ ] Successful recordings verified via `/single-recording-results`
 ```
