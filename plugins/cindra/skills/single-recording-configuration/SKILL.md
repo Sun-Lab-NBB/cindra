@@ -388,22 +388,23 @@ and let it handle per-recording fine-tuning automatically.
 5. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
 6. **Configuration complete** — the validated template file is ready for use. This skill does not start
-   processing. If invoked standalone, inform the user that the configuration is ready, and they can proceed
-   when ready. If invoked from another skill, return control to the caller.
+   processing. If invoked standalone, the configuration is ready; to run it, proceed to
+   `/single-recording-processing`. If invoked from another skill, return control to the caller.
 
 ---
 
 ## Related skills
 
-| Skill                            | Relationship                                                                    |
-|----------------------------------|---------------------------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`  | Prerequisite: MCP server must be connected for configuration tools              |
-| `/acquisition-data-preparation`  | Prerequisite: raw data must be prepared before configuring the pipeline         |
-| `/single-recording-processing`   | Next step: processing workflow that consumes this configuration                 |
-| `/single-recording-results`      | Output data format reference for evaluating processing results                  |
-| `/multi-recording-configuration` | Companion configuration reference for the multi-recording pipeline              |
-| `/multi-recording-processing`    | Downstream: multi-recording workflow requires single-recording processing first |
-| `/visualization`                 | Downstream: launch viewers to inspect results after processing                  |
+| Skill                            | Relationship                                                               |
+|----------------------------------|----------------------------------------------------------------------------|
+| `/cindra-pipeline`               | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
+| `/cindra-mcp-environment-setup`  | Prerequisite: MCP server must be connected for configuration tools         |
+| `/acquisition-data-preparation`  | Prerequisite: raw data must be prepared before configuring the pipeline    |
+| `/single-recording-processing`   | Next step: processing workflow that consumes this configuration            |
+| `/single-recording-results`      | Output data format reference for evaluating processing results             |
+| `/multi-recording-configuration` | Companion configuration reference for the multi-recording pipeline         |
+| `/multi-recording-processing`    | Downstream: multi-recording requires single-recording processing first     |
+| `/visualization`                 | Downstream: launch viewers to inspect results after processing             |
 
 ---
 

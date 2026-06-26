@@ -24,7 +24,8 @@ Complete output data format documentation for the single-recording (within-recor
 - Output completeness verification
 
 **Does not cover:**
-- Configuration parameters or input data format (see `/single-recording-configuration`)
+- Configuration parameters (see `/single-recording-configuration`)
+- Input data format, TIFF requirements, and acquisition parameters (see `/acquisition-data-preparation`)
 - Processing workflow, batch operations, or status monitoring (see `/single-recording-processing`)
 - Multi-recording output data formats (see `/multi-recording-results`)
 
@@ -279,7 +280,7 @@ all-zero spike or corrected trace can mean deconvolution was disabled rather tha
 
 **Optional colocalization files (combined root and per-plane):**
 
-| File                                  | Shape           | Description                                                      |
+| File                                  | Shape           | Description                                                     |
 |---------------------------------------|-----------------|-----------------------------------------------------------------|
 | `cell_colocalization.npy`             | (num_rois, 2)   | Channel-2 colocalization; columns depend on the extraction path |
 | `corrected_structural_mean_image.npy` | (height, width) | Bleed-through-corrected structural channel mean                 |
@@ -302,19 +303,19 @@ that channel-2 colocalization was computed.
 
 Saved in `plane_N/registration_data/`. All files are `.npy` format.
 
-| File                                     | Dtype   | Shape                              | Description                                                        |
-|------------------------------------------|---------|------------------------------------|--------------------------------------------------------------------|
-| `reference_image.npy`                    | float32 | (height, width)                    | Template image used for alignment                                  |
-| `bad_frames.npy`                         | bool    | (num_frames,)                      | Frames flagged for excessive motion                                |
-| `rigid_y_offsets.npy`                    | int32   | (num_frames,)                      | Rigid registration Y displacement per frame                        |
-| `rigid_x_offsets.npy`                    | int32   | (num_frames,)                      | Rigid registration X displacement per frame                        |
-| `rigid_correlations.npy`                 | float32 | (num_frames,)                      | Phase correlation quality per frame                                |
-| `nonrigid_y_offsets.npy`                 | float32 | (num_frames, num_blocks)           | Nonrigid Y displacement per block per frame                        |
-| `nonrigid_x_offsets.npy`                 | float32 | (num_frames, num_blocks)           | Nonrigid X displacement per block per frame                        |
-| `nonrigid_correlations.npy`              | float32 | (num_frames, num_blocks)           | Nonrigid correlation quality per block per frame                   |
-| `principal_component_extreme_images.npy` | float32 | (2, num_components, height, width) | Mean images at PC extremes (0=low, 1=high)                         |
-| `principal_component_projections.npy`    | float32 | (num_frames, num_components)       | Frame projections onto principal components                        |
-| `principal_component_shift_metrics.npy`  | float32 | (num_components, 3)                | Columns: rigid magnitude, mean nonrigid shift, max nonrigid shift  |
+| File                                     | Dtype   | Shape                              | Description                                                       |
+|------------------------------------------|---------|------------------------------------|-------------------------------------------------------------------|
+| `reference_image.npy`                    | float32 | (height, width)                    | Template image used for alignment                                 |
+| `bad_frames.npy`                         | bool    | (num_frames,)                      | Frames flagged for excessive motion                               |
+| `rigid_y_offsets.npy`                    | int32   | (num_frames,)                      | Rigid registration Y displacement per frame                       |
+| `rigid_x_offsets.npy`                    | int32   | (num_frames,)                      | Rigid registration X displacement per frame                       |
+| `rigid_correlations.npy`                 | float32 | (num_frames,)                      | Phase correlation quality per frame                               |
+| `nonrigid_y_offsets.npy`                 | float32 | (num_frames, num_blocks)           | Nonrigid Y displacement per block per frame                       |
+| `nonrigid_x_offsets.npy`                 | float32 | (num_frames, num_blocks)           | Nonrigid X displacement per block per frame                       |
+| `nonrigid_correlations.npy`              | float32 | (num_frames, num_blocks)           | Nonrigid correlation quality per block per frame                  |
+| `principal_component_extreme_images.npy` | float32 | (2, num_components, height, width) | Mean images at PC extremes (0=low, 1=high)                        |
+| `principal_component_projections.npy`    | float32 | (num_frames, num_components)       | Frame projections onto principal components                       |
+| `principal_component_shift_metrics.npy`  | float32 | (num_components, 3)                | Columns: rigid magnitude, mean nonrigid shift, max nonrigid shift |
 
 ---
 
@@ -359,29 +360,34 @@ and set to None in the YAML.
 | Plane indices       | int32   | plane_index                                    |
 | Plane counts        | uint8   | plane_count                                    |
 
-All `.npy` files are saved with `allow_pickle=False`. Arrays support memory-mapped loading via
+Extraction trace, classification, and colocalization `.npy` files and all `.npz` archives are saved with
+`allow_pickle=False`; detection and registration `.npy` files use NumPy save defaults but contain only numeric
+arrays that load safely with `allow_pickle=False`. Arrays support memory-mapped loading via
 `np.load(path, mmap_mode='r+')` for efficient access to large datasets.
 
 ---
 
 ## Multi-recording compatibility requirements
 
-For recordings intended for multi-recording processing, single-recording processing must complete all three phases 
-(binarize, process, combine). The multi-recording pipeline locates single-recording output by searching for 
-`combined_metadata.npz` within the recording directory tree. The pipeline always generates combined output and 
-preserves registered binary files, so no special configuration is required.
+For recordings intended for multi-recording processing, single-recording processing must complete all three
+phases (binarize, process, combine); no special configuration is required. For the authoritative list of the
+single-recording outputs the multi-recording pipeline consumes, see `/multi-recording-configuration`
+(Prerequisites from single-recording processing).
 
 ---
 
 ## Related skills
 
-| Skill                             | Relationship                                                             |
-|-----------------------------------|--------------------------------------------------------------------------|
-| `/single-recording-configuration` | Configuration parameter reference for the single-recording pipeline      |
-| `/single-recording-processing`    | Processing workflow that produces this output                            |
-| `/multi-recording-results`        | Companion output data reference for the multi-recording pipeline         |
-| `/multi-recording-configuration`  | Multi-recording configuration requires these outputs as prerequisites    |
-| `/visualization`                  | Launch viewers and query tools to visualize and inspect this output data |
+| Skill                             | Relationship                                                               |
+|-----------------------------------|----------------------------------------------------------------------------|
+| `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
+| `/cindra-mcp-environment-setup`   | Prerequisite: cindra MCP server for query and verification tools           |
+| `/acquisition-data-preparation`   | Upstream: input data, TIFF requirements, and acquisition parameters        |
+| `/single-recording-configuration` | Configuration parameter reference for the single-recording pipeline        |
+| `/single-recording-processing`    | Processing workflow that produces this output                              |
+| `/multi-recording-results`        | Companion output data reference for the multi-recording pipeline           |
+| `/multi-recording-configuration`  | Multi-recording configuration requires these outputs as prerequisites      |
+| `/visualization`                  | Launch viewers and query tools to visualize and inspect this output data   |
 
 ---
 

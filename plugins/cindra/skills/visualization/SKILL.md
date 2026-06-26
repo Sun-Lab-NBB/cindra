@@ -68,7 +68,9 @@ tools manage the viewer window; the headless query tools provide the underlying 
 ### Data query tools (cindra MCP server)
 
 Use these headless query tools alongside viewer state to provide data-driven assistance. These
-tools are documented in detail by `/single-recording-results` and `/multi-recording-results`.
+tools are documented in detail by `/single-recording-results` and `/multi-recording-results`. The
+`get_recording_status_tool` (cindra MCP server) is also used to confirm processing is complete before
+launching a viewer (see the launch-and-inspect workflow).
 
 | Tool                                              | Use with viewer |
 |---------------------------------------------------|-----------------|
@@ -266,67 +268,14 @@ Returns a nested dictionary with two sub-viewers:
 
 ## Enum value reference
 
-State fields report the lowercase enum value (e.g. `maximum_projection`), while the on-screen dropdowns
-show a title-case label (e.g. "Maximum Projection"). When telling the user which control to operate,
-translate the state value to its dropdown label. This applies to `background_view`, `roi_color_mode`,
-`mask_layer`, and `coordinate_space`.
-
-### Background views
-
-Reported in `background_view` state field. Values correspond to the background image behind ROI
-overlays.
-
-| Value                  | Description                                               |
-|------------------------|-----------------------------------------------------------|
-| `rois_only`            | Blank background with ROI overlays only                   |
-| `mean_image`           | Temporal mean image (channel 1 or 2 based on toggle)      |
-| `enhanced_mean_image`  | High-pass filtered mean image                             |
-| `correlation_map`      | Pixel-wise activity correlation map                       |
-| `maximum_projection`   | Maximum intensity projection                              |
-| `corrected_structural` | Bleed-through-corrected structural channel (dual-channel) |
-
-### ROI color modes
-
-Reported in `roi_color_mode` state field. Values correspond to the statistic used to color ROI
-overlays.
-
-| Value                        | Description                                               |
-|------------------------------|-----------------------------------------------------------|
-| `random`                     | Random color per ROI from active colormap                 |
-| `skewness`                   | Fluorescence skewness                                     |
-| `compactness`                | Circularity of spatial footprint                          |
-| `footprint`                  | Total spatial footprint area                              |
-| `aspect_ratio`               | Bounding ellipse aspect ratio                             |
-| `solidity`                   | Soma-to-convex-hull area ratio                            |
-| `colocalization_probability` | Channel 2 colocalization probability                      |
-| `recording_count`            | Number of recordings the ROI was tracked across           |
-| `cell_probability`           | Classifier cell-probability gradient                      |
-| `correlations`               | Pairwise activity correlation with selected ROI           |
-| `cell_classification`        | Binary cell/non-cell label (green=cell, magenta=non-cell) |
-
-### Mask layers
-
-Reported in `mask_layer` state field (tracking viewer only).
-
-| Value      | Description                                                         |
-|------------|---------------------------------------------------------------------|
-| `original` | Original ROI masks from single-recording extraction (native coords) |
-| `deformed` | Original masks warped to shared cross-recording coordinate space    |
-| `template` | Consensus template masks from cross-recording clustering            |
-| `tracked`  | Template masks backward-deformed to each recording's native coords  |
-
-### Coordinate spaces
-
-Reported in `coordinate_space` state field (tracking viewer only).
-
-| Value         | Description                                                    |
-|---------------|----------------------------------------------------------------|
-| `native`      | Original recording coordinate space                            |
-| `transformed` | Warped to align with cross-recording template coordinate space |
+State fields report the lowercase enum value (e.g. `maximum_projection`), while the on-screen dropdowns show a
+title-case label (e.g. "Maximum Projection"). When telling the user which control to operate, translate the
+state value to its dropdown label. The full value lists for `background_view`, `roi_color_mode`, `mask_layer`,
+and `coordinate_space` are in [references/viewer-enums.md](references/viewer-enums.md).
 
 ---
 
-## Workflows
+## Visualization workflows
 
 ### Launch and inspect workflow
 
@@ -466,15 +415,16 @@ high extremes indicate residual motion or optical artifacts not captured by regi
 
 ## Related skills
 
-| Skill                             | Relationship                                                    |
-|-----------------------------------|-----------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`   | Prerequisite: cindra-gui MCP server connectivity                |
-| `/single-recording-processing`    | Upstream: produces the data this skill visualizes               |
-| `/multi-recording-processing`     | Upstream: produces the data this skill visualizes               |
-| `/single-recording-results`       | Reference: output data formats for single-recording query tools |
-| `/multi-recording-results`        | Reference: output data formats for multi-recording query tools  |
-| `/single-recording-configuration` | Reference: parameter tuning informed by visual inspection       |
-| `/multi-recording-configuration`  | Reference: parameter tuning informed by visual inspection       |
+| Skill                             | Relationship                                                               |
+|-----------------------------------|----------------------------------------------------------------------------|
+| `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
+| `/cindra-mcp-environment-setup`   | Prerequisite: cindra-gui MCP server connectivity                           |
+| `/single-recording-processing`    | Upstream: produces the data this skill visualizes                          |
+| `/multi-recording-processing`     | Upstream: produces the data this skill visualizes                          |
+| `/single-recording-results`       | Reference: output data formats for single-recording query tools            |
+| `/multi-recording-results`        | Reference: output data formats for multi-recording query tools             |
+| `/single-recording-configuration` | Reference: parameter tuning informed by visual inspection                  |
+| `/multi-recording-configuration`  | Reference: parameter tuning informed by visual inspection                  |
 
 ---
 

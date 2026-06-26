@@ -2,9 +2,9 @@
 name: multi-recording-processing
 description: >-
   Orchestrates multi-recording neural imaging batch processing via the cindra MCP server, dispatching to
-  configuration, validation, and results skills as needed. Use when the user asks to run multi-recording
-  (cross-day ROI tracking) processing, process multiple recordings as a tracked dataset, monitor batch
-  jobs, or re-run a processing phase, or when invoking /multi-recording-processing.
+  configuration and results skills as needed. Use when the user asks to run multi-recording (cross-day ROI
+  tracking) processing, process multiple recordings as a tracked dataset, monitor multi-recording batch jobs,
+  re-run a multi-recording processing phase, or when invoking /multi-recording-processing.
 user-invocable: true
 ---
 
@@ -27,7 +27,7 @@ skills for output verification.
 - MCP management tools (`get_batch_status_overview_tool`, `reset_processing_phases_tool`,
   `clean_processing_output_tool`)
 - Dataset name resolution via `resolve_dataset_name_tool`
-- Supporting tools for candidate discovery and status checking
+- Supporting tools for status checking (recording discovery owned by `/multi-recording-configuration`)
 - Resource management and CPU allocation guidance
 - Status formatting and progress monitoring
 - Error routing to appropriate upstream skills
@@ -112,7 +112,7 @@ single-recording status `completed`). If any recording is incomplete, invoke the
 Two-phase pipeline per dataset:
 
 ```text
-Phase 1: DISCOVER (CPU bound, parallel by dataset)
+Phase 1: DISCOVER (phase name: discovery; CPU bound, parallel by dataset)
 ├── Selects/filters ROIs from each recording's single-recording outputs
 ├── Registers all recordings to common reference frame
 ├── Clusters ROI masks across recordings
@@ -120,7 +120,7 @@ Phase 1: DISCOVER (CPU bound, parallel by dataset)
 ├── Projects template masks back to each recording's coordinate system
 └── Workers per dataset via saturating allocation (see Resource management)
 
-Phase 2: EXTRACT (CPU bound, parallel by recording)
+Phase 2: EXTRACT (phase name: extraction; CPU bound, parallel by recording)
 ├── Applies template masks to extract fluorescence
 ├── Computes neuropil signals, spike deconvolution
 └── Workers per recording via saturating allocation (see Resource management)
@@ -145,9 +145,9 @@ batch-specific specifier:
 resolve_dataset_name_tool(
     dataset_name="learning_task",           # shared analysis name from user
     recording_paths=["/data/animal_A/rec1", "/data/animal_A/rec2"],
-    specifier=""                            # auto-derived from common parent → "animal_A"
+    specifier=""                            # auto-derived from common parent → "animal_a"
 )
-→ { "dataset_name": "animal_A_learning_task", "specifier": "animal_A", "base_name": "learning_task" }
+→ { "dataset_name": "animal_a_learning_task", "specifier": "animal_a", "base_name": "learning_task" }
 ```
 
 **Specifier derivation strategies:**
@@ -331,10 +331,10 @@ When presenting batch status to the user, format as a table:
 Current Phase: EXTRACT
 Summary: 1/2 datasets complete | 2/4 recordings extracted | 0 failed
 
-| Dataset                    | Discover | Extract Progress | Status     |
-|----------------------------|----------|------------------|------------|
-| animal_A_learning_task     | done     | 2/2              | SUCCEEDED  |
-| animal_B_learning_task     | done     | 0/2              | EXTRACTING |
+| Dataset                | Discover | Extract Progress | Status     |
+|------------------------|----------|------------------|------------|
+| animal_A_learning_task | done     | 2/2              | SUCCEEDED  |
+| animal_B_learning_task | done     | 0/2              | EXTRACTING |
 ```
 
 ---
@@ -380,14 +380,16 @@ Wait for the current execution session to complete before starting retries.
 
 ## Related skills
 
-| Skill                            | Relationship                                                   |
-|----------------------------------|----------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`  | Prerequisite: MCP server connectivity                          |
-| `/acquisition-data-preparation`  | Upstream: raw data preparation                                 |
-| `/single-recording-processing`   | Prerequisite: all recordings must be single-recording complete |
-| `/multi-recording-configuration` | Configuration: parameter reference and file creation           |
-| `/multi-recording-results`       | Output: verify and explain processing results                  |
-| `/visualization`                 | Downstream: visual inspection of results                       |
+| Skill                             | Relationship                                                                |
+|-----------------------------------|-----------------------------------------------------------------------------|
+| `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point  |
+| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server connectivity                                       |
+| `/acquisition-data-preparation`   | Upstream: raw data preparation                                              |
+| `/single-recording-configuration` | Prerequisite chain: configure recordings before single-recording processing |
+| `/single-recording-processing`    | Prerequisite: all recordings must be single-recording complete              |
+| `/multi-recording-configuration`  | Configuration: parameter reference and file creation                        |
+| `/multi-recording-results`        | Output: verify and explain processing results                               |
+| `/visualization`                  | Downstream: visual inspection of results                                    |
 
 ---
 

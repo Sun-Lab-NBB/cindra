@@ -258,12 +258,12 @@ Read the first plane's `ops.npy` file (`numpy.load(path, allow_pickle=True).item
 
 | suite2p ops key | cindra field     | Conversion                                                        |
 |-----------------|------------------|-------------------------------------------------------------------|
-| `fs`            | `frame_rate`     | `fs / nplanes` for multi-plane recordings. `fs` for single-plane. |
+| `fs`            | `frame_rate`     | `fs * nplanes` for multi-plane recordings. `fs` for single-plane. |
 | `nplanes`       | `plane_number`   | Direct mapping.                                                   |
 | `nchannels`     | `channel_number` | Direct mapping.                                                   |
 
 **Critical: suite2p `fs` is the per-plane sampling rate.** cindra `frame_rate` is the volume rate. For
-multi-plane recordings: `frame_rate = fs / nplanes`. For single-plane recordings the values are identical.
+multi-plane recordings: `frame_rate = fs * nplanes`. For single-plane recordings the values are identical.
 
 **Step 2: Create `cindra_parameters.json`.**
 
@@ -384,13 +384,14 @@ each ROI.
 
 ## Related skills
 
-| Skill                             | Relationship                                                          |
-|-----------------------------------|-----------------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server must be connected for data preparation tools |
-| `/single-recording-configuration` | Next step: configure the pipeline using prepared data                 |
-| `/single-recording-processing`    | Downstream: processing workflow that uses the prepared data           |
-| `/single-recording-results`       | Downstream: output data format reference for processing results       |
-| `/visualization`                  | Downstream: launch viewers to inspect data after processing           |
+| Skill                             | Relationship                                                               |
+|-----------------------------------|----------------------------------------------------------------------------|
+| `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
+| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server must be connected for data preparation tools      |
+| `/single-recording-configuration` | Next step: configure the pipeline using prepared data                      |
+| `/single-recording-processing`    | Downstream: processing workflow that uses the prepared data                |
+| `/single-recording-results`       | Downstream: output data format reference for processing results            |
+| `/visualization`                  | Downstream: launch viewers to inspect data after processing                |
 
 ---
 

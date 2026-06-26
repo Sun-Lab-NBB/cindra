@@ -241,7 +241,7 @@ class TestCreateNeuropilMasks:
             height=50,
             width=50,
             inner_neuropil_border_radius=2,
-            minimum_neuropil_size=50,
+            minimum_neuropil_pixels=50,
             cell_probability_percentile=0,
         )
         # Second call should return cached.
@@ -250,7 +250,7 @@ class TestCreateNeuropilMasks:
             height=50,
             width=50,
             inner_neuropil_border_radius=2,
-            minimum_neuropil_size=50,
+            minimum_neuropil_pixels=50,
             cell_probability_percentile=0,
         )
         np.testing.assert_array_equal(masks_first[0], masks_second[0])
