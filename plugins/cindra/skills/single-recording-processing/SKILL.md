@@ -2,9 +2,9 @@
 name: single-recording-processing
 description: >-
   Orchestrates single-recording neural imaging batch processing via the cindra MCP server, dispatching to
-  configuration, validation, and results skills as needed. Use when the user asks to process single-recording
-  imaging data, run the single-recording batch pipeline, monitor batch jobs, or re-run a processing phase,
-  or when invoking /single-recording-processing.
+  acquisition-preparation, configuration, and results skills as needed. Use when the user asks to process
+  single-recording imaging data, run the single-recording batch pipeline, monitor single-recording batch jobs,
+  re-run a single-recording processing phase, or when invoking /single-recording-processing.
 user-invocable: true
 ---
 
@@ -25,7 +25,7 @@ verification.
   `get_active_execution_timing_tool`, `cancel_processing_jobs_tool`)
 - MCP management tools (`get_batch_status_overview_tool`, `reset_processing_phases_tool`,
   `clean_processing_output_tool`)
-- Supporting tools for discovery, validation, and status checking
+- Supporting tools for validation and status checking (recording discovery owned by `/single-recording-configuration`)
 - Resource management and CPU allocation guidance
 - Status formatting and progress monitoring
 - Error routing to appropriate upstream skills
@@ -94,16 +94,16 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 Three-phase sequential pipeline per recording:
 
 ```text
-Phase 1: BINARIZE (I/O bound, up to 4 parallel)
+Phase 1: BINARIZE (phase name: binarization; I/O bound, up to 4 parallel)
 ├── Converts raw TIFFs to binary format
 └── Determines plane count
 
-Phase 2: PROCESS (CPU bound, parallel by plane)
+Phase 2: PROCESS (phase name: processing; CPU bound, parallel by plane)
 ├── Motion correction, ROI detection, signal extraction
 └── Workers per plane via saturating allocation (see Resource management)
 
-Phase 3: COMBINE (I/O bound, up to 4 parallel)
-└── Merges all plane results into unified dataset
+Phase 3: COMBINE (phase name: combination; I/O bound, up to 4 parallel)
+└── Merges all plane results into a unified combined_metadata.npz dataset
 ```
 
 Batch processing across multiple recordings:
@@ -277,12 +277,12 @@ When presenting batch status to the user, format as a table:
 Current Phase: PROCESS
 Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
-| Recording                    | Binarize | Process | Combine | Status     |
-|------------------------------|----------|---------|---------|------------|
-| 2024-01-15-10-30-00-123456   | done     | 2/4     | pending | PROCESSING |
-| 2024-01-15-11-45-00-234567   | done     | 4/4     | running | PROCESSING |
-| 2024-01-16-09-00-00-111111   | done     | 4/4     | done    | SUCCEEDED  |
-| 2024-01-16-10-15-00-222222   | pending  | 0/0     | pending | QUEUED     |
+| Recording                  | Binarize | Process | Combine | Status     |
+|----------------------------|----------|---------|---------|------------|
+| 2024-01-15-10-30-00-123456 | done     | 2/4     | pending | PROCESSING |
+| 2024-01-15-11-45-00-234567 | done     | 4/4     | running | PROCESSING |
+| 2024-01-16-09-00-00-111111 | done     | 4/4     | done    | SUCCEEDED  |
+| 2024-01-16-10-15-00-222222 | pending  | 0/0     | pending | QUEUED     |
 ```
 
 ---
@@ -325,14 +325,16 @@ Wait for the current execution session to complete before starting retries.
 
 ## Related skills
 
-| Skill                             | Relationship                                         |
-|-----------------------------------|------------------------------------------------------|
-| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server connectivity                |
-| `/acquisition-data-preparation`   | Input: raw data preparation and validation           |
-| `/single-recording-configuration` | Configuration: parameter reference and file creation |
-| `/single-recording-results`       | Output: verify and explain processing results        |
-| `/multi-recording-processing`     | Downstream: cross-recording ROI tracking             |
-| `/visualization`                  | Downstream: visual inspection of results             |
+| Skill                             | Relationship                                                               |
+|-----------------------------------|----------------------------------------------------------------------------|
+| `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
+| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server connectivity                                      |
+| `/acquisition-data-preparation`   | Input: raw data preparation and validation                                 |
+| `/single-recording-configuration` | Configuration: parameter reference and file creation                       |
+| `/single-recording-results`       | Output: verify and explain processing results                              |
+| `/multi-recording-configuration`  | Downstream: configure cross-recording tracking                             |
+| `/multi-recording-processing`     | Downstream: cross-recording ROI tracking                                   |
+| `/visualization`                  | Downstream: visual inspection of results                                   |
 
 ---
 

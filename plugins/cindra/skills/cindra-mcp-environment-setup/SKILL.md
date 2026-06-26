@@ -3,8 +3,9 @@ name: cindra-mcp-environment-setup
 description: >-
   Diagnoses and resolves cindra and cindra-gui MCP server connectivity issues. Covers environment
   verification, command availability, Python version checks, dependency validation, and conda/pip/uv
-  environment configuration. Use when MCP tools are unavailable, when either MCP server fails to
-  start, when the user reports connection issues, or when starting a session that requires MCP tools.
+  environment configuration. Use when the cindra or cindra-gui MCP tools are unavailable, when either MCP
+  server fails to start, when the user reports cindra connection issues, or when starting a session that
+  requires the cindra MCP tools.
 user-invocable: true
 ---
 
@@ -26,8 +27,19 @@ Diagnoses and resolves cindra and cindra-gui MCP server connectivity and environ
 **Does not cover:**
 - MCP tool usage for data processing (see `/single-recording-processing`, `/multi-recording-processing`)
 - MCP tool usage for configuration (see `/single-recording-configuration`, `/multi-recording-configuration`)
+- MCP tool usage for results querying and output verification (see `/single-recording-results`,
+  `/multi-recording-results`)
 - MCP tool usage for visualization (see `/visualization`)
-- cindra package development or contribution workflows
+- cindra package development or contribution workflows (no cindra skill; out of scope for this lattice)
+
+---
+
+## Agent requirements
+
+This skill is the deliberate exception to the MCP-first rule the other cindra skills follow: it runs precisely
+when the cindra MCP tools are unavailable, so it uses shell and CLI diagnostics (for example `which cindra`,
+`python --version`, `pip check cindra`) rather than `@mcp.tool()` functions. Once connectivity is restored, the
+other cindra skills resume using the MCP tools.
 
 ---
 
@@ -42,10 +54,10 @@ cindra = "cindra.interface.cli:cindra_cli"
 cindra-gui = "cindra.interface.gui_cli:cindra_gui"
 ```
 
-| Server       | CLI command      | Purpose                                                     |
-|--------------|------------------|-------------------------------------------------------------|
-| `cindra-mcp` | `cindra mcp`     | Headless processing: discovery, configuration, batch jobs   |
-| `cindra-gui` | `cindra-gui mcp` | GUI viewers and data querying (ROI, registration, tracking) |
+| Server       | CLI command      | Purpose                                                                     |
+|--------------|------------------|-----------------------------------------------------------------------------|
+| `cindra-mcp` | `cindra mcp`     | Headless processing: discovery, configuration, results querying, batch jobs |
+| `cindra-gui` | `cindra-gui mcp` | GUI viewer lifecycle management and live display-state queries              |
 
 Both servers accept a `--transport` option (defaults to `stdio`). The cindra Claude Code plugin
 registers both servers in its `plugin.json`:
@@ -259,6 +271,13 @@ On macOS, if the resolution was a `DYLD_LIBRARY_PATH` export, the export MUST be
 shell that launches Claude Code — subsequently activating it from within Claude Code does not
 propagate to already-spawned MCP server subprocesses.
 
+### Step 8: Resume the intended work
+
+After connectivity is restored, return to whatever required MCP. If no restart was needed (the environment was
+already healthy), return control to the invoking skill, or proceed to `/acquisition-data-preparation` to begin
+the single-recording pipeline when invoked standalone. If a restart was required, resume the work that needed
+MCP on the next session, since the current session's MCP subprocesses predate the fix.
+
 ---
 
 ## Common issues and resolutions
@@ -281,14 +300,17 @@ propagate to already-spawned MCP server subprocesses.
 
 ## Related skills
 
-| Skill                             | Relationship                                                        |
-|-----------------------------------|---------------------------------------------------------------------|
-| `/acquisition-data-preparation`   | Requires the cindra MCP server for data preparation tools           |
-| `/single-recording-configuration` | Requires the cindra MCP server for configuration tool access        |
-| `/single-recording-processing`    | Requires the cindra MCP server to be connected before processing    |
-| `/multi-recording-configuration`  | Requires the cindra MCP server for configuration tool access        |
-| `/multi-recording-processing`     | Requires the cindra MCP server to be connected before processing    |
-| `/visualization`                  | Requires the cindra-gui MCP server for viewer and query tool access |
+| Skill                             | Relationship                                                                   |
+|-----------------------------------|--------------------------------------------------------------------------------|
+| `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point     |
+| `/acquisition-data-preparation`   | Requires the cindra MCP server for data preparation tools                      |
+| `/single-recording-configuration` | Requires the cindra MCP server for configuration tool access                   |
+| `/single-recording-processing`    | Requires the cindra MCP server to be connected before processing               |
+| `/single-recording-results`       | Requires the cindra MCP server for query and verification tool access          |
+| `/multi-recording-configuration`  | Requires the cindra MCP server for configuration tool access                   |
+| `/multi-recording-processing`     | Requires the cindra MCP server to be connected before processing               |
+| `/multi-recording-results`        | Requires the cindra MCP server for query and verification tool access          |
+| `/visualization`                  | Requires the cindra-gui server for viewer tools; query tools are on cindra-mcp |
 
 ---
 

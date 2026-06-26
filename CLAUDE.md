@@ -57,8 +57,9 @@ state to prevent integration errors.
 ## Available skills
 
 Skills are provided via Claude Code plugins, not the cindra pip package. The cindra plugin provides project-specific
-skills (processing, configuration, results, visualization, MCP setup). The ataraxis automation plugin provides shared
-workflow skills (style guides, commit, codebase exploration).
+skills (pipeline orchestration, data preparation, configuration, processing, results, visualization, MCP setup). The
+ataraxis automation plugin provides shared workflow skills (style guides, commit, codebase exploration). For cindra
+pipeline work, `/cindra-pipeline` is the end-to-end orchestration entry point that routes to the phase-specific skills.
 
 **Ataraxis automation plugin skills:**
 
@@ -76,11 +77,16 @@ workflow skills (style guides, commit, codebase exploration).
 | `/pyproject-style`      | Apply cindra pyproject.toml conventions                                  |
 | `/tox-config`           | Apply cindra tox.ini conventions                                         |
 | `/api-docs`             | Apply cindra API documentation conventions                               |
+| `/audit-style`          | Audit files for style compliance against the style skills                |
+| `/audit-facts`          | Audit documentation for factual accuracy against source code             |
+| `/pr`                   | Draft a style-compliant pull request summary                             |
+| `/release`              | Draft style-compliant release notes from merged PRs                      |
 
 **Cindra plugin skills:**
 
 | Skill                             | Description                                                      |
 |-----------------------------------|------------------------------------------------------------------|
+| `/cindra-pipeline`                | End-to-end pipeline orchestration and session entry point        |
 | `/single-recording-processing`    | Orchestrate single-recording batch processing via MCP            |
 | `/multi-recording-processing`     | Orchestrate multi-recording batch processing via MCP             |
 | `/single-recording-configuration` | Reference for single-recording pipeline configuration parameters |
@@ -204,10 +210,12 @@ pipeline outputs.
 
 ### Key patterns
 
-- **Numba parallelization**: The TBB threading layer is set in `__init__.py` before any Numba imports. Functions use
-  `@njit(cache=True, parallel=True)` with `prange` for frame-level parallelization. The
-  `# type: ignore[import-untyped]` comments on Numba imports and `# pragma: no cover` on JIT-compiled function bodies
-  are expected and should not be removed.
+- **Numba parallelization**: The Numba threading layer is configured in `__init__.py` (TBB on non-Mac, OpenMP on
+  macOS) immediately after importing `numba.config` and before importing any modules that compile `@njit` functions.
+  Functions use `@njit(cache=True, parallel=True)` with `prange` for frame-level parallelization. Numba is excluded
+  from type checking via a `pyproject.toml` mypy override; the `# type: ignore[import-untyped]` comments apply to the
+  scikit-learn, threadpoolctl, PyQtGraph, and yaml imports, and `# pragma: no cover` on JIT-compiled function bodies
+  is expected. None of these should be removed.
 - **Memory efficiency**: Pre-allocates arrays with `np.empty` when overwritten immediately. Uses flattened mask arrays
   with offset indices to reduce per-ROI allocations. Memory maps registration arrays on demand via
   `memory_map_arrays()`. Results tools use lightweight NumPy/YAML reads for targeted queries without full data loading.
@@ -349,7 +357,9 @@ suffix. Test directories: `classification/`, `detection/`, `extraction/`, `io/`,
 **Important considerations:**
 
 - The `console` is enabled in `src/cindra/__init__.py` — do not re-enable elsewhere
-- The Numba TBB threading layer is set in `__init__.py` before any Numba imports — do not move this
-- The `# type: ignore[import-untyped]` comments on Numba and tifffile imports are expected
+- The Numba threading layer is configured in `__init__.py` (TBB on non-Mac, OpenMP on macOS) after importing
+  `numba.config` and before importing modules that compile `@njit` functions — do not move this
+- The `# type: ignore[import-untyped]` comments on the scikit-learn, threadpoolctl, PyQtGraph, and yaml imports are
+  expected (Numba is excluded via the `pyproject.toml` mypy override; tifffile imports carry no such comment)
 - The `# pragma: no cover` annotations on `@njit` function bodies are intentional
 - Use `console.error()` from ataraxis-base-utilities for all error handling (no bare `raise`)
