@@ -206,7 +206,7 @@ class TestCreateNeuropilMasks:
             height=50,
             width=50,
             inner_neuropil_border_radius=2,
-            minimum_neuropil_size=50,
+            minimum_neuropil_pixels=50,
             cell_probability_percentile=0,
         )
 
@@ -227,7 +227,7 @@ class TestCreateNeuropilMasks:
             height=50,
             width=50,
             inner_neuropil_border_radius=2,
-            minimum_neuropil_size=min_size,
+            minimum_neuropil_pixels=min_size,
             cell_probability_percentile=0,
         )
         assert neuropil_masks[0].size >= min_size
@@ -264,7 +264,7 @@ class TestCreateNeuropilMasks:
             height=50,
             width=50,
             inner_neuropil_border_radius=2,
-            minimum_neuropil_size=50,
+            minimum_neuropil_pixels=50,
             cell_probability_percentile=0,
         )
         # Second call with recompute should succeed without error.
@@ -273,7 +273,7 @@ class TestCreateNeuropilMasks:
             height=50,
             width=50,
             inner_neuropil_border_radius=2,
-            minimum_neuropil_size=50,
+            minimum_neuropil_pixels=50,
             cell_probability_percentile=0,
             recompute=True,
         )
