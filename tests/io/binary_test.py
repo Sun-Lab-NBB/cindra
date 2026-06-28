@@ -173,7 +173,7 @@ class TestBinaryFileContextManager:
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
             assert binary_file.frame_number == _FRAME_COUNT
 
-        # Verifies the underlying memory map is closed after exiting the context.
+        # numpy memmap exposes no public closed flag; _mmap.closed is the authoritative signal it was released.
         assert binary_file.file._mmap.closed  # type: ignore[attr-defined]
 
     def test_exit_closes_file_even_with_exception(self, tmp_path: Path) -> None:
@@ -188,7 +188,7 @@ class TestBinaryFileContextManager:
         ):
             raise simulated_error
 
-        # Verifies the underlying memory map is closed despite the exception.
+        # numpy memmap exposes no public closed flag; _mmap.closed confirms release even after the exception.
         assert binary_file.file._mmap.closed  # type: ignore[attr-defined]
 
     def test_close_method_closes_memmap(self, tmp_path: Path) -> None:
@@ -416,7 +416,6 @@ class TestBinMovie:
     def test_bins_small_batch_averaged_into_single_bin(self, tmp_path: Path) -> None:
         """Verifies that a batch smaller than bin_size is averaged into a single bin to preserve data."""
         file_path = tmp_path / "test.bin"
-        # Creates a binary with only 3 frames.
         small_frame_count = 3
         data = np.ones((small_frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.int16) * 10
         data.tofile(file_path)

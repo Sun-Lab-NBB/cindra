@@ -50,13 +50,15 @@ def _make_circular_roi(
     frame_width: int,
 ) -> ROIStatistics:
     """Creates a circular ROI for testing."""
-    y_coords, x_coords = np.mgrid[0:frame_height, 0:frame_width]
-    distance = np.sqrt((y_coords - center_y) ** 2 + (x_coords - center_x) ** 2)
+    y_coordinates, x_coordinates = np.mgrid[0:frame_height, 0:frame_width]
+    distance = np.sqrt((y_coordinates - center_y) ** 2 + (x_coordinates - center_x) ** 2)
     inside = distance <= radius
-    y_pixels = y_coords[inside].astype(np.int32)
-    x_pixels = x_coords[inside].astype(np.int32)
+    y_pixels = y_coordinates[inside].astype(np.int32)
+    x_pixels = x_coordinates[inside].astype(np.int32)
     weights = np.maximum(0, 1.0 - distance[inside] / radius).astype(np.float32)
-    return _make_roi(y_pixels, x_pixels, weights, frame_width, radius=float(radius))
+    return _make_roi(
+        y_pixels=y_pixels, x_pixels=x_pixels, weights=weights, frame_width=frame_width, radius=float(radius)
+    )
 
 
 class TestCorrectBleedthrough:
@@ -166,7 +168,7 @@ class TestComputeSpatialColocalization:
         """Verifies correct handling of empty channel 1."""
         result = compute_spatial_colocalization(
             rois_channel_1=[],
-            rois_channel_2=[_make_roi([5], [5], [1.0], 20)],
+            rois_channel_2=[_make_roi(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=20)],
             frame_height=20,
             frame_width=20,
             colocalization_threshold=0.3,

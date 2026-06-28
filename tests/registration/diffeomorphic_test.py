@@ -96,8 +96,8 @@ class TestDiffeomorphicDemonsRegistration:
         assert registration._grid_sampling_factor == 1.0
         assert registration._final_scale == 1.0
         assert registration._final_grid_sampling == 16.0
-        assert registration._smooth_scale is True
-        assert registration._injective is True
-        assert registration._freeze_edges is True
+        assert registration._smooth_scale
+        assert registration._injective
+        assert registration._freeze_edges
         assert registration._deformation_limit == 1.0
         assert registration._noise_factor == 1.0

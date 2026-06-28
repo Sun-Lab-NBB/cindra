@@ -53,7 +53,6 @@ class TestApplyPhaseCorrelation:
         kernel /= NORMALIZATION_EPSILON + np.abs(kernel)
         frames = reference[np.newaxis, :, :]
         result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
-        # Peak should be at (0, 0).
         assert result[0, 0, 0] == result[0].max()
 
 
@@ -199,9 +198,9 @@ class TestApplyTemporalSmoothing:
         rng = np.random.default_rng(42)
         frames = rng.standard_normal((50, 8, 8)).astype(np.float32)
         result = apply_temporal_smoothing(frames=frames, sigma=5.0)
-        original_std = np.std(np.diff(frames, axis=0))
-        smoothed_std = np.std(np.diff(result, axis=0))
-        assert smoothed_std < original_std
+        original_standard_deviation = np.std(np.diff(frames, axis=0))
+        smoothed_standard_deviation = np.std(np.diff(result, axis=0))
+        assert smoothed_standard_deviation < original_standard_deviation
 
 
 class TestApplySpatialSmoothing:
@@ -254,7 +253,6 @@ class TestApplySpatialHighPass:
         # Adds a point source to introduce a high-frequency feature.
         data[:, 10, 10] = 100.0
         result = apply_spatial_high_pass(data=data, window=4)
-        # The point source should still be prominent after filtering.
         assert result[0, 10, 10] > 50.0
 
     def test_2d_input(self) -> None:
@@ -328,21 +326,21 @@ class TestMeanCenteredMeshgridRegistration:
 
     def test_shape(self) -> None:
         """Verifies meshgrid output shapes match input dimensions."""
-        col_dist, row_dist = mean_centered_meshgrid(height=10, width=20)
-        assert col_dist.shape == (10, 20)
-        assert row_dist.shape == (10, 20)
+        column_distance, row_distance = mean_centered_meshgrid(height=10, width=20)
+        assert column_distance.shape == (10, 20)
+        assert row_distance.shape == (10, 20)
 
     def test_center_zero_for_odd_dimensions(self) -> None:
         """Verifies center values are zero for odd dimensions."""
-        col_dist, row_dist = mean_centered_meshgrid(height=11, width=11)
-        np.testing.assert_allclose(row_dist[5, 5], 0.0)
-        np.testing.assert_allclose(col_dist[5, 5], 0.0)
+        column_distance, row_distance = mean_centered_meshgrid(height=11, width=11)
+        np.testing.assert_allclose(row_distance[5, 5], 0.0)
+        np.testing.assert_allclose(column_distance[5, 5], 0.0)
 
     def test_dtype(self) -> None:
         """Verifies the meshgrid dtype is float32."""
-        col_dist, row_dist = mean_centered_meshgrid(height=8, width=8)
-        assert col_dist.dtype == np.float32
-        assert row_dist.dtype == np.float32
+        column_distance, row_distance = mean_centered_meshgrid(height=8, width=8)
+        assert column_distance.dtype == np.float32
+        assert row_distance.dtype == np.float32
 
 
 class TestComputeGaussianRbfWeights:
@@ -350,27 +348,27 @@ class TestComputeGaussianRbfWeights:
 
     def test_square_matrix_for_same_coordinates(self) -> None:
         """Verifies a square matrix is returned when source equals target."""
-        coords = np.arange(-2, 3, dtype=np.float64)
-        weights = _compute_gaussian_rbf_weights(source_coordinates=coords, target_coordinates=coords)
-        n = len(coords)
+        coordinates = np.arange(-2, 3, dtype=np.float64)
+        weights = _compute_gaussian_rbf_weights(source_coordinates=coordinates, target_coordinates=coordinates)
+        n = len(coordinates)
         assert weights.shape == (n**2, n**2)
 
     def test_diagonal_is_one(self) -> None:
         """Verifies diagonal elements are 1.0 (zero distance)."""
-        coords = np.arange(-2, 3, dtype=np.float64)
-        weights = _compute_gaussian_rbf_weights(source_coordinates=coords, target_coordinates=coords)
+        coordinates = np.arange(-2, 3, dtype=np.float64)
+        weights = _compute_gaussian_rbf_weights(source_coordinates=coordinates, target_coordinates=coordinates)
         np.testing.assert_allclose(np.diag(weights), 1.0, atol=1e-10)
 
     def test_symmetry(self) -> None:
         """Verifies the weight matrix is symmetric when source equals target."""
-        coords = np.arange(-2, 3, dtype=np.float64)
-        weights = _compute_gaussian_rbf_weights(source_coordinates=coords, target_coordinates=coords)
+        coordinates = np.arange(-2, 3, dtype=np.float64)
+        weights = _compute_gaussian_rbf_weights(source_coordinates=coordinates, target_coordinates=coordinates)
         np.testing.assert_allclose(weights, weights.T, atol=1e-10)
 
     def test_values_in_unit_range(self) -> None:
         """Verifies all weight values are in (0, 1]."""
-        coords = np.arange(-3, 4, dtype=np.float64)
-        weights = _compute_gaussian_rbf_weights(source_coordinates=coords, target_coordinates=coords)
+        coordinates = np.arange(-3, 4, dtype=np.float64)
+        weights = _compute_gaussian_rbf_weights(source_coordinates=coordinates, target_coordinates=coordinates)
         assert weights.min() > 0
         assert weights.max() <= 1.0 + 1e-10
 
@@ -386,7 +384,6 @@ class TestGetNormalizationWeights:
     def test_interior_near_one(self) -> None:
         """Verifies interior normalization weights are close to 1.0."""
         weights = _get_normalization_weights(height=30, width=30, window=4)
-        # Interior values should be close to 1.0.
         np.testing.assert_allclose(weights[10:20, 10:20], 1.0, atol=0.1)
 
     def test_border_less_than_one(self) -> None:

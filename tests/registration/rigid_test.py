@@ -103,7 +103,6 @@ class TestComputePhaseCorrelationKernel:
         reference = rng.standard_normal((32, 32)).astype(np.float32)
         kernel_no_smooth = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0)
         kernel_smooth = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=1.5)
-        # Smoothed kernel should differ from unsmoothed.
         assert not np.allclose(kernel_no_smooth, kernel_smooth)
 
     def test_normalized_magnitude(self) -> None:
@@ -142,7 +141,6 @@ class TestComputeRigidOffsets:
         rng = np.random.default_rng(42)
         reference = rng.standard_normal((64, 64)).astype(np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference)
-        # Shift the reference by (3, -2) using roll.
         shifted = np.roll(reference, shift=(3, -2), axis=(0, 1))
         frames = shifted[np.newaxis, :, :]
         y_offsets, x_offsets, _correlation = compute_rigid_offsets(

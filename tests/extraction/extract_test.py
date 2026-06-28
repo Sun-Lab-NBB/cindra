@@ -71,7 +71,7 @@ class TestUpdateRoiExtractionStatistics:
             neuropil_coefficient=0.7,
         )
 
-        # With zero neuropil, corrected = cell - 0.7 * 0 = cell, so skewness should match scipy.stats.skew of cell.
+        # Equals the plain cell skewness because corrected equals cell when neuropil is zero.
         expected_skewness = np.asarray(stats.skew(a=cell_fluorescence, axis=1))
         for roi, expected in zip(roi_statistics, expected_skewness, strict=True):
             assert roi.skewness is not None
@@ -87,7 +87,6 @@ class TestUpdateRoiExtractionStatistics:
         cell_fluorescence = rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 100.0
         neuropil_fluorescence = rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 80.0
 
-        # Computes skewness with neuropil correction.
         _update_roi_extraction_statistics(
             roi_statistics=roi_statistics_corrected,
             cell_fluorescence=cell_fluorescence,
@@ -95,7 +94,6 @@ class TestUpdateRoiExtractionStatistics:
             neuropil_coefficient=0.7,
         )
 
-        # Computes skewness without neuropil correction.
         _update_roi_extraction_statistics(
             roi_statistics=roi_statistics_uncorrected,
             cell_fluorescence=cell_fluorescence,
@@ -103,7 +101,7 @@ class TestUpdateRoiExtractionStatistics:
             neuropil_coefficient=0.0,
         )
 
-        # At least one ROI should have different skewness values between corrected and uncorrected.
+        # Expects at least one ROI to differ in skewness between the corrected and uncorrected runs.
         differences_found = False
         for corrected, uncorrected in zip(roi_statistics_corrected, roi_statistics_uncorrected, strict=True):
             assert corrected.skewness is not None
@@ -119,7 +117,6 @@ class TestUpdateRoiExtractionStatistics:
         rng = np.random.default_rng(42)
         roi_statistics = _make_roi_statistics(count=roi_count)
 
-        # Confirms skewness starts as None.
         for roi in roi_statistics:
             assert roi.skewness is None
 
@@ -130,7 +127,6 @@ class TestUpdateRoiExtractionStatistics:
             neuropil_coefficient=0.5,
         )
 
-        # Confirms skewness is now set.
         for roi in roi_statistics:
             assert roi.skewness is not None
 
@@ -159,7 +155,6 @@ class TestUpdateRoiExtractionStatistics:
         cell_fluorescence = rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 100.0
         neuropil_fluorescence = rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 80.0
 
-        # Computes expected corrected trace manually.
         neuropil_coefficient = 0.7
         expected_corrected = cell_fluorescence - np.float32(neuropil_coefficient) * neuropil_fluorescence
         expected_skewness = np.asarray(stats.skew(a=expected_corrected, axis=1))
