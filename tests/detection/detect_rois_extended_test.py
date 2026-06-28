@@ -95,11 +95,11 @@ class TestExtendIteratively:
         # Creates frames with a bright Gaussian-like center blob.
         frames_2d = np.zeros((frame_count, height, width), dtype=np.float32)
         center_y, center_x = 8, 8
-        for dy in range(-3, 4):
-            for dx in range(-3, 4):
-                distance = np.sqrt(dy**2 + dx**2)
-                if center_y + dy < height and center_x + dx < width:
-                    frames_2d[:, center_y + dy, center_x + dx] = max(0, 5.0 - distance)
+        for delta_y in range(-3, 4):
+            for delta_x in range(-3, 4):
+                distance = np.sqrt(delta_y**2 + delta_x**2)
+                if center_y + delta_y < height and center_x + delta_x < width:
+                    frames_2d[:, center_y + delta_y, center_x + delta_x] = max(0, 5.0 - distance)
 
         # Flattens frames to (frame_count, height * width) as expected by _extend_iteratively.
         frames = frames_2d.reshape(frame_count, height * width)

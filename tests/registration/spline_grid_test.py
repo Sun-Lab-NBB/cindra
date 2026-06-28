@@ -106,7 +106,7 @@ class TestSplineGridFreezeEdges:
         field_x = np.ones((50, 50), dtype=np.float32) * 0.5
         grid.set_from_fields(field_y=field_y, field_x=field_x, freeze_edges=True)
         recovered_y, recovered_x = grid.deformation_fields
-        # Edge pixels should be close to zero.
+        # Freezing edges clamps the boundary knots, so boundary pixels collapse toward zero.
         np.testing.assert_allclose(recovered_y[0, :], 0.0, atol=0.05)
         np.testing.assert_allclose(recovered_y[-1, :], 0.0, atol=0.05)
         np.testing.assert_allclose(recovered_x[:, 0], 0.0, atol=0.05)

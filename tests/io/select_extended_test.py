@@ -146,7 +146,7 @@ class TestFilterRois:
             maximum_size=10000,
         )
 
-        # Adds channel 2 ROI statistics and classification to the combined data.
+        # Channel 2 selection must run independently of channel 1 selection.
         channel_2_rois = [_make_roi(centroid=(30 + i * 10, 30 + i * 10)) for i in range(roi_count)]
         channel_2_classification = np.array([[0.9, 1.0], [0.2, 0.0], [0.8, 1.0]], dtype=np.float32)
         assert runtime.combined_data is not None
@@ -211,7 +211,7 @@ class TestFilterRois:
             probability_threshold=0.5,
         )
 
-        # Adds channel 2 statistics but no classification.
+        # Channel 2 selection must fail when its classification is missing.
         channel_2_rois = [_make_roi() for _ in range(roi_count)]
         assert runtime.combined_data is not None
         runtime.combined_data.extraction.roi_statistics_channel_2 = channel_2_rois

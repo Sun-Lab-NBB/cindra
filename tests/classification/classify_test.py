@@ -100,7 +100,7 @@ class TestClassifier:
         path = tmp_path / "test_classifier.npz"
         _create_classifier_file(path)
         classifier = Classifier(classifier_path=path)
-        rois = [_make_roi(compactness=c) for c in [1.0, 1.5, 2.0, 5.0]]
+        rois = [_make_roi(compactness=compactness) for compactness in [1.0, 1.5, 2.0, 5.0]]
         result = classifier.classify(roi_statistics=rois)
         assert np.all(result[:, 1] >= 0)
         assert np.all(result[:, 1] <= 1)

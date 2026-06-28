@@ -16,11 +16,11 @@ def _make_circular_roi(
     """Creates an ROIStatistics instance with a circular mask for testing."""
     y_pixels = []
     x_pixels = []
-    for dy in range(-radius, radius + 1):
-        for dx in range(-radius, radius + 1):
-            if dy**2 + dx**2 <= radius**2:
-                y_pixels.append(centroid[0] + dy)
-                x_pixels.append(centroid[1] + dx)
+    for delta_y in range(-radius, radius + 1):
+        for delta_x in range(-radius, radius + 1):
+            if delta_y**2 + delta_x**2 <= radius**2:
+                y_pixels.append(centroid[0] + delta_y)
+                x_pixels.append(centroid[1] + delta_x)
     y_array = np.array(y_pixels, dtype=np.int32)
     x_array = np.array(x_pixels, dtype=np.int32)
     pixel_weights = np.ones(len(y_pixels), dtype=np.float32)
@@ -101,7 +101,7 @@ class TestApplyPreclassification:
             diameter=10,
         )
 
-        # All returned ROIs should be from the original list (compared by identity).
+        # Confirms every returned ROI originates from the original list, compared by identity.
         assert len(result) <= len(roi_statistics)
         original_ids = {id(roi) for roi in roi_statistics}
         for roi in result:

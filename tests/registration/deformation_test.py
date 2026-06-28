@@ -54,7 +54,7 @@ class TestCreateDiffusionKernel:
         kernel = _create_diffusion_kernel(sigma=2.0)
         center = kernel.size // 2
         right_half = kernel[center:]
-        # Each element should be >= the next (monotonically non-increasing).
+        # Confirms kernel values are monotonically non-increasing toward the tail.
         assert np.all(np.diff(right_half) <= 0)
 
 
@@ -134,21 +134,21 @@ class TestMakeSamplesAbsolute:
         """Verifies that zero displacement fields produce identity coordinate grids."""
         delta_x = np.zeros((4, 6), dtype=np.float32)
         delta_y = np.zeros((4, 6), dtype=np.float32)
-        abs_x, abs_y = _make_samples_absolute(delta_x=delta_x, delta_y=delta_y)
+        absolute_x, absolute_y = _make_samples_absolute(delta_x=delta_x, delta_y=delta_y)
 
         expected_x = np.arange(6, dtype=np.float32).reshape(1, 6)
         expected_y = np.arange(4, dtype=np.float32).reshape(4, 1)
-        np.testing.assert_allclose(abs_x, np.broadcast_to(expected_x, (4, 6)))
-        np.testing.assert_allclose(abs_y, np.broadcast_to(expected_y, (4, 6)))
+        np.testing.assert_allclose(absolute_x, np.broadcast_to(expected_x, (4, 6)))
+        np.testing.assert_allclose(absolute_y, np.broadcast_to(expected_y, (4, 6)))
 
     def test_with_known_deltas(self) -> None:
         """Verifies correct absolute coordinates with known displacement values."""
         delta_x = np.ones((3, 3), dtype=np.float32) * 0.5
         delta_y = np.ones((3, 3), dtype=np.float32) * -0.5
-        abs_x, abs_y = _make_samples_absolute(delta_x=delta_x, delta_y=delta_y)
-        # At pixel (1, 2): abs_x = 2 + 0.5 = 2.5, abs_y = 1 + (-0.5) = 0.5
-        np.testing.assert_allclose(abs_x[1, 2], 2.5)
-        np.testing.assert_allclose(abs_y[1, 2], 0.5)
+        absolute_x, absolute_y = _make_samples_absolute(delta_x=delta_x, delta_y=delta_y)
+        # At pixel (1, 2): absolute_x = 2 + 0.5 = 2.5, absolute_y = 1 + (-0.5) = 0.5
+        np.testing.assert_allclose(absolute_x[1, 2], 2.5)
+        np.testing.assert_allclose(absolute_y[1, 2], 0.5)
 
 
 class TestResize:
@@ -269,7 +269,7 @@ class TestDeformationScale:
         deformation = Deformation(field_y=field_y, field_x=field_x)
         copied = deformation.scale(factor=1.0)
         np.testing.assert_array_equal(copied[0], field_y)
-        # Verify it's a copy, not a view.
+        # Confirms the result is a copy rather than a view.
         copied[0][0, 0] = 999.0
         assert deformation[0][0, 0] != 999.0
 
@@ -283,7 +283,7 @@ class TestDeformationAdd:
         field_y = np.ones((5, 5), dtype=np.float32) * 2.0
         field_x = np.ones((5, 5), dtype=np.float32) * 3.0
         deformation = Deformation(field_y=field_y, field_x=field_x)
-        result = identity.add(deformation)
+        result = identity.add(other=deformation)
         np.testing.assert_array_equal(result[0], field_y)
         np.testing.assert_array_equal(result[1], field_x)
 
@@ -318,7 +318,7 @@ class TestDeformationCompose:
         field_y = np.ones((10, 10), dtype=np.float32) * 0.5
         field_x = np.ones((10, 10), dtype=np.float32) * -0.5
         deformation = Deformation(field_y=field_y, field_x=field_x)
-        result = identity.compose(deformation)
+        result = identity.compose(other=deformation)
         np.testing.assert_allclose(result[0], 0.5, atol=1e-5)
         np.testing.assert_allclose(result[1], -0.5, atol=1e-5)
 
@@ -328,7 +328,7 @@ class TestDeformationCompose:
         field_y = np.ones((10, 10), dtype=np.float32) * 0.5
         field_x = np.ones((10, 10), dtype=np.float32) * -0.5
         deformation = Deformation(field_y=field_y, field_x=field_x)
-        result = deformation.compose(identity)
+        result = deformation.compose(other=identity)
         np.testing.assert_allclose(result[0], 0.5, atol=1e-5)
 
     def test_compose_two_uniform_deformations(self) -> None:
@@ -337,7 +337,7 @@ class TestDeformationCompose:
         field_x = np.ones((20, 20), dtype=np.float32) * 0.2
         deformation_1 = Deformation(field_y=field_y, field_x=field_x)
         deformation_2 = Deformation(field_y=field_y.copy(), field_x=field_x.copy())
-        result = deformation_1.compose(deformation_2)
+        result = deformation_1.compose(other=deformation_2)
         # For small uniform displacements, composition ≈ addition at interior pixels.
         np.testing.assert_allclose(result[0][5:-5, 5:-5], 0.6, atol=0.05)
         np.testing.assert_allclose(result[1][5:-5, 5:-5], 0.4, atol=0.05)
@@ -416,10 +416,10 @@ class TestDeformationGetDeformationLocations:
         field_y = np.ones((5, 5), dtype=np.float32) * 0.5
         field_x = np.ones((5, 5), dtype=np.float32) * -0.5
         deformation = Deformation(field_y=field_y, field_x=field_x)
-        abs_x, abs_y = deformation.get_deformation_locations()
-        # At pixel (2, 3): abs_x = 3 + (-0.5) = 2.5, abs_y = 2 + 0.5 = 2.5
-        np.testing.assert_allclose(abs_x[2, 3], 2.5)
-        np.testing.assert_allclose(abs_y[2, 3], 2.5)
+        absolute_x, absolute_y = deformation.get_deformation_locations()
+        # At pixel (2, 3): absolute_x = 3 + (-0.5) = 2.5, absolute_y = 2 + 0.5 = 2.5
+        np.testing.assert_allclose(absolute_x[2, 3], 2.5)
+        np.testing.assert_allclose(absolute_y[2, 3], 2.5)
 
 
 class TestDeformationRegularize:

@@ -25,11 +25,11 @@ def _make_circular_roi(
     """
     y_pixels = []
     x_pixels = []
-    for dy in range(-radius, radius + 1):
-        for dx in range(-radius, radius + 1):
-            if dy**2 + dx**2 <= radius**2:
-                y_pixels.append(centroid[0] + dy)
-                x_pixels.append(centroid[1] + dx)
+    for delta_y in range(-radius, radius + 1):
+        for delta_x in range(-radius, radius + 1):
+            if delta_y**2 + delta_x**2 <= radius**2:
+                y_pixels.append(centroid[0] + delta_y)
+                x_pixels.append(centroid[1] + delta_x)
     y_array = np.array(y_pixels, dtype=np.int32)
     x_array = np.array(x_pixels, dtype=np.int32)
     pixel_weights = np.ones(len(y_pixels), dtype=np.float32)
@@ -69,7 +69,6 @@ class TestCreateAndUnpackMasks:
             channel_label="channel 1",
         )
 
-        # Verifies cell masks are returned.
         assert len(roi_masks) == 2
         for indices, weights in roi_masks:
             assert len(indices) > 0
@@ -77,7 +76,6 @@ class TestCreateAndUnpackMasks:
             assert indices.dtype == np.int32
             assert weights.dtype == np.float32
 
-        # Verifies neuropil masks are returned.
         assert neuropil_masks is not None
         assert len(neuropil_masks) == 2
         for neuropil_indices in neuropil_masks:
@@ -101,11 +99,9 @@ class TestCreateAndUnpackMasks:
             channel_label="channel 1",
         )
 
-        # Verifies cell masks are returned.
         assert len(roi_masks) == 1
         assert len(roi_masks[0][0]) > 0
 
-        # Verifies neuropil masks are None.
         assert neuropil_masks is None
 
     def test_multiple_rois_produce_matching_mask_count(self) -> None:

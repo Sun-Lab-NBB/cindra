@@ -28,9 +28,9 @@ class TestFitAndReconstructBlock:
         """Verifies that a low-rank input is perfectly reconstructed when enough components are retained."""
         rng = np.random.default_rng(42)
         # Creates a rank-3 matrix.
-        u = rng.standard_normal((50, 3)).astype(np.float32)
-        v = rng.standard_normal((3, 100)).astype(np.float32)
-        block = (u @ v).astype(np.float32)
+        left_factor = rng.standard_normal((50, 3)).astype(np.float32)
+        right_factor = rng.standard_normal((3, 100)).astype(np.float32)
+        block = (left_factor @ right_factor).astype(np.float32)
         result = _fit_and_reconstruct_block(block=block, num_components=3)
         np.testing.assert_allclose(result, block, atol=1e-3)
 

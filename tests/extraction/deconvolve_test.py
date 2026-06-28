@@ -67,7 +67,7 @@ class TestComputeDeltaFluorescence:
 
     def test_constant_baseline(self) -> None:
         """Verifies the constant baseline method uses the global minimum of the smoothed trace."""
-        # Flat trace with a single bump. Constant baseline = global min of smoothed trace.
+        # A lone bump on a flat trace keeps the constant baseline at the smoothed global minimum.
         cell = np.ones((1, 200), dtype=np.float32) * 100.0
         cell[0, 100:120] += 50.0
         neuropil = np.zeros((1, 200), dtype=np.float32)
@@ -178,14 +178,14 @@ class TestApplyOasisDeconvolution:
 
     def test_detects_spike_in_exponential_decay(self) -> None:
         """Verifies that OASIS detects a spike at the onset of an exponential decay."""
-        # Creates a single ROI trace with a clear exponential decay starting at frame 50.
+        # An isolated onset followed by exponential decay should localize the deconvolved spike at frame 50.
         time_constant = 1.0
         sampling_rate = 30.0
         frame_count = 200
         trace = np.zeros((1, frame_count), dtype=np.float32)
         decay_constant = -1.0 / (time_constant * sampling_rate)
-        for t in range(50, frame_count):
-            trace[0, t] = 10.0 * np.exp(decay_constant * (t - 50))
+        for frame_index in range(50, frame_count):
+            trace[0, frame_index] = 10.0 * np.exp(decay_constant * (frame_index - 50))
 
         result = apply_oasis_deconvolution(
             cell_fluorescence=trace,

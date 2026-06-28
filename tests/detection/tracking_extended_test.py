@@ -32,7 +32,7 @@ class TestCollectBinRois:
         roi_2 = _make_roi_mask(centroid=(50, 50))
         roi_3 = _make_roi_mask(centroid=(35, 35))
 
-        # Places ROIs in grid cells based on their centroids. ROIs with the same grid cell are grouped together.
+        # ROIs that share a grid cell are grouped so the bin collector can scan neighboring cells.
         roi_grid: dict[tuple[int, int], list[tuple[ROIMask, int]]] = {}
         for roi, recording_index in [(roi_1, 0), (roi_2, 1), (roi_3, 2)]:
             grid_key = (roi.centroid[0] // grid_roi_size, roi.centroid[1] // grid_roi_size)
@@ -115,7 +115,7 @@ class TestCollectBinRois:
         roi_unclustered = _make_roi_mask(centroid=(30, 30), cluster_id=0)
         roi_clustered = _make_roi_mask(centroid=(45, 45), cluster_id=5)
 
-        # Places ROIs in grid cells. The two ROIs are in different cells to avoid overwrite issues.
+        # The two ROIs are placed in different cells to avoid overwriting each other in the grid.
         roi_grid: dict[tuple[int, int], list[tuple[ROIMask, int]]] = {}
         for roi, recording_index in [(roi_unclustered, 0), (roi_clustered, 1)]:
             grid_key = (roi.centroid[0] // grid_roi_size, roi.centroid[1] // grid_roi_size)

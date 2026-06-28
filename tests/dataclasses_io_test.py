@@ -176,7 +176,7 @@ def _assert_roi_masks_equal(original: ROIMask, loaded: ROIMask) -> None:
 
 def _assert_roi_statistics_equal(original: ROIStatistics, loaded: ROIStatistics) -> None:
     """Asserts that two ROIStatistics instances have identical data."""
-    _assert_roi_masks_equal(original.mask, loaded.mask)
+    _assert_roi_masks_equal(original=original.mask, loaded=loaded.mask)
     assert original.footprint == loaded.footprint
     assert original.compactness == pytest.approx(loaded.compactness, abs=1e-5)
     assert original.solidity == pytest.approx(loaded.solidity, abs=1e-5)
@@ -333,7 +333,6 @@ class TestDetectionDataSaveLoad:
         assert loaded.correlation_map is not None
         np.testing.assert_allclose(original.correlation_map, loaded.correlation_map, rtol=1e-6)
 
-        # Channel 2.
         assert loaded.mean_image_channel_2 is not None
         np.testing.assert_allclose(original.mean_image_channel_2, loaded.mean_image_channel_2, rtol=1e-6)
 
@@ -396,7 +395,7 @@ class TestROIMaskSaveLoadList:
 
         assert len(loaded_masks) == len(masks)
         for original, loaded in zip(masks, loaded_masks, strict=True):
-            _assert_roi_masks_equal(original, loaded)
+            _assert_roi_masks_equal(original=original, loaded=loaded)
 
     def test_save_empty_list_does_not_create_file(self, tmp_path: Path) -> None:
         """Verifies that saving an empty list does not create an output file."""
@@ -412,7 +411,7 @@ class TestROIMaskSaveLoadList:
         loaded_masks = ROIMask.load_list(file_path=file_path)
 
         assert len(loaded_masks) == 1
-        _assert_roi_masks_equal(mask, loaded_masks[0])
+        _assert_roi_masks_equal(original=mask, loaded=loaded_masks[0])
 
 
 class TestROIStatisticsSaveLoadList:
@@ -433,7 +432,7 @@ class TestROIStatisticsSaveLoadList:
 
         assert len(loaded_list) == len(roi_list)
         for original, loaded in zip(roi_list, loaded_list, strict=True):
-            _assert_roi_statistics_equal(original, loaded)
+            _assert_roi_statistics_equal(original=original, loaded=loaded)
 
     def test_save_load_round_trip_with_none_optional_fields(self, tmp_path: Path) -> None:
         """Verifies that ROIStatistics instances with None optional fields survive a save/load round-trip."""
@@ -461,7 +460,7 @@ class TestROIStatisticsSaveLoadList:
 
         assert len(loaded_list) == len(roi_list)
         for original, loaded in zip(roi_list, loaded_list, strict=True):
-            _assert_roi_statistics_equal(original, loaded)
+            _assert_roi_statistics_equal(original=original, loaded=loaded)
 
     def test_save_load_round_trip_mixed_optional_fields(self, tmp_path: Path) -> None:
         """Verifies that ROIStatistics instances with a mix of present and absent optional fields survive a
@@ -480,7 +479,7 @@ class TestROIStatisticsSaveLoadList:
 
         assert len(loaded_list) == len(roi_list)
         for original, loaded in zip(roi_list, loaded_list, strict=True):
-            _assert_roi_statistics_equal(original, loaded)
+            _assert_roi_statistics_equal(original=original, loaded=loaded)
 
     def test_save_empty_list_does_not_create_files(self, tmp_path: Path) -> None:
         """Verifies that saving an empty list does not create output files."""
@@ -504,11 +503,9 @@ class TestExtractionDataSaveLoad:
         loaded = ExtractionData()
         loaded.load_arrays(output_path=tmp_path)
 
-        # ROI statistics should be loaded.
         assert loaded.roi_statistics is not None
         assert len(loaded.roi_statistics) == len(original.roi_statistics)
 
-        # Classification should be loaded.
         assert loaded.cell_classification is not None
         np.testing.assert_allclose(original.cell_classification, loaded.cell_classification, rtol=1e-6)
 
@@ -532,7 +529,6 @@ class TestExtractionDataSaveLoad:
         loaded.load_arrays(output_path=tmp_path)
         loaded.load_results(output_path=tmp_path)
 
-        # Traces should be loaded.
         assert loaded.cell_fluorescence is not None
         np.testing.assert_allclose(original.cell_fluorescence, loaded.cell_fluorescence, rtol=1e-6)
 
@@ -545,11 +541,9 @@ class TestExtractionDataSaveLoad:
         assert loaded.spikes is not None
         np.testing.assert_allclose(original.spikes, loaded.spikes, rtol=1e-6)
 
-        # Classification.
         assert loaded.cell_classification is not None
         np.testing.assert_allclose(original.cell_classification, loaded.cell_classification, rtol=1e-6)
 
-        # Colocalization.
         assert loaded.cell_colocalization is not None
         np.testing.assert_allclose(original.cell_colocalization, loaded.cell_colocalization, rtol=1e-6)
 
@@ -639,7 +633,6 @@ class TestSingleRecordingRuntimeDataSaveLoad:
 
         loaded = SingleRecordingRuntimeData.load(output_path=tmp_path)
 
-        # Scalar IO fields should be preserved.
         assert loaded.io.frame_height == 256
         assert loaded.io.frame_width == 256
         assert loaded.io.frame_count == 1000
@@ -647,15 +640,13 @@ class TestSingleRecordingRuntimeDataSaveLoad:
         assert loaded.io.plane_index == 0
         assert loaded.output_path == tmp_path
 
-        # Registration scalar fields should be preserved.
         assert loaded.registration.valid_y_range == (2, 30)
         assert loaded.registration.valid_x_range == (2, 30)
         assert loaded.registration.bidirectional_phase_offset == 3
-        assert loaded.registration.bidirectional_phase_corrected is True
+        assert loaded.registration.bidirectional_phase_corrected
         assert loaded.registration.normalization_minimum == 100
         assert loaded.registration.normalization_maximum == 5000
 
-        # Detection scalar fields should be preserved.
         assert loaded.detection.roi_diameter == 12
         assert loaded.detection.aspect_ratio == pytest.approx(1.2)
 
@@ -727,7 +718,6 @@ class TestSingleRecordingRuntimeDataSaveLoad:
         assert data.registration.rigid_y_offsets is None
         assert data.detection.mean_image is None
         assert data.extraction.roi_statistics is None
-        # Scalar fields should be preserved.
         assert data.registration.valid_y_range == (2, 30)
 
     def test_load_arrays_noop_when_output_path_none(self) -> None:
@@ -789,7 +779,6 @@ class TestMultiRecordingRegistrationDataSaveLoad:
             original.transformed_maximum_projection, loaded.transformed_maximum_projection, rtol=1e-6
         )
 
-        # Channel 2 images.
         assert loaded.transformed_mean_image_channel_2 is not None
         np.testing.assert_allclose(
             original.transformed_mean_image_channel_2, loaded.transformed_mean_image_channel_2, rtol=1e-6
@@ -797,15 +786,16 @@ class TestMultiRecordingRegistrationDataSaveLoad:
         assert loaded.transformed_enhanced_mean_image_channel_2 is not None
         assert loaded.transformed_maximum_projection_channel_2 is not None
 
-        # Deformed ROI masks.
         assert loaded.deformed_roi_masks is not None
         assert len(loaded.deformed_roi_masks) == 2
-        _assert_roi_masks_equal(original.deformed_roi_masks[0], loaded.deformed_roi_masks[0])
-        _assert_roi_masks_equal(original.deformed_roi_masks[1], loaded.deformed_roi_masks[1])
+        _assert_roi_masks_equal(original=original.deformed_roi_masks[0], loaded=loaded.deformed_roi_masks[0])
+        _assert_roi_masks_equal(original=original.deformed_roi_masks[1], loaded=loaded.deformed_roi_masks[1])
 
         assert loaded.deformed_roi_masks_channel_2 is not None
         assert len(loaded.deformed_roi_masks_channel_2) == 1
-        _assert_roi_masks_equal(original.deformed_roi_masks_channel_2[0], loaded.deformed_roi_masks_channel_2[0])
+        _assert_roi_masks_equal(
+            original=original.deformed_roi_masks_channel_2[0], loaded=loaded.deformed_roi_masks_channel_2[0]
+        )
 
     def test_memory_map_round_trip(self, tmp_path: Path) -> None:
         """Verifies that memory_map_arrays produces memory-mapped .npy arrays and eagerly loaded .npz masks."""
@@ -864,12 +854,12 @@ class TestMultiRecordingTrackingDataSaveLoad:
 
         assert loaded.template_masks is not None
         assert len(loaded.template_masks) == 2
-        _assert_roi_masks_equal(masks_channel_1[0], loaded.template_masks[0])
-        _assert_roi_masks_equal(masks_channel_1[1], loaded.template_masks[1])
+        _assert_roi_masks_equal(original=masks_channel_1[0], loaded=loaded.template_masks[0])
+        _assert_roi_masks_equal(original=masks_channel_1[1], loaded=loaded.template_masks[1])
 
         assert loaded.template_masks_channel_2 is not None
         assert len(loaded.template_masks_channel_2) == 1
-        _assert_roi_masks_equal(masks_channel_2[0], loaded.template_masks_channel_2[0])
+        _assert_roi_masks_equal(original=masks_channel_2[0], loaded=loaded.template_masks_channel_2[0])
 
     def test_memory_map_delegates_to_load(self, tmp_path: Path) -> None:
         """Verifies that memory_map_arrays loads template masks identically to load_arrays."""
@@ -882,7 +872,7 @@ class TestMultiRecordingTrackingDataSaveLoad:
 
         assert mapped.template_masks is not None
         assert len(mapped.template_masks) == 1
-        _assert_roi_masks_equal(masks[0], mapped.template_masks[0])
+        _assert_roi_masks_equal(original=masks[0], loaded=mapped.template_masks[0])
 
     def test_load_no_file_leaves_none(self, tmp_path: Path) -> None:
         """Verifies that load_arrays leaves fields None when no files exist."""
@@ -937,18 +927,16 @@ class TestExtractionDataChannel2:
         loaded = ExtractionData()
         loaded.load_arrays(output_path=tmp_path)
 
-        # Channel 1 statistics and classification should be loaded.
         assert loaded.roi_statistics is not None
         assert len(loaded.roi_statistics) == len(original.roi_statistics)
         assert loaded.cell_classification is not None
 
-        # Channel 2 statistics and classification should be loaded.
         assert loaded.roi_statistics_channel_2 is not None
         assert len(loaded.roi_statistics_channel_2) == len(original.roi_statistics_channel_2)
         for original_roi, loaded_roi in zip(
             original.roi_statistics_channel_2, loaded.roi_statistics_channel_2, strict=True
         ):
-            _assert_roi_statistics_equal(original_roi, loaded_roi)
+            _assert_roi_statistics_equal(original=original_roi, loaded=loaded_roi)
 
         assert loaded.cell_classification_channel_2 is not None
         np.testing.assert_allclose(
@@ -969,7 +957,6 @@ class TestExtractionDataChannel2:
         loaded = ExtractionData()
         loaded.load_results(output_path=tmp_path)
 
-        # Channel 2 traces should be loaded.
         assert loaded.cell_fluorescence_channel_2 is not None
         np.testing.assert_allclose(original.cell_fluorescence_channel_2, loaded.cell_fluorescence_channel_2, rtol=1e-6)
 
@@ -992,7 +979,6 @@ class TestExtractionDataChannel2:
             original.cell_classification_channel_2, loaded.cell_classification_channel_2, rtol=1e-6
         )
 
-        # Colocalization should be loaded.
         assert loaded.cell_colocalization is not None
         np.testing.assert_allclose(original.cell_colocalization, loaded.cell_colocalization, rtol=1e-6)
 
@@ -1088,7 +1074,9 @@ class TestMultiRecordingRegistrationDataChannel2:
         # Channel 2 deformed ROI masks should be eagerly loaded (npz cannot be memory-mapped).
         assert mapped.deformed_roi_masks_channel_2 is not None
         assert len(mapped.deformed_roi_masks_channel_2) == 1
-        _assert_roi_masks_equal(original.deformed_roi_masks_channel_2[0], mapped.deformed_roi_masks_channel_2[0])
+        _assert_roi_masks_equal(
+            original=original.deformed_roi_masks_channel_2[0], loaded=mapped.deformed_roi_masks_channel_2[0]
+        )
 
 
 class TestMultiRecordingRuntimeDataReleaseWithCombinedData:
@@ -1113,11 +1101,9 @@ class TestMultiRecordingRuntimeDataReleaseWithCombinedData:
 
         runtime.release_arrays()
 
-        # Combined data detection arrays should be released.
         assert runtime.combined_data.detection.mean_image is None
         assert runtime.combined_data.detection.enhanced_mean_image is None
 
-        # Combined data extraction arrays should be released.
         assert runtime.combined_data.extraction.roi_statistics is None
         assert runtime.combined_data.extraction.cell_fluorescence is None
         assert runtime.combined_data.extraction.cell_classification is None
@@ -1150,7 +1136,6 @@ class TestMultiRecordingRuntimeDataSaveLoad:
 
         loaded = MultiRecordingRuntimeData.load(output_path=tmp_path)
 
-        # Scalar fields should be preserved.
         assert loaded.io.recording_id == "session_001"
         assert loaded.io.dataset_name == "test_dataset"
         assert loaded.io.selected_roi_indices == (0, 3, 7)
@@ -1306,11 +1291,11 @@ class TestCombinedDataSaveLoad:
 
     def test_save_load_with_channel_2_binary_paths(self, tmp_path: Path) -> None:
         """Verifies that channel 2 binary paths survive a save/load round-trip."""
-        binary_path_ch1 = tmp_path / "plane0" / "registered.bin"
-        binary_path_ch2 = tmp_path / "plane0" / "registered_channel_2.bin"
-        binary_path_ch1.parent.mkdir(parents=True, exist_ok=True)
-        binary_path_ch1.touch()
-        binary_path_ch2.touch()
+        binary_path_channel_1 = tmp_path / "plane0" / "registered.bin"
+        binary_path_channel_2 = tmp_path / "plane0" / "registered_channel_2.bin"
+        binary_path_channel_1.parent.mkdir(parents=True, exist_ok=True)
+        binary_path_channel_1.touch()
+        binary_path_channel_2.touch()
 
         original = CombinedData(
             detection=DetectionData(),
@@ -1324,8 +1309,8 @@ class TestCombinedDataSaveLoad:
             plane_widths=np.array([32], dtype=np.uint16),
             plane_y_offsets=np.array([0], dtype=np.int32),
             plane_x_offsets=np.array([0], dtype=np.int32),
-            registered_binary_paths=(binary_path_ch1,),
-            registered_binary_paths_channel_2=(binary_path_ch2,),
+            registered_binary_paths=(binary_path_channel_1,),
+            registered_binary_paths_channel_2=(binary_path_channel_2,),
         )
         original.save(root_path=tmp_path)
 
@@ -1333,7 +1318,7 @@ class TestCombinedDataSaveLoad:
 
         assert loaded.registered_binary_paths_channel_2 is not None
         assert len(loaded.registered_binary_paths_channel_2) == 1
-        assert loaded.registered_binary_paths_channel_2[0] == binary_path_ch2
+        assert loaded.registered_binary_paths_channel_2[0] == binary_path_channel_2
 
     def test_save_load_then_load_detection_extraction_arrays(self, tmp_path: Path) -> None:
         """Verifies that detection and extraction arrays can be loaded after CombinedData.load."""
@@ -1355,7 +1340,6 @@ class TestCombinedDataSaveLoad:
 
         loaded = CombinedData.load(root_path=tmp_path)
 
-        # Load child arrays.
         loaded.detection.load_arrays(output_path=tmp_path)
         loaded.extraction.load_arrays(output_path=tmp_path)
 

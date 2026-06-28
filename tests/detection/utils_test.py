@@ -229,7 +229,6 @@ class TestApplyGaussianHighPass:
         frames = rng.standard_normal((20, 8, 8)).astype(np.float32) + 50.0
         original = frames.copy()
         _apply_gaussian_high_pass(frames=frames, kernel_size=3)
-        # Should have changed.
         assert not np.array_equal(frames, original)
         # High-pass output should have near-zero mean.
         assert np.abs(frames.mean()) < 5.0
@@ -360,31 +359,31 @@ class TestMeanCenteredMeshgrid:
 
     def test_shape(self) -> None:
         """Verifies meshgrid output shapes match input dimensions."""
-        col_dist, row_dist = mean_centered_meshgrid(height=10, width=20)
-        assert col_dist.shape == (10, 20)
-        assert row_dist.shape == (10, 20)
+        column_distances, row_distances = mean_centered_meshgrid(height=10, width=20)
+        assert column_distances.shape == (10, 20)
+        assert row_distances.shape == (10, 20)
 
     def test_center_zero_for_odd_dimensions(self) -> None:
         """Verifies center values are zero for odd dimensions."""
-        col_dist, row_dist = mean_centered_meshgrid(height=11, width=11)
-        np.testing.assert_allclose(row_dist[5, 5], 0.0)
-        np.testing.assert_allclose(col_dist[5, 5], 0.0)
+        column_distances, row_distances = mean_centered_meshgrid(height=11, width=11)
+        np.testing.assert_allclose(row_distances[5, 5], 0.0)
+        np.testing.assert_allclose(column_distances[5, 5], 0.0)
 
     def test_symmetry(self) -> None:
         """Verifies the meshgrid is symmetric."""
-        col_dist, row_dist = mean_centered_meshgrid(height=10, width=10)
-        np.testing.assert_allclose(col_dist, np.flip(col_dist, axis=1))
-        np.testing.assert_allclose(row_dist, np.flip(row_dist, axis=0))
+        column_distances, row_distances = mean_centered_meshgrid(height=10, width=10)
+        np.testing.assert_allclose(column_distances, np.flip(column_distances, axis=1))
+        np.testing.assert_allclose(row_distances, np.flip(row_distances, axis=0))
 
     def test_dtype(self) -> None:
         """Verifies the meshgrid dtype is float32."""
-        col_dist, row_dist = mean_centered_meshgrid(height=8, width=8)
-        assert col_dist.dtype == np.float32
-        assert row_dist.dtype == np.float32
+        column_distances, row_distances = mean_centered_meshgrid(height=8, width=8)
+        assert column_distances.dtype == np.float32
+        assert row_distances.dtype == np.float32
 
     def test_max_distance_at_corners(self) -> None:
         """Verifies maximum distances occur at corners."""
-        col_dist, row_dist = mean_centered_meshgrid(height=10, width=10)
+        column_distances, row_distances = mean_centered_meshgrid(height=10, width=10)
         # Corner should have max distance from center.
-        assert row_dist[0, 0] == row_dist.max()
-        assert col_dist[0, 0] == col_dist.max()
+        assert row_distances[0, 0] == row_distances.max()
+        assert column_distances[0, 0] == column_distances.max()

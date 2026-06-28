@@ -71,19 +71,15 @@ class TestCreateEnhancedMeanImage:
         valid_region = result[valid_y_range[0] : valid_y_range[1], valid_x_range[0] : valid_x_range[1]]
         minimum_interior_value = valid_region.min()
 
-        # Top border.
         top_border = result[: valid_y_range[0], :]
         np.testing.assert_allclose(top_border, minimum_interior_value)
 
-        # Bottom border.
         bottom_border = result[valid_y_range[1] :, :]
         np.testing.assert_allclose(bottom_border, minimum_interior_value)
 
-        # Left border (within valid y range).
         left_border = result[valid_y_range[0] : valid_y_range[1], : valid_x_range[0]]
         np.testing.assert_allclose(left_border, minimum_interior_value)
 
-        # Right border (within valid y range).
         right_border = result[valid_y_range[0] : valid_y_range[1], valid_x_range[1] :]
         np.testing.assert_allclose(right_border, minimum_interior_value)
 
