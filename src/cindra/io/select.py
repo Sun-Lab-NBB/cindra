@@ -54,17 +54,17 @@ def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
 
         # Checks if ROI selection already exists and repeat_selection is not enabled. Both channel 1 and channel 2
         # (if applicable) must have existing selections to skip.
-        has_channel_1_selection = len(runtime.io.selected_roi_indices) > 0
+        has_channel_1_selection = bool(runtime.io.selected_roi_indices)
         has_channel_2_data = (
             runtime.combined_data is not None and runtime.combined_data.extraction.roi_statistics_channel_2 is not None
         )
-        has_channel_2_selection = len(runtime.io.selected_roi_indices_channel_2) > 0
+        has_channel_2_selection = bool(runtime.io.selected_roi_indices_channel_2)
 
         # Skips if channel 1 has selections AND (no channel 2 data OR channel 2 has selections).
         if has_channel_1_selection and (not has_channel_2_data or has_channel_2_selection) and not repeat_selection:
             channel_1_count = len(runtime.io.selected_roi_indices)
             channel_2_count = len(runtime.io.selected_roi_indices_channel_2)
-            if channel_2_count > 0:
+            if channel_2_count:
                 message = (
                     f"Recording {recording_id} already has {channel_1_count} channel 1 and {channel_2_count} channel 2 "
                     f"selected ROIs. Skipping ROI selection."
@@ -85,7 +85,7 @@ def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
         channel_1_count, channel_2_count = _filter_rois(runtime=runtime, configuration=configuration)
 
         # Formats output message based on whether channel 2 data is present.
-        if channel_2_count > 0:
+        if channel_2_count:
             count_message = f"{channel_1_count} channel 1 and {channel_2_count} channel 2 ROI candidates"
         else:
             count_message = f"{channel_1_count} ROI candidates"
@@ -119,8 +119,8 @@ def _filter_channel_rois(
 
     Args:
         roi_statistics: The list of ROIStatistics instances to filter.
-        cell_classification: The classification array for this channel. Each row contains [probability, is_cell] for
-            one ROI. Only ROIs whose classifier probability exceeds the threshold are retained.
+        cell_classification: The classification array for this channel. Each row contains [is_cell, probability] for
+            one ROI. Only ROIs whose classifier probability meets or exceeds the threshold are retained.
         mroi_region_borders: The x-coordinates of MROI region borders. ROIs near these borders are filtered out
             to avoid tracking ambiguities. Pass an empty tuple for non-MROI recordings.
         probability_threshold: The minimum classifier probability required for an ROI to be selected.
@@ -134,11 +134,11 @@ def _filter_channel_rois(
     selected_indices: list[int] = []
     for index, roi in enumerate(roi_statistics):
         # Applies the probability threshold filter.
-        if cell_classification[index, 0] < probability_threshold:
+        if cell_classification[index, 1] < probability_threshold:
             continue
 
         # Applies the maximum size filter.
-        if roi.pixel_count >= maximum_size:
+        if roi.pixel_count > maximum_size:
             continue
 
         # Applies MROI region border filter if applicable.
@@ -165,8 +165,8 @@ def _filter_rois(
     Notes:
         This step is expected to discard some single-recording ROIs because the multi-recording pipeline
         typically uses more stringent ROI identification criteria. Channel 2 filtering only occurs when
-        roi_statistics_channel_2 is
-        present in the combined data, indicating the recording used two functional channels.
+        roi_statistics_channel_2 is present in the combined data, indicating the recording used two functional
+        channels.
 
     Args:
         runtime: The per-recording runtime data. The io.selected_roi_indices and io.selected_roi_indices_channel_2

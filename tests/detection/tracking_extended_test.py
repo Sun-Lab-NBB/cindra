@@ -9,16 +9,7 @@ from cindra.detection.tracking import _collect_bin_rois
 
 
 def _make_roi_mask(centroid: tuple[int, int], pixel_count: int = 5, cluster_id: int = 0) -> ROIMask:
-    """Creates a minimal ROIMask instance for testing.
-
-    Args:
-        centroid: The (y, x) centroid position.
-        pixel_count: The number of pixels in the mask.
-        cluster_id: The cluster assignment ID. Zero means unclustered.
-
-    Returns:
-        A ROIMask instance with the specified properties.
-    """
+    """Creates a minimal ROIMask instance for testing."""
     y_pixels = np.full(pixel_count, fill_value=centroid[0], dtype=np.int32)
     x_pixels = np.full(pixel_count, fill_value=centroid[1], dtype=np.int32)
     return ROIMask(
@@ -32,7 +23,7 @@ def _make_roi_mask(centroid: tuple[int, int], pixel_count: int = 5, cluster_id: 
 
 
 class TestCollectBinRois:
-    """Tests for _collect_bin_rois."""
+    """Tests _collect_bin_rois."""
 
     def test_collects_rois_within_bin(self) -> None:
         """Verifies that ROIs within the bin region are correctly collected."""
@@ -41,7 +32,7 @@ class TestCollectBinRois:
         roi_2 = _make_roi_mask(centroid=(50, 50))
         roi_3 = _make_roi_mask(centroid=(35, 35))
 
-        # Places ROIs in grid cells based on their centroids. ROIs with the same grid cell are grouped together.
+        # ROIs that share a grid cell are grouped so the bin collector can scan neighboring cells.
         roi_grid: dict[tuple[int, int], list[tuple[ROIMask, int]]] = {}
         for roi, recording_index in [(roi_1, 0), (roi_2, 1), (roi_3, 2)]:
             grid_key = (roi.centroid[0] // grid_roi_size, roi.centroid[1] // grid_roi_size)
@@ -124,7 +115,7 @@ class TestCollectBinRois:
         roi_unclustered = _make_roi_mask(centroid=(30, 30), cluster_id=0)
         roi_clustered = _make_roi_mask(centroid=(45, 45), cluster_id=5)
 
-        # Places ROIs in grid cells. The two ROIs are in different cells to avoid overwrite issues.
+        # The two ROIs are placed in different cells to avoid overwriting each other in the grid.
         roi_grid: dict[tuple[int, int], list[tuple[ROIMask, int]]] = {}
         for roi, recording_index in [(roi_unclustered, 0), (roi_clustered, 1)]:
             grid_key = (roi.centroid[0] // grid_roi_size, roi.centroid[1] // grid_roi_size)

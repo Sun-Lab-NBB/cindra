@@ -32,7 +32,7 @@ EMPTY: NDArray[np.float32] = np.empty(0, dtype=np.float32)
 """Empty array sentinel returned for absent trace or classification data."""
 
 
-@dataclass
+@dataclass(slots=True)
 class SingleRecordingData:
     """Wraps the output of the single-recording processing pipeline for a single recording and serves it to consumer
     GUIs.
@@ -185,11 +185,11 @@ class SingleRecordingData:
         """Returns the spatial and shape statistics for each detected ROI in the current view."""
         statistics = self._current_extraction.roi_statistics
         if statistics is None:
-            console.error(
-                message="Unable to retrieve the ROI statistics for the current single-recording view. The pipeline "
-                "data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                "Unable to retrieve the ROI statistics for the current single-recording view. The pipeline data is "
+                "incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return list(statistics)
 
     @property
@@ -201,18 +201,18 @@ class SingleRecordingData:
     def cell_count(self) -> int:
         """Returns the number of ROIs classified as cells in the current view."""
         classification = self.cell_classification
-        return int(classification[:, 1].sum()) if classification.size else 0
+        return int(classification[:, 0].sum()) if classification.size else 0
 
     @property
     def cell_fluorescence(self) -> NDArray[np.float32]:
         """Returns the cell fluorescence traces with shape (cells, frames) for the current view."""
         value = self._current_extraction.cell_fluorescence
         if value is None:
-            console.error(
-                message="Unable to retrieve the cell fluorescence traces for the current single-recording view. "
-                "The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                "Unable to retrieve the cell fluorescence traces for the current single-recording view. The pipeline "
+                "data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -226,11 +226,11 @@ class SingleRecordingData:
         """Returns the neuropil fluorescence traces with shape (cells, frames) for the current view."""
         value = self._current_extraction.neuropil_fluorescence
         if value is None:
-            console.error(
-                message="Unable to retrieve the neuropil fluorescence traces for the current single-recording view. "
-                "The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                "Unable to retrieve the neuropil fluorescence traces for the current single-recording view. The "
+                "pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -244,11 +244,11 @@ class SingleRecordingData:
         """Returns the memory-mapped baseline-and-neuropil-subtracted fluorescence traces."""
         value = self._current_extraction.subtracted_fluorescence
         if value is None:
-            console.error(
-                message="Unable to retrieve the subtracted fluorescence traces for the current single-recording view. "
-                "The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                "Unable to retrieve the subtracted fluorescence traces for the current single-recording view. The "
+                "pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -262,11 +262,11 @@ class SingleRecordingData:
         """Returns the deconvolved spike traces with shape (cells, frames) for the current view."""
         value = self._current_extraction.spikes
         if value is None:
-            console.error(
-                message="Unable to retrieve the deconvolved spikes for the current single-recording view. "
-                "The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                "Unable to retrieve the deconvolved spikes for the current single-recording view. The pipeline data is "
+                "incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -287,11 +287,11 @@ class SingleRecordingData:
         """
         value = self._current_extraction.cell_classification
         if value is None:
-            console.error(
-                message="Unable to retrieve the cell classification for the current single-recording view. "
-                "The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                "Unable to retrieve the cell classification for the current single-recording view. The pipeline data "
+                "is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -313,11 +313,11 @@ class SingleRecordingData:
         """Returns the mean image from the current view's detection data."""
         value = self._current_detection.mean_image
         if value is None:
-            console.error(
-                message="Unable to retrieve the mean image for the current single-recording view. The pipeline data "
-                "is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                "Unable to retrieve the mean image for the current single-recording view. The pipeline data is "
+                "incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -325,11 +325,11 @@ class SingleRecordingData:
         """Returns the enhanced mean image from the current view's detection data."""
         value = self._current_detection.enhanced_mean_image
         if value is None:
-            console.error(
-                message="Unable to retrieve the enhanced mean image for the current single-recording view. The "
-                "pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                "Unable to retrieve the enhanced mean image for the current single-recording view. The pipeline data "
+                "is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -337,11 +337,11 @@ class SingleRecordingData:
         """Returns the maximum projection from the current view's detection data."""
         value = self._current_detection.maximum_projection
         if value is None:
-            console.error(
-                message="Unable to retrieve the maximum projection for the current single-recording view. The pipeline "
-                "data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                "Unable to retrieve the maximum projection for the current single-recording view. The pipeline data "
+                "is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -349,11 +349,11 @@ class SingleRecordingData:
         """Returns the correlation map from the current view's detection data."""
         value = self._current_detection.correlation_map
         if value is None:
-            console.error(
-                message="Unable to retrieve the correlation map for the current single-recording view. The pipeline "
-                "data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                "Unable to retrieve the correlation map for the current single-recording view. The pipeline data is "
+                "incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -447,15 +447,17 @@ class SingleRecordingData:
         path components and progressively reducing to 2, then 1, if the label exceeds 45 characters.
         """
         data_path = self._contexts[self._current_plane_index].configuration.file_io.data_path
-        if data_path is not None:
-            parts = data_path.parts
-            max_characters = 45
-            # Tries 3, then 2, then 1 trailing component(s) until the label fits.
-            for count in (3, 2, 1):
-                if len(parts) >= count:
-                    label = str(Path(*parts[-count:]))
-                    if len(label) <= max_characters:
-                        return label
+        if data_path is None:
+            return ""
+
+        parts = data_path.parts
+        max_characters = 45
+        # Tries 3, then 2, then 1 trailing component(s) until the label fits.
+        for count in (3, 2, 1):
+            if len(parts) >= count:
+                label = str(Path(*parts[-count:]))
+                if len(label) <= max_characters:
+                    return label
         return ""
 
     @property
@@ -463,11 +465,11 @@ class SingleRecordingData:
         """Returns the cindra output directory path derived from the first plane's runtime IO data."""
         value = self._contexts[0].runtime.io.output_path
         if value is None:
-            console.error(
-                message="Unable to retrieve the output path for the single-recording recording. The pipeline "
-                "data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                "Unable to retrieve the output path for the single recording. The pipeline data is incomplete or "
+                "corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value.parent
 
     @property
@@ -488,10 +490,8 @@ class SingleRecordingData:
         Uses slice indexing internally to avoid the integer-indexing shape bug in BinaryFileCombined.
         """
         if self._combined_binary_channel_2 is None:
-            console.error(
-                message="Unable to read a stitched channel 2 frame. The recording is single-channel.",
-                error=RuntimeError,
-            )
+            message = "Unable to read a stitched channel 2 frame. The recording is single-channel."
+            console.error(message=message, error=RuntimeError)
         return self._combined_binary_channel_2[frame_index : frame_index + 1][0]
 
     def plane_rigid_offsets(self, plane_index: int) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
@@ -607,7 +607,7 @@ class SingleRecordingData:
         return self._contexts[self._current_plane_index].runtime.detection
 
 
-@dataclass
+@dataclass(slots=True)
 class MultiRecordingData:
     """Wraps the output of the multi-recording processing pipeline for a single recording and serves it to
     consumer GUIs.
@@ -647,11 +647,11 @@ class MultiRecordingData:
         """Returns the recording's single-recording cindra root path."""
         value = self._runtime.io.data_path
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the data path for multi-recording recording '{self.recording_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the data path for multi-recording recording '{self.recording_id}'. The pipeline "
+                f"data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -664,11 +664,11 @@ class MultiRecordingData:
         """Returns the native-space mean fluorescence image."""
         value = self._detection.mean_image
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the mean image for multi-recording recording '{self.recording_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the mean image for multi-recording recording '{self.recording_id}'. The pipeline "
+                f"data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -676,11 +676,11 @@ class MultiRecordingData:
         """Returns the native-space contrast-enhanced mean image."""
         value = self._detection.enhanced_mean_image
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the enhanced mean image for multi-recording recording "
-                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the enhanced mean image for multi-recording recording '{self.recording_id}'. The "
+                f"pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -688,11 +688,11 @@ class MultiRecordingData:
         """Returns the native-space maximum intensity projection."""
         value = self._detection.maximum_projection
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the maximum projection for multi-recording recording "
-                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the maximum projection for multi-recording recording '{self.recording_id}'. The "
+                f"pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -700,11 +700,11 @@ class MultiRecordingData:
         """Returns the native-space pixel correlation map."""
         value = self._detection.correlation_map
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the correlation map for multi-recording recording '{self.recording_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the correlation map for multi-recording recording '{self.recording_id}'. The "
+                f"pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -736,11 +736,11 @@ class MultiRecordingData:
         """Returns the mean image in deformed (registered) space."""
         value = self._registration.transformed_mean_image
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the transformed mean image for multi-recording recording "
-                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the transformed mean image for multi-recording recording '{self.recording_id}'. "
+                f"The pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -748,11 +748,11 @@ class MultiRecordingData:
         """Returns the enhanced mean image in deformed (registered) space."""
         value = self._registration.transformed_enhanced_mean_image
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the transformed enhanced mean image for multi-recording recording "
-                f"'{self.recording_id}'. This indicates incomplete or corrupt pipeline data.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the transformed enhanced mean image for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -760,11 +760,11 @@ class MultiRecordingData:
         """Returns the maximum projection in deformed (registered) space."""
         value = self._registration.transformed_maximum_projection
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the transformed maximum projection for multi-recording recording "
-                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the transformed maximum projection for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -790,11 +790,11 @@ class MultiRecordingData:
         """Returns the selected ROI masks that were used as input to forward deformation."""
         all_masks = self._combined.extraction.roi_statistics
         if all_masks is None:
-            console.error(
-                message=f"Unable to retrieve the original masks for multi-recording recording '{self.recording_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the original masks for multi-recording recording '{self.recording_id}'. The "
+                f"pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         selected_indices = self._runtime.io.selected_roi_indices
         if not selected_indices:
             return list(all_masks)
@@ -816,11 +816,11 @@ class MultiRecordingData:
         """Returns the ROI masks warped to the shared coordinate space."""
         value = self._registration.deformed_roi_masks
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the deformed masks for multi-recording recording '{self.recording_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the deformed masks for multi-recording recording '{self.recording_id}'. The "
+                f"pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -834,11 +834,11 @@ class MultiRecordingData:
         """Returns the consensus template masks from cross-recording tracking."""
         value = self._tracking.template_masks
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the template masks for multi-recording recording '{self.recording_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the template masks for multi-recording recording '{self.recording_id}'. The "
+                f"pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -852,11 +852,11 @@ class MultiRecordingData:
         """Returns the template ROI masks backward-deformed to this recording's native coordinate space."""
         value = self._runtime.extraction.roi_statistics
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the tracked masks for multi-recording recording '{self.recording_id}'. "
-                f"The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the tracked masks for multi-recording recording '{self.recording_id}'. The "
+                f"pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -870,11 +870,11 @@ class MultiRecordingData:
         """Returns the cell fluorescence array for this recording's extraction."""
         value = self._runtime.extraction.cell_fluorescence
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the cell fluorescence traces for multi-recording recording "
-                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the cell fluorescence traces for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -882,11 +882,11 @@ class MultiRecordingData:
         """Returns the neuropil fluorescence array for this recording's extraction."""
         value = self._runtime.extraction.neuropil_fluorescence
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the neuropil fluorescence traces for multi-recording recording "
-                f"'{self.recording_id}'. This indicates incomplete or corrupt pipeline data.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the neuropil fluorescence traces for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -894,11 +894,11 @@ class MultiRecordingData:
         """Returns the baseline-and-neuropil-subtracted fluorescence traces for this recording's extraction."""
         value = self._runtime.extraction.subtracted_fluorescence
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the subtracted fluorescence traces for multi-recording recording "
-                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the subtracted fluorescence traces for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -906,11 +906,11 @@ class MultiRecordingData:
         """Returns the deconvolved spikes array for this recording's extraction."""
         value = self._runtime.extraction.spikes
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the deconvolved spikes for multi-recording recording "
-                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the deconvolved spikes for multi-recording recording '{self.recording_id}'. The "
+                f"pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -967,11 +967,11 @@ class MultiRecordingData:
         """Returns the combined single-recording data for this recording."""
         value = self._runtime.combined_data
         if value is None:
-            console.error(
-                message=f"Unable to retrieve the combined single-recording data for multi-recording "
-                f"recording '{self.recording_id}'. The pipeline data is incomplete or corrupt.",
-                error=RuntimeError,
+            message = (
+                f"Unable to retrieve the combined single-recording data for multi-recording recording "
+                f"'{self.recording_id}'. The pipeline data is incomplete or corrupt."
             )
+            console.error(message=message, error=RuntimeError)
         return value
 
     @property
@@ -980,7 +980,7 @@ class MultiRecordingData:
         return self._combined.detection
 
 
-@dataclass
+@dataclass(slots=True)
 class ViewerData:
     """Provides the top-level data entry point for all consumer GUIs.
 
@@ -1147,8 +1147,8 @@ class ViewerData:
     def _discover_dataset_names(root_path: Path) -> tuple[str, ...]:
         """Discovers available multi-recording dataset names under root_path.
 
-        Searches for multi_recording_runtime_data.yaml files, extracts the parent directory name (dataset name)
-        from each, deduplicates, and returns natsorted.
+        Searches for multi_recording_runtime_data.yaml files, extracts the lower-cased parent directory name
+        (dataset name) from each, deduplicates, and returns natsorted.
 
         Args:
             root_path: The root directory to search recursively.

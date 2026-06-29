@@ -14,7 +14,7 @@ from .multi_recording_configuration import MultiRecordingConfiguration
 from .single_recording_configuration import AcquisitionParameters, SingleRecordingConfiguration
 
 
-@dataclass
+@dataclass(slots=True)
 class RuntimeContext:
     """Combines configuration, acquisition parameters, and runtime data used in the single-recording
     processing pipeline.
@@ -156,7 +156,7 @@ class RuntimeContext:
         return cls(configuration=config, acquisition=acquisition, runtime=runtime)
 
 
-@dataclass
+@dataclass(slots=True)
 class MultiRecordingRuntimeContext:
     """Combines configuration and runtime data used in the multi-recording processing pipeline.
 

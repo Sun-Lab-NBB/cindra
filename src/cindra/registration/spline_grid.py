@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import numba  # type: ignore[import-untyped]
+import numba
 from numba import prange
 import numpy as np
 
@@ -68,16 +68,16 @@ def compute_basis_coefficients(  # pragma: no cover
     factor_cubed = factor_squared * factor
     one_minus_factor = 1.0 - factor
 
-    # Coefficient for p0 (leftmost control point)
+    # Coefficient for p0 (leftmost control point).
     coefficients[0] = (one_minus_factor * one_minus_factor * one_minus_factor) / 6.0
 
-    # Coefficient for p1 (left-center control point)
+    # Coefficient for p1 (left-center control point).
     coefficients[1] = (3.0 * factor_cubed - 6.0 * factor_squared + 4.0) / 6.0
 
-    # Coefficient for p2 (right-center control point)
+    # Coefficient for p2 (right-center control point).
     coefficients[2] = (-3.0 * factor_cubed + 3.0 * factor_squared + 3.0 * factor + 1.0) / 6.0
 
-    # Coefficient for p3 (rightmost control point)
+    # Coefficient for p3 (rightmost control point).
     coefficients[3] = factor_cubed / 6.0
 
 
@@ -181,6 +181,7 @@ class SplineGrid:
         self,
         field_y: NDArray[np.float32],
         field_x: NDArray[np.float32],
+        *,
         injective: bool = True,
         injective_factor: float = 0.9,
         freeze_edges: bool = True,
@@ -403,6 +404,6 @@ def _fit_knots_to_field(  # pragma: no cover
                     denominator[knot_y, knot_x] += coefficient_squared
 
     # Finalizes the knot values by dividing numerator by denominator.
-    for i in range(knots.size):
-        if denominator.flat[i] > 0.0:
-            knots.flat[i] = numerator.flat[i] / denominator.flat[i]
+    for flat_index in range(knots.size):
+        if denominator.flat[flat_index] > 0.0:
+            knots.flat[flat_index] = numerator.flat[flat_index] / denominator.flat[flat_index]

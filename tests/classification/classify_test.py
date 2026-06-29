@@ -48,7 +48,7 @@ def _create_classifier_file(path: Path, sample_count: int = 200) -> None:
 
 
 class TestClassifier:
-    """Tests for the Classifier class."""
+    """Tests the Classifier class."""
 
     def test_loads_and_fits(self, tmp_path: Path) -> None:
         """Verifies that the classifier loads training data and fits the model."""
@@ -100,7 +100,7 @@ class TestClassifier:
         path = tmp_path / "test_classifier.npz"
         _create_classifier_file(path)
         classifier = Classifier(classifier_path=path)
-        rois = [_make_roi(compactness=c) for c in [1.0, 1.5, 2.0, 5.0]]
+        rois = [_make_roi(compactness=compactness) for compactness in [1.0, 1.5, 2.0, 5.0]]
         result = classifier.classify(roi_statistics=rois)
         assert np.all(result[:, 1] >= 0)
         assert np.all(result[:, 1] <= 1)
@@ -156,7 +156,7 @@ class TestClassifier:
 
 
 class TestCreateTrainingDataset:
-    """Tests for Classifier.create_training_dataset."""
+    """Tests Classifier.create_training_dataset."""
 
     def test_creates_file(self, tmp_path: Path) -> None:
         """Verifies that the training dataset file is created."""
@@ -202,7 +202,7 @@ class TestCreateTrainingDataset:
 
 
 class TestClassifyFunction:
-    """Tests for the module-level classify function."""
+    """Tests the module-level classify function."""
 
     def test_builtin_classifier(self) -> None:
         """Verifies that the built-in classifier works."""

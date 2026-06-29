@@ -50,17 +50,19 @@ def _make_circular_roi(
     frame_width: int,
 ) -> ROIStatistics:
     """Creates a circular ROI for testing."""
-    y_coords, x_coords = np.mgrid[0:frame_height, 0:frame_width]
-    distance = np.sqrt((y_coords - center_y) ** 2 + (x_coords - center_x) ** 2)
+    y_coordinates, x_coordinates = np.mgrid[0:frame_height, 0:frame_width]
+    distance = np.sqrt((y_coordinates - center_y) ** 2 + (x_coordinates - center_x) ** 2)
     inside = distance <= radius
-    y_pixels = y_coords[inside].astype(np.int32)
-    x_pixels = x_coords[inside].astype(np.int32)
+    y_pixels = y_coordinates[inside].astype(np.int32)
+    x_pixels = x_coordinates[inside].astype(np.int32)
     weights = np.maximum(0, 1.0 - distance[inside] / radius).astype(np.float32)
-    return _make_roi(y_pixels, x_pixels, weights, frame_width, radius=float(radius))
+    return _make_roi(
+        y_pixels=y_pixels, x_pixels=x_pixels, weights=weights, frame_width=frame_width, radius=float(radius)
+    )
 
 
 class TestCorrectBleedthrough:
-    """Tests for _correct_bleedthrough."""
+    """Tests _correct_bleedthrough."""
 
     def test_output_non_negative(self) -> None:
         """Verifies that the corrected image has no negative values."""
@@ -96,7 +98,7 @@ class TestCorrectBleedthrough:
 
 
 class TestBuildSparseRoiMasks:
-    """Tests for _build_sparse_roi_masks."""
+    """Tests _build_sparse_roi_masks."""
 
     def test_shape(self) -> None:
         """Verifies the sparse matrix has correct shape."""
@@ -123,7 +125,7 @@ class TestBuildSparseRoiMasks:
 
 
 class TestComputeOverlapMatrix:
-    """Tests for _compute_overlap_matrix."""
+    """Tests _compute_overlap_matrix."""
 
     def test_identical_rois_full_overlap(self) -> None:
         """Verifies that identical ROIs produce an overlap of 1.0."""
@@ -160,13 +162,13 @@ class TestComputeOverlapMatrix:
 
 
 class TestComputeSpatialColocalization:
-    """Tests for compute_spatial_colocalization."""
+    """Tests compute_spatial_colocalization."""
 
     def test_empty_channel_1(self) -> None:
         """Verifies correct handling of empty channel 1."""
         result = compute_spatial_colocalization(
             rois_channel_1=[],
-            rois_channel_2=[_make_roi([5], [5], [1.0], 20)],
+            rois_channel_2=[_make_roi(y_pixels=[5], x_pixels=[5], weights=[1.0], frame_width=20)],
             frame_height=20,
             frame_width=20,
             colocalization_threshold=0.3,
@@ -237,7 +239,7 @@ class TestComputeSpatialColocalization:
 
 
 class TestComputeIntensityColocalization:
-    """Tests for compute_intensity_colocalization."""
+    """Tests compute_intensity_colocalization."""
 
     def test_empty_rois(self) -> None:
         """Verifies correct handling of empty ROI list."""

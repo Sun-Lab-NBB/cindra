@@ -32,11 +32,18 @@ Complete parameter reference for the multi-recording (cross-recording) cindra RO
 
 ---
 
-## MCP configuration tools
+## Agent requirements
 
-These tools are registered on the `cindra-mcp` server. You MUST verify the MCP server is connected before
-using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
-connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
+You MUST use the cindra MCP tools for all configuration operations. Do not hand-edit configuration files
+or import cindra Python functions directly when an MCP tool exists for the task. If MCP tools are not
+available, invoke `/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+
+---
+
+## Available tools
+
+These tools are registered on the `cindra-mcp` server. Tool parameters and return values are
+self-documented via MCP introspection.
 
 | Tool                        | Purpose                                                                   |
 |-----------------------------|---------------------------------------------------------------------------|
@@ -108,9 +115,10 @@ Runtime behavior settings shared with the single-recording pipeline.
 ## Section 2: recording_io
 
 Controls input recording paths, output dataset naming, and ROI selection caching. The pipeline receives a list
-of recording directories (populated by the MCP batch tool), natural-sorts them to determine the main recording,
-and stores all multi-recording output under `multi_recording/{dataset_name}/` inside the main recording's cindra
-output directory. ROI selection results are cached per dataset so that re-running the pipeline skips selection
+of recording directories (populated by the MCP batch tool) and natural-sorts them to determine the main recording.
+Each recording stores its own multi-recording output under its own `cindra/multi_recording/{dataset_name}/`
+directory; the main (first natural-sorted) recording additionally holds the shared resolved configuration and the
+processing tracker. ROI selection results are cached per dataset so that re-running the pipeline skips selection
 unless `repeat_selection` is enabled.
 
 | Parameter               | Type        | Default | Description                                                                                                  |
@@ -415,22 +423,24 @@ and let it handle per-dataset fine-tuning automatically.
 6. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
 7. **Configuration complete** — the validated template file is ready for use. This skill does not start
-   processing. If invoked standalone, inform the user that the configuration is ready, and they can proceed
-   when ready. If invoked from another skill, return control to the caller.
+   processing. If invoked standalone, the configuration is ready; to run it, proceed to
+   `/multi-recording-processing`. If invoked from another skill, return control to the caller.
 
 ---
 
 ## Related skills
 
-| Skill                             | Relationship                                                                      |
-|-----------------------------------|-----------------------------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server must be connected for configuration tools                |
-| `/single-recording-processing`    | Prerequisite: single-recording processing must complete before multi-recording    |
-| `/single-recording-results`       | Prerequisite: single-recording output files required as input for multi-recording |
-| `/single-recording-configuration` | Companion configuration reference for the single-recording pipeline               |
-| `/multi-recording-processing`     | Next step: processing workflow that consumes this configuration                   |
-| `/multi-recording-results`        | Output data format reference for evaluating processing results                    |
-| `/visualization`                  | Downstream: launch viewers to inspect multi-recording results after processing    |
+| Skill                             | Relationship                                                                   |
+|-----------------------------------|--------------------------------------------------------------------------------|
+| `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point     |
+| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server must be connected for configuration tools             |
+| `/acquisition-data-preparation`   | Upstream: invoke if raw data is not yet prepared for the prerequisite chain    |
+| `/single-recording-processing`    | Prerequisite: single-recording processing must complete first                  |
+| `/single-recording-results`       | Prerequisite: single-recording outputs required as multi-recording input       |
+| `/single-recording-configuration` | Companion configuration reference for the single-recording pipeline            |
+| `/multi-recording-processing`     | Next step: processing workflow that consumes this configuration                |
+| `/multi-recording-results`        | Output data format reference for evaluating processing results                 |
+| `/visualization`                  | Downstream: launch viewers to inspect multi-recording results after processing |
 
 ---
 
@@ -444,7 +454,7 @@ parameter detection.
 Multi-Recording Configuration Compliance:
 - [ ] cindra MCP server is connected (if not, invoke `/cindra-mcp-environment-setup`)
 - [ ] `validate_config_file_tool` reports no errors (run this first)
-- [ ] `recording_io.dataset_name` is set to a unique, non-empty string
+- [ ] `recording_io.dataset_name` is set to a unique, non-empty string (prepare overwrites it with the qualified name)
 - [ ] `roi_selection.probability_threshold` is appropriate for the dataset (0.85 default)
 - [ ] `diffeomorphic_registration.speed_factor` matches expected tissue drift (1-5 range)
 - [ ] `roi_tracking.mask_prevalence` is set appropriately for the number of recordings

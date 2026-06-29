@@ -11,7 +11,7 @@ from .mcp_server import run_server
 from ..dataclasses import PipelineType, MultiRecordingConfiguration, SingleRecordingConfiguration, detect_pipeline_type
 
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
-"""The Click context settings that ensure displayed help messages are formatted according to the Sun lab standard."""
+"""The Click context settings that ensure displayed help messages are formatted according to the cindra standard."""
 
 
 @click.group("cindra", context_settings=CONTEXT_SETTINGS)
@@ -180,8 +180,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     required=False,
     default=None,
     help=(
-        "[Single-recording] The path to the root directory that stores the processed recording's data. When provided, "
-        "this path overrides the matching field in the pipeline's configuration file."
+        "[Single-recording] The path to the root directory containing the recording's raw input TIFF files. When "
+        "provided, this path overrides the matching field in the pipeline's configuration file."
     ),
 )
 @click.option(

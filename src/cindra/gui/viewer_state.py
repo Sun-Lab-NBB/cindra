@@ -17,7 +17,7 @@ _LOCK_TIMEOUT: float = 10.0
 """The maximum number of seconds to wait when acquiring the state file lock."""
 
 _POLL_INTERVAL_MILLISECONDS: int = 250
-"""The default polling interval in milliseconds for the StateWriter to check for state changes."""
+"""The polling interval in milliseconds for the StateWriter to check for state changes."""
 
 
 def generate_state_path(viewer_id: str) -> str:

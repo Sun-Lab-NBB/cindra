@@ -48,7 +48,7 @@ def _make_mask(
 
 
 class TestComputeOverlap:
-    """Tests for _compute_overlap."""
+    """Tests _compute_overlap."""
 
     def test_no_overlap(self) -> None:
         """Verifies that non-overlapping ROIs have all-False overlap masks."""
@@ -72,8 +72,8 @@ class TestComputeOverlap:
         roi2 = _make_mask(y_pixels=[5, 5], x_pixels=[6, 7], weights=[1.0, 1.0], frame_width=20)
         _compute_overlap(rois=[roi1, roi2])
         # roi1 pixel (5,6) overlaps, pixel (5,5) does not.
-        assert roi1.overlap_mask[1]  # (5,6) is overlapping
-        assert not roi1.overlap_mask[0]  # (5,5) is not
+        assert roi1.overlap_mask[1]  # (5,6) is overlapping.
+        assert not roi1.overlap_mask[0]  # (5,5) is not.
 
     def test_empty_list(self) -> None:
         """Verifies that an empty list is handled without error."""
@@ -81,7 +81,7 @@ class TestComputeOverlap:
 
 
 class TestComputeCondensedIndex:
-    """Tests for _compute_condensed_index."""
+    """Tests _compute_condensed_index."""
 
     def test_known_values(self) -> None:
         """Verifies correct condensed indices for known square matrix positions."""
@@ -97,9 +97,9 @@ class TestComputeCondensedIndex:
 
     def test_symmetric(self) -> None:
         """Verifies that swapped indices produce the same condensed index."""
-        idx_a = _compute_condensed_index(row_index=3, column_index=1, matrix_size=5)
-        idx_b = _compute_condensed_index(row_index=1, column_index=3, matrix_size=5)
-        assert idx_a == idx_b
+        index_a = _compute_condensed_index(row_index=3, column_index=1, matrix_size=5)
+        index_b = _compute_condensed_index(row_index=1, column_index=3, matrix_size=5)
+        assert index_a == index_b
 
     def test_diagonal_raises(self) -> None:
         """Verifies that diagonal elements raise ValueError."""
@@ -108,7 +108,7 @@ class TestComputeCondensedIndex:
 
 
 class TestBuildRoiGrid:
-    """Tests for _build_roi_grid."""
+    """Tests _build_roi_grid."""
 
     def test_single_roi(self) -> None:
         """Verifies that a single ROI is placed in the correct grid cell."""
@@ -129,7 +129,7 @@ class TestBuildRoiGrid:
 
 
 class TestCreateTemplateRoi:
-    """Tests for _create_template_roi."""
+    """Tests _create_template_roi."""
 
     def test_identical_rois(self) -> None:
         """Verifies that identical ROIs produce a template with the same pixels."""
@@ -176,7 +176,7 @@ class TestCreateTemplateRoi:
 
 
 class TestClusterRoisInBin:
-    """Tests for _cluster_rois_in_bin."""
+    """Tests _cluster_rois_in_bin."""
 
     def test_empty_input(self) -> None:
         """Verifies that empty input returns empty output."""
@@ -211,7 +211,7 @@ class TestClusterRoisInBin:
 
 
 class TestFilterTemplates:
-    """Tests for _filter_templates."""
+    """Tests _filter_templates."""
 
     def test_keeps_large_masks(self) -> None:
         """Verifies that masks with enough non-overlapping pixels are kept."""

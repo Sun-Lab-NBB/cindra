@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-import numba  # type: ignore[import-untyped]
+import numba
 import numpy as np
 import scipy.ndimage
 import scipy.special
@@ -49,7 +49,6 @@ def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np
     result = data
     for dimension in range(data.ndim):
         kernel = _create_diffusion_kernel(sigma_list[dimension])
-        # noinspection PyTypeChecker
         result = scipy.ndimage.convolve1d(input=result, weights=kernel, axis=dimension, mode="nearest")
 
     return result
@@ -83,7 +82,7 @@ def zoom(
     new_height = round(factor_y * height)
     new_width = round(factor_x * width)
 
-    return _resize(data, new_height, new_width, order)
+    return _resize(data=data, new_height=new_height, new_width=new_width, order=order)
 
 
 class Deformation:
@@ -241,7 +240,6 @@ class Deformation:
 
         # Warps Y field.
         warped_y = np.empty(samples_x.shape, dtype=np.float32)
-        # noinspection PyTypeChecker
         _warp(
             data=self._fields[0],
             result=warped_y.ravel(),
@@ -253,7 +251,6 @@ class Deformation:
 
         # Warps X field.
         warped_x = np.empty(samples_x.shape, dtype=np.float32)
-        # noinspection PyTypeChecker
         _warp(
             data=self._fields[1],
             result=warped_x.ravel(),
@@ -368,6 +365,7 @@ class Deformation:
     def regularize(
         self,
         grid_sampling: float,
+        *,
         injective: bool = True,
         injective_factor: float = 0.9,
         freeze_edges: bool = True,
@@ -411,7 +409,7 @@ class Deformation:
         origin: tuple[int, int],
         crop_size: tuple[int, int],
     ) -> tuple[Deformation, tuple[int, int]]:
-        """Creates a cropped view of the deformation field centered on the specified origin.
+        """Creates a cropped view of the deformation field starting at the specified top-left origin.
 
         This method extracts a local region of the deformation field to reduce memory overhead when applying
         deformations to small regions such as individual ROI masks. The origin is automatically clamped to ensure
@@ -496,7 +494,6 @@ def _make_samples_absolute(
     indices_x = np.arange(width, dtype=np.float32).reshape(1, width)
     indices_y = np.arange(height, dtype=np.float32).reshape(height, 1)
 
-    # noinspection PyTypeChecker
     return indices_x + delta_x, indices_y + delta_y
 
 
@@ -547,10 +544,12 @@ def _warp(  # pragma: no cover
 
                 # Computes weighted sum over the 4x4 neighborhood.
                 interpolated_value = 0.0
-                for ky in range(4):
-                    for kx in range(4):
+                for kernel_y in range(4):
+                    for kernel_x in range(4):
                         interpolated_value += (
-                            data[pixel_y + ky - 1, pixel_x + kx - 1] * coefficients_y[ky] * coefficients_x[kx]
+                            data[pixel_y + kernel_y - 1, pixel_x + kernel_x - 1]
+                            * coefficients_y[kernel_y]
+                            * coefficients_x[kernel_x]
                         )
                 result[sample_index] = interpolated_value
 
@@ -577,26 +576,28 @@ def _warp(  # pragma: no cover
 
                 # Renormalizes x-coefficients to sum to 1 over the valid range.
                 coefficient_sum = 0.0
-                for k in range(range_start_x, range_end_x):
-                    coefficient_sum += coefficients_x[k]
+                for coefficient_index in range(range_start_x, range_end_x):
+                    coefficient_sum += coefficients_x[coefficient_index]
                 coefficient_sum = 1.0 / coefficient_sum
-                for k in range(range_start_x, range_end_x):
-                    coefficients_x[k] *= coefficient_sum
+                for coefficient_index in range(range_start_x, range_end_x):
+                    coefficients_x[coefficient_index] *= coefficient_sum
 
                 # Renormalizes y-coefficients to sum to 1 over the valid range.
                 coefficient_sum = 0.0
-                for k in range(range_start_y, range_end_y):
-                    coefficient_sum += coefficients_y[k]
+                for coefficient_index in range(range_start_y, range_end_y):
+                    coefficient_sum += coefficients_y[coefficient_index]
                 coefficient_sum = 1.0 / coefficient_sum
-                for k in range(range_start_y, range_end_y):
-                    coefficients_y[k] *= coefficient_sum
+                for coefficient_index in range(range_start_y, range_end_y):
+                    coefficients_y[coefficient_index] *= coefficient_sum
 
                 # Computes weighted sum over the valid partial neighborhood.
                 interpolated_value = 0.0
-                for ky in range(range_start_y, range_end_y):
-                    for kx in range(range_start_x, range_end_x):
+                for kernel_y in range(range_start_y, range_end_y):
+                    for kernel_x in range(range_start_x, range_end_x):
                         interpolated_value += (
-                            data[pixel_y + ky - 1, pixel_x + kx - 1] * coefficients_y[ky] * coefficients_x[kx]
+                            data[pixel_y + kernel_y - 1, pixel_x + kernel_x - 1]
+                            * coefficients_y[kernel_y]
+                            * coefficients_x[kernel_x]
                         )
                 result[sample_index] = interpolated_value
 

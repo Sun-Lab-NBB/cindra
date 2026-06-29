@@ -129,8 +129,8 @@ def compute_pc_metrics(context: RuntimeContext) -> None:  # pragma: no cover
     )
     timer.reset()
 
-    # Determines the number of frames to sample based on recording dimensions. Uses fewer samples for larger
-    # recordings or recordings with many frames to manage memory usage.
+    # Determines the number of frames to sample based on recording dimensions. Uses fewer samples for recordings with
+    # large frame dimensions or recordings with few total frames to manage memory usage.
     use_small_sample = (
         frame_count < _MAXIMUM_SAMPLE_COUNT
         or frame_height > _MAXIMUM_HEIGHT_FOR_LARGE_SAMPLE
@@ -239,7 +239,6 @@ def _compute_pc_extremes(
 
     # Fits PCA on transposed data to get frame-wise projections.
     pca = PCA(n_components=num_components).fit(frames_centered.T)
-    # noinspection PyUnresolvedReferences
     projections: NDArray[np.float32] = pca.components_.T.astype(np.float32)
 
     # Pre-computes sorted indices for all components at once.
@@ -262,6 +261,7 @@ def _compute_pc_extremes(
 def _register_pc_extremes(
     pc_low: NDArray[np.float32],
     pc_high: NDArray[np.float32],
+    *,
     bidirectional_corrected: bool,
     spatial_highpass_window: int | None = None,
     pre_smoothing_window: int | None = None,
@@ -276,7 +276,7 @@ def _register_pc_extremes(
     edge_taper_slope: float = 40.0,
     workers: int = -1,
 ) -> NDArray[np.float32]:
-    """Registers images at the extreme ends of each principal components to each-other to measure registration quality.
+    """Registers images at the extreme ends of each principal component to each other to measure registration quality.
 
     Attempts to align the high-projection PC images to the low-projection PC images using rigid and optionally
     nonrigid registration. The magnitude of the required offsets indicates how much residual motion remains after
@@ -300,7 +300,7 @@ def _register_pc_extremes(
         workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
-        A 2D array with shape (num_components, 3) containing registration metrics. Column 0 contains the mean rigid
+        A 2D array with shape (num_components, 3) containing registration metrics. Column 0 contains the rigid
         offset magnitude in pixels. Column 1 contains the mean nonrigid offset magnitude. Column 2 contains the maximum
         nonrigid offset magnitude. When nonrigid registration is disabled, columns 1 and 2 are zero.
     """

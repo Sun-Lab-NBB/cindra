@@ -32,11 +32,18 @@ Complete parameter reference for the single-recording (within-recording) cindra 
 
 ---
 
-## MCP configuration tools
+## Agent requirements
 
-These tools are registered on the `cindra-mcp` server. You MUST verify the MCP server is connected before
-using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
-connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
+You MUST use the cindra MCP tools for all configuration operations. Do not hand-edit configuration files
+or import cindra Python functions directly when an MCP tool exists for the task. If MCP tools are not
+available, invoke `/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+
+---
+
+## Available tools
+
+These tools are registered on the `cindra-mcp` server. Tool parameters and return values are
+self-documented via MCP introspection.
 
 | Tool                        | Purpose                                                                   |
 |-----------------------------|---------------------------------------------------------------------------|
@@ -381,22 +388,23 @@ and let it handle per-recording fine-tuning automatically.
 5. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
 6. **Configuration complete** — the validated template file is ready for use. This skill does not start
-   processing. If invoked standalone, inform the user that the configuration is ready, and they can proceed
-   when ready. If invoked from another skill, return control to the caller.
+   processing. If invoked standalone, the configuration is ready; to run it, proceed to
+   `/single-recording-processing`. If invoked from another skill, return control to the caller.
 
 ---
 
 ## Related skills
 
-| Skill                            | Relationship                                                                    |
-|----------------------------------|---------------------------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`  | Prerequisite: MCP server must be connected for configuration tools              |
-| `/acquisition-data-preparation`  | Prerequisite: raw data must be prepared before configuring the pipeline         |
-| `/single-recording-processing`   | Next step: processing workflow that consumes this configuration                 |
-| `/single-recording-results`      | Output data format reference for evaluating processing results                  |
-| `/multi-recording-configuration` | Companion configuration reference for the multi-recording pipeline              |
-| `/multi-recording-processing`    | Downstream: multi-recording workflow requires single-recording processing first |
-| `/visualization`                 | Downstream: launch viewers to inspect results after processing                  |
+| Skill                            | Relationship                                                               |
+|----------------------------------|----------------------------------------------------------------------------|
+| `/cindra-pipeline`               | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
+| `/cindra-mcp-environment-setup`  | Prerequisite: MCP server must be connected for configuration tools         |
+| `/acquisition-data-preparation`  | Prerequisite: raw data must be prepared before configuring the pipeline    |
+| `/single-recording-processing`   | Next step: processing workflow that consumes this configuration            |
+| `/single-recording-results`      | Output data format reference for evaluating processing results             |
+| `/multi-recording-configuration` | Companion configuration reference for the multi-recording pipeline         |
+| `/multi-recording-processing`    | Downstream: multi-recording requires single-recording processing first     |
+| `/visualization`                 | Downstream: launch viewers to inspect results after processing             |
 
 ---
 
@@ -415,5 +423,5 @@ Single-Recording Configuration Compliance:
 - [ ] `main.ignored_flyback_planes` lists correct flyback plane indices if applicable
 - [ ] `file_io.ignored_file_names` lists any TIFFs to exclude
 - [ ] Review any warnings from `validate_config_file_tool` (pipeline-set parameters, channel consistency)
-- [ ] Acquisition data prepared, `validate_recording_readiness_tool` passed (if not, invoke `/acquisition-data-preparation`)
+- [ ] Acquisition data prepared, `validate_recording_readiness_tool` passed (else run `/acquisition-data-preparation`)
 ```

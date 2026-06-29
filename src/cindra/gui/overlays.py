@@ -7,7 +7,7 @@ import contextlib
 
 import numpy as np
 import pyqtgraph as pg  # type: ignore[import-untyped]
-import matplotlib.cm
+import matplotlib as mpl
 from matplotlib.colors import hsv_to_rgb
 from ataraxis_base_utilities import LogLevel, console
 
@@ -30,7 +30,8 @@ _STATISTIC_FIELD_MAP: dict[int, str] = {
     ROIColorMode.COLOCALIZATION_PROBABILITY: "colocalization_probability",
     ROIColorMode.RECORDING_COUNT: "recording_count",
 }
-"""Maps ROIColorMode values to the corresponding ROIStatistics attribute names for percentile-based color modes."""
+"""Maps ROIColorMode values to the corresponding ROIStatistics/ROIMask attribute names for percentile-based color
+modes; recording_count is resolved on ROIMask and unmapped attributes default to 0.0."""
 
 
 def build_views(
@@ -356,8 +357,8 @@ def draw_masks(
 ) -> NDArray[np.uint8]:
     """Draws the current mask overlay for the image panel.
 
-    Computes transparency based on ROI weights, then highlights the currently selected ROIs
-    with full-white (ROI view) or colored circles (image views).
+    Applies a flat overlay opacity (``roi_opacity``) at all ROI pixels, then highlights the currently selected ROIs
+    with overlap-depth-scaled brightness (ROI view) or colored circles (image views).
 
     Args:
         roi_statistics: The ROI statistics for the current view.
@@ -870,7 +871,7 @@ def _apply_colormap(values: NDArray[np.float32], colormap: str = "hsv") -> NDArr
         return _apply_hsv_colormap(values)
 
     try:
-        color_map = matplotlib.cm.get_cmap(colormap)
+        color_map = mpl.colormaps.get_cmap(colormap)
         mapped = color_map(values)[:, :3]
         mapped *= 255
         return mapped.astype(np.uint8)

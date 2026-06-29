@@ -70,6 +70,7 @@ class DiffeomorphicDemonsRegistration:
         grid_sampling_factor: float = 1.0,
         final_scale: float = 1.0,
         final_grid_sampling: float = 16.0,
+        *,
         smooth_scale: bool = True,
         injective: bool = True,
         freeze_edges: bool = True,
@@ -114,7 +115,7 @@ class DiffeomorphicDemonsRegistration:
         """
         return self._deformations[image_index]
 
-    def register(self, progress: bool = True) -> None:
+    def register(self, *, progress: bool = True) -> None:
         """Performs the multiscale registration process.
 
         Iteratively computes deformations from coarse to fine scales, updating the groupwise alignment at each step.
@@ -122,7 +123,8 @@ class DiffeomorphicDemonsRegistration:
         Args:
             progress: Determines whether to display a progress bar to report the registration progress.
         """
-        self._interpolation_order = 1  # Initializes the interpolation order to 1
+        # Starts with bilinear (order 1) interpolation for the coarse iterations.
+        self._interpolation_order = 1
 
         # The iteration factor controls smooth scale transitions between levels.
         iteration_factor = 0.5 ** (1.0 / self._scale_sampling)
@@ -199,10 +201,10 @@ class DiffeomorphicDemonsRegistration:
         iteration_key = (level, iteration, scale)
 
         # Computes incremental deformation for each image.
-        incremental_deformations = []
-        for image_index in range(len(self._images)):
-            deformation = self._compute_groupwise_deformation(image_index=image_index, iteration_key=iteration_key)
-            incremental_deformations.append(deformation)
+        incremental_deformations = [
+            self._compute_groupwise_deformation(image_index=image_index, iteration_key=iteration_key)
+            for image_index in range(len(self._images))
+        ]
 
         # Applies incremental deformations to the running totals.
         for image_index in range(len(self._images)):
@@ -376,7 +378,6 @@ class DiffeomorphicDemonsRegistration:
             message = "Unable to retrieve image. The pyramids have not been initialized, call register() first."
             console.error(message=message, error=RuntimeError)
 
-        # noinspection PyUnresolvedReferences
         image = self._pyramids[image_index].get_scale(scale=scale)
 
         # Applies current accumulated deformation if one exists.

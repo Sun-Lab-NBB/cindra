@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from functools import lru_cache
 
-from numba import vectorize  # type: ignore[import-untyped]
+from numba import vectorize
 import numpy as np
 from numpy.fft import ifftshift
 from scipy.fft import (
@@ -188,7 +188,9 @@ def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[n
     if data.ndim == 2:  # noqa: PLR2004
         data = data[np.newaxis, :, :]
 
-    # Pads spatial dimensions to handle window edges. Zero padding ensures border pixels average over partial windows.
+    # Pads spatial dimensions with zeros to handle window edges. Border pixels are summed over partial (zero-filled)
+    # windows but still divided by the full window**2, so their means are under-estimated and corrected later via the
+    # normalization weights in apply_spatial_high_pass.
     half_pad = window // 2
     data_padded = np.pad(
         array=data,

@@ -31,8 +31,8 @@ The single-recording pipeline algorithms reimplemented in this library originate
 and fall under the following copyright notice:
 **Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.**
 
-For the original suite2p algorithm documentation, see the original documentation available
-[here](https://suite2p.readthedocs.io/en/latest/settings.html).
+For the original suite2p algorithm documentation, see the
+[original suite2p settings reference](https://suite2p.readthedocs.io/en/latest/settings.html).
 
 The multi-recording ROI tracking pipeline algorithms reimplemented in this library originate from the
 [OSM Manuscript](https://www.nature.com/articles/s41586-024-08548-w). All original algorithm rights belong to the
@@ -65,7 +65,7 @@ ___
   and results querying, and a GUI server with 4 tools for viewer lifecycle management.
 - Natively supports two-channel functional imaging with independent ROI detection, colocalization analysis, and
   fluorescence extraction per channel.
-- Uses Numba JIT compilation with Intel TBB threading for parallelized frame-level computation.
+- Uses Numba JIT compilation with Intel TBB threading (OpenMP on macOS) for parallelized frame-level computation.
 - GPL-3.0-or-later License.
 
 ___
@@ -165,11 +165,11 @@ Each raw data directory must contain a `cindra_parameters.json` file that descri
 file can be generated using the `generate_acquisition_parameters_file_tool` [MCP tool](#mcp-servers) or constructed
 manually. The required fields are:
 
-| Field            | Type  | Description                                                 |
-|------------------|-------|-------------------------------------------------------------|
-| `frame_rate`     | float | Volume acquisition rate in Hz (frames per second per plane) |
-| `plane_number`   | int   | Number of physical imaging planes                           |
-| `channel_number` | int   | Number of channels per plane (1 or 2)                       |
+| Field            | Type  | Description                                                           |
+|------------------|-------|-----------------------------------------------------------------------|
+| `frame_rate`     | float | Volume acquisition rate in Hz (rate across all planes, not per-plane) |
+| `plane_number`   | int   | Number of physical imaging planes                                     |
+| `channel_number` | int   | Number of channels per plane (1 or 2)                                 |
 
 For MROI (multi-region of interest) line-scanning recordings, additional fields describe the geometry of each acquired
 region:
@@ -286,15 +286,17 @@ Channel 2 variants (`mean_image_channel_2.npy`, etc.) are saved when both channe
 
 Stored under `plane_<i>/`:
 
-| File                          | Format                   | Description                                                              |
-|-------------------------------|--------------------------|--------------------------------------------------------------------------|
-| `roi_masks.npz`               | variable-length arrays   | Per-ROI pixel coordinates, weights, centroids                            |
-| `roi_statistics.npz`          | float arrays             | Per-ROI shape properties (compactness, solidity, aspect ratio, skewness) |
-| `cell_fluorescence.npy`       | float32 (n_rois, frames) | Raw fluorescence time series per ROI                                     |
-| `neuropil_fluorescence.npy`   | float32 (n_rois, frames) | Background fluorescence from surround masks                              |
-| `subtracted_fluorescence.npy` | float32 (n_rois, frames) | Neuropil-corrected and baseline-subtracted traces                        |
-| `spikes.npy`                  | float32 (n_rois, frames) | Inferred spike amplitudes from OASIS                                     |
-| `cell_classification.npy`     | float32 (n_rois, 2)      | Column 0: is_cell label (1.0 or 0.0); column 1: classifier probability   |
+| File                                  | Format                   | Description                                                              |
+|---------------------------------------|--------------------------|--------------------------------------------------------------------------|
+| `roi_masks.npz`                       | variable-length arrays   | Per-ROI pixel coordinates, weights, centroids                            |
+| `roi_statistics.npz`                  | float arrays             | Per-ROI shape properties (compactness, solidity, aspect ratio, skewness) |
+| `cell_fluorescence.npy`               | float32 (n_rois, frames) | Raw fluorescence time series per ROI                                     |
+| `neuropil_fluorescence.npy`           | float32 (n_rois, frames) | Background fluorescence from surround masks                              |
+| `subtracted_fluorescence.npy`         | float32 (n_rois, frames) | Neuropil-corrected and baseline-subtracted traces                        |
+| `spikes.npy`                          | float32 (n_rois, frames) | Inferred spike amplitudes from OASIS                                     |
+| `cell_classification.npy`             | float32 (n_rois, 2)      | Column 0: is_cell label (1.0 or 0.0); column 1: classifier probability   |
+| `cell_colocalization.npy`             | float32 (n_rois, 2)      | Per-ROI colocalization flag and probability (two-channel only)           |
+| `corrected_structural_mean_image.npy` | float32 (h, w)           | Bleed-through-corrected structural mean (intensity colocalization)       |
 
 Channel 2 variants (`cell_fluorescence_channel_2.npy`, etc.) are saved when both channels are functional.
 
@@ -316,12 +318,12 @@ and channel 2 variants) follows the same naming convention at the combined level
 
 #### Multi-Recording Data
 
-Stored under `<output_path>/cindra/multi_recording/<dataset_name>/` per recording:
+Stored under `<recording_directory>/cindra/multi_recording/<dataset_name>/` per recording:
 
 | File / Directory                         | Description                                               |
 |------------------------------------------|-----------------------------------------------------------|
 | `multi_recording_runtime_data.yaml`      | Per-recording runtime metadata and timing                 |
-| `multi_recording_configuration.yaml`     | Shared multi-recording configuration                      |
+| `multi_recording_configuration.yaml`     | Shared configuration (main recording only)                |
 | `registration_arrays/deform_field_y.npy` | Vertical deformation field component                      |
 | `registration_arrays/deform_field_x.npy` | Horizontal deformation field component                    |
 | `registration_arrays/transformed_*.npy`  | Reference images warped to the shared coordinate space    |
@@ -382,7 +384,7 @@ running separate `cindra run --process --target-plane <index>` commands.
 
 Registration aligns every frame in the recording to a stable reference image, correcting for brain motion that occurs
 during imaging. Even small motion artifacts corrupt downstream analysis — if a cell drifts by a few pixels between
-frames, its fluorescence trace will mix with signals from neighboring cells or neuropil. Registration ensures that
+frames, its fluorescence trace mixes with signals from neighboring cells or neuropil. Registration ensures that
 each pixel corresponds to the same physical location across all frames.
 
 The algorithm proceeds in two stages. Rigid registration shifts each frame as a whole using phase correlation, and
@@ -395,7 +397,7 @@ Reads:
 |--------------------------------|-----------------------------------------------------|
 | `plane_<i>/channel_1_data.bin` | Raw binary imaging data from binarization           |
 | `plane_<i>/channel_2_data.bin` | Channel 2 binary data (two-channel recordings only) |
-| `plane_<i>/runtime_data.yaml`  | Mean image and frame dimensions from binarization   |
+| `plane_<i>/runtime_data.yaml`  | Frame dimensions, frame count, and sampling rate    |
 
 Produces:
 
@@ -408,10 +410,11 @@ Produces:
 | `plane_<i>/registration_data/bad_frames.npy`         | Boolean mask flagging excessive-motion frames |
 | `plane_<i>/registration_data/nonrigid_*_offsets.npy` | Per-block deformation offsets (when enabled)  |
 
-When the `registration_metric_principal_components` configuration parameter is set above zero, the registration step
-also computes principal component projections of the registered movie. These projections capture the dominant spatial
-patterns of residual variance after motion correction. A well-registered recording should show principal components
-dominated by neural activity rather than motion artifacts. The projections are saved as
+When the `registration_metric_principal_components` configuration parameter is set above zero and the recording contains
+at least 1500 frames, the registration step computes principal component projections of the registered movie. These
+projections capture the dominant spatial patterns of residual variance after motion correction. A well-registered
+recording should show principal components dominated by neural activity rather than motion artifacts. The projections
+are saved as
 `principal_component_projections.npy`, `principal_component_extreme_images.npy`, and
 `principal_component_shift_metrics.npy` under `registration_data/`, and can be inspected interactively using the
 registration quality GUI viewer (`cindra-gui registration`).
@@ -424,9 +427,9 @@ sources based on their spatiotemporal fluorescence patterns rather than morpholo
 variations in cell shape and brightness.
 
 The algorithm temporally bins frames to improve signal-to-noise ratio, optionally applies PCA denoising, then runs a
-sparse iterative detection procedure that identifies compact fluorescent sources. Detected ROIs are filtered by a
-lightweight preclassification step, and shape statistics (area, compactness, aspect ratio) are computed for each
-surviving ROI.
+sparse iterative detection procedure that identifies compact fluorescent sources. Detected ROIs are optionally filtered
+by a lightweight preclassification step (when the preclassification threshold is above zero), and shape statistics
+(area, compactness, aspect ratio) are computed for each surviving ROI.
 
 Reads:
 
@@ -645,7 +648,8 @@ Produces:
 | `roi_statistics.npz` | Shape statistics for projected templates                     |
 
 All Phase 1 results are persisted under `multi_recording/<dataset_name>/` within each recording's cindra output
-directory, along with a `multi_recording_runtime_data.yaml` file and a copy of the multi-recording configuration.
+directory, along with a per-recording `multi_recording_runtime_data.yaml` file. A single copy of the multi-recording
+configuration (`multi_recording_configuration.yaml`) is written once to the main (first) recording's directory.
 
 #### Phase 2: Multi-Recording Extraction
 
@@ -844,14 +848,14 @@ that want to modify the source code of this library.
 ### Installing the Project
 
 ***Note,*** this installation method requires **mamba version 2.3.2 or above**. Currently, all
-Sun lab automation pipelines require that mamba is installed through the
+cindra automation pipelines require that mamba is installed through the
 [miniforge3](https://github.com/conda-forge/miniforge) installer.
 
 1. Download this repository to the local machine using the preferred method, such as git-cloning.
 2. If the downloaded distribution is stored as a compressed archive, unpack it using the
    appropriate decompression tool.
 3. `cd` to the root directory of the prepared project distribution.
-4. Install the core Sun lab development dependencies into the ***base*** mamba environment via the
+4. Install the core cindra development dependencies into the ***base*** mamba environment via the
    `mamba install tox uv tox-uv` command.
 5. Use the `tox -e create` command to create the project-specific development environment followed
    by `tox -e install` command to install the project into that environment as a library.
@@ -902,7 +906,7 @@ Claude Code skills and AI development assets for this project are distributed th
   environment setup. Install this marketplace to register the `cindra mcp` and `cindra-gui mcp` servers with
   compatible MCP clients and make all pipeline workflow skills available.
 - [ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace: Provides shared development skills that enforce
-  Sun Lab coding conventions (Python style, README style, commit messages, pyproject.toml, tox configuration) and
+  cindra coding conventions (Python style, README style, commit messages, pyproject.toml, tox configuration) and
   general-purpose codebase exploration tools via the **automation** plugin.
 
 Install both marketplaces to make all associated skills and development tools available to compatible AI coding agents.

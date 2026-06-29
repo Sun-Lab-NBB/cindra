@@ -19,7 +19,7 @@ _BLOCK_COUNT: int = 3
 """The number of spatial blocks along each axis used for block-wise bleedthrough regression."""
 
 _SMOOTHING_FRACTION: float = 0.25
-"""The fraction of the mean block dimension used as the Gaussian smoothing sigma for quadrant masks."""
+"""The fraction of the mean block dimension used as the Gaussian smoothing sigma for the block masks."""
 
 _INTENSITY_EPSILON: float = 1e-3
 """The minimum intensity floor used to prevent division by zero in colocalization probability computation."""
@@ -109,8 +109,8 @@ def compute_intensity_colocalization(
         if neuropil_indices is not None and neuropil_indices.size > 0:
             intensity_outside[roi_index] = flattened_image[neuropil_indices].mean()
 
-    # Computes the colocalization probability as the ratio of inside to total intensity. Adds a small
-    # epsilon to prevent division by zero and ensure numerical stability.
+    # Computes the colocalization probability as the ratio of inside to total intensity. Floors
+    # intensity_inside at a small epsilon to prevent division by zero and ensure numerical stability.
     intensity_inside = np.maximum(np.float32(_INTENSITY_EPSILON), intensity_inside)
     colocalization_probability = intensity_inside / (intensity_inside + intensity_outside)
 
@@ -118,7 +118,7 @@ def compute_intensity_colocalization(
     is_colocalized = colocalization_probability > colocalization_threshold
 
     # Stacks results into (n_rois, 2) array matching the reference implementation format.
-    colocalization_result = np.stack((is_colocalized, colocalization_probability), axis=-1).astype(np.float32)
+    colocalization_result = np.stack(arrays=(is_colocalized, colocalization_probability), axis=-1).astype(np.float32)
 
     return colocalization_result, corrected_mean_image
 
@@ -179,9 +179,9 @@ def compute_spatial_colocalization(
     )
 
     # Finds the best match index and score for each ROI in both directions.
-    best_indices_1 = np.argmax(overlap_matrix, axis=1)
-    best_scores_1 = np.max(overlap_matrix, axis=1)
-    best_indices_2 = np.argmax(overlap_matrix, axis=0)
+    best_indices_1 = np.argmax(a=overlap_matrix, axis=1)
+    best_scores_1 = np.max(a=overlap_matrix, axis=1)
+    best_indices_2 = np.argmax(a=overlap_matrix, axis=0)
 
     # Enforces mutual best matching: a pair (i, j) is accepted only when channel 1 ROI i's best
     # match is j AND channel 2 ROI j's best match is i. For each channel 1 ROI i, looks up its

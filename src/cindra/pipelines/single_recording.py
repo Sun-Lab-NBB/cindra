@@ -1,6 +1,6 @@
 """Provides the high-level API for the single-recording processing pipeline."""
 
-import numba  # type: ignore[import-untyped]
+import numba
 from ataraxis_time import PrecisionTimer, TimerPrecisions, get_timestamp
 from ataraxis_base_utilities import LogLevel, console
 
@@ -32,7 +32,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:  # 
         configuration: The single-recording pipeline configuration.
 
     Raises:
-        ValueError: If data_path is not configured.
+        ValueError: If data_path or output_path is not configured.
     """
     # Validates that data_path is configured.
     if configuration.file_io.data_path is None:
@@ -115,8 +115,7 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int)
     Notes:
         This function executes the second phase of the single-recording pipeline: it processes a single imaging
         plane through registration, ROI detection, and trace extraction. Multiple planes can be processed in
-        parallel, but each
-        plane may use significant memory and CPU resources.
+        parallel, but each plane may use significant memory and CPU resources.
 
     Args:
         configuration: The single-recording pipeline configuration.

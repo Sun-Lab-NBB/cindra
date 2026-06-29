@@ -128,7 +128,6 @@ def compute_rigid_offsets(
     maximum_radius = minimum_dimension // 2
     correlation_radius = int(np.minimum(np.round(maximum_offset_fraction * minimum_dimension), maximum_radius))
 
-    # Applies phase correlation in frequency domain.
     correlation_data = apply_phase_correlation(frames=frames, kernel=reference_kernel, workers=workers)
 
     # Extracts the central region containing valid correlation peaks. The correlation surface wraps around,
@@ -160,7 +159,6 @@ def compute_rigid_offsets(
     y_offsets = (flat_indices // window_size - correlation_radius).astype(np.int32)
     x_offsets = (flat_indices % window_size - correlation_radius).astype(np.int32)
 
-    # Extracts correlation maxima at peak locations.
     correlation_maxima = correlation_window.reshape(num_frames, -1)[np.arange(num_frames), flat_indices]
 
     return y_offsets, x_offsets, correlation_maxima.astype(np.float32)

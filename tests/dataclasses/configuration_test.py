@@ -18,7 +18,7 @@ from cindra.dataclasses.single_recording_configuration import (
 
 
 class TestSingleRecordingConfigurationRoundTrip:
-    """Tests for SingleRecordingConfiguration save/load round-trip."""
+    """Tests SingleRecordingConfiguration save/load round-trip."""
 
     def test_default_configuration_survives_round_trip(self, tmp_path: Path) -> None:
         """Verifies that a default SingleRecordingConfiguration can be saved and loaded without data loss."""
@@ -39,7 +39,7 @@ class TestSingleRecordingConfigurationRoundTrip:
 
 
 class TestMultiRecordingConfigurationRoundTrip:
-    """Tests for MultiRecordingConfiguration save/load round-trip."""
+    """Tests MultiRecordingConfiguration save/load round-trip."""
 
     def test_default_configuration_survives_round_trip(self, tmp_path: Path) -> None:
         """Verifies that a default MultiRecordingConfiguration can be saved and loaded without data loss."""
@@ -60,7 +60,7 @@ class TestMultiRecordingConfigurationRoundTrip:
 
 
 class TestDetectPipelineType:
-    """Tests for detect_pipeline_type."""
+    """Tests detect_pipeline_type."""
 
     def test_detects_single_recording_pipeline(self, tmp_path: Path) -> None:
         """Verifies that a saved SingleRecordingConfiguration file is detected as SINGLE_RECORDING."""

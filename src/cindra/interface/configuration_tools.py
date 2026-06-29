@@ -20,7 +20,12 @@ from dataclasses import (
 import yaml  # type: ignore[import-untyped]
 
 from ..io import resolve_recording_roots
-from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
+from ..dataclasses import (
+    BaselineMethod,
+    ReferenceImageType,
+    MultiRecordingConfiguration,
+    SingleRecordingConfiguration,
+)
 from .mcp_instance import mcp
 
 _MAX_SPEED_FACTOR: int = 5
@@ -42,15 +47,19 @@ def generate_config_file_tool(
 ) -> dict[str, str | bool]:
     """Generates a default configuration YAML file for the specified pipeline type.
 
-    Creates a configuration file with sensible defaults that can be used directly or modified before processing.
+    Creates a configuration file with sensible defaults that can be used directly or modified before processing. For
+    the full set of writable parameters and their constraints, consult the single-recording-configuration and
+    multi-recording-configuration cindra skills.
 
     Args:
         output_path: The absolute path where the configuration file should be saved.
         pipeline_type: The type of pipeline configuration to generate ('single-recording' or 'multi-recording').
 
     Returns:
-        On success, contains the resolved 'file_path' and the 'pipeline_type'. On failure, contains an 'error'
-        describing the issue. Both cases include a 'success' flag.
+        On success, contains the resolved 'file_path' and the 'pipeline_type'. The resolved 'file_path' may differ
+        from 'output_path' when the suffix is normalized to '.yaml' (any non-'.yaml' suffix is replaced), so use the
+        returned 'file_path' for subsequent validate and prepare steps. On failure, contains an 'error' describing
+        the issue. Both cases include a 'success' flag.
     """
     output = Path(output_path)
 
@@ -196,11 +205,11 @@ def resolve_dataset_name_tool(
 
     # Derives specifier from the common parent directory when not explicitly provided.
     if not specifier:
-        resolved_paths = [Path(p) for p in recording_paths]
+        resolved_paths = [Path(path) for path in recording_paths]
         if len(resolved_paths) == 1:
             specifier = resolved_paths[0].parent.name
         else:
-            common = Path(commonpath(resolved_paths))
+            common = Path(commonpath(paths=resolved_paths))
             specifier = common.name
 
         if not specifier:
@@ -293,16 +302,21 @@ def read_config_file_tool(file_path: str) -> dict[str, str | bool | list[str] | 
 
 @mcp.tool()
 def validate_config_file_tool(file_path: str) -> dict[str, str | bool | list[str] | dict[str, dict[str, object]]]:
-    """Validates a cindra configuration YAML file by loading it through the appropriate configuration dataclass,
-    checking parameter values against known constraints, and identifying parameters that differ from their defaults.
+    """Validates a cindra configuration YAML file and reports any problems found.
+
+    Loads the file through the appropriate configuration dataclass, checks parameter values against known constraints,
+    and identifies parameters that differ from their defaults.
 
     Args:
         file_path: The absolute path to the cindra configuration YAML file to validate.
 
     Returns:
-        On success, contains the resolved 'file_path', 'pipeline_type', overall 'valid' status, and any validation
-        'errors', 'warnings', or 'non_default_parameters' detected. On failure, contains an 'error' describing the
-        issue. Both cases include a 'success' flag.
+        On success, contains the resolved 'file_path', 'pipeline_type', and overall 'valid' status, plus 'errors',
+        'warnings', and 'non_default_parameters' when non-empty (each of these three keys is omitted when empty).
+        'errors' and 'warnings' are lists of human-readable strings; 'non_default_parameters' maps each changed
+        'section.parameter' dotted path to a {'current', 'default'} value pair. A 'success' value of True only means
+        the tool ran — gate downstream steps on the 'valid' field, which is False whenever 'errors' is non-empty. On
+        failure, contains an 'error' describing the issue. Both cases include a 'success' flag.
     """
     path = Path(file_path)
 
@@ -356,11 +370,11 @@ def validate_config_file_tool(file_path: str) -> dict[str, str | bool | list[str
         if raw_pipeline_type == "single-recording":
             config = SingleRecordingConfiguration.load(file_path=path)
             default = SingleRecordingConfiguration()
-            errors, warnings = _validate_single_recording(config)
+            errors, warnings = _validate_single_recording(config=config)
         else:
             config = MultiRecordingConfiguration.load(file_path=path)
             default = MultiRecordingConfiguration()
-            errors, warnings = _validate_multi_recording(config)
+            errors, warnings = _validate_multi_recording(config=config)
     except Exception as error:
         return {
             "success": False,
@@ -408,8 +422,10 @@ def _to_json_compatible(value: object) -> object:
 
 
 def _identify_non_default_parameters(config: object, default: object, prefix: str = "") -> dict[str, dict[str, object]]:
-    """Compares a loaded configuration against its default instance and returns a mapping of dotted parameter paths
-    to their current and default values for all parameters that differ from the default.
+    """Compares a loaded configuration against its default instance and reports the parameters that differ.
+
+    Returns a mapping of dotted parameter paths to their current and default values for all parameters that differ
+    from the default.
 
     Args:
         config: The loaded configuration dataclass instance to compare.
@@ -422,7 +438,6 @@ def _identify_non_default_parameters(config: object, default: object, prefix: st
     """
     differences: dict[str, dict[str, object]] = {}
 
-    # noinspection PyDataclass
     for field in dataclass_fields(config):  # type: ignore[arg-type]
         if not field.init:
             continue
@@ -635,6 +650,12 @@ def _validate_single_recording(
             f"spike_deconvolution.baseline_percentile must be in [0, {_MAX_PERCENTAGE}] "
             f"(current: {config.spike_deconvolution.baseline_percentile})."
         )
+    valid_baseline_methods = {member.value for member in BaselineMethod}
+    if str(config.spike_deconvolution.baseline_method) not in valid_baseline_methods:
+        errors.append(
+            f"spike_deconvolution.baseline_method must be one of {sorted(valid_baseline_methods)} "
+            f"(current: {config.spike_deconvolution.baseline_method})."
+        )
 
     return errors, warnings
 
@@ -657,6 +678,14 @@ def _validate_multi_recording(
     # Recording I/O section validations.
     if not config.recording_io.dataset_name:
         errors.append("recording_io.dataset_name must be a non-empty string.")
+    else:
+        dataset_name_error = _validate_filesystem_name(
+            name=config.recording_io.dataset_name,
+            field_label="recording_io.dataset_name",
+            action="validate configuration file",
+        )
+        if dataset_name_error is not None:
+            errors.append(dataset_name_error)
     if config.recording_io.recording_directories:
         warnings.append(
             "recording_io.recording_directories is set (pipeline-set parameter — will be overwritten at runtime)."
@@ -717,6 +746,12 @@ def _validate_multi_recording(
         warnings.append(
             f"diffeomorphic_registration.speed_factor is outside the typical 1-{_MAX_SPEED_FACTOR} range "
             f"(current: {config.diffeomorphic_registration.speed_factor})."
+        )
+    valid_image_types = {member.value for member in ReferenceImageType}
+    if str(config.diffeomorphic_registration.image_type) not in valid_image_types:
+        errors.append(
+            f"diffeomorphic_registration.image_type must be one of {sorted(valid_image_types)} "
+            f"(current: {config.diffeomorphic_registration.image_type})."
         )
 
     # ROI tracking section validations.
@@ -801,7 +836,7 @@ def _validate_multi_recording(
     return errors, warnings
 
 
-def _validate_filesystem_name(name: str, field_label: str) -> str | None:
+def _validate_filesystem_name(name: str, field_label: str, action: str = "resolve dataset name") -> str | None:
     """Validates that a name is safe for use as a filesystem directory name.
 
     Rejects names containing characters that are invalid in directory names on common filesystems, names that consist
@@ -810,24 +845,25 @@ def _validate_filesystem_name(name: str, field_label: str) -> str | None:
     Args:
         name: The name string to validate.
         field_label: The label of the field being validated, used in error messages.
+        action: The action phrase used in the "Unable to {action}." error prefix. Defaults to "resolve dataset name".
 
     Returns:
         An error message string if the name is invalid, or None if the name is safe.
     """
     if not name.strip():
-        return f"Unable to resolve dataset name. The {field_label} must not be empty or consist entirely of whitespace."
+        return f"Unable to {action}. The {field_label} must not be empty or consist entirely of whitespace."
 
     if name in (".", ".."):
-        return f"Unable to resolve dataset name. The {field_label} must not be '{name}'."
+        return f"Unable to {action}. The {field_label} must not be '{name}'."
 
     found = sorted({character for character in name if character in _FORBIDDEN_FILESYSTEM_CHARACTERS})
     if found:
         display = ", ".join(repr(character) for character in found)
-        return f"Unable to resolve dataset name. The {field_label} contains filesystem-unsafe characters: {display}."
+        return f"Unable to {action}. The {field_label} contains filesystem-unsafe characters: {display}."
 
     # Rejects names with control characters (ordinal < 32).
     control_characters = [character for character in name if ord(character) < _MAXIMUM_CONTROL_CHARACTER_ORDINAL]
     if control_characters:
-        return f"Unable to resolve dataset name. The {field_label} contains control characters."
+        return f"Unable to {action}. The {field_label} contains control characters."
 
     return None

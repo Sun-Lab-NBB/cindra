@@ -122,13 +122,19 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
     and returns per-dataset status (discover, extract).
 
     Args:
-        recording_path: The absolute path to the recording data directory.
+        recording_path: The absolute path to the recording OUTPUT directory, which is the parent of the cindra/ folder
+            and equals the recording_output_paths entries returned by the prepare tool when the output root differs from
+            the raw-data root. The cindra/ subdirectory is resolved directly under it with no fallback.
 
     Returns:
         On success, contains the 'recording_path', 'single_recording' status (per-phase jobs, summary, and synthesized
         status string), and 'multi_recording' status (per-dataset tracker status). Each section reports 'not_started'
         when no tracker exists. On failure, contains an 'error' describing the issue. Both cases include a 'success'
-        flag.
+        flag. The synthesized single-recording status string is one of completed, failed, scheduled, binarizing,
+        processing, or combining. The synthesized multi-recording status string is one of completed, failed, scheduled,
+        discovering, or extracting. These differ from the get_processing_jobs_status_tool summary vocabulary of pending,
+        running, succeeded, and failed, which describes the same jobs (pending equals scheduled, and running spans the
+        *-ing phases).
     """
     recording = Path(recording_path)
 
@@ -185,7 +191,13 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
     Returns:
         On success, contains 'single_recordings' and 'multi_recordings' lists with per-tracker status, and a
         'summary' with aggregate counts for completed, failed, in_progress, and not_started pipelines. On failure,
-        contains an 'error' describing the issue. Both cases include a 'success' flag.
+        contains an 'error' describing the issue. Both cases include a 'success' flag. Each per-tracker entry carries a
+        synthesized status string: single-recording entries use completed, failed, scheduled, binarizing, processing,
+        or combining, and multi-recording entries use completed, failed, scheduled, discovering, or extracting. The
+        summary roll-up counts completed as completed, failed as failed, scheduled as not_started, and buckets every
+        other status (the *-ing phases) as in_progress. These differ from the get_processing_jobs_status_tool summary
+        vocabulary of pending, running, succeeded, and failed, which describes the same jobs (pending equals scheduled,
+        and running spans the *-ing phases).
     """
     root = Path(root_directory)
 
@@ -311,9 +323,11 @@ def prepare_single_recording_batch_tool(
 
     Returns:
         On success, contains per-recording manifests in 'recordings' keyed by recording path, with each entry listing
-        its configuration_path, tracker_path, pipeline_type, and per-phase job entries (binarize_job, process_jobs,
-        combine_job) including job_id, name, specifier, and current status. Also includes 'total_recordings' and
-        'total_jobs' counts. On failure, contains an 'error' describing the issue.
+        its configuration_path, tracker_path, output_path, pipeline_type, and per-phase job entries (binarize_job,
+        process_jobs, combine_job) including job_id, name, specifier, and current status. The output_path is the
+        absolute output directory and the parent of the cindra/ directory, where configuration_path equals
+        <output_path>/cindra/configuration.yaml, so downstream verify, status, and clean tools need no re-derivation.
+        Also includes 'total_recordings' and 'total_jobs' counts. On failure, contains an 'error' describing the issue.
     """
     if not recording_paths:
         return {"success": False, "error": "Unable to prepare batch. At least one recording path is required."}
@@ -421,6 +435,7 @@ def prepare_single_recording_batch_tool(
             recordings_manifest[recording_key] = {
                 "configuration_path": str(configuration_file_path),
                 "tracker_path": str(tracker_path),
+                "output_path": str(output_path),
                 "pipeline_type": "single-recording",
                 "binarize_job": binarize_entry,
                 "process_jobs": process_entries,
@@ -480,6 +495,7 @@ def prepare_single_recording_batch_tool(
             recordings_manifest[recording_key] = {
                 "configuration_path": str(recording_configuration_path),
                 "tracker_path": str(tracker_path),
+                "output_path": str(output_path),
                 "pipeline_type": "single-recording",
                 "binarize_job": binarize_entry,
                 "process_jobs": process_entries,
@@ -523,10 +539,13 @@ def prepare_multi_recording_batch_tool(
             are required.
 
     Returns:
-        On success, contains per-dataset manifests in 'datasets' keyed by dataset name, with each entry listing its
-        configuration_path, tracker_path, pipeline_type, and per-phase job entries (discover_job, extract_jobs)
-        including job_id, name, specifier, and current status. Also includes 'total_datasets' and 'total_jobs' counts.
-        On failure, contains an 'error' describing the issue.
+        On success, contains per-dataset manifests in 'datasets' keyed by the lowercased dataset name, with each entry
+        listing its configuration_path, tracker_path, dataset_name, pipeline_type, and per-phase job entries
+        (discover_job, extract_jobs) including job_id, name, specifier, and current status. The dataset_name field is
+        the resolved lowercased dataset name. To verify a dataset, call verify_multi_recording_output_tool with the
+        dataset_name plus any recording_path belonging to the dataset (one of the input recording_paths, whose cindra/
+        subdirectory is resolved automatically). Also includes 'total_datasets' and 'total_jobs' counts. On failure,
+        contains an 'error' describing the issue.
     """
     if not dataset_configurations:
         return {
@@ -644,6 +663,7 @@ def prepare_multi_recording_batch_tool(
             datasets_manifest[dataset_key] = {
                 "configuration_path": str(configuration_file_path),
                 "tracker_path": str(tracker_path),
+                "dataset_name": dataset_key,
                 "pipeline_type": "multi-recording",
                 "discover_job": discover_entry,
                 "extract_jobs": extract_entries,
@@ -680,6 +700,7 @@ def prepare_multi_recording_batch_tool(
             datasets_manifest[dataset_key] = {
                 "configuration_path": str(configuration_file_path),
                 "tracker_path": str(tracker_path),
+                "dataset_name": dataset_key,
                 "pipeline_type": "multi-recording",
                 "discover_job": discover_entry,
                 "extract_jobs": extract_entries,
@@ -855,11 +876,15 @@ def clean_processing_output_tool(
     reclaim disk space or force a full rerun from specific phases.
 
     Args:
-        recording_path: The absolute path to the recording data directory.
+        recording_path: The absolute path to the recording OUTPUT directory, which is the parent of the cindra/ folder
+            and equals the recording_output_paths entries returned by the prepare tool when the output root differs from
+            the raw-data root. The cindra/ subdirectory is resolved directly under it with no fallback.
         phases: List of phase names to clean. For single-recording: 'binarization', 'processing', 'combination'. For
             multi-recording: 'discovery', 'extraction'. Downstream phases are automatically included.
         pipeline_type: The pipeline type, either 'single-recording' or 'multi-recording'.
-        dataset: The multi-recording dataset name. Required when pipeline_type is 'multi-recording'.
+        dataset: The multi-recording dataset name. Required when pipeline_type is 'multi-recording'. It must be the
+            resolved lowercased dataset directory name created by the prepare tool, located at
+            cindra/multi_recording/<dataset>, and the match is case-sensitive.
 
     Returns:
         On success, contains 'deleted_files', 'deleted_dirs', 'total_deleted', the 'requested_phases' and
@@ -1072,11 +1097,11 @@ def execute_processing_jobs_tool(
 ) -> dict[str, object]:
     """Dispatches pipeline jobs for background execution with prerequisite validation and resource allocation.
 
-    Validates that each job's prerequisites are satisfied (e.g., BINARIZE must be SUCCEEDED before PROCESS can run),
-    resolves worker and parallelism counts via saturating allocation, rewrites configuration files for compute-bound
-    jobs with the resolved worker count, then starts a background execution manager. I/O-bound jobs (binarize, combine)
-    ignore both parameters and always run with a fixed concurrency of 4. Use get_processing_jobs_status_tool to monitor
-    progress and cancel_processing_jobs_tool to stop execution.
+    Validates that each job's prerequisites are satisfied (e.g., BINARIZE must be SUCCEEDED before PROCESS can run)
+    and resolves worker and parallelism counts via saturating allocation. It then rewrites configuration files for
+    compute-bound jobs with the resolved worker count and starts a background execution manager. I/O-bound jobs
+    (binarize, combine) ignore both parameters and always run with a fixed concurrency of 4. Use
+    get_processing_jobs_status_tool to monitor progress and cancel_processing_jobs_tool to stop execution.
 
     Important:
         Only one execution session can be active at a time. Wait for the current session to complete or cancel it before
@@ -1088,15 +1113,20 @@ def execute_processing_jobs_tool(
             configuration file), 'tracker_path' (absolute path to the ProcessingTracker file), 'job_id' (the
             hexadecimal job identifier from the prepare manifest), and 'pipeline_type' ('single-recording' or
             'multi-recording').
-        workers_per_job: CPU cores per compute-bound job. Set to -1 for automatic resolution via saturating allocation
-            (prefers ~30 cores per job, minimum 10, rounded to multiples of 5). Ignored for I/O-bound jobs.
-        max_parallel_jobs: Maximum concurrent compute-bound jobs. Set to -1 for automatic resolution via saturating
-            allocation. Ignored for I/O-bound jobs, which always use a fixed concurrency of 4.
+        workers_per_job: CPU cores per compute-bound job. The four override combinations match the resolution branches.
+            Both this and max_parallel_jobs at -1 trigger saturating allocation (prefers ~30 cores per job, minimum 10,
+            rounded to multiples of 5). When only this is set, the parallel capacity is derived from it. When only
+            max_parallel_jobs is set, workers become budget // max_parallel_jobs rounded down to a multiple of 5 with no
+            10-worker floor. When both are set, both are used as-is. Ignored for I/O-bound jobs.
+        max_parallel_jobs: Maximum concurrent compute-bound jobs. Participates in the same four override combinations
+            described for workers_per_job. Set to -1 for automatic resolution via saturating allocation. Ignored for
+            I/O-bound jobs, which always use a fixed concurrency of 4.
 
     Returns:
-        Contains a 'started' flag, 'total_jobs' dispatched (split into 'compute_jobs' and 'io_jobs'), resolved
-        'workers_per_job' and 'max_parallel_jobs' for compute-bound work, and 'invalid_jobs' listing any jobs that
-        failed validation with reasons.
+        Always contains a 'success' flag indicating the tool ran. On a started session, also contains a 'started' flag,
+        'total_jobs' dispatched (split into 'compute_jobs' and 'io_jobs'), resolved 'workers_per_job' and
+        'max_parallel_jobs' for compute-bound work, and 'invalid_jobs' listing any jobs that failed validation with
+        reasons. On failure, contains success:False and an 'error' describing the issue.
     """
     if not jobs:
         return {"success": False, "error": "Unable to execute jobs. At least one job descriptor is required."}
@@ -1209,14 +1239,23 @@ def get_processing_jobs_status_tool() -> dict[str, object]:
     status information is derived from the on-disk tracker files rather than in-memory state.
 
     Returns:
-        Contains an 'active' flag, per-job status entries in 'jobs', and a 'summary' with counts for pending, running,
-        succeeded, and failed jobs. Returns inactive state when no execution session exists.
+        Always contains a 'success' flag indicating the tool ran. On an active session, also contains an 'active' flag,
+        per-job status entries in 'jobs', and a 'summary' with counts for pending, running, succeeded, and failed jobs.
+        The 'active' flag reflects manager-thread liveness, not whether jobs ever ran. The execution manager clears
+        session state on normal completion and on phase failure, so after a run drains this tool reports active:False
+        with empty 'jobs' and a zero 'summary' plus a 'note'. Final per-job outcomes must then be re-read via
+        get_recording_status_tool, get_batch_status_overview_tool, or verify_*_output_tool.
     """
     if _job_execution_state is None:
         return {
+            "success": True,
             "active": False,
             "jobs": [],
             "summary": {"pending": 0, "running": 0, "succeeded": 0, "failed": 0},
+            "note": (
+                "No execution session is active. Final per-job outcomes can be read via get_recording_status_tool "
+                "or get_batch_status_overview_tool."
+            ),
         }
 
     with _job_execution_state.lock:
@@ -1264,6 +1303,7 @@ def get_processing_jobs_status_tool() -> dict[str, object]:
     manager_alive = _job_execution_state.manager_thread is not None and _job_execution_state.manager_thread.is_alive()
 
     return {
+        "success": True,
         "active": manager_alive,
         "pending_io": io_pending,
         "pending_compute": compute_pending,
@@ -1283,11 +1323,13 @@ def get_active_execution_timing_tool() -> dict[str, object]:
     this alongside get_processing_jobs_status_tool for time-aware progress monitoring.
 
     Returns:
-        Contains an 'active' flag, per-job timing in 'jobs', and a 'session' summary with total_elapsed_seconds,
-        completed, failed, running, and pending counts, and throughput_jobs_per_hour when applicable.
+        Always contains a 'success' flag indicating the tool ran. Also contains an 'active' flag, per-job timing in
+        'jobs', and a 'session' summary with total_elapsed_seconds, completed, failed, running, and pending counts, and
+        throughput_jobs_per_hour when applicable.
     """
     if _job_execution_state is None:
         return {
+            "success": True,
             "active": False,
             "jobs": [],
             "session": {
@@ -1365,6 +1407,7 @@ def get_active_execution_timing_tool() -> dict[str, object]:
     manager_alive = _job_execution_state.manager_thread is not None and _job_execution_state.manager_thread.is_alive()
 
     return {
+        "success": True,
         "active": manager_alive,
         "jobs": jobs_timing,
         "session": session,
@@ -1375,17 +1418,31 @@ def get_active_execution_timing_tool() -> dict[str, object]:
 def cancel_processing_jobs_tool() -> dict[str, object]:
     """Cancels the active job execution session.
 
-    Clears both pending job queues to prevent new jobs from starting and resets the execution state. Active jobs will
-    complete naturally but no new jobs will be dispatched.
+    Clears both pending job queues to prevent new jobs from starting and resets the execution state. Already-dispatched
+    worker threads keep running because session state is cleared immediately. The agent should therefore poll
+    get_recording_status_tool on the affected recordings or datasets until previously-RUNNING jobs leave RUNNING before
+    starting a new session, to avoid colliding with still-running cancelled jobs. Calling cancel when no session is
+    active is a safe no-op.
 
     Returns:
-        Contains a 'canceled' flag, a 'message' describing the outcome, and a 'final_state' with counts for
-        succeeded_jobs, failed_jobs, and active_jobs_at_cancel.
+        Always contains a 'success' flag indicating the tool ran. On an active session, also contains a 'canceled'
+        flag, a 'message' describing the outcome, and a 'final_state' with counts for succeeded_jobs, failed_jobs, and
+        active_jobs_at_cancel. With no active session, contains canceled:False plus a 'note' stating that no session is
+        active and that final per-job outcomes can be read via get_recording_status_tool or
+        get_batch_status_overview_tool.
     """
     global _job_execution_state
 
     if _job_execution_state is None:
-        return {"canceled": False, "message": "No execution session is active."}
+        return {
+            "success": True,
+            "canceled": False,
+            "message": "No execution session is active.",
+            "note": (
+                "No execution session is active. Final per-job outcomes can be read via get_recording_status_tool "
+                "or get_batch_status_overview_tool."
+            ),
+        }
 
     with _job_execution_state.lock:
         active_count = len(_job_execution_state.io_active_threads) + len(_job_execution_state.compute_active_threads)
@@ -1420,6 +1477,7 @@ def cancel_processing_jobs_tool() -> dict[str, object]:
     _job_execution_state = None
 
     return {
+        "success": True,
         "canceled": True,
         "message": "Execution session canceled. Active jobs will complete but no new jobs will start.",
         "final_state": final_state,
@@ -1454,14 +1512,24 @@ def execute_full_pipeline_tool(
             single-recording pipelines and must match the length of recording_paths.
         dataset_configurations: List of dataset configuration dictionaries. Required for multi-recording pipelines.
             Each must contain 'configuration_path', 'recording_paths', and 'dataset_name'.
-        workers_per_job: CPU cores per compute-bound job. Set to -1 for automatic resolution via saturating
-            allocation.
-        max_parallel_jobs: Maximum concurrent compute-bound jobs. Set to -1 for automatic resolution.
+        workers_per_job: CPU cores per compute-bound job. The four override combinations match the resolution branches.
+            Both this and max_parallel_jobs at -1 trigger saturating allocation (prefers ~30 cores per job, minimum 10,
+            rounded to multiples of 5). When only this is set, the parallel capacity is derived from it. When only
+            max_parallel_jobs is set, workers become budget // max_parallel_jobs rounded down to a multiple of 5 with no
+            10-worker floor. When both are set, both are used as-is. Ignored for I/O-bound jobs.
+        max_parallel_jobs: Maximum concurrent compute-bound jobs. Participates in the same four override combinations
+            described for workers_per_job. Set to -1 for automatic resolution via saturating allocation. Ignored for
+            I/O-bound jobs.
 
     Returns:
-        On success, contains 'total_jobs', 'phase_count', per-phase 'phases' with job counts and IDs, and resolved
-        resource allocation. On failure, contains an 'error' describing the issue. Both cases include a 'success'
-        flag.
+        Always contains a 'success' flag indicating the tool ran, and callers MUST also check the 'started' flag rather
+        than 'success' alone. When jobs are dispatched, contains started:True, 'total_jobs', 'phase_count', per-phase
+        'phases' with job counts and IDs, and resolved resource allocation. When all phases are already complete,
+        returns {success:True, started:False, message:"All pipeline phases are already completed.", total_jobs:0,
+        phase_count:0, phases:[]} plus a 'next_step' string. On failure, contains success:False and an 'error'
+        describing the issue. Cascade-aborted downstream jobs are recorded in their trackers as FAILED with the exact
+        message "Unable to execute job. A preceding pipeline phase failed.", distinguishing them from genuine per-phase
+        failures.
     """
     if pipeline_type not in ("single-recording", "multi-recording"):
         return {
@@ -1628,6 +1696,9 @@ def execute_full_pipeline_tool(
             "total_jobs": 0,
             "phase_count": 0,
             "phases": [],
+            "next_step": (
+                "All phases complete; call reset_processing_phases_tool to force a re-run of a specific phase."
+            ),
         }
 
     # Collects all jobs across all phases for the execution state.
