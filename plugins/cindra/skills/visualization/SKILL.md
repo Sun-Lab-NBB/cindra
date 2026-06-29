@@ -68,7 +68,9 @@ tools manage the viewer window; the headless query tools provide the underlying 
 ### Data query tools (cindra MCP server)
 
 Use these headless query tools alongside viewer state to provide data-driven assistance. These
-tools are documented in detail by `/single-recording-results` and `/multi-recording-results`.
+tools are documented in detail by `/single-recording-results` and `/multi-recording-results`. The
+`get_recording_status_tool` (cindra MCP server) is also used to confirm processing is complete before
+launching a viewer (see the launch-and-inspect workflow).
 
 | Tool                                              | Use with viewer |
 |---------------------------------------------------|-----------------|
@@ -112,7 +114,7 @@ launch_viewer_tool(viewer_type="roi", recording_path="<path>", dataset="<name>")
   colocalization probability, recording count, cell probability, correlations, classification)
 - Inspect fluorescence traces (raw, neuropil, corrected, spikes) for selected ROIs
 - Toggle channel 2 overlay for dual-channel recordings
-- Filter ROIs by cell classification
+- Reclassify ROIs by toggling cell/non-cell labels in classify mode (a click flips the clicked ROI's label)
 - Adjust opacity and colormap
 - View multi-recording tracked ROIs across datasets
 
@@ -183,8 +185,9 @@ dictionary structure depends on the viewer type.
 | `roi_color_mode`           | str       | Active ROI coloring statistic (see ROI color modes) |
 | `colormap`                 | str       | Active colormap name                                |
 | `selected_roi_indices`     | list[int] | Indices of currently selected ROIs                  |
+| `primary_roi_index`        | int\|null | Focused ROI whose stats fill the info bar, or null  |
 | `opacity`                  | int       | ROI overlay opacity (slider value)                  |
-| `classify_mode`            | bool      | Whether cell classification filter is active        |
+| `classify_mode`            | bool      | Whether classify mode is on (clicks flip labels)    |
 | `trace_visibility`         | dict      | Visibility flags for each trace type (see below)    |
 | `temporal_bin_size`        | int       | Temporal binning window for correlation computation |
 | `colocalization_threshold` | float     | Probability threshold for channel 2 classification  |
@@ -195,6 +198,8 @@ dictionary structure depends on the viewer type.
 | `roi_source`               | str       | Current ROI source dropdown text                    |
 | `active_dataset`           | str\|null | Active multi-recording dataset name, or null        |
 | `available_datasets`       | list[str] | List of available multi-recording dataset names     |
+| `view_index`               | int       | Active plane view: -1 combined, 0+ per-plane index  |
+| `current_recording_index`  | int\|null | Multi-rec focused recording index; null if single   |
 
 **`trace_visibility` sub-fields:**
 
@@ -222,6 +227,7 @@ dictionary structure depends on the viewer type.
 | `channel_2_active`        | bool            | Whether channel 2 overlay is toggled on                 |
 | `opacity`                 | int             | ROI overlay opacity (slider value)                      |
 | `selected_roi_indices`    | list[int]\|null | Indices of selected ROIs, or null if none               |
+| `last_clicked_roi_index`  | int\|null       | Index of the most recently clicked ROI, or null         |
 | `mask_count`              | int             | Number of masks in the active layer                     |
 | `auto_cycling`            | bool            | Whether auto-recording cycling is active                |
 
@@ -248,75 +254,28 @@ Returns a nested dictionary with two sub-viewers:
 
 **`pc_viewer` sub-fields:**
 
-| Field           | Type | Description                                    |
-|-----------------|------|------------------------------------------------|
-| `current_plane` | int  | Currently displayed plane index                |
-| `plane_count`   | int  | Total number of imaging planes                 |
-| `current_pc`    | int  | Currently displayed principal component number |
-| `pc_count`      | int  | Total number of principal components           |
-| `playing`       | bool | Whether PC extreme animation is active         |
-| `loaded`        | bool | Whether PC data has finished loading           |
+| Field                 | Type | Description                                    |
+|-----------------------|------|------------------------------------------------|
+| `current_plane`       | int  | Currently displayed plane index                |
+| `current_plane_label` | str  | Human-readable label of the displayed plane    |
+| `plane_count`         | int  | Total number of imaging planes                 |
+| `current_pc`          | int  | Currently displayed principal component number |
+| `pc_count`            | int  | Total number of principal components           |
+| `playing`             | bool | Whether PC extreme animation is active         |
+| `loaded`              | bool | Whether PC data has finished loading           |
 
 ---
 
 ## Enum value reference
 
-### Background views
-
-Reported in `background_view` state field. Values correspond to the background image behind ROI
-overlays.
-
-| Value                  | Description                                               |
-|------------------------|-----------------------------------------------------------|
-| `rois_only`            | Blank background with ROI overlays only                   |
-| `mean_image`           | Temporal mean image (channel 1 or 2 based on toggle)      |
-| `enhanced_mean_image`  | High-pass filtered mean image                             |
-| `correlation_map`      | Pixel-wise activity correlation map                       |
-| `maximum_projection`   | Maximum intensity projection                              |
-| `corrected_structural` | Bleed-through-corrected structural channel (dual-channel) |
-
-### ROI color modes
-
-Reported in `roi_color_mode` state field. Values correspond to the statistic used to color ROI
-overlays.
-
-| Value                        | Description                                               |
-|------------------------------|-----------------------------------------------------------|
-| `random`                     | Random color per ROI from active colormap                 |
-| `skewness`                   | Fluorescence skewness                                     |
-| `compactness`                | Circularity of spatial footprint                          |
-| `footprint`                  | Total spatial footprint area                              |
-| `aspect_ratio`               | Bounding ellipse aspect ratio                             |
-| `solidity`                   | Soma-to-convex-hull area ratio                            |
-| `colocalization_probability` | Channel 2 colocalization probability                      |
-| `recording_count`            | Number of recordings the ROI was tracked across           |
-| `cell_probability`           | Classifier cell-probability gradient                      |
-| `correlations`               | Pairwise activity correlation with selected ROI           |
-| `cell_classification`        | Binary cell/non-cell label (green=cell, magenta=non-cell) |
-
-### Mask layers
-
-Reported in `mask_layer` state field (tracking viewer only).
-
-| Value      | Description                                                         |
-|------------|---------------------------------------------------------------------|
-| `original` | Original ROI masks from single-recording extraction (native coords) |
-| `deformed` | Original masks warped to shared cross-recording coordinate space    |
-| `template` | Consensus template masks from cross-recording clustering            |
-| `tracked`  | Template masks backward-deformed to each recording's native coords  |
-
-### Coordinate spaces
-
-Reported in `coordinate_space` state field (tracking viewer only).
-
-| Value         | Description                                                    |
-|---------------|----------------------------------------------------------------|
-| `native`      | Original recording coordinate space                            |
-| `transformed` | Warped to align with cross-recording template coordinate space |
+State fields report the lowercase enum value (e.g. `maximum_projection`), while the on-screen dropdowns show a
+title-case label (e.g. "Maximum Projection"). When telling the user which control to operate, translate the
+state value to its dropdown label. The full value lists for `background_view`, `roi_color_mode`, `mask_layer`,
+and `coordinate_space` are in [references/viewer-enums.md](references/viewer-enums.md).
 
 ---
 
-## Workflows
+## Visualization workflows
 
 ### Launch and inspect workflow
 
@@ -326,9 +285,11 @@ Reported in `coordinate_space` state field (tracking viewer only).
 2. **Launch viewer** — Call `launch_viewer_tool` with the appropriate `viewer_type`,
    `recording_path`, and optional `dataset`. Store the returned `viewer_id`.
 
-3. **Wait for loading** — Query state with `query_viewer_state_tool` until `loaded` is `true`.
-   The viewer subprocess needs time to read data from disk. If `loaded` remains `false` after
-   10-15 seconds, check for errors by verifying the viewer is still alive via `list_viewers_tool`.
+3. **Wait for loading** — Query state with `query_viewer_state_tool` until `loaded` is `true`. The viewer
+   subprocess needs time to read data from disk. The registration viewer has no top-level `loaded` flag once its
+   state file exists — poll `pc_viewer.loaded`, or treat the presence of the `binary_player` and `pc_viewer`
+   sub-states as the loaded signal. If `loaded` remains `false` after 10-15 seconds, check for errors by
+   verifying the viewer is still alive via `list_viewers_tool`.
 
 4. **Assist the user** — Respond to user questions by combining viewer state with headless query
    tools. For example, if the user asks about a specific ROI, query its statistics via
@@ -368,6 +329,10 @@ recordings at any time via the GUI controls. The launch-time parameters passed t
 call `query_viewer_state_tool` to read the live display state. Do not rely on cached state from
 previous queries or launch-time parameters.
 
+**Allow for write latency.** The viewer writes its state at most every 250 ms, and only when it
+changes. After prompting the user to change a setting, allow a brief moment or re-query once before
+trusting the result, since a query issued immediately after the change may still return the prior state.
+
 **Dataset tracking.** Both `list_viewers_tool` and `query_viewer_state_tool` report the
 `active_dataset` field, which reflects the dataset currently displayed by the viewer. This may
 differ from the `dataset` parameter provided at launch if the user switched datasets via the
@@ -382,7 +347,7 @@ gets a unique `viewer_id`. Use `list_viewers_tool` to track all active instances
 Common multi-viewer patterns:
 - Registration viewer + ROI viewer for the same recording (verify registration then inspect ROIs)
 - ROI viewers for different recordings in a multi-recording dataset (compare across sessions)
-- Tracking viewer + ROI viewer for the same dataset (verify tracking then inspect traced activity)
+- Tracking viewer + ROI viewer for the same dataset (verify tracking then inspect ROI traces)
 
 ---
 
@@ -391,11 +356,11 @@ Common multi-viewer patterns:
 ### ROI viewer assistance
 
 **"What am I looking at?"** — Query viewer state. Report the background view, ROI color mode,
-number of ROIs, whether classification filter is active, and which traces are visible.
+number of ROIs, whether classify mode is active, and which traces are visible.
 
-**"Are these good ROIs?"** — Query `roi_color_mode` and `classify_mode` from state. If not
-already in classification mode, suggest switching to `cell_classification` or `cell_probability`
-color mode. Use `query_roi_statistics_tool` to retrieve compactness, solidity,
+**"Are these good ROIs?"** — Query `roi_color_mode` from state. If it is not `cell_classification`
+or `cell_probability`, suggest switching to one of those color modes to see classifier output. Use
+`query_roi_statistics_tool` to retrieve compactness, solidity,
 and skewness statistics for the visible ROIs. Explain what each statistic means:
 - **Compactness** near 1.0 indicates circular footprints (typical neurons)
 - **Solidity** near 1.0 indicates filled footprints without holes
@@ -407,9 +372,15 @@ with activity) or by `cell_probability` to see classifier confidence. Use
 ROIs.
 
 **"What do the traces look like?"** — Check `trace_visibility` and `selected_roi_indices` from
-state. If no ROIs are selected, inform the user they need to click ROIs in the image panel. Use
-`query_traces_tool` for the selected ROI indices to provide quantitative trace
-information.
+state. If no ROIs are selected, tell the user they can select one by clicking it in the image panel
+or by typing its index into the ROI index field (the "Enter an ROI index to select it" box). Use
+`query_traces_tool` for the selected ROI indices to provide quantitative trace information.
+
+**"Select or highlight a specific ROI (e.g. ROI 20)?"** — These tools observe only and cannot drive
+the viewer, so ask the user to type the index into the ROI index field. ROI indices are 0-based and
+match `selected_roi_indices` / `primary_roi_index` in the state, so resolve any "cell N" wording to a
+0-based index against `roi_count` before instructing. Confirm by re-querying state and checking that
+`primary_roi_index` matches.
 
 ### Tracking viewer assistance
 
@@ -431,7 +402,10 @@ playing — suggest playing the video to look for residual jitter. Use
 counts. Key indicators:
 - **Rigid offset standard deviation** < 2 pixels indicates stable registration
 - **Bad frame percentage** < 5% indicates few motion artifacts
-- **PC shift metrics** close to zero indicate no systematic drift
+- **PC shift metrics** close to zero indicate no systematic drift (a qualitative cue — there is no
+  fixed threshold). `pc_viewer.current_pc` in the state is 1-based, while the PC component indices in
+  `query_registration_quality_tool`'s shift metrics are 0-based, so subtract 1 when looking up the
+  metric for the PC the user is viewing.
 
 **"What are these PC images?"** — Explain that PC extreme images show the average frame
 appearance at the extremes of each principal component. Large visible differences between low and
@@ -441,15 +415,16 @@ high extremes indicate residual motion or optical artifacts not captured by regi
 
 ## Related skills
 
-| Skill                             | Relationship                                                    |
-|-----------------------------------|-----------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`   | Prerequisite: cindra-gui MCP server connectivity                |
-| `/single-recording-processing`    | Upstream: produces the data this skill visualizes               |
-| `/multi-recording-processing`     | Upstream: produces the data this skill visualizes               |
-| `/single-recording-results`       | Reference: output data formats for single-recording query tools |
-| `/multi-recording-results`        | Reference: output data formats for multi-recording query tools  |
-| `/single-recording-configuration` | Reference: parameter tuning informed by visual inspection       |
-| `/multi-recording-configuration`  | Reference: parameter tuning informed by visual inspection       |
+| Skill                             | Relationship                                                               |
+|-----------------------------------|----------------------------------------------------------------------------|
+| `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
+| `/cindra-mcp-environment-setup`   | Prerequisite: cindra-gui MCP server connectivity                           |
+| `/single-recording-processing`    | Upstream: produces the data this skill visualizes                          |
+| `/multi-recording-processing`     | Upstream: produces the data this skill visualizes                          |
+| `/single-recording-results`       | Reference: output data formats for single-recording query tools            |
+| `/multi-recording-results`        | Reference: output data formats for multi-recording query tools             |
+| `/single-recording-configuration` | Reference: parameter tuning informed by visual inspection                  |
+| `/multi-recording-configuration`  | Reference: parameter tuning informed by visual inspection                  |
 
 ---
 

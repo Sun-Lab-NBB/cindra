@@ -136,14 +136,12 @@ class BinaryPlayer(QMainWindow):
 
         # Configures main image view.
         self._main_view_box: pg.ViewBox = pg.ViewBox(lockAspect=True, invertY=True, name="plot1")
-        # noinspection PyUnresolvedReferences,PyArgumentList
         self._graphics_widget.addItem(self._main_view_box, row=0, col=0)
         self._main_view_box.setMenuEnabled(False)
         self._main_image: pg.ImageItem = pg.ImageItem()
         self._main_view_box.addItem(self._main_image)
 
         # Configures rigid registration offset plot.
-        # noinspection PyUnresolvedReferences
         self._offset_plot = self._graphics_widget.addPlot(name="plot_offset", row=1, col=0, colspan=2)
         configure_plot(
             self._offset_plot,
@@ -152,7 +150,6 @@ class BinaryPlayer(QMainWindow):
             bottom_label="Frame",
         )
 
-        # noinspection PyUnresolvedReferences
         self._graphics_widget.ci.layout.setRowStretchFactor(0, BINARY_STYLE.image_plot_stretch[0])
         self._graphics_widget.ci.layout.setRowStretchFactor(1, BINARY_STYLE.image_plot_stretch[1])
 
@@ -196,7 +193,6 @@ class BinaryPlayer(QMainWindow):
         self._update_buttons()
         self._update_timer: QtCore.QTimer = QtCore.QTimer()
         self._update_timer.timeout.connect(self._next_frame)
-        # noinspection PyUnresolvedReferences
         self._graphics_widget.scene().sigMouseClicked.connect(self._plot_clicked)
 
         self.load_data(data=data)
@@ -526,7 +522,6 @@ class BinaryPlayer(QMainWindow):
     def _plot_clicked(self, event: object) -> None:
         """Handles mouse click events on plots for frame navigation."""
         # Resolves which graphics items lie under the click position.
-        # noinspection PyUnresolvedReferences
         items = self._graphics_widget.scene().items(event.scenePos())  # type: ignore[attr-defined]
         position_x = 0
         is_time_plot = False

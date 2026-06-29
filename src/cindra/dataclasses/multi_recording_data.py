@@ -15,7 +15,7 @@ from .version import version, python_version
 from .single_recording_data import ROIMask, CombinedData, ExtractionData, is_memory_mapped
 
 
-@dataclass
+@dataclass(slots=True)
 class MultiRecordingIOData:
     """Stores the Input / Output runtime data for all stages of the multi-recording processing pipeline."""
 
@@ -52,7 +52,7 @@ class MultiRecordingIOData:
     tracking. Empty if channel 2 data is not available or no channel 2 ROIs were selected."""
 
 
-@dataclass
+@dataclass(slots=True)
 class MultiRecordingRegistrationData:
     """Stores runtime data from the registration stage."""
 
@@ -316,7 +316,7 @@ class MultiRecordingRegistrationData:
             self.deformed_roi_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
 
 
-@dataclass
+@dataclass(slots=True)
 class MultiRecordingTimingData:
     """Stores pipeline timing and version data.
 
@@ -360,7 +360,7 @@ class MultiRecordingTimingData:
     """The cindra library version used for processing this recording."""
 
 
-@dataclass
+@dataclass(slots=True)
 class MultiRecordingTrackingData:
     """Stores template masks from cross-recording ROI tracking.
 
@@ -444,7 +444,7 @@ class MultiRecordingRuntimeData(YamlConfig):
     """The path to the directory where runtime data and array files are stored."""
 
     io: MultiRecordingIOData = field(default_factory=MultiRecordingIOData)
-    """The per-recording I/O data including recording ID, recording directory, and dataset name."""
+    """The per-recording I/O data including recording ID, single-recording output data path, and dataset name."""
 
     registration: MultiRecordingRegistrationData = field(default_factory=MultiRecordingRegistrationData)
     """The runtime data from the registration stage (deformation fields, transformed images, deformed masks)."""

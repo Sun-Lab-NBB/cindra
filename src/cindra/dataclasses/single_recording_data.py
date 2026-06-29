@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from pathlib import Path  # noqa: TC003 - needed at runtime for dacite deserialization
 from functools import cached_property
 from dataclasses import field, dataclass
@@ -24,7 +24,7 @@ def is_memory_mapped(array: NDArray[np.generic] | None) -> bool:
     return isinstance(array, np.memmap)
 
 
-@dataclass
+@dataclass(slots=True)
 class IOData:
     """Stores the Input / Output runtime data for all stages of the single-recording processing pipeline."""
 
@@ -66,7 +66,7 @@ class IOData:
     """The zero-based index identifying this plane's position in a multi-plane volumetric recording."""
 
 
-@dataclass
+@dataclass(slots=True)
 class RegistrationData:
     """Stores runtime data from the registration stage."""
 
@@ -124,7 +124,7 @@ class RegistrationData:
 
     principal_component_shift_metrics: NDArray[np.float32] | None = None
     """The registration offset metrics computed by aligning PC extreme images of the registered recording movie, with
-    shape (num_components, 3). Column 0 contains mean rigid offset magnitude, column 1 contains mean nonrigid offset
+    shape (num_components, 3). Column 0 contains the rigid offset magnitude, column 1 contains mean nonrigid offset
     magnitude, and column 2 contains maximum nonrigid offset magnitude. Large values indicate poor registration
     quality."""
 
@@ -340,7 +340,7 @@ class RegistrationData:
             self.principal_component_shift_metrics = np.load(path, mmap_mode="r+")
 
 
-@dataclass
+@dataclass(slots=True)
 class DetectionData:
     """Stores runtime data from the detection stage."""
 
@@ -348,7 +348,8 @@ class DetectionData:
     """The estimated ROI diameter in pixels, automatically computed from the spatial scale during detection."""
 
     aspect_ratio: float = 0.0
-    """The aspect ratio of detected ROIs, computed as the ratio of vertical to horizontal diameter."""
+    """The median normalized aspect ratio across detected ROIs, computed from the fitted ellipse semi-axes as
+    2*major/(major+minor), bounded between 0 and 2 where 1 indicates a circular shape."""
 
     mean_image: NDArray[np.float32] | None = None
     """The temporal mean of all registered frames, providing a static view of the imaging field."""
@@ -559,7 +560,7 @@ class ROIMask:
         100 sample points around the ROI centroid.
         """
         scaled_radius = self.radius * 1.25
-        theta = np.linspace(0.0, 2 * np.pi, num=100)
+        theta = np.linspace(start=0.0, stop=2 * np.pi, num=100)
         y_circle = (scaled_radius * np.sin(theta) + self.centroid[0]).astype(np.int32)
         x_circle = (scaled_radius * np.cos(theta) + self.centroid[1]).astype(np.int32)
         return y_circle, x_circle
@@ -643,15 +644,15 @@ class ROIMask:
         return mask_list
 
 
-@dataclass
+@dataclass(slots=True)
 class ROIStatistics:
     """Stores spatial and statistical properties for a single region of interest (ROI).
 
     This dataclass represents the complete set of properties computed for each detected ROI during the detection,
     extraction, and optional multi-recording processing stages. The fields are organized into required core properties
     (always present after detection), shape statistics (computed during ROI detection, with defaults for staged
-    construction), optional extraction properties (added during signal extraction),
-    multi-plane/multi-recording properties, and GUI visualization properties.
+    construction), optional extraction properties (added during signal extraction), and
+    multi-plane/multi-recording properties.
 
     Notes:
         This dataclass replaces the legacy dictionary-based stat.npy format. Shape statistics fields have default
@@ -705,7 +706,7 @@ class ROIStatistics:
         """Saves a list of ROIStatistics instances to two companion .npz files without pickle.
 
         Spatial pixel data (coordinates, weights, centroid) is delegated to ``ROIMask.save_list`` and written to
-        ``masks_path``. Shape statistics, extraction statistics, and GUI visualization fields are written to
+        ``masks_path``. Shape statistics and extraction statistics are written to
         ``stats_path``.
 
         Args:
@@ -733,7 +734,9 @@ class ROIStatistics:
 
         plane_index = np.array([roi.plane_index for roi in roi_list], dtype=np.int32)
 
-        save_dict: dict[str, np.ndarray] = {
+        save_dict: dict[
+            str, NDArray[np.float32] | NDArray[np.int32] | NDArray[np.uint16] | NDArray[np.uint32] | NDArray[np.bool_]
+        ] = {
             "footprints": footprints,
             "compactness": compactness,
             "solidity": solidity,
@@ -801,7 +804,7 @@ class ROIStatistics:
         return roi_list
 
 
-@dataclass
+@dataclass(slots=True)
 class ExtractionData:
     """Stores runtime data from the extraction stage."""
 
@@ -847,7 +850,7 @@ class ExtractionData:
     # Colocalization data (channel 1 ROIs presence in channel 2).
     cell_colocalization: NDArray[np.float32] | None = None
     """The colocalization results indicating whether channel 1 ROIs are present in channel 2. Shape is (cells, 2)
-    containing (probability, is_colocalized_boolean)."""
+    containing (is_colocalized_boolean, probability)."""
 
     corrected_structural_mean_image: NDArray[np.float32] | None = None
     """The bleed-through-corrected mean image for the structural channel, computed during intensity-based
@@ -1196,7 +1199,7 @@ class ExtractionData:
             self.corrected_structural_mean_image = np.load(corrected_structural_mean_image_path, mmap_mode="r+")
 
 
-@dataclass
+@dataclass(slots=True)
 class TimingData:
     """Stores pipeline timing and version data.
 
@@ -1367,7 +1370,7 @@ class SingleRecordingRuntimeData(YamlConfig):
         return cls.from_yaml(file_path=file_path)
 
 
-@dataclass
+@dataclass(slots=True)
 class CombinedData:
     """Stores combined multi-plane detection and extraction data.
 
@@ -1495,7 +1498,7 @@ class CombinedData:
         return cls(detection=DetectionData(), extraction=ExtractionData(), **kwargs)
 
     @classmethod
-    def _load_metadata(cls, root_path: Path) -> dict:
+    def _load_metadata(cls, root_path: Path) -> dict[str, Any]:
         """Loads combined metadata from the .npz file and returns constructor keyword arguments.
 
         This private helper extracts all metadata fields from combined_metadata.npz and returns them as a dictionary
@@ -1518,7 +1521,7 @@ class CombinedData:
 
         metadata = np.load(metadata_path, allow_pickle=False)
 
-        kwargs: dict = {
+        kwargs: dict[str, Any] = {
             "plane_count": int(metadata["plane_count"][0]),
             "combined_height": int(metadata["combined_height"][0]),
             "combined_width": int(metadata["combined_width"][0]),
@@ -1553,7 +1556,9 @@ class CombinedData:
 def _save_optional_array_field(
     field_name: str,
     arrays: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | tuple[int, ...] | None],
-    save_dictionary: dict[str, NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_] | NDArray[np.uint32]],
+    save_dictionary: dict[
+        str, NDArray[np.float32] | NDArray[np.int32] | NDArray[np.uint16] | NDArray[np.uint32] | NDArray[np.bool_]
+    ],
     dtype: type,
 ) -> None:
     """Saves an optional variable-length array field to the provided save dictionary.
@@ -1570,13 +1575,13 @@ def _save_optional_array_field(
         save_dictionary: The dictionary to populate with the serialized arrays.
         dtype: The numpy dtype to use when converting arrays.
     """
-    has_data = [a is not None and len(a) > 0 for a in arrays]
+    has_data = [a is not None and len(a) for a in arrays]
     if not any(has_data):
         return
 
     counts = np.array(object=[len(a) if a is not None else 0 for a in arrays], dtype=np.uint32)
     valid_arrays: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_]] = [
-        np.asarray(a=a, dtype=dtype) for a in arrays if a is not None and len(a) > 0
+        np.asarray(a=a, dtype=dtype) for a in arrays if a is not None and len(a)
     ]
     if valid_arrays:
         save_dictionary[f"{field_name}_counts"] = counts

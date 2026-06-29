@@ -1,6 +1,6 @@
-"""Provides nonrigid (piecewise-affine) registration algorithm for motion correction."""
+"""Provides nonrigid (piecewise) registration algorithm for motion correction."""
 
-from numba import njit, prange  # type: ignore[import-untyped]
+from numba import njit, prange
 import numpy as np
 from scipy.fft import rfft2
 from numpy.typing import NDArray  # noqa: TC002 - Required at runtime for numba function signatures
@@ -329,23 +329,23 @@ def _compute_correlation_snr(  # pragma: no cover
         peak_value = np.float32(-np.inf)
         peak_y = 0
         peak_x = 0
-        for y in range(padding, window_height - padding):
-            for x in range(padding, window_width - padding):
-                value = correlation_data[frame_index, y, x]
+        for row in range(padding, window_height - padding):
+            for col in range(padding, window_width - padding):
+                value = correlation_data[frame_index, row, col]
                 if value > peak_value:
                     peak_value = value
-                    peak_y = y - padding
-                    peak_x = x - padding
+                    peak_y = row - padding
+                    peak_x = col - padding
 
         # Finds the maximum value outside the peak region.
         background_value = np.float32(-np.inf)
         mask_y_end = peak_y + 2 * padding
         mask_x_end = peak_x + 2 * padding
-        for y in range(window_height):
-            for x in range(window_width):
-                if peak_y <= y < mask_y_end and peak_x <= x < mask_x_end:
+        for row in range(window_height):
+            for col in range(window_width):
+                if peak_y <= row < mask_y_end and peak_x <= col < mask_x_end:
                     continue
-                value = correlation_data[frame_index, y, x]
+                value = correlation_data[frame_index, row, col]
                 background_value = max(background_value, value)
 
         # Ensures positivity for outlier cases with very low background.
@@ -383,23 +383,23 @@ def _apply_bilinear_interpolation(  # pragma: no cover
             x_coordinate = x_coordinates[row, col]
 
             # Separates coordinates into integer (floor) and fractional components.
-            y0 = int(y_coordinate)
-            x0 = int(x_coordinate)
-            y_fraction = y_coordinate - y0
-            x_fraction = x_coordinate - x0
+            y_floor = int(y_coordinate)
+            x_floor = int(x_coordinate)
+            y_fraction = y_coordinate - y_floor
+            x_fraction = x_coordinate - x_floor
 
             # Clamps the four neighbor indices to valid source image bounds.
-            y0 = min(height - 1, max(0, y0))
-            x0 = min(width - 1, max(0, x0))
-            y1 = min(height - 1, y0 + 1)
-            x1 = min(width - 1, x0 + 1)
+            y_floor = min(height - 1, max(0, y_floor))
+            x_floor = min(width - 1, max(0, x_floor))
+            y_ceil = min(height - 1, y_floor + 1)
+            x_ceil = min(width - 1, x_floor + 1)
 
             # Computes the weighted average of the four neighboring pixels.
             output[row, col] = (
-                source[y0, x0] * (1 - y_fraction) * (1 - x_fraction)
-                + source[y0, x1] * (1 - y_fraction) * x_fraction
-                + source[y1, x0] * y_fraction * (1 - x_fraction)
-                + source[y1, x1] * y_fraction * x_fraction
+                source[y_floor, x_floor] * (1 - y_fraction) * (1 - x_fraction)
+                + source[y_floor, x_ceil] * (1 - y_fraction) * x_fraction
+                + source[y_ceil, x_floor] * y_fraction * (1 - x_fraction)
+                + source[y_ceil, x_ceil] * y_fraction * x_fraction
             )
 
 
@@ -421,9 +421,9 @@ def _apply_coordinate_offsets(  # pragma: no cover
     Args:
         frames: The input frame data with shape (num_frames, height, width) to be transformed.
         y_offset_maps: The per-pixel vertical offsets with shape (num_frames, height, width). Positive values shift
-            content upward (sample from lower y-coordinates).
+            content upward (sample from higher y-coordinates).
         x_offset_maps: The per-pixel horizontal offsets with shape (num_frames, height, width). Positive values shift
-            content leftward (sample from lower x-coordinates).
+            content leftward (sample from higher x-coordinates).
         y_grid: The base y-coordinate grid with shape (height, width) containing row indices (0 to height-1). Combined
             with y_offset_maps to determine source sampling locations.
         x_grid: The base x-coordinate grid with shape (height, width) containing column indices (0 to width-1).
@@ -511,13 +511,15 @@ def _extract_upsampling_regions(  # pragma: no cover
     for index in prange(num_blocks * num_frames):
         block_index = index // num_frames
         frame_index = index % num_frames
-        y = y_peaks[block_index, frame_index]
-        x = x_peaks[block_index, frame_index]
+        peak_y = y_peaks[block_index, frame_index]
+        peak_x = x_peaks[block_index, frame_index]
 
         # Copies the region around the peak to the output array.
         for row in range(region_size):
             for col in range(region_size):
-                output[block_index, frame_index, row, col] = correlation[block_index, frame_index, y + row, x + col]
+                output[block_index, frame_index, row, col] = correlation[
+                    block_index, frame_index, peak_y + row, peak_x + col
+                ]
 
 
 def _upsample_block_offsets(

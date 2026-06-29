@@ -58,6 +58,7 @@ class BinaryFile:
         file_path: str | Path,
         frame_number: int = 0,
         dtype: str = "int16",
+        *,
         read_only: bool = False,
     ) -> None:
         # Initializes class attributes using input arguments.
@@ -113,21 +114,18 @@ class BinaryFile:
 
     @staticmethod
     def convert_numpy_file_to_binary(source_file_name: Path, destination_file_name: Path) -> None:
-        """Converts a NumPy file, such as a .npz or .npy file, to a cindra binary.
+        """Converts a NumPy .npy file to a cindra binary.
 
         Args:
-            source_file_name: The absolute path to the NumPy .npy or .npz file to convert to cindra binary format.
+            source_file_name: The absolute path to the NumPy .npy file to convert to cindra binary format.
             destination_file_name: The absolute path to the cindra .bin file to create using the data from the source
                 file.
 
         Raises:
-            FileNotFoundError: If the provided NumPy file does not exist.
+            FileNotFoundError: If the provided NumPy file does not exist, is not a regular file, or does not use the
+                .npy extension.
         """
-        if (
-            not source_file_name.exists()
-            or not source_file_name.is_file()
-            or source_file_name.suffix not in (".npy", ".npz")
-        ):
+        if not source_file_name.exists() or not source_file_name.is_file() or source_file_name.suffix != ".npy":
             message = (
                 f"Unable to create the target cindra binary {destination_file_name}, as the source file "
                 f"'{source_file_name}' does not exist or is not a valid NumPy file."
@@ -169,7 +167,6 @@ class BinaryFile:
 
     def close(self) -> None:
         """Closes the memory-mapped file view."""
-        # noinspection PyProtectedMember
         self.file._mmap.close()  # type: ignore[attr-defined]
 
     def __enter__(self) -> Self:
@@ -258,7 +255,6 @@ class BinaryFile:
         # Computes evenly-spaced indices across the recording.
         indices = np.linspace(start=0, stop=self.frame_number - 1, num=actual_samples).astype(dtype=np.intp)
 
-        # Reads the subsampled frames.
         movie = self.file[indices]
 
         # Applies cropping if ranges are provided.
@@ -267,7 +263,6 @@ class BinaryFile:
 
         return movie.astype(dtype=np.float32)
 
-    # noinspection PyTypeHints
     def bin_movie(
         self,
         bin_size: int,
@@ -309,7 +304,6 @@ class BinaryFile:
         batch_size = min(int(np.sum(good_frames)), _DEFAULT_BIN_BATCH_SIZE)
 
         # Bins the frames in batches to reduce memory consumption.
-        # Stores the frames of each batch.
         batches: list[NDArray[np.float32]] = []
         for batch_index in range(0, self.frame_number, batch_size):
             # Retrieves the frames in the processed batch.
@@ -543,5 +537,4 @@ class BinaryFileCombined:
                 + self.plane_widths[file_index],
             ] = file_data
 
-        # Returns the combined data.
         return data

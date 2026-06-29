@@ -1,8 +1,10 @@
 ---
 name: single-recording-processing
 description: >-
-  Orchestrates single-recording neural imaging batch processing via the cindra MCP server.
-  Dispatches to configuration, validation, and results skills as needed.
+  Orchestrates single-recording neural imaging batch processing via the cindra MCP server, dispatching to
+  acquisition-preparation, configuration, and results skills as needed. Use when the user asks to process
+  single-recording imaging data, run the single-recording batch pipeline, monitor single-recording batch jobs,
+  re-run a single-recording processing phase, or when invoking /single-recording-processing.
 user-invocable: true
 ---
 
@@ -23,7 +25,7 @@ verification.
   `get_active_execution_timing_tool`, `cancel_processing_jobs_tool`)
 - MCP management tools (`get_batch_status_overview_tool`, `reset_processing_phases_tool`,
   `clean_processing_output_tool`)
-- Supporting tools for discovery, validation, and status checking
+- Supporting tools for validation and status checking (recording discovery owned by `/single-recording-configuration`)
 - Resource management and CPU allocation guidance
 - Status formatting and progress monitoring
 - Error routing to appropriate upstream skills
@@ -92,16 +94,16 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 Three-phase sequential pipeline per recording:
 
 ```text
-Phase 1: BINARIZE (I/O bound, up to 4 parallel)
+Phase 1: BINARIZE (phase name: binarization; I/O bound, up to 4 parallel)
 ├── Converts raw TIFFs to binary format
 └── Determines plane count
 
-Phase 2: PROCESS (CPU bound, parallel by plane)
+Phase 2: PROCESS (phase name: processing; CPU bound, parallel by plane)
 ├── Motion correction, ROI detection, signal extraction
-└── Workers per plane via saturating allocation (see Resource Management)
+└── Workers per plane via saturating allocation (see Resource management)
 
-Phase 3: COMBINE (I/O bound, up to 4 parallel)
-└── Merges all plane results into unified dataset
+Phase 3: COMBINE (phase name: combination; I/O bound, up to 4 parallel)
+└── Merges all plane results into a unified combined_metadata.npz dataset
 ```
 
 Batch processing across multiple recordings:
@@ -149,9 +151,9 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
 1. **Discover recordings** — Use `discover_recordings_tool` (check the `single_recording_candidates` list) or
    accept explicit paths from user.
 
-2. **Validate raw data** — Use `validate_recording_readiness_tool` on each recording. Skip for recordings
-   where `get_recording_status_tool` shows status `binarized` or later. If validation fails, invoke
-   `/acquisition-data-preparation` to resolve issues before continuing.
+2. **Validate raw data** — Use `validate_recording_readiness_tool` on each recording. Skip for recordings where
+   `get_recording_status_tool` shows status `binarizing`, `processing`, `combining`, or `completed`. If validation
+   fails, invoke `/acquisition-data-preparation` to resolve issues before continuing.
 
 3. **Configure** — Ask the user if they have an existing template configuration file. If not,
    invoke `/single-recording-configuration` to create one. Template configs are reusable across
@@ -168,7 +170,7 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
    and `execute_full_pipeline_tool`.
 
 5. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many cores
-   to use (see Resource Management section).
+   to use (see Resource management section).
 
 6. **Execute** — Choose one of two approaches:
 
@@ -186,12 +188,40 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
       the manifest.
 
 7. **Monitor** — Use `get_processing_jobs_status_tool` to check progress. Optionally use
-   `get_active_execution_timing_tool` for per-job timing and session throughput. Present status as a
-   formatted table (see Status Formatting section).
+   `get_active_execution_timing_tool` for per-job timing and session throughput. These two tools
+   reflect only the active in-process execution session and return `active: false` with empty jobs
+   when no session is running. This drained state happens not only after an MCP server restart, a
+   reconnect, or a batch dispatched by a prior process, but also after NORMAL completion: the
+   manager clears session state on success AND on failure. So an all-zero, inactive status can mean
+   "finished," not "nothing ran." Do not read it as failure. For final per-job outcomes, read
+   persisted on-disk tracker state via `get_batch_status_overview_tool` for a whole-tree view,
+   `get_recording_status_tool` per recording, or `verify_single_recording_output_tool` (all using
+   the output directory, see the Output-directory path rule). Present status as a formatted table
+   (see Status formatting section).
 
-8. **Handle completion** — When all recordings finish, check for failures. Route errors to the
-   appropriate skill (see Error Routing section). On success, invoke `/single-recording-results`
+8. **Handle completion** — When all recordings finish, check for failures. A `success: true` return
+   only means a tool ran, not that work is ready or done: gate decisions on the domain flag, not on
+   `success`. For `verify_single_recording_output_tool`, gate on `complete` (false whenever `missing`
+   is non-empty); for validate tools, gate on `valid`; for `execute_full_pipeline_tool`, gate on
+   `started` (it returns `started: false` with a `next_step` when all phases are already complete).
+   Checking `success` alone can advance on an unready or already-complete state. Route errors to the
+   appropriate skill (see Error routing section). On success, invoke `/single-recording-results`
    to verify outputs, then `/visualization` for visual inspection.
+
+#### Output-directory path rule
+
+`get_recording_status_tool`, `verify_single_recording_output_tool`, and `clean_processing_output_tool`
+all take the recording OUTPUT directory (the parent of the `cindra/` folder), which equals the
+`recording_output_paths` / per-entry `output_path` the prepare tool returns — NOT the raw-data root.
+This matters on a separate-output layout where output and raw-data roots differ:
+
+- `get_recording_status_tool` and `clean_processing_output_tool` resolve `cindra/` directly under the
+  given path with NO fallback. Feeding the raw-data root makes them report `not_started` or
+  "directory not found" — a silent false negative.
+- `verify_single_recording_output_tool` also recursively searches for `configuration.yaml`, so it may
+  still pass via that fallback even when fed the wrong root. The two then disagree.
+
+Always reuse the `output_path` captured from the prepare manifest for status, verify, and clean.
 
 ### Re-running specific phases
 
@@ -202,6 +232,11 @@ To re-run specific phases (e.g., after changing ROI detection parameters):
 2. Optionally modify the configuration file before re-execution.
 3. Optionally use `clean_processing_output_tool` to delete output files from the reset phases.
 4. Call `execute_processing_jobs_tool` with the reset jobs from the manifest.
+
+Both `reset_processing_phases_tool` and `clean_processing_output_tool` require `pipeline_type="single-recording"`
+and a `phases` list drawn from the valid single-recording phase names: `binarization`, `processing`,
+`combination`. `reset_processing_phases_tool` also requires `tracker_path`; `clean_processing_output_tool`
+requires `recording_path`.
 
 ---
 
@@ -214,7 +249,7 @@ When both `workers_per_job` and `max_parallel_jobs` are set to `-1` (automatic),
 runs the following algorithm for compute-bound jobs:
 
 1. **Budget**: `cpu_count - 2` (2 cores reserved for system operations)
-2. **Max parallel jobs**: `min(total_jobs, budget // 30)` (targets ~30 workers per job)
+2. **Max parallel jobs**: `min(total_jobs, max(1, budget // 30))` (targets ~30 workers per job, with a floor of 1)
 3. **Raw workers per job**: `budget // max_parallel_jobs`
 4. **Round down** to the nearest multiple of 5
 5. **Saturate**: If workers per job falls below 10 and parallelism > 1, reduce parallelism and
@@ -242,12 +277,12 @@ When presenting batch status to the user, format as a table:
 Current Phase: PROCESS
 Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
-| Recording                    | Binarize | Process | Combine | Status     |
-|------------------------------|----------|---------|---------|------------|
-| 2024-01-15-10-30-00-123456   | done     | 2/4     | pending | PROCESSING |
-| 2024-01-15-11-45-00-234567   | done     | 4/4     | running | PROCESSING |
-| 2024-01-16-09-00-00-111111   | done     | 4/4     | done    | SUCCEEDED  |
-| 2024-01-16-10-15-00-222222   | pending  | 0/0     | pending | QUEUED     |
+| Recording                  | Binarize | Process | Combine | Status     |
+|----------------------------|----------|---------|---------|------------|
+| 2024-01-15-10-30-00-123456 | done     | 2/4     | pending | PROCESSING |
+| 2024-01-15-11-45-00-234567 | done     | 4/4     | running | PROCESSING |
+| 2024-01-16-09-00-00-111111 | done     | 4/4     | done    | SUCCEEDED  |
+| 2024-01-16-10-15-00-222222 | pending  | 0/0     | pending | QUEUED     |
 ```
 
 ---
@@ -260,8 +295,7 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 |-------------------------------------------|------------------------------------------|
 | "At least one recording path is required" | Provide recording paths                  |
 | "Configuration file not found"            | Invoke `/single-recording-configuration` |
-| "Recording directory not found"           | Verify path exists                       |
-| "No valid recording paths provided"       | Check paths exist and are directories    |
+| "No valid recording paths provided"       | Inspect `invalid_paths` in the response  |
 
 ### Execution errors
 
@@ -269,7 +303,10 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 |------------------------------------------|----------------------------------------------|
 | "An execution session is already active" | Wait for current session or cancel first     |
 | "Job ID not found in tracker"            | Re-prepare the batch to regenerate manifests |
-| "Prerequisites not satisfied"            | Execute prerequisite phases first            |
+| "Prerequisite ... has not succeeded"     | Execute prerequisite phases first            |
+
+Prerequisite failures are returned inside the `invalid_jobs` list with a `reason` field (for example,
+"Prerequisite BINARIZE job X has not succeeded."), not as a top-level `error`.
 
 ### Processing failure routing
 
@@ -288,14 +325,16 @@ Wait for the current execution session to complete before starting retries.
 
 ## Related skills
 
-| Skill                             | Role                                                 |
-|-----------------------------------|------------------------------------------------------|
-| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server connectivity                |
-| `/acquisition-data-preparation`   | Input: raw data preparation and validation           |
-| `/single-recording-configuration` | Configuration: parameter reference and file creation |
-| `/single-recording-results`       | Output: verify and explain processing results        |
-| `/multi-recording-processing`     | Downstream: cross-recording ROI tracking             |
-| `/visualization`                  | Downstream: visual inspection of results             |
+| Skill                             | Relationship                                                               |
+|-----------------------------------|----------------------------------------------------------------------------|
+| `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
+| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server connectivity                                      |
+| `/acquisition-data-preparation`   | Input: raw data preparation and validation                                 |
+| `/single-recording-configuration` | Configuration: parameter reference and file creation                       |
+| `/single-recording-results`       | Output: verify and explain processing results                              |
+| `/multi-recording-configuration`  | Downstream: configure cross-recording tracking                             |
+| `/multi-recording-processing`     | Downstream: cross-recording ROI tracking                                   |
+| `/visualization`                  | Downstream: visual inspection of results                                   |
 
 ---
 
@@ -311,6 +350,6 @@ Single-Recording Processing Workflow:
 - [ ] CPU core allocation confirmed with user
 - [ ] Batch prepared or full pipeline executed
 - [ ] Status monitored until all recordings complete or fail
-- [ ] Failed recordings routed to appropriate skill (see Error Routing)
+- [ ] Failed recordings routed to appropriate skill (see Error routing)
 - [ ] Successful recordings verified via `/single-recording-results`
 ```

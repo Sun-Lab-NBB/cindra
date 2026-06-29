@@ -3,10 +3,9 @@ import importlib_metadata
 
 # -- Project information -----------------------------------------------------
 project = 'cindra'
-# noinspection PyShadowingBuiltins
 copyright = '2026, Sun (NeuroAI) lab'
 authors = ['Ivan Kondratyev', 'Natalie Yeung']
-# Extracts the project version from the metadata .toml file.
+# Reads the project version from the installed package's distribution metadata.
 release = importlib_metadata.version("cindra")
 
 # -- General configuration ---------------------------------------------------

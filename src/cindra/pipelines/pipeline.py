@@ -1,4 +1,4 @@
-"""Provides the centralized pipeline for processing the brain activity data acquired in the Sun lab."""
+"""Provides the centralized pipeline for processing the acquired brain activity data."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class SingleRecordingJobNames(StrEnum):
     BINARIZE = "binarization"
     """The name for the binarization (step 1) processing job."""
     PROCESS = "processing"
-    """The generic name for the processing (step 2) processing job. During runtime, the processed plane is identified
+    """The generic name for the plane-processing (step 2) job. During runtime, the processed plane is identified
     by the tracker's specifier field using the format 'plane_{plane_index}'."""
     COMBINE = "combination"
     """The name for the combination (step 3) processing job."""
@@ -130,7 +130,6 @@ def run_single_recording_pipeline(  # pragma: no cover
     # with where batch tools create it and where get_recording_status_tool looks for it.
     tracker_path: Path = configuration.file_io.output_path / "cindra" / SINGLE_RECORDING_TRACKER_NAME
 
-    # Determines which jobs to run based on the flags.
     requested_jobs: dict[str, bool] = {
         SingleRecordingJobNames.BINARIZE: binarize,
         SingleRecordingJobNames.PROCESS: process,
@@ -141,7 +140,6 @@ def run_single_recording_pipeline(  # pragma: no cover
     if not any(requested_jobs.values()):
         requested_jobs = dict.fromkeys(requested_jobs, True)
 
-    # Builds the list of jobs to run.
     jobs_to_run = [job_name for job_name, requested in requested_jobs.items() if requested]
 
     # Builds the universe of every valid job the pipeline could execute for this configuration. PROCESS always
@@ -153,7 +151,6 @@ def run_single_recording_pipeline(  # pragma: no cover
         (SingleRecordingJobNames.COMBINE, ""),
     ]
 
-    # Initializes the tracker instance.
     tracker = ProcessingTracker(file_path=tracker_path)
 
     # Determines the execution mode and resolves job IDs accordingly.
@@ -311,7 +308,6 @@ def run_multi_recording_pipeline(  # pragma: no cover
         )
         console.error(message=message, error=ValueError)
 
-    # Determines which jobs to run based on the flags.
     requested_jobs: dict[str, bool] = {
         MultiRecordingJobNames.DISCOVER: discover,
         MultiRecordingJobNames.EXTRACT: extract,
@@ -321,7 +317,6 @@ def run_multi_recording_pipeline(  # pragma: no cover
     if not any(requested_jobs.values()):
         requested_jobs = dict.fromkeys(requested_jobs, True)
 
-    # Builds the list of jobs to run.
     jobs_to_run = [job_name for job_name, requested in requested_jobs.items() if requested]
 
     # Builds the universe of every valid job the pipeline could execute for this configuration. EXTRACT always

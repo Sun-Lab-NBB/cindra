@@ -1,5 +1,5 @@
 Welcome to cindra API documentation page
-=========================================
+========================================
 
 Provides pipelines for processing neural imaging data and tracking Regions of Interest across multiple recordings.
 

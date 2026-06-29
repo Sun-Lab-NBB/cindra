@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from numba import njit, prange  # type: ignore[import-untyped]
+from numba import njit, prange
 import numpy as np
 from scipy import stats
 from ataraxis_time import PrecisionTimer, TimerPrecisions
@@ -431,7 +431,7 @@ def _extract_single_recording(context: RuntimeContext) -> None:  # pragma: no co
 
     timing.extraction_time = int(timer.elapsed)
 
-    # Computes neuropil-corrected skewness and standard deviation for channel 1 ROIs.
+    # Computes neuropil-corrected skewness for channel 1 ROIs.
     _update_roi_extraction_statistics(
         roi_statistics=roi_statistics,
         cell_fluorescence=extraction_data.cell_fluorescence,
@@ -670,7 +670,7 @@ def _extract_functional_channel_2(  # pragma: no cover
 
     timing.extraction_time_channel_2 = int(timer.elapsed)
 
-    # Computes neuropil-corrected skewness and standard deviation for channel 2 ROIs.
+    # Computes neuropil-corrected skewness for channel 2 ROIs.
     _update_roi_extraction_statistics(
         roi_statistics=roi_statistics_channel_2,
         cell_fluorescence=extraction_data.cell_fluorescence_channel_2,
@@ -752,7 +752,7 @@ def _extract_multi_recording_channel(  # pragma: no cover
     tau: float,
     sampling_rate: float,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
-    """Extracts fluorescence, computes delta-F, and deconvolves spikes for one channel of a multi-recording recording.
+    """Extracts fluorescence, computes delta-F, and deconvolves spikes for one channel of a multi-recording extraction.
 
     Notes:
         Serves as the generic multi-recording channel worker used by both channel 1 and channel 2. It always uses
@@ -925,7 +925,7 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:  # 
             sampling_rate=sampling_rate,
         )
 
-    # Computes neuropil-corrected skewness and standard deviation for channel 1 tracked ROIs.
+    # Computes neuropil-corrected skewness for channel 1 tracked ROIs.
     _update_roi_extraction_statistics(
         roi_statistics=roi_statistics,
         cell_fluorescence=extraction_data.cell_fluorescence,
@@ -971,7 +971,7 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:  # 
                 sampling_rate=sampling_rate,
             )
 
-        # Computes neuropil-corrected skewness and standard deviation for channel 2 tracked ROIs.
+        # Computes neuropil-corrected skewness for channel 2 tracked ROIs.
         _update_roi_extraction_statistics(
             roi_statistics=roi_statistics_channel_2,
             cell_fluorescence=extraction_data.cell_fluorescence_channel_2,

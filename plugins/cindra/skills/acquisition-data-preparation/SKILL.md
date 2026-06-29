@@ -34,11 +34,18 @@ Complete guide for preparing raw neural imaging data for the cindra single-recor
 
 ---
 
-## MCP acquisition tools
+## Agent requirements
 
-These tools are registered on the `cindra-mcp` server. You MUST verify the MCP server is connected before
-using these tools. If the tools are unavailable, invoke `/cindra-mcp-environment-setup` to diagnose and resolve
-connectivity issues. Tool parameters and return values are self-documented via MCP introspection.
+You MUST use the cindra MCP tools for creating and validating acquisition parameter files. Verify the
+cindra MCP server is connected before use; if the tools are unavailable, invoke
+`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+
+---
+
+## Available tools
+
+These tools are registered on the `cindra-mcp` server. Tool parameters and return values are
+self-documented via MCP introspection.
 
 | Tool                                        | Purpose                                                                         |
 |---------------------------------------------|---------------------------------------------------------------------------------|
@@ -101,8 +108,8 @@ approach for their specific format. Ensure the converted TIFFs follow the frame 
 
 ### Frame interleaving
 
-TIFF frames must follow a specific interleave pattern. Frames cycle through planes first, then channels, with a
-stride of `plane_number * channel_number`:
+TIFF frames must follow a specific interleave pattern. Within each volume, frames cycle through channels first
+(innermost), then planes, with a stride of `plane_number * channel_number`:
 
 ```text
 Single plane, single channel:
@@ -185,7 +192,7 @@ When the user knows their acquisition metadata (frame rate, planes, channels):
 2. **Verify divisibility** — Confirm `total_frames % (plane_number * channel_number) == 0`.
 3. **Create parameters file** — Use `generate_acquisition_parameters_file_tool` with the known values.
 4. **Validate** — Use `validate_acquisition_parameters_file_tool` to confirm the file is correct.
-5. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is fully ready for processing.
+5. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is ready for processing.
 
 ### Workflow 2: Unknown acquisition parameters
 
@@ -196,7 +203,7 @@ When the user has imaging data but is unsure about the acquisition configuration
 3. **Extract parameters** — Help the user read metadata using appropriate tools or libraries.
 4. **Confirm with user** — Present the extracted parameters and ask the user to verify.
 5. **Create parameters file** — Use `generate_acquisition_parameters_file_tool` with the confirmed values.
-6. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is fully ready for processing.
+6. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is ready for processing.
 
 ### Workflow 3: ScanImage recordings
 
@@ -251,12 +258,12 @@ Read the first plane's `ops.npy` file (`numpy.load(path, allow_pickle=True).item
 
 | suite2p ops key | cindra field     | Conversion                                                        |
 |-----------------|------------------|-------------------------------------------------------------------|
-| `fs`            | `frame_rate`     | `fs / nplanes` for multi-plane recordings. `fs` for single-plane. |
+| `fs`            | `frame_rate`     | `fs * nplanes` for multi-plane recordings. `fs` for single-plane. |
 | `nplanes`       | `plane_number`   | Direct mapping.                                                   |
 | `nchannels`     | `channel_number` | Direct mapping.                                                   |
 
 **Critical: suite2p `fs` is the per-plane sampling rate.** cindra `frame_rate` is the volume rate. For
-multi-plane recordings: `frame_rate = fs / nplanes`. For single-plane recordings the values are identical.
+multi-plane recordings: `frame_rate = fs * nplanes`. For single-plane recordings the values are identical.
 
 **Step 2: Create `cindra_parameters.json`.**
 
@@ -314,9 +321,18 @@ You MUST ask the user to confirm all the following. Do not guess or infer these 
 
 Use `generate_acquisition_parameters_file_tool` with the user-provided acquisition parameters.
 
-**Step 3: Place binary files in the cindra output structure.**
+**Step 3: Generate the cindra output bootstrap.**
 
-Copy or symlink each plane's binary file into the expected cindra directory layout:
+Binarization only skips TIFF conversion when the cindra output bootstrap already exists alongside valid
+binaries. Configure the pipeline and run `prepare_single_recording_batch_tool` first: it writes
+`recording/cindra/configuration.yaml`, `recording/cindra/acquisition_parameters.yaml`, and each plane's
+`recording/cindra/plane_N/runtime_data.yaml` (whose `registered_binary_path` points at
+`plane_N/channel_1_data.bin`), and creates the `plane_N/` directories. Without this bootstrap, binarization
+falls through to TIFF conversion, which fails when no raw TIFFs exist at `data_path`.
+
+**Step 4: Place binary files in the cindra output structure.**
+
+Copy or symlink each plane's binary file into the directories created by Step 3:
 
 ```text
 recording/cindra/
@@ -325,19 +341,22 @@ recording/cindra/
   ...
 ```
 
-For dual-channel recordings, the second channel maps to `channel_2_data.bin` per plane.
+For dual-channel recordings, cindra routes the functional channel into `channel_1_data.bin` and the structural
+channel into `channel_2_data.bin` per plane. When adopting binaries directly, place the functional-channel data
+in `channel_1_data.bin`, since the rest of the pipeline assumes channel 1 holds the functional channel.
 
-**Step 4: Verify file sizes.**
+**Step 5: Verify file sizes.**
 
 For each binary file, confirm that the file size matches the expected value:
 `frame_count * height * width * 2` bytes. A mismatch indicates incorrect dimensions, frame count, or data
 type. Ask the user to re-check their metadata.
 
-**Step 5: Run the pipeline.**
+**Step 6: Run binarization.**
 
-Run binarization normally — cindra detects existing valid binaries and skips TIFF conversion. If binarization
-fails or produces unexpected results, the binary files may be incorrectly formatted. Ask the user to verify
-the format requirements above.
+With the bootstrap (Step 3) and valid binaries (Step 4) in place, run binarization normally — cindra loads the
+existing plane contexts, confirms each `registered_binary_path` exists, and skips TIFF conversion. If
+binarization instead attempts conversion or reports missing binaries, the bootstrap or file placement is
+incorrect; re-check Steps 3-4 and the format requirements above.
 
 ---
 
@@ -365,13 +384,14 @@ each ROI.
 
 ## Related skills
 
-| Skill                             | Relationship                                                          |
-|-----------------------------------|-----------------------------------------------------------------------|
-| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server must be connected for data preparation tools |
-| `/single-recording-configuration` | Next step: configure the pipeline using prepared data                 |
-| `/single-recording-processing`    | Downstream: processing workflow that uses the prepared data           |
-| `/single-recording-results`       | Downstream: output data format reference for processing results       |
-| `/visualization`                  | Downstream: launch viewers to inspect data after processing           |
+| Skill                             | Relationship                                                               |
+|-----------------------------------|----------------------------------------------------------------------------|
+| `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
+| `/cindra-mcp-environment-setup`   | Prerequisite: MCP server must be connected for data preparation tools      |
+| `/single-recording-configuration` | Next step: configure the pipeline using prepared data                      |
+| `/single-recording-processing`    | Downstream: processing workflow that uses the prepared data                |
+| `/single-recording-results`       | Downstream: output data format reference for processing results            |
+| `/visualization`                  | Downstream: launch viewers to inspect data after processing                |
 
 ---
 

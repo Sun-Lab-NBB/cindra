@@ -16,25 +16,14 @@ def _make_roi_mask(
     cluster_id: int = 0,
     recording_count: int = 1,
 ) -> ROIMask:
-    """Creates a circular ROIMask instance for testing.
-
-    Args:
-        centroid: The (y, x) centroid position.
-        radius: The radius of the circular mask in pixels.
-        frame_width: The width of the frame in pixels.
-        cluster_id: The cluster assignment ID.
-        recording_count: The number of recordings containing this ROI.
-
-    Returns:
-        A ROIMask instance with circular pixel coordinates.
-    """
+    """Creates a circular ROIMask instance for testing."""
     y_pixels = []
     x_pixels = []
-    for dy in range(-radius, radius + 1):
-        for dx in range(-radius, radius + 1):
-            if dy**2 + dx**2 <= radius**2:
-                y_pixels.append(centroid[0] + dy)
-                x_pixels.append(centroid[1] + dx)
+    for delta_y in range(-radius, radius + 1):
+        for delta_x in range(-radius, radius + 1):
+            if delta_y**2 + delta_x**2 <= radius**2:
+                y_pixels.append(centroid[0] + delta_y)
+                x_pixels.append(centroid[1] + delta_x)
     y_array = np.array(y_pixels, dtype=np.int32)
     x_array = np.array(x_pixels, dtype=np.int32)
     pixel_weights = np.ones(len(y_pixels), dtype=np.float32)
@@ -52,7 +41,7 @@ def _make_roi_mask(
 
 
 class TestWarpMaskPixels:
-    """Tests for _warp_mask_pixels."""
+    """Tests _warp_mask_pixels."""
 
     def test_identity_deformation_preserves_pixels(self) -> None:
         """Verifies that a zero-displacement deformation preserves pixel positions approximately."""
@@ -67,9 +56,9 @@ class TestWarpMaskPixels:
 
         new_y, _new_x, new_weights, new_centroid = _warp_mask_pixels(mask=mask, deformation=deformation)
 
-        # The pixel count should be approximately preserved.
+        # Verifies that the pixel count is approximately preserved.
         assert abs(len(new_y) - len(mask.y_pixels)) <= 2
-        # The centroid should be approximately preserved.
+        # Verifies that the centroid is approximately preserved.
         assert abs(new_centroid[0] - 50) <= 2
         assert abs(new_centroid[1] - 50) <= 2
         assert new_weights.dtype == np.float32
@@ -87,14 +76,14 @@ class TestWarpMaskPixels:
 
         new_y, new_x, new_weights, _new_centroid = _warp_mask_pixels(mask=mask, deformation=deformation)
 
-        # Pixels should exist in the result (the deformation should not destroy the mask).
+        # Verifies that pixels survive the deformation.
         assert len(new_y) > 0
         assert len(new_x) > 0
         assert new_weights.dtype == np.float32
 
 
 class TestForwardDeformMasks:
-    """Tests for _forward_deform_masks."""
+    """Tests _forward_deform_masks."""
 
     def test_identity_deformation_preserves_mask_count(self) -> None:
         """Verifies that identity deformation preserves the number of masks and approximate positions."""
@@ -112,7 +101,7 @@ class TestForwardDeformMasks:
         result = _forward_deform_masks(masks=masks, deformation=deformation, frame_width=width)
 
         assert len(result) == 2
-        # Each transformed mask should have pixel data.
+        # Verifies that each transformed mask has pixel data.
         for transformed_mask in result:
             assert len(transformed_mask.y_pixels) > 0
             assert len(transformed_mask.x_pixels) > 0
@@ -134,7 +123,7 @@ class TestForwardDeformMasks:
 
 
 class TestBackwardDeformMasks:
-    """Tests for _backward_deform_masks."""
+    """Tests _backward_deform_masks."""
 
     def test_identity_deformation_returns_roi_statistics(self) -> None:
         """Verifies that identity deformation returns ROIStatistics with computed fields."""
@@ -157,19 +146,19 @@ class TestBackwardDeformMasks:
         )
 
         assert len(result) == 1
-        roi_stat = result[0]
+        roi_statistics = result[0]
 
         # Verifies that ROIStatistics was created with spatial data.
-        assert len(roi_stat.mask.y_pixels) > 0
-        assert roi_stat.mask.frame_width == width
-        assert roi_stat.mask.cluster_id == 1
-        assert roi_stat.mask.recording_count == 3
+        assert len(roi_statistics.mask.y_pixels) > 0
+        assert roi_statistics.mask.frame_width == width
+        assert roi_statistics.mask.cluster_id == 1
+        assert roi_statistics.mask.recording_count == 3
 
         # Verifies that compute_roi_statistics populated shape fields.
-        assert roi_stat.pixel_count > 0
+        assert roi_statistics.pixel_count > 0
 
         # Verifies that footprint is zeroed for tracked ROIs.
-        assert roi_stat.footprint == 0
+        assert roi_statistics.footprint == 0
 
     def test_multiple_masks_produce_matching_statistics_count(self) -> None:
         """Verifies that backward deformation of multiple masks returns one ROIStatistics per mask."""
@@ -194,5 +183,5 @@ class TestBackwardDeformMasks:
         )
 
         assert len(result) == 3
-        for roi_stat in result:
-            assert roi_stat.footprint == 0
+        for roi_statistics in result:
+            assert roi_statistics.footprint == 0

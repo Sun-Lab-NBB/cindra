@@ -37,7 +37,8 @@ class ScaleSpacePyramid:
     """
 
     _LEVEL_FACTOR: float = 2.0
-    """The downsampling factor applied between successive pyramid levels."""
+    """The factor by which the scale doubles between successive pyramid levels; each level is downsampled by its
+    reciprocal (0.5)."""
 
     def __init__(self, data: NDArray[np.float32], min_scale: float) -> None:
         min_scale = float(min_scale)

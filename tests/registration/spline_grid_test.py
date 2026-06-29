@@ -8,7 +8,7 @@ from cindra.registration.spline_grid import SplineGrid
 
 
 class TestSplineGridInit:
-    """Tests for SplineGrid initialization and properties."""
+    """Tests SplineGrid initialization and properties."""
 
     def test_properties(self) -> None:
         """Verifies core properties after initialization."""
@@ -20,9 +20,9 @@ class TestSplineGridInit:
     def test_grid_shape_formula(self) -> None:
         """Verifies the grid shape follows int((dim - 1) / sampling) + 4."""
         grid = SplineGrid(field_height=100, field_width=50, sampling=10.0)
-        expected_h = int((100 - 1) / 10.0) + 4
-        expected_w = int((50 - 1) / 10.0) + 4
-        assert grid.grid_shape == (expected_h, expected_w)
+        expected_height = int((100 - 1) / 10.0) + 4
+        expected_width = int((50 - 1) / 10.0) + 4
+        assert grid.grid_shape == (expected_height, expected_width)
 
     def test_compute_grid_shape_static(self) -> None:
         """Verifies the static method produces the same result as the constructor."""
@@ -39,7 +39,7 @@ class TestSplineGridInit:
 
 
 class TestSplineGridDeformationFields:
-    """Tests for SplineGrid.deformation_fields property."""
+    """Tests SplineGrid.deformation_fields property."""
 
     def test_output_shapes(self) -> None:
         """Verifies the deformation fields have the correct shape."""
@@ -57,7 +57,7 @@ class TestSplineGridDeformationFields:
 
 
 class TestSplineGridSetFromFields:
-    """Tests for SplineGrid.set_from_fields and roundtrip behavior."""
+    """Tests SplineGrid.set_from_fields and roundtrip behavior."""
 
     def test_set_from_fields_returns_true(self) -> None:
         """Verifies that set_from_fields succeeds for a valid grid."""
@@ -97,7 +97,7 @@ class TestSplineGridSetFromFields:
 
 
 class TestSplineGridFreezeEdges:
-    """Tests for SplineGrid._freeze_edges behavior."""
+    """Tests SplineGrid._freeze_edges behavior."""
 
     def test_frozen_edges_produce_zero_at_boundary(self) -> None:
         """Verifies that frozen edges produce approximately zero deformation at boundaries."""
@@ -106,7 +106,7 @@ class TestSplineGridFreezeEdges:
         field_x = np.ones((50, 50), dtype=np.float32) * 0.5
         grid.set_from_fields(field_y=field_y, field_x=field_x, freeze_edges=True)
         recovered_y, recovered_x = grid.deformation_fields
-        # Edge pixels should be close to zero.
+        # Freezing edges clamps the boundary knots, so boundary pixels collapse toward zero.
         np.testing.assert_allclose(recovered_y[0, :], 0.0, atol=0.05)
         np.testing.assert_allclose(recovered_y[-1, :], 0.0, atol=0.05)
         np.testing.assert_allclose(recovered_x[:, 0], 0.0, atol=0.05)
@@ -123,7 +123,7 @@ class TestSplineGridFreezeEdges:
 
 
 class TestSplineGridUnfold:
-    """Tests for SplineGrid._unfold injectivity constraint."""
+    """Tests SplineGrid._unfold injectivity constraint."""
 
     def test_unfold_limits_large_knots(self) -> None:
         """Verifies that unfold constrains large displacement values."""

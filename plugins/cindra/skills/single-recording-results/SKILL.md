@@ -24,9 +24,18 @@ Complete output data format documentation for the single-recording (within-recor
 - Output completeness verification
 
 **Does not cover:**
-- Configuration parameters or input data format (see `/single-recording-configuration`)
+- Configuration parameters (see `/single-recording-configuration`)
+- Input data format, TIFF requirements, and acquisition parameters (see `/acquisition-data-preparation`)
 - Processing workflow, batch operations, or status monitoring (see `/single-recording-processing`)
 - Multi-recording output data formats (see `/multi-recording-results`)
+
+---
+
+## Agent requirements
+
+You MUST use the cindra MCP query and verification tools to inspect output data rather than reading output
+files directly when a tool exists for the task. If MCP tools are not available, invoke
+`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
 
 ---
 
@@ -58,6 +67,17 @@ manual file reads whenever possible.
 3. `query_detection_summary_tool` — review detection image quality and ROI diameter
 4. `query_roi_statistics_tool` — inspect ROI quality metrics and classification
 5. `query_traces_tool` — examine fluorescence activity for specific ROIs
+
+### Query tool argument semantics
+
+The `recording_path` argument for the verify and query tools must be the recording output directory, the parent of
+the `cindra/` folder. This equals the `recording_output_paths` entries passed to and returned by the prepare tool
+when the output root differs from the raw-data root, not the raw-data path itself. The tools resolve the `cindra/`
+subdirectory automatically.
+
+The ROI indices accepted by `query_traces_tool` and `query_roi_statistics_tool` are 0-based positional row indices
+into the per-recording arrays, not a tracking identity. Out-of-range indices are silently dropped without an error,
+so a confidently "successful" empty result can mean a wrong index rather than missing data.
 
 ---
 
@@ -245,7 +265,8 @@ Saved at both the combined root and per-plane levels. All files are `.npy` forma
 | `cell_classification.npy`     | (num_rois, 2)      | Column 0: is_cell label (1.0 or 0.0), column 1: classifier probability |
 
 If `spike_deconvolution.extract_spikes` is False, both `subtracted_fluorescence.npy` and `spikes.npy` are filled with
-zeroes.
+zeroes. In that case `query_traces_tool` returns an all-zero trace with `success=true` rather than an error, so an
+all-zero spike or corrected trace can mean deconvolution was disabled rather than the absence of activity.
 
 **Channel 2 (two-channel only, same shapes):**
 
@@ -259,10 +280,22 @@ zeroes.
 
 **Optional colocalization files (combined root and per-plane):**
 
-| File                                  | Shape           | Description                                                                                                    |
-|---------------------------------------|-----------------|----------------------------------------------------------------------------------------------------------------|
-| `cell_colocalization.npy`             | (num_rois, 2)   | Column 0: is_colocalized label (1.0 or 0.0), column 1: probability                                             |
-| `corrected_structural_mean_image.npy` | (height, width) | Bleed-through-corrected structural channel mean (dual-channel recordings where only one channel is functional) |
+| File                                  | Shape           | Description                                                     |
+|---------------------------------------|-----------------|-----------------------------------------------------------------|
+| `cell_colocalization.npy`             | (num_rois, 2)   | Channel-2 colocalization; columns depend on the extraction path |
+| `corrected_structural_mean_image.npy` | (height, width) | Bleed-through-corrected structural channel mean                 |
+
+The `cell_colocalization.npy` column semantics depend on the extraction path. When one channel is structural,
+intensity-based colocalization runs (and also writes `corrected_structural_mean_image.npy`): column 0 is the
+is_colocalized label (1.0 or 0.0) and column 1 the probability. When both channels are functional, spatial
+colocalization runs instead: column 0 is the matched channel-2 ROI index (-1 if unmatched) and column 1 the
+overlap score. `query_roi_statistics_tool` surfaces this as a per-ROI `colocalization` pair plus top-level
+`colocalization_mode` and `colocalization_columns`.
+
+The metadata tool's `two_channels` flag means channel 2 is present AND functional, not merely that the recording
+is dual-channel. A recording with a structural (non-functional) channel 2 reports `two_channels=False` yet still
+writes `cell_colocalization.npy`. Use the presence of `cell_colocalization.npy` (not `two_channels`) as the signal
+that channel-2 colocalization was computed.
 
 ---
 
@@ -270,19 +303,19 @@ zeroes.
 
 Saved in `plane_N/registration_data/`. All files are `.npy` format.
 
-| File                                     | Dtype   | Shape                              | Description                                                        |
-|------------------------------------------|---------|------------------------------------|--------------------------------------------------------------------|
-| `reference_image.npy`                    | float32 | (height, width)                    | Template image used for alignment                                  |
-| `bad_frames.npy`                         | bool    | (num_frames,)                      | Frames flagged for excessive motion                                |
-| `rigid_y_offsets.npy`                    | int32   | (num_frames,)                      | Rigid registration Y displacement per frame                        |
-| `rigid_x_offsets.npy`                    | int32   | (num_frames,)                      | Rigid registration X displacement per frame                        |
-| `rigid_correlations.npy`                 | float32 | (num_frames,)                      | Phase correlation quality per frame                                |
-| `nonrigid_y_offsets.npy`                 | float32 | (num_frames, num_blocks)           | Nonrigid Y displacement per block per frame                        |
-| `nonrigid_x_offsets.npy`                 | float32 | (num_frames, num_blocks)           | Nonrigid X displacement per block per frame                        |
-| `nonrigid_correlations.npy`              | float32 | (num_frames, num_blocks)           | Nonrigid correlation quality per block per frame                   |
-| `principal_component_extreme_images.npy` | float32 | (2, num_components, height, width) | Mean images at PC extremes (0=low, 1=high)                         |
-| `principal_component_projections.npy`    | float32 | (num_frames, num_components)       | Frame projections onto principal components                        |
-| `principal_component_shift_metrics.npy`  | float32 | (num_components, 3)                | Columns: mean rigid shift, mean nonrigid shift, max nonrigid shift |
+| File                                     | Dtype   | Shape                              | Description                                                       |
+|------------------------------------------|---------|------------------------------------|-------------------------------------------------------------------|
+| `reference_image.npy`                    | float32 | (height, width)                    | Template image used for alignment                                 |
+| `bad_frames.npy`                         | bool    | (num_frames,)                      | Frames flagged for excessive motion                               |
+| `rigid_y_offsets.npy`                    | int32   | (num_frames,)                      | Rigid registration Y displacement per frame                       |
+| `rigid_x_offsets.npy`                    | int32   | (num_frames,)                      | Rigid registration X displacement per frame                       |
+| `rigid_correlations.npy`                 | float32 | (num_frames,)                      | Phase correlation quality per frame                               |
+| `nonrigid_y_offsets.npy`                 | float32 | (num_frames, num_blocks)           | Nonrigid Y displacement per block per frame                       |
+| `nonrigid_x_offsets.npy`                 | float32 | (num_frames, num_blocks)           | Nonrigid X displacement per block per frame                       |
+| `nonrigid_correlations.npy`              | float32 | (num_frames, num_blocks)           | Nonrigid correlation quality per block per frame                  |
+| `principal_component_extreme_images.npy` | float32 | (2, num_components, height, width) | Mean images at PC extremes (0=low, 1=high)                        |
+| `principal_component_projections.npy`    | float32 | (num_frames, num_components)       | Frame projections onto principal components                       |
+| `principal_component_shift_metrics.npy`  | float32 | (num_components, 3)                | Columns: rigid magnitude, mean nonrigid shift, max nonrigid shift |
 
 ---
 
@@ -306,8 +339,8 @@ A YAML file containing scalar metadata from all processing stages. Key sections:
 | Section        | Key fields                                                                                                                                                                                                                                                                                                                                                                                |
 |----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `io`           | `frame_height`, `frame_width`, `frame_count`, `sampling_rate`, `plane_index`                                                                                                                                                                                                                                                                                                              |
-| `registration` | `valid_y_range`, `valid_x_range`, `bidirectional_phase_offset`, `normalization_minimum`, `normalization_maximum`                                                                                                                                                                                                                                                                          |
-| `detection`    | `roi_diameter`, `aspect_ratio`                                                                                                                                                                                                                                                                                                                                                            |
+| `registration` | `valid_y_range`, `valid_x_range`, `bidirectional_phase_offset`, `bidirectional_phase_corrected`, `normalization_minimum`, `normalization_maximum`                                                                                                                                                                                                                                         |
+| `detection`    | `roi_diameter`, `roi_diameter_channel_2`, `aspect_ratio`                                                                                                                                                                                                                                                                                                                                  |
 | `timing`       | `binarization_time`, `registration_time`, `two_step_registration_time`, `registration_metrics_time`, `detection_time`, `extraction_time`, `classification_time`, `deconvolution_time`, `detection_time_channel_2`, `extraction_time_channel_2`, `classification_time_channel_2`, `deconvolution_time_channel_2`, `total_plane_time`, `date_processed`, `python_version`, `cindra_version` |
 
 Array fields from registration, detection, and extraction are saved as separate `.npy` files (documented above)
@@ -319,7 +352,7 @@ and set to None in the YAML.
 
 | Category            | Dtype   | Examples                                       |
 |---------------------|---------|------------------------------------------------|
-| Pixel coordinates   | int32   | y_pixels, x_pixels, centroids, motion offsets  |
+| Pixel coordinates   | int32   | y_pixels, x_pixels, centroids, rigid offsets   |
 | Images and traces   | float32 | mean_image, fluorescence, spikes, correlations |
 | Counts / dimensions | uint32  | pixel_counts, frame_count, combined_height     |
 | Small counts        | uint16  | plane_heights, plane_widths, recording_count   |
@@ -327,29 +360,34 @@ and set to None in the YAML.
 | Plane indices       | int32   | plane_index                                    |
 | Plane counts        | uint8   | plane_count                                    |
 
-All `.npy` files are saved with `allow_pickle=False`. Arrays support memory-mapped loading via
+Extraction trace, classification, and colocalization `.npy` files and all `.npz` archives are saved with
+`allow_pickle=False`; detection and registration `.npy` files use NumPy save defaults but contain only numeric
+arrays that load safely with `allow_pickle=False`. Arrays support memory-mapped loading via
 `np.load(path, mmap_mode='r+')` for efficient access to large datasets.
 
 ---
 
 ## Multi-recording compatibility requirements
 
-For recordings intended for multi-recording processing, single-recording processing must complete all three phases 
-(binarize, process, combine). The multi-recording pipeline locates single-recording output by searching for 
-`combined_metadata.npz` within the recording directory tree. The pipeline always generates combined output and 
-preserves registered binary files, so no special configuration is required.
+For recordings intended for multi-recording processing, single-recording processing must complete all three
+phases (binarize, process, combine); no special configuration is required. For the authoritative list of the
+single-recording outputs the multi-recording pipeline consumes, see `/multi-recording-configuration`
+(Prerequisites from single-recording processing).
 
 ---
 
 ## Related skills
 
-| Skill                             | Relationship                                                             |
-|-----------------------------------|--------------------------------------------------------------------------|
-| `/single-recording-configuration` | Configuration parameter reference for the single-recording pipeline      |
-| `/single-recording-processing`    | Processing workflow that produces this output                            |
-| `/multi-recording-results`        | Companion output data reference for the multi-recording pipeline         |
-| `/multi-recording-configuration`  | Multi-recording configuration requires these outputs as prerequisites    |
-| `/visualization`                  | Launch viewers and query tools to visualize and inspect this output data |
+| Skill                             | Relationship                                                               |
+|-----------------------------------|----------------------------------------------------------------------------|
+| `/cindra-pipeline`                | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
+| `/cindra-mcp-environment-setup`   | Prerequisite: cindra MCP server for query and verification tools           |
+| `/acquisition-data-preparation`   | Upstream: input data, TIFF requirements, and acquisition parameters        |
+| `/single-recording-configuration` | Configuration parameter reference for the single-recording pipeline        |
+| `/single-recording-processing`    | Processing workflow that produces this output                              |
+| `/multi-recording-results`        | Companion output data reference for the multi-recording pipeline           |
+| `/multi-recording-configuration`  | Multi-recording configuration requires these outputs as prerequisites      |
+| `/visualization`                  | Launch viewers and query tools to visualize and inspect this output data   |
 
 ---
 
@@ -398,7 +436,8 @@ Per-plane registration data (plane_N/registration_data/):
 - [ ] PC metric arrays exist if registration.registration_metric_principal_components > 0
 
 Per-plane detection and extraction data (plane_N/):
-- [ ] `detection_data/mean_image.npy` and `detection_data/enhanced_mean_image.npy` exist
+- [ ] `detection_data/` contains the four channel-1 images: `mean_image.npy`, `enhanced_mean_image.npy`,
+      `maximum_projection.npy`, and `correlation_map.npy`
 - [ ] `roi_masks.npz` and `roi_statistics.npz` exist
 - [ ] Fluorescence trace .npy files exist with consistent shapes across all traces
 - [ ] `cell_classification.npy` exists with shape (num_rois, 2)

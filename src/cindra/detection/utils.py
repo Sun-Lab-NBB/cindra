@@ -106,7 +106,7 @@ def downsample(data: NDArray[np.float32], taper_edge: bool = True) -> NDArray[np
 
 
 def compute_thresholded_variance(frames: NDArray[np.float32], intensity_threshold: float) -> NDArray[np.float32]:
-    """Computes the thresholded standard deviation of pixel intensities across frames.
+    """Computes the thresholded root-sum-of-squares of pixel intensities across frames.
 
     Notes:
         This function computes a root-sum-of-squares measure for pixels exceeding the intensity threshold. Uses
@@ -118,7 +118,7 @@ def compute_thresholded_variance(frames: NDArray[np.float32], intensity_threshol
             calculation. Pixels below this threshold contribute zero to the sum.
 
     Returns:
-        An array with shape (height, width) containing the thresholded standard deviation for each pixel.
+        An array with shape (height, width) containing the thresholded root-sum-of-squares for each pixel.
     """
     # Zeros out below-threshold values in a single allocation, then squares in-place to avoid a second temporary.
     thresholded = np.where(frames > intensity_threshold, frames, np.float32(0.0))
@@ -155,10 +155,10 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
     # Applies sigmoid function: 1.0 at center, 0.5 at taper_start, approaches 0 at edges.
     sigma_f32 = np.float32(sigma)
     row_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((row_distances - taper_start_row) / sigma_f32))
-    col_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((column_distances - taper_start_column) / sigma_f32))
+    column_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((column_distances - taper_start_column) / sigma_f32))
 
     # Combines row and column tapers multiplicatively for 2D falloff.
-    taper_mask: NDArray[np.float32] = row_taper * col_taper
+    taper_mask: NDArray[np.float32] = row_taper * column_taper
     return taper_mask
 
 
@@ -175,7 +175,7 @@ def compute_block_smoothing_kernel(x_block_count: int, y_block_count: int) -> ND
         y_block_count: Number of blocks along the y-axis.
 
     Returns:
-        The row-normalized Gaussian kernel matrix with shape (num_blocks, num_blocks).
+        The column-normalized Gaussian kernel matrix with shape (num_blocks, num_blocks).
     """
     # Creates 2D coordinate grids from block indices.
     grid_y, grid_x = np.meshgrid(

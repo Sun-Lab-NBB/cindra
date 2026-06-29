@@ -31,15 +31,19 @@ def generate_acquisition_parameters_file_tool(
     roi_x_coordinates: list[int] | None = None,
     roi_y_coordinates: list[int] | None = None,
 ) -> dict[str, bool | str | list[str] | dict[str, object]]:
-    """Generates a cindra_parameters.json acquisition parameters file in the specified directory from the provided
-    acquisition metadata, validating all fields before writing.
+    """Generates a cindra_parameters.json acquisition parameters file in the specified directory.
+
+    Builds the file from the provided acquisition metadata, validating all fields before writing.
 
     Args:
         output_directory: The absolute path to the directory where the cindra_parameters.json file should be created,
             typically the same directory containing the raw TIFF files.
         frame_rate: The volume acquisition rate in Hz (rate at which all planes are acquired, not the per-plane rate).
+            For multi-plane data, the per-plane sampling rate is frame_rate / plane_number.
         plane_number: The number of imaging planes per volume.
-        channel_number: The number of channels per plane (1 or 2).
+        channel_number: The number of channels per plane (1 or 2). By default, channel 1 is treated as the functional
+            (calcium) channel and channel 2 as the optional structural channel. This routing is configurable via the
+            first_channel_functional and second_channel_functional fields in the pipeline configuration.
         roi_number: The number of ROIs per plane (1 for standard imaging, >1 for MROI data).
         roi_lines: The row indices for each ROI in the raw frame (required when roi_number > 1).
         roi_x_coordinates: The x-pixel offset for each ROI in the combined field of view (required when
@@ -115,7 +119,8 @@ def validate_acquisition_parameters_file_tool(file_path: str) -> dict[str, bool 
     Returns:
         On success, contains the resolved 'file_path', overall 'valid' status, and the loaded 'parameters', plus
         any validation 'errors' or 'warnings' detected. On failure, contains an 'error' describing the issue.
-        Both cases include a 'success' flag.
+        Both cases include a 'success' flag. A 'success' value of True only means the tool ran. Callers MUST gate
+        downstream steps on the 'valid' field, which can be False even when 'success' is True.
     """
     path = Path(file_path)
 
@@ -175,9 +180,12 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
 
     Returns:
         On success, contains the 'recording_directory', overall 'valid' status, 'tiff_file_count', 'total_frames',
-        'frames_per_plane', 'frame_height', 'frame_width', 'dtype', validated 'acquisition_parameters', per-file
-        'files' details, and any validation 'errors' or 'warnings'. On failure, contains an 'error' describing the
-        issue. Both cases include a 'success' flag.
+        validated 'acquisition_parameters', per-file 'files' details, and any validation 'errors' or 'warnings'. The
+        'frame_height', 'frame_width', 'dtype', and a meaningful nonzero 'frames_per_plane' appear only when at least
+        one TIFF is readable. When no TIFFs are found, the return has 'valid' False with an 'errors' entry and omits
+        those frame-dimension keys. On failure, contains an 'error' describing the issue. Both cases include a
+        'success' flag. A 'success' value of True only means the tool ran. Callers MUST gate downstream steps on the
+        'valid' field, which can be False even when 'success' is True.
     """
     directory = Path(recording_directory)
 
@@ -239,11 +247,12 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
         plane_number * channel_number if isinstance(plane_number, int) and isinstance(channel_number, int) else 0
     )
 
-    # Discovers TIFF files using the same pattern as the pipeline.
-    tiff_paths: list[Path] = []
+    # Discovers TIFF files using the same deduplicated globbing as the pipeline, resolving paths so that case-variant
+    # extension matches on case-insensitive filesystems are not counted more than once.
+    discovered_paths: set[Path] = set()
     for extension in TIFF_EXTENSIONS:
-        tiff_paths.extend(directory.glob(f"*.{extension}"))
-    tiff_paths = natsorted(tiff_paths)
+        discovered_paths.update(path.resolve() for path in directory.glob(f"*.{extension}"))
+    tiff_paths = natsorted(discovered_paths)
 
     if not tiff_paths:
         errors.append(f"No TIFF files found in: {recording_directory}")
@@ -339,6 +348,11 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
             f"TIFF dtype '{reference_dtype}' is not one of the natively supported types (uint16, int16, int32). "
             f"Data will be cast to int16 during binarization, which may cause precision loss."
         )
+    elif reference_dtype in ("uint16", "int32"):
+        warnings.append(
+            f"TIFF dtype '{reference_dtype}' values are divided by 2 (floor division) during binarization to fit "
+            f"the int16 range, so all pixel values are halved before processing."
+        )
 
     result: dict[str, object] = {
         "success": True,
@@ -413,14 +427,14 @@ def _validate_acquisition_parameters(
     elif roi_number < 1:
         errors.append(f"'roi_number' must be at least 1 (found: {roi_number}).")
     elif roi_number > 1:
-        # MROI mode — validates all MROI fields.
+        # Validates all MROI fields in MROI mode.
         roi_lines = data.get("roi_lines")
         roi_x_coordinates = data.get("roi_x_coordinates")
         roi_y_coordinates = data.get("roi_y_coordinates")
 
         if roi_lines is None:
             errors.append("Missing required field 'roi_lines' (required when roi_number > 1).")
-        elif not isinstance(roi_lines, list) or not all(isinstance(r, list) for r in roi_lines):
+        elif not isinstance(roi_lines, list) or not all(isinstance(lines, list) for lines in roi_lines):
             errors.append("'roi_lines' must be a list of lists of integers.")
         elif len(roi_lines) != roi_number:
             errors.append(f"'roi_lines' length ({len(roi_lines)}) must equal 'roi_number' ({roi_number}).")
@@ -443,7 +457,7 @@ def _validate_acquisition_parameters(
                 f"'roi_y_coordinates' length ({len(roi_y_coordinates)}) must equal 'roi_number' ({roi_number})."
             )
     else:
-        # Single-ROI mode — warns if MROI fields are present.
+        # Warns when MROI fields are present in single-ROI mode.
         if data.get("roi_lines"):
             warnings.append("'roi_lines' is set but 'roi_number' is 1 (single-ROI mode). Field will be ignored.")
         if data.get("roi_x_coordinates"):

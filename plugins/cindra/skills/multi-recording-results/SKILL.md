@@ -30,6 +30,14 @@ Complete output data format documentation for the multi-recording (cross-recordi
 
 ---
 
+## Agent requirements
+
+You MUST use the cindra MCP query and verification tools to inspect output data rather than reading output
+files directly when a tool exists for the task. If MCP tools are not available, invoke
+`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+
+---
+
 ## Available tools
 
 Use these cindra MCP tools to query and verify multi-recording output data programmatically. Prefer these over
@@ -55,7 +63,8 @@ manual file reads whenever possible.
 ### Recommended query order
 
 1. `query_multi_recording_overview_tool` — understand dataset composition and processing completeness
-2. `query_multi_recording_registration_quality_tool` — review deformation field magnitudes and transformed image availability
+2. `query_multi_recording_registration_quality_tool` — review deformation field magnitudes and transformed
+   image availability
 3. `query_multi_recording_tracking_summary_tool` — review template counts, cluster IDs, and recording count distribution
 4. `query_roi_statistics_tool` (with `dataset` parameter) — inspect per-ROI spatial statistics and tracking metadata
 5. `query_traces_tool` (with `dataset` parameter) — examine tracked ROI fluorescence activity per recording
@@ -67,13 +76,29 @@ failure — ROIs can be active in some sessions and inactive in others. The only
 registration quality is visual inspection: confirm that backward-deformed templates overlap with the same structures
 across days. Use `/visualization` for this.
 
+### Query tool argument semantics
+
+The `recording_path` argument for the verify and query tools must be the recording output directory, the parent of
+the `cindra/` folder. This equals the `recording_output_paths` entries passed to and returned by the prepare tool
+when the output root differs from the raw-data root, not the raw-data path itself. The tools resolve the `cindra/`
+subdirectory automatically.
+
+The ROI indices accepted by `query_traces_tool`, `query_roi_statistics_tool`, and `query_cross_recording_traces_tool`
+are 0-based positional row indices into the per-recording arrays. They are not the tracking `cluster_id`, which is a
+separate 1-based identity (0 = unclustered). Out-of-range indices are silently dropped without an error, so a
+confidently "successful" empty result can mean a wrong index rather than missing data.
+
+`query_cross_recording_traces_tool` excludes recordings with incomplete extraction into a `skipped_recordings` list,
+so "all recordings" really means all recordings with complete extraction. Surface `skipped_recordings` to the user
+when it is present.
+
 ---
 
 ## Output data reference
 
-All results are saved under `{cindra_root}/multi_recording/{dataset_name}/` within each recording's cindra output 
-directory. The pipeline produces per-recording output for every recording, plus a shared configuration file in the main 
-recording (first after natural sorting). Channel 2 files are only present for dual-channel recordings where both 
+All results are saved under `{cindra_root}/multi_recording/{dataset_name}/` within each recording's cindra output
+directory. The pipeline produces per-recording output for every recording, plus a shared configuration file in the main
+recording (first after natural sorting). Channel 2 files are only present for dual-channel recordings where both
 channels are functional.
 
 ### Directory structure
@@ -101,7 +126,7 @@ channels are functional.
 
 ### Processing phase and file creation timeline
 
-**Phase 1 — Discovery:** Executed once across all recordings. Creates `multi_recording_configuration.yaml` (main 
+**Phase 1 — Discovery:** Executed once across all recordings. Creates `multi_recording_configuration.yaml` (main
 recording only), `multi_recording_runtime_data.yaml` for each recording, and runs the following sub-steps:
 
 1. **Context resolution:** Creates output directories, saves configuration and initial runtime data.
@@ -142,11 +167,11 @@ Saved in `registration_arrays/` subdirectory. All files are `.npy` format, float
 
 **Channel 2 transformed images (dual-channel only, same shape and dtype):**
 
-| File                                            | Description                              |
-|-------------------------------------------------|------------------------------------------|
-| `transformed_mean_image_channel_2.npy`          | Channel 2 mean image in shared space     |
-| `transformed_enhanced_mean_image_channel_2.npy` | Channel 2 enhanced mean in shared space  |
-| `transformed_maximum_projection_channel_2.npy`  | Channel 2 max projection in shared space |
+| File                                            | Description                                     |
+|-------------------------------------------------|-------------------------------------------------|
+| `transformed_mean_image_channel_2.npy`          | Channel 2 mean image in shared visual space     |
+| `transformed_enhanced_mean_image_channel_2.npy` | Channel 2 enhanced mean in shared visual space  |
+| `transformed_maximum_projection_channel_2.npy`  | Channel 2 max projection in shared visual space |
 
 ---
 
@@ -157,17 +182,17 @@ Saved in `registration_arrays/` subdirectory. All files are `.npy` format, float
 Uses the `ROIMask.save_list()` serialization format. Contains the selected single-recording ROI masks after forward
 deformation to the shared visual space.
 
-| NPZ key           | Dtype   | Shape           | Description                                     |
-|-------------------|---------|-----------------|-------------------------------------------------|
-| `pixel_counts`    | uint32  | (num_rois,)     | Number of pixels in each deformed ROI           |
-| `y_pixels`        | int32   | (total_pixels,) | Y-coordinates of all ROI pixels (concatenated)  |
-| `x_pixels`        | int32   | (total_pixels,) | X-coordinates of all ROI pixels (concatenated)  |
-| `pixel_weights`   | float32 | (total_pixels,) | Spatial filter weights for each pixel           |
-| `centroids`       | int32   | (num_rois, 2)   | ROI centroid coordinates (y, x) in shared space |
-| `radius`          | float32 | (num_rois,)     | Fitted radius per ROI                           |
-| `cluster_id`      | uint32  | (num_rois,)     | Tracking cluster ID (0 = unclustered)           |
-| `recording_count` | uint16  | (num_rois,)     | Number of recordings ROI appears in             |
-| `frame_width`     | uint32  | (1,)            | Frame width in pixels                           |
+| NPZ key           | Dtype   | Shape           | Description                                            |
+|-------------------|---------|-----------------|--------------------------------------------------------|
+| `pixel_counts`    | uint32  | (num_rois,)     | Number of pixels in each deformed ROI                  |
+| `y_pixels`        | int32   | (total_pixels,) | Y-coordinates of all ROI pixels (concatenated)         |
+| `x_pixels`        | int32   | (total_pixels,) | X-coordinates of all ROI pixels (concatenated)         |
+| `pixel_weights`   | float32 | (total_pixels,) | Spatial filter weights for each pixel                  |
+| `centroids`       | int32   | (num_rois, 2)   | ROI centroid coordinates (y, x) in shared visual space |
+| `radius`          | float32 | (num_rois,)     | Fitted radius per ROI                                  |
+| `cluster_id`      | uint32  | (num_rois,)     | Tracking cluster ID (0 = unclustered)                  |
+| `recording_count` | uint16  | (num_rois,)     | Number of recordings ROI appears in                    |
+| `frame_width`     | uint32  | (1,)            | Frame width in pixels                                  |
 
 ---
 
@@ -184,8 +209,8 @@ recordings contributed to the template.
 
 ### Backward-transformed extraction data (roi_masks.npz, roi_statistics.npz)
 
-Saved at the multi_recording output root. Uses the same `ROIStatistics.save_list()` serialization format as 
-single-recording output. Contains template masks projected back to the recording's native coordinate system via inverse 
+Saved at the multi_recording output root. Uses the same `ROIStatistics.save_list()` serialization format as
+single-recording output. Contains template masks projected back to the recording's native coordinate system via inverse
 deformation, with full shape statistics computed for each ROI.
 
 **roi_masks.npz** — same NPZ keys and dtypes as the tracking template masks (see above).
@@ -194,7 +219,7 @@ deformation, with full shape statistics computed for each ROI.
 
 | NPZ key                  | Dtype   | Shape       | Description                                            |
 |--------------------------|---------|-------------|--------------------------------------------------------|
-| `footprints`             | uint16  | (num_rois,) | Set to pixel_count for tracked ROIs (bypass detection) |
+| `footprints`             | uint16  | (num_rois,) | Set to 0 for tracked ROIs (no meaningful hop size)     |
 | `compactness`            | float32 | (num_rois,) | Ratio of actual to expected mean radius (1.0=circular) |
 | `solidity`               | float32 | (num_rois,) | Ratio of soma pixels to convex hull area               |
 | `pixel_count`            | uint32  | (num_rois,) | Total pixels in complete ROI                           |
@@ -202,6 +227,15 @@ deformation, with full shape statistics computed for each ROI.
 | `normalized_pixel_count` | float32 | (num_rois,) | Pixel count normalized by expected ROI size (soma)     |
 | `skewness`               | float32 | (num_rois,) | Neuropil-corrected fluorescence skewness               |
 | `plane_index`            | int32   | (num_rois,) | Imaging plane index for each ROI                       |
+| `soma_mask`              | bool    | (n_pixels,) | Flattened soma masks (present when populated)          |
+| `soma_mask_counts`       | uint32  | (num_rois,) | Per-ROI lengths indexing `soma_mask`                   |
+| `overlap_mask`           | bool    | (n_pixels,) | Flattened overlap masks (present when populated)       |
+| `overlap_mask_counts`    | uint32  | (num_rois,) | Per-ROI lengths indexing `overlap_mask`                |
+| `neuropil_mask`          | int32   | (n_pixels,) | Flattened neuropil indices (present when populated)    |
+| `neuropil_mask_counts`   | uint32  | (num_rois,) | Per-ROI lengths indexing `neuropil_mask`               |
+
+The `soma_mask`, `overlap_mask`, and `neuropil_mask` data arrays (with their `_counts` companions) appear only
+when the corresponding per-ROI data is populated; otherwise the keys are absent.
 
 Channel 2 uses identical keys in `roi_masks_channel_2.npz` and `roi_statistics_channel_2.npz`.
 
@@ -234,9 +268,12 @@ zeroes.
 
 **Optional colocalization file (dual-channel only):**
 
-| File                      | Shape         | Description                                                        |
-|---------------------------|---------------|--------------------------------------------------------------------|
-| `cell_colocalization.npy` | (num_rois, 2) | Column 0: is_colocalized label (1.0 or 0.0), column 1: probability |
+| File                      | Shape         | Description                                                                            |
+|---------------------------|---------------|----------------------------------------------------------------------------------------|
+| `cell_colocalization.npy` | (num_rois, 2) | Column 0: matched channel-2 ROI index (-1 if unmatched), column 1: pixel-overlap score |
+
+Multi-recording dual-channel processing uses spatial colocalization (pixel overlap between channel-1 and
+channel-2 ROIs), so column 0 holds the matched channel-2 ROI index (-1 when unmatched), not a 1.0/0.0 label.
 
 ---
 
@@ -256,30 +293,32 @@ saved as separate `.npy`/`.npz` files (documented above).
 
 ### Data type conventions
 
-| Category            | Dtype   | Examples                                               |
-|---------------------|---------|--------------------------------------------------------|
-| Pixel coordinates   | int32   | y_pixels, x_pixels, centroids                          |
-| Images and traces   | float32 | transformed images, fluorescence, spikes, correlations |
-| Counts / dimensions | uint32  | pixel_counts, cluster_id, frame_width                  |
-| Small counts        | uint16  | footprints, recording_count                            |
-| Plane indices       | int32   | plane_index                                            |
-| Plane counts        | uint8   | plane_count                                            |
-| Deformation fields  | float32 | deform_field_y, deform_field_x                         |
+| Category            | Dtype   | Examples                                 |
+|---------------------|---------|------------------------------------------|
+| Pixel coordinates   | int32   | y_pixels, x_pixels, centroids            |
+| Images and traces   | float32 | transformed images, fluorescence, spikes |
+| Counts / dimensions | uint32  | pixel_counts, cluster_id, frame_width    |
+| Small counts        | uint16  | footprints, recording_count              |
+| Plane indices       | int32   | plane_index                              |
+| Deformation fields  | float32 | deform_field_y, deform_field_x           |
 
-All `.npy` files are saved with `allow_pickle=False`. Arrays support memory-mapped loading via
-`np.load(path, mmap_mode='r+')` for efficient access to large datasets. NPZ archives do not support memory
-mapping and are always eagerly loaded.
+The fluorescence trace and colocalization `.npy` files are saved with `allow_pickle=False`; the
+`registration_arrays/*.npy` files use NumPy save defaults but contain only numeric arrays that load safely with
+`allow_pickle=False`. Arrays support memory-mapped loading via `np.load(path, mmap_mode='r+')` for efficient
+access to large datasets. NPZ archives do not support memory mapping and are always eagerly loaded.
 
 ---
 
 ## Related skills
 
-| Skill                            | Relationship                                                             |
-|----------------------------------|--------------------------------------------------------------------------|
-| `/multi-recording-configuration` | Configuration parameter reference for the multi-recording pipeline       |
-| `/multi-recording-processing`    | Processing workflow that produces this output                            |
-| `/single-recording-results`      | Companion output data reference for the single-recording pipeline        |
-| `/visualization`                 | Launch viewers and query tools to visualize and inspect this output data |
+| Skill                            | Relationship                                                               |
+|----------------------------------|----------------------------------------------------------------------------|
+| `/cindra-pipeline`               | Overview: end-to-end phases, handoffs, and the single-vs-multi entry point |
+| `/cindra-mcp-environment-setup`  | Prerequisite: cindra MCP server for query and verification tools           |
+| `/multi-recording-configuration` | Configuration parameter reference for the multi-recording pipeline         |
+| `/multi-recording-processing`    | Processing workflow that produces this output                              |
+| `/single-recording-results`      | Companion output data reference for the single-recording pipeline          |
+| `/visualization`                 | Launch viewers and query tools to visualize and inspect this output data   |
 
 ---
 

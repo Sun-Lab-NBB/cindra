@@ -16,7 +16,7 @@ from cindra.registration.deformation import (
 
 
 class TestCreateDiffusionKernel:
-    """Tests for _create_diffusion_kernel."""
+    """Tests _create_diffusion_kernel."""
 
     def test_small_sigma_returns_delta(self) -> None:
         """Verifies that sigma below threshold returns a single-element delta kernel."""
@@ -54,12 +54,12 @@ class TestCreateDiffusionKernel:
         kernel = _create_diffusion_kernel(sigma=2.0)
         center = kernel.size // 2
         right_half = kernel[center:]
-        # Each element should be >= the next (monotonically non-increasing).
+        # Confirms kernel values are monotonically non-increasing toward the tail.
         assert np.all(np.diff(right_half) <= 0)
 
 
 class TestDiffuse:
-    """Tests for the diffuse function."""
+    """Tests the diffuse function."""
 
     def test_small_sigma_identity(self) -> None:
         """Verifies that a very small sigma produces no smoothing."""
@@ -86,7 +86,7 @@ class TestDiffuse:
 
 
 class TestZoom:
-    """Tests for the zoom function."""
+    """Tests the zoom function."""
 
     def test_upscale_shape(self) -> None:
         """Verifies the output shape after upscaling."""
@@ -128,31 +128,31 @@ class TestZoom:
 
 
 class TestMakeSamplesAbsolute:
-    """Tests for _make_samples_absolute."""
+    """Tests _make_samples_absolute."""
 
     def test_zero_deltas_give_identity_grid(self) -> None:
         """Verifies that zero displacement fields produce identity coordinate grids."""
         delta_x = np.zeros((4, 6), dtype=np.float32)
         delta_y = np.zeros((4, 6), dtype=np.float32)
-        abs_x, abs_y = _make_samples_absolute(delta_x=delta_x, delta_y=delta_y)
+        absolute_x, absolute_y = _make_samples_absolute(delta_x=delta_x, delta_y=delta_y)
 
         expected_x = np.arange(6, dtype=np.float32).reshape(1, 6)
         expected_y = np.arange(4, dtype=np.float32).reshape(4, 1)
-        np.testing.assert_allclose(abs_x, np.broadcast_to(expected_x, (4, 6)))
-        np.testing.assert_allclose(abs_y, np.broadcast_to(expected_y, (4, 6)))
+        np.testing.assert_allclose(absolute_x, np.broadcast_to(expected_x, (4, 6)))
+        np.testing.assert_allclose(absolute_y, np.broadcast_to(expected_y, (4, 6)))
 
     def test_with_known_deltas(self) -> None:
         """Verifies correct absolute coordinates with known displacement values."""
         delta_x = np.ones((3, 3), dtype=np.float32) * 0.5
         delta_y = np.ones((3, 3), dtype=np.float32) * -0.5
-        abs_x, abs_y = _make_samples_absolute(delta_x=delta_x, delta_y=delta_y)
-        # At pixel (1, 2): abs_x = 2 + 0.5 = 2.5, abs_y = 1 + (-0.5) = 0.5
-        np.testing.assert_allclose(abs_x[1, 2], 2.5)
-        np.testing.assert_allclose(abs_y[1, 2], 0.5)
+        absolute_x, absolute_y = _make_samples_absolute(delta_x=delta_x, delta_y=delta_y)
+        # At pixel (1, 2): absolute_x = 2 + 0.5 = 2.5, absolute_y = 1 + (-0.5) = 0.5
+        np.testing.assert_allclose(absolute_x[1, 2], 2.5)
+        np.testing.assert_allclose(absolute_y[1, 2], 0.5)
 
 
 class TestResize:
-    """Tests for the _resize function."""
+    """Tests the _resize function."""
 
     def test_shape_change(self) -> None:
         """Verifies the output has the requested dimensions."""
@@ -175,7 +175,7 @@ class TestResize:
 
 
 class TestDeformationIdentity:
-    """Tests for Deformation identity creation and properties."""
+    """Tests Deformation identity creation and properties."""
 
     def test_identity_creation(self) -> None:
         """Verifies identity deformation is created with correct shape."""
@@ -212,7 +212,7 @@ class TestDeformationIdentity:
 
 
 class TestDeformationConstructor:
-    """Tests for Deformation constructed from displacement fields."""
+    """Tests Deformation constructed from displacement fields."""
 
     def test_non_identity_properties(self) -> None:
         """Verifies properties of a non-identity deformation."""
@@ -251,7 +251,7 @@ class TestDeformationConstructor:
 
 
 class TestDeformationScale:
-    """Tests for Deformation.scale."""
+    """Tests Deformation.scale."""
 
     def test_scale_by_factor(self) -> None:
         """Verifies that scaling multiplies all displacement values."""
@@ -269,13 +269,13 @@ class TestDeformationScale:
         deformation = Deformation(field_y=field_y, field_x=field_x)
         copied = deformation.scale(factor=1.0)
         np.testing.assert_array_equal(copied[0], field_y)
-        # Verify it's a copy, not a view.
+        # Confirms the result is a copy rather than a view.
         copied[0][0, 0] = 999.0
         assert deformation[0][0, 0] != 999.0
 
 
 class TestDeformationAdd:
-    """Tests for Deformation.add and __add__."""
+    """Tests Deformation.add and __add__."""
 
     def test_add_identity_left(self) -> None:
         """Verifies that identity + deformation returns a copy of the deformation."""
@@ -283,7 +283,7 @@ class TestDeformationAdd:
         field_y = np.ones((5, 5), dtype=np.float32) * 2.0
         field_x = np.ones((5, 5), dtype=np.float32) * 3.0
         deformation = Deformation(field_y=field_y, field_x=field_x)
-        result = identity.add(deformation)
+        result = identity.add(other=deformation)
         np.testing.assert_array_equal(result[0], field_y)
         np.testing.assert_array_equal(result[1], field_x)
 
@@ -310,7 +310,7 @@ class TestDeformationAdd:
 
 
 class TestDeformationCompose:
-    """Tests for Deformation.compose."""
+    """Tests Deformation.compose."""
 
     def test_compose_with_identity_left(self) -> None:
         """Verifies that identity.compose(d) returns a copy of d."""
@@ -318,7 +318,7 @@ class TestDeformationCompose:
         field_y = np.ones((10, 10), dtype=np.float32) * 0.5
         field_x = np.ones((10, 10), dtype=np.float32) * -0.5
         deformation = Deformation(field_y=field_y, field_x=field_x)
-        result = identity.compose(deformation)
+        result = identity.compose(other=deformation)
         np.testing.assert_allclose(result[0], 0.5, atol=1e-5)
         np.testing.assert_allclose(result[1], -0.5, atol=1e-5)
 
@@ -328,7 +328,7 @@ class TestDeformationCompose:
         field_y = np.ones((10, 10), dtype=np.float32) * 0.5
         field_x = np.ones((10, 10), dtype=np.float32) * -0.5
         deformation = Deformation(field_y=field_y, field_x=field_x)
-        result = deformation.compose(identity)
+        result = deformation.compose(other=identity)
         np.testing.assert_allclose(result[0], 0.5, atol=1e-5)
 
     def test_compose_two_uniform_deformations(self) -> None:
@@ -337,14 +337,14 @@ class TestDeformationCompose:
         field_x = np.ones((20, 20), dtype=np.float32) * 0.2
         deformation_1 = Deformation(field_y=field_y, field_x=field_x)
         deformation_2 = Deformation(field_y=field_y.copy(), field_x=field_x.copy())
-        result = deformation_1.compose(deformation_2)
+        result = deformation_1.compose(other=deformation_2)
         # For small uniform displacements, composition ≈ addition at interior pixels.
         np.testing.assert_allclose(result[0][5:-5, 5:-5], 0.6, atol=0.05)
         np.testing.assert_allclose(result[1][5:-5, 5:-5], 0.4, atol=0.05)
 
 
 class TestDeformationResizeField:
-    """Tests for Deformation.resize_field."""
+    """Tests Deformation.resize_field."""
 
     def test_resize_identity(self) -> None:
         """Verifies that resizing an identity deformation returns a new identity."""
@@ -371,7 +371,7 @@ class TestDeformationResizeField:
 
 
 class TestDeformationApply:
-    """Tests for Deformation.apply_deformation."""
+    """Tests Deformation.apply_deformation."""
 
     def test_zero_displacement_preserves_image(self) -> None:
         """Verifies that zero displacement fields preserve the image."""
@@ -395,7 +395,7 @@ class TestDeformationApply:
 
 
 class TestDeformationInverse:
-    """Tests for Deformation.inverse."""
+    """Tests Deformation.inverse."""
 
     def test_inverse_of_small_displacement(self) -> None:
         """Verifies that inverse approximately negates the displacement for small fields."""
@@ -409,21 +409,21 @@ class TestDeformationInverse:
 
 
 class TestDeformationGetDeformationLocations:
-    """Tests for Deformation.get_deformation_locations."""
+    """Tests Deformation.get_deformation_locations."""
 
     def test_returns_absolute_coordinates(self) -> None:
         """Verifies that the returned coordinates are absolute pixel positions."""
         field_y = np.ones((5, 5), dtype=np.float32) * 0.5
         field_x = np.ones((5, 5), dtype=np.float32) * -0.5
         deformation = Deformation(field_y=field_y, field_x=field_x)
-        abs_x, abs_y = deformation.get_deformation_locations()
-        # At pixel (2, 3): abs_x = 3 + (-0.5) = 2.5, abs_y = 2 + 0.5 = 2.5
-        np.testing.assert_allclose(abs_x[2, 3], 2.5)
-        np.testing.assert_allclose(abs_y[2, 3], 2.5)
+        absolute_x, absolute_y = deformation.get_deformation_locations()
+        # At pixel (2, 3): absolute_x = 3 + (-0.5) = 2.5, absolute_y = 2 + 0.5 = 2.5
+        np.testing.assert_allclose(absolute_x[2, 3], 2.5)
+        np.testing.assert_allclose(absolute_y[2, 3], 2.5)
 
 
 class TestDeformationRegularize:
-    """Tests for Deformation.regularize."""
+    """Tests Deformation.regularize."""
 
     def test_regularize_identity(self) -> None:
         """Verifies that regularizing an identity deformation returns identity."""
@@ -442,7 +442,7 @@ class TestDeformationRegularize:
 
 
 class TestDeformationCrop:
-    """Tests for Deformation.crop."""
+    """Tests Deformation.crop."""
 
     def test_crop_identity(self) -> None:
         """Verifies that cropping an identity deformation returns a smaller identity."""

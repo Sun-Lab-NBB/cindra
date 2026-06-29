@@ -151,14 +151,12 @@ class TrackingViewer(QMainWindow):
 
         # Image + trace display panel (pyqtgraph).
         self._graphics_widget = pg.GraphicsLayoutWidget()
-        # noinspection PyUnresolvedReferences
         self._view_box: pg.ViewBox = self._graphics_widget.addViewBox(row=0, col=0)
         self._view_box.setAspectLocked(True)
         self._view_box.invertY(True)
         self._image_item: pg.ImageItem = pg.ImageItem()
         self._view_box.addItem(self._image_item)
         main_layout.addWidget(self._graphics_widget, stretch=3)
-        # noinspection PyUnresolvedReferences
         self._graphics_widget.scene().sigMouseClicked.connect(self._on_image_clicked)
 
         # Control panel (right sidebar).
@@ -189,9 +187,9 @@ class TrackingViewer(QMainWindow):
             self._dataset_combo.addItem(name, userData=name)
         # Selects the active dataset in the combo box.
         active = data.active_dataset_name
-        for i in range(self._dataset_combo.count()):
-            if self._dataset_combo.itemData(i) == active:
-                self._dataset_combo.setCurrentIndex(i)
+        for index in range(self._dataset_combo.count()):
+            if self._dataset_combo.itemData(index) == active:
+                self._dataset_combo.setCurrentIndex(index)
                 break
         self._dataset_combo.blockSignals(False)
 
@@ -220,6 +218,9 @@ class TrackingViewer(QMainWindow):
         if not self.data.is_multi_recording:
             return {"viewer_type": "tracking", "loaded": False}
 
+        roi_text = self._roi_edit.text().strip()
+        last_clicked_roi_index = int(roi_text) if roi_text.isdigit() else None
+
         return {
             "viewer_type": "tracking",
             "loaded": True,
@@ -234,6 +235,7 @@ class TrackingViewer(QMainWindow):
             "channel_2_active": self._channel_2_checkbox.isChecked(),
             "opacity": self._opacity_slider.value(),
             "selected_roi_indices": sorted(self._selected_rois) if self._selected_rois is not None else None,
+            "last_clicked_roi_index": last_clicked_roi_index,
             "mask_count": self._cached_mask_count,
             "auto_cycling": self._auto_cycle_timer.isActive(),
         }
@@ -548,7 +550,9 @@ class TrackingViewer(QMainWindow):
             self._roi_edit.clear()
         elif self._selected_rois is not None and self._cached_mask_count > 0:
             # Clamps the selection to valid indices in case the mask count differs.
-            self._selected_rois = {i for i in self._selected_rois if i < self._cached_mask_count}
+            self._selected_rois = {
+                roi_index for roi_index in self._selected_rois if roi_index < self._cached_mask_count
+            }
         self._selection_was_template = current_is_template_group
         self._selection_recording_index = recording_index
 
@@ -728,14 +732,12 @@ class TrackingViewer(QMainWindow):
         ):
             return
 
-        # noinspection PyTypeChecker
         roi_index = int(self._cached_roi_map[click_y, click_x])
         if roi_index < 0:
             return
 
         # Determines whether to toggle (Ctrl/Shift held) or replace selection (plain click).
         modifiers = event.modifiers()  # type: ignore[attr-defined]
-        # noinspection PyTypeChecker
         is_toggle = bool(
             modifiers & (QtCore.Qt.KeyboardModifier.ControlModifier | QtCore.Qt.KeyboardModifier.ShiftModifier)
         )

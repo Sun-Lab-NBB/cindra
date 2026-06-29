@@ -16,14 +16,14 @@ from cindra.detection.detect_rois import (
 
 
 class TestExtendRoi:
-    """Tests for extend_roi."""
+    """Tests extend_roi."""
 
     def test_single_pixel_one_iteration(self) -> None:
         """Verifies that a single pixel expands to a diamond of 5 pixels after one iteration."""
         y = np.array([5], dtype=np.int32)
         x = np.array([5], dtype=np.int32)
         y_out, _x_out = extend_roi(y_pixels=y, x_pixels=x, height=10, width=10, iterations=1)
-        assert len(y_out) == 5  # center + 4 cardinal neighbors
+        assert len(y_out) == 5  # center + 4 cardinal neighbors.
 
     def test_boundary_clipping(self) -> None:
         """Verifies that pixels outside the frame boundary are excluded."""
@@ -61,7 +61,7 @@ class TestExtendRoi:
 
 
 class TestSubtractNeuropil:
-    """Tests for _subtract_neuropil."""
+    """Tests _subtract_neuropil."""
 
     def test_in_place_modification(self) -> None:
         """Verifies that frames are modified in-place."""
@@ -86,7 +86,7 @@ class TestSubtractNeuropil:
 
 
 class TestConvolveSquare2d:
-    """Tests for _convolve_square_2d."""
+    """Tests _convolve_square_2d."""
 
     def test_output_shape(self) -> None:
         """Verifies that the output shape matches the input shape."""
@@ -112,7 +112,7 @@ class TestConvolveSquare2d:
 
 
 class TestCreateInitialSquare:
-    """Tests for _create_initial_square."""
+    """Tests _create_initial_square."""
 
     def test_centered_square(self) -> None:
         """Verifies that the output is a square patch centered at the given location."""
@@ -132,26 +132,26 @@ class TestCreateInitialSquare:
 
     def test_weights_unit_normalized(self) -> None:
         """Verifies that the output weights have unit norm."""
-        _, _, w = _create_initial_square(center_y=10, center_x=10, square_size=5, height=30, width=30)
-        np.testing.assert_allclose(np.linalg.norm(w), 1.0, atol=1e-5)
+        _, _, weights = _create_initial_square(center_y=10, center_x=10, square_size=5, height=30, width=30)
+        np.testing.assert_allclose(np.linalg.norm(weights), 1.0, atol=1e-5)
 
     def test_output_dtypes(self) -> None:
         """Verifies the output dtypes."""
-        y, x, w = _create_initial_square(center_y=10, center_x=10, square_size=3, height=30, width=30)
+        y, x, weights = _create_initial_square(center_y=10, center_x=10, square_size=3, height=30, width=30)
         assert y.dtype == np.int32
         assert x.dtype == np.int32
-        assert w.dtype == np.float32
+        assert weights.dtype == np.float32
 
 
 class TestExtendMask:
-    """Tests for _extend_mask."""
+    """Tests _extend_mask."""
 
     def test_expands_in_all_directions(self) -> None:
         """Verifies that the mask expands into all 8 surrounding neighbors."""
         y = np.array([5], dtype=np.int32)
         x = np.array([5], dtype=np.int32)
-        w = np.array([1.0], dtype=np.float32)
-        y_out, _x_out, _w_out = _extend_mask(y_pixels=y, x_pixels=x, weights=w, height=20, width=20)
+        weights = np.array([1.0], dtype=np.float32)
+        y_out, _x_out, _w_out = _extend_mask(y_pixels=y, x_pixels=x, weights=weights, height=20, width=20)
         # Single pixel + 8 neighbors = 9 pixels.
         assert len(y_out) == 9
 
@@ -159,8 +159,8 @@ class TestExtendMask:
         """Verifies that the mask respects frame boundaries."""
         y = np.array([0], dtype=np.int32)
         x = np.array([0], dtype=np.int32)
-        w = np.array([1.0], dtype=np.float32)
-        y_out, x_out, _w_out = _extend_mask(y_pixels=y, x_pixels=x, weights=w, height=20, width=20)
+        weights = np.array([1.0], dtype=np.float32)
+        y_out, x_out, _w_out = _extend_mask(y_pixels=y, x_pixels=x, weights=weights, height=20, width=20)
         assert np.all(y_out >= 0)
         assert np.all(x_out >= 0)
         # Corner pixel: only center, right, down, and diagonal = 4 pixels.
@@ -170,13 +170,13 @@ class TestExtendMask:
         """Verifies that the accumulated weights are non-negative."""
         y = np.array([5, 5, 6], dtype=np.int32)
         x = np.array([5, 6, 5], dtype=np.int32)
-        w = np.array([1.0, 2.0, 3.0], dtype=np.float32)
-        _, _, w_out = _extend_mask(y_pixels=y, x_pixels=x, weights=w, height=20, width=20)
+        weights = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        _, _, w_out = _extend_mask(y_pixels=y, x_pixels=x, weights=weights, height=20, width=20)
         assert np.all(w_out >= 0)
 
 
 class TestEstimateSpatialScale:
-    """Tests for _estimate_spatial_scale."""
+    """Tests _estimate_spatial_scale."""
 
     def test_returns_dominant_scale(self) -> None:
         """Verifies that the dominant scale is returned for a clear scale pattern."""
@@ -195,33 +195,33 @@ class TestEstimateSpatialScale:
 
 
 class TestComputeMultiscaleMasks:
-    """Tests for _compute_multiscale_masks."""
+    """Tests _compute_multiscale_masks."""
 
     def test_output_list_lengths(self) -> None:
         """Verifies that the output lists have one entry per scale."""
         y = np.array([5, 5, 6, 6], dtype=np.int32)
         x = np.array([5, 6, 5, 6], dtype=np.int32)
-        w = np.array([0.25, 0.25, 0.25, 0.25], dtype=np.float32)
+        pixel_weights = np.array([0.25, 0.25, 0.25, 0.25], dtype=np.float32)
         scale_heights = np.array([32, 16, 8], dtype=np.uint16)
         scale_widths = np.array([32, 16, 8], dtype=np.uint16)
-        y_coords, x_coords, weights = _compute_multiscale_masks(
-            y_pixels=y, x_pixels=x, weights=w, scale_heights=scale_heights, scale_widths=scale_widths
+        y_coordinates, x_coordinates, weights = _compute_multiscale_masks(
+            y_pixels=y, x_pixels=x, weights=pixel_weights, scale_heights=scale_heights, scale_widths=scale_widths
         )
-        assert len(y_coords) == 3
-        assert len(x_coords) == 3
+        assert len(y_coordinates) == 3
+        assert len(x_coordinates) == 3
         assert len(weights) == 3
 
     def test_coarser_scales_have_fewer_or_equal_pixels(self) -> None:
         """Verifies that coarser scales have fewer or comparable pixels due to downsampling."""
         y = np.arange(10, dtype=np.int32)
         x = np.arange(10, dtype=np.int32)
-        w = np.ones(10, dtype=np.float32) / 10
+        weights = np.ones(10, dtype=np.float32) / 10
         scale_heights = np.array([64, 32, 16], dtype=np.uint16)
         scale_widths = np.array([64, 32, 16], dtype=np.uint16)
-        y_coords, _x_coords, _weights = _compute_multiscale_masks(
-            y_pixels=y, x_pixels=x, weights=w, scale_heights=scale_heights, scale_widths=scale_widths
+        y_coordinates, _x_coordinates, _weights = _compute_multiscale_masks(
+            y_pixels=y, x_pixels=x, weights=weights, scale_heights=scale_heights, scale_widths=scale_widths
         )
         # After extension, coarser scales may have more pixels than the raw downsampled count,
         # but the original downsampled coordinates should be fewer.
         for i in range(3):
-            assert len(y_coords[i]) > 0
+            assert len(y_coordinates[i]) > 0

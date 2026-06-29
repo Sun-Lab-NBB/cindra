@@ -18,15 +18,7 @@ from cindra.dataclasses import (
 
 
 def _make_roi(centroid: tuple[int, int] = (20, 20), pixel_count: int = 50) -> ROIStatistics:
-    """Creates a minimal ROIStatistics instance for testing.
-
-    Args:
-        centroid: The (y, x) centroid position.
-        pixel_count: The number of pixels in the mask.
-
-    Returns:
-        An ROIStatistics instance with the specified properties.
-    """
+    """Creates a minimal ROIStatistics instance for testing."""
     y_pixels = np.arange(pixel_count, dtype=np.int32) % 10
     x_pixels = np.arange(pixel_count, dtype=np.int32) // 10
     mask = ROIMask(
@@ -61,7 +53,9 @@ def _make_runtime_and_config(
     rois = [_make_roi(centroid=(20 + i * 15, 20 + i * 15)) for i in range(roi_count)]
     if probabilities is None:
         probabilities = [0.9] * roi_count
-    classification = np.array([[prob, 1.0 if prob > 0.5 else 0.0] for prob in probabilities], dtype=np.float32)
+    classification = np.array(
+        [[probability, 1.0 if probability > 0.5 else 0.0] for probability in probabilities], dtype=np.float32
+    )
 
     extraction = ExtractionData()
     extraction.roi_statistics = rois
@@ -85,7 +79,7 @@ def _make_runtime_and_config(
 
 
 class TestFilterRois:
-    """Tests for _filter_rois."""
+    """Tests _filter_rois."""
 
     def test_selects_all_rois_with_permissive_filters(self) -> None:
         """Verifies that all ROIs are selected when filters are permissive."""
@@ -119,10 +113,10 @@ class TestFilterRois:
         runtime, configuration = _make_runtime_and_config(
             roi_count=2,
             probability_threshold=0.0,
-            maximum_size=50,
+            maximum_size=49,
         )
 
-        # Default ROIs have pixel_count=50, and the filter uses >= (not >), so pixel_count >= 50 is excluded.
+        # Default ROIs have pixel_count=50; maximum_size is inclusive, so 50 > 49 is excluded.
         channel_1_count, _ = _filter_rois(runtime=runtime, configuration=configuration)
 
         assert channel_1_count == 0
@@ -152,7 +146,7 @@ class TestFilterRois:
             maximum_size=10000,
         )
 
-        # Adds channel 2 ROI statistics and classification to the combined data.
+        # Channel 2 selection must run independently of channel 1 selection.
         channel_2_rois = [_make_roi(centroid=(30 + i * 10, 30 + i * 10)) for i in range(roi_count)]
         channel_2_classification = np.array([[0.9, 1.0], [0.2, 0.0], [0.8, 1.0]], dtype=np.float32)
         assert runtime.combined_data is not None
@@ -217,7 +211,7 @@ class TestFilterRois:
             probability_threshold=0.5,
         )
 
-        # Adds channel 2 statistics but no classification.
+        # Channel 2 selection must fail when its classification is missing.
         channel_2_rois = [_make_roi() for _ in range(roi_count)]
         assert runtime.combined_data is not None
         runtime.combined_data.extraction.roi_statistics_channel_2 = channel_2_rois

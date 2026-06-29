@@ -8,7 +8,7 @@ from cindra.registration.diffeomorphic import DiffeomorphicDemonsRegistration
 
 
 class TestDiffeomorphicDemonsRegistration:
-    """Tests for DiffeomorphicDemonsRegistration."""
+    """Tests DiffeomorphicDemonsRegistration."""
 
     def test_constructor_stores_images(self) -> None:
         """Verifies that the constructor stores images as float32."""
@@ -96,8 +96,8 @@ class TestDiffeomorphicDemonsRegistration:
         assert registration._grid_sampling_factor == 1.0
         assert registration._final_scale == 1.0
         assert registration._final_grid_sampling == 16.0
-        assert registration._smooth_scale is True
-        assert registration._injective is True
-        assert registration._freeze_edges is True
+        assert registration._smooth_scale
+        assert registration._injective
+        assert registration._freeze_edges
         assert registration._deformation_limit == 1.0
         assert registration._noise_factor == 1.0

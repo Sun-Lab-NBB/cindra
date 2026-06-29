@@ -42,7 +42,7 @@ def _create_test_binary(file_path: Path, frame_count: int = _FRAME_COUNT) -> NDA
 
 
 class TestBinaryFileInit:
-    """Tests for BinaryFile.__init__() constructor behavior."""
+    """Tests BinaryFile.__init__() constructor behavior."""
 
     def test_creates_new_binary_file_with_write_mode(self, tmp_path: Path) -> None:
         """Verifies that providing frame_number to the constructor creates a new writable binary file."""
@@ -100,7 +100,7 @@ class TestBinaryFileInit:
 
 
 class TestBinaryFileProperties:
-    """Tests for BinaryFile computed properties."""
+    """Tests BinaryFile computed properties."""
 
     def test_bytes_per_frame_returns_correct_size(self, tmp_path: Path) -> None:
         """Verifies that bytes_per_frame returns the number of bytes needed for one frame of int16 data."""
@@ -153,7 +153,7 @@ class TestBinaryFileProperties:
 
 
 class TestBinaryFileContextManager:
-    """Tests for BinaryFile context manager protocol (__enter__, __exit__, close)."""
+    """Tests BinaryFile context manager protocol (__enter__, __exit__, close)."""
 
     def test_enter_returns_self(self, tmp_path: Path) -> None:
         """Verifies that __enter__ returns the BinaryFile instance itself."""
@@ -173,7 +173,7 @@ class TestBinaryFileContextManager:
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
             assert binary_file.frame_number == _FRAME_COUNT
 
-        # Verifies the underlying memory map is closed after exiting the context.
+        # numpy memmap exposes no public closed flag; _mmap.closed is the authoritative signal it was released.
         assert binary_file.file._mmap.closed  # type: ignore[attr-defined]
 
     def test_exit_closes_file_even_with_exception(self, tmp_path: Path) -> None:
@@ -188,7 +188,7 @@ class TestBinaryFileContextManager:
         ):
             raise simulated_error
 
-        # Verifies the underlying memory map is closed despite the exception.
+        # numpy memmap exposes no public closed flag; _mmap.closed confirms release even after the exception.
         assert binary_file.file._mmap.closed  # type: ignore[attr-defined]
 
     def test_close_method_closes_memmap(self, tmp_path: Path) -> None:
@@ -203,7 +203,7 @@ class TestBinaryFileContextManager:
 
 
 class TestBinaryFileSetItem:
-    """Tests for BinaryFile.__setitem__() write operations."""
+    """Tests BinaryFile.__setitem__() write operations."""
 
     def test_writes_int16_data_to_file(self, tmp_path: Path) -> None:
         """Verifies that int16 data is correctly written to the binary file at the specified frame index."""
@@ -256,7 +256,7 @@ class TestBinaryFileSetItem:
 
 
 class TestBinaryFileGetItemAndData:
-    """Tests for BinaryFile.__getitem__() and the data property."""
+    """Tests BinaryFile.__getitem__() and the data property."""
 
     def test_getitem_returns_single_frame(self, tmp_path: Path) -> None:
         """Verifies that integer indexing returns the correct single frame from the binary file."""
@@ -284,7 +284,7 @@ class TestBinaryFileGetItemAndData:
 
 
 class TestSubsampleMovie:
-    """Tests for BinaryFile.subsample_movie()."""
+    """Tests BinaryFile.subsample_movie()."""
 
     def test_subsamples_evenly_spaced_frames(self, tmp_path: Path) -> None:
         """Verifies that subsample_movie selects evenly-spaced frames across the recording."""
@@ -332,7 +332,7 @@ class TestSubsampleMovie:
 
 
 class TestBinMovie:
-    """Tests for BinaryFile.bin_movie()."""
+    """Tests BinaryFile.bin_movie()."""
 
     def test_bins_frames_by_averaging(self, tmp_path: Path) -> None:
         """Verifies that bin_movie groups consecutive frames and averages each bin."""
@@ -416,7 +416,6 @@ class TestBinMovie:
     def test_bins_small_batch_averaged_into_single_bin(self, tmp_path: Path) -> None:
         """Verifies that a batch smaller than bin_size is averaged into a single bin to preserve data."""
         file_path = tmp_path / "test.bin"
-        # Creates a binary with only 3 frames.
         small_frame_count = 3
         data = np.ones((small_frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.int16) * 10
         data.tofile(file_path)

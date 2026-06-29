@@ -19,7 +19,7 @@ from cindra.detection.utils import (
 
 
 class TestComputeSpatialTaperMask:
-    """Tests for compute_spatial_taper_mask."""
+    """Tests compute_spatial_taper_mask."""
 
     def test_shape_and_dtype(self) -> None:
         """Verifies the taper mask has the correct shape and dtype."""
@@ -68,7 +68,7 @@ class TestComputeSpatialTaperMask:
 
 
 class TestDownsample:
-    """Tests for downsample."""
+    """Tests downsample."""
 
     def test_even_dimensions(self) -> None:
         """Verifies 2x downsampling with even spatial dimensions."""
@@ -82,7 +82,7 @@ class TestDownsample:
         data = np.ones((1, 11, 13), dtype=np.float32)
         result = downsample(data=data, taper_edge=True)
         assert result.shape == (1, 6, 7)
-        # Interior elements from complete 2x2 blocks should be 1.0
+        # Interior elements from complete 2x2 blocks should be 1.0.
         np.testing.assert_allclose(result[0, :5, :6], 1.0)
         # Bottom-right corner: tapered twice (0.5 * 0.5 = 0.25)
         np.testing.assert_allclose(result[0, -1, -1], 0.25)
@@ -126,7 +126,7 @@ class TestDownsample:
 
 
 class TestComputeTemporalStandardDeviation:
-    """Tests for compute_temporal_standard_deviation."""
+    """Tests compute_temporal_standard_deviation."""
 
     def test_shape(self) -> None:
         """Verifies the output shape matches spatial dimensions."""
@@ -152,17 +152,17 @@ class TestComputeTemporalStandardDeviation:
     def test_higher_variation_produces_larger_values(self) -> None:
         """Verifies pixels with more temporal variation produce larger standard deviation."""
         frames = np.zeros((20, 4, 4), dtype=np.float32)
-        # Left half: high variation
+        # Left half: high variation.
         rng = np.random.default_rng(42)
         frames[:, :, :2] = rng.standard_normal((20, 4, 2)).astype(np.float32) * 10.0
-        # Right half: low variation
+        # Right half: low variation.
         frames[:, :, 2:] = rng.standard_normal((20, 4, 2)).astype(np.float32) * 0.1
         result = compute_temporal_standard_deviation(frames=frames)
         assert result[:, :2].mean() > result[:, 2:].mean()
 
 
 class TestComputeThresholdedVariance:
-    """Tests for compute_thresholded_variance."""
+    """Tests compute_thresholded_variance."""
 
     def test_shape(self) -> None:
         """Verifies the output shape matches spatial dimensions."""
@@ -185,7 +185,7 @@ class TestComputeThresholdedVariance:
 
 
 class TestApplyTemporalHighPassFilter:
-    """Tests for apply_temporal_high_pass_filter."""
+    """Tests apply_temporal_high_pass_filter."""
 
     def test_gaussian_dispatch_modifies_frames(self) -> None:
         """Verifies Gaussian dispatch for small kernel sizes modifies frames."""
@@ -216,12 +216,12 @@ class TestApplyTemporalHighPassFilter:
         rng = np.random.default_rng(42)
         frames = rng.standard_normal((30, 4, 4)).astype(np.float32) + 1000.0
         apply_temporal_high_pass_filter(frames=frames, kernel_size=5)
-        # After high-pass, temporal mean should be significantly reduced
+        # After high-pass, temporal mean should be significantly reduced.
         assert np.abs(frames.mean()) < 10.0
 
 
 class TestApplyGaussianHighPass:
-    """Tests for _apply_gaussian_high_pass (private)."""
+    """Tests _apply_gaussian_high_pass."""
 
     def test_in_place_subtraction(self) -> None:
         """Verifies Gaussian high-pass subtracts low-frequency content in-place."""
@@ -229,20 +229,19 @@ class TestApplyGaussianHighPass:
         frames = rng.standard_normal((20, 8, 8)).astype(np.float32) + 50.0
         original = frames.copy()
         _apply_gaussian_high_pass(frames=frames, kernel_size=3)
-        # Should have changed
         assert not np.array_equal(frames, original)
-        # High-pass output should have near-zero mean
+        # High-pass output should have near-zero mean.
         assert np.abs(frames.mean()) < 5.0
 
 
 class TestApplyRollingMeanHighPass:
-    """Tests for _apply_rolling_mean_high_pass (private)."""
+    """Tests _apply_rolling_mean_high_pass."""
 
     def test_complete_windows_no_remainder(self) -> None:
         """Verifies rolling mean with frames evenly divisible by kernel size."""
         frames = np.ones((30, 4, 4), dtype=np.float32) * 10.0
         _apply_rolling_mean_high_pass(frames=frames, kernel_size=10)
-        # Constant frames minus their window mean should give zero
+        # Constant frames minus their window mean should give zero.
         np.testing.assert_allclose(frames, 0.0, atol=1e-6)
 
     def test_with_remainder(self) -> None:
@@ -250,16 +249,16 @@ class TestApplyRollingMeanHighPass:
         rng = np.random.default_rng(42)
         frames = rng.standard_normal((35, 4, 4)).astype(np.float32) + 100.0
         _apply_rolling_mean_high_pass(frames=frames, kernel_size=10)
-        # Complete windows (30 frames): within-window mean should be ~0
+        # Complete windows (30 frames): within-window mean should be ~0.
         for window_start in range(0, 30, 10):
             window = frames[window_start : window_start + 10]
             np.testing.assert_allclose(window.mean(axis=0), 0.0, atol=1e-4)
-        # Remainder (5 frames): their mean should also be ~0
+        # Remainder (5 frames): their mean should also be ~0.
         np.testing.assert_allclose(frames[30:].mean(axis=0), 0.0, atol=1e-4)
 
 
 class TestComputeBlockSmoothingKernel:
-    """Tests for compute_block_smoothing_kernel."""
+    """Tests compute_block_smoothing_kernel."""
 
     def test_shape(self) -> None:
         """Verifies kernel matrix shape matches total block count."""
@@ -292,7 +291,7 @@ class TestComputeBlockSmoothingKernel:
 
 
 class TestComputeRegistrationBlocks:
-    """Tests for compute_registration_blocks."""
+    """Tests compute_registration_blocks."""
 
     def test_single_block_when_smaller_than_block_size(self) -> None:
         """Verifies a single block when image is smaller than block size."""
@@ -323,7 +322,7 @@ class TestComputeRegistrationBlocks:
         )
         assert y_blocks[0][0] == 0
         assert x_blocks[0][0] == 0
-        # Last block should end at image boundary
+        # Last block should end at image boundary.
         assert y_blocks[-1][1] == height
         assert x_blocks[-1][1] == width
 
@@ -356,35 +355,35 @@ class TestComputeRegistrationBlocks:
 
 
 class TestMeanCenteredMeshgrid:
-    """Tests for _mean_centered_meshgrid (private)."""
+    """Tests mean_centered_meshgrid."""
 
     def test_shape(self) -> None:
         """Verifies meshgrid output shapes match input dimensions."""
-        col_dist, row_dist = mean_centered_meshgrid(height=10, width=20)
-        assert col_dist.shape == (10, 20)
-        assert row_dist.shape == (10, 20)
+        column_distances, row_distances = mean_centered_meshgrid(height=10, width=20)
+        assert column_distances.shape == (10, 20)
+        assert row_distances.shape == (10, 20)
 
     def test_center_zero_for_odd_dimensions(self) -> None:
         """Verifies center values are zero for odd dimensions."""
-        col_dist, row_dist = mean_centered_meshgrid(height=11, width=11)
-        np.testing.assert_allclose(row_dist[5, 5], 0.0)
-        np.testing.assert_allclose(col_dist[5, 5], 0.0)
+        column_distances, row_distances = mean_centered_meshgrid(height=11, width=11)
+        np.testing.assert_allclose(row_distances[5, 5], 0.0)
+        np.testing.assert_allclose(column_distances[5, 5], 0.0)
 
     def test_symmetry(self) -> None:
         """Verifies the meshgrid is symmetric."""
-        col_dist, row_dist = mean_centered_meshgrid(height=10, width=10)
-        np.testing.assert_allclose(col_dist, np.flip(col_dist, axis=1))
-        np.testing.assert_allclose(row_dist, np.flip(row_dist, axis=0))
+        column_distances, row_distances = mean_centered_meshgrid(height=10, width=10)
+        np.testing.assert_allclose(column_distances, np.flip(column_distances, axis=1))
+        np.testing.assert_allclose(row_distances, np.flip(row_distances, axis=0))
 
     def test_dtype(self) -> None:
         """Verifies the meshgrid dtype is float32."""
-        col_dist, row_dist = mean_centered_meshgrid(height=8, width=8)
-        assert col_dist.dtype == np.float32
-        assert row_dist.dtype == np.float32
+        column_distances, row_distances = mean_centered_meshgrid(height=8, width=8)
+        assert column_distances.dtype == np.float32
+        assert row_distances.dtype == np.float32
 
     def test_max_distance_at_corners(self) -> None:
         """Verifies maximum distances occur at corners."""
-        col_dist, row_dist = mean_centered_meshgrid(height=10, width=10)
-        # Corner should have max distance from center
-        assert row_dist[0, 0] == row_dist.max()
-        assert col_dist[0, 0] == col_dist.max()
+        column_distances, row_distances = mean_centered_meshgrid(height=10, width=10)
+        # Corner should have max distance from center.
+        assert row_distances[0, 0] == row_distances.max()
+        assert column_distances[0, 0] == column_distances.max()

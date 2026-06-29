@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # Project metadata section. Provides the general ID information about the project.
 [project]
 name = "cindra"
-version = "1.0.1"
+version = "1.1.0rc1"
 description = "Provides pipelines for processing neural imaging data and tracking Regions of Interest across multiple recordings."
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -31,7 +31,6 @@ keywords = [
     "neuroscience",
     "fluorescence",
     "cell-tracking",
-    "sunlab"
 ]
 
 classifiers = [
@@ -55,6 +54,7 @@ dependencies = [
     "numba>=0.64,<1",
     "scipy>=1,<2",
     "scikit-learn>=1,<2",
+    "threadpoolctl>=3,<4",
     "natsort>=8,<9",
 
     # Image I/O
@@ -79,11 +79,13 @@ dependencies = [
     "ataraxis-data-structures>=6,<7",
 
     # Runtime Utilities
-    "importlib_metadata>=8,<9",
+    "pyyaml>=6,<7",
+    "filelock>=3,<4",
+    "importlib_metadata>=9,<10",
 
     # Platform-Specific Acceleration
-    "tbb4py>=2022,<2023; sys_platform != 'darwin'",
-    "intel-cmplr-lib-rt>=2025,<2026; sys_platform != 'darwin'",
+    "tbb4py>=2023,<2024; sys_platform != 'darwin'",
+    "intel-cmplr-lib-rt>=2026,<2027; sys_platform != 'darwin'",
 ]
 
 [project.urls]
@@ -92,7 +94,7 @@ Documentation = "https://cindra-api-docs.netlify.app/"
 
 # All interactions with the library are performed via the 'cindra' and 'cindra-gui' CLI commands.
 [project.scripts]
-cindra = "cindra.interface.cli:cindra_cli"  # Top-level CLI group
+cindra = "cindra.interface.cli:cindra_cli"          # Top-level CLI group
 cindra-gui = "cindra.interface.gui_cli:cindra_gui"  # GUI launcher (separate to avoid loading Qt during headless runs)
 
 # Development dependencies (PEP 735). Not published to PyPI.
@@ -143,7 +145,7 @@ lint.ignore = [
     "FBT001",  # UI elements require the use of positional boolean values
     "FBT002",  # UI elements require the use of positional boolean values
     "FBT003",  # UI elements require the use of positional boolean values
-    "TID252",  # Conflicts with Sun Lab import strategy
+    "TID252",  # Conflicts with the cindra import strategy
     "SLF001",  # Sometimes accessing private members is necessary
     "SIM115",  # Sometimes it is necessary to open and close files without the context manager
     "BLE001",  # Catching blind exceptions is necessary for the functioning of this library
@@ -201,7 +203,7 @@ disallow_untyped_defs = true # Enforces function annotation
 warn_unused_ignores = true   # Warns against using 'type: ignore' for packages with type stubs
 
 exclude = [
-    "cindra-\\d+",    # Ignores temporary folder created by setuptools when building the sdist
+    "cindra-\\d+",         # Ignores temporary folder created by setuptools when building the sdist
     "venv.*/",             # Ignores virtual environments
     "build/",              # Ignores the sdist directory
     "dist/",               # Ignores the wheel directory
@@ -210,6 +212,14 @@ exclude = [
     "recipe/",             # Ignores recipe directory (grayskull output target)
     "tests/",              # Ignores the test directory.
 ]
+
+# Numba ships a py.typed marker, but its bundled annotations do not model prange as an iterable or expose runtime
+# config attributes such as THREADING_LAYER. Treats the package as untyped so the JIT-compiled modules type-check
+# against their actual runtime behavior rather than the incomplete bundled annotations.
+[[tool.mypy.overrides]]
+module = ["numba", "numba.*"]
+follow_imports = "skip"        # Treats all symbols imported from numba as untyped (Any)
+ignore_missing_imports = true  # Suppresses missing-stub errors for the skipped package
 
 # Pytest configuration section.
 [tool.pytest.ini_options]
@@ -220,7 +230,12 @@ addopts = "--import-mode=importlib"
 
 # Excludes GUI and interface modules from coverage measurement. GUI modules require PySide6/PyQtGraph runtime and
 # cannot be meaningfully unit tested. Interface modules (CLI, MCP servers, MCP tools) require external infrastructure.
-omit = ["src/cindra/gui/*", "src/cindra/interface/*", "*/cindra/gui/*", "*/cindra/interface/*"]
+omit = [
+    "src/cindra/gui/*",
+    "src/cindra/interface/*",
+    "*/cindra/gui/*",
+    "*/cindra/interface/*",
+]
 
 [tool.coverage.paths]
 
