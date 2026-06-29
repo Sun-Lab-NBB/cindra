@@ -86,6 +86,10 @@ class TestSplineGridSetFromFields:
         field_x = np.ones((50, 50), dtype=np.float32) * 0.5
         success = grid.set_from_fields(field_y=field_y, field_x=field_x, injective=False)
         assert success
+        # Without the injectivity constraint, the interior should faithfully reproduce the uniform input field.
+        recovered_y, recovered_x = grid.deformation_fields
+        np.testing.assert_allclose(recovered_y[10:-10, 10:-10], 0.5, atol=0.15)
+        np.testing.assert_allclose(recovered_x[10:-10, 10:-10], 0.5, atol=0.15)
 
     def test_set_from_fields_without_frozen_edges(self) -> None:
         """Verifies set_from_fields works without frozen edges."""
@@ -94,6 +98,10 @@ class TestSplineGridSetFromFields:
         field_x = np.ones((50, 50), dtype=np.float32) * 0.5
         success = grid.set_from_fields(field_y=field_y, field_x=field_x, freeze_edges=False)
         assert success
+        # With edges left unfrozen, the interior should track the uniform input field closely.
+        recovered_y, recovered_x = grid.deformation_fields
+        np.testing.assert_allclose(recovered_y[10:-10, 10:-10], 0.5, atol=0.15)
+        np.testing.assert_allclose(recovered_x[10:-10, 10:-10], 0.5, atol=0.15)
 
 
 class TestSplineGridFreezeEdges:

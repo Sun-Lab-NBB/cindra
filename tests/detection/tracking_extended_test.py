@@ -109,6 +109,27 @@ class TestCollectBinRois:
         assert len(collected_rois_with_margin) == 1
         assert collected_recordings == [0]
 
+    def test_roi_in_scanned_cell_outside_search_region_rejected(self) -> None:
+        """Verifies that an ROI in a scanned grid cell but outside the precise search region is rejected."""
+        grid_roi_size = 20
+        # The centroid (65, 35) lies in grid cell (3, 1), which is coarsely scanned, but its y-coordinate (65)
+        # falls outside the precise search region (20, 60), so the boundary check rejects it.
+        roi = _make_roi_mask(centroid=(65, 35), cluster_id=0)
+        roi_grid: dict[tuple[int, int], list[tuple[ROIMask, int]]] = {(3, 1): [(roi, 0)]}
+
+        collected_rois, collected_recordings = _collect_bin_rois(
+            roi_grid=roi_grid,
+            bin_origin_y=20,
+            bin_origin_x=20,
+            bin_height=40,
+            bin_width=40,
+            overlap_margin=0,
+            grid_roi_size=grid_roi_size,
+        )
+
+        assert collected_rois == []
+        assert collected_recordings == []
+
     def test_skips_already_clustered_rois(self) -> None:
         """Verifies that ROIs with a non-zero cluster_id are excluded from collection."""
         grid_roi_size = 20

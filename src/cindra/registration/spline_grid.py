@@ -286,7 +286,7 @@ class SplineGrid:
                 knots[-2] = -(knots[-3] * coefficients[2] + knots[-4] * coefficients[3]) / coefficients[1]
 
             # Freezes knots for X dimension (operates on columns).
-            elif dimension == 1:
+            elif dimension == 1:  # pragma: no branch - SplineGrid is always 2D, so dimension is only ever 0 or 1.
                 knots[:, 0] = 0
                 knots[:, 1] = -0.25 * knots[:, 2]
                 knots[:, -3] = (1 - edge_interpolation_factor) * knots[:, -3]
