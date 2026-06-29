@@ -45,7 +45,7 @@ class MultiRecordingJobNames(StrEnum):
     is identified by the tracker's specifier field, which stores the recording ID string."""
 
 
-def run_single_recording_pipeline(  # pragma: no cover
+def run_single_recording_pipeline(
     configuration_path: Path,
     job_id: str | None = None,
     *,
@@ -207,7 +207,7 @@ def run_single_recording_pipeline(  # pragma: no cover
     console.echo(message="Single-recording processing: Complete.", level=LogLevel.SUCCESS)
 
 
-def run_multi_recording_pipeline(  # pragma: no cover
+def run_multi_recording_pipeline(
     configuration_path: Path,
     job_id: str | None = None,
     *,
@@ -382,7 +382,7 @@ def run_multi_recording_pipeline(  # pragma: no cover
     console.echo(message="Multi-recording processing: Complete.", level=LogLevel.SUCCESS)
 
 
-def _prepare_tracker(  # pragma: no cover
+def _prepare_tracker(
     tracker: ProcessingTracker,
     jobs: list[tuple[str, str]],
     universe: list[tuple[str, str]],
@@ -447,7 +447,7 @@ def _prepare_tracker(  # pragma: no cover
         tracker.initialize_jobs(jobs=jobs)
 
 
-def _execute_single_recording_job(  # pragma: no cover
+def _execute_single_recording_job(
     configuration: SingleRecordingConfiguration,
     job_name: SingleRecordingJobNames,
     specifier: str,
@@ -494,10 +494,11 @@ def _execute_single_recording_job(  # pragma: no cover
             # and fluorescence traces.
             root_path = configuration.file_io.output_path / "cindra"
             contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
-            if not isinstance(contexts, list):
+            if not isinstance(contexts, list):  # pragma: no cover — load with plane_index=-1 always returns a list
                 contexts = [contexts]
             for context in contexts:
-                if context.runtime.output_path is not None:
+                # pragma justification: resolved plane contexts always carry a configured output path.
+                if context.runtime.output_path is not None:  # pragma: no branch
                     context.runtime.detection.memory_map_arrays(context.runtime.output_path)
                     context.runtime.extraction.memory_map_arrays(context.runtime.output_path)
                     context.runtime.extraction.memory_map_results(context.runtime.output_path)
@@ -517,7 +518,7 @@ def _execute_single_recording_job(  # pragma: no cover
         raise
 
 
-def _execute_multi_recording_job(  # pragma: no cover
+def _execute_multi_recording_job(
     configuration: MultiRecordingConfiguration,
     job_name: MultiRecordingJobNames,
     specifier: str,

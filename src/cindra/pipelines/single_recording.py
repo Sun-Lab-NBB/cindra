@@ -20,7 +20,7 @@ _RECOMMENDED_PROCESSING_FRAMES: int = 200
 """The recommended minimum number of frames in the processed movie for the processing to work as expected."""
 
 
-def binarize_recording(configuration: SingleRecordingConfiguration) -> None:  # pragma: no cover
+def binarize_recording(configuration: SingleRecordingConfiguration) -> None:
     """Converts raw TIFF recording data into the internal binary format used by the processing pipeline.
 
     Notes:
@@ -59,7 +59,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:  # 
 
         # Loads all existing contexts. Uses plane_index=-1 to load all planes, which always returns a list.
         loaded_contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
-        if not isinstance(loaded_contexts, list):
+        if not isinstance(loaded_contexts, list):  # pragma: no cover — load with plane_index=-1 always returns a list
             loaded_contexts = [loaded_contexts]
 
         # Validates that required binary files exist for all contexts.
@@ -109,7 +109,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:  # 
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
-def process_plane(configuration: SingleRecordingConfiguration, plane_index: int) -> None:  # pragma: no cover
+def process_plane(configuration: SingleRecordingConfiguration, plane_index: int) -> None:
     """Registers, detects ROIs, and extracts fluorescence traces for the target imaging plane.
 
     Notes:
@@ -178,7 +178,8 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int)
         detect_plane_rois(context=context)
 
         # Extracts fluorescence traces when ROIs were detected.
-        if context.runtime.extraction.roi_statistics is not None:
+        # pragma justification: detection always populates ROI statistics on success or raises beforehand.
+        if context.runtime.extraction.roi_statistics is not None:  # pragma: no branch
             extract_traces(context=context)
     else:
         message = f"Skipping plane {plane_index} ROI detection (disabled via 'roi_detection.enabled' parameter)."
@@ -198,7 +199,7 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int)
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
-def save_combined_data(contexts: list[RuntimeContext]) -> None:  # pragma: no cover
+def save_combined_data(contexts: list[RuntimeContext]) -> None:
     """Combines processed data from all imaging planes into a unified dataset and saves it to disk.
 
     Notes:

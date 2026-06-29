@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from ..dataclasses import MultiRecordingConfiguration
 
 
-def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -> None:  # pragma: no cover
+def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -> None:
     """Discovers reliably identifiable ROIs and tracks them across the processed set of recordings.
 
     Notes:
@@ -67,9 +67,7 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -
     )
 
 
-def extract_multi_recording_fluorescence(  # pragma: no cover
-    configuration: MultiRecordingConfiguration, recording_id: str
-) -> None:
+def extract_multi_recording_fluorescence(configuration: MultiRecordingConfiguration, recording_id: str) -> None:
     """Extracts fluorescence data from ROIs tracked across imaging recordings for the specified recording.
 
     Notes:
@@ -101,7 +99,8 @@ def extract_multi_recording_fluorescence(  # pragma: no cover
     # Memory-maps extraction arrays from disk. resolve_multi_recording_contexts() only loads YAML scalars, so
     # roi_statistics will be None until arrays are explicitly loaded. Uses memory mapping because the data is only
     # needed for validation here; extract_traces() reloads what it needs independently.
-    if target_context.runtime.output_path is not None:
+    # pragma justification: the resolved runtime context always carries a configured output path.
+    if target_context.runtime.output_path is not None:  # pragma: no branch
         target_context.runtime.extraction.memory_map_arrays(target_context.runtime.output_path)
 
     # Validates that backward-transformed ROI statistics exist from the discovery phase.
