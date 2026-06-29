@@ -31,7 +31,7 @@ from .dataclasses import (  # noqa: E402
 # Ensures console output is enabled whenever the cindra library is imported. The 'Console' class is
 # used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal
 # outputs instead of or in addition to sending them to the terminal.
-if not console.enabled:
+if not console.enabled:  # pragma: no branch — the console-enabled state is only reachable as False on first import.
     console.enable()
 
 __all__ = [

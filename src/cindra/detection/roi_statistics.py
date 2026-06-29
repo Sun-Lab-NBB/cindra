@@ -412,7 +412,7 @@ class _ROI:
         crop_radius = radii[-1]
 
         above_threshold_indices = np.nonzero(weight_gradient > threshold)[0]
-        if len(above_threshold_indices) > 0:
+        if len(above_threshold_indices) > 0:  # pragma: no branch — non-negative weights guarantee a match
             first_above_index = above_threshold_indices[0]
             below_threshold_after = np.nonzero(weight_gradient[first_above_index:] < threshold)[0]
             if len(below_threshold_after) > 0:

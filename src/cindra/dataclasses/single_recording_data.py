@@ -1583,7 +1583,7 @@ def _save_optional_array_field(
     valid_arrays: list[NDArray[np.float32] | NDArray[np.int32] | NDArray[np.bool_]] = [
         np.asarray(a=a, dtype=dtype) for a in arrays if a is not None and len(a)
     ]
-    if valid_arrays:
+    if valid_arrays:  # pragma: no branch - line 1579's identical early-return predicate keeps valid_arrays non-empty.
         save_dictionary[f"{field_name}_counts"] = counts
         save_dictionary[field_name] = np.concatenate(valid_arrays)  # type: ignore[assignment]
 

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     )
 
 
-def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:  # pragma: no cover
+def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
     """Selects ROIs from single-recording pipeline outputs that meet multi-recording tracking criteria.
 
     This function performs ROI selection filtering on each recording using the ROI selection parameters from the
@@ -99,7 +99,7 @@ def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
         context.save_runtime()
 
         # Releases combined extraction arrays to free memory.
-        if context.runtime.combined_data is not None:
+        if context.runtime.combined_data is not None:  # pragma: no branch - _filter_rois rejects None combined_data.
             context.runtime.combined_data.extraction.release_arrays()
 
 

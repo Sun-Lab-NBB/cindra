@@ -40,7 +40,7 @@ _MAXIMUM_WIDTH_FOR_LARGE_SAMPLE: int = 700
 """The maximum frame width below which the larger sample count is used for PC metrics computation."""
 
 
-def compute_pc_metrics(context: RuntimeContext) -> None:  # pragma: no cover
+def compute_pc_metrics(context: RuntimeContext) -> None:
     """Computes registration quality metrics using principal component analysis.
 
     Evaluates registration quality by computing principal components of the registered frames and measuring how well

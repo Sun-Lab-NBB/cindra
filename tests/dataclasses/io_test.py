@@ -583,12 +583,17 @@ class TestExtractionDataSaveLoad:
 
         assert mapped.spikes is not None
         assert is_memory_mapped(mapped.spikes)
+        np.testing.assert_allclose(original.spikes, mapped.spikes, rtol=1e-6)
 
         assert mapped.cell_colocalization is not None
         assert is_memory_mapped(mapped.cell_colocalization)
+        np.testing.assert_allclose(original.cell_colocalization, mapped.cell_colocalization, rtol=1e-6)
 
         assert mapped.corrected_structural_mean_image is not None
         assert is_memory_mapped(mapped.corrected_structural_mean_image)
+        np.testing.assert_allclose(
+            original.corrected_structural_mean_image, mapped.corrected_structural_mean_image, rtol=1e-6
+        )
 
     def test_save_load_without_optional_channel_2(self, tmp_path: Path) -> None:
         """Verifies that extraction data without channel 2 survives a save/load round-trip."""
@@ -784,7 +789,17 @@ class TestMultiRecordingRegistrationDataSaveLoad:
             original.transformed_mean_image_channel_2, loaded.transformed_mean_image_channel_2, rtol=1e-6
         )
         assert loaded.transformed_enhanced_mean_image_channel_2 is not None
+        np.testing.assert_allclose(
+            original.transformed_enhanced_mean_image_channel_2,
+            loaded.transformed_enhanced_mean_image_channel_2,
+            rtol=1e-6,
+        )
         assert loaded.transformed_maximum_projection_channel_2 is not None
+        np.testing.assert_allclose(
+            original.transformed_maximum_projection_channel_2,
+            loaded.transformed_maximum_projection_channel_2,
+            rtol=1e-6,
+        )
 
         assert loaded.deformed_roi_masks is not None
         assert len(loaded.deformed_roi_masks) == 2
@@ -817,6 +832,7 @@ class TestMultiRecordingRegistrationDataSaveLoad:
 
         assert mapped.transformed_mean_image is not None
         assert is_memory_mapped(mapped.transformed_mean_image)
+        np.testing.assert_allclose(original.transformed_mean_image, mapped.transformed_mean_image, rtol=1e-6)
 
         # ROI masks are eagerly loaded (npz does not support mmap).
         assert mapped.deformed_roi_masks is not None
@@ -1021,16 +1037,26 @@ class TestExtractionDataChannel2:
 
         assert mapped.neuropil_fluorescence_channel_2 is not None
         assert is_memory_mapped(mapped.neuropil_fluorescence_channel_2)
+        np.testing.assert_allclose(
+            original.neuropil_fluorescence_channel_2, mapped.neuropil_fluorescence_channel_2, rtol=1e-6
+        )
 
         assert mapped.subtracted_fluorescence_channel_2 is not None
         assert is_memory_mapped(mapped.subtracted_fluorescence_channel_2)
+        np.testing.assert_allclose(
+            original.subtracted_fluorescence_channel_2, mapped.subtracted_fluorescence_channel_2, rtol=1e-6
+        )
 
         assert mapped.spikes_channel_2 is not None
         assert is_memory_mapped(mapped.spikes_channel_2)
+        np.testing.assert_allclose(original.spikes_channel_2, mapped.spikes_channel_2, rtol=1e-6)
 
         # Channel 2 classification should be memory-mapped.
         assert mapped.cell_classification_channel_2 is not None
         assert is_memory_mapped(mapped.cell_classification_channel_2)
+        np.testing.assert_allclose(
+            original.cell_classification_channel_2, mapped.cell_classification_channel_2, rtol=1e-6
+        )
 
 
 class TestMultiRecordingRegistrationDataChannel2:
@@ -1376,6 +1402,36 @@ class TestCombinedDataSaveLoad:
         loaded = CombinedData.load(root_path=tmp_path)
         assert loaded.registered_binary_paths_channel_2 is None
 
+    def test_load_legacy_metadata_without_geometry_and_paths(self, tmp_path: Path) -> None:
+        """Verifies that loading legacy metadata lacking geometry and binary path fields falls back to defaults."""
+        # Writes a metadata file that predates the per-plane geometry and binary path fields, exercising the optional
+        # metadata branches in CombinedData._load_metadata.
+        np.savez(
+            tmp_path / "combined_metadata.npz",
+            allow_pickle=False,
+            plane_count=np.array([1], dtype=np.uint8),
+            combined_height=np.array([32], dtype=np.uint32),
+            combined_width=np.array([32], dtype=np.uint32),
+            tau=np.array([1.5], dtype=np.float32),
+            sampling_rate=np.array([15.0], dtype=np.float32),
+        )
+
+        loaded = CombinedData.load(root_path=tmp_path)
+
+        assert loaded.plane_count == 1
+        assert loaded.combined_height == 32
+        assert loaded.combined_width == 32
+        assert loaded.tau == pytest.approx(1.5, abs=1e-5)
+        assert loaded.sampling_rate == pytest.approx(15.0, abs=1e-5)
+
+        # Geometry and binary path fields fall back to their empty defaults.
+        assert loaded.plane_heights.size == 0
+        assert loaded.plane_widths.size == 0
+        assert loaded.plane_y_offsets.size == 0
+        assert loaded.plane_x_offsets.size == 0
+        assert loaded.registered_binary_paths == ()
+        assert loaded.registered_binary_paths_channel_2 is None
+
 
 class TestOptionalArrayFieldSerialization:
     """Tests _save_optional_array_field and _load_optional_array_field round-trips."""
@@ -1446,3 +1502,334 @@ class TestOptionalArrayFieldSerialization:
         assert result[1] is not None
         np.testing.assert_array_equal(result[1], np.array([False, False], dtype=np.bool_))
         assert result[2] is None
+
+
+_REGISTRATION_ARRAY_FIELDS = (
+    "bad_frames",
+    "reference_image",
+    "rigid_y_offsets",
+    "rigid_x_offsets",
+    "rigid_correlations",
+    "nonrigid_y_offsets",
+    "nonrigid_x_offsets",
+    "nonrigid_correlations",
+    "principal_component_extreme_images",
+    "principal_component_projections",
+    "principal_component_shift_metrics",
+)
+
+_DETECTION_ARRAY_FIELDS = (
+    "mean_image",
+    "enhanced_mean_image",
+    "maximum_projection",
+    "correlation_map",
+    "mean_image_channel_2",
+    "enhanced_mean_image_channel_2",
+    "maximum_projection_channel_2",
+    "correlation_map_channel_2",
+)
+
+_EXTRACTION_RESULT_FIELDS = (
+    "cell_fluorescence",
+    "neuropil_fluorescence",
+    "subtracted_fluorescence",
+    "spikes",
+    "cell_classification",
+    "cell_fluorescence_channel_2",
+    "neuropil_fluorescence_channel_2",
+    "subtracted_fluorescence_channel_2",
+    "spikes_channel_2",
+    "cell_classification_channel_2",
+    "cell_colocalization",
+    "corrected_structural_mean_image",
+)
+
+_MULTI_REGISTRATION_ARRAY_FIELDS = (
+    "deform_field_y",
+    "deform_field_x",
+    "transformed_mean_image",
+    "transformed_enhanced_mean_image",
+    "transformed_maximum_projection",
+    "transformed_mean_image_channel_2",
+    "transformed_enhanced_mean_image_channel_2",
+    "transformed_maximum_projection_channel_2",
+    "deformed_roi_masks",
+    "deformed_roi_masks_channel_2",
+)
+
+
+def _populate_multi_registration_data() -> MultiRecordingRegistrationData:
+    """Creates a MultiRecordingRegistrationData instance with all arrays and mask lists populated."""
+    rng = np.random.default_rng(seed=21)
+    height = 16
+    width = 16
+    return MultiRecordingRegistrationData(
+        deform_field_y=rng.random(size=(height, width)).astype(np.float32),
+        deform_field_x=rng.random(size=(height, width)).astype(np.float32),
+        transformed_mean_image=rng.random(size=(height, width)).astype(np.float32),
+        transformed_enhanced_mean_image=rng.random(size=(height, width)).astype(np.float32),
+        transformed_maximum_projection=rng.random(size=(height, width)).astype(np.float32),
+        transformed_mean_image_channel_2=rng.random(size=(height, width)).astype(np.float32),
+        transformed_enhanced_mean_image_channel_2=rng.random(size=(height, width)).astype(np.float32),
+        transformed_maximum_projection_channel_2=rng.random(size=(height, width)).astype(np.float32),
+        deformed_roi_masks=[_make_roi_mask(pixel_count=5)],
+        deformed_roi_masks_channel_2=[_make_roi_mask(pixel_count=4, cluster_id=2)],
+    )
+
+
+class TestArrayPersistenceSkipBranches:
+    """Tests the optional-array skip branches in every save/load/memory_map method.
+
+    These tests exercise the branches taken when array fields are None, when on-disk files are absent, and when
+    arrays are already memory-mapped, complementing the populated round-trip tests that exercise the present-array
+    branches.
+    """
+
+    def test_registration_all_none_save_writes_no_files(self, tmp_path: Path) -> None:
+        """Verifies that saving an all-None RegistrationData creates the subdirectory but writes no array files."""
+        RegistrationData().save_arrays(output_path=tmp_path)
+
+        registration_directory = tmp_path / "registration_data"
+        assert registration_directory.is_dir()
+        assert not any(registration_directory.iterdir())
+
+    def test_registration_empty_directory_load_keeps_fields_none(self, tmp_path: Path) -> None:
+        """Verifies that load_arrays leaves all fields None when the registration_data directory is empty."""
+        RegistrationData().save_arrays(output_path=tmp_path)
+
+        data = RegistrationData()
+        data.load_arrays(output_path=tmp_path)
+
+        for field_name in _REGISTRATION_ARRAY_FIELDS:
+            assert getattr(data, field_name) is None
+
+    def test_registration_empty_directory_memory_map_keeps_fields_none(self, tmp_path: Path) -> None:
+        """Verifies that memory_map_arrays leaves all fields None when the registration_data directory is empty."""
+        RegistrationData().save_arrays(output_path=tmp_path)
+
+        data = RegistrationData()
+        data.memory_map_arrays(output_path=tmp_path)
+
+        for field_name in _REGISTRATION_ARRAY_FIELDS:
+            assert getattr(data, field_name) is None
+
+    def test_registration_save_skips_memory_mapped_arrays(self, tmp_path: Path) -> None:
+        """Verifies that save_arrays does not re-write registration arrays that are already memory-mapped."""
+        source = tmp_path / "source"
+        source.mkdir()
+        _populate_registration_data().save_arrays(output_path=source)
+
+        mapped = RegistrationData()
+        mapped.memory_map_arrays(output_path=source)
+
+        destination = tmp_path / "destination"
+        destination.mkdir()
+        mapped.save_arrays(output_path=destination)
+
+        registration_directory = destination / "registration_data"
+        assert registration_directory.is_dir()
+        assert not any(registration_directory.iterdir())
+
+    def test_detection_all_none_save_writes_no_files(self, tmp_path: Path) -> None:
+        """Verifies that saving an all-None DetectionData creates the subdirectory but writes no array files."""
+        DetectionData().save_arrays(output_path=tmp_path)
+
+        detection_directory = tmp_path / "detection_data"
+        assert detection_directory.is_dir()
+        assert not any(detection_directory.iterdir())
+
+    def test_detection_empty_directory_load_keeps_fields_none(self, tmp_path: Path) -> None:
+        """Verifies that load_arrays leaves all fields None when the detection_data directory is empty."""
+        DetectionData().save_arrays(output_path=tmp_path)
+
+        data = DetectionData()
+        data.load_arrays(output_path=tmp_path)
+
+        for field_name in _DETECTION_ARRAY_FIELDS:
+            assert getattr(data, field_name) is None
+
+    def test_detection_empty_directory_memory_map_keeps_fields_none(self, tmp_path: Path) -> None:
+        """Verifies that memory_map_arrays leaves all fields None when the detection_data directory is empty."""
+        DetectionData().save_arrays(output_path=tmp_path)
+
+        data = DetectionData()
+        data.memory_map_arrays(output_path=tmp_path)
+
+        for field_name in _DETECTION_ARRAY_FIELDS:
+            assert getattr(data, field_name) is None
+
+    def test_detection_save_skips_memory_mapped_arrays(self, tmp_path: Path) -> None:
+        """Verifies that save_arrays does not re-write detection arrays that are already memory-mapped."""
+        source = tmp_path / "source"
+        source.mkdir()
+        _populate_detection_data().save_arrays(output_path=source)
+
+        mapped = DetectionData()
+        mapped.memory_map_arrays(output_path=source)
+
+        destination = tmp_path / "destination"
+        destination.mkdir()
+        mapped.save_arrays(output_path=destination)
+
+        detection_directory = destination / "detection_data"
+        assert detection_directory.is_dir()
+        assert not any(detection_directory.iterdir())
+
+    def test_extraction_all_none_save_writes_no_files(self, tmp_path: Path) -> None:
+        """Verifies that saving an all-None ExtractionData writes no array files into the output directory."""
+        output = tmp_path / "extraction"
+        output.mkdir()
+        ExtractionData().save_arrays(output_path=output)
+
+        assert not any(output.iterdir())
+
+    def test_extraction_empty_directory_load_arrays_keeps_fields_none(self, tmp_path: Path) -> None:
+        """Verifies that load_arrays leaves statistics and classification None when no extraction files exist."""
+        output = tmp_path / "extraction"
+        output.mkdir()
+        ExtractionData().save_arrays(output_path=output)
+
+        data = ExtractionData()
+        data.load_arrays(output_path=output)
+
+        assert data.roi_statistics is None
+        assert data.roi_statistics_channel_2 is None
+        assert data.cell_classification is None
+        assert data.cell_classification_channel_2 is None
+
+    def test_extraction_empty_directory_load_results_keeps_fields_none(self, tmp_path: Path) -> None:
+        """Verifies that load_results leaves all result fields None when no extraction files exist."""
+        output = tmp_path / "extraction"
+        output.mkdir()
+
+        data = ExtractionData()
+        data.load_results(output_path=output)
+
+        for field_name in _EXTRACTION_RESULT_FIELDS:
+            assert getattr(data, field_name) is None
+
+    def test_extraction_empty_directory_memory_map_arrays_keeps_fields_none(self, tmp_path: Path) -> None:
+        """Verifies that memory_map_arrays leaves statistics and classification None when no extraction files exist."""
+        output = tmp_path / "extraction"
+        output.mkdir()
+
+        data = ExtractionData()
+        data.memory_map_arrays(output_path=output)
+
+        assert data.roi_statistics is None
+        assert data.roi_statistics_channel_2 is None
+        assert data.cell_classification is None
+        assert data.cell_classification_channel_2 is None
+
+    def test_extraction_empty_directory_memory_map_results_keeps_fields_none(self, tmp_path: Path) -> None:
+        """Verifies that memory_map_results leaves all result fields None when no extraction files exist."""
+        output = tmp_path / "extraction"
+        output.mkdir()
+
+        data = ExtractionData()
+        data.memory_map_results(output_path=output)
+
+        for field_name in _EXTRACTION_RESULT_FIELDS:
+            assert getattr(data, field_name) is None
+
+    def test_extraction_save_skips_memory_mapped_arrays(self, tmp_path: Path) -> None:
+        """Verifies that save_arrays does not re-write extraction arrays that are already memory-mapped."""
+        source = tmp_path / "source"
+        source.mkdir()
+        _populate_extraction_data().save_arrays(output_path=source)
+
+        mapped = ExtractionData()
+        mapped.memory_map_results(output_path=source)
+
+        destination = tmp_path / "destination"
+        destination.mkdir()
+        mapped.save_arrays(output_path=destination)
+
+        assert not (destination / "cell_fluorescence.npy").exists()
+        assert not (destination / "spikes.npy").exists()
+        assert not (destination / "cell_colocalization.npy").exists()
+        assert not (destination / "corrected_structural_mean_image.npy").exists()
+
+    def test_multi_registration_all_none_save_writes_no_files(self, tmp_path: Path) -> None:
+        """Verifies that saving an all-None MultiRecordingRegistrationData writes no array or mask files."""
+        MultiRecordingRegistrationData().save_arrays(output_path=tmp_path)
+
+        registration_directory = tmp_path / "registration_arrays"
+        assert registration_directory.is_dir()
+        assert not any(registration_directory.iterdir())
+        assert not (tmp_path / "registration_deformed_masks.npz").exists()
+        assert not (tmp_path / "registration_deformed_masks_channel_2.npz").exists()
+
+    def test_multi_registration_empty_directory_load_keeps_fields_none(self, tmp_path: Path) -> None:
+        """Verifies that load_arrays leaves all fields None when the registration_arrays directory is empty."""
+        MultiRecordingRegistrationData().save_arrays(output_path=tmp_path)
+
+        data = MultiRecordingRegistrationData()
+        data.load_arrays(output_path=tmp_path)
+
+        for field_name in _MULTI_REGISTRATION_ARRAY_FIELDS:
+            assert getattr(data, field_name) is None
+
+    def test_multi_registration_empty_directory_memory_map_keeps_fields_none(self, tmp_path: Path) -> None:
+        """Verifies that memory_map_arrays leaves all fields None when the registration_arrays directory is empty."""
+        MultiRecordingRegistrationData().save_arrays(output_path=tmp_path)
+
+        data = MultiRecordingRegistrationData()
+        data.memory_map_arrays(output_path=tmp_path)
+
+        for field_name in _MULTI_REGISTRATION_ARRAY_FIELDS:
+            assert getattr(data, field_name) is None
+
+    def test_multi_registration_load_skips_already_populated_fields(self, tmp_path: Path) -> None:
+        """Verifies that load_arrays does not overwrite fields that are already populated in memory."""
+        data = _populate_multi_registration_data()
+        originals = {field_name: getattr(data, field_name) for field_name in _MULTI_REGISTRATION_ARRAY_FIELDS}
+
+        data.load_arrays(output_path=tmp_path)
+
+        for field_name in _MULTI_REGISTRATION_ARRAY_FIELDS:
+            assert getattr(data, field_name) is originals[field_name]
+
+    def test_multi_registration_memory_map_skips_already_populated_fields(self, tmp_path: Path) -> None:
+        """Verifies that memory_map_arrays does not overwrite fields that are already populated in memory."""
+        data = _populate_multi_registration_data()
+        originals = {field_name: getattr(data, field_name) for field_name in _MULTI_REGISTRATION_ARRAY_FIELDS}
+
+        data.memory_map_arrays(output_path=tmp_path)
+
+        for field_name in _MULTI_REGISTRATION_ARRAY_FIELDS:
+            assert getattr(data, field_name) is originals[field_name]
+
+    def test_multi_registration_save_skips_memory_mapped_arrays(self, tmp_path: Path) -> None:
+        """Verifies that save_arrays does not re-write registration arrays that are already memory-mapped."""
+        source = tmp_path / "source"
+        source.mkdir()
+        _populate_multi_registration_data().save_arrays(output_path=source)
+
+        mapped = MultiRecordingRegistrationData()
+        mapped.memory_map_arrays(output_path=source)
+
+        destination = tmp_path / "destination"
+        destination.mkdir()
+        mapped.save_arrays(output_path=destination)
+
+        registration_directory = destination / "registration_arrays"
+        assert not (registration_directory / "deform_field_y.npy").exists()
+        assert not (registration_directory / "deform_field_x.npy").exists()
+        assert not (registration_directory / "transformed_mean_image.npy").exists()
+        assert not (registration_directory / "transformed_mean_image_channel_2.npy").exists()
+
+    def test_tracking_all_none_save_writes_no_files(self, tmp_path: Path) -> None:
+        """Verifies that saving an all-None MultiRecordingTrackingData writes no template mask files."""
+        MultiRecordingTrackingData().save_arrays(output_path=tmp_path)
+
+        assert not (tmp_path / "tracking_template_masks.npz").exists()
+        assert not (tmp_path / "tracking_template_masks_channel_2.npz").exists()
+
+    def test_tracking_empty_directory_memory_map_keeps_fields_none(self, tmp_path: Path) -> None:
+        """Verifies that memory_map_arrays leaves template mask fields None when no template files exist."""
+        data = MultiRecordingTrackingData()
+        data.memory_map_arrays(output_path=tmp_path)
+
+        assert data.template_masks is None
+        assert data.template_masks_channel_2 is None

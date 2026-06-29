@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # Project metadata section. Provides the general ID information about the project.
 [project]
 name = "cindra"
-version = "1.1.0rc1"
+version = "1.1.0"
 description = "Provides pipelines for processing neural imaging data and tracking Regions of Interest across multiple recordings."
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -228,6 +228,10 @@ addopts = "--import-mode=importlib"
 # This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
 [tool.coverage.run]
 
+# Measures branch coverage in addition to statement coverage, so that partial branches (one side of a conditional or
+# loop that no test exercises) are reported as gaps rather than hidden behind full line coverage.
+branch = true
+
 # Excludes GUI and interface modules from coverage measurement. GUI modules require PySide6/PyQtGraph runtime and
 # cannot be meaningfully unit tested. Interface modules (CLI, MCP servers, MCP tools) require external infrastructure.
 omit = [
@@ -249,6 +253,11 @@ directory = "reports/coverage_html"
 # Specifies additional ignore directives
 [tool.coverage.report]
 omit = ["src/cindra/gui/*", "src/cindra/interface/*"]
+
+# Fails the coverage report if combined statement and branch coverage drops below 100%, locking in full coverage of all
+# measured modules and preventing regressions. GUI and interface modules are omitted above; pragma-excluded lines
+# (Numba JIT bodies and pipeline orchestration entry points) do not count against this threshold.
+fail_under = 100
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",

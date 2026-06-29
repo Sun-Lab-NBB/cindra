@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import tifffile
 
 from cindra.io.binary import BinaryFile
 
@@ -337,21 +338,22 @@ class TestBinMovie:
     def test_bins_frames_by_averaging(self, tmp_path: Path) -> None:
         """Verifies that bin_movie groups consecutive frames and averages each bin."""
         file_path = tmp_path / "test.bin"
-        _create_test_binary(file_path=file_path)
+        data = _create_test_binary(file_path=file_path)
 
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
             result = binary_file.bin_movie(bin_size=5)
 
             assert result.dtype == np.float32
             # 10 frames with bin_size=5 should produce 2 bins.
-            assert result.shape[0] == 2
-            assert result.shape[1] == _FRAME_HEIGHT
-            assert result.shape[2] == _FRAME_WIDTH
+            assert result.shape == (2, _FRAME_HEIGHT, _FRAME_WIDTH)
+            # The arange input is deterministic, so each bin equals the exact mean of its five source frames.
+            np.testing.assert_allclose(result[0], data[0:5].mean(axis=0))
+            np.testing.assert_allclose(result[1], data[5:10].mean(axis=0))
 
     def test_bins_with_cropping(self, tmp_path: Path) -> None:
         """Verifies that bin_movie applies x_range and y_range cropping to binned frames."""
         file_path = tmp_path / "test.bin"
-        _create_test_binary(file_path=file_path)
+        data = _create_test_binary(file_path=file_path)
 
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
             result = binary_file.bin_movie(
@@ -359,13 +361,15 @@ class TestBinMovie:
                 x_range=(0, 4),
                 y_range=(0, 4),
             )
-            assert result.shape[1] == 4
-            assert result.shape[2] == 4
+            assert result.shape == (2, 4, 4)
+            # Cropping selects the top-left 4x4 region of each frame before averaging the 5-frame bins.
+            np.testing.assert_allclose(result[0], data[0:5, 0:4, 0:4].mean(axis=0))
+            np.testing.assert_allclose(result[1], data[5:10, 0:4, 0:4].mean(axis=0))
 
     def test_bins_with_bad_frames_rejected(self, tmp_path: Path) -> None:
         """Verifies that bin_movie excludes bad frames when the good frame fraction exceeds the threshold."""
         file_path = tmp_path / "test.bin"
-        _create_test_binary(file_path=file_path)
+        data = _create_test_binary(file_path=file_path)
 
         # Marks frames 0 and 1 as bad (2 out of 10, so 80% good > 50% threshold).
         bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
@@ -378,6 +382,9 @@ class TestBinMovie:
             assert result.dtype == np.float32
             # 8 good frames with bin_size=2 should produce 4 bins.
             assert result.shape[0] == 4
+            # Bad frames 0 and 1 are dropped, leaving good frames 2..9 binned into pairs (2,3), (4,5), (6,7), (8,9).
+            np.testing.assert_allclose(result[0], data[2:4].mean(axis=0))
+            np.testing.assert_allclose(result[3], data[8:10].mean(axis=0))
 
     def test_bins_without_bad_frames(self, tmp_path: Path) -> None:
         """Verifies that bin_movie treats all frames as good when bad_frames is not provided."""
@@ -448,3 +455,35 @@ class TestBinMovie:
             assert result.shape[0] == 2
             np.testing.assert_allclose(result[0], 15.0)
             np.testing.assert_allclose(result[1], 35.0)
+
+
+class TestWriteTiff:
+    """Tests BinaryFile.write_tiff()."""
+
+    def test_writes_tiff_with_explicit_ranges(self, tmp_path: Path) -> None:
+        """Verifies that write_tiff crops frames to the explicit y_range and x_range before saving the .tiff stack."""
+        file_path = tmp_path / "test.bin"
+        data = _create_test_binary(file_path=file_path, frame_count=5)
+        tiff_path = tmp_path / "output.tiff"
+
+        with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
+            binary_file.write_tiff(file_name=tiff_path, y_range=slice(1, 3), x_range=slice(2, 4))
+
+        # The explicit ranges crop each frame to rows 1:3 and columns 2:4, yielding a (5, 2, 2) stack on read-back.
+        tiff_data = tifffile.imread(tiff_path)
+        assert tiff_data.shape == (5, 2, 2)
+        np.testing.assert_array_equal(tiff_data, data[:, 1:3, 2:4])
+
+    def test_writes_tiff_with_default_ranges(self, tmp_path: Path) -> None:
+        """Verifies that write_tiff exports a frame subset at full frame size when y_range and x_range are omitted."""
+        file_path = tmp_path / "test.bin"
+        data = _create_test_binary(file_path=file_path, frame_count=5)
+        tiff_path = tmp_path / "full.tiff"
+
+        with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
+            binary_file.write_tiff(file_name=tiff_path, frame_range=slice(0, 3))
+
+        # Omitting y_range and x_range defaults to the full frame dimensions, exporting the first three frames in full.
+        tiff_data = tifffile.imread(tiff_path)
+        assert tiff_data.shape == (3, _FRAME_HEIGHT, _FRAME_WIDTH)
+        np.testing.assert_array_equal(tiff_data, data[0:3])

@@ -118,11 +118,22 @@ class TestDownsample:
         np.testing.assert_allclose(result[0, :5, :], 1.0)
         np.testing.assert_allclose(result[0, -1, :], 0.5)
 
+    def test_single_row_skips_block_reshape(self) -> None:
+        """Verifies downsampling a single-row input averages along width only."""
+        data = np.zeros((1, 1, 4), dtype=np.float32)
+        data[0, 0, :] = [1.0, 3.0, 5.0, 7.0]
+        result = downsample(data=data, taper_edge=False)
+        # height=1 makes even_height 0, so the main 2x2-block reshape is skipped and only the bottom-row
+        # width averaging runs: [(1+3)/2, (5+7)/2] = [2.0, 6.0].
+        assert result.shape == (1, 1, 2)
+        np.testing.assert_allclose(result, [[[2.0, 6.0]]])
+
     def test_preserves_depth_dimension(self) -> None:
-        """Verifies the depth (frame) dimension is preserved."""
+        """Verifies the depth (frame) dimension is preserved and each frame is downsampled independently."""
         data = np.ones((5, 10, 10), dtype=np.float32)
         result = downsample(data=data)
-        assert result.shape[0] == 5
+        assert result.shape == (5, 5, 5)
+        np.testing.assert_allclose(result, 1.0)
 
 
 class TestComputeTemporalStandardDeviation:

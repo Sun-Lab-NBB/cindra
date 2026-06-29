@@ -154,6 +154,21 @@ class TestClassifier:
         assert result.shape == (1, 2)
         assert np.isfinite(result).all()
 
+    def test_all_nan_feature_excluded(self, tmp_path: Path) -> None:
+        """Verifies that an all-NaN feature is filtered out while a valid feature remains available."""
+        path = tmp_path / "nan_feature.npz"
+        rng = np.random.default_rng(42)
+        sample_count = 200
+        np.savez(
+            path,
+            training_labels=np.array([True, False] * (sample_count // 2), dtype=np.bool_),
+            normalized_pixel_count=rng.standard_normal(sample_count).astype(np.float32) + 1.0,
+            compactness=np.full(sample_count, np.nan, dtype=np.float32),
+        )
+        classifier = Classifier(classifier_path=path)
+        assert "compactness" not in classifier._available_features
+        assert classifier._available_features == ["normalized_pixel_count"]
+
 
 class TestCreateTrainingDataset:
     """Tests Classifier.create_training_dataset."""

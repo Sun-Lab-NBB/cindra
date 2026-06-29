@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from cindra.registration.deformation import Deformation
 from cindra.registration.diffeomorphic import DiffeomorphicDemonsRegistration
 
 
@@ -76,8 +77,8 @@ class TestDiffeomorphicDemonsRegistration:
             assert np.max(np.abs(deformation[1])) < 2.0
 
     def test_register_produces_deformations(self) -> None:
-        """Verifies that registration produces deformations for different images."""
-        rng = np.random.default_rng(42)
+        """Verifies that registration produces finite, full-resolution, non-trivial deformations for distinct images."""
+        rng = np.random.default_rng(seed=42)
         image1 = rng.standard_normal((32, 32)).astype(np.float32)
         image2 = rng.standard_normal((32, 32)).astype(np.float32)
         registration = DiffeomorphicDemonsRegistration(
@@ -86,6 +87,59 @@ class TestDiffeomorphicDemonsRegistration:
         registration.register(progress=False)
         assert 0 in registration._deformations
         assert 1 in registration._deformations
+        deformation0 = registration.get_deformation(image_index=0)
+        deformation1 = registration.get_deformation(image_index=1)
+        # Final deformation fields span the full image resolution and contain only finite values.
+        assert deformation0[0].shape == (32, 32)
+        assert deformation0[1].shape == (32, 32)
+        assert deformation1[0].shape == (32, 32)
+        assert deformation1[1].shape == (32, 32)
+        assert np.all(np.isfinite(deformation0[0]))
+        assert np.all(np.isfinite(deformation0[1]))
+        assert np.all(np.isfinite(deformation1[0]))
+        assert np.all(np.isfinite(deformation1[1]))
+        # Distinct input images must produce a non-trivial (non-zero) deformation.
+        assert np.max(np.abs(deformation0[0])) > 1e-3
+
+    def test_register_without_smooth_scale(self) -> None:
+        """Verifies that registration runs with smooth scale transitions disabled."""
+        rng = np.random.default_rng(seed=7)
+        image1 = rng.standard_normal((32, 32)).astype(np.float32)
+        image2 = rng.standard_normal((32, 32)).astype(np.float32)
+        registration = DiffeomorphicDemonsRegistration(
+            images=[image1, image2],
+            scale_sampling=5,
+            final_scale=1.0,
+            final_grid_sampling=8.0,
+            smooth_scale=False,
+        )
+        registration.register(progress=False)
+        assert 0 in registration._deformations
+        assert 1 in registration._deformations
+
+    def test_register_without_freeze_edges(self) -> None:
+        """Verifies that registration runs with edge freezing disabled."""
+        rng = np.random.default_rng(seed=11)
+        image1 = rng.standard_normal((32, 32)).astype(np.float32)
+        image2 = rng.standard_normal((32, 32)).astype(np.float32)
+        registration = DiffeomorphicDemonsRegistration(
+            images=[image1, image2],
+            scale_sampling=5,
+            final_scale=1.0,
+            final_grid_sampling=8.0,
+            freeze_edges=False,
+        )
+        registration.register(progress=False)
+        assert 0 in registration._deformations
+        assert 1 in registration._deformations
+
+    def test_regularize_deformation_without_image_shape(self) -> None:
+        """Verifies direct regularization with no image shape and injectivity disabled returns a Deformation."""
+        image = np.ones((32, 32), dtype=np.float32)
+        registration = DiffeomorphicDemonsRegistration(images=[image, image], injective=False, final_grid_sampling=4.0)
+        deformation = Deformation.identity(height=32, width=32)
+        result = registration._regularize_deformation(scale=1.0, deformation=deformation, image_shape=None)
+        assert isinstance(result, Deformation)
 
     def test_default_parameters(self) -> None:
         """Verifies that the constructor stores default parameter values."""

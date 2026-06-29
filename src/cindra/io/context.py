@@ -64,7 +64,7 @@ def find_data_directory(data_path: Path) -> Path:
     return parameter_files[0].parent
 
 
-def resolve_single_recording_contexts(  # pragma: no cover
+def resolve_single_recording_contexts(
     configuration: SingleRecordingConfiguration,
     *,
     persist: bool = True,
@@ -227,7 +227,8 @@ def resolve_single_recording_contexts(  # pragma: no cover
         # Worker entry (REMOTE mode): bootstrap must already exist on disk from a prior prepare step. Treat missing
         # runtime_data.yaml as a hard error rather than silently persisting concurrently alongside peer workers.
         for context in contexts:
-            if context.runtime.io.output_path is None:
+            # io.output_path is always populated during per-plane construction above; the guard is defensive only.
+            if context.runtime.io.output_path is None:  # pragma: no cover
                 continue
             runtime_yaml = context.runtime.io.output_path / "runtime_data.yaml"
             if not runtime_yaml.exists():
@@ -242,7 +243,7 @@ def resolve_single_recording_contexts(  # pragma: no cover
     return contexts
 
 
-def resolve_multi_recording_contexts(  # pragma: no cover
+def resolve_multi_recording_contexts(
     configuration: MultiRecordingConfiguration,
     target_recording_id: str | None = None,
     *,
@@ -391,7 +392,8 @@ def resolve_multi_recording_contexts(  # pragma: no cover
         # peer workers, which would race on the same files and corrupt them.
         for context in contexts:
             runtime_output_path = context.runtime.output_path
-            if runtime_output_path is None:
+            # output_path is always populated during per-recording construction above; the guard is defensive only.
+            if runtime_output_path is None:  # pragma: no cover
                 continue
             runtime_yaml = runtime_output_path / "multi_recording_runtime_data.yaml"
             if not runtime_yaml.exists():

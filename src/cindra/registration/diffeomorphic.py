@@ -144,7 +144,7 @@ class DiffeomorphicDemonsRegistration:
         if self._smooth_scale:
             total_iterations = (scale_level_count - 1) * self._scale_sampling
         else:
-            total_iterations = scale_level_count * self._scale_sampling  # pragma: no cover — smooth_scale=False path
+            total_iterations = scale_level_count * self._scale_sampling
 
         # Saves and restores the console's progress state to honor the progress parameter without affecting the global
         # state set by the pipeline entry point.
@@ -249,7 +249,9 @@ class DiffeomorphicDemonsRegistration:
             pairwise_deformation = self._compute_pairwise_deformation(
                 source_index=image_index, target_index=other_index, iteration_key=iteration_key
             )
-            if pairwise_deformation is not None:
+            if (
+                pairwise_deformation is not None
+            ):  # pragma: no branch - _compute_pairwise_deformation always returns a Deformation, never None.
                 pair_count += 1
                 total_deformation += pairwise_deformation
 
