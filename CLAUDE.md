@@ -279,7 +279,7 @@ pipeline outputs.
 
 ### Code standards
 
-- MyPy strict mode with full type annotations
+- MyPy type checking with full type annotations (`disallow_untyped_defs`, `warn_unused_ignores`)
 - Google-style docstrings
 - 120 character line limit
 - Ruff for formatting and linting
