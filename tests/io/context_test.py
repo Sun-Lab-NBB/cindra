@@ -255,6 +255,17 @@ class TestResolveRecordingRoots:
 
         assert result == (Path("/data/session_a"), Path("/data/session_b"))
 
+    def test_deduplicates_identical_paths(self) -> None:
+        """Verifies that two identical paths collapse into a single deduplicated recording root."""
+        paths = [
+            Path("/data/session_a"),
+            Path("/data/session_a"),
+        ]
+
+        result = resolve_recording_roots(paths=paths)
+
+        assert result == (Path("/data/session_a"),)
+
 
 class TestFindCindraDirectory:
     """Tests _find_cindra_directory."""

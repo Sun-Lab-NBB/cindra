@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from cindra.detection import extend_roi
 from cindra.dataclasses import ROIMask, ROIStatistics
 from cindra.extraction.masks import (
     create_masks,
@@ -133,13 +134,14 @@ class TestCreateRoiPixels:
         assert not pixel_mask[19, 19]
 
     def test_with_percentile_filtering(self) -> None:
-        """Verifies that percentile filtering produces a valid boolean mask."""
+        """Verifies that percentile filtering retains the high-weight cell core and rejects the background."""
         roi = _make_circular_roi(center_y=15, center_x=15, radius=5, frame_height=30, frame_width=30)
         pixel_mask = _create_roi_pixels(roi_statistics=[roi], height=30, width=30, cell_probability_percentile=50)
         assert pixel_mask.dtype == np.bool_
         assert pixel_mask.shape == (30, 30)
-        # Confirms at least one pixel is marked as ROI.
-        assert pixel_mask.any()
+        # The brightest pixel at the ROI center is retained while a far-background pixel is rejected.
+        assert pixel_mask[15, 15]
+        assert not pixel_mask[0, 0]
 
 
 class TestCreateRoiMasks:
@@ -261,10 +263,10 @@ class TestCreateNeuropilMasks:
         np.testing.assert_array_equal(masks_first[0], masks_second[0])
 
     def test_recompute_overrides_cache(self) -> None:
-        """Verifies that recompute=True forces recomputation even with cached masks."""
+        """Verifies that recompute=True reproduces the same deterministic mask even with a cached mask present."""
         roi = _make_circular_roi(center_y=25, center_x=25, radius=3, frame_height=50, frame_width=50)
         # Primes the cached property so the recompute call has a cached value to override.
-        _create_neuropil_masks(
+        masks_first = _create_neuropil_masks(
             roi_statistics=[roi],
             height=50,
             width=50,
@@ -272,7 +274,7 @@ class TestCreateNeuropilMasks:
             minimum_neuropil_pixels=50,
             cell_probability_percentile=0,
         )
-        # Confirms the recompute call succeeds without error.
+        # Confirms the recompute call reproduces the cache-priming mask rather than returning a different result.
         masks = _create_neuropil_masks(
             roi_statistics=[roi],
             height=50,
@@ -282,4 +284,34 @@ class TestCreateNeuropilMasks:
             cell_probability_percentile=0,
             recompute=True,
         )
-        assert masks[0].size > 0
+        np.testing.assert_array_equal(masks[0], masks_first[0])
+
+    def test_expansion_runs_to_exhaustion(self) -> None:
+        """Verifies that an unreachable minimum pixel count expands the neuropil mask to the full non-cell frame."""
+        roi = _make_circular_roi(center_y=15, center_x=15, radius=3, frame_height=30, frame_width=30)
+
+        # Builds the expected full-frame neuropil mask independently: every non-cell pixel that is not part of the
+        # inner exclusion border around the ROI.
+        roi_pixels = _create_roi_pixels(roi_statistics=[roi], height=30, width=30, cell_probability_percentile=0)
+        inner_y_pixels, inner_x_pixels = extend_roi(
+            y_pixels=roi.mask.y_pixels,
+            x_pixels=roi.mask.x_pixels,
+            height=30,
+            width=30,
+            iterations=2,
+        )
+        expected_mask = roi_pixels == 0
+        expected_mask[inner_y_pixels, inner_x_pixels] = False
+        expected_flat = np.flatnonzero(expected_mask).astype(np.int32)
+
+        # A minimum pixel count larger than the whole frame can never be satisfied, so the expansion loop runs all
+        # iterations and exits via loop completion rather than an early break.
+        neuropil_masks = _create_neuropil_masks(
+            roi_statistics=[roi],
+            height=30,
+            width=30,
+            inner_neuropil_border_radius=2,
+            minimum_neuropil_pixels=100000,
+            cell_probability_percentile=0,
+        )
+        np.testing.assert_array_equal(neuropil_masks[0], expected_flat)

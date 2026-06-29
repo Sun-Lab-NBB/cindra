@@ -25,7 +25,7 @@ _MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
 """The minimum number of image dimensions considered 'multidimensional'."""
 
 
-def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:  # pragma: no cover
+def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
     """Converts TIFF files to cindra binary format for all planes.
 
     This function performs TIFF to binary conversion using pre-initialized RuntimeContext instances. It discovers TIFF
@@ -191,7 +191,9 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:  # pragma: 
                             range(first_frame_index_channel_2, frame_count, interleave_stride)
                         )
 
-                        if channel_2_frame_indices:
+                        # For balanced two-channel data, the channel 2 indices mirror the already non-empty channel 1
+                        # indices, so the empty case cannot be reached here.
+                        if channel_2_frame_indices:  # pragma: no branch
                             channel_2_frames = frames[channel_2_frame_indices]
 
                             if is_mroi and roi_lines:
@@ -226,18 +228,20 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:  # pragma: 
         if channel_number > 1:
             channel_2_binaries[context_index].close()
 
-        # Computes final mean image by dividing by frame count.
+        # Computes final mean image by dividing by frame count. Every context receives at least one frame, so the
+        # guard against an unpopulated mean image / zero frame count never fails for valid recordings.
         mean_image = mean_images[context_index]
-        if mean_image is not None and frame_counts[context_index] > 0:
+        if mean_image is not None and frame_counts[context_index] > 0:  # pragma: no branch
             mean_image /= frame_counts[context_index]
 
         mean_image_channel_2 = mean_images_channel_2[context_index]
         if mean_image_channel_2 is not None and frame_counts[context_index] > 0:
             mean_image_channel_2 /= frame_counts[context_index]
 
-        # Updates IOData with frame dimensions.
+        # Updates IOData with frame dimensions. The mean image is always populated because every context receives at
+        # least one frame, so the dimension update always runs for valid recordings.
         io_data = context.runtime.io
-        if mean_image is not None:
+        if mean_image is not None:  # pragma: no branch
             io_data.frame_height = mean_image.shape[0]
             io_data.frame_width = mean_image.shape[1]
         io_data.frame_count = frame_counts[context_index]
@@ -341,7 +345,7 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.
     return frames
 
 
-def _get_frame_dimensions(  # pragma: no cover — requires RuntimeContext with acquisition data
+def _get_frame_dimensions(
     tiff_files: list[Path],
     contexts: list[RuntimeContext],
     acquisition: AcquisitionParameters,
@@ -394,7 +398,7 @@ def _get_frame_dimensions(  # pragma: no cover — requires RuntimeContext with 
     return heights, widths
 
 
-def _create_binary_files(  # pragma: no cover — requires RuntimeContext with binary paths
+def _create_binary_files(
     contexts: list[RuntimeContext],
     frame_heights: list[int],
     frame_widths: list[int],

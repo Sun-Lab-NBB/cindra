@@ -151,6 +151,44 @@ class TestComputeNonrigidOffsets:
         assert x_offsets.dtype == np.float32
         assert correlation.dtype == np.float32
 
+    def test_high_snr_threshold_runs_all_smoothing_levels(self) -> None:
+        """Verifies offsets stay valid when the SNR threshold forces all smoothing levels to run."""
+        rng = np.random.default_rng(seed=42)
+        reference = rng.standard_normal((64, 64)).astype(np.float32)
+        y_blocks, x_blocks, _block_counts, _, smoothing_kernel = compute_registration_blocks(
+            height=64, width=64, block_size=(32, 32)
+        )
+
+        taper, offset, kernel = compute_nonrigid_reference_data(
+            reference_image=reference,
+            taper_slope=5.0,
+            smoothing_sigma=1.15,
+            y_blocks=y_blocks,
+            x_blocks=x_blocks,
+        )
+
+        frames = np.tile(reference, (2, 1, 1))
+        # A threshold above any achievable SNR keeps low_snr_mask fully True, so the inner loop exhausts all levels.
+        y_offsets, x_offsets, _correlation = compute_nonrigid_offsets(
+            frames=frames,
+            taper_mask=taper,
+            mean_offset=offset,
+            reference_kernel=kernel,
+            snr_threshold=1e9,
+            smoothing_kernel=smoothing_kernel,
+            x_blocks=x_blocks,
+            y_blocks=y_blocks,
+            maximum_offset=5.0,
+            workers=1,
+        )
+
+        block_count = len(y_blocks)
+        assert y_offsets.shape == (2, block_count)
+        assert x_offsets.shape == (2, block_count)
+        # Frames identical to the reference must still produce sub-pixel offsets despite the extra smoothing.
+        assert np.max(np.abs(y_offsets)) < 1.0
+        assert np.max(np.abs(x_offsets)) < 1.0
+
 
 class TestApplyNonrigidCorrection:
     """Tests apply_nonrigid_correction."""
@@ -195,6 +233,8 @@ class TestApplyNonrigidCorrection:
 
         assert result.shape == (3, 64, 64)
         assert result.dtype == np.float32
+        # Warping a constant (all-ones) image by any offset must yield a constant image.
+        np.testing.assert_allclose(result, 1.0, atol=1e-4)
 
 
 class TestUpsampleBlockOffsets:

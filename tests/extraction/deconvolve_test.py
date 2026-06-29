@@ -48,14 +48,15 @@ class TestComputeDeltaFluorescence:
         np.testing.assert_allclose(result, 0.0, atol=1e-4)
 
     def test_maximin_baseline(self) -> None:
-        """Verifies the maximin baseline method runs and produces reasonable output."""
-        rng = np.random.default_rng(42)
-        cell = rng.standard_normal((3, 300)).astype(np.float32) + 200.0
-        neuropil = rng.standard_normal((3, 300)).astype(np.float32) + 150.0
+        """Verifies the maximin baseline method subtracts a constant baseline from a constant trace."""
+        # A perfectly constant trace passes unchanged through the gaussian, minimum, and maximum filters, so the
+        # estimated baseline equals the trace and the corrected delta fluorescence is zero everywhere.
+        cell = np.ones((3, 300), dtype=np.float32) * 100.0
+        neuropil = np.zeros((3, 300), dtype=np.float32)
         result = compute_delta_fluorescence(
             cell_fluorescence=cell,
             neuropil_fluorescence=neuropil,
-            neuropil_coefficient=0.7,
+            neuropil_coefficient=0.0,
             baseline_method="maximin",
             baseline_window=1.0,
             baseline_sigma=3.0,
@@ -63,7 +64,25 @@ class TestComputeDeltaFluorescence:
             sampling_rate=30.0,
         )
         assert result.shape == (3, 300)
-        assert np.isfinite(result).all()
+        np.testing.assert_allclose(result, 0.0, atol=1e-4)
+
+    def test_odd_window_not_incremented(self) -> None:
+        """Verifies that an already-odd baseline window is left unchanged during symmetric filtering."""
+        cell = np.ones((1, 100), dtype=np.float32) * 100.0
+        neuropil = np.zeros((1, 100), dtype=np.float32)
+        # sampling_rate=31, window=1.0 => 31 frames (already odd) => left as-is. A constant trace yields zero delta F.
+        result = compute_delta_fluorescence(
+            cell_fluorescence=cell,
+            neuropil_fluorescence=neuropil,
+            neuropil_coefficient=0.0,
+            baseline_method="maximin",
+            baseline_window=1.0,
+            baseline_sigma=3.0,
+            baseline_percentile=8.0,
+            sampling_rate=31.0,
+        )
+        assert result.shape == (1, 100)
+        np.testing.assert_allclose(result, 0.0, atol=1e-4)
 
     def test_constant_baseline(self) -> None:
         """Verifies the constant baseline method uses the global minimum of the smoothed trace."""

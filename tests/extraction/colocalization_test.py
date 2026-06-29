@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -85,6 +86,9 @@ class TestCorrectBleedthrough:
         )
         assert corrected.shape == (30, 30)
         assert corrected.dtype == np.float32
+        # Uniform functional and structural images regress to a perfectly predicted bleedthrough, so the corrected
+        # structural image is zero everywhere.
+        np.testing.assert_allclose(corrected, 0.0, atol=1e-4)
 
     def test_zero_functional_no_correction(self) -> None:
         """Verifies that zero functional image produces no bleedthrough correction."""
@@ -281,6 +285,38 @@ class TestComputeIntensityColocalization:
         assert result.dtype == np.float32
         assert corrected.shape == (30, 30)
         assert corrected.dtype == np.float32
+        # Uniform inputs zero the corrected structural image, so the neuropil intensity is zero and the
+        # inside-to-total ratio floors to 1.0.
+        np.testing.assert_allclose(corrected, 0.0, atol=1e-4)
+        assert result[0, 1] == pytest.approx(1.0, abs=1e-5)
+
+    def test_frame_filling_roi_empty_neuropil(self) -> None:
+        """Verifies that a frame-filling ROI yields an empty neuropil region and zero outside intensity."""
+        # An ROI covering every pixel leaves no background, so its neuropil mask is empty and the neuropil intensity
+        # branch is skipped, leaving the outside intensity at zero.
+        y_coordinates, x_coordinates = np.mgrid[0:8, 0:8]
+        roi = _make_roi(
+            y_pixels=y_coordinates.ravel().tolist(),
+            x_pixels=x_coordinates.ravel().tolist(),
+            weights=[1.0] * 64,
+            frame_width=8,
+        )
+        functional = np.ones((8, 8), dtype=np.float32) * 10.0
+        structural = np.ones((8, 8), dtype=np.float32) * 50.0
+        result, _ = compute_intensity_colocalization(
+            rois=[roi],
+            functional_mean_image=functional,
+            structural_mean_image=structural,
+            frame_height=8,
+            frame_width=8,
+            colocalization_threshold=0.5,
+            allow_overlap=True,
+            cell_probability_percentile=0,
+            inner_neuropil_border_radius=2,
+            minimum_neuropil_pixels=50,
+        )
+        # With no neuropil pixels the outside intensity stays zero, so the inside-to-total ratio floors to 1.0.
+        assert result[0, 1] == pytest.approx(1.0, abs=1e-5)
 
     def test_bright_roi_colocalized(self) -> None:
         """Verifies that an ROI bright in the structural channel is detected as colocalized."""

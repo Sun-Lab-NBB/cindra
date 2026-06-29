@@ -334,7 +334,7 @@ class BinaryFile:
                 # (from int16) type.
                 binned_movie = movie.reshape(-1, bin_size, height, width).astype(dtype=np.float32).mean(axis=1)
                 batches.extend(binned_movie)
-            elif data.shape[0] > 0:
+            elif data.shape[0] > 0:  # pragma: no branch — a batch always retains at least one frame.
                 # Batch has fewer frames than bin_size (likely due to many bad frames). Averages the batch into a single
                 # bin to preserve data.
                 batches.append(data.astype(dtype=np.float32).mean(axis=0))

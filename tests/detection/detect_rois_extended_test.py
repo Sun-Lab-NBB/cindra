@@ -145,7 +145,7 @@ class TestExtendIteratively:
         x_pixels = np.array([6], dtype=np.int32)
         active_frame_indices = np.arange(frame_count, dtype=np.intp)
 
-        _, _, extended_weights = _extend_iteratively(
+        extended_y, extended_x, extended_weights = _extend_iteratively(
             y_pixels=y_pixels,
             x_pixels=x_pixels,
             frames=frames,
@@ -154,6 +154,39 @@ class TestExtendIteratively:
             active_frame_indices=active_frame_indices,
         )
 
+        assert np.isclose(norm(extended_weights), 1.0, atol=1e-5)
+
+        # The growth should be driven by and localized to the bright 4:8 x 4:8 source block.
+        assert len(extended_y) > 1
+        assert np.all((extended_y >= 3) & (extended_y <= 8))
+        assert np.all((extended_x >= 3) & (extended_x <= 8))
+
+    def test_grows_past_pixel_cap_exits_via_while_condition(self) -> None:
+        """Verifies that a uniformly bright frame grows the ROI past the 10000-pixel cap."""
+        height = 120
+        width = 120
+        frame_count = 4
+
+        # Every pixel shares an identical intensity, so the ROI grows monotonically each iteration and never
+        # stops via the no-growth break, eventually crossing the 10000-pixel safety cap.
+        frames = np.ones((frame_count, height * width), dtype=np.float32)
+
+        y_pixels = np.array([60], dtype=np.int32)
+        x_pixels = np.array([60], dtype=np.int32)
+        active_frame_indices = np.arange(frame_count, dtype=np.intp)
+
+        extended_y, extended_x, extended_weights = _extend_iteratively(
+            y_pixels=y_pixels,
+            x_pixels=x_pixels,
+            frames=frames,
+            height=height,
+            width=width,
+            active_frame_indices=active_frame_indices,
+        )
+
+        # The ROI grows past the 10000-pixel cap, so the while condition (not the break) terminates the loop.
+        assert len(extended_y) > 10000
+        assert len(extended_x) == len(extended_y)
         assert np.isclose(norm(extended_weights), 1.0, atol=1e-5)
 
 

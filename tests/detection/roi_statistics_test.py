@@ -205,14 +205,17 @@ class TestROI:
         """Verifies that a compact circular ROI has a compactness near 1.0."""
         roi_statistics = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         roi = _ROI(data=roi_statistics, diameter=10)
-        # Compactness is max(1.0, ...) so it must be >= 1.0.
-        assert roi.compactness >= 1.0
+        # A near-perfect disk has perimeter^2 / (4 * pi * area) close to 1; an elongated or fragmented shape
+        # would exceed this tight band.
+        assert roi.compactness == pytest.approx(1.0, abs=0.3)
 
     def test_mean_radius_positive(self) -> None:
-        """Verifies that mean_radius is positive for a non-trivial ROI."""
+        """Verifies that mean_radius falls in the band expected for a radius-5 disk."""
         roi_statistics = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         roi = _ROI(data=roi_statistics, diameter=10)
-        assert roi.mean_radius > 0.0
+        # mean_radius is the diameter-normalized mean pixel-to-center distance; a radius-5 disk normalized by
+        # diameter 10 yields a fraction well below 1, so an off-by-a-large-factor computation would fall outside.
+        assert 0.15 < roi.mean_radius < 0.5
 
     def test_baseline_mean_radius_cached(self) -> None:
         """Verifies that the baseline cache is populated after first access."""
