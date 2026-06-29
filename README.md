@@ -31,8 +31,8 @@ The single-recording pipeline algorithms reimplemented in this library originate
 and fall under the following copyright notice:
 **Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer and Marius Pachitariu.**
 
-For the original suite2p algorithm documentation, see the original documentation available
-[here](https://suite2p.readthedocs.io/en/latest/settings.html).
+For the original suite2p algorithm documentation, see the
+[original suite2p settings reference](https://suite2p.readthedocs.io/en/latest/settings.html).
 
 The multi-recording ROI tracking pipeline algorithms reimplemented in this library originate from the
 [OSM Manuscript](https://www.nature.com/articles/s41586-024-08548-w). All original algorithm rights belong to the
@@ -384,7 +384,7 @@ running separate `cindra run --process --target-plane <index>` commands.
 
 Registration aligns every frame in the recording to a stable reference image, correcting for brain motion that occurs
 during imaging. Even small motion artifacts corrupt downstream analysis — if a cell drifts by a few pixels between
-frames, its fluorescence trace will mix with signals from neighboring cells or neuropil. Registration ensures that
+frames, its fluorescence trace mixes with signals from neighboring cells or neuropil. Registration ensures that
 each pixel corresponds to the same physical location across all frames.
 
 The algorithm proceeds in two stages. Rigid registration shifts each frame as a whole using phase correlation, and
