@@ -103,7 +103,7 @@ def compute_plane_offsets(
     return y_displacement, x_displacement
 
 
-def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:  # pragma: no cover
+def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     """Combines processed data from multiple planes into a unified dataset.
 
     This function combines multi-plane and multi-ROI recording data into a unified dataset, reassembling the original

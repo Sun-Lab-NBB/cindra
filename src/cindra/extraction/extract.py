@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from ..dataclasses import ROIStatistics, SignalExtraction, SpikeDeconvolution, MultiRecordingRuntimeContext
 
 
-def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext) -> None:  # pragma: no cover
+def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext) -> None:
     """Extracts fluorescence traces, classifies ROIs, and deconvolves spikes from registered binary data.
 
     Notes:
@@ -192,7 +192,7 @@ def _create_and_unpack_masks(
     return roi_masks, neuropil_masks
 
 
-def _extract_fluorescence_traces(  # pragma: no cover
+def _extract_fluorescence_traces(
     frames: BinaryFile | BinaryFileCombined,
     roi_masks: tuple[tuple[NDArray[np.int32], NDArray[np.float32]], ...],
     neuropil_masks: tuple[NDArray[np.int32], ...] | None,
@@ -341,7 +341,7 @@ def _update_roi_extraction_statistics(
         roi.skewness = float(skewness_value)
 
 
-def _extract_single_recording(context: RuntimeContext) -> None:  # pragma: no cover
+def _extract_single_recording(context: RuntimeContext) -> None:
     """Extracts fluorescence traces, classifies ROIs, and deconvolves spikes from registered binary data.
 
     Notes:
@@ -517,7 +517,7 @@ def _extract_single_recording(context: RuntimeContext) -> None:  # pragma: no co
     context.runtime.extraction.release_arrays()
 
 
-def _extract_structural_channel_2(  # pragma: no cover
+def _extract_structural_channel_2(
     context: RuntimeContext,
     batch_size: int,
     roi_masks: tuple[tuple[NDArray[np.int32], NDArray[np.float32]], ...],
@@ -591,7 +591,7 @@ def _extract_structural_channel_2(  # pragma: no cover
         )
 
 
-def _extract_functional_channel_2(  # pragma: no cover
+def _extract_functional_channel_2(
     context: RuntimeContext,
     batch_size: int,
 ) -> None:
@@ -733,7 +733,7 @@ def _extract_functional_channel_2(  # pragma: no cover
         extraction_data.spikes_channel_2 = np.zeros_like(extraction_data.cell_fluorescence_channel_2)
 
     # Computes spatial colocalization between channel 1 and channel 2 ROIs.
-    if extraction_data.roi_statistics is not None:
+    if extraction_data.roi_statistics is not None:  # pragma: no branch — channel 1 statistics always exist here
         extraction_data.cell_colocalization = compute_spatial_colocalization(
             rois_channel_1=extraction_data.roi_statistics,
             rois_channel_2=roi_statistics_channel_2,
@@ -743,7 +743,7 @@ def _extract_functional_channel_2(  # pragma: no cover
         )
 
 
-def _extract_multi_recording_channel(  # pragma: no cover
+def _extract_multi_recording_channel(
     frames: BinaryFileCombined,
     roi_statistics: list[ROIStatistics],
     extraction_config: SignalExtraction,
@@ -831,7 +831,7 @@ def _extract_multi_recording_channel(  # pragma: no cover
     return cell_fluorescence, neuropil_fluorescence, subtracted_fluorescence, spikes
 
 
-def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:  # pragma: no cover
+def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
     """Extracts fluorescence traces from ROIs tracked across multiple recordings for a single recording.
 
     Notes:

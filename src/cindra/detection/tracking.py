@@ -21,7 +21,7 @@ _DEFAULT_JACCARD_DISTANCE: float = 10000.0
 that are not evaluated (due to centroid distance filtering) are never clustered together."""
 
 
-def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:  # pragma: no cover
+def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
     """Tracks ROIs across multiple recordings using Jaccard distance-based hierarchical clustering.
 
     Clusters ROI masks from multiple recordings based on spatial overlap in the shared deformed visual
@@ -63,7 +63,8 @@ def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -
     # Loads registration arrays (deformed ROI masks) needed for tracking.
     for context in contexts:
         output_path = context.runtime.output_path
-        if output_path is not None:
+        # save_runtime below requires a non-None output_path, so the None side is unreachable on the main path.
+        if output_path is not None:  # pragma: no branch
             context.runtime.registration.memory_map_arrays(output_path)
 
     # Determines which channels have data to process by checking the first context with available registration data.
@@ -278,7 +279,7 @@ def _create_template_roi(
     )
 
 
-def _collect_recording_rois(  # pragma: no cover
+def _collect_recording_rois(
     contexts: list[MultiRecordingRuntimeContext],
     channel_2: bool,
 ) -> tuple[list[ROIMask], list[int]]:
@@ -420,7 +421,7 @@ def _filter_templates(
     return filtered_templates
 
 
-def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], channel_2: bool) -> None:  # pragma: no cover
+def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], channel_2: bool) -> None:
     """Tracks ROIs for a single channel across multiple recordings.
 
     Notes:
@@ -549,7 +550,8 @@ def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], channel_2:
                 pixel_prevalence=pixel_prevalence,
             )
 
-            if template is not None:
+            # Clustering requires spatial overlap, so a clustered template always retains prevalence-passing pixels.
+            if template is not None:  # pragma: no branch
                 template_masks.append(template)
 
                 # Marks all source ROIs with the cluster ID to prevent them from being re-clustered in
