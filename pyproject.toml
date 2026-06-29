@@ -54,6 +54,7 @@ dependencies = [
     "numba>=0.64,<1",
     "scipy>=1,<2",
     "scikit-learn>=1,<2",
+    "threadpoolctl>=3,<4",
     "natsort>=8,<9",
 
     # Image I/O
@@ -78,6 +79,8 @@ dependencies = [
     "ataraxis-data-structures>=6,<7",
 
     # Runtime Utilities
+    "pyyaml>=6,<7",
+    "filelock>=3,<4",
     "importlib_metadata>=9,<10",
 
     # Platform-Specific Acceleration
