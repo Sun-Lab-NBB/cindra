@@ -51,9 +51,6 @@ def run_multi_recording_pipeline(
     extract: bool = False,
     target_recording: str | None = None,
 ) -> None: ...
-def _prepare_tracker(
-    tracker: ProcessingTracker, jobs: list[tuple[str, str]], universe: list[tuple[str, str]]
-) -> None: ...
 def _execute_single_recording_job(
     configuration: SingleRecordingConfiguration,
     job_name: SingleRecordingJobNames,

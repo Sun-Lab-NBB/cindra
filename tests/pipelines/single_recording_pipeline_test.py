@@ -16,7 +16,6 @@ from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import RuntimeContext, SingleRecordingConfiguration
 from cindra.pipelines.pipeline import (
     SingleRecordingJobNames,
-    _prepare_tracker,
     _execute_single_recording_job,
     run_single_recording_pipeline,
 )
@@ -334,8 +333,8 @@ class TestSaveCombinedData:
             save_combined_data(contexts=[context])
 
 
-class TestPrepareTracker:
-    """Tests _prepare_tracker."""
+class TestAlignJobs:
+    """Tests tracker job-registry alignment via ProcessingTracker.align_jobs."""
 
     def test_first_run_initializes_jobs(self, tmp_path: Path) -> None:
         """Verifies that a missing tracker file is initialized with the requested jobs."""
@@ -343,7 +342,7 @@ class TestPrepareTracker:
         jobs = [(SingleRecordingJobNames.BINARIZE, ""), (SingleRecordingJobNames.PROCESS, "plane_0")]
         universe = [*jobs, (SingleRecordingJobNames.COMBINE, "")]
 
-        _prepare_tracker(tracker=tracker, jobs=jobs, universe=universe)
+        tracker.align_jobs(jobs=jobs, universe=universe)
 
         assert tracker.file_path.exists()
         assert len(tracker.find_jobs(job_name="")) == 2
@@ -355,7 +354,7 @@ class TestPrepareTracker:
         jobs = [(SingleRecordingJobNames.BINARIZE, "")]
         universe = [(SingleRecordingJobNames.BINARIZE, ""), (SingleRecordingJobNames.COMBINE, "")]
 
-        _prepare_tracker(tracker=tracker, jobs=jobs, universe=universe)
+        tracker.align_jobs(jobs=jobs, universe=universe)
 
         assert not tracker.find_jobs(job_name="foreign_job")
         assert len(tracker.find_jobs(job_name="binarization")) == 1
@@ -367,7 +366,7 @@ class TestPrepareTracker:
         jobs = [(SingleRecordingJobNames.BINARIZE, ""), (SingleRecordingJobNames.PROCESS, "plane_0")]
         universe = [*jobs, (SingleRecordingJobNames.COMBINE, "")]
 
-        _prepare_tracker(tracker=tracker, jobs=jobs, universe=universe)
+        tracker.align_jobs(jobs=jobs, universe=universe)
 
         assert len(tracker.find_jobs(job_name="")) == 2
 
@@ -380,7 +379,7 @@ class TestPrepareTracker:
         tracker.complete_job(job_id=binarize_id)
         universe = [*jobs, (SingleRecordingJobNames.COMBINE, "")]
 
-        _prepare_tracker(tracker=tracker, jobs=jobs, universe=universe)
+        tracker.align_jobs(jobs=jobs, universe=universe)
 
         assert tracker.get_job_status(job_id=binarize_id) == ProcessingStatus.SUCCEEDED
 
