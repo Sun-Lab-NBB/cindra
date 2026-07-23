@@ -389,6 +389,7 @@ def prepare_single_recording_batch_tool(
         if tracker_path.exists():
             # Idempotent path: tracker already exists, returns current state without reinitializing.
             tracker = ProcessingTracker(file_path=tracker_path)
+            registry = tracker.snapshot()
             configuration_file_path = cindra_root / "configuration.yaml"
 
             binarize_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.BINARIZE)
@@ -397,7 +398,7 @@ def prepare_single_recording_batch_tool(
 
             binarize_entry: dict[str, object] = {}
             for job_id, (name, specifier) in binarize_jobs.items():
-                job_info = tracker.get_job_info(job_id=job_id)
+                job_info = registry[job_id]
                 binarize_entry = {
                     "job_id": job_id,
                     "name": name,
@@ -408,7 +409,7 @@ def prepare_single_recording_batch_tool(
 
             process_entries: list[dict[str, object]] = []
             for job_id, (name, specifier) in process_jobs.items():
-                job_info = tracker.get_job_info(job_id=job_id)
+                job_info = registry[job_id]
                 process_entries.append(
                     {
                         "job_id": job_id,
@@ -421,7 +422,7 @@ def prepare_single_recording_batch_tool(
 
             combine_entry: dict[str, object] = {}
             for job_id, (name, specifier) in combine_jobs.items():
-                job_info = tracker.get_job_info(job_id=job_id)
+                job_info = registry[job_id]
                 combine_entry = {
                     "job_id": job_id,
                     "name": name,
@@ -630,13 +631,14 @@ def prepare_multi_recording_batch_tool(
         if tracker_path.exists():
             # Idempotent path: tracker already exists, returns current state without reinitializing.
             tracker = ProcessingTracker(file_path=tracker_path)
+            registry = tracker.snapshot()
 
             discover_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.DISCOVER)
             extract_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.EXTRACT)
 
             discover_entry: dict[str, object] = {}
             for job_id, (name, specifier) in discover_jobs.items():
-                job_info = tracker.get_job_info(job_id=job_id)
+                job_info = registry[job_id]
                 discover_entry = {
                     "job_id": job_id,
                     "name": name,
@@ -647,7 +649,7 @@ def prepare_multi_recording_batch_tool(
 
             extract_entries: list[dict[str, object]] = []
             for job_id, (name, specifier) in extract_jobs.items():
-                job_info = tracker.get_job_info(job_id=job_id)
+                job_info = registry[job_id]
                 extract_entries.append(
                     {
                         "job_id": job_id,
@@ -799,56 +801,24 @@ def reset_processing_phases_tool(
 
     tracker = ProcessingTracker(file_path=path)
 
-    # Snapshots current job states before reset.
-    if pipeline_type == "single-recording":
-        all_found_jobs = {
-            **tracker.find_jobs(job_name=SingleRecordingJobNames.BINARIZE),
-            **tracker.find_jobs(job_name=SingleRecordingJobNames.PROCESS),
-            **tracker.find_jobs(job_name=SingleRecordingJobNames.COMBINE),
-        }
-    else:
-        all_found_jobs = {
-            **tracker.find_jobs(job_name=MultiRecordingJobNames.DISCOVER),
-            **tracker.find_jobs(job_name=MultiRecordingJobNames.EXTRACT),
-        }
-
-    # Captures original states for all jobs.
-    original_states: dict[str, tuple[str, str, ProcessingStatus, str | None]] = {}
-    for job_id, (job_name, specifier) in all_found_jobs.items():
-        job_info = tracker.get_job_info(job_id=job_id)
-        original_states[job_id] = (job_name, specifier, job_info.status, job_info.error_message)
-
-    # Resets tracker and reinitializes all jobs as SCHEDULED.
-    all_jobs_list: list[tuple[str, str]] = list(all_found_jobs.values())
-    tracker.reset()
-    tracker.initialize_jobs(jobs=all_jobs_list)
-
-    # Replays original status for phases NOT being reset (preserved phases).
+    # Resets only the jobs whose phase is in the expanded reset set, reading the registry once. Jobs of preserved
+    # phases are left untouched, so their recorded status, executor, and timing survive the reset unchanged.
     phases_set = set(phases)
-    for job_id, (job_name, _specifier, original_status, error_message) in original_states.items():
-        if job_name in phases_set:
-            continue
+    reset_ids = [job_id for job_id, state in tracker.snapshot().items() if state.job_name in phases_set]
+    tracker.reset_jobs(job_ids=reset_ids)
 
-        if original_status == ProcessingStatus.SUCCEEDED:
-            tracker.start_job(job_id=job_id)
-            tracker.complete_job(job_id=job_id)
-        elif original_status == ProcessingStatus.FAILED:
-            tracker.start_job(job_id=job_id)
-            tracker.fail_job(job_id=job_id, error_message=error_message)
-
-    # Builds the response with updated per-job statuses.
-    updated_jobs: list[dict[str, object]] = []
-    for job_id, (job_name, specifier) in all_found_jobs.items():
-        job_info = tracker.get_job_info(job_id=job_id)
-        updated_jobs.append(
-            {
-                "job_id": job_id,
-                "name": job_name,
-                "specifier": specifier,
-                "status": job_info.status.name.lower(),
-                "executor_id": job_info.executor_id,
-            }
-        )
+    # Builds the response from a post-reset snapshot, reporting every job of a valid phase for this pipeline.
+    updated_jobs: list[dict[str, object]] = [
+        {
+            "job_id": job_id,
+            "name": state.job_name,
+            "specifier": state.specifier,
+            "status": state.status.name.lower(),
+            "executor_id": state.executor_id,
+        }
+        for job_id, state in tracker.snapshot().items()
+        if state.job_name in valid_phases
+    ]
 
     return {
         "success": True,
@@ -2067,6 +2037,7 @@ def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> 
     """
     tracker = ProcessingTracker(file_path=tracker_path)
     summary = tracker.get_summary()
+    registry = tracker.snapshot()
 
     # Groups jobs by pipeline phase using find_jobs.
     binarize_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.BINARIZE)
@@ -2076,7 +2047,7 @@ def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> 
     # Reads binarize status.
     binarize_status: dict[str, object] = {}
     for job_id in binarize_jobs:
-        job_info = tracker.get_job_info(job_id=job_id)
+        job_info = registry[job_id]
         binarize_status["status"] = job_info.status.name.lower()
         if job_info.error_message:
             binarize_status["error"] = job_info.error_message
@@ -2084,13 +2055,12 @@ def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> 
     # Reads per-plane process status.
     process_status: dict[str, object] = {}
     for job_id, (_, specifier) in process_jobs.items():
-        job_info = tracker.get_job_info(job_id=job_id)
-        process_status[specifier] = job_info.status.name.lower()
+        process_status[specifier] = registry[job_id].status.name.lower()
 
     # Reads combine status.
     combine_status: dict[str, object] = {}
     for job_id in combine_jobs:
-        job_info = tracker.get_job_info(job_id=job_id)
+        job_info = registry[job_id]
         combine_status["status"] = job_info.status.name.lower()
         if job_info.error_message:
             combine_status["error"] = job_info.error_message
@@ -2100,18 +2070,14 @@ def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> 
         overall_status = "completed"
     elif tracker.encountered_error:
         overall_status = "failed"
-    elif combine_jobs and any(
-        tracker.get_job_info(job_id=job_id).status == ProcessingStatus.RUNNING for job_id in combine_jobs
-    ):
+    elif combine_jobs and any(registry[job_id].status == ProcessingStatus.RUNNING for job_id in combine_jobs):
         overall_status = "combining"
     elif process_jobs and any(
-        tracker.get_job_info(job_id=job_id).status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
-        for job_id in process_jobs
+        registry[job_id].status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED) for job_id in process_jobs
     ):
         overall_status = "processing"
     elif binarize_jobs and any(
-        tracker.get_job_info(job_id=job_id).status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
-        for job_id in binarize_jobs
+        registry[job_id].status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED) for job_id in binarize_jobs
     ):
         overall_status = "binarizing"
     else:
@@ -2146,6 +2112,7 @@ def _read_multi_recording_tracker(tracker_path: Path) -> dict[str, object]:
     """
     tracker = ProcessingTracker(file_path=tracker_path)
     summary = tracker.get_summary()
+    registry = tracker.snapshot()
 
     # Groups jobs by pipeline phase using find_jobs.
     discover_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.DISCOVER)
@@ -2154,7 +2121,7 @@ def _read_multi_recording_tracker(tracker_path: Path) -> dict[str, object]:
     # Reads discover status.
     discover_status: dict[str, object] = {}
     for job_id in discover_jobs:
-        job_info = tracker.get_job_info(job_id=job_id)
+        job_info = registry[job_id]
         discover_status["status"] = job_info.status.name.lower()
         if job_info.error_message:
             discover_status["error"] = job_info.error_message
@@ -2162,8 +2129,7 @@ def _read_multi_recording_tracker(tracker_path: Path) -> dict[str, object]:
     # Reads per-recording extract status.
     extract_status: dict[str, object] = {}
     for job_id, (_, specifier) in extract_jobs.items():
-        job_info = tracker.get_job_info(job_id=job_id)
-        extract_status[specifier] = job_info.status.name.lower()
+        extract_status[specifier] = registry[job_id].status.name.lower()
 
     # Synthesizes overall status from tracker state.
     if tracker.complete:
@@ -2171,13 +2137,11 @@ def _read_multi_recording_tracker(tracker_path: Path) -> dict[str, object]:
     elif tracker.encountered_error:
         overall_status = "failed"
     elif extract_jobs and any(
-        tracker.get_job_info(job_id=job_id).status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
-        for job_id in extract_jobs
+        registry[job_id].status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED) for job_id in extract_jobs
     ):
         overall_status = "extracting"
     elif discover_jobs and any(
-        tracker.get_job_info(job_id=job_id).status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
-        for job_id in discover_jobs
+        registry[job_id].status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED) for job_id in discover_jobs
     ):
         overall_status = "discovering"
     else:
