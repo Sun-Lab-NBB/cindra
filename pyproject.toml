@@ -76,7 +76,7 @@ dependencies = [
     # Ataraxis
     "ataraxis-time>=6,<7",
     "ataraxis-base-utilities>=6,<7",
-    "ataraxis-data-structures>=6,<7",
+    "ataraxis-data-structures>=6.1.1,<7",
 
     # Runtime Utilities
     "pyyaml>=6,<7",
