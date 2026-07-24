@@ -277,19 +277,19 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
 
     for tiff_path in tiff_paths:
         try:
-            tiff = TiffFile(tiff_path)
-            page_count = len(tiff.pages)
+            with TiffFile(tiff_path) as tiff:
+                page_count = len(tiff.pages)
 
-            if page_count == 0:
-                errors.append(f"TIFF file contains zero frames: {tiff_path.name}")
-                file_details.append({"name": tiff_path.name, "frames": 0})
-                continue
+                if page_count == 0:
+                    errors.append(f"TIFF file contains zero frames: {tiff_path.name}")
+                    file_details.append({"name": tiff_path.name, "frames": 0})
+                    continue
 
-            # Reads dimensions and dtype from the first page without loading full frame data.
-            first_page = tiff.pages[0]
-            height = first_page.shape[0]
-            width = first_page.shape[1] if len(first_page.shape) > 1 else 1
-            dtype = str(first_page.dtype)
+                # Reads dimensions and dtype from the first page without loading full frame data.
+                first_page = tiff.pages[0]
+                height = first_page.shape[0]
+                width = first_page.shape[1] if len(first_page.shape) > 1 else 1
+                dtype = str(first_page.dtype)
 
             file_details.append(
                 {"name": tiff_path.name, "frames": page_count, "height": height, "width": width, "dtype": dtype}
