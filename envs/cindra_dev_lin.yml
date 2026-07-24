@@ -33,7 +33,6 @@ dependencies:
   - python_abi=3.14=8_cp314
   - readline=8.3=h853b02a_0
   - tk=8.6.13=noxft_h366c992_103
-  - tomli=2.4.1=pyhcf101f3_0
   - tomli-w=1.2.0=pyhd8ed1ab_0
   - tox=4.56.4=pyhcf101f3_0
   - tox-uv=1.35.2=pyhcf101f3_0
@@ -62,7 +61,7 @@ dependencies:
     - ast_serialize==0.6.0
     - ataraxis-automation==8.1.1
     - ataraxis-base-utilities==6.0.1
-    - ataraxis-data-structures==6.0.1
+    - ataraxis-data-structures==6.1.1
     - ataraxis-time==6.0.2
     - attrs==26.1.0
     - babel==2.18.0

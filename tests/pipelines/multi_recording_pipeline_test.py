@@ -17,6 +17,7 @@ from cindra.dataclasses import MultiRecordingConfiguration, SingleRecordingConfi
 import cindra.pipelines.pipeline as pipeline_module
 from cindra.pipelines.pipeline import (
     MultiRecordingJobNames,
+    execute_multi_recording_job,
     _execute_multi_recording_job,
     run_multi_recording_pipeline,
     run_single_recording_pipeline,
@@ -246,3 +247,74 @@ class TestExecuteMultiRecordingJob:
             )
 
         assert tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
+
+
+class TestExecuteMultiRecordingJobInjection:
+    """Tests execute_multi_recording_job against a caller-owned tracker."""
+
+    def test_injected_tracker_records_jobs_without_disturbing_foreign_entries(self, tmp_path: Path) -> None:
+        """Verifies that discovery and extraction stamp a foreign tracker while preserving its other jobs."""
+        configuration_path, first_output, second_output = _prepare_dataset(tmp_path)
+
+        # Builds a caller-owned tracker whose universe uses the caller's own job names and includes a foreign job the
+        # injected executor leaves in place, mirroring how the forging pipeline drives cindra.
+        define_job = ("dataset_definition", "")
+        universe = [
+            define_job,
+            ("multiday_discovery", "animal"),
+            ("multiday_extraction", "rec1"),
+            ("multiday_extraction", "rec2"),
+        ]
+        tracker = ProcessingTracker(file_path=tmp_path / "forging_tracker.yaml")
+        tracker.align_jobs(jobs=universe, universe=universe)
+
+        discovery_id = ProcessingTracker.generate_job_id(job_name="multiday_discovery", specifier="animal")
+        first_id = ProcessingTracker.generate_job_id(job_name="multiday_extraction", specifier="rec1")
+        second_id = ProcessingTracker.generate_job_id(job_name="multiday_extraction", specifier="rec2")
+
+        execute_multi_recording_job(
+            configuration_path=configuration_path,
+            job_name=MultiRecordingJobNames.DISCOVER,
+            specifier="",
+            job_id=discovery_id,
+            tracker=tracker,
+            persist_bootstrap=True,
+        )
+        execute_multi_recording_job(
+            configuration_path=configuration_path,
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="rec1",
+            job_id=first_id,
+            tracker=tracker,
+        )
+        execute_multi_recording_job(
+            configuration_path=configuration_path,
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="rec2",
+            job_id=second_id,
+            tracker=tracker,
+        )
+
+        assert (_multi_output(first_output) / "cell_fluorescence.npy").exists()
+        assert (_multi_output(second_output) / "cell_fluorescence.npy").exists()
+        assert tracker.get_job_status(job_id=discovery_id) == ProcessingStatus.SUCCEEDED
+        assert tracker.get_job_status(job_id=first_id) == ProcessingStatus.SUCCEEDED
+        assert tracker.get_job_status(job_id=second_id) == ProcessingStatus.SUCCEEDED
+
+        # The injected cindra jobs stamp only the identifiers they are given, so the caller's definition job is left in
+        # its initial scheduled state.
+        define_id = ProcessingTracker.generate_job_id(job_name="dataset_definition", specifier="")
+        assert tracker.get_job_status(job_id=define_id) == ProcessingStatus.SCHEDULED
+
+    def test_missing_configuration_file_raises(self, tmp_path: Path) -> None:
+        """Verifies that a missing configuration path raises a FileNotFoundError through the injected executor."""
+        tracker = ProcessingTracker(file_path=tmp_path / "forging_tracker.yaml")
+
+        with pytest.raises(FileNotFoundError, match="Expected the configuration file to"):
+            execute_multi_recording_job(
+                configuration_path=tmp_path / "missing.yaml",
+                job_name=MultiRecordingJobNames.DISCOVER,
+                specifier="",
+                job_id="deadbeefdeadbeef",
+                tracker=tracker,
+            )
