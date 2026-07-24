@@ -1,6 +1,5 @@
 """Provides assets for importing, converting, and saving TIFF imaging data."""
 
-import gc
 import math
 from typing import TYPE_CHECKING
 
@@ -88,7 +87,8 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
     # Counts total frames for progress bar and calculates frames per plane.
     total_frames = 0
     for tiff_file in tiff_files:
-        total_frames += len(TiffFile(tiff_file).pages)
+        with TiffFile(tiff_file) as tiff:
+            total_frames += len(tiff.pages)
 
     # Calculates the number of frames per plane (accounting for interleaved planes and channels).
     frames_per_plane = total_frames // (plane_number * channel_number)
@@ -220,7 +220,10 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
             # Updates the interleave offset for the next file based on the total frames in this file.
             interleave_offset = (interleave_offset + start_index) % interleave_stride
 
-            gc.collect()
+            # Closes the TIFF file handle deterministically. tifffile's TiffFile forms reference cycles with its
+            # pages, so leaving it to garbage collection holds the file descriptor open until the next collection
+            # and emits spurious ResourceWarnings for the unclosed file.
+            tiff.close()
 
     # Closes binary files and updates runtime data in each context.
     for context_index, context in enumerate(contexts):
@@ -367,14 +370,14 @@ def _get_frame_dimensions(
         ValueError: If the first TIFF file is empty.
     """
     # Opens the first TIFF and reads the first frame to get base dimensions.
-    tiff = TiffFile(tiff_files[0])
-    tiff_length = len(tiff.pages)
-    if tiff_length == 0:
-        message = f"Unable to determine frame dimensions. The first TIFF file is empty: {tiff_files[0]}"
-        console.error(message=message, error=ValueError)
+    with TiffFile(tiff_files[0]) as tiff:
+        tiff_length = len(tiff.pages)
+        if tiff_length == 0:
+            message = f"Unable to determine frame dimensions. The first TIFF file is empty: {tiff_files[0]}"
+            console.error(message=message, error=ValueError)
 
-    # Reads a single frame to get dimensions.
-    first_frame = tiff.asarray(key=0) if tiff_length > 1 else tiff.asarray()
+        # Reads a single frame to get dimensions.
+        first_frame = tiff.asarray(key=0) if tiff_length > 1 else tiff.asarray()
     base_height, base_width = first_frame.shape[-2], first_frame.shape[-1]
 
     # Calculates dimensions for each plane/context.
