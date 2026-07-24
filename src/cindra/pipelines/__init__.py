@@ -5,6 +5,8 @@ from .pipeline import (
     SINGLE_RECORDING_TRACKER_NAME,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
+    execute_multi_recording_job,
+    execute_single_recording_job,
     run_multi_recording_pipeline,
     run_single_recording_pipeline,
 )
@@ -14,6 +16,8 @@ __all__ = [
     "SINGLE_RECORDING_TRACKER_NAME",
     "MultiRecordingJobNames",
     "SingleRecordingJobNames",
+    "execute_multi_recording_job",
+    "execute_single_recording_job",
     "run_multi_recording_pipeline",
     "run_single_recording_pipeline",
 ]

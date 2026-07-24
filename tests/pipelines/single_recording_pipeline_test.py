@@ -16,6 +16,7 @@ from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import RuntimeContext, SingleRecordingConfiguration
 from cindra.pipelines.pipeline import (
     SingleRecordingJobNames,
+    execute_single_recording_job,
     _execute_single_recording_job,
     run_single_recording_pipeline,
 )
@@ -422,3 +423,68 @@ class TestExecuteSingleRecordingJob:
             )
 
         assert tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
+
+
+class TestExecuteSingleRecordingJobInjection:
+    """Tests execute_single_recording_job against a caller-owned tracker."""
+
+    def test_injected_tracker_records_jobs_without_disturbing_foreign_entries(self, tmp_path: Path) -> None:
+        """Verifies that binarize, process, and combine stamp a foreign tracker while preserving its other jobs."""
+        configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path)
+
+        # Builds a caller-owned tracker whose universe uses the caller's own job names and includes a foreign job the
+        # injected executor leaves in place, mirroring how an owning pipeline would drive cindra.
+        owner_job = ("session_owner", "")
+        universe = [owner_job, ("recording_binarize", ""), ("recording_process", "plane_0"), ("recording_combine", "")]
+        tracker = ProcessingTracker(file_path=tmp_path / "owner_tracker.yaml")
+        tracker.align_jobs(jobs=universe, universe=universe)
+
+        binarize_id = ProcessingTracker.generate_job_id(job_name="recording_binarize", specifier="")
+        process_id = ProcessingTracker.generate_job_id(job_name="recording_process", specifier="plane_0")
+        combine_id = ProcessingTracker.generate_job_id(job_name="recording_combine", specifier="")
+
+        execute_single_recording_job(
+            configuration_path=configuration_path,
+            job_name=SingleRecordingJobNames.BINARIZE,
+            specifier="",
+            job_id=binarize_id,
+            tracker=tracker,
+            persist_bootstrap=True,
+        )
+        execute_single_recording_job(
+            configuration_path=configuration_path,
+            job_name=SingleRecordingJobNames.PROCESS,
+            specifier="plane_0",
+            job_id=process_id,
+            tracker=tracker,
+        )
+        execute_single_recording_job(
+            configuration_path=configuration_path,
+            job_name=SingleRecordingJobNames.COMBINE,
+            specifier="",
+            job_id=combine_id,
+            tracker=tracker,
+        )
+
+        assert (output_directory / "cindra" / "combined_metadata.npz").exists()
+        assert tracker.get_job_status(job_id=binarize_id) == ProcessingStatus.SUCCEEDED
+        assert tracker.get_job_status(job_id=process_id) == ProcessingStatus.SUCCEEDED
+        assert tracker.get_job_status(job_id=combine_id) == ProcessingStatus.SUCCEEDED
+
+        # The injected cindra jobs stamp only the identifiers they are given, so the caller's owner job is left in its
+        # initial scheduled state.
+        owner_id = ProcessingTracker.generate_job_id(job_name="session_owner", specifier="")
+        assert tracker.get_job_status(job_id=owner_id) == ProcessingStatus.SCHEDULED
+
+    def test_missing_configuration_file_raises(self, tmp_path: Path) -> None:
+        """Verifies that a missing configuration path raises a FileNotFoundError through the injected executor."""
+        tracker = ProcessingTracker(file_path=tmp_path / "owner_tracker.yaml")
+
+        with pytest.raises(FileNotFoundError, match="Expected the configuration file to"):
+            execute_single_recording_job(
+                configuration_path=tmp_path / "missing.yaml",
+                job_name=SingleRecordingJobNames.BINARIZE,
+                specifier="",
+                job_id="deadbeefdeadbeef",
+                tracker=tracker,
+            )
