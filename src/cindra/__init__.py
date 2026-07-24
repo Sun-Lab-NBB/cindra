@@ -20,6 +20,8 @@ from ataraxis_base_utilities import console  # noqa: E402
 from .pipelines import (  # noqa: E402
     MultiRecordingJobNames,
     SingleRecordingJobNames,
+    execute_multi_recording_job,
+    execute_single_recording_job,
     run_multi_recording_pipeline,
     run_single_recording_pipeline,
 )
@@ -39,6 +41,8 @@ __all__ = [
     "MultiRecordingJobNames",
     "SingleRecordingConfiguration",
     "SingleRecordingJobNames",
+    "execute_multi_recording_job",
+    "execute_single_recording_job",
     "run_multi_recording_pipeline",
     "run_single_recording_pipeline",
 ]

@@ -43,6 +43,15 @@ def run_single_recording_pipeline(
     combine: bool = False,
     target_plane: int = -1,
 ) -> None: ...
+def execute_single_recording_job(
+    configuration_path: Path,
+    job_name: SingleRecordingJobNames,
+    specifier: str,
+    job_id: str,
+    tracker: ProcessingTracker,
+    *,
+    persist_bootstrap: bool = False,
+) -> None: ...
 def run_multi_recording_pipeline(
     configuration_path: Path,
     job_id: str | None = None,
@@ -51,6 +60,17 @@ def run_multi_recording_pipeline(
     extract: bool = False,
     target_recording: str | None = None,
 ) -> None: ...
+def execute_multi_recording_job(
+    configuration_path: Path,
+    job_name: MultiRecordingJobNames,
+    specifier: str,
+    job_id: str,
+    tracker: ProcessingTracker,
+    *,
+    persist_bootstrap: bool = False,
+) -> None: ...
+def _load_single_recording_configuration(configuration_path: Path) -> tuple[SingleRecordingConfiguration, Path]: ...
+def _load_multi_recording_configuration(configuration_path: Path) -> MultiRecordingConfiguration: ...
 def _execute_single_recording_job(
     configuration: SingleRecordingConfiguration,
     job_name: SingleRecordingJobNames,
