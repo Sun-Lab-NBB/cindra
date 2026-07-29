@@ -48,7 +48,7 @@ Does the goal require tracking the SAME ROIs across multiple recordings (e.g. cr
 ```
 
 The multi-recording pipeline is not a replacement for the single-recording pipeline — it is a second stage that
-consumes single-recording outputs. Every recording in a multi-recording dataset must complete all three
+consumes single-recording outputs. Every recording in a multi-recording dataset must complete all four
 single-recording phases before multi-recording processing can run.
 
 ---
@@ -89,7 +89,8 @@ Setup       →  Data Prep   →               →             →            �
 ### Phase 4: Processing
 
 - **Skill:** `/single-recording-processing`
-- **Actions:** Prepare and execute the three-phase pipeline (binarize, process, combine) via the MCP execution tools
+- **Actions:** Prepare and execute the four-phase pipeline (binarize, register, process, combine) via the MCP
+  execution tools
 - **Handoff condition:** All recordings report `completed`; `verify_single_recording_output_tool` returns
   `complete: true`
 
@@ -108,7 +109,8 @@ Setup       →  Data Prep   →               →             →            �
 
 ## Multi-recording pipeline
 
-Prerequisite: every recording in the dataset has completed all three single-recording phases (Phases 1-5 above).
+Prerequisite: every recording in the dataset has completed all four single-recording phases, which are binarization,
+registration, processing, and combination (Phases 1-5 above).
 
 ```text
 Single-Recording   Configuration    Processing       Results         Visual
@@ -191,7 +193,7 @@ resource management, prerequisite validation, and phase sequencing are handled c
 1. `/cindra-mcp-environment-setup` — verify MCP connectivity (if first session)
 2. `/acquisition-data-preparation` — create and validate `cindra_parameters.json`
 3. `/single-recording-configuration` — generate and validate a template configuration
-4. `/single-recording-processing` — run binarize, process, combine
+4. `/single-recording-processing` — run binarize, register, process, combine
 5. `/single-recording-results` — verify and review outputs
 6. `/visualization` — inspect ROIs and registration
 

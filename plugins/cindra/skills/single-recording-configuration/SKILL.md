@@ -62,6 +62,12 @@ Default values are optimized for GCaMP6f data from 2-Photon Random Access Mesosc
 All parameters are specified in the `SingleRecordingConfiguration` YAML file. The pipeline loads the fully resolved
 configuration directly from the file without any runtime overrides.
 
+CPU worker allocation lives outside the configuration file. Each processing stage receives its worker count as an
+invocation argument, supplied by the `cindra run` options `-bw/--binarize-workers`, `-rw/--register-workers` and
+`-pw/--process-workers`, or by `execute_processing_jobs_tool` and `execute_full_pipeline_tool` at dispatch time.
+Omitting a worker option applies the measured default of 4 workers for binarization, 8 for registration and 10 for
+processing. Setting a worker option to -1 requests every available core.
+
 ---
 
 ## Pipeline-set parameters
@@ -72,7 +78,6 @@ These parameters are set automatically by the pipeline and should not be manuall
 |---------------------------------|------------|-----------------------------------------------------|
 | `file_io.data_path`             | batch tool | Recording's session root path (not raw data subdir) |
 | `file_io.output_path`           | user/batch | Recording's processed output path (required)        |
-| `runtime.parallel_workers`      | CLI/MCP    | Number of workers (or auto-detected from CPU count) |
 | `runtime.display_progress_bars` | CLI/MCP    | Whether to show progress bars                       |
 
 ---
@@ -81,10 +86,13 @@ These parameters are set automatically by the pipeline and should not be manuall
 
 Runtime behavior settings shared between single-recording and multi-recording pipelines.
 
-| Parameter               | Type | Default | Description                                                          |
-|-------------------------|------|---------|----------------------------------------------------------------------|
-| `parallel_workers`      | int  | 20      | Maximum CPU worker count. 10-20 optimal per plane. -1/0 = all cores. |
-| `display_progress_bars` | bool | False   | Show progress bars. Disable for parallel processing.                 |
+| Parameter               | Type | Default | Description                                          |
+|-------------------------|------|---------|------------------------------------------------------|
+| `display_progress_bars` | bool | False   | Show progress bars. Disable for parallel processing. |
+
+Worker allocation is not a configuration parameter. Each stage receives its worker count as an invocation argument,
+with measured defaults of 4 workers for binarization, 8 for registration and 10 for processing. Those defaults are
+published as `BINARIZATION_WORKERS`, `REGISTRATION_WORKERS` and `PROCESSING_WORKERS` in `cindra.allocation`.
 
 ---
 
@@ -337,7 +345,6 @@ and deconvolves the result to produce an estimated spike rate trace per ROI.
 
 ```yaml
 runtime:
-  parallel_workers: 20
   display_progress_bars: false
 
 main:
@@ -364,10 +371,10 @@ Configuration files follow a two-tier lifecycle:
 2. **Resolved copies** — When `prepare_single_recording_batch_tool` runs, it loads the template, applies
    recording-specific overrides (`file_io.data_path` from `recording_paths`, `file_io.output_path` from the
    required `recording_output_paths` parameter, `runtime.display_progress_bars=False`), and saves the
-   resolved copy as `cindra/configuration.yaml` inside each recording's output directory. The
-   `runtime.parallel_workers` value is rewritten later by `execute_processing_jobs_tool` at dispatch time
-   based on saturating allocation, not by the prepare step. These resolved copies are what the pipeline
-   actually executes against.
+   resolved copy as `cindra/configuration.yaml` inside each recording's output directory. The per-recording copy is
+   immutable once written. `execute_processing_jobs_tool` resolves worker allocation at dispatch time and passes it
+   to each job as a dispatch argument, so one configuration file serves every job dispatched against it. These
+   resolved copies are what the pipeline actually executes against.
 
 **Do NOT** create per-recording configuration files manually. Pass a single template path to the batch tool
 and let it handle per-recording fine-tuning automatically.
@@ -388,7 +395,7 @@ and let it handle per-recording fine-tuning automatically.
 5. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
 6. **Configuration complete** — the validated template file is ready for use. This skill does not start
-   processing. If invoked standalone, the configuration is ready; to run it, proceed to
+   processing. If invoked standalone, the configuration is ready. To run it, proceed to
    `/single-recording-processing`. If invoked from another skill, return control to the caller.
 
 ---
