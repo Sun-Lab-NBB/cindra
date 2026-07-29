@@ -112,18 +112,18 @@ single-recording status `completed`). If any recording is incomplete, invoke the
 Two-phase pipeline per dataset:
 
 ```text
-Phase 1: DISCOVER (phase name: discovery; CPU bound, parallel by dataset)
+Phase 1: DISCOVER (phase name: discovery, CPU bound, parallel by dataset)
 ├── Selects/filters ROIs from each recording's single-recording outputs
 ├── Registers all recordings to common reference frame
 ├── Clusters ROI masks across recordings
 ├── Generates template masks for tracked ROIs
 ├── Projects template masks back to each recording's coordinate system
-└── Workers per dataset via saturating allocation (see Resource management)
+└── One job per dataset, workers from the shared multi_recording allocation (see Resource management)
 
-Phase 2: EXTRACT (phase name: extraction; CPU bound, parallel by recording)
+Phase 2: EXTRACT (phase name: extraction, CPU bound, parallel by recording)
 ├── Applies template masks to extract fluorescence
 ├── Computes neuropil signals, spike deconvolution
-└── Workers per recording via saturating allocation (see Resource management)
+└── One job per recording, workers from the shared multi_recording allocation (see Resource management)
 ```
 
 Batch processing across multiple datasets:
@@ -215,19 +215,22 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
    directory, preserving the original template. Pass the same template path for multiple datasets
    that share parameters.
 
-5. **Confirm CPU allocation** — Compute the saturating allocation for both phases using the
-   algorithm in the Resource management section. Present the computed values to the user as a
-   summary table before starting:
+5. **Confirm CPU allocation** — Compute the saturating allocation for the session using the algorithm
+   in the Resource management section. Discovery and extraction jobs share one `multi_recording`
+   resource class, so the session resolves one allocation from their combined job count. Present the
+   computed values to the user as a summary table before starting. The example below covers 2 datasets
+   of 15 recordings each on a 128-core host, which is 2 discovery jobs plus 30 extraction jobs:
 
    ```text
-   Phase     | Jobs | Workers/Job | Max Parallel | Total Cores
-   ----------|------|-------------|--------------|------------
-   Discover  |    2 |          60 |            2 |         120
-   Extract   |   30 |          30 |            4 |         120
+   Resource class  | Jobs | Workers/Job | Max Parallel | Total Cores
+   ----------------|------|-------------|--------------|------------
+   multi_recording |   32 |          30 |            4 |         120
    ```
 
    Ask the user to confirm or override. Both `workers_per_job` and `max_parallel_jobs` default to
-   `-1` (automatic). Only pass explicit values if the user requests an override.
+   `-1` (automatic). Only pass explicit values if the user requests an override. Report the values
+   returned in the `resource_classes` mapping of the execute tool response rather than recomputing
+   them per phase.
 
 6. **Execute** — Choose one of two approaches:
 
@@ -259,7 +262,7 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
 8. **Handle completion** — When all datasets finish, check for failures. A `success: true` return
    only means a tool ran, not that work is ready or done: gate decisions on the domain flag, not on
    `success`. For `verify_multi_recording_output_tool`, gate on `complete` (false whenever `missing`
-   is non-empty); for validate tools, gate on `valid`; for `execute_full_pipeline_tool`, gate on
+   is non-empty). For validate tools, gate on `valid`. For `execute_full_pipeline_tool`, gate on
    `started` (it returns `started: false` with a `next_step` when all phases are already complete).
    Checking `success` alone can advance on an unready or already-complete state. Route errors to the
    appropriate skill (see Error routing section). On success, invoke `/multi-recording-results`
@@ -296,9 +299,9 @@ To re-run specific phases (e.g., after changing tracking parameters):
 
 ## Resource management
 
-The system uses saturating core allocation to distribute CPU cores across parallel compute-bound jobs.
-When both `workers_per_job` and `max_parallel_jobs` are set to `-1` (automatic), the allocator
-runs the following algorithm:
+Multi-recording jobs belong to the `multi_recording` resource class, which uses saturating core allocation to
+distribute CPU cores across parallel compute-bound jobs. When both `workers_per_job` and `max_parallel_jobs`
+are set to `-1` (automatic), the allocator runs the following algorithm:
 
 1. **Budget**: `cpu_count - 2` (2 cores reserved for system operations)
 2. **Max parallel jobs**: `min(total_jobs, max(1, budget // 30))` (targets ~30 workers per job, with a floor of 1)
@@ -314,10 +317,14 @@ runs the following algorithm:
 | 32        | 30     | 4    | 30          | 1            | 30             |
 | 16        | 14     | 4    | 14 (→ 10)   | 1            | 10             |
 
-Both phases use this same allocation model independently. The discover phase treats each dataset
-as a job; the extract phase treats each recording as a job. Both `workers_per_job` and
+Discovery and extraction jobs share one `multi_recording` resource class, so a session resolves a single
+allocation from the combined count of the discovery and extraction jobs it holds. The discover phase contributes
+one job per dataset, and the extract phase contributes one job per recording. Both `workers_per_job` and
 `max_parallel_jobs` default to `-1` (automatic) and can be overridden explicitly in
-`execute_processing_jobs_tool` or `execute_full_pipeline_tool`.
+`execute_processing_jobs_tool` or `execute_full_pipeline_tool`. Both execute tools return a session-level
+`cpu_budget` and a `resource_classes` mapping keyed by class name, whose `multi_recording` entry carries
+`workers_per_job`, `max_parallel_jobs` and `job_count`. `get_processing_jobs_status_tool` returns the same
+mapping with `pending` and `active` in place of `job_count`.
 
 ---
 
@@ -359,7 +366,8 @@ Summary: 1/2 datasets complete | 2/4 recordings extracted | 0 failed
 | "Prerequisite ... has not succeeded"     | Execute prerequisite phases first            |
 
 Prerequisite failures are returned inside the `invalid_jobs` list with a `reason` field (for example,
-"Prerequisite DISCOVER job X has not succeeded."), not as a top-level `error`.
+"Unable to execute job {job_id}. Its prerequisite 'discovery' job {prerequisite_id} has not succeeded and
+is not part of this submission."), not as a top-level `error`.
 
 ### Processing failure routing
 

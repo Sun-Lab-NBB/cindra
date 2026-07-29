@@ -64,14 +64,18 @@ template masks.
 All parameters are specified in the `MultiRecordingConfiguration` YAML file. The pipeline loads the fully resolved
 configuration directly from the file without any runtime overrides.
 
+CPU worker allocation lives outside the configuration file. The discovery and extraction stages each receive their
+worker count as an invocation argument, supplied by the `cindra run` options `-dw/--discover-workers` and
+`-ew/--extract-workers`, or by `execute_processing_jobs_tool` and `execute_full_pipeline_tool` at dispatch time.
+
 ---
 
 ## Prerequisites from single-recording processing
 
 Before multi-recording processing, all recordings must have completed single-recording processing through
-all three phases (binarize, process, combine). The multi-recording pipeline locates single-recording output by
-recursively searching each recording directory for a `combined_metadata.npz` file. The parent directory of this
-file becomes the cindra root for that recording.
+all four phases (binarization, registration, processing, combination). The multi-recording pipeline locates
+single-recording output by recursively searching each recording directory for a `combined_metadata.npz` file. The
+parent directory of this file becomes the cindra root for that recording.
 
 **Required single-recording outputs per recording:**
 
@@ -96,7 +100,6 @@ These parameters are set automatically by the pipeline and should not be manuall
 | Parameter                            | Set by         | Value                                                     |
 |--------------------------------------|----------------|-----------------------------------------------------------|
 | `recording_io.recording_directories` | MCP batch tool | List of recording paths (from `recording_paths` argument) |
-| `runtime.parallel_workers`           | CLI/MCP        | Number of workers (or auto-detected from CPU count)       |
 | `runtime.display_progress_bars`      | CLI/MCP        | Whether to show progress bars                             |
 
 ---
@@ -105,10 +108,13 @@ These parameters are set automatically by the pipeline and should not be manuall
 
 Runtime behavior settings shared with the single-recording pipeline.
 
-| Parameter               | Type | Default | Description                                                              |
-|-------------------------|------|---------|--------------------------------------------------------------------------|
-| `parallel_workers`      | int  | 20      | Maximum CPU worker count. 10-20 optimal per recording. -1/0 = all cores. |
-| `display_progress_bars` | bool | False   | Show progress bars. Disable for parallel processing.                     |
+| Parameter               | Type | Default | Description                                          |
+|-------------------------|------|---------|------------------------------------------------------|
+| `display_progress_bars` | bool | False   | Show progress bars. Disable for parallel processing. |
+
+Worker allocation is not a configuration parameter. The discovery and extraction stages each receive their worker
+count as an invocation argument, supplied by `execute_processing_jobs_tool` and `execute_full_pipeline_tool` at
+dispatch time, or by the `cindra run` options `-dw/--discover-workers` and `-ew/--extract-workers`.
 
 ---
 
@@ -117,13 +123,13 @@ Runtime behavior settings shared with the single-recording pipeline.
 Controls input recording paths, output dataset naming, and ROI selection caching. The pipeline receives a list
 of recording directories (populated by the MCP batch tool) and natural-sorts them to determine the main recording.
 Each recording stores its own multi-recording output under its own `cindra/multi_recording/{dataset_name}/`
-directory; the main (first natural-sorted) recording additionally holds the shared resolved configuration and the
+directory. The main (first natural-sorted) recording additionally holds the shared resolved configuration and the
 processing tracker. ROI selection results are cached per dataset so that re-running the pipeline skips selection
 unless `repeat_selection` is enabled.
 
 | Parameter               | Type        | Default | Description                                                                                                  |
 |-------------------------|-------------|---------|--------------------------------------------------------------------------------------------------------------|
-| `recording_directories` | tuple[Path] | ()      | **Set by batch tool.** Absolute paths to recording roots. Natural-sorted; first = main recording.            |
+| `recording_directories` | tuple[Path] | ()      | **Set by batch tool.** Absolute paths to recording roots. Natural-sorted, first = main recording.            |
 | `dataset_name`          | str         | ""      | **REQUIRED.** Unique identifier for this dataset. Used for output folder: `multi_recording/{dataset_name}/`. |
 | `repeat_selection`      | bool        | False   | Re-run ROI selection even if existing selections are found.                                                  |
 
@@ -175,7 +181,7 @@ Aligns recordings to a common coordinate space using groupwise diffeomorphic Dem
 level of a coarse-to-fine pyramid, symmetric Demons forces are computed from every recording to all others and
 averaged, producing a displacement field that is regularized via cubic B-spline fitting with injectivity constraints
 to guarantee invertibility. Deformations are composed across scales to produce smooth, invertible forward and inverse
-maps per recording. Forward maps warp ROI masks into the shared space for tracking; inverse maps transform tracked
+maps per recording. Forward maps warp ROI masks into the shared space for tracking. Inverse maps transform tracked
 template masks back to each recording's native space for signal extraction.
 
 | Parameter              | Type  | Default         | Description                                                                   |
@@ -287,7 +293,7 @@ See `/single-recording-configuration` Section 9 for full tuning guidance. The sa
 
 | Parameter                   | Why required                                         |
 |-----------------------------|------------------------------------------------------|
-| `recording_io.dataset_name` | Uniquely identifies output; cannot be auto-generated |
+| `recording_io.dataset_name` | Uniquely identifies output, cannot be auto-generated |
 
 ### Parameters users should consider
 
@@ -338,7 +344,6 @@ roi_tracking:
 
 ```yaml
 runtime:
-  parallel_workers: 20
   display_progress_bars: false
 
 recording_io:
@@ -396,9 +401,9 @@ Configuration files follow a two-tier lifecycle:
    `recording_io.recording_directories` natural-sorted from the supplied `recording_paths`, and
    `runtime.display_progress_bars=False`), and saves the resolved copy as
    `multi_recording_configuration.yaml` inside the main recording's dataset output directory
-   (`cindra/multi_recording/{dataset_name}/`). The `runtime.parallel_workers` value is rewritten later
-   by `execute_processing_jobs_tool` at dispatch time based on saturating allocation, not by the
-   prepare step. These resolved copies are what the pipeline actually executes against.
+   (`cindra/multi_recording/{dataset_name}/`). The resolved copy stays immutable after the prepare step, because
+   `execute_processing_jobs_tool` resolves the worker allocation at dispatch time and passes it to each job as an
+   invocation argument. These resolved copies are what the pipeline actually executes against.
 
 **Do NOT** create per-dataset configuration files manually. Pass a single template path to the batch tool
 and let it handle per-dataset fine-tuning automatically.
@@ -410,7 +415,7 @@ and let it handle per-dataset fine-tuning automatically.
 1. **Discover candidates** using `discover_recordings_tool` to find recordings with completed single-recording
    output (check the `multi_recording_candidates` list in the response).
 2. **Verify prerequisites** — confirm all discovered recordings have completed single-recording processing
-   (all 3 phases). If any recording is incomplete, invoke `/single-recording-processing` (or
+   (all four phases). If any recording is incomplete, invoke `/single-recording-processing` (or
    `/acquisition-data-preparation` if raw data is not yet prepared) to complete the prerequisite chain before
    continuing.
 3. **Generate a template configuration** using `generate_config_file_tool` with `pipeline_type="multi-recording"`.
@@ -423,7 +428,7 @@ and let it handle per-dataset fine-tuning automatically.
 6. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
 7. **Configuration complete** — the validated template file is ready for use. This skill does not start
-   processing. If invoked standalone, the configuration is ready; to run it, proceed to
+   processing. If invoked standalone, the configuration is ready. To run it, proceed to
    `/multi-recording-processing`. If invoked from another skill, return control to the caller.
 
 ---
