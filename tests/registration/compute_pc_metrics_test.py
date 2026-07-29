@@ -85,7 +85,7 @@ class TestComputePcMetrics:
 
         context = _registered_context(tmp_path, single_recording_context, gaussian_blob_image, configure=configure)
 
-        compute_pc_metrics(context=context)
+        compute_pc_metrics(context=context, workers=1)
 
         _assert_metric_outputs(context)
 
@@ -104,7 +104,7 @@ class TestComputePcMetrics:
 
         context = _registered_context(tmp_path, single_recording_context, gaussian_blob_image, configure=configure)
 
-        compute_pc_metrics(context=context)
+        compute_pc_metrics(context=context, workers=1)
 
         _assert_metric_outputs(context)
 
@@ -125,7 +125,7 @@ class TestComputePcMetrics:
         context.runtime.registration.bidirectional_phase_offset = 2
         context.runtime.registration.bidirectional_phase_corrected = False
 
-        compute_pc_metrics(context=context)
+        compute_pc_metrics(context=context, workers=1)
 
         _assert_metric_outputs(context)
 
@@ -145,7 +145,7 @@ class TestComputePcMetrics:
 
         context = _registered_context(tmp_path, single_recording_context, gaussian_blob_image, configure=configure)
 
-        compute_pc_metrics(context=context)
+        compute_pc_metrics(context=context, workers=1)
 
         _assert_metric_outputs(context)
 
@@ -160,7 +160,7 @@ class TestComputePcMetrics:
         context.runtime.io.registered_binary_path = None
 
         with pytest.raises(ValueError, match="Unable to compute the registration quality metrics"):
-            compute_pc_metrics(context=context)
+            compute_pc_metrics(context=context, workers=1)
 
     def test_raises_when_binary_file_missing(
         self,
@@ -173,4 +173,4 @@ class TestComputePcMetrics:
         context.runtime.io.registered_binary_path = tmp_path / "does_not_exist.bin"
 
         with pytest.raises(FileNotFoundError):
-            compute_pc_metrics(context=context)
+            compute_pc_metrics(context=context, workers=1)

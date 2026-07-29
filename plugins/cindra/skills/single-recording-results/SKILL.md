@@ -139,13 +139,19 @@ cindra/
 
 ### Processing phase and file creation timeline
 
-**Phase 1 — Binarize:** Creates `configuration.yaml`, `acquisition_parameters.yaml`, per-plane
-`channel_1_data.bin` (and `channel_2_data.bin` if two-channel), and initial `runtime_data.yaml` per plane.
+**Phase 1 — Binarization:** Creates `configuration.yaml`, `acquisition_parameters.yaml`, per-plane
+`channel_1_data.bin` (and `channel_2_data.bin` if two-channel), the initial per-plane `runtime_data.yaml`, and
+per-plane `detection_data/mean_image.npy` (plus `mean_image_channel_2.npy` if two-channel).
 
-**Phase 2 — Process (per-plane):** Creates `registration_data/`, `detection_data/`, ROI `.npz` files,
-fluorescence `.npy` traces, and updates `runtime_data.yaml` with processing results and timing.
+**Phase 2 — Registration (per-plane):** Creates `registration_data/`, rewrites the plane binary in place, refreshes
+`detection_data/mean_image.npy`, and updates `runtime_data.yaml` with the registration section,
+`total_registration_time`, and `registration_workers`.
 
-**Phase 3 — Combine:** Creates `combined_metadata.npz`, combined `detection_data/`, and combined ROI and trace
+**Phase 3 — Processing (per-plane):** Creates the remaining `detection_data/` images (`enhanced_mean_image.npy`,
+`maximum_projection.npy`, `correlation_map.npy`), the ROI `.npz` files, the fluorescence `.npy` traces, and updates
+`runtime_data.yaml` with `total_processing_time`, `processing_workers`, and `date_processed`.
+
+**Phase 4 — Combination:** Creates `combined_metadata.npz`, combined `detection_data/`, and combined ROI and trace
 files at the root level by merging all per-plane results.
 
 ---
@@ -336,12 +342,27 @@ Binary files store frames as contiguous int16 arrays. Each frame has `height × 
 
 A YAML file containing scalar metadata from all processing stages. Key sections:
 
-| Section        | Key fields                                                                                                                                                                                                                                                                                                                                                                                |
-|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `io`           | `frame_height`, `frame_width`, `frame_count`, `sampling_rate`, `plane_index`                                                                                                                                                                                                                                                                                                              |
-| `registration` | `valid_y_range`, `valid_x_range`, `bidirectional_phase_offset`, `bidirectional_phase_corrected`, `normalization_minimum`, `normalization_maximum`                                                                                                                                                                                                                                         |
-| `detection`    | `roi_diameter`, `roi_diameter_channel_2`, `aspect_ratio`                                                                                                                                                                                                                                                                                                                                  |
-| `timing`       | `binarization_time`, `registration_time`, `two_step_registration_time`, `registration_metrics_time`, `detection_time`, `extraction_time`, `classification_time`, `deconvolution_time`, `detection_time_channel_2`, `extraction_time_channel_2`, `classification_time_channel_2`, `deconvolution_time_channel_2`, `total_plane_time`, `date_processed`, `python_version`, `cindra_version` |
+| Section        | Key fields                                                                                                                                        |
+|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `io`           | `frame_height`, `frame_width`, `frame_count`, `sampling_rate`, `plane_index`                                                                      |
+| `registration` | `valid_y_range`, `valid_x_range`, `bidirectional_phase_offset`, `bidirectional_phase_corrected`, `normalization_minimum`, `normalization_maximum` |
+| `detection`    | `roi_diameter`, `roi_diameter_channel_2`, `aspect_ratio`                                                                                          |
+| `timing`       | Stage durations, phase totals, worker counts, and version stamps, itemized below.                                                                 |
+
+The `timing` section stores every duration as an integer number of seconds:
+
+- Stage durations: `binarization_time`, `registration_time`, `two_step_registration_time`,
+  `registration_metrics_time`, `detection_time`, `extraction_time`, `classification_time`, `deconvolution_time`.
+- Channel 2 stage durations: `detection_time_channel_2`, `extraction_time_channel_2`,
+  `classification_time_channel_2`, `deconvolution_time_channel_2`.
+- Phase totals: `total_registration_time` covers motion correction and the registration quality metrics
+  computation. `total_processing_time` covers ROI detection, trace extraction, classification, and spike
+  deconvolution.
+- Worker counts: `registration_workers` and `processing_workers` record the allocation each stage used.
+- Version stamps: `date_processed`, `python_version`, `cindra_version`.
+
+`query_single_recording_metadata_tool` surfaces the phase totals and both worker counts in its `plane_timing`
+entries, so the per-plane worker allocation is readable without opening `runtime_data.yaml`.
 
 Array fields from registration, detection, and extraction are saved as separate `.npy` files (documented above)
 and set to None in the YAML.
@@ -361,7 +382,7 @@ and set to None in the YAML.
 | Plane counts        | uint8   | plane_count                                    |
 
 Extraction trace, classification, and colocalization `.npy` files and all `.npz` archives are saved with
-`allow_pickle=False`; detection and registration `.npy` files use NumPy save defaults but contain only numeric
+`allow_pickle=False`. Detection and registration `.npy` files use NumPy save defaults but contain only numeric
 arrays that load safely with `allow_pickle=False`. Arrays support memory-mapped loading via
 `np.load(path, mmap_mode='r+')` for efficient access to large datasets.
 
@@ -369,10 +390,10 @@ arrays that load safely with `allow_pickle=False`. Arrays support memory-mapped 
 
 ## Multi-recording compatibility requirements
 
-For recordings intended for multi-recording processing, single-recording processing must complete all three
-phases (binarize, process, combine); no special configuration is required. For the authoritative list of the
-single-recording outputs the multi-recording pipeline consumes, see `/multi-recording-configuration`
-(Prerequisites from single-recording processing).
+For recordings intended for multi-recording processing, single-recording processing must complete all four
+phases (binarization, registration, processing, combination). No special configuration is required. For the
+authoritative list of the single-recording outputs the multi-recording pipeline consumes, see
+`/multi-recording-configuration` (Prerequisites from single-recording processing).
 
 ---
 

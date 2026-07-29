@@ -12,11 +12,11 @@ from tifffile import TiffWriter
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
+from cindra.allocation import MultiRecordingJobNames
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
 import cindra.pipelines.pipeline as pipeline_module
 from cindra.pipelines.pipeline import (
-    MultiRecordingJobNames,
     execute_multi_recording_job,
     _execute_multi_recording_job,
     run_multi_recording_pipeline,
@@ -83,7 +83,6 @@ def _build_processed_recording(root: Path, *, seed: int) -> Path:
     configuration = SingleRecordingConfiguration()
     configuration.file_io.data_path = data_directory
     configuration.file_io.output_path = output_directory
-    configuration.runtime.parallel_workers = 1
     configuration.runtime.display_progress_bars = False
     configuration.registration.registration_metric_principal_components = 0
     configuration.nonrigid_registration.enabled = False
@@ -96,7 +95,9 @@ def _build_processed_recording(root: Path, *, seed: int) -> Path:
     configuration_path = root / "configuration.yaml"
     configuration.save(file_path=configuration_path)
 
-    run_single_recording_pipeline(configuration_path=configuration_path, binarize=True, process=True, combine=True)
+    run_single_recording_pipeline(
+        configuration_path=configuration_path, binarize=True, register=True, process=True, combine=True
+    )
     return output_directory
 
 
@@ -107,7 +108,6 @@ def _make_multi_configuration(
     configuration = MultiRecordingConfiguration()
     configuration.recording_io.recording_directories = recording_directories
     configuration.recording_io.dataset_name = dataset_name
-    configuration.runtime.parallel_workers = 1
     configuration.runtime.display_progress_bars = display_progress_bars
     return configuration
 
@@ -244,6 +244,7 @@ class TestExecuteMultiRecordingJob:
                 specifier="",
                 job_id=job_id,
                 tracker=tracker,
+                workers=None,
             )
 
         assert tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED

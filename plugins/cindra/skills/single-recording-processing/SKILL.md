@@ -91,28 +91,37 @@ directly or run processing via scripts or CLI commands. If MCP tools are not ava
 
 ## Pipeline architecture
 
-Three-phase sequential pipeline per recording:
+Four-phase sequential pipeline per recording:
 
 ```text
-Phase 1: BINARIZE (phase name: binarization; I/O bound, up to 4 parallel)
+Phase 1: BINARIZE (phase name binarization, I/O bound, 4 cores per job, up to 4 concurrent jobs)
 ├── Converts raw TIFFs to binary format
-└── Determines plane count
+└── Determines plane count, one job per recording with an empty specifier
 
-Phase 2: PROCESS (phase name: processing; CPU bound, parallel by plane)
-├── Motion correction, ROI detection, signal extraction
-└── Workers per plane via saturating allocation (see Resource management)
+Phase 2: REGISTER (phase name registration, per plane, 8 cores per job)
+├── Motion correction plus the registration-quality metrics computation
+└── One job per plane, specifier plane_{plane_index}
 
-Phase 3: COMBINE (phase name: combination; I/O bound, up to 4 parallel)
+Phase 3: PROCESS (phase name processing, per plane, 10 cores per job)
+├── ROI detection, trace extraction, classification, spike deconvolution
+└── One job per plane, specifier plane_{plane_index}, requires that plane's registration job to succeed
+
+Phase 4: COMBINE (phase name combination, I/O bound, 1 core per job, up to 4 concurrent jobs)
 └── Merges all plane results into a unified combined_metadata.npz dataset
 ```
 
 Batch processing across multiple recordings:
 
 ```text
-BINARIZE: Up to 4 concurrent recordings (I/O bound, fixed concurrency)
-PROCESS:  Parallel (recording-plane pairs up to core limit)
-COMBINE:  Up to 4 concurrent recordings (I/O bound, fixed concurrency)
+BINARIZE: Up to 4 concurrent recordings, 4 cores each, fixed concurrency
+REGISTER: Concurrency bounded by the session CPU budget, 8 cores per plane job
+PROCESS:  Concurrency bounded by the CPU budget and available memory, 10 cores per plane job
+COMBINE:  Up to 4 concurrent recordings, 1 core each, fixed concurrency
 ```
+
+Every job is admitted as soon as its own prerequisites succeed on its own tracker, so the whole dependency graph can
+be submitted in one call. One plane starts processing while its peers are still registering, and each recording
+advances independently.
 
 ---
 
@@ -152,8 +161,8 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
    accept explicit paths from user.
 
 2. **Validate raw data** — Use `validate_recording_readiness_tool` on each recording. Skip for recordings where
-   `get_recording_status_tool` shows status `binarizing`, `processing`, `combining`, or `completed`. If validation
-   fails, invoke `/acquisition-data-preparation` to resolve issues before continuing.
+   `get_recording_status_tool` shows status `binarizing`, `registering`, `processing`, `combining`, or `completed`.
+   If validation fails, invoke `/acquisition-data-preparation` to resolve issues before continuing.
 
 3. **Configure** — Ask the user if they have an existing template configuration file. If not,
    invoke `/single-recording-configuration` to create one. Template configs are reusable across
@@ -169,8 +178,8 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
    structure. `recording_output_paths` is a required parameter for both `prepare_single_recording_batch_tool`
    and `execute_full_pipeline_tool`.
 
-5. **Confirm CPU allocation** — Present the resource allocation model and ask the user how many cores
-   to use (see Resource management section).
+5. **Confirm CPU allocation** — Present the per-phase measured defaults and ask the user whether to
+   accept them or override them (see Resource management section).
 
 6. **Execute** — Choose one of two approaches:
 
@@ -182,7 +191,14 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
    **Fine-grained (for selective execution or re-runs):**
    a. Call `prepare_single_recording_batch_tool` with recording paths, configuration path, and
       output paths. This returns a manifest with job IDs and statuses.
-   b. Select the jobs to execute from the manifest (e.g., only SCHEDULED jobs, only specific phases).
+   b. Select the jobs to execute from the manifest. Each entry in `recordings` is keyed by the
+      recording data path and carries `configuration_path`, `tracker_path`, `output_path`,
+      `pipeline_type`, `binarize_job`, `register_jobs`, `process_jobs`, and `combine_job`. The two
+      `*_jobs` keys hold one entry per plane, and each job dict holds `job_id`, `name`, `specifier`,
+      and `status`. The response also carries `total_recordings`, `total_jobs`, and
+      `migrated_recordings` when an existing tracker gained per-plane registration jobs. Selecting by
+      phase MUST include `register_jobs`, because every processing job depends on the registration job
+      carrying the same `plane_{index}` specifier.
    c. Call `execute_processing_jobs_tool` with the selected job descriptors and worker settings. Each
       job descriptor needs `configuration_path`, `tracker_path`, `job_id`, and `pipeline_type` from
       the manifest.
@@ -228,42 +244,48 @@ Always reuse the `output_path` captured from the prepare manifest for status, ve
 To re-run specific phases (e.g., after changing ROI detection parameters):
 
 1. Use `reset_processing_phases_tool` to reset the target phases to SCHEDULED status. Downstream
-   phases are automatically reset (e.g., resetting `processing` also resets `combination`).
+   phases are automatically reset. Resetting `binarization` also resets `registration`, `processing`,
+   and `combination`. Resetting `registration` also resets `processing` and `combination`. Resetting
+   `processing` also resets `combination`. The returned `effective_phases` list is sorted
+   alphabetically rather than in execution order.
 2. Optionally modify the configuration file before re-execution.
 3. Optionally use `clean_processing_output_tool` to delete output files from the reset phases.
 4. Call `execute_processing_jobs_tool` with the reset jobs from the manifest.
 
 Both `reset_processing_phases_tool` and `clean_processing_output_tool` require `pipeline_type="single-recording"`
-and a `phases` list drawn from the valid single-recording phase names: `binarization`, `processing`,
-`combination`. `reset_processing_phases_tool` also requires `tracker_path`; `clean_processing_output_tool`
-requires `recording_path`.
+and a `phases` list drawn from the valid single-recording phase names: `binarization`, `registration`,
+`processing`, `combination`. `reset_processing_phases_tool` also requires `tracker_path`, and
+`clean_processing_output_tool` requires `recording_path`.
+
+Cleaning `registration` deletes the plane's `registration_data` directory, which carries the `bad_frames.npy` array
+that detection reads. Registration rewrites the plane binary in place, so clean `binarization` to rebuild that
+binary from the raw TIFFs.
 
 ---
 
 ## Resource management
 
-The system uses saturating core allocation to distribute CPU cores across parallel compute-bound jobs.
-I/O-bound jobs (binarize, combine) always use a fixed concurrency of 4 regardless of resource settings.
+Each single-recording phase runs under its own resource class with a measured per-job worker count. Setting
+`workers_per_job` and `max_parallel_jobs` to `-1` accepts those measured defaults. The session CPU budget is
+`cpu_count - 2`, with 2 cores reserved for system operations, and the dispatcher holds the sum of the cores
+committed by every class inside that budget.
 
-When both `workers_per_job` and `max_parallel_jobs` are set to `-1` (automatic), the allocator
-runs the following algorithm for compute-bound jobs:
+| Phase    | Resource class | Cores per job | Concurrency cap                      |
+|----------|----------------|---------------|--------------------------------------|
+| BINARIZE | binarization   | 4             | Fixed at 4                           |
+| REGISTER | registration   | 8             | Session CPU budget                   |
+| PROCESS  | processing     | 10            | CPU budget and memory, 15 GB per job |
+| COMBINE  | combination    | 1             | Fixed at 4                           |
 
-1. **Budget**: `cpu_count - 2` (2 cores reserved for system operations)
-2. **Max parallel jobs**: `min(total_jobs, max(1, budget // 30))` (targets ~30 workers per job, with a floor of 1)
-3. **Raw workers per job**: `budget // max_parallel_jobs`
-4. **Round down** to the nearest multiple of 5
-5. **Saturate**: If workers per job falls below 10 and parallelism > 1, reduce parallelism and
-   recalculate until each job has at least 10 workers
+The binarization and combination classes ignore both `workers_per_job` and `max_parallel_jobs`. The registration and
+processing classes accept either parameter as an override of the measured default and of the derived concurrency cap,
+via `execute_processing_jobs_tool` or `execute_full_pipeline_tool`.
 
-| CPU Cores | Budget | Planes | Workers/Plane | Max Parallel | Total Utilized |
-|-----------|--------|--------|---------------|--------------|----------------|
-| 128       | 126    | 4      | 30            | 4            | 120            |
-| 64        | 62     | 4      | 30            | 2            | 60             |
-| 32        | 30     | 4      | 30            | 1            | 30             |
-| 16        | 14     | 4      | 14 (→ 10)     | 1            | 10             |
+The saturating allocation algorithm applies to the `multi_recording` resource class, which has no measured knee. With
+both parameters at `-1`, it prefers 30 cores per job, enforces a minimum of 10, and rounds down to a multiple of 5.
 
-Either or both values can be overridden explicitly via `workers_per_job` and `max_parallel_jobs`
-parameters in `execute_processing_jobs_tool` or `execute_full_pipeline_tool`.
+Present the measured per-phase defaults when confirming CPU allocation with the user. A `workers_per_job` value of 30
+overrides the processing default of 10 and can exhaust memory, because the processing class budgets 15 GB per job.
 
 ---
 
@@ -277,13 +299,17 @@ When presenting batch status to the user, format as a table:
 Current Phase: PROCESS
 Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
-| Recording                  | Binarize | Process | Combine | Status     |
-|----------------------------|----------|---------|---------|------------|
-| 2024-01-15-10-30-00-123456 | done     | 2/4     | pending | PROCESSING |
-| 2024-01-15-11-45-00-234567 | done     | 4/4     | running | PROCESSING |
-| 2024-01-16-09-00-00-111111 | done     | 4/4     | done    | SUCCEEDED  |
-| 2024-01-16-10-15-00-222222 | pending  | 0/0     | pending | QUEUED     |
+| Recording                  | Binarize | Register | Process | Combine | Status     |
+|----------------------------|----------|----------|---------|---------|------------|
+| 2024-01-15-10-30-00-123456 | done     | 4/4      | 2/4     | pending | PROCESSING |
+| 2024-01-15-11-45-00-234567 | done     | 4/4      | 4/4     | running | PROCESSING |
+| 2024-01-16-09-00-00-111111 | done     | 4/4      | 4/4     | done    | SUCCEEDED  |
+| 2024-01-16-10-15-00-222222 | pending  | 0/0      | 0/0     | pending | QUEUED     |
 ```
+
+The `jobs` mapping that `get_recording_status_tool` returns holds exactly four keys, `binarize`, `register`,
+`process`, and `combine`. The `register` and `process` keys map each `plane_{index}` specifier to a lowercased status
+string, so the table MUST carry a column for each of the four keys.
 
 ---
 
@@ -305,8 +331,10 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 | "Job ID not found in tracker"            | Re-prepare the batch to regenerate manifests |
 | "Prerequisite ... has not succeeded"     | Execute prerequisite phases first            |
 
-Prerequisite failures are returned inside the `invalid_jobs` list with a `reason` field (for example,
-"Prerequisite BINARIZE job X has not succeeded."), not as a top-level `error`.
+Prerequisite failures are returned inside the `invalid_jobs` list with a `reason` field, not as a top-level `error`.
+The message reads "Unable to execute job {job_id}. Its prerequisite '{phase}' job {prerequisite_id} has not succeeded
+and is not part of this submission.", where `{phase}` is the tracker phase name, for example `registration` for a
+processing job.
 
 ### Processing failure routing
 

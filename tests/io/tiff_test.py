@@ -92,7 +92,7 @@ class TestReadTiff:
                 writer.write(data[frame_index])
 
         with TiffFile(tiff_path) as tiff:
-            result = _read_tiff(tiff=tiff, start_index=0, batch_size=5)
+            result = _read_tiff(tiff=tiff, start_index=0, batch_size=5, decode_workers=1)
 
         assert result is not None
         assert result.shape == (5, height, width)
@@ -108,7 +108,7 @@ class TestReadTiff:
                 writer.write(data[frame_index])
 
         with TiffFile(tiff_path) as tiff:
-            result = _read_tiff(tiff=tiff, start_index=100, batch_size=5)
+            result = _read_tiff(tiff=tiff, start_index=100, batch_size=5, decode_workers=1)
 
         assert result is None
 
@@ -125,7 +125,7 @@ class TestReadTiff:
                 writer.write(data[frame_index])
 
         with TiffFile(tiff_path) as tiff:
-            result = _read_tiff(tiff=tiff, start_index=5, batch_size=10)
+            result = _read_tiff(tiff=tiff, start_index=5, batch_size=10, decode_workers=1)
 
         assert result is not None
         # Only 2 frames remain starting at index 5.
@@ -142,7 +142,7 @@ class TestReadTiff:
             writer.write(data)
 
         with TiffFile(tiff_path) as tiff:
-            result = _read_tiff(tiff=tiff, start_index=0, batch_size=1)
+            result = _read_tiff(tiff=tiff, start_index=0, batch_size=1, decode_workers=1)
 
         assert result is not None
         assert result.ndim == 3
@@ -159,7 +159,7 @@ class TestReadTiff:
             writer.write(data)
 
         with TiffFile(tiff_path) as tiff:
-            result = _read_tiff(tiff=tiff, start_index=0, batch_size=1)
+            result = _read_tiff(tiff=tiff, start_index=0, batch_size=1, decode_workers=1)
 
         assert result is not None
         assert result.dtype == np.int16

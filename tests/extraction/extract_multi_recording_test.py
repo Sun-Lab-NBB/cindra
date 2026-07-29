@@ -137,7 +137,6 @@ def _build_multi_context(
     )
 
     configuration = MultiRecordingConfiguration()
-    configuration.runtime.parallel_workers = 1
     if configure is not None:
         configure(configuration)
 
@@ -171,7 +170,7 @@ class TestExtractMultiRecording:
         rois = _make_roi_statistics(((12, 12), (20, 20)), frame_height=frame_height, frame_width=frame_width)
         context.runtime.extraction.roi_statistics = rois
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         output_directory = context.runtime.output_path
         cell_fluorescence = _load_result(output_directory, "cell_fluorescence")
@@ -209,7 +208,7 @@ class TestExtractMultiRecording:
             ((16, 16),), frame_height=frame_height, frame_width=frame_width
         )
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         output_directory = context.runtime.output_path
         subtracted_fluorescence = _load_result(output_directory, "subtracted_fluorescence")
@@ -252,7 +251,7 @@ class TestExtractMultiRecording:
             centers, frame_height=frame_height, frame_width=frame_width
         )
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         output_directory = context.runtime.output_path
         cell_fluorescence = _load_result(output_directory, "cell_fluorescence")
@@ -288,7 +287,7 @@ class TestExtractMultiRecording:
         # Clears the in-memory statistics so the entry point must reload them from the saved files.
         context.runtime.extraction.roi_statistics = None
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         cell_fluorescence = _load_result(output_directory, "cell_fluorescence")
         assert cell_fluorescence.shape == (len(rois), frame_count)
@@ -304,7 +303,7 @@ class TestExtractMultiRecording:
         context.runtime.combined_data = None
 
         with pytest.raises(RuntimeError):
-            extract_traces(context=context)
+            extract_traces(context=context, workers=1)
 
     def test_missing_roi_statistics_raises(self, tmp_path: Path) -> None:
         """Verifies that extraction raises RuntimeError when no tracked ROI statistics are available."""
@@ -316,4 +315,4 @@ class TestExtractMultiRecording:
         context.runtime.extraction.roi_statistics = None
 
         with pytest.raises(RuntimeError):
-            extract_traces(context=context)
+            extract_traces(context=context, workers=1)

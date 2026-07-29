@@ -109,7 +109,7 @@ def _build_multi_dataset(
 
     if write_config:
         configuration = MultiRecordingConfiguration()
-        configuration.runtime.parallel_workers = 3
+        configuration.runtime.display_progress_bars = True
         configuration.save(file_path=multi_directories[0] / "multi_recording_configuration.yaml")
 
     return multi_directories_tuple
@@ -362,7 +362,7 @@ class TestMultiRecordingRuntimeContextLoad:
 
         assert isinstance(loaded, list)
         assert len(loaded) == 2
-        assert loaded[0].configuration.runtime.parallel_workers == 3
+        assert loaded[0].configuration.runtime.display_progress_bars
         assert loaded[0].runtime.io.recording_id == "rec0"
         assert loaded[1].runtime.io.recording_id == "rec1"
 

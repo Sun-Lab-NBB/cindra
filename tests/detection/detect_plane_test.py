@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -11,6 +11,7 @@ from cindra.detection import detect_plane_rois
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from collections.abc import Callable
 
     from numpy.typing import NDArray
 
@@ -106,7 +107,7 @@ class TestDetectPlaneRois:
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
         context.runtime.registration.bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
 
-        detect_plane_rois(context=context)
+        detect_plane_rois(context=context, workers=1)
 
         roi_statistics = context.runtime.extraction.roi_statistics
         assert roi_statistics is not None
@@ -148,7 +149,7 @@ class TestDetectPlaneRois:
         np.save(registration_directory / "bad_frames.npy", np.zeros(_FRAME_COUNT, dtype=np.bool_))
         context.runtime.registration.bad_frames = None
 
-        detect_plane_rois(context=context)
+        detect_plane_rois(context=context, workers=1)
 
         assert context.runtime.extraction.roi_statistics is not None
         assert len(context.runtime.extraction.roi_statistics) >= 1
@@ -181,7 +182,7 @@ class TestDetectPlaneRois:
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
         context.runtime.registration.bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
 
-        detect_plane_rois(context=context)
+        detect_plane_rois(context=context, workers=1)
 
         assert context.runtime.extraction.roi_statistics is not None
         assert len(context.runtime.extraction.roi_statistics) >= 1
@@ -209,7 +210,7 @@ class TestDetectPlaneRois:
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
         context.runtime.registration.bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
 
-        detect_plane_rois(context=context)
+        detect_plane_rois(context=context, workers=1)
 
         assert context.runtime.extraction.roi_statistics is not None
         assert len(context.runtime.extraction.roi_statistics) >= 1
@@ -232,7 +233,7 @@ class TestDetectPlaneRois:
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
         context.runtime.registration.bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
 
-        detect_plane_rois(context=context)
+        detect_plane_rois(context=context, workers=1)
 
         assert context.runtime.extraction.roi_statistics is not None
         assert len(context.runtime.extraction.roi_statistics) >= 1
@@ -252,7 +253,7 @@ class TestDetectPlaneRois:
         context.runtime.registration.bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
 
         with pytest.raises(ValueError, match="No ROIs found"):
-            detect_plane_rois(context=context)
+            detect_plane_rois(context=context, workers=1)
 
     def test_missing_binary_path_raises(
         self,
@@ -271,4 +272,4 @@ class TestDetectPlaneRois:
         context.runtime.io.registered_binary_path = None
 
         with pytest.raises(RuntimeError, match="registered binary file path is not set"):
-            detect_plane_rois(context=context)
+            detect_plane_rois(context=context, workers=1)
