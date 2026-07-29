@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -25,6 +25,7 @@ from cindra.dataclasses import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from collections.abc import Callable
 
     from numpy.typing import NDArray
 
@@ -59,7 +60,6 @@ def _build_configuration(*, data_path: Path | None, output_path: Path) -> Single
     configuration = SingleRecordingConfiguration()
     configuration.file_io.data_path = data_path
     configuration.file_io.output_path = output_path
-    configuration.runtime.parallel_workers = 1
     configuration.runtime.display_progress_bars = False
     return configuration
 
@@ -107,7 +107,7 @@ class TestConvertTiffsToBinary:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
         )
 
-        convert_tiffs_to_binary(contexts=[context])
+        convert_tiffs_to_binary(contexts=[context], workers=1)
 
         io_data = context.runtime.io
         assert io_data.frame_count == len(frame_values)
@@ -141,7 +141,7 @@ class TestConvertTiffsToBinary:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=1
         )
 
-        convert_tiffs_to_binary(contexts=[context_0, context_1])
+        convert_tiffs_to_binary(contexts=[context_0, context_1], workers=1)
 
         binary_0 = read_binary_movie(context_0.runtime.io.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
         binary_1 = read_binary_movie(context_1.runtime.io.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
@@ -175,7 +175,7 @@ class TestConvertTiffsToBinary:
             two_channels=True,
         )
 
-        convert_tiffs_to_binary(contexts=[context])
+        convert_tiffs_to_binary(contexts=[context], workers=1)
 
         io_data = context.runtime.io
         binary_1 = read_binary_movie(io_data.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
@@ -208,7 +208,7 @@ class TestConvertTiffsToBinary:
             two_channels=True,
         )
 
-        convert_tiffs_to_binary(contexts=[context])
+        convert_tiffs_to_binary(contexts=[context], workers=1)
 
         io_data = context.runtime.io
         binary_1 = read_binary_movie(io_data.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
@@ -238,7 +238,7 @@ class TestConvertTiffsToBinary:
             mroi_lines=mroi_lines,
         )
 
-        convert_tiffs_to_binary(contexts=[context])
+        convert_tiffs_to_binary(contexts=[context], workers=1)
 
         io_data = context.runtime.io
         roi_height = mroi_lines[-1] - mroi_lines[0] + 1
@@ -271,7 +271,7 @@ class TestConvertTiffsToBinary:
             mroi_lines=mroi_lines,
         )
 
-        convert_tiffs_to_binary(contexts=[context])
+        convert_tiffs_to_binary(contexts=[context], workers=1)
 
         io_data = context.runtime.io
         roi_height = mroi_lines[-1] - mroi_lines[0] + 1
@@ -302,7 +302,7 @@ class TestConvertTiffsToBinary:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=1
         )
 
-        convert_tiffs_to_binary(contexts=[context_0, context_1])
+        convert_tiffs_to_binary(contexts=[context_0, context_1], workers=1)
 
         binary_0 = read_binary_movie(context_0.runtime.io.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
         binary_1 = read_binary_movie(context_1.runtime.io.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
@@ -324,7 +324,7 @@ class TestConvertTiffsToBinary:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
         )
 
-        convert_tiffs_to_binary(contexts=[context])
+        convert_tiffs_to_binary(contexts=[context], workers=1)
 
         io_data = context.runtime.io
         assert io_data.frame_count == 1
@@ -349,7 +349,7 @@ class TestConvertTiffsToBinary:
             output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
         )
 
-        convert_tiffs_to_binary(contexts=[context])
+        convert_tiffs_to_binary(contexts=[context], workers=1)
 
         io_data = context.runtime.io
         assert io_data.frame_count == len(frame_values)
@@ -359,7 +359,7 @@ class TestConvertTiffsToBinary:
     def test_empty_contexts_raises(self) -> None:
         """Verifies that providing no contexts raises a ValueError."""
         with pytest.raises(ValueError, match="At least one RuntimeContext"):
-            convert_tiffs_to_binary(contexts=[])
+            convert_tiffs_to_binary(contexts=[], workers=1)
 
     def test_missing_data_path_raises(self, tmp_path: Path) -> None:
         """Verifies that a configuration without a data_path raises a ValueError."""
@@ -371,7 +371,7 @@ class TestConvertTiffsToBinary:
         )
 
         with pytest.raises(ValueError, match="data_path must be configured"):
-            convert_tiffs_to_binary(contexts=[context])
+            convert_tiffs_to_binary(contexts=[context], workers=1)
 
 
 class TestGetFrameDimensions:
@@ -393,7 +393,9 @@ class TestGetFrameDimensions:
         )
 
         with pytest.raises(ValueError, match="first TIFF file is empty"):
-            _get_frame_dimensions(tiff_files=[empty_tiff], contexts=[context], acquisition=acquisition)
+            _get_frame_dimensions(
+                tiff_files=[empty_tiff], contexts=[context], acquisition=acquisition, decode_workers=1
+            )
 
 
 class TestCreateBinaryFiles:

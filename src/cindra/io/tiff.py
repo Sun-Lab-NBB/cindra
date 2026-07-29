@@ -10,6 +10,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from .binary import BinaryFile
 from .context import find_data_directory
+from ..allocation import TIFF_DECODE_CEILING
 from ..dataclasses import RuntimeContext, AcquisitionParameters  # noqa: TC001
 
 if TYPE_CHECKING:
@@ -24,7 +25,7 @@ _MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
 """The minimum number of image dimensions considered 'multidimensional'."""
 
 
-def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
+def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> None:
     """Converts TIFF files to cindra binary format for all planes.
 
     This function performs TIFF to binary conversion using pre-initialized RuntimeContext instances. It discovers TIFF
@@ -36,10 +37,14 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
         This function modifies the provided contexts in place, populating frame dimensions, frame counts, and mean
         images in each context's runtime data.
 
+        The allocated workers become the TIFF image decode threads, capped at TIFF_DECODE_CEILING.
+
     Args:
         contexts: A list of RuntimeContext instances created by resolve_single_recording_contexts(). Each
             context must have valid configuration, acquisition parameters, and IOData with binary file paths
             configured.
+        workers: The number of parallel workers allocated to this binarization job. Must be a positive integer, which
+            the caller resolves before invoking this function.
 
     Raises:
         ValueError: If contexts is empty or data_path is not configured.
@@ -48,6 +53,8 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
     if not contexts:
         message = "Unable to convert TIFFs to binary. At least one RuntimeContext must be provided."
         console.error(message=message, error=ValueError)
+
+    decode_workers = min(workers, TIFF_DECODE_CEILING)
 
     # Extracts configuration and acquisition from the first context (shared across all contexts).
     config = contexts[0].configuration
@@ -98,6 +105,7 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
         tiff_files=tiff_files,
         contexts=contexts,
         acquisition=acquisition,
+        decode_workers=decode_workers,
     )
 
     # Creates BinaryFile instances for writing.
@@ -129,7 +137,12 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext]) -> None:
             start_index = 0
 
             while True:
-                frames = _read_tiff(tiff=tiff, start_index=start_index, batch_size=batch_size)
+                frames = _read_tiff(
+                    tiff=tiff,
+                    start_index=start_index,
+                    batch_size=batch_size,
+                    decode_workers=decode_workers,
+                )
                 if frames is None:
                     break
 
@@ -311,7 +324,7 @@ def _discover_tiff_files(
     return file_paths
 
 
-def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.int16] | None:
+def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int, decode_workers: int) -> NDArray[np.int16] | None:
     """Reads a batch (subset) of frames stored inside the TIFF file wrapped by the input TiffFile instance.
 
     This function loads the requested subset of data into memory.
@@ -320,6 +333,7 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.
         tiff: The TiffFile instance that wraps the .tiff file from which to read the data.
         start_index: Index of the first frame to read.
         batch_size: Maximum number of frames to read in this batch.
+        decode_workers: The number of threads tifffile uses to decode the requested frames.
 
     Returns:
         A 3D NumPy array with shape (frames, height, width) containing the requested frame data, or None if the
@@ -331,7 +345,11 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int) -> NDArray[np.
         return None
 
     frames_to_read = min(tiff_length - start_index, batch_size)
-    frames = tiff.asarray() if tiff_length == 1 else tiff.asarray(key=range(start_index, start_index + frames_to_read))
+    frames = (
+        tiff.asarray(maxworkers=decode_workers)
+        if tiff_length == 1
+        else tiff.asarray(key=range(start_index, start_index + frames_to_read), maxworkers=decode_workers)
+    )
 
     # Adds extra dimension for single-frame TIFFs to ensure 3D array.
     if len(frames.shape) < _MULTIDIMENSIONAL_PROCESSING_THRESHOLD:
@@ -352,6 +370,7 @@ def _get_frame_dimensions(
     tiff_files: list[Path],
     contexts: list[RuntimeContext],
     acquisition: AcquisitionParameters,
+    decode_workers: int,
 ) -> tuple[list[int], list[int]]:
     """Pre-scans the first TIFF file to determine frame dimensions for each plane.
 
@@ -362,6 +381,7 @@ def _get_frame_dimensions(
         tiff_files: The list of TIFF file paths to process.
         contexts: The list of RuntimeContext instances, one per plane.
         acquisition: The acquisition parameters describing the recording setup.
+        decode_workers: The number of threads tifffile uses to decode the sampled frame.
 
     Returns:
         A tuple of two lists: (heights, widths) where each list has one entry per plane/context.
@@ -377,7 +397,11 @@ def _get_frame_dimensions(
             console.error(message=message, error=ValueError)
 
         # Reads a single frame to get dimensions.
-        first_frame = tiff.asarray(key=0) if tiff_length > 1 else tiff.asarray()
+        first_frame = (
+            tiff.asarray(key=0, maxworkers=decode_workers)
+            if tiff_length > 1
+            else tiff.asarray(maxworkers=decode_workers)
+        )
     base_height, base_width = first_frame.shape[-2], first_frame.shape[-1]
 
     # Calculates dimensions for each plane/context.

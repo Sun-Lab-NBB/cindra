@@ -99,14 +99,61 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     help="The absolute path to the configuration .yaml file for the executed pipeline.",
 )
 @click.option(
-    "-w",
-    "--workers",
+    "-bw",
+    "--binarize-workers",
     type=int,
-    default=-1,
+    required=False,
+    default=None,
     help=(
-        "The number of parallel workers to use when executing multiprocessing tasks. For machines with a large number "
-        "of cores a value between 10 and 20 is optimal. Setting this to a value of -1 or 0 makes the system use "
-        "all available cores to parallelize multiprocessing tasks."
+        "[Single-recording] The number of parallel workers to allocate to the binarization step. When this option is "
+        "omitted, the step receives its measured default allocation of 4 workers, which is the point where the "
+        "allocated cores become the TIFF image decode threads. Setting this to -1 uses all available cores."
+    ),
+)
+@click.option(
+    "-rw",
+    "--register-workers",
+    type=int,
+    required=False,
+    default=None,
+    help=(
+        "[Single-recording] The number of parallel workers to allocate to each plane-registration step. When this "
+        "option is omitted, the step receives its measured default allocation of 8 workers, which is the knee of the "
+        "measured registration scaling curve. Setting this to -1 uses all available cores."
+    ),
+)
+@click.option(
+    "-pw",
+    "--process-workers",
+    type=int,
+    required=False,
+    default=None,
+    help=(
+        "[Single-recording] The number of parallel workers to allocate to each plane-processing step. When this option "
+        "is omitted, the step receives its measured default allocation of 10 workers, where detection reaches its "
+        "measured throughput plateau. Setting this to -1 uses all available cores."
+    ),
+)
+@click.option(
+    "-dw",
+    "--discover-workers",
+    type=int,
+    required=False,
+    default=None,
+    help=(
+        "[Multi-recording] The number of parallel workers to allocate to the discovery step. Omitting this option or "
+        "setting it to -1 allocates all available cores."
+    ),
+)
+@click.option(
+    "-ew",
+    "--extract-workers",
+    type=int,
+    required=False,
+    default=None,
+    help=(
+        "[Multi-recording] The number of parallel workers to allocate to each per-recording extraction step. Omitting "
+        "this option or setting it to -1 allocates all available cores."
     ),
 )
 @click.option(
@@ -140,15 +187,26 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     ),
 )
 @click.option(
+    "-r",
+    "--register",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help=(
+        "[Single-recording] Determines whether to register the target plane(s) to remove motion and compute the "
+        "registration quality metrics (step 2). This step must complete for a plane before that plane can be "
+        "processed."
+    ),
+)
+@click.option(
     "-p",
     "--process",
     is_flag=True,
     show_default=True,
     default=False,
     help=(
-        "[Single-recording] Determines whether to process the target plane(s) to remove motion, discover ROIs,"
-        " and extract their fluorescence (step 2). This step aggregates most data processing logic of the"
-        " pipeline."
+        "[Single-recording] Determines whether to process the target plane(s) to discover ROIs and extract their "
+        "fluorescence (step 3). This step aggregates most data processing logic of the pipeline."
     ),
 )
 @click.option(
@@ -158,9 +216,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     show_default=True,
     default=False,
     help=(
-        "[Single-recording] Determines whether to combine processed plane data into a uniform dataset"
-        " (step 3). Note, this step is required to later process the data as part of a multi-recording"
-        " pipeline."
+        "[Single-recording] Determines whether to combine processed plane data into a uniform dataset "
+        "(step 4). Note, this step is required to later process the data as part of a multi-recording "
+        "pipeline."
     ),
 )
 @click.option(
@@ -169,8 +227,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     type=int,
     default=-1,
     help=(
-        "[Single-recording] The index of the plane to process when running the PROCESS step (2). Setting this to '-1' "
-        "(default value) processes all available planes sequentially."
+        "[Single-recording] The index of the plane to process when running the REGISTER (2) or PROCESS (3) steps. "
+        "Setting this to '-1' (default value) processes all available planes sequentially."
     ),
 )
 @click.option(
@@ -214,8 +272,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     show_default=True,
     default=False,
     help=(
-        "[Multi-recording] Determines whether to extract the fluorescence from ROIs tracked across"
-        " recordings, identified during the first processing step."
+        "[Multi-recording] Determines whether to extract the fluorescence from ROIs tracked across "
+        "recordings, identified during the first processing step."
     ),
 )
 @click.option(
@@ -237,19 +295,24 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     multiple=True,
     required=False,
     help=(
-        "[Multi-recording] The path to the recording processed with the single-recording cindra pipeline"
-        " to include in the processed multi-recording dataset. Specify this option multiple times to include"
-        " multiple recordings "
+        "[Multi-recording] The path to the recording processed with the single-recording cindra pipeline "
+        "to include in the processed multi-recording dataset. Specify this option multiple times to include "
+        "multiple recordings "
         "(at least two required). When provided, these paths override the matching fields in the pipeline's "
         "configuration file."
     ),
 )
 def cindra_run(
     input_path: Path,
-    workers: int,
+    binarize_workers: int | None,
+    register_workers: int | None,
+    process_workers: int | None,
+    discover_workers: int | None,
+    extract_workers: int | None,
     progress_bars: bool,
     job_id: str | None,
     binarize: bool,
+    register: bool,
     process: bool,
     combine: bool,
     target_plane: int,
@@ -264,7 +327,7 @@ def cindra_run(
 
     The pipeline type (single-recording or multi-recording) is automatically detected from the
     configuration file. When --job-id is provided, only the matching job is executed and all step flags
-    are ignored.
+    are ignored. The combination step merges the per-plane result files with serial input and output.
     """
     # Detects the pipeline type from the configuration file and dispatches to the appropriate pipeline runner.
     pipeline_type = detect_pipeline_type(file_path=input_path)
@@ -272,7 +335,6 @@ def cindra_run(
     if pipeline_type == PipelineType.SINGLE_RECORDING:
         # Writes CLI overrides into the configuration file before running the pipeline.
         configuration = SingleRecordingConfiguration.from_yaml(file_path=input_path)
-        configuration.runtime.parallel_workers = workers
         configuration.runtime.display_progress_bars = progress_bars
         if data_path is not None:
             configuration.file_io.data_path = data_path
@@ -290,16 +352,19 @@ def cindra_run(
             configuration_path=input_path,
             job_id=job_id,
             binarize=binarize,
+            register=register,
             process=process,
             combine=combine,
             target_plane=target_plane,
+            binarization_workers=binarize_workers,
+            registration_workers=register_workers,
+            processing_workers=process_workers,
         )
     else:
         # Writes CLI overrides into the configuration file before running the pipeline.
         multi_recording_configuration = MultiRecordingConfiguration.from_yaml(file_path=input_path)
         if recording_paths:
             multi_recording_configuration.recording_io.recording_directories = tuple(natsorted(recording_paths))
-        multi_recording_configuration.runtime.parallel_workers = workers
         multi_recording_configuration.runtime.display_progress_bars = progress_bars
         multi_recording_configuration.save(file_path=input_path)
 
@@ -309,4 +374,6 @@ def cindra_run(
             discover=discover,
             extract=extract,
             target_recording=target_recording,
+            discovery_workers=discover_workers,
+            extraction_workers=extract_workers,
         )

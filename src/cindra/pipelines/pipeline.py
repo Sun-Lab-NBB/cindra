@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
 from ataraxis_data_structures import ProcessingTracker
 
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
+from ..allocation import (
+    ALL_CORES_REQUEST,
+    MultiRecordingJobNames,
+    SingleRecordingJobNames,
+    resolve_stage_workers,
+)
 from ..dataclasses import RuntimeContext, MultiRecordingConfiguration, SingleRecordingConfiguration
 from .multi_recording import discover_multi_recording_cells, extract_multi_recording_fluorescence
-from .single_recording import process_plane, binarize_recording, save_combined_data
+from .single_recording import process_plane, binarize_recording, save_combined_data, register_recording_plane
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,27 +27,9 @@ SINGLE_RECORDING_TRACKER_NAME: str = "single_recording_tracker.yaml"
 MULTI_RECORDING_TRACKER_NAME: str = "multi_recording_tracker.yaml"
 """The tracker file name for the multi-recording processing pipeline."""
 
-
-class SingleRecordingJobNames(StrEnum):
-    """Defines the job names for the single-recording processing pipeline components."""
-
-    BINARIZE = "binarization"
-    """The name for the binarization (step 1) processing job."""
-    PROCESS = "processing"
-    """The generic name for the plane-processing (step 2) job. During runtime, the processed plane is identified
-    by the tracker's specifier field using the format 'plane_{plane_index}'."""
-    COMBINE = "combination"
-    """The name for the combination (step 3) processing job."""
-
-
-class MultiRecordingJobNames(StrEnum):
-    """Defines the job names for the multi-recording processing pipeline components."""
-
-    DISCOVER = "discovery"
-    """The name for the ROI discovery (step 1) processing job."""
-    EXTRACT = "extraction"
-    """The generic name for the fluorescence extraction (step 2) processing job. During runtime, the processed recording
-    is identified by the tracker's specifier field, which stores the recording ID string."""
+_PER_PLANE_JOB_NAMES: frozenset[str] = frozenset({SingleRecordingJobNames.REGISTER, SingleRecordingJobNames.PROCESS})
+"""The single-recording job names that expand into one job per imaging plane, each carrying a 'plane_{index}'
+specifier."""
 
 
 def run_single_recording_pipeline(
@@ -50,33 +37,54 @@ def run_single_recording_pipeline(
     job_id: str | None = None,
     *,
     binarize: bool = False,
+    register: bool = False,
     process: bool = False,
     combine: bool = False,
     target_plane: int = -1,
+    binarization_workers: int | None = None,
+    registration_workers: int | None = None,
+    processing_workers: int | None = None,
 ) -> None:
     """Executes the requested single-recording processing pipeline steps for the target data.
 
-    The caller is responsible for writing all runtime overrides (``file_io.data_path``, ``file_io.output_path``,
-    ``runtime.parallel_workers``, ``runtime.display_progress_bars``) into the configuration file before invoking this
-    function. The pipeline reads these values from the file at ``configuration_path`` and does not accept them as
-    direct parameters.
+    The caller is responsible for writing all path overrides (``file_io.data_path``, ``file_io.output_path``) and the
+    ``runtime.display_progress_bars`` flag into the configuration file before invoking this function. The pipeline
+    reads these values from the file at ``configuration_path`` and does not accept them as direct parameters. Each
+    stage takes its worker count as a direct parameter, which keeps the configuration file immutable and therefore
+    safe to share between concurrently dispatched jobs.
 
     Args:
         configuration_path: The path to the single-recording configuration YAML file.
         job_id: The unique hexadecimal identifier for the processing job to execute. If provided, only the job
             matching this ID is executed. If not provided, all requested jobs are run sequentially.
         binarize: Determines whether to resolve the binary files for plane-specific processing (step 1).
-        process: Determines whether to process the target plane(s) to remove motion, discover ROIs, and extract their
-            fluorescence (step 2).
-        combine: Determines whether to combine processed plane data into a uniform dataset (step 3).
-        target_plane: The index of the plane to process. Setting this to '-1' processes all available planes
-            sequentially.
+        register: Determines whether to register the target plane(s) to remove motion and compute the registration
+            quality metrics (step 2).
+        process: Determines whether to process the target plane(s) to discover ROIs and extract their fluorescence
+            (step 3).
+        combine: Determines whether to combine processed plane data into a uniform dataset (step 4).
+        target_plane: The index of the plane to register and process. Setting this to '-1' processes all available
+            planes sequentially.
+        binarization_workers: The number of parallel workers to allocate to the binarization stage. Use None to accept
+            the measured default for the stage and -1 to request every available core.
+        registration_workers: The number of parallel workers to allocate to each plane-registration job. Use None to
+            accept the measured default for the stage and -1 to request every available core.
+        processing_workers: The number of parallel workers to allocate to each plane-processing job. Use None to accept
+            the measured default for the stage and -1 to request every available core.
 
     Raises:
         FileNotFoundError: If the single-recording configuration data cannot be loaded from the specified file.
         ValueError: If the recording's data validation fails or the specified job_id does not match any available jobs.
     """
     configuration, output_path = _load_single_recording_configuration(configuration_path=configuration_path)
+
+    # Maps each worker-consuming stage to its requested allocation so that every job reads the count intended for its
+    # own stage. The lookups below resolve a combination job to None.
+    stage_workers: dict[str, int | None] = {
+        SingleRecordingJobNames.BINARIZE: binarization_workers,
+        SingleRecordingJobNames.REGISTER: registration_workers,
+        SingleRecordingJobNames.PROCESS: processing_workers,
+    }
 
     # Resolves RuntimeContext instances for all planes upfront. This determines the plane count without requiring
     # binarization to run first, mirroring how run_multi_recording_pipeline resolves contexts before building jobs.
@@ -91,8 +99,12 @@ def run_single_recording_pipeline(
     # with where batch tools create it and where get_recording_status_tool looks for it.
     tracker_path: Path = output_path / "cindra" / SINGLE_RECORDING_TRACKER_NAME
 
+    # The insertion order of this dictionary sequences the jobs a LOCAL-mode invocation runs, so the registration
+    # entry must sit between the binarization and processing entries. Otherwise a run that requests no flags detects
+    # ROIs before it removes motion.
     requested_jobs: dict[str, bool] = {
         SingleRecordingJobNames.BINARIZE: binarize,
+        SingleRecordingJobNames.REGISTER: register,
         SingleRecordingJobNames.PROCESS: process,
         SingleRecordingJobNames.COMBINE: combine,
     }
@@ -103,11 +115,12 @@ def run_single_recording_pipeline(
 
     jobs_to_run = [job_name for job_name, requested in requested_jobs.items() if requested]
 
-    # Builds the universe of every valid job the pipeline could execute for this configuration. PROCESS always
-    # expands to every available plane regardless of ``target_plane`` so that foreign-entry detection treats
+    # Builds the universe of every valid job the pipeline could execute for this configuration. REGISTER and PROCESS
+    # always expand to every available plane regardless of ``target_plane`` so that foreign-entry detection treats
     # the universe as a configuration fingerprint, not an invocation fingerprint.
     universe: list[tuple[str, str]] = [
         (SingleRecordingJobNames.BINARIZE, ""),
+        *((SingleRecordingJobNames.REGISTER, f"plane_{plane_index}") for plane_index in range(plane_count)),
         *((SingleRecordingJobNames.PROCESS, f"plane_{plane_index}") for plane_index in range(plane_count)),
         (SingleRecordingJobNames.COMBINE, ""),
     ]
@@ -139,6 +152,7 @@ def run_single_recording_pipeline(
             specifier=resolved_specifier,
             job_id=job_id,
             tracker=tracker,
+            workers=stage_workers.get(resolved_name),
         )
     else:
         # LOCAL mode: Builds all requested jobs upfront using the pre-resolved plane count, aligns the tracker
@@ -146,11 +160,11 @@ def run_single_recording_pipeline(
         # run_multi_recording_pipeline.
         jobs: list[tuple[str, str]] = []
         for base_job_name in jobs_to_run:
-            if base_job_name == SingleRecordingJobNames.PROCESS:
+            if base_job_name in _PER_PLANE_JOB_NAMES:
                 if target_plane == -1:
-                    jobs.extend((SingleRecordingJobNames.PROCESS, f"plane_{p}") for p in range(plane_count))
+                    jobs.extend((base_job_name, f"plane_{p}") for p in range(plane_count))
                 else:
-                    jobs.append((SingleRecordingJobNames.PROCESS, f"plane_{target_plane}"))
+                    jobs.append((base_job_name, f"plane_{target_plane}"))
             else:
                 jobs.append((base_job_name, ""))
 
@@ -163,6 +177,7 @@ def run_single_recording_pipeline(
                 specifier=spec,
                 job_id=ProcessingTracker.generate_job_id(job_name=name, specifier=spec),
                 tracker=tracker,
+                workers=stage_workers.get(name),
             )
 
     console.echo(message="Single-recording processing: Complete.", level=LogLevel.SUCCESS)
@@ -176,6 +191,7 @@ def execute_single_recording_job(
     tracker: ProcessingTracker,
     *,
     persist_bootstrap: bool = False,
+    workers: int | None = None,
 ) -> None:
     """Executes one single-recording job and records its state on a caller-provided tracker.
 
@@ -186,22 +202,27 @@ def execute_single_recording_job(
         granularity the caller controls. The job's start, completion, and failure are recorded onto the provided
         tracker under job_id.
 
-        The binarization and plane-processing stages re-load the shared bootstrap with persistence disabled, so it must
-        already exist on disk. Enable persist_bootstrap for the first job dispatched against a configuration, the
-        binarization job, which runs single-threaded and writes the bootstrap for every plane. Leave it disabled for
-        the later per-plane processing jobs, which may run concurrently and read the bootstrap the binarization job
+        The binarization, plane-registration, and plane-processing stages re-load the shared bootstrap with persistence
+        disabled, so it must already exist on disk. Enable persist_bootstrap for the first job dispatched against a
+        configuration, the binarization job, which runs single-threaded and writes the bootstrap for every plane. Leave
+        it disabled for the later per-plane jobs, which may run concurrently and read the bootstrap the binarization job
         already wrote.
+
+        The worker count travels through this parameter, so a batch dispatcher can give every job a different
+        allocation while every job shares one immutable configuration file.
 
     Args:
         configuration_path: The path to the single-recording configuration YAML file.
         job_name: The single-recording job to run, a member of the SingleRecordingJobNames enumeration.
-        specifier: The job specifier. For a PROCESS job this encodes the plane index as 'plane_{index}', and for a
-            BINARIZE or COMBINE job it is an empty string.
+        specifier: The job specifier. For a REGISTER or PROCESS job this encodes the plane index as 'plane_{index}',
+            and for a BINARIZE or COMBINE job it is an empty string.
         job_id: The unique hexadecimal identifier under which the job's state is recorded on the provided tracker. It
             must already be present in the tracker's aligned job set.
         tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
         persist_bootstrap: Determines whether to write the shared single-recording bootstrap to disk before running the
             job. Enable it only for the single-threaded binarization job that precedes plane processing.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for
+            the job's stage and -1 to request every available core. The combination job ignores this parameter.
 
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid single-recording
@@ -211,8 +232,9 @@ def execute_single_recording_job(
     """
     configuration, _ = _load_single_recording_configuration(configuration_path=configuration_path)
 
-    # The binarization and plane-processing stages re-load the shared bootstrap with persistence disabled, so it must
-    # exist before they run. The single-threaded binarization job opts in to write it, and later jobs rely on it.
+    # The binarization, plane-registration, and plane-processing stages re-load the shared bootstrap with persistence
+    # disabled, so it must exist before they run. The single-threaded binarization job opts in to write it, and later
+    # jobs rely on it.
     if persist_bootstrap:
         resolve_single_recording_contexts(configuration=configuration, persist=True)
 
@@ -222,6 +244,7 @@ def execute_single_recording_job(
         specifier=specifier,
         job_id=job_id,
         tracker=tracker,
+        workers=workers,
     )
 
 
@@ -232,13 +255,16 @@ def run_multi_recording_pipeline(
     discover: bool = False,
     extract: bool = False,
     target_recording: str | None = None,
+    discovery_workers: int | None = None,
+    extraction_workers: int | None = None,
 ) -> None:
     """Executes the requested multi-recording processing pipeline steps for the target data.
 
     The caller is responsible for writing all runtime overrides (``recording_io.recording_directories``,
-    ``runtime.parallel_workers``, ``runtime.display_progress_bars``) into the configuration file before invoking this
-    function. The pipeline reads these values from the file at ``configuration_path`` and does not accept them as
-    direct parameters.
+    ``runtime.display_progress_bars``) into the configuration file before invoking this function. The pipeline reads
+    these values from the file at ``configuration_path`` and does not accept them as direct parameters. Each stage
+    takes its worker count as a direct parameter, which keeps the configuration file immutable and therefore safe to
+    share between concurrently dispatched jobs.
 
     Args:
         configuration_path: The path to the multi-recording configuration YAML file. The configuration must include the
@@ -249,6 +275,10 @@ def run_multi_recording_pipeline(
         extract: Determines whether to extract fluorescence from the ROIs tracked across multiple recordings (step 2).
         target_recording: The unique identifier of the recording to process when running the 'extract' job. If None,
             processes all recordings.
+        discovery_workers: The number of parallel workers to allocate to the discovery stage. Use None or -1 to request
+            every available core.
+        extraction_workers: The number of parallel workers to allocate to each per-recording extraction job. Use None or
+            -1 to request every available core.
 
     Raises:
         FileNotFoundError: If the multi-recording configuration data cannot be loaded from the specified file.
@@ -256,6 +286,12 @@ def run_multi_recording_pipeline(
             match any available jobs.
     """
     config = _load_multi_recording_configuration(configuration_path=configuration_path)
+
+    # Maps each stage to its requested allocation so that every job reads the count intended for its own stage.
+    stage_workers: dict[str, int | None] = {
+        MultiRecordingJobNames.DISCOVER: discovery_workers,
+        MultiRecordingJobNames.EXTRACT: extraction_workers,
+    }
 
     console.echo(
         message=f"Processing {len(config.recording_io.recording_directories)} recordings for dataset "
@@ -324,6 +360,7 @@ def run_multi_recording_pipeline(
             specifier=resolved_specifier,
             job_id=job_id,
             tracker=tracker,
+            workers=stage_workers[resolved_name],
         )
     else:
         # LOCAL mode: Builds all requested jobs, aligns the tracker with the requested subset, then runs
@@ -347,6 +384,7 @@ def run_multi_recording_pipeline(
                 specifier=spec,
                 job_id=ProcessingTracker.generate_job_id(job_name=name, specifier=spec),
                 tracker=tracker,
+                workers=stage_workers[name],
             )
 
     console.echo(message="Multi-recording processing: Complete.", level=LogLevel.SUCCESS)
@@ -360,6 +398,7 @@ def execute_multi_recording_job(
     tracker: ProcessingTracker,
     *,
     persist_bootstrap: bool = False,
+    workers: int | None = None,
 ) -> None:
     """Executes one multi-recording job and records its state on a caller-provided tracker.
 
@@ -386,6 +425,7 @@ def execute_multi_recording_job(
         tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
         persist_bootstrap: Determines whether to write the shared multi-recording bootstrap to disk before running the
             job. Enable it only for the single-threaded discovery job that precedes extraction.
+        workers: The number of parallel workers to allocate to this job. Use None or -1 to request every available core.
 
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid multi-recording
@@ -406,6 +446,7 @@ def execute_multi_recording_job(
         specifier=specifier,
         job_id=job_id,
         tracker=tracker,
+        workers=workers,
     )
 
 
@@ -414,14 +455,14 @@ def _load_single_recording_configuration(configuration_path: Path) -> tuple[Sing
 
     Notes:
         Shared by the whole-pipeline entry point and the single-job executor so both apply identical path validation,
-        dataclass loading, worker-count resolution, progress configuration, and output-path checks.
+        dataclass loading, progress configuration, and output-path checks.
 
     Args:
         configuration_path: The path to the single-recording configuration YAML file.
 
     Returns:
-        A tuple of the loaded SingleRecordingConfiguration, with its worker count resolved and progress display state
-        applied, and its validated output path.
+        A tuple of the loaded SingleRecordingConfiguration, with its progress display state applied, and its validated
+        output path.
 
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid single-recording
@@ -450,11 +491,6 @@ def _load_single_recording_configuration(configuration_path: Path) -> tuple[Sing
         )
         console.error(message=message, error=FileNotFoundError)
 
-    # Resolves the requested worker count to a valid positive integer based on available CPU cores.
-    configuration.runtime.parallel_workers = resolve_worker_count(
-        requested_workers=configuration.runtime.parallel_workers
-    )
-
     # Configures the console's progress bar display state based on the configuration flag.
     if configuration.runtime.display_progress_bars:
         console.enable_progress()
@@ -477,13 +513,13 @@ def _load_multi_recording_configuration(configuration_path: Path) -> MultiRecord
 
     Notes:
         Shared by the whole-pipeline entry point and the single-job executor so both apply identical path validation,
-        dataclass loading, worker-count resolution, progress configuration, and required-field checks.
+        dataclass loading, progress configuration, and required-field checks.
 
     Args:
         configuration_path: The path to the multi-recording configuration YAML file.
 
     Returns:
-        The loaded MultiRecordingConfiguration with its worker count resolved and progress display state applied.
+        The loaded MultiRecordingConfiguration with its progress display state applied.
 
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid multi-recording
@@ -531,9 +567,6 @@ def _load_multi_recording_configuration(configuration_path: Path) -> MultiRecord
         )
         console.error(message=message, error=ValueError)
 
-    # Resolves the requested worker count to a valid positive integer based on available CPU cores.
-    config.runtime.parallel_workers = resolve_worker_count(requested_workers=config.runtime.parallel_workers)
-
     # Configures the console's progress bar display state based on the configuration flag.
     if config.runtime.display_progress_bars:
         console.enable_progress()
@@ -549,6 +582,7 @@ def _execute_single_recording_job(
     specifier: str,
     job_id: str,
     tracker: ProcessingTracker,
+    workers: int | None,
 ) -> None:
     """Executes a single processing job of the single-recording pipeline.
 
@@ -556,24 +590,42 @@ def _execute_single_recording_job(
         configuration: The SingleRecordingConfiguration instance for the pipeline.
         job_name: The job name identifying the job to run. Must be a valid member of the
             SingleRecordingJobNames enumeration.
-        specifier: The job specifier string. For PROCESS jobs, this encodes the plane index as 'plane_{index}'.
-            For BINARIZE and COMBINE jobs, this is an empty string.
+        specifier: The job specifier string. For REGISTER and PROCESS jobs, this encodes the plane index as
+            'plane_{index}'. For BINARIZE and COMBINE jobs, this is an empty string.
         job_id: The unique hexadecimal identifier for this processing job.
         tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for
+            the job's stage and -1 to request every available core. The combination job ignores this parameter.
 
     Raises:
-        ValueError: If the job_name is not recognized.
+        ValueError: If the job_name is not recognized or the requested worker count is invalid.
     """
     console.echo(message=f"Running '{job_name}' job (specifier='{specifier}') with ID {job_id}...")
     tracker.start_job(job_id=job_id)
 
     try:
+        # Every worker-consuming stage resolves its budget inside the tracked block, so an invalid request is recorded
+        # as a job failure instead of escaping as an untracked error. The resolution happens per branch rather than
+        # ahead of the chain, so that an unrecognized job name reaches the job-name guard below.
         if job_name == SingleRecordingJobNames.BINARIZE:
-            binarize_recording(configuration=configuration)
+            binarize_recording(
+                configuration=configuration,
+                workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
+            )
+
+        elif job_name == SingleRecordingJobNames.REGISTER:
+            register_recording_plane(
+                configuration=configuration,
+                plane_index=int(specifier.removeprefix("plane_")),
+                workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
+            )
 
         elif job_name == SingleRecordingJobNames.PROCESS:
-            plane_index = int(specifier.removeprefix("plane_"))
-            process_plane(configuration=configuration, plane_index=plane_index)
+            process_plane(
+                configuration=configuration,
+                plane_index=int(specifier.removeprefix("plane_")),
+                workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
+            )
 
         elif job_name == SingleRecordingJobNames.COMBINE:
             # Validates that output_path is configured before loading contexts.
@@ -620,6 +672,7 @@ def _execute_multi_recording_job(
     specifier: str,
     job_id: str,
     tracker: ProcessingTracker,
+    workers: int | None,
 ) -> None:
     """Executes a single processing job of the multi-recording pipeline.
 
@@ -631,6 +684,7 @@ def _execute_multi_recording_job(
             empty string.
         job_id: The unique hexadecimal identifier for this processing job.
         tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
+        workers: The number of parallel workers to allocate to this job. Use None or -1 to request every available core.
 
     Raises:
         ValueError: If the job_name is not recognized.
@@ -639,11 +693,19 @@ def _execute_multi_recording_job(
     tracker.start_job(job_id=job_id)
 
     try:
+        # Resolves the job's worker budget inside the tracked block so that an invalid request is recorded as a job
+        # failure instead of escaping as an untracked error. The multi-recording stages have no measured per-stage
+        # default, so an unspecified request resolves to every available core.
+        requested_workers = ALL_CORES_REQUEST if workers is None else workers
+        resolved_workers = resolve_worker_count(requested_workers=requested_workers)
+
         if job_name == MultiRecordingJobNames.DISCOVER:
-            discover_multi_recording_cells(configuration=configuration)
+            discover_multi_recording_cells(configuration=configuration, workers=resolved_workers)
 
         elif job_name == MultiRecordingJobNames.EXTRACT:
-            extract_multi_recording_fluorescence(configuration=configuration, recording_id=specifier)
+            extract_multi_recording_fluorescence(
+                configuration=configuration, recording_id=specifier, workers=resolved_workers
+            )
 
         else:
             message = (

@@ -154,18 +154,21 @@ pipeline outputs.
 
 ### Architecture
 
-- **Single-recording pipeline**: Three-phase workflow (binarize, process, combine). Phase 1 converts TIFFs to internal
-  binary format and initializes RuntimeContext per plane. Phase 2 runs per-plane registration, detection,
-  classification, and extraction (parallelizable across planes). Phase 3 merges plane-specific results into a unified
-  `combined_metadata.npz` dataset.
+- **Single-recording pipeline**: Four-phase workflow (binarize, register, process, combine). Phase 1 converts TIFFs to
+  internal binary format and initializes RuntimeContext per plane. Phase 2 runs per-plane motion correction and
+  registration-quality metrics (parallelizable across planes). Phase 3 runs per-plane detection, classification, and
+  extraction, and requires the plane to be registered (parallelizable across planes). Phase 4 merges plane-specific
+  results into a unified `combined_metadata.npz` dataset. Phases 2 and 3 carry a `plane_{index}` tracker specifier.
 - **Multi-recording pipeline**: Two-phase workflow (discover, extract). Phase 1 selects ROIs from each recording,
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap,
   and projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
   deconvolution for tracked ROI templates (parallelizable across recordings).
 - **Context pattern**: `RuntimeContext` and `MultiRecordingRuntimeContext` combine configuration, acquisition
   parameters, and runtime data into single objects passed through pipeline steps.
-- **Configuration-driven execution**: Pipelines read all parameters from YAML files (YamlConfig subclasses). The CLI
-  writes overrides to the config file before execution rather than passing arguments.
+- **Configuration-driven execution**: Pipelines read all processing parameters from YAML files (YamlConfig
+  subclasses). The CLI writes overrides to the config file before execution rather than passing arguments. Worker
+  counts are the exception: they are explicit API parameters resolved through `cindra.allocation`, which keeps the
+  configuration file immutable and safe to share between concurrently dispatched jobs.
 - **ProcessingTracker**: File-based YAML pipeline state tracking with FileLock for multi-process coordination. Manages
   job states (SCHEDULED, RUNNING, SUCCEEDED, FAILED) for resumable batch processing.
 - **Subprocess GUI isolation**: GUI viewers launch as separate subprocesses with state file exchange via temporary

@@ -129,7 +129,6 @@ def _make_context(
     configuration.roi_selection.probability_threshold = probability_threshold
     configuration.roi_selection.maximum_size = maximum_size
     configuration.roi_selection.mroi_region_margin = mroi_region_margin
-    configuration.runtime.parallel_workers = 1
 
     return MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime)
 
