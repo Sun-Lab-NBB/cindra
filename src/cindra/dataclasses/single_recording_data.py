@@ -1242,8 +1242,19 @@ class TimingData:
     deconvolution_time_channel_2: int = 0
     """The channel 2 spike deconvolution time in seconds."""
 
-    total_plane_time: int = 0
-    """The total plane processing time in seconds."""
+    total_registration_time: int = 0
+    """The total plane registration time in seconds, covering motion correction and the registration quality metrics
+    computation."""
+
+    total_processing_time: int = 0
+    """The total plane processing time in seconds, covering ROI detection, trace extraction, classification, and spike
+    deconvolution."""
+
+    registration_workers: int = 0
+    """The number of parallel workers allocated to the plane's registration stage."""
+
+    processing_workers: int = 0
+    """The number of parallel workers allocated to the plane's processing stage."""
 
     date_processed: str = ""
     """The timestamp when processing completed in ataraxis-time format (yyyy-mm-dd-hh-mm-ss-us)."""

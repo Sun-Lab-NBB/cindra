@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numba
 from numba import njit, prange
 import numpy as np
 from scipy import stats
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from ..dataclasses import ROIStatistics, SignalExtraction, SpikeDeconvolution, MultiRecordingRuntimeContext
 
 
-def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext) -> None:
+def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext, *, workers: int) -> None:
     """Extracts fluorescence traces, classifies ROIs, and deconvolves spikes from registered binary data.
 
     Notes:
@@ -36,11 +37,19 @@ def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext) -> No
         contexts, the full extraction pipeline runs including classification and interleaved extraction statistics.
         For multi-recording contexts, backward-transformed tracked ROI masks are used without reclassification.
 
+        Extraction and deconvolution run entirely inside Numba kernels parallelized over ROIs, so the worker count is
+        applied as the Numba thread mask before dispatch and covers both branches. The mask is thread-local, so
+        concurrently dispatched recordings can hold different worker budgets inside a single process.
+
     Args:
         context: The runtime context for the recording being processed. Accepts either a single-recording
             RuntimeContext or a multi-recording MultiRecordingRuntimeContext. Modified in-place to store extraction
             outputs including fluorescence traces, deconvolved spikes, and colocalization data.
+        workers: The number of parallel workers allocated to this extraction job. Must be a positive integer.
     """
+    # The Numba thread mask is thread-local and cannot exceed the core count Numba detected at import time.
+    numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
+
     if isinstance(context, RuntimeContext):
         _extract_single_recording(context=context)
     else:

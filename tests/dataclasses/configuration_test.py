@@ -35,7 +35,7 @@ class TestSingleRecordingConfigurationRoundTrip:
         assert loaded.roi_detection.threshold_scaling == original.roi_detection.threshold_scaling
         assert loaded.signal_extraction.minimum_neuropil_pixels == original.signal_extraction.minimum_neuropil_pixels
         assert loaded.spike_deconvolution.neuropil_coefficient == original.spike_deconvolution.neuropil_coefficient
-        assert loaded.runtime.parallel_workers == original.runtime.parallel_workers
+        assert loaded.runtime.display_progress_bars == original.runtime.display_progress_bars
 
 
 class TestMultiRecordingConfigurationRoundTrip:
@@ -56,7 +56,7 @@ class TestMultiRecordingConfigurationRoundTrip:
         assert loaded.roi_tracking.threshold == original.roi_tracking.threshold
         assert loaded.signal_extraction.minimum_neuropil_pixels == original.signal_extraction.minimum_neuropil_pixels
         assert loaded.spike_deconvolution.neuropil_coefficient == original.spike_deconvolution.neuropil_coefficient
-        assert loaded.runtime.parallel_workers == original.runtime.parallel_workers
+        assert loaded.runtime.display_progress_bars == original.runtime.display_progress_bars
 
 
 class TestDetectPipelineType:

@@ -20,7 +20,7 @@ _RECOMMENDED_PROCESSING_FRAMES: int = 200
 """The recommended minimum number of frames in the processed movie for the processing to work as expected."""
 
 
-def binarize_recording(configuration: SingleRecordingConfiguration) -> None:
+def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: int) -> None:
     """Converts raw TIFF recording data into the internal binary format used by the processing pipeline.
 
     Notes:
@@ -30,6 +30,8 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:
 
     Args:
         configuration: The single-recording pipeline configuration.
+        workers: The number of parallel workers allocated to this binarization job. Must be a positive integer, which
+            the caller resolves before invoking this function.
 
     Raises:
         ValueError: If data_path or output_path is not configured.
@@ -97,7 +99,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:
     contexts = resolve_single_recording_contexts(configuration=configuration, persist=False)
 
     # Converts TIFF data to binary format.
-    convert_tiffs_to_binary(contexts=contexts)
+    convert_tiffs_to_binary(contexts=contexts, workers=workers)
 
     # Records the binarization time and saves runtime data for each plane. Each plane's runtime_data.yaml has only
     # one writer here (the single BINARIZE worker for this recording), so the per-plane save is race-free.
@@ -109,91 +111,122 @@ def binarize_recording(configuration: SingleRecordingConfiguration) -> None:
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
-def process_plane(configuration: SingleRecordingConfiguration, plane_index: int) -> None:
-    """Registers, detects ROIs, and extracts fluorescence traces for the target imaging plane.
+def register_recording_plane(configuration: SingleRecordingConfiguration, plane_index: int, *, workers: int) -> None:
+    """Removes motion from the target imaging plane and computes its registration quality metrics.
 
     Notes:
-        This function executes the second phase of the single-recording pipeline: it processes a single imaging
-        plane through registration, ROI detection, and trace extraction. Multiple planes can be processed in
-        parallel, but each plane may use significant memory and CPU resources.
+        This function executes the second phase of the single-recording pipeline: it motion-corrects a single imaging
+        plane and computes the principal components used to assess the registration quality. Multiple planes can be
+        registered in parallel, but each plane may use significant memory and CPU resources.
+
+        This stage is the prerequisite for the processing stage. It writes the registration offsets, the valid pixel
+        ranges, and the bad-frame mask to disk, all of which the processing stage reads back before detecting ROIs.
+
+    Args:
+        configuration: The single-recording pipeline configuration.
+        plane_index: The index of the imaging plane to register.
+        workers: The number of parallel workers allocated to this registration job. Must be a positive integer, which
+            the caller resolves before invoking this function.
+    """
+    context = _resolve_plane_context(
+        configuration=configuration,
+        plane_index=plane_index,
+        workers=workers,
+        stage_action="register",
+        stage_progressive="Registering",
+        stage_noun="registration",
+    )
+    if context is None:
+        return
+
+    # Starts the overall plane registration timer.
+    timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+    timer.reset()
+
+    # Runs registration (motion correction) and the registration quality metrics computation.
+    register_plane(context=context, workers=workers)
+
+    # Records the total plane registration time and the allocation the stage actually used.
+    context.runtime.timing.total_registration_time = timer.elapsed
+    context.runtime.timing.registration_workers = workers
+
+    # Persists the updated runtime data to disk.
+    context.save_runtime()
+
+    message = (
+        f"Plane {plane_index} registered in {context.runtime.timing.total_registration_time} seconds. Registration "
+        f"quality can now be reviewed in the GUI."
+    )
+    console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def process_plane(configuration: SingleRecordingConfiguration, plane_index: int, *, workers: int) -> None:
+    """Detects ROIs and extracts their fluorescence traces for the target imaging plane.
+
+    Notes:
+        This function executes the third phase of the single-recording pipeline: it discovers the ROIs of a single
+        registered imaging plane and extracts, classifies, and deconvolves their fluorescence. Multiple planes can be
+        processed in parallel, but each plane may use significant memory and CPU resources.
+
+        The plane must be registered before it is processed. Detection reads the valid pixel ranges computed during
+        registration, and an unregistered plane carries the (0, 0) defaults for those ranges, which silently produce a
+        zero-size binned movie instead of an error.
 
     Args:
         configuration: The single-recording pipeline configuration.
         plane_index: The index of the imaging plane to process.
+        workers: The number of parallel workers allocated to this processing job. Must be a positive integer, which the
+            caller resolves before invoking this function.
+
+    Raises:
+        RuntimeError: If the target plane has not been registered.
     """
-    # Skips flyback planes early.
-    if plane_index in configuration.main.ignored_flyback_planes:
-        console.echo(message=f"Skipping processing the flyback plane {plane_index}.", level=LogLevel.SUCCESS)
+    context = _resolve_plane_context(
+        configuration=configuration,
+        plane_index=plane_index,
+        workers=workers,
+        stage_action="process",
+        stage_progressive="Processing",
+        stage_noun="processing",
+    )
+    if context is None:
         return
 
-    # Validates that output_path is configured.
-    if configuration.file_io.output_path is None:
+    # Validates that the plane has been registered.
+    if not context.runtime.registration.is_registered(output_path=context.runtime.io.output_path):
         message = (
-            "Unable to process the target plane. The output_path must be configured in the FileIO section of the "
-            "configuration, but it is currently None."
+            f"Unable to process plane {plane_index}. The plane must be registered before ROI detection, but no "
+            f"registration data was found in memory or under the plane's output directory. Run the registration "
+            f"stage for this plane before running the processing stage."
         )
-        console.error(message=message, error=ValueError)
-
-    # Loads the RuntimeContext for the target plane from disk.
-    root_path = configuration.file_io.output_path / "cindra"
-    context = RuntimeContext.load(root_path=root_path, plane_index=plane_index)
-    if isinstance(context, list):
-        message = (
-            f"Unable to process the target plane. Expected a single RuntimeContext for plane {plane_index}, "
-            f"but received a list of {len(context)} contexts."
-        )
-        console.error(message=message, error=TypeError)
-
-    console.echo(message=f"Processing plane {plane_index}...", level=LogLevel.INFO)
-
-    # Configures the maximum number of numba threads for parallelization. The worker count is already resolved to a
-    # valid positive integer by the pipeline entry point.
-    numba.set_num_threads(configuration.runtime.parallel_workers)
-
-    # Validates the frame count meets minimum processing requirements.
-    frame_count = context.runtime.io.frame_count
-    if frame_count < _MINIMUM_PROCESSING_FRAMES:
-        message = (
-            f"Unable to process plane {plane_index}. A plane must contain at least {_MINIMUM_PROCESSING_FRAMES} "
-            f"frames to be processed, but the input plane contains only {frame_count} frames."
-        )
-        console.error(message=message, error=ValueError)
-
-    if frame_count < _RECOMMENDED_PROCESSING_FRAMES:
-        message = (
-            f"The number of frames for plane {plane_index} is below {_RECOMMENDED_PROCESSING_FRAMES}, unexpected "
-            f"behavior may occur during processing."
-        )
-        console.echo(message=message, level=LogLevel.WARNING)
+        console.error(message=message, error=RuntimeError)
 
     # Starts the overall plane processing timer.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
-    # Runs registration (motion correction).
-    register_plane(context=context)
-
     # Runs ROI detection and trace extraction when detection is enabled.
     if configuration.roi_detection.enabled:
-        detect_plane_rois(context=context)
+        detect_plane_rois(context=context, workers=workers)
 
         # Extracts fluorescence traces when ROIs were detected.
         # pragma justification: detection always populates ROI statistics on success or raises beforehand.
         if context.runtime.extraction.roi_statistics is not None:  # pragma: no branch
-            extract_traces(context=context)
+            extract_traces(context=context, workers=workers)
     else:
         message = f"Skipping plane {plane_index} ROI detection (disabled via 'roi_detection.enabled' parameter)."
         console.echo(message=message, level=LogLevel.WARNING)
 
-    # Records the total plane processing time and the processing timestamp.
-    context.runtime.timing.total_plane_time = timer.elapsed
+    # Records the total plane processing time, the allocation the stage actually used, and the processing timestamp.
+    context.runtime.timing.total_processing_time = timer.elapsed
+    context.runtime.timing.processing_workers = workers
     context.runtime.timing.date_processed = str(get_timestamp())
 
     # Persists the updated runtime data to disk.
     context.save_runtime()
 
     message = (
-        f"Plane {plane_index} processed in {context.runtime.timing.total_plane_time} seconds. Processing results "
+        f"Plane {plane_index} processed in {context.runtime.timing.total_processing_time} seconds. Processing results "
         f"can now be viewed in the GUI."
     )
     console.echo(message=message, level=LogLevel.SUCCESS)
@@ -229,3 +262,92 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
     # Saves the combined data to the root cindra directory.
     combined_data.save(root_path / "cindra")
     console.echo(message=f"Combined data saved to: {root_path / 'cindra'}", level=LogLevel.SUCCESS)
+
+
+def _resolve_plane_context(
+    configuration: SingleRecordingConfiguration,
+    plane_index: int,
+    *,
+    workers: int,
+    stage_action: str,
+    stage_progressive: str,
+    stage_noun: str,
+) -> RuntimeContext | None:
+    """Loads and validates the runtime context for the target plane and applies the stage's worker budget.
+
+    Notes:
+        This helper carries the preamble shared by the registration and processing plane stages. It skips flyback
+        planes, validates the configured output path, loads the plane's RuntimeContext from disk, applies the
+        allocated worker budget to the calling thread's Numba mask, and validates the plane's frame count.
+
+        The stage labels are parameterized because the two stages report different actions to the user.
+
+    Args:
+        configuration: The single-recording pipeline configuration.
+        plane_index: The index of the imaging plane to load the runtime context for.
+        workers: The number of parallel workers allocated to the calling stage. Must be a positive integer, which the
+            caller resolves before invoking this function.
+        stage_action: The lowercase verb naming the calling stage's action, used in error messages. Use 'register' for
+            the registration stage and 'process' for the processing stage.
+        stage_progressive: The capitalized progressive form of the calling stage's action, used in status messages. Use
+            'Registering' for the registration stage and 'Processing' for the processing stage.
+        stage_noun: The lowercase noun naming the calling stage, used in the flyback skip message. Use 'registration'
+            for the registration stage and 'processing' for the processing stage.
+
+    Returns:
+        The loaded RuntimeContext for the target plane, or None if the target plane is a flyback plane that the calling
+        stage must skip.
+
+    Raises:
+        ValueError: If output_path is not configured or the plane contains too few frames to be processed.
+        TypeError: If the runtime context loader returns multiple contexts for the target plane.
+    """
+    # Skips flyback planes early.
+    if plane_index in configuration.main.ignored_flyback_planes:
+        message = f"Skipping the {stage_noun} of the flyback plane {plane_index}."
+        console.echo(message=message, level=LogLevel.SUCCESS)
+        return None
+
+    # Validates that output_path is configured.
+    if configuration.file_io.output_path is None:
+        message = (
+            f"Unable to {stage_action} the target plane. The output_path must be configured in the FileIO section of "
+            f"the configuration, but it is currently None."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Loads the RuntimeContext for the target plane from disk.
+    root_path = configuration.file_io.output_path / "cindra"
+    context = RuntimeContext.load(root_path=root_path, plane_index=plane_index)
+    if isinstance(context, list):
+        message = (
+            f"Unable to {stage_action} the target plane. Expected a single RuntimeContext for plane {plane_index}, "
+            f"but received a list of {len(context)} contexts."
+        )
+        console.error(message=message, error=TypeError)
+
+    console.echo(message=f"{stage_progressive} plane {plane_index}...", level=LogLevel.INFO)
+
+    # Applies the allocated worker budget to the calling thread's Numba mask. The mask is thread-local, so concurrently
+    # dispatched planes can hold different budgets inside one process. The mask cannot exceed the number of cores Numba
+    # detected at import time, so the requested budget is capped at that ceiling.
+    numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
+
+    # Validates the frame count meets minimum processing requirements.
+    frame_count = context.runtime.io.frame_count
+    if frame_count < _MINIMUM_PROCESSING_FRAMES:
+        message = (
+            f"Unable to {stage_action} plane {plane_index}. A plane must contain at least "
+            f"{_MINIMUM_PROCESSING_FRAMES} frames to be processed, but the input plane contains only {frame_count} "
+            f"frames."
+        )
+        console.error(message=message, error=ValueError)
+
+    if frame_count < _RECOMMENDED_PROCESSING_FRAMES:
+        message = (
+            f"The number of frames for plane {plane_index} is below {_RECOMMENDED_PROCESSING_FRAMES}, unexpected "
+            f"behavior may occur during processing."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+
+    return context

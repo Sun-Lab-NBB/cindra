@@ -37,7 +37,7 @@ Complete guide for preparing raw neural imaging data for the cindra single-recor
 ## Agent requirements
 
 You MUST use the cindra MCP tools for creating and validating acquisition parameter files. Verify the
-cindra MCP server is connected before use; if the tools are unavailable, invoke
+cindra MCP server is connected before use. If the tools are unavailable, invoke
 `/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
 
 ---
@@ -79,8 +79,8 @@ recording_directory/
   ...
 ```
 
-The `cindra_parameters.json` file may also be in a subdirectory — the pipeline searches recursively. However, TIFF
-files must be in the same directory as the JSON file (non-recursive TIFF scan).
+The `cindra_parameters.json` file may also be in a subdirectory, since the pipeline searches recursively. However,
+TIFF files must be in the same directory as the JSON file (non-recursive TIFF scan).
 
 ---
 
@@ -101,7 +101,7 @@ scenarios requiring conversion:
 - **Binary / raw files**: Read with numpy and write as multipage TIFFs.
 - **Proprietary formats** (Nikon .nd2, Zeiss .czi, Leica .lif): Use the appropriate reader library (e.g.,
   `nd2`, `aicspylibczi`, `readlif`) to extract frames, then write as multipage TIFFs.
-- **Single-frame TIFFs**: Already compatible — the pipeline concatenates all TIFFs in natural sort order.
+- **Single-frame TIFFs**: Already compatible, since the pipeline concatenates all TIFFs in natural sort order.
 
 When helping the user convert data, use web searches and documentation to determine the correct reader library and
 approach for their specific format. Ensure the converted TIFFs follow the frame interleaving rules below.
@@ -188,22 +188,22 @@ When the user does not know their acquisition parameters, guide the interaction 
 
 When the user knows their acquisition metadata (frame rate, planes, channels):
 
-1. **Confirm TIFF files** — Ask the user to verify TIFF files are present in the data directory.
-2. **Verify divisibility** — Confirm `total_frames % (plane_number * channel_number) == 0`.
-3. **Create parameters file** — Use `generate_acquisition_parameters_file_tool` with the known values.
-4. **Validate** — Use `validate_acquisition_parameters_file_tool` to confirm the file is correct.
-5. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is ready for processing.
+1. **Confirm TIFF files**. Ask the user to verify TIFF files are present in the data directory.
+2. **Verify divisibility**. Confirm `total_frames % (plane_number * channel_number) == 0`.
+3. **Create parameters file**. Use `generate_acquisition_parameters_file_tool` with the known values.
+4. **Validate**. Use `validate_acquisition_parameters_file_tool` to confirm the file is correct.
+5. **Verify readiness**. Use `validate_recording_readiness_tool` to confirm the recording is ready for processing.
 
 ### Workflow 2: Unknown acquisition parameters
 
 When the user has imaging data but is unsure about the acquisition configuration:
 
-1. **Identify the data source** — Ask what microscope and acquisition software was used.
-2. **Locate metadata** — Guide the user to find metadata files or headers specific to their system.
-3. **Extract parameters** — Help the user read metadata using appropriate tools or libraries.
-4. **Confirm with user** — Present the extracted parameters and ask the user to verify.
-5. **Create parameters file** — Use `generate_acquisition_parameters_file_tool` with the confirmed values.
-6. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm the recording is ready for processing.
+1. **Identify the data source**. Ask what microscope and acquisition software was used.
+2. **Locate metadata**. Guide the user to find metadata files or headers specific to their system.
+3. **Extract parameters**. Help the user read metadata using appropriate tools or libraries.
+4. **Confirm with user**. Present the extracted parameters and ask the user to verify.
+5. **Create parameters file**. Use `generate_acquisition_parameters_file_tool` with the confirmed values.
+6. **Verify readiness**. Use `validate_recording_readiness_tool` to confirm the recording is ready for processing.
 
 ### Workflow 3: ScanImage recordings
 
@@ -280,26 +280,26 @@ structure. Suite2p's binary format is directly compatible with cindra.
 
 Configure and run the cindra pipeline normally (see `/single-recording-configuration`). Cindra re-runs
 registration, ROI detection, and extraction from scratch using its own algorithms. The suite2p binary files
-serve only as the binarized input — all downstream processing is independent.
+serve only as the binarized input, and all downstream processing is independent.
 
 ### Workflow 5: Non-TIFF source data
 
 When the user's data is in a format other than multipage TIFF:
 
-1. **Identify the format** — Ask the user what format their data is in (HDF5, NWB, .nd2, .czi, binary, etc.).
-2. **Find the right reader** — Use web searches to identify the appropriate Python library for reading the format.
-3. **Write a conversion script** — Help the user write a script that reads the source data and writes multipage
+1. **Identify the format**. Ask the user what format their data is in (HDF5, NWB, .nd2, .czi, binary, etc.).
+2. **Find the right reader**. Use web searches to identify the appropriate Python library for reading the format.
+3. **Write a conversion script**. Help the user write a script that reads the source data and writes multipage
    TIFFs using `tifffile.imwrite`, ensuring the correct frame interleaving order.
-4. **Verify output** — Confirm the converted TIFFs have the expected frame count and dimensions.
-5. **Create parameters file** — Use `generate_acquisition_parameters_file_tool` with the acquisition metadata.
-6. **Verify readiness** — Use `validate_recording_readiness_tool` to confirm TIFF data and parameters are consistent.
+4. **Verify output**. Confirm the converted TIFFs have the expected frame count and dimensions.
+5. **Create parameters file**. Use `generate_acquisition_parameters_file_tool` with the acquisition metadata.
+6. **Verify readiness**. Use `validate_recording_readiness_tool` to confirm TIFF data and parameters are consistent.
 
 ### Workflow 6: Direct binary file adoption (potentially unsafe)
 
 When the user has pre-existing binary files (from suite2p, custom pipelines, or other sources) and wants to
 skip TIFF-to-binary conversion entirely. **This workflow is potentially unsafe** because cindra cannot verify
 that the binary files are correctly formatted. All metadata (frame count, dimensions, data type) must come
-from the user — incorrect values will produce silent data corruption or pipeline crashes.
+from the user, and incorrect values will produce silent data corruption or pipeline crashes.
 
 **Binary format requirements:**
 
@@ -353,10 +353,19 @@ type. Ask the user to re-check their metadata.
 
 **Step 6: Run binarization.**
 
-With the bootstrap (Step 3) and valid binaries (Step 4) in place, run binarization normally — cindra loads the
+With the bootstrap (Step 3) and valid binaries (Step 4) in place, run binarization normally. Cindra loads the
 existing plane contexts, confirms each `registered_binary_path` exists, and skips TIFF conversion. If
 binarization instead attempts conversion or reports missing binaries, the bootstrap or file placement is
-incorrect; re-check Steps 3-4 and the format requirements above.
+incorrect, so re-check Steps 3-4 and the format requirements above.
+
+**Step 7: Run registration for every plane.**
+
+Adopted data follows the standard phase order of binarization, registration, processing, and combination. Run
+the registration phase for every plane before dispatching any processing job. Registration writes the reference
+image, the motion offsets, the valid pixel ranges, and the bad-frame mask into each plane's `registration_data/`
+directory, and processing reads all of them back before detecting ROIs. A plane that carries no
+`registration_data/` fails at the start of processing with "Unable to process plane {index}. The plane must be
+registered before ROI detection...", so a binarize-then-process dispatch stops at the first processing job.
 
 ---
 

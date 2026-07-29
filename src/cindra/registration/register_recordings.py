@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import numba
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-def register_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
+def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers: int) -> None:
     """Registers multiple recording reference images to a common visual space using diffeomorphic demons registration.
 
     This function computes deformation fields that align all recordings to a shared coordinate system, then applies
@@ -37,10 +38,15 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
         diffeomorphic registration. When repeat_registration is True, existing registration data is cleared before
         re-computing.
 
+        The groupwise registration runs on the calling thread and receives the full worker budget as its Numba thread
+        mask. The per-recording deformation step then splits that budget between the thread pool width and each pool
+        thread's own Numba mask, since the Numba mask is thread-local and pool threads do not inherit it.
+
     Args:
         contexts: The list of MultiRecordingRuntimeContext instances, one per recording. All contexts must share
             the same configuration. Each context's runtime.combined_data must be loaded with single-recording
             detection results.
+        workers: The number of parallel workers allocated to this discovery job. Must be a positive integer.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
@@ -48,6 +54,10 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
     configuration = contexts[0].configuration
     registration_config = configuration.diffeomorphic_registration
     runtime_config = configuration.runtime
+
+    # Applies the allocated worker budget to the calling thread's Numba mask, which the groupwise registration kernels
+    # run under. The mask cannot exceed the number of cores Numba detected at import time.
+    numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
 
     # Checks if registration should be skipped (all recordings already registered and not forcing re-registration).
     all_registered = all(
@@ -114,9 +124,16 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
     registration.register(progress=runtime_config.display_progress_bars)
 
     # Applies deformation fields to each recording in parallel.
-    if runtime_config.parallel_workers > 1:
-        # pragma: no cover — parallel ThreadPoolExecutor branch; integration tests run serially (parallel_workers=1)
-        with ThreadPoolExecutor(max_workers=runtime_config.parallel_workers) as executor:  # pragma: no cover
+    if workers > 1:
+        # pragma: no cover — parallel ThreadPoolExecutor branch, integration tests run serially with workers=1.
+        pool_width, pool_numba_threads = _resolve_pool_allocation(  # pragma: no cover
+            workers=workers, task_count=len(contexts)
+        )
+        with ThreadPoolExecutor(  # pragma: no cover
+            max_workers=pool_width,
+            initializer=numba.set_num_threads,
+            initargs=(pool_numba_threads,),
+        ) as executor:
             futures = {
                 executor.submit(
                     _apply_forward_deformation,
@@ -163,17 +180,22 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
     )
 
 
-def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
+def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers: int) -> None:
     """Projects template masks from shared visual space back to each recording's original coordinate system.
 
     After ROI tracking produces template masks in the shared deformed space, this function applies the inverse
     deformation to map those masks back to each recording's native coordinates. This enables fluorescence extraction
     using the original registered binary data.
 
+    Notes:
+        The worker budget is split between the thread pool width and each pool thread's own Numba mask, since the
+        Numba mask is thread-local and pool threads do not inherit the mask held by the submitting thread.
+
     Args:
         contexts: The list of MultiRecordingRuntimeContext instances, one per recording. Each context must have
             deformation fields stored in runtime.registration from a prior call to register_recordings(), and
             template masks set in runtime.tracking from ROI tracking.
+        workers: The number of parallel workers allocated to this discovery job. Must be a positive integer.
     """
     # Skips projection when the backward-transformed ROI statistics already exist and registration was not repeated.
     # Checks for roi_statistics.npz (the file this function produces) rather than tracking_template_masks.npz (which
@@ -189,7 +211,10 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
 
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
-    runtime_config = contexts[0].configuration.runtime
+
+    # Applies the allocated worker budget to the calling thread's Numba mask, which the serial projection branch runs
+    # under. The mask cannot exceed the number of cores Numba detected at import time.
+    numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
 
     # Loads registration and tracking arrays needed for backward deformation.
     for context in contexts:
@@ -199,9 +224,16 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
             context.runtime.registration.memory_map_arrays(output_path)
             context.runtime.tracking.load_arrays(output_path)
 
-    if runtime_config.parallel_workers > 1:
-        # pragma: no cover — parallel ThreadPoolExecutor branch; integration tests run serially (parallel_workers=1)
-        with ThreadPoolExecutor(max_workers=runtime_config.parallel_workers) as executor:  # pragma: no cover
+    if workers > 1:
+        # pragma: no cover — parallel ThreadPoolExecutor branch, integration tests run serially with workers=1.
+        pool_width, pool_numba_threads = _resolve_pool_allocation(  # pragma: no cover
+            workers=workers, task_count=len(contexts)
+        )
+        with ThreadPoolExecutor(  # pragma: no cover
+            max_workers=pool_width,
+            initializer=numba.set_num_threads,
+            initargs=(pool_numba_threads,),
+        ) as executor:
             futures = {
                 executor.submit(_apply_backward_deformation, context=context): index
                 for index, context in enumerate(contexts)
@@ -238,6 +270,26 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
     console.echo(
         message=f"Template projection: complete. Time: {backward_transform_time} seconds.", level=LogLevel.SUCCESS
     )
+
+
+def _resolve_pool_allocation(workers: int, task_count: int) -> tuple[int, int]:
+    """Splits the allocated worker budget between the deformation thread pool width and each pool thread's Numba mask.
+
+    Notes:
+        Each pool thread runs Numba kernels parallelized over the deformation field, so the product of the pool width
+        and the per-thread Numba mask is what consumes cores. Dividing the budget holds that product at the allocated
+        worker count.
+
+    Args:
+        workers: The number of parallel workers allocated to the multi-recording discovery job.
+        task_count: The number of recordings the pool transforms.
+
+    Returns:
+        A tuple of the thread pool width and the Numba thread count to apply to each pool thread.
+    """
+    pool_width = max(1, min(workers, task_count))
+    pool_numba_threads = min(max(1, workers // pool_width), numba.config.NUMBA_NUM_THREADS)
+    return pool_width, pool_numba_threads
 
 
 def _warp_mask_pixels(

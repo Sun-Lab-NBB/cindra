@@ -18,12 +18,19 @@ config.THREADING_LAYER = "omp" if sys.platform == "darwin" else "tbb"
 from ataraxis_base_utilities import console  # noqa: E402
 
 from .pipelines import (  # noqa: E402
-    MultiRecordingJobNames,
-    SingleRecordingJobNames,
     execute_multi_recording_job,
     execute_single_recording_job,
     run_multi_recording_pipeline,
     run_single_recording_pipeline,
+)
+from .allocation import (  # noqa: E402
+    PROCESSING_WORKERS,
+    TIFF_DECODE_CEILING,
+    BINARIZATION_WORKERS,
+    REGISTRATION_WORKERS,
+    MultiRecordingJobNames,
+    SingleRecordingJobNames,
+    resolve_stage_workers,
 )
 from .dataclasses import (  # noqa: E402
     MultiRecordingConfiguration,
@@ -37,12 +44,17 @@ if not console.enabled:  # pragma: no branch — the console-enabled state is on
     console.enable()
 
 __all__ = [
+    "BINARIZATION_WORKERS",
+    "PROCESSING_WORKERS",
+    "REGISTRATION_WORKERS",
+    "TIFF_DECODE_CEILING",
     "MultiRecordingConfiguration",
     "MultiRecordingJobNames",
     "SingleRecordingConfiguration",
     "SingleRecordingJobNames",
     "execute_multi_recording_job",
     "execute_single_recording_job",
+    "resolve_stage_workers",
     "run_multi_recording_pipeline",
     "run_single_recording_pipeline",
 ]

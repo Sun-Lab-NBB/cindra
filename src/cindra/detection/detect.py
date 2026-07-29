@@ -53,7 +53,7 @@ type _ChannelDetectionResult = tuple[
 projection, correlation map, ROI diameter, and ROI statistics."""
 
 
-def detect_plane_rois(context: RuntimeContext) -> None:
+def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
     """Detects ROIs from registered binary data and updates the runtime context in-place.
 
     Notes:
@@ -62,9 +62,14 @@ def detect_plane_rois(context: RuntimeContext) -> None:
         ROI populations may have different soma sizes and spatial scales. Results are written into
         context.runtime.detection, context.runtime.extraction, and context.runtime.timing.
 
+        The worker count drives the PCA denoising thread pool and the BLAS thread limit applied around the sparse
+        detection loop. Movie binning IO and the serial detection loop bound this stage, so its runtime plateaus at
+        the measured processing default.
+
     Args:
         context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
             in-place to store detection outputs including ROI statistics, image projections, and timing data.
+        workers: The number of parallel workers allocated to this processing job. Must be a positive integer.
 
     Raises:
         RuntimeError: If the registered binary file path for channel 1 is not set.
@@ -105,7 +110,6 @@ def detect_plane_rois(context: RuntimeContext) -> None:
 
     valid_y_range = registration_data.valid_y_range
     valid_x_range = registration_data.valid_x_range
-    parallel_workers = context.configuration.runtime.parallel_workers
 
     # Validates that the registered binary path exists. This is always satisfied when called from the processing
     # pipeline, since registration creates the binary file before detection runs.
@@ -129,7 +133,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
             bad_frames=registration_data.bad_frames,
             detection_config=detection_config,
             nonrigid_block_size=nonrigid_block_size,
-            parallel_workers=parallel_workers,
+            workers=workers,
             custom_classifier_path=custom_classifier_path,
             plane_index=plane_index,
             channel_label="channel 1",
@@ -183,7 +187,7 @@ def detect_plane_rois(context: RuntimeContext) -> None:
             bad_frames=registration_data.bad_frames,
             detection_config=detection_config,
             nonrigid_block_size=nonrigid_block_size,
-            parallel_workers=parallel_workers,
+            workers=workers,
             custom_classifier_path=custom_classifier_path,
             plane_index=plane_index,
             channel_label="channel 2",
@@ -353,7 +357,7 @@ def _detect_channel(
     bad_frames: NDArray[np.bool_] | None,
     detection_config: ROIDetection,
     nonrigid_block_size: tuple[int, int],
-    parallel_workers: int,
+    workers: int,
     custom_classifier_path: Path | None,
     plane_index: int,
     channel_label: str,
@@ -378,8 +382,8 @@ def _detect_channel(
         detection_config: The ROIDetection configuration dataclass containing detection parameters.
         nonrigid_block_size: The nonrigid registration block size (height, width), used to derive the PCA denoising
             block dimensions.
-        parallel_workers: The number of parallel threads for PCA denoising. Values of -1 or 0 use all available cores.
-            A value of 1 disables parallelism.
+        workers: The number of parallel workers to use for PCA denoising and for the BLAS thread limit applied around
+            the sparse detection loop. A value of 1 disables parallelism.
         custom_classifier_path: The path to a custom classifier file, or None to use the built-in classifier.
         plane_index: The index of the imaging plane being processed, used for logging.
         channel_label: The channel identifier string used in log messages (e.g., "channel 1" or "channel 2").
@@ -430,7 +434,7 @@ def _detect_channel(
             frames=binned_frames,
             block_size=(nonrigid_block_size[0] // 2, nonrigid_block_size[1] // 2),
             component_fraction=0.5,
-            parallel_workers=parallel_workers,
+            parallel_workers=workers,
         )
 
     # Runs the sparse iterative ROI detection algorithm. Limits BLAS and OpenMP thread count to match the requested
@@ -441,7 +445,7 @@ def _detect_channel(
         level=LogLevel.INFO,
     )
 
-    with threadpool_limits(limits=parallel_workers if parallel_workers > 0 else None):
+    with threadpool_limits(limits=workers):
         maximum_projection, correlation_map, spatial_scale_pixels, roi_statistics = detect(
             frames=binned_frames,
             temporal_highpass_window=detection_config.temporal_highpass_window,

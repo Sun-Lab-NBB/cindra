@@ -117,7 +117,7 @@ class TestExtractTracesSingleRecording:
         rois = _make_roi_statistics(((12, 12), (30, 30)), frame_height=frame_height, frame_width=frame_width)
         context.runtime.extraction.roi_statistics = rois
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
         cell_fluorescence = _load_result(plane_directory, "cell_fluorescence")
@@ -162,7 +162,7 @@ class TestExtractTracesSingleRecording:
             ((14, 14),), frame_height=frame_height, frame_width=frame_width
         )
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
         cell_fluorescence = _load_result(plane_directory, "cell_fluorescence")
@@ -199,7 +199,7 @@ class TestExtractTracesSingleRecording:
             ((20, 20),), frame_height=frame_height, frame_width=frame_width
         )
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
         subtracted_fluorescence = _load_result(plane_directory, "subtracted_fluorescence")
@@ -242,7 +242,7 @@ class TestExtractTracesSingleRecording:
         # Clears the in-memory statistics so the entry point must reload them from the saved files.
         context.runtime.extraction.roi_statistics = None
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         cell_fluorescence = _load_result(plane_directory, "cell_fluorescence")
         assert cell_fluorescence.shape == (len(rois), frame_count)
@@ -255,7 +255,7 @@ class TestExtractTracesSingleRecording:
         context.runtime.extraction.roi_statistics = None
 
         with pytest.raises(RuntimeError):
-            extract_traces(context=context)
+            extract_traces(context=context, workers=1)
 
     def test_missing_registered_binary_path_raises(
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
@@ -266,7 +266,7 @@ class TestExtractTracesSingleRecording:
         context.runtime.io.registered_binary_path = None
 
         with pytest.raises(RuntimeError):
-            extract_traces(context=context)
+            extract_traces(context=context, workers=1)
 
 
 class TestExtractTracesChannel2:
@@ -304,7 +304,7 @@ class TestExtractTracesChannel2:
         context.runtime.detection.mean_image = np.full((frame_height, frame_width), 100.0, dtype=np.float32)
         context.runtime.detection.mean_image_channel_2 = np.full((frame_height, frame_width), 80.0, dtype=np.float32)
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
         cell_fluorescence_channel_2 = _load_result(plane_directory, "cell_fluorescence_channel_2")
@@ -345,7 +345,7 @@ class TestExtractTracesChannel2:
             ((20, 20),), frame_height=frame_height, frame_width=frame_width
         )
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
         cell_fluorescence_channel_2 = _load_result(plane_directory, "cell_fluorescence_channel_2")
@@ -388,7 +388,7 @@ class TestExtractTracesChannel2:
             ((30, 30),), frame_height=frame_height, frame_width=frame_width
         )
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
         cell_fluorescence_channel_2 = _load_result(plane_directory, "cell_fluorescence_channel_2")
@@ -435,7 +435,7 @@ class TestExtractTracesChannel2:
             ((30, 30),), frame_height=frame_height, frame_width=frame_width
         )
 
-        extract_traces(context=context)
+        extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
         spikes_channel_2 = _load_result(plane_directory, "spikes_channel_2")
@@ -476,7 +476,7 @@ class TestExtractTracesChannel2:
         context.runtime.extraction.roi_statistics_channel_2 = None
 
         with pytest.raises(RuntimeError):
-            extract_traces(context=context)
+            extract_traces(context=context, workers=1)
 
 
 class TestExtractTracesChannel2Guards:
@@ -515,4 +515,4 @@ class TestExtractTracesDispatch:
         )
 
         with pytest.raises(RuntimeError):
-            extract_traces(context=context)
+            extract_traces(context=context, workers=1)

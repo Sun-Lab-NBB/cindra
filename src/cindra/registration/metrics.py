@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numba
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from sklearn.decomposition import PCA  # type: ignore[import-untyped]
@@ -40,7 +41,7 @@ _MAXIMUM_WIDTH_FOR_LARGE_SAMPLE: int = 700
 """The maximum frame width below which the larger sample count is used for PC metrics computation."""
 
 
-def compute_pc_metrics(context: RuntimeContext) -> None:
+def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
     """Computes registration quality metrics using principal component analysis.
 
     Evaluates registration quality by computing principal components of the registered frames and measuring how well
@@ -60,14 +61,22 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
         projection values for each sampled frame. The principal_component_shift_metrics field contains registration
         offset metrics computed by aligning PC extremes.
 
+        The worker count drives both the FFT thread pool used by phase correlation and the Numba thread mask used by
+        the nonrigid warping kernels. The Numba mask is thread-local, so concurrently dispatched planes can hold
+        different worker budgets inside a single process.
+
     Args:
         context: The runtime context containing pipeline configuration and runtime data for the current plane. Modified
             in-place to store the computed metrics.
+        workers: The number of parallel workers allocated to this registration job. Must be a positive integer.
 
     Raises:
         FileNotFoundError: If the registered binary file does not exist at the specified path.
         ValueError: If the registered binary path is not set in the runtime context.
     """
+    # The Numba thread mask is thread-local and cannot exceed the core count Numba detected at import time.
+    numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
+
     # Extracts IO parameters from runtime context.
     registered_binary_path = context.runtime.io.registered_binary_path
     if registered_binary_path is None:
@@ -97,7 +106,6 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
     num_components = context.configuration.registration.registration_metric_principal_components
     spatial_smoothing_sigma = context.configuration.registration.spatial_smoothing_sigma
     maximum_offset_fraction = context.configuration.registration.maximum_offset_fraction
-    parallel_workers = context.configuration.runtime.parallel_workers
 
     # Extracts nonrigid registration parameters.
     nonrigid_enabled = context.configuration.nonrigid_registration.enabled
@@ -191,7 +199,7 @@ def compute_pc_metrics(context: RuntimeContext) -> None:
         nonrigid_enabled=nonrigid_enabled,
         bidirectional_phase_offset=bidirectional_phase_offset,
         edge_taper_slope=edge_taper_slope,
-        workers=parallel_workers,
+        workers=workers,
     )
 
     console.echo(
@@ -274,7 +282,7 @@ def _register_pc_extremes(
     nonrigid_enabled: bool = True,
     bidirectional_phase_offset: int = 0,
     edge_taper_slope: float = 40.0,
-    workers: int = -1,
+    workers: int,
 ) -> NDArray[np.float32]:
     """Registers images at the extreme ends of each principal component to each other to measure registration quality.
 
@@ -297,7 +305,7 @@ def _register_pc_extremes(
         nonrigid_enabled: Determines whether to compute nonrigid registration metrics.
         bidirectional_phase_offset: The bidirectional phase offset in pixels.
         edge_taper_slope: Controls the steepness of the edge taper for phase correlation.
-        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        workers: The number of parallel workers for FFT computation.
 
     Returns:
         A 2D array with shape (num_components, 3) containing registration metrics. Column 0 contains the rigid
