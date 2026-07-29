@@ -80,8 +80,9 @@ ___
   - [Data Structures](#data-structures)
   - [Single-Recording Pipeline](#single-recording-pipeline)
     - [Phase 1: Binarization](#phase-1-binarization)
-    - [Phase 2: Processing](#phase-2-processing)
-    - [Phase 3: Combination](#phase-3-combination)
+    - [Phase 2: Registration](#phase-2-registration)
+    - [Phase 3: Processing](#phase-3-processing)
+    - [Phase 4: Combination](#phase-4-combination)
   - [Multi-Recording Pipeline](#multi-recording-pipeline)
     - [Phase 1: Discovery](#phase-1-discovery)
     - [Phase 2: Multi-Recording Extraction](#phase-2-multi-recording-extraction)
@@ -339,9 +340,10 @@ Stored under `<recording_directory>/cindra/multi_recording/<dataset_name>/` per 
 
 ### Single-Recording Pipeline
 
-The single-recording pipeline processes a single calcium imaging session through three sequential phases: binarization,
-processing, and combination. Phase 2 (processing) runs independently per imaging plane, enabling parallel execution
-across planes.
+The single-recording pipeline processes a single calcium imaging session through four sequential phases: binarization,
+registration, processing, and combination. Phase 2 (registration) and phase 3 (processing) both run independently per
+imaging plane, enabling parallel execution across planes. Each plane must be registered before it is processed, because
+detection reads the valid pixel ranges that registration computes.
 
 #### Phase 1: Binarization
 
@@ -372,13 +374,13 @@ Produces:
 
 **Run via CLI:** `cindra run --input-path config.yaml --binarize`
 
-#### Phase 2: Processing
+#### Phase 2: Registration
 
-Phase 2 runs four steps sequentially on each imaging plane: registration, detection, extraction (with classification),
-and spike deconvolution. Each plane is processed independently, so multiple planes can be processed in parallel by
-running separate `cindra run --process --target-plane <index>` commands.
+Phase 2 motion-corrects one imaging plane and computes the principal components used to review the registration
+quality. Each plane is registered independently, so multiple planes can be registered in parallel by running separate
+`cindra run --register --target-plane <index>` commands. This phase is the prerequisite of phase 3.
 
-**Run via CLI:** `cindra run --input-path config.yaml --process`
+**Run via CLI:** `cindra run --input-path config.yaml --register`
 
 ##### Registration (Motion Correction)
 
@@ -418,6 +420,15 @@ are saved as
 `principal_component_projections.npy`, `principal_component_extreme_images.npy`, and
 `principal_component_shift_metrics.npy` under `registration_data/`, and can be inspected interactively using the
 registration quality GUI viewer (`cindra-gui registration`).
+
+#### Phase 3: Processing
+
+Phase 3 runs three steps sequentially on each registered imaging plane: detection, extraction (with classification),
+and spike deconvolution. Each plane is processed independently, so multiple planes can be processed in parallel by
+running separate `cindra run --process --target-plane <index>` commands. Processing a plane that phase 2 has not
+registered raises an error rather than detecting ROIs on uncorrected data.
+
+**Run via CLI:** `cindra run --input-path config.yaml --process`
 
 ##### ROI Detection
 
@@ -505,7 +516,7 @@ Produces:
 |------------------------|--------------------------------------------|
 | `plane_<i>/spikes.npy` | Inferred spike amplitude per ROI per frame |
 
-#### Phase 3: Combination
+#### Phase 4: Combination
 
 The combination phase merges the per-plane processing results into a single unified dataset. Multi-plane recordings
 produce independent results per plane, and this step creates a single coordinate system and dataset that represents the
@@ -705,12 +716,13 @@ config.file_io.data_path = Path("/path/to/tiff/directory")
 config.file_io.output_path = Path("/path/to/output")
 config.to_yaml(Path("/path/to/config.yaml"))
 
-# Execute the full single-recording pipeline (binarize, process, combine).
+# Execute the full single-recording pipeline (binarize, register, process, combine).
 run_single_recording_pipeline(configuration_path=Path("/path/to/config.yaml"))
 
-# Execute individual phases for finer control.
+# Execute individual phases for finer control, each with its own worker allocation.
 run_single_recording_pipeline(configuration_path=Path("/path/to/config.yaml"), binarize=True)
-run_single_recording_pipeline(configuration_path=Path("/path/to/config.yaml"), process=True)
+run_single_recording_pipeline(configuration_path=Path("/path/to/config.yaml"), register=True, registration_workers=8)
+run_single_recording_pipeline(configuration_path=Path("/path/to/config.yaml"), process=True, processing_workers=10)
 run_single_recording_pipeline(configuration_path=Path("/path/to/config.yaml"), combine=True)
 
 # For multi-recording pipelines, configure and run similarly.
@@ -731,9 +743,12 @@ This library provides the `cindra` and `cindra-gui` CLIs that expose the followi
 | `run`       | Executes a pipeline using a YAML configuration file with optional CLI overrides    |
 | `mcp`       | Starts the data processing MCP server for AI agent integration                     |
 
-The `run` command supports executing individual pipeline phases (`--binarize`, `--process`, `--combine` for
-single-recording; `--discover`, `--extract` for multi-recording), targeting specific planes (`--target-plane`) or
-recordings (`--target-recording`), and controlling parallelism (`--workers`).
+The `run` command supports executing individual pipeline phases (`--binarize`, `--register`, `--process`, `--combine`
+for single-recording, `--discover` and `--extract` for multi-recording), targeting specific planes (`--target-plane`) or
+recordings (`--target-recording`), and allocating workers per phase (`--binarize-workers`, `--register-workers`,
+`--process-workers`, `--discover-workers`, `--extract-workers`). Omitting a worker option gives that phase its measured
+default allocation, and the combination phase takes no worker option because it merges the per-plane result files with
+serial input and output.
 
 #### cindra-gui
 

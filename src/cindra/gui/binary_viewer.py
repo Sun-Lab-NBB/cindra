@@ -119,8 +119,8 @@ class BinaryPlayer(QMainWindow):
 
         # Hint label for keyboard shortcuts.
         hint_label = QLabel(
-            "Hint: Use arrows to navigate recording's frames / adjust frame step size,"
-            " use space to toggle recording playback."
+            "Hint: Use arrows to navigate recording's frames / adjust frame step size, "
+            "use space to toggle recording playback."
         )
         hint_label.setStyleSheet(STYLE.white_label)
         hint_label.setFont(FONTS.small_bold)

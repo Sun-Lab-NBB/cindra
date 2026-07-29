@@ -62,7 +62,7 @@ class TestRegisterPlane:
             tmp_path, frame_height=128, frame_width=128, frame_count=frame_count, movie=movie
         )
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
         registered = read_binary_movie(binary_path, 128, 128)
@@ -83,7 +83,7 @@ class TestRegisterPlane:
         movie = np.broadcast_to(base, (30, 128, 128)).copy()
         context = single_recording_context(tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie)
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         plane_directory = tmp_path / "output" / "cindra" / "plane_0"
         registration_directory = plane_directory / "registration_data"
@@ -109,7 +109,7 @@ class TestRegisterPlane:
         registration_directory.mkdir(parents=True, exist_ok=True)
         np.save(registration_directory / "reference_image.npy", np.zeros((48, 48), dtype=np.float32))
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         # The early return happens before any registration work, so no mean image is produced.
         assert context.runtime.detection.mean_image is None
@@ -135,7 +135,7 @@ class TestRegisterPlane:
         registration_directory.mkdir(parents=True, exist_ok=True)
         np.save(registration_directory / "reference_image.npy", np.zeros((128, 128), dtype=np.float32))
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         # The forced re-registration runs the full pipeline, producing a fresh mean image.
         assert context.runtime.detection.mean_image is not None
@@ -159,7 +159,7 @@ class TestRegisterPlane:
             movie_channel_2=movie_channel_2,
         )
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         assert context.runtime.detection.mean_image is not None
         assert context.runtime.detection.mean_image_channel_2 is not None
@@ -187,7 +187,7 @@ class TestRegisterPlane:
             configure=configure,
         )
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         # Both mean images are produced regardless of which channel drives the alignment.
         assert context.runtime.detection.mean_image is not None
@@ -210,7 +210,7 @@ class TestRegisterPlane:
         )
 
         with pytest.raises(ValueError, match="Unable to register channel 2 frames"):
-            register_plane(context=context)
+            register_plane(context=context, workers=1)
 
     def test_two_step_registration_refines(
         self,
@@ -228,7 +228,7 @@ class TestRegisterPlane:
             tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         # The refinement pass re-registers the frames and still produces a mean image.
         assert context.runtime.detection.mean_image is not None
@@ -254,7 +254,7 @@ class TestRegisterPlane:
             tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         # The in-memory arrays are released after registration, so the bad-frame mask is read back from disk.
         registration_directory = tmp_path / "output" / "cindra" / "plane_0" / "registration_data"
@@ -280,7 +280,7 @@ class TestRegisterPlane:
             tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         # No frames are flagged from disk, and the motion-free movie yields no offset-based outliers.
         registration_directory = tmp_path / "output" / "cindra" / "plane_0" / "registration_data"
@@ -311,7 +311,7 @@ class TestRegisterPlane:
             configure=configure,
         )
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         registration_directory = tmp_path / "output" / "cindra" / "plane_0" / "registration_data"
         assert (registration_directory / "nonrigid_y_offsets.npy").exists()
@@ -334,7 +334,7 @@ class TestRegisterPlane:
             tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         # The recording has far fewer than the minimum frames, so metrics are not computed.
         assert context.runtime.registration.principal_component_extreme_images is None
@@ -355,7 +355,7 @@ class TestRegisterPlane:
             tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         # With normalization disabled, the unbounded clip range is stored as the zero sentinel.
         assert context.runtime.registration.normalization_minimum == 0
@@ -379,7 +379,7 @@ class TestRegisterPlane:
             tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         assert context.runtime.registration.bidirectional_phase_offset != 0
         assert context.runtime.registration.bidirectional_phase_corrected
@@ -400,7 +400,7 @@ class TestRegisterPlane:
             tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
-        register_plane(context=context)
+        register_plane(context=context, workers=1)
 
         # The artifact-free movie yields no offset, leaving the bidirectional correction untriggered.
         assert context.runtime.registration.bidirectional_phase_offset == 0

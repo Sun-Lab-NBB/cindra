@@ -9,9 +9,11 @@
 | `MultiRecordingRuntimeContext`    | `dataclasses/runtime_contexts.py`               | Multi-recording config + runtime data                   |
 | `SingleRecordingRuntimeData`      | `dataclasses/single_recording_data.py`          | IOData, RegistrationData, DetectionData, ExtractionData |
 | `MultiRecordingRuntimeData`       | `dataclasses/multi_recording_data.py`           | Multi-recording IO, registration, tracking, timing data |
-| `run_single_recording_pipeline`   | `pipelines/pipeline.py`                         | Execute single-recording three-phase workflow           |
+| `run_single_recording_pipeline`   | `pipelines/pipeline.py`                         | Execute single-recording four-phase workflow            |
 | `run_multi_recording_pipeline`    | `pipelines/pipeline.py`                         | Execute multi-recording two-phase workflow              |
+| `register_recording_plane`        | `pipelines/single_recording.py`                 | Per-plane registration stage entry point (phase 2)      |
 | `register_plane`                  | `registration/register.py`                      | Per-plane motion correction (rigid + optional nonrigid) |
+| `resolve_stage_workers`           | `allocation/workers.py`                         | Measured per-stage worker defaults and worker resolver  |
 | `DiffeomorphicDemonsRegistration` | `registration/diffeomorphic.py`                 | Cross-day diffeomorphic alignment algorithm             |
 | `Deformation`                     | `registration/deformation.py`                   | Deformation field application and inversion             |
 | `detect_plane_rois`               | `detection/detect.py`                           | ROI detection via sparse detection with PCA denoising   |
@@ -81,7 +83,7 @@
 **Modifying pipeline orchestration:**
 
 1. Review `src/cindra/pipelines/pipeline.py` for job orchestration and ProcessingTracker integration
-2. Review `src/cindra/pipelines/single_recording.py` for the three-phase single-recording workflow
+2. Review `src/cindra/pipelines/single_recording.py` for the four-phase single-recording workflow
 3. Review `src/cindra/pipelines/multi_recording.py` for the two-phase multi-recording workflow
 4. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
 

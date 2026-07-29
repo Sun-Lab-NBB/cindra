@@ -3,8 +3,6 @@
 from .pipeline import (
     MULTI_RECORDING_TRACKER_NAME,
     SINGLE_RECORDING_TRACKER_NAME,
-    MultiRecordingJobNames,
-    SingleRecordingJobNames,
     execute_multi_recording_job,
     execute_single_recording_job,
     run_multi_recording_pipeline,
@@ -14,8 +12,6 @@ from .pipeline import (
 __all__ = [
     "MULTI_RECORDING_TRACKER_NAME",
     "SINGLE_RECORDING_TRACKER_NAME",
-    "MultiRecordingJobNames",
-    "SingleRecordingJobNames",
     "execute_multi_recording_job",
     "execute_single_recording_job",
     "run_multi_recording_pipeline",

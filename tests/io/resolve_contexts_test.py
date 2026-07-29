@@ -30,7 +30,6 @@ def _make_single_configuration(output_path: Path, data_path: Path | None = None)
     configuration = SingleRecordingConfiguration()
     configuration.file_io.output_path = output_path
     configuration.file_io.data_path = data_path
-    configuration.runtime.parallel_workers = 1
     configuration.runtime.display_progress_bars = False
     return configuration
 
@@ -68,7 +67,6 @@ def _make_multi_configuration(
     configuration = MultiRecordingConfiguration()
     configuration.recording_io.recording_directories = recording_directories
     configuration.recording_io.dataset_name = dataset_name
-    configuration.runtime.parallel_workers = 1
     configuration.runtime.display_progress_bars = False
     return configuration
 

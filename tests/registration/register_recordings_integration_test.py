@@ -89,7 +89,6 @@ def _make_configuration(
 ) -> MultiRecordingConfiguration:
     """Builds a serial multi-recording configuration with fast diffeomorphic registration settings."""
     configuration = MultiRecordingConfiguration()
-    configuration.runtime.parallel_workers = 1
     configuration.runtime.display_progress_bars = False
     configuration.diffeomorphic_registration.image_type = image_type
     configuration.diffeomorphic_registration.scale_sampling = 5
@@ -254,7 +253,7 @@ class TestRegisterRecordings:
         configuration = _make_configuration()
         contexts = _build_recording_pair(tmp_path, gaussian_blob_image, configuration)
 
-        register_recordings(contexts)
+        register_recordings(contexts=contexts, workers=1)
 
         for context in contexts:
             output_path = context.runtime.output_path
@@ -282,7 +281,7 @@ class TestRegisterRecordings:
         configuration = _make_configuration()
         contexts = _build_recording_pair(tmp_path, gaussian_blob_image, configuration, shift=0)
 
-        register_recordings(contexts)
+        register_recordings(contexts=contexts, workers=1)
 
         for context in contexts:
             field_y, field_x = _read_deform_fields(context)
@@ -302,7 +301,7 @@ class TestRegisterRecordings:
             selected_indices=(),
         )
 
-        register_recordings(contexts)
+        register_recordings(contexts=contexts, workers=1)
 
         for context in contexts:
             output_path = context.runtime.output_path
@@ -326,7 +325,7 @@ class TestRegisterRecordings:
             write_channel_2_masks=True,
         )
 
-        register_recordings(contexts)
+        register_recordings(contexts=contexts, workers=1)
 
         for context in contexts:
             output_path = context.runtime.output_path
@@ -354,7 +353,7 @@ class TestRegisterRecordings:
             write_channel_2_masks=False,
         )
 
-        register_recordings(contexts)
+        register_recordings(contexts=contexts, workers=1)
 
         for context in contexts:
             output_path = context.runtime.output_path
@@ -368,13 +367,13 @@ class TestRegisterRecordings:
         """Verifies that a second registration call short-circuits when registration data already exists on disk."""
         configuration = _make_configuration()
         contexts = _build_recording_pair(tmp_path, gaussian_blob_image, configuration)
-        register_recordings(contexts)
+        register_recordings(contexts=contexts, workers=1)
 
         # Removing combined data would break a re-run; the skip path must not touch it, so no error proves the skip.
         for context in contexts:
             context.runtime.combined_data = None
 
-        register_recordings(contexts)
+        register_recordings(contexts=contexts, workers=1)
 
         for context in contexts:
             output_path = context.runtime.output_path
@@ -387,10 +386,10 @@ class TestRegisterRecordings:
         """Verifies that enabling repeat_registration re-runs registration despite existing registration data."""
         configuration = _make_configuration()
         contexts = _build_recording_pair(tmp_path, gaussian_blob_image, configuration)
-        register_recordings(contexts)
+        register_recordings(contexts=contexts, workers=1)
 
         configuration.diffeomorphic_registration.repeat_registration = True
-        register_recordings(contexts)
+        register_recordings(contexts=contexts, workers=1)
 
         for context in contexts:
             field_y, field_x = _read_deform_fields(context)
@@ -406,7 +405,7 @@ class TestRegisterRecordings:
         contexts[0].runtime.combined_data = None
 
         with pytest.raises(ValueError, match="combined_data must be loaded"):
-            register_recordings(contexts)
+            register_recordings(contexts=contexts, workers=1)
 
     def test_missing_reference_image_raises(
         self, gaussian_blob_image: Callable[..., NDArray[np.float64]], tmp_path: Path
@@ -416,7 +415,7 @@ class TestRegisterRecordings:
         contexts = _build_recording_pair(tmp_path, gaussian_blob_image, configuration, image_kinds=("enhanced_mean",))
 
         with pytest.raises(ValueError, match="required reference image"):
-            register_recordings(contexts)
+            register_recordings(contexts=contexts, workers=1)
 
 
 class TestApplyForwardDeformation:
@@ -444,7 +443,7 @@ class TestProjectTemplatesToRecordings:
             _build_projection_context(tmp_path, configuration, recording_id="rec1"),
         ]
 
-        project_templates_to_recordings(contexts)
+        project_templates_to_recordings(contexts=contexts, workers=1)
 
         for context in contexts:
             output_path = context.runtime.output_path
@@ -474,7 +473,7 @@ class TestProjectTemplatesToRecordings:
             ),
         ]
 
-        project_templates_to_recordings(contexts)
+        project_templates_to_recordings(contexts=contexts, workers=1)
 
         for context in contexts:
             output_path = context.runtime.output_path
@@ -494,7 +493,7 @@ class TestProjectTemplatesToRecordings:
             ),
         ]
 
-        project_templates_to_recordings(contexts)
+        project_templates_to_recordings(contexts=contexts, workers=1)
 
         for context in contexts:
             output_path = context.runtime.output_path
@@ -509,13 +508,13 @@ class TestProjectTemplatesToRecordings:
             _build_projection_context(tmp_path, configuration, recording_id="rec0"),
             _build_projection_context(tmp_path, configuration, recording_id="rec1"),
         ]
-        project_templates_to_recordings(contexts)
+        project_templates_to_recordings(contexts=contexts, workers=1)
 
         # Clearing the in-memory templates would break a re-run; the skip path must not reach them.
         for context in contexts:
             context.runtime.tracking.template_masks = None
 
-        project_templates_to_recordings(contexts)
+        project_templates_to_recordings(contexts=contexts, workers=1)
 
         for context in contexts:
             output_path = context.runtime.output_path

@@ -9,6 +9,14 @@ Data Structures
    :undoc-members:
    :show-inheritance:
 
+Allocation
+==========
+
+.. automodule:: cindra.allocation
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Pipelines
 =========
 

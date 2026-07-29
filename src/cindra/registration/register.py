@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
+import numba
 import numpy as np
 from scipy.signal import medfilt
 from ataraxis_time import PrecisionTimer, TimerPrecisions
@@ -54,7 +55,7 @@ if TYPE_CHECKING:
     from ..dataclasses import RuntimeContext
 
 
-def register_plane(context: RuntimeContext) -> None:
+def register_plane(context: RuntimeContext, *, workers: int) -> None:
     """Registers (motion-corrects) all frames for a single imaging plane specified by the input runtime context.
 
     This function is the primary entry point for frame registration. It computes registration offsets from the alignment
@@ -65,10 +66,19 @@ def register_plane(context: RuntimeContext) -> None:
     All configuration is read from context.configuration, file paths from context.runtime.io, and results are stored in
     context.runtime.registration, context.runtime.detection, and context.runtime.timing.
 
+    Notes:
+        The worker count drives both the FFT thread pool used by phase correlation and the Numba thread mask used by
+        the nonrigid warping kernels. The Numba mask is thread-local, so concurrently dispatched planes can hold
+        different worker budgets inside a single process.
+
     Args:
         context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
             in-place to store registration outputs including reference image, offsets, mean images, and timing data.
+        workers: The number of parallel workers allocated to this registration job. Must be a positive integer.
     """
+    # The Numba thread mask is thread-local and cannot exceed the core count Numba detected at import time.
+    numba.set_num_threads(min(workers, numba.config.NUMBA_NUM_THREADS))
+
     config = context.configuration
     io_data = context.runtime.io
     registration_data = context.runtime.registration
@@ -110,11 +120,11 @@ def register_plane(context: RuntimeContext) -> None:
     timer.reset()
 
     # Computes registration offsets from the alignment channel and applies them.
-    _register_alignment_channel(context)
+    _register_alignment_channel(context=context, workers=workers)
 
     # Applies the same registration offsets to the secondary channel if present.
     if has_second_channel:
-        _register_secondary_channel(context)
+        _register_secondary_channel(context=context)
 
     context.runtime.timing.registration_time = timer.elapsed
     console.echo(
@@ -129,11 +139,11 @@ def register_plane(context: RuntimeContext) -> None:
         timer.reset()
 
         # Re-runs registration (computes new reference from already-registered frames).
-        _register_alignment_channel(context)
+        _register_alignment_channel(context=context, workers=workers)
 
         # Re-applies offsets to the secondary channel if present.
         if has_second_channel:
-            _register_secondary_channel(context)  # pragma: no cover — duplicates the tested step-1 secondary path
+            _register_secondary_channel(context=context)  # pragma: no cover — duplicates the step-1 secondary path
 
         context.runtime.timing.two_step_registration_time = int(timer.elapsed)
         console.echo(
@@ -207,7 +217,7 @@ def register_plane(context: RuntimeContext) -> None:
     if num_principal_components > 0 and num_frames >= _MINIMUM_REGISTRATION_METRIC_FRAMES:  # pragma: no cover — the
         # >=1500-frame metrics path is impractical on synthetic data; compute_pc_metrics is covered directly.
         timer.reset()
-        compute_pc_metrics(context)
+        compute_pc_metrics(context=context, workers=workers)
         context.runtime.timing.registration_metrics_time = int(timer.elapsed)
         console.echo(
             message=(
@@ -717,7 +727,7 @@ def _apply_precomputed_offsets_batch(
     return frames
 
 
-def _register_alignment_channel(context: RuntimeContext) -> None:
+def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> None:
     """Computes registration offsets from the alignment channel and applies them to that channel's frames.
 
     The alignment channel is determined by config.registration.align_by_first_channel. If True, channel 1 is used;
@@ -727,6 +737,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
 
     Args:
         context: The RuntimeContext containing configuration, acquisition parameters, and runtime data.
+        workers: The number of parallel workers to use for the phase correlation FFT computations.
     """
     # Extracts configuration parameters.
     config = context.configuration
@@ -745,7 +756,6 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
     block_size = config.nonrigid_registration.block_size
     signal_to_noise_threshold = config.nonrigid_registration.signal_to_noise_threshold
     maximum_block_offset = config.nonrigid_registration.maximum_block_offset
-    parallel_workers = config.runtime.parallel_workers
     enable_bidiphase_computation = config.registration.compute_bidirectional_phase_offset
     initial_bidirectional_phase_offset = config.registration.bidirectional_phase_offset_override
 
@@ -811,7 +821,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
             spatial_smoothing_sigma=spatial_smoothing_sigma,
             maximum_offset_fraction=maximum_offset_fraction,
             temporal_smoothing_sigma=temporal_smoothing_sigma,
-            workers=parallel_workers,
+            workers=workers,
         )
         console.echo(
             message=f"Plane {plane_index} reference frame: computed. Time taken: {timer.elapsed} seconds.",
@@ -905,7 +915,7 @@ def _register_alignment_channel(context: RuntimeContext) -> None:
                 nonrigid_enabled=nonrigid_enabled,
                 signal_to_noise_threshold=signal_to_noise_threshold,
                 maximum_block_offset=maximum_block_offset,
-                workers=parallel_workers,
+                workers=workers,
             )
 
             rigid_offsets_batches.append((batch_result.y_offsets, batch_result.x_offsets, batch_result.correlations))

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from ..dataclasses import MultiRecordingConfiguration
 
 
-def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -> None:
+def discover_multi_recording_cells(configuration: MultiRecordingConfiguration, *, workers: int) -> None:
     """Discovers reliably identifiable ROIs and tracks them across the processed set of recordings.
 
     Notes:
@@ -26,6 +26,8 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -
 
     Args:
         configuration: The multi-recording pipeline configuration.
+        workers: The number of parallel workers allocated to this discovery job. Must be a positive integer, which the
+            caller resolves before invoking this function.
     """
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
@@ -44,7 +46,7 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -
 
     # Registers all recordings to a shared visual space using diffeomorphic demons registration and applies the
     # deformation fields to transform reference images and ROI masks.
-    register_recordings(contexts=contexts)
+    register_recordings(contexts=contexts, workers=workers)
 
     # Clusters ROIs across recordings in the shared deformed visual space and generates template masks for ROIs that
     # can be reliably identified across recordings.
@@ -52,7 +54,7 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -
 
     # Projects template masks from the shared visual space back to each recording's original coordinate system for
     # fluorescence extraction.
-    project_templates_to_recordings(contexts=contexts)
+    project_templates_to_recordings(contexts=contexts, workers=workers)
 
     # Records total discovery time and processing timestamp for each context.
     total_discovery_time = int(timer.elapsed)
@@ -67,7 +69,9 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration) -
     )
 
 
-def extract_multi_recording_fluorescence(configuration: MultiRecordingConfiguration, recording_id: str) -> None:
+def extract_multi_recording_fluorescence(
+    configuration: MultiRecordingConfiguration, recording_id: str, *, workers: int
+) -> None:
     """Extracts fluorescence data from ROIs tracked across imaging recordings for the specified recording.
 
     Notes:
@@ -80,6 +84,8 @@ def extract_multi_recording_fluorescence(configuration: MultiRecordingConfigurat
         configuration: The multi-recording pipeline configuration.
         recording_id: The unique identifier of the recording for which to extract fluorescence data. Must match
             one of the recording IDs assigned during context resolution.
+        workers: The number of parallel workers allocated to this extraction job. Must be a positive integer, which the
+            caller resolves before invoking this function.
 
     Raises:
         ValueError: If the target recording_id does not match any resolved recording context.
@@ -115,4 +121,4 @@ def extract_multi_recording_fluorescence(configuration: MultiRecordingConfigurat
 
     # Delegates to the unified extraction entry point, which dispatches to _extract_multi_recording internally. The
     # extraction function handles fluorescence extraction, deconvolution, timing, and runtime saving.
-    extract_traces(context=target_context)
+    extract_traces(context=target_context, workers=workers)

@@ -14,7 +14,7 @@ class PipelineType(StrEnum):
     """Defines the supported cindra processing pipeline types."""
 
     SINGLE_RECORDING = "single-recording"
-    """The within-recording pipeline that processes a single recording (binarize, process, combine)."""
+    """The within-recording pipeline that processes a single recording (binarize, register, process, combine)."""
 
     MULTI_RECORDING = "multi-recording"
     """The across-recording pipeline that tracks and extracts ROIs across multiple recordings (discover,
@@ -93,17 +93,9 @@ class _PipelineHeader(YamlConfig):
 class RuntimeSettings:
     """Stores runtime behavior settings shared between single-recording and multi-recording processing pipelines.
 
-    This dataclass contains parameters that control execution behavior rather than data processing logic. Both
-    pipelines use these settings to configure parallel processing and progress reporting.
+    This dataclass holds the parameters that control execution behavior. Both pipelines use these settings to
+    configure progress reporting.
     """
-
-    parallel_workers: int = 20
-    """The number of workers used to parallelize certain processing operations. This worker pool is used by numba when
-    it parallelizes certain computations used during registration and ROI processing. There is generally no benefit from
-    increasing this parameter above 20 cores per each processed recording or plane. On machines with a high number of
-    cores, it is recommended to keep this value between 10 and 20 cores and to instead parallelize processing
-    across recordings and planes. Setting this to -1 or 0 removes worker limits, forcing the pipeline to use
-    all available CPU cores."""
 
     display_progress_bars: bool = False
     """Determines whether to display progress bars for certain processing steps. Only enable this option when running

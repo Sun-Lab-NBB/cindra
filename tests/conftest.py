@@ -7,7 +7,7 @@ end-to-end against small, predictable inputs without requiring real acquisition 
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -23,6 +23,7 @@ from cindra.dataclasses import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from collections.abc import Callable
 
     from numpy.typing import NDArray
 
@@ -86,7 +87,6 @@ def single_recording_context() -> Callable[..., RuntimeContext]:
         configuration = SingleRecordingConfiguration()
         configuration.file_io.output_path = output_root
         configuration.file_io.data_path = None
-        configuration.runtime.parallel_workers = 1
         configuration.runtime.display_progress_bars = False
         configuration.registration.registration_metric_principal_components = 0
         configuration.nonrigid_registration.enabled = False
