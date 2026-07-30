@@ -61,8 +61,9 @@ def generate_acquisition_parameters_file_tool(
     if not directory.exists():
         return {
             "success": False,
-            "error": f"Unable to generate acquisition parameters file. The directory does not exist: "
-            f"{output_directory}",
+            "error": (
+                f"Unable to generate acquisition parameters file. The directory does not exist: {output_directory}"
+            ),
         }
 
     if not directory.is_dir():
@@ -170,9 +171,11 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
     """Validates that a recording directory is fully ready for cindra single-recording processing.
 
     Verifies that the cindra_parameters.json acquisition parameters file is present and valid, that raw TIFF files
-    exist and are readable with consistent dimensions, and that the TIFF data is compatible with the acquisition
-    parameters. This tool is intended as the final readiness gate before committing compute resources to pipeline
-    execution.
+    exist and are readable, and that the TIFF data is compatible with the acquisition parameters. Files whose frame
+    shape differs from the shape holding the most frames are reported as warnings rather than errors. A raw directory
+    commonly holds an unrelated file such as an anatomical z-stack, which must be excluded through the
+    'file_io.ignored_file_names' configuration parameter. Serves as the final readiness gate before committing
+    compute resources to pipeline execution.
 
     Args:
         recording_directory: The absolute path to the recording directory containing raw TIFF files and a
@@ -211,7 +214,7 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
             "success": False,
             "error": (
                 f"Unable to validate recording readiness. No {PARAMETERS_FILENAME} found in: {recording_directory}. "
-                f"Use generate_acquisition_parameters_file to create one before validating readiness."
+                f"Use generate_acquisition_parameters_file_tool to create one before validating readiness."
             ),
         }
 
@@ -298,7 +301,7 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
             shape_groups.setdefault((height, width), []).append((tiff_path.name, page_count))
 
             # Tracks the reference dtype from the first valid file. Frame dimensions are resolved after the loop, from
-            # the shape the majority of files share.
+            # the shape whose files hold the most frames in total.
             if reference_dtype is None:
                 reference_dtype = dtype
             elif dtype != reference_dtype:
@@ -307,8 +310,8 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
         except Exception as exception:
             errors.append(f"Unable to read TIFF file {tiff_path.name}: {type(exception).__name__}: {exception}")
 
-    # Resolves the recording's frame shape as the one the majority of files share, and counts frames from those files
-    # alone. This tool receives a directory rather than a configuration, so it cannot read the
+    # Resolves the recording's frame shape as the shape whose files hold the most frames in total, and counts
+    # frames from those files alone. Receives a directory rather than a configuration, so it cannot read the
     # 'file_io.ignored_file_names' exclusions the pipeline applies. A raw directory commonly holds a differently shaped
     # file that is not part of the recording, such as an anatomical z-stack, and reporting it as an error here would
     # fail a recording the pipeline processes correctly. The conversion stage still rejects a genuinely ragged
@@ -357,10 +360,10 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
     if isinstance(roi_number, int) and roi_number > 1 and roi_lines and reference_height is not None:
         for roi_index, lines in enumerate(roi_lines):
             if isinstance(lines, list) and lines:
-                max_line = max(lines)
-                if max_line >= reference_height:
+                maximum_line = max(lines)
+                if maximum_line >= reference_height:
                     errors.append(
-                        f"ROI {roi_index} roi_lines maximum ({max_line}) exceeds frame height ({reference_height})."
+                        f"ROI {roi_index} roi_lines maximum ({maximum_line}) exceeds frame height ({reference_height})."
                     )
 
     # Checks dtype compatibility with the pipeline.

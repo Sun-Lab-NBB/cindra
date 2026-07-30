@@ -63,7 +63,7 @@ class TestExplicitRequests:
         assert resolved >= 1
 
     def test_all_cores_request_is_honored_for_every_allocating_stage(self) -> None:
-        """Verifies that every stage taking an allocation accepts the all-cores request."""
+        """Verifies that every single-recording stage taking an allocation accepts the all-cores request."""
         expected = resolve_worker_count(requested_workers=ALL_CORES_REQUEST)
         for job_name in (
             SingleRecordingJobNames.BINARIZE,

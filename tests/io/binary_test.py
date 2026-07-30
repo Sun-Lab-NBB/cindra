@@ -14,7 +14,6 @@ from cindra.io.binary import BinaryFile
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-# Test data constants.
 _FRAME_HEIGHT: int = 8
 """The height of each frame used in test binary files."""
 
@@ -174,7 +173,7 @@ class TestBinaryFileContextManager:
         with BinaryFile(height=_FRAME_HEIGHT, width=_FRAME_WIDTH, file_path=file_path) as binary_file:
             assert binary_file.frame_number == _FRAME_COUNT
 
-        # numpy memmap exposes no public closed flag; _mmap.closed is the authoritative signal it was released.
+        # numpy memmap exposes no public closed flag, so _mmap.closed is the authoritative signal it was released.
         assert binary_file.file._mmap.closed  # type: ignore[attr-defined]
 
     def test_exit_closes_file_even_with_exception(self, tmp_path: Path) -> None:
@@ -189,7 +188,7 @@ class TestBinaryFileContextManager:
         ):
             raise simulated_error
 
-        # numpy memmap exposes no public closed flag; _mmap.closed confirms release even after the exception.
+        # numpy memmap exposes no public closed flag, so _mmap.closed confirms release even after the exception.
         assert binary_file.file._mmap.closed  # type: ignore[attr-defined]
 
     def test_close_method_closes_memmap(self, tmp_path: Path) -> None:
@@ -407,7 +406,8 @@ class TestBinMovie:
         )
         data.tofile(file_path)
 
-        # Marks 15 out of 20 frames as bad (25% good < 50% threshold), so no frames are rejected within batches.
+        # Marks 15 of the 20 frames as bad. The bad frames fill whole batches, so each batch is either fully good
+        # or fully bad and no batch discards any of its frames.
         bad_frames = np.ones(frame_count, dtype=np.bool_)
         bad_frames[:5] = False
 
@@ -415,9 +415,8 @@ class TestBinMovie:
             result = binary_file.bin_movie(bin_size=2, bad_frames=bad_frames)
 
             assert result.dtype == np.float32
-            # batch_size = min(5, 500) = 5. Each batch has 5 frames. 20 // 5 = 4 batches.
-            # Mean good fraction per batch is <= 0.5, so all frames kept. 5 frames with bin_size=2 yields
-            # floor(5/2) = 2 bins per batch. 4 batches * 2 bins = 8 bins total.
+            # batch_size = min(5 good frames, 500) = 5, so the 20 frames split into 4 batches of 5. Every batch keeps
+            # all 5 of its frames, and bin_size=2 yields floor(5/2) = 2 bins per batch, for 8 bins total.
             assert result.shape[0] == 8
 
     def test_bins_small_batch_averaged_into_single_bin(self, tmp_path: Path) -> None:

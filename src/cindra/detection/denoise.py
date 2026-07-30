@@ -1,4 +1,4 @@
-"""Provides PCA-based denoising algorithm applied to the recording frames before ROI detection."""
+"""Provides the PCA-based denoising algorithm applied to the recording frames before ROI detection."""
 
 from __future__ import annotations
 
@@ -28,9 +28,9 @@ def pca_denoise(
     Notes:
         The movie is divided into overlapping blocks, and PCA is applied to each block independently. The denoised
         blocks are then blended together using a taper mask to ensure smooth transitions between adjacent blocks.
-        This approach reduces noise while preserving spatially localized signals. When parallel_workers is greater
-        than 1, PCA fitting runs concurrently across blocks using a thread pool. LAPACK's SVD implementation used by
-        sklearn releases the GIL, making threading effective for this workload. The subsequent accumulation step
+        This approach reduces noise while preserving spatially localized signals. Whenever more than one worker is
+        available, PCA fitting runs concurrently across blocks using a thread pool. LAPACK's SVD implementation used
+        by sklearn releases the GIL, making threading effective for this workload. The subsequent accumulation step
         remains sequential to avoid write conflicts on overlapping block regions.
 
     Args:

@@ -29,26 +29,26 @@ class TestApplyPhaseCorrelation:
 
     def test_output_shape(self) -> None:
         """Verifies the output shape matches the input frames shape."""
-        rng = np.random.default_rng(42)
-        frames = rng.standard_normal((5, 32, 32)).astype(np.float32)
-        reference = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(42)
+        frames = generator.standard_normal((5, 32, 32)).astype(np.float32)
+        reference = generator.standard_normal((32, 32)).astype(np.float32)
         kernel = compute_reference_fft(reference_image=reference)
         result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
         assert result.shape == frames.shape
 
     def test_output_dtype(self) -> None:
         """Verifies the output dtype is float32."""
-        rng = np.random.default_rng(42)
-        frames = rng.standard_normal((3, 16, 16)).astype(np.float32)
-        reference = rng.standard_normal((16, 16)).astype(np.float32)
+        generator = np.random.default_rng(42)
+        frames = generator.standard_normal((3, 16, 16)).astype(np.float32)
+        reference = generator.standard_normal((16, 16)).astype(np.float32)
         kernel = compute_reference_fft(reference_image=reference)
         result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
         assert result.dtype == np.float32
 
     def test_self_correlation_peak_at_origin(self) -> None:
         """Verifies that correlating a frame with itself produces a peak at the origin."""
-        rng = np.random.default_rng(42)
-        reference = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(42)
+        reference = generator.standard_normal((32, 32)).astype(np.float32)
         kernel = compute_reference_fft(reference_image=reference)
         kernel /= NORMALIZATION_EPSILON + np.abs(kernel)
         frames = reference[np.newaxis, :, :]
@@ -99,19 +99,19 @@ class TestCombineRigidOffsets:
 
     def test_concatenation(self) -> None:
         """Verifies horizontal concatenation of rigid offset batches."""
-        batch1 = (
+        first_batch = (
             np.array([1, 2], dtype=np.int32),
             np.array([3, 4], dtype=np.int32),
             np.array([0.9, 0.8], dtype=np.float32),
         )
-        batch2 = (
+        second_batch = (
             np.array([5], dtype=np.int32),
             np.array([6], dtype=np.int32),
             np.array([0.7], dtype=np.float32),
         )
-        y, x, correlation = combine_rigid_offsets([batch1, batch2])
-        np.testing.assert_array_equal(y, [1, 2, 5])
-        np.testing.assert_array_equal(x, [3, 4, 6])
+        y_offsets, x_offsets, correlation = combine_rigid_offsets(offset_list=[first_batch, second_batch])
+        np.testing.assert_array_equal(y_offsets, [1, 2, 5])
+        np.testing.assert_array_equal(x_offsets, [3, 4, 6])
         np.testing.assert_allclose(correlation, [0.9, 0.8, 0.7])
 
     def test_single_batch(self) -> None:
@@ -121,9 +121,9 @@ class TestCombineRigidOffsets:
             np.array([30, 40], dtype=np.int32),
             np.array([1.0, 0.5], dtype=np.float32),
         )
-        y, x, _correlation = combine_rigid_offsets([batch])
-        np.testing.assert_array_equal(y, [10, 20])
-        np.testing.assert_array_equal(x, [30, 40])
+        y_offsets, x_offsets, _correlation = combine_rigid_offsets(offset_list=[batch])
+        np.testing.assert_array_equal(y_offsets, [10, 20])
+        np.testing.assert_array_equal(x_offsets, [30, 40])
 
 
 class TestCombineNonrigidOffsets:
@@ -131,19 +131,19 @@ class TestCombineNonrigidOffsets:
 
     def test_vertical_stacking(self) -> None:
         """Verifies vertical stacking of nonrigid offset batches."""
-        batch1 = (
+        first_batch = (
             np.ones((3, 4), dtype=np.float32),
             np.ones((3, 4), dtype=np.float32) * 2.0,
             np.ones((3, 4), dtype=np.float32) * 0.9,
         )
-        batch2 = (
+        second_batch = (
             np.ones((2, 4), dtype=np.float32) * 3.0,
             np.ones((2, 4), dtype=np.float32) * 4.0,
             np.ones((2, 4), dtype=np.float32) * 0.8,
         )
-        y, x, correlation = combine_nonrigid_offsets([batch1, batch2])
-        assert y.shape == (5, 4)
-        assert x.shape == (5, 4)
+        y_offsets, x_offsets, correlation = combine_nonrigid_offsets(offset_list=[first_batch, second_batch])
+        assert y_offsets.shape == (5, 4)
+        assert x_offsets.shape == (5, 4)
         assert correlation.shape == (5, 4)
 
 
@@ -167,9 +167,9 @@ class TestComputeGaussianFrequencyFilter:
 
     def test_cache_returns_same_object(self) -> None:
         """Verifies the lru_cache returns the same object for identical parameters."""
-        result1 = compute_gaussian_frequency_filter(sigma=3.0, height=64, width=64)
-        result2 = compute_gaussian_frequency_filter(sigma=3.0, height=64, width=64)
-        assert result1 is result2
+        first_result = compute_gaussian_frequency_filter(sigma=3.0, height=64, width=64)
+        second_result = compute_gaussian_frequency_filter(sigma=3.0, height=64, width=64)
+        assert first_result is second_result
 
 
 class TestApplyTemporalSmoothing:
@@ -195,8 +195,8 @@ class TestApplyTemporalSmoothing:
 
     def test_smoothing_reduces_variation(self) -> None:
         """Verifies temporal smoothing reduces frame-to-frame variation."""
-        rng = np.random.default_rng(42)
-        frames = rng.standard_normal((50, 8, 8)).astype(np.float32)
+        generator = np.random.default_rng(42)
+        frames = generator.standard_normal((50, 8, 8)).astype(np.float32)
         result = apply_temporal_smoothing(frames=frames, sigma=5.0)
         original_standard_deviation = np.std(np.diff(frames, axis=0))
         smoothed_standard_deviation = np.std(np.diff(result, axis=0))
@@ -232,7 +232,7 @@ class TestApplySpatialSmoothing:
             apply_spatial_smoothing(data=data, window=3)
 
     def test_even_window_no_error(self) -> None:
-        """Verifies even window size does not raise an error."""
+        """Verifies that an even window size is accepted."""
         data = np.ones((1, 20, 20), dtype=np.float32)
         result = apply_spatial_smoothing(data=data, window=4)
         assert result is not None
@@ -316,13 +316,13 @@ class TestComputeUpsamplingKernel:
 
     def test_cache_returns_same_object(self) -> None:
         """Verifies the lru_cache returns the same object for identical parameters."""
-        result1 = compute_upsampling_kernel(padding=4, subpixel=10)
-        result2 = compute_upsampling_kernel(padding=4, subpixel=10)
-        assert result1[0] is result2[0]
+        first_result = compute_upsampling_kernel(padding=4, subpixel=10)
+        second_result = compute_upsampling_kernel(padding=4, subpixel=10)
+        assert first_result[0] is second_result[0]
 
 
 class TestMeanCenteredMeshgridRegistration:
-    """Tests _mean_centered_meshgrid in registration/utils."""
+    """Tests mean_centered_meshgrid in registration/utils."""
 
     def test_shape(self) -> None:
         """Verifies meshgrid output shapes match input dimensions."""
@@ -344,14 +344,14 @@ class TestMeanCenteredMeshgridRegistration:
 
 
 class TestComputeGaussianRbfWeights:
-    """Tests _compute_gaussian_rbf_weights (private)."""
+    """Tests _compute_gaussian_rbf_weights."""
 
     def test_square_matrix_for_same_coordinates(self) -> None:
         """Verifies a square matrix is returned when source equals target."""
         coordinates = np.arange(-2, 3, dtype=np.float64)
         weights = _compute_gaussian_rbf_weights(source_coordinates=coordinates, target_coordinates=coordinates)
-        n = len(coordinates)
-        assert weights.shape == (n**2, n**2)
+        coordinate_count = len(coordinates)
+        assert weights.shape == (coordinate_count**2, coordinate_count**2)
 
     def test_diagonal_is_one(self) -> None:
         """Verifies diagonal elements are 1.0 (zero distance)."""
@@ -374,7 +374,7 @@ class TestComputeGaussianRbfWeights:
 
 
 class TestGetNormalizationWeights:
-    """Tests _get_normalization_weights (private)."""
+    """Tests _get_normalization_weights."""
 
     def test_shape(self) -> None:
         """Verifies the output shape matches (height, width)."""

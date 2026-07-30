@@ -31,6 +31,63 @@ from cindra.dataclasses.single_recording_data import (
     _save_optional_array_field,
 )
 
+_REGISTRATION_ARRAY_FIELDS: tuple[str, ...] = (
+    "bad_frames",
+    "reference_image",
+    "rigid_y_offsets",
+    "rigid_x_offsets",
+    "rigid_correlations",
+    "nonrigid_y_offsets",
+    "nonrigid_x_offsets",
+    "nonrigid_correlations",
+    "principal_component_extreme_images",
+    "principal_component_projections",
+    "principal_component_shift_metrics",
+)
+"""The names of every optional array field managed by the RegistrationData save, load, and memory-map methods."""
+
+_DETECTION_ARRAY_FIELDS: tuple[str, ...] = (
+    "mean_image",
+    "enhanced_mean_image",
+    "maximum_projection",
+    "correlation_map",
+    "mean_image_channel_2",
+    "enhanced_mean_image_channel_2",
+    "maximum_projection_channel_2",
+    "correlation_map_channel_2",
+)
+"""The names of every optional array field managed by the DetectionData save, load, and memory-map methods."""
+
+_EXTRACTION_RESULT_FIELDS: tuple[str, ...] = (
+    "cell_fluorescence",
+    "neuropil_fluorescence",
+    "subtracted_fluorescence",
+    "spikes",
+    "cell_classification",
+    "cell_fluorescence_channel_2",
+    "neuropil_fluorescence_channel_2",
+    "subtracted_fluorescence_channel_2",
+    "spikes_channel_2",
+    "cell_classification_channel_2",
+    "cell_colocalization",
+    "corrected_structural_mean_image",
+)
+"""The names of every result array field managed by the ExtractionData result loading and memory-mapping methods."""
+
+_MULTI_REGISTRATION_ARRAY_FIELDS: tuple[str, ...] = (
+    "deform_field_y",
+    "deform_field_x",
+    "transformed_mean_image",
+    "transformed_enhanced_mean_image",
+    "transformed_maximum_projection",
+    "transformed_mean_image_channel_2",
+    "transformed_enhanced_mean_image_channel_2",
+    "transformed_maximum_projection_channel_2",
+    "deformed_roi_masks",
+    "deformed_roi_masks_channel_2",
+)
+"""The names of every optional array and mask list field persisted by MultiRecordingRegistrationData."""
+
 
 def _make_roi_mask(
     pixel_count: int = 5,
@@ -39,10 +96,10 @@ def _make_roi_mask(
     recording_count: int = 0,
 ) -> ROIMask:
     """Creates a synthetic ROIMask with the given pixel count."""
-    rng = np.random.default_rng(seed=pixel_count + cluster_id)
-    y_pixels = rng.integers(low=0, high=64, size=pixel_count).astype(np.int32)
-    x_pixels = rng.integers(low=0, high=frame_width, size=pixel_count).astype(np.int32)
-    pixel_weights = rng.random(size=pixel_count).astype(np.float32)
+    generator = np.random.default_rng(seed=pixel_count + cluster_id)
+    y_pixels = generator.integers(low=0, high=64, size=pixel_count).astype(np.int32)
+    x_pixels = generator.integers(low=0, high=frame_width, size=pixel_count).astype(np.int32)
+    pixel_weights = generator.random(size=pixel_count).astype(np.float32)
     centroid = (int(np.median(y_pixels)), int(np.median(x_pixels)))
     return ROIMask(
         y_pixels=y_pixels,
@@ -59,6 +116,7 @@ def _make_roi_mask(
 def _make_roi_statistics(
     pixel_count: int = 8,
     frame_width: int = 128,
+    *,
     include_soma: bool = True,
     include_neuropil: bool = True,
     include_overlap: bool = True,
@@ -67,12 +125,14 @@ def _make_roi_statistics(
 ) -> ROIStatistics:
     """Creates a synthetic ROIStatistics instance."""
     mask = _make_roi_mask(pixel_count=pixel_count, frame_width=frame_width)
-    rng = np.random.default_rng(seed=pixel_count + plane_index)
-    soma_mask = rng.choice(a=[True, False], size=pixel_count).astype(np.bool_) if include_soma else None
+    generator = np.random.default_rng(seed=pixel_count + plane_index)
+    soma_mask = generator.choice(a=[True, False], size=pixel_count).astype(np.bool_) if include_soma else None
     neuropil_mask = (
-        rng.integers(low=0, high=frame_width * 64, size=pixel_count * 3).astype(np.int32) if include_neuropil else None
+        generator.integers(low=0, high=frame_width * 64, size=pixel_count * 3).astype(np.int32)
+        if include_neuropil
+        else None
     )
-    overlap_mask = rng.choice(a=[True, False], size=pixel_count).astype(np.bool_) if include_overlap else None
+    overlap_mask = generator.choice(a=[True, False], size=pixel_count).astype(np.bool_) if include_overlap else None
     mask.overlap_mask = overlap_mask
     return ROIStatistics(
         mask=mask,
@@ -127,19 +187,19 @@ def _populate_detection_data() -> DetectionData:
     """Creates a DetectionData instance with all arrays populated."""
     height = 32
     width = 32
-    rng = np.random.default_rng(seed=42)
+    generator = np.random.default_rng(seed=42)
     return DetectionData(
         roi_diameter=12,
         aspect_ratio=1.2,
-        mean_image=rng.random(size=(height, width)).astype(np.float32),
-        enhanced_mean_image=rng.random(size=(height, width)).astype(np.float32),
-        maximum_projection=rng.random(size=(height, width)).astype(np.float32),
-        correlation_map=rng.random(size=(height, width)).astype(np.float32),
+        mean_image=generator.random(size=(height, width)).astype(np.float32),
+        enhanced_mean_image=generator.random(size=(height, width)).astype(np.float32),
+        maximum_projection=generator.random(size=(height, width)).astype(np.float32),
+        correlation_map=generator.random(size=(height, width)).astype(np.float32),
         roi_diameter_channel_2=10,
-        mean_image_channel_2=rng.random(size=(height, width)).astype(np.float32),
-        enhanced_mean_image_channel_2=rng.random(size=(height, width)).astype(np.float32),
-        maximum_projection_channel_2=rng.random(size=(height, width)).astype(np.float32),
-        correlation_map_channel_2=rng.random(size=(height, width)).astype(np.float32),
+        mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+        enhanced_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+        maximum_projection_channel_2=generator.random(size=(height, width)).astype(np.float32),
+        correlation_map_channel_2=generator.random(size=(height, width)).astype(np.float32),
     )
 
 
@@ -148,17 +208,17 @@ def _populate_extraction_data(
     frame_count: int = 50,
 ) -> ExtractionData:
     """Creates an ExtractionData instance with all arrays populated."""
-    rng = np.random.default_rng(seed=99)
-    roi_statistics = [_make_roi_statistics(pixel_count=5 + i) for i in range(roi_count)]
+    generator = np.random.default_rng(seed=99)
+    roi_statistics = [_make_roi_statistics(pixel_count=5 + index) for index in range(roi_count)]
     return ExtractionData(
         roi_statistics=roi_statistics,
-        cell_fluorescence=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        neuropil_fluorescence=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        subtracted_fluorescence=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        spikes=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        cell_classification=rng.random(size=(roi_count, 2)).astype(np.float32),
-        cell_colocalization=rng.random(size=(roi_count, 2)).astype(np.float32),
-        corrected_structural_mean_image=rng.random(size=(32, 32)).astype(np.float32),
+        cell_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        neuropil_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        subtracted_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        spikes=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        cell_classification=generator.random(size=(roi_count, 2)).astype(np.float32),
+        cell_colocalization=generator.random(size=(roi_count, 2)).astype(np.float32),
+        corrected_structural_mean_image=generator.random(size=(32, 32)).astype(np.float32),
     )
 
 
@@ -285,15 +345,15 @@ class TestRegistrationDataSaveLoad:
         mapped.memory_map_arrays(output_path=tmp_path)
 
         assert mapped.reference_image is not None
-        assert is_memory_mapped(mapped.reference_image)
+        assert is_memory_mapped(array=mapped.reference_image)
         np.testing.assert_allclose(original.reference_image, mapped.reference_image, rtol=1e-6)
 
         assert mapped.rigid_y_offsets is not None
-        assert is_memory_mapped(mapped.rigid_y_offsets)
+        assert is_memory_mapped(array=mapped.rigid_y_offsets)
         np.testing.assert_array_equal(original.rigid_y_offsets, mapped.rigid_y_offsets)
 
         assert mapped.bad_frames is not None
-        assert is_memory_mapped(mapped.bad_frames)
+        assert is_memory_mapped(array=mapped.bad_frames)
         np.testing.assert_array_equal(original.bad_frames, mapped.bad_frames)
 
     def test_load_returns_early_when_directory_missing(self, tmp_path: Path) -> None:
@@ -358,11 +418,11 @@ class TestDetectionDataSaveLoad:
         mapped.memory_map_arrays(output_path=tmp_path)
 
         assert mapped.mean_image is not None
-        assert is_memory_mapped(mapped.mean_image)
+        assert is_memory_mapped(array=mapped.mean_image)
         np.testing.assert_allclose(original.mean_image, mapped.mean_image, rtol=1e-6)
 
         assert mapped.correlation_map_channel_2 is not None
-        assert is_memory_mapped(mapped.correlation_map_channel_2)
+        assert is_memory_mapped(array=mapped.correlation_map_channel_2)
         np.testing.assert_allclose(original.correlation_map_channel_2, mapped.correlation_map_channel_2, rtol=1e-6)
 
     def test_load_returns_early_when_directory_missing(self, tmp_path: Path) -> None:
@@ -426,9 +486,9 @@ class TestROIStatisticsSaveLoadList:
         ]
 
         masks_path = tmp_path / "test_roi_masks.npz"
-        stats_path = tmp_path / "test_roi_statistics.npz"
-        ROIStatistics.save_list(roi_list=roi_list, masks_path=masks_path, stats_path=stats_path)
-        loaded_list = ROIStatistics.load_list(masks_path=masks_path, stats_path=stats_path)
+        statistics_path = tmp_path / "test_roi_statistics.npz"
+        ROIStatistics.save_list(roi_list=roi_list, masks_path=masks_path, statistics_path=statistics_path)
+        loaded_list = ROIStatistics.load_list(masks_path=masks_path, statistics_path=statistics_path)
 
         assert len(loaded_list) == len(roi_list)
         for original, loaded in zip(roi_list, loaded_list, strict=True):
@@ -454,9 +514,9 @@ class TestROIStatisticsSaveLoadList:
         ]
 
         masks_path = tmp_path / "masks_no_optional.npz"
-        stats_path = tmp_path / "stats_no_optional.npz"
-        ROIStatistics.save_list(roi_list=roi_list, masks_path=masks_path, stats_path=stats_path)
-        loaded_list = ROIStatistics.load_list(masks_path=masks_path, stats_path=stats_path)
+        statistics_path = tmp_path / "stats_no_optional.npz"
+        ROIStatistics.save_list(roi_list=roi_list, masks_path=masks_path, statistics_path=statistics_path)
+        loaded_list = ROIStatistics.load_list(masks_path=masks_path, statistics_path=statistics_path)
 
         assert len(loaded_list) == len(roi_list)
         for original, loaded in zip(roi_list, loaded_list, strict=True):
@@ -473,9 +533,9 @@ class TestROIStatisticsSaveLoadList:
         ]
 
         masks_path = tmp_path / "masks_mixed.npz"
-        stats_path = tmp_path / "stats_mixed.npz"
-        ROIStatistics.save_list(roi_list=roi_list, masks_path=masks_path, stats_path=stats_path)
-        loaded_list = ROIStatistics.load_list(masks_path=masks_path, stats_path=stats_path)
+        statistics_path = tmp_path / "stats_mixed.npz"
+        ROIStatistics.save_list(roi_list=roi_list, masks_path=masks_path, statistics_path=statistics_path)
+        loaded_list = ROIStatistics.load_list(masks_path=masks_path, statistics_path=statistics_path)
 
         assert len(loaded_list) == len(roi_list)
         for original, loaded in zip(roi_list, loaded_list, strict=True):
@@ -484,10 +544,10 @@ class TestROIStatisticsSaveLoadList:
     def test_save_empty_list_does_not_create_files(self, tmp_path: Path) -> None:
         """Verifies that saving an empty list does not create output files."""
         masks_path = tmp_path / "empty_masks.npz"
-        stats_path = tmp_path / "empty_stats.npz"
-        ROIStatistics.save_list(roi_list=[], masks_path=masks_path, stats_path=stats_path)
+        statistics_path = tmp_path / "empty_stats.npz"
+        ROIStatistics.save_list(roi_list=[], masks_path=masks_path, statistics_path=statistics_path)
         assert not masks_path.exists()
-        assert not stats_path.exists()
+        assert not statistics_path.exists()
 
 
 class TestExtractionDataSaveLoad:
@@ -525,7 +585,7 @@ class TestExtractionDataSaveLoad:
         original.save_arrays(output_path=tmp_path)
 
         loaded = ExtractionData()
-        # First load roi_statistics via load_arrays (load_results does not load roi_statistics).
+        # Loads roi_statistics through load_arrays first, because load_results does not populate that field.
         loaded.load_arrays(output_path=tmp_path)
         loaded.load_results(output_path=tmp_path)
 
@@ -564,9 +624,8 @@ class TestExtractionDataSaveLoad:
         assert mapped.roi_statistics is not None
         assert len(mapped.roi_statistics) == len(original.roi_statistics)
 
-        # Classification should be memory-mapped.
         assert mapped.cell_classification is not None
-        assert is_memory_mapped(mapped.cell_classification)
+        assert is_memory_mapped(array=mapped.cell_classification)
         np.testing.assert_allclose(original.cell_classification, mapped.cell_classification, rtol=1e-6)
 
     def test_memory_map_results_produces_memory_mapped_traces(self, tmp_path: Path) -> None:
@@ -578,19 +637,19 @@ class TestExtractionDataSaveLoad:
         mapped.memory_map_results(output_path=tmp_path)
 
         assert mapped.cell_fluorescence is not None
-        assert is_memory_mapped(mapped.cell_fluorescence)
+        assert is_memory_mapped(array=mapped.cell_fluorescence)
         np.testing.assert_allclose(original.cell_fluorescence, mapped.cell_fluorescence, rtol=1e-6)
 
         assert mapped.spikes is not None
-        assert is_memory_mapped(mapped.spikes)
+        assert is_memory_mapped(array=mapped.spikes)
         np.testing.assert_allclose(original.spikes, mapped.spikes, rtol=1e-6)
 
         assert mapped.cell_colocalization is not None
-        assert is_memory_mapped(mapped.cell_colocalization)
+        assert is_memory_mapped(array=mapped.cell_colocalization)
         np.testing.assert_allclose(original.cell_colocalization, mapped.cell_colocalization, rtol=1e-6)
 
         assert mapped.corrected_structural_mean_image is not None
-        assert is_memory_mapped(mapped.corrected_structural_mean_image)
+        assert is_memory_mapped(array=mapped.corrected_structural_mean_image)
         np.testing.assert_allclose(
             original.corrected_structural_mean_image, mapped.corrected_structural_mean_image, rtol=1e-6
         )
@@ -706,9 +765,9 @@ class TestSingleRecordingRuntimeDataSaveLoad:
         loaded.memory_map_arrays()
 
         assert loaded.registration.reference_image is not None
-        assert is_memory_mapped(loaded.registration.reference_image)
+        assert is_memory_mapped(array=loaded.registration.reference_image)
         assert loaded.detection.mean_image is not None
-        assert is_memory_mapped(loaded.detection.mean_image)
+        assert is_memory_mapped(array=loaded.detection.mean_image)
 
     def test_release_arrays_clears_all_child_arrays(self) -> None:
         """Verifies that release_arrays sets all child array fields to None."""
@@ -745,18 +804,18 @@ class TestMultiRecordingRegistrationDataSaveLoad:
 
     def test_save_load_round_trip(self, tmp_path: Path) -> None:
         """Verifies that multi-recording registration arrays survive a save/load round-trip."""
-        rng = np.random.default_rng(seed=7)
+        generator = np.random.default_rng(seed=7)
         height = 32
         width = 32
         original = MultiRecordingRegistrationData(
-            deform_field_y=rng.random(size=(height, width)).astype(np.float32),
-            deform_field_x=rng.random(size=(height, width)).astype(np.float32),
-            transformed_mean_image=rng.random(size=(height, width)).astype(np.float32),
-            transformed_enhanced_mean_image=rng.random(size=(height, width)).astype(np.float32),
-            transformed_maximum_projection=rng.random(size=(height, width)).astype(np.float32),
-            transformed_mean_image_channel_2=rng.random(size=(height, width)).astype(np.float32),
-            transformed_enhanced_mean_image_channel_2=rng.random(size=(height, width)).astype(np.float32),
-            transformed_maximum_projection_channel_2=rng.random(size=(height, width)).astype(np.float32),
+            deform_field_y=generator.random(size=(height, width)).astype(np.float32),
+            deform_field_x=generator.random(size=(height, width)).astype(np.float32),
+            transformed_mean_image=generator.random(size=(height, width)).astype(np.float32),
+            transformed_enhanced_mean_image=generator.random(size=(height, width)).astype(np.float32),
+            transformed_maximum_projection=generator.random(size=(height, width)).astype(np.float32),
+            transformed_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+            transformed_enhanced_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+            transformed_maximum_projection_channel_2=generator.random(size=(height, width)).astype(np.float32),
             deformed_roi_masks=[_make_roi_mask(pixel_count=5), _make_roi_mask(pixel_count=8, cluster_id=1)],
             deformed_roi_masks_channel_2=[_make_roi_mask(pixel_count=4, cluster_id=2)],
         )
@@ -814,11 +873,11 @@ class TestMultiRecordingRegistrationDataSaveLoad:
 
     def test_memory_map_round_trip(self, tmp_path: Path) -> None:
         """Verifies that memory_map_arrays produces memory-mapped .npy arrays and eagerly loaded .npz masks."""
-        rng = np.random.default_rng(seed=8)
+        generator = np.random.default_rng(seed=8)
         original = MultiRecordingRegistrationData(
-            deform_field_y=rng.random(size=(16, 16)).astype(np.float32),
-            deform_field_x=rng.random(size=(16, 16)).astype(np.float32),
-            transformed_mean_image=rng.random(size=(16, 16)).astype(np.float32),
+            deform_field_y=generator.random(size=(16, 16)).astype(np.float32),
+            deform_field_x=generator.random(size=(16, 16)).astype(np.float32),
+            transformed_mean_image=generator.random(size=(16, 16)).astype(np.float32),
             deformed_roi_masks=[_make_roi_mask(pixel_count=4)],
         )
         original.save_arrays(output_path=tmp_path)
@@ -827,11 +886,11 @@ class TestMultiRecordingRegistrationDataSaveLoad:
         mapped.memory_map_arrays(output_path=tmp_path)
 
         assert mapped.deform_field_y is not None
-        assert is_memory_mapped(mapped.deform_field_y)
+        assert is_memory_mapped(array=mapped.deform_field_y)
         np.testing.assert_allclose(original.deform_field_y, mapped.deform_field_y, rtol=1e-6)
 
         assert mapped.transformed_mean_image is not None
-        assert is_memory_mapped(mapped.transformed_mean_image)
+        assert is_memory_mapped(array=mapped.transformed_mean_image)
         np.testing.assert_allclose(original.transformed_mean_image, mapped.transformed_mean_image, rtol=1e-6)
 
         # ROI masks are eagerly loaded (npz does not support mmap).
@@ -911,24 +970,26 @@ def _populate_extraction_data_with_channel_2(
     frame_count: int = 50,
 ) -> ExtractionData:
     """Creates an ExtractionData instance with both channel 1 and channel 2 data populated."""
-    rng = np.random.default_rng(seed=77)
-    roi_statistics = [_make_roi_statistics(pixel_count=5 + i) for i in range(roi_count)]
-    roi_statistics_channel_2 = [_make_roi_statistics(pixel_count=6 + i, plane_index=1) for i in range(roi_count)]
+    generator = np.random.default_rng(seed=77)
+    roi_statistics = [_make_roi_statistics(pixel_count=5 + index) for index in range(roi_count)]
+    roi_statistics_channel_2 = [
+        _make_roi_statistics(pixel_count=6 + index, plane_index=1) for index in range(roi_count)
+    ]
     return ExtractionData(
         roi_statistics=roi_statistics,
-        cell_fluorescence=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        neuropil_fluorescence=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        subtracted_fluorescence=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        spikes=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        cell_classification=rng.random(size=(roi_count, 2)).astype(np.float32),
+        cell_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        neuropil_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        subtracted_fluorescence=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        spikes=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        cell_classification=generator.random(size=(roi_count, 2)).astype(np.float32),
         roi_statistics_channel_2=roi_statistics_channel_2,
-        cell_fluorescence_channel_2=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        neuropil_fluorescence_channel_2=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        subtracted_fluorescence_channel_2=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        spikes_channel_2=rng.random(size=(roi_count, frame_count)).astype(np.float32),
-        cell_classification_channel_2=rng.random(size=(roi_count, 2)).astype(np.float32),
-        cell_colocalization=rng.random(size=(roi_count, 2)).astype(np.float32),
-        corrected_structural_mean_image=rng.random(size=(32, 32)).astype(np.float32),
+        cell_fluorescence_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        neuropil_fluorescence_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        subtracted_fluorescence_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        spikes_channel_2=generator.random(size=(roi_count, frame_count)).astype(np.float32),
+        cell_classification_channel_2=generator.random(size=(roi_count, 2)).astype(np.float32),
+        cell_colocalization=generator.random(size=(roi_count, 2)).astype(np.float32),
+        corrected_structural_mean_image=generator.random(size=(32, 32)).astype(np.float32),
     )
 
 
@@ -1015,9 +1076,8 @@ class TestExtractionDataChannel2:
         assert mapped.roi_statistics_channel_2 is not None
         assert len(mapped.roi_statistics_channel_2) == len(original.roi_statistics_channel_2)
 
-        # Channel 2 classification should be memory-mapped.
         assert mapped.cell_classification_channel_2 is not None
-        assert is_memory_mapped(mapped.cell_classification_channel_2)
+        assert is_memory_mapped(array=mapped.cell_classification_channel_2)
         np.testing.assert_allclose(
             original.cell_classification_channel_2, mapped.cell_classification_channel_2, rtol=1e-6
         )
@@ -1030,30 +1090,28 @@ class TestExtractionDataChannel2:
         mapped = ExtractionData()
         mapped.memory_map_results(output_path=tmp_path)
 
-        # Channel 2 traces should be memory-mapped.
         assert mapped.cell_fluorescence_channel_2 is not None
-        assert is_memory_mapped(mapped.cell_fluorescence_channel_2)
+        assert is_memory_mapped(array=mapped.cell_fluorescence_channel_2)
         np.testing.assert_allclose(original.cell_fluorescence_channel_2, mapped.cell_fluorescence_channel_2, rtol=1e-6)
 
         assert mapped.neuropil_fluorescence_channel_2 is not None
-        assert is_memory_mapped(mapped.neuropil_fluorescence_channel_2)
+        assert is_memory_mapped(array=mapped.neuropil_fluorescence_channel_2)
         np.testing.assert_allclose(
             original.neuropil_fluorescence_channel_2, mapped.neuropil_fluorescence_channel_2, rtol=1e-6
         )
 
         assert mapped.subtracted_fluorescence_channel_2 is not None
-        assert is_memory_mapped(mapped.subtracted_fluorescence_channel_2)
+        assert is_memory_mapped(array=mapped.subtracted_fluorescence_channel_2)
         np.testing.assert_allclose(
             original.subtracted_fluorescence_channel_2, mapped.subtracted_fluorescence_channel_2, rtol=1e-6
         )
 
         assert mapped.spikes_channel_2 is not None
-        assert is_memory_mapped(mapped.spikes_channel_2)
+        assert is_memory_mapped(array=mapped.spikes_channel_2)
         np.testing.assert_allclose(original.spikes_channel_2, mapped.spikes_channel_2, rtol=1e-6)
 
-        # Channel 2 classification should be memory-mapped.
         assert mapped.cell_classification_channel_2 is not None
-        assert is_memory_mapped(mapped.cell_classification_channel_2)
+        assert is_memory_mapped(array=mapped.cell_classification_channel_2)
         np.testing.assert_allclose(
             original.cell_classification_channel_2, mapped.cell_classification_channel_2, rtol=1e-6
         )
@@ -1064,18 +1122,18 @@ class TestMultiRecordingRegistrationDataChannel2:
 
     def test_memory_map_loads_channel_2_images_and_masks(self, tmp_path: Path) -> None:
         """Verifies that memory_map_arrays loads channel 2 transformed images and deformed masks."""
-        rng = np.random.default_rng(seed=12)
+        generator = np.random.default_rng(seed=12)
         height = 16
         width = 16
         original = MultiRecordingRegistrationData(
-            deform_field_y=rng.random(size=(height, width)).astype(np.float32),
-            deform_field_x=rng.random(size=(height, width)).astype(np.float32),
-            transformed_mean_image=rng.random(size=(height, width)).astype(np.float32),
-            transformed_enhanced_mean_image=rng.random(size=(height, width)).astype(np.float32),
-            transformed_maximum_projection=rng.random(size=(height, width)).astype(np.float32),
-            transformed_mean_image_channel_2=rng.random(size=(height, width)).astype(np.float32),
-            transformed_enhanced_mean_image_channel_2=rng.random(size=(height, width)).astype(np.float32),
-            transformed_maximum_projection_channel_2=rng.random(size=(height, width)).astype(np.float32),
+            deform_field_y=generator.random(size=(height, width)).astype(np.float32),
+            deform_field_x=generator.random(size=(height, width)).astype(np.float32),
+            transformed_mean_image=generator.random(size=(height, width)).astype(np.float32),
+            transformed_enhanced_mean_image=generator.random(size=(height, width)).astype(np.float32),
+            transformed_maximum_projection=generator.random(size=(height, width)).astype(np.float32),
+            transformed_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+            transformed_enhanced_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+            transformed_maximum_projection_channel_2=generator.random(size=(height, width)).astype(np.float32),
             deformed_roi_masks=[_make_roi_mask(pixel_count=5)],
             deformed_roi_masks_channel_2=[_make_roi_mask(pixel_count=4, cluster_id=3)],
         )
@@ -1084,18 +1142,17 @@ class TestMultiRecordingRegistrationDataChannel2:
         mapped = MultiRecordingRegistrationData()
         mapped.memory_map_arrays(output_path=tmp_path)
 
-        # Channel 2 transformed images should be memory-mapped.
         assert mapped.transformed_mean_image_channel_2 is not None
-        assert is_memory_mapped(mapped.transformed_mean_image_channel_2)
+        assert is_memory_mapped(array=mapped.transformed_mean_image_channel_2)
         np.testing.assert_allclose(
             original.transformed_mean_image_channel_2, mapped.transformed_mean_image_channel_2, rtol=1e-6
         )
 
         assert mapped.transformed_enhanced_mean_image_channel_2 is not None
-        assert is_memory_mapped(mapped.transformed_enhanced_mean_image_channel_2)
+        assert is_memory_mapped(array=mapped.transformed_enhanced_mean_image_channel_2)
 
         assert mapped.transformed_maximum_projection_channel_2 is not None
-        assert is_memory_mapped(mapped.transformed_maximum_projection_channel_2)
+        assert is_memory_mapped(array=mapped.transformed_maximum_projection_channel_2)
 
         # Channel 2 deformed ROI masks should be eagerly loaded (npz cannot be memory-mapped).
         assert mapped.deformed_roi_masks_channel_2 is not None
@@ -1110,15 +1167,15 @@ class TestMultiRecordingRuntimeDataReleaseWithCombinedData:
 
     def test_release_arrays_clears_combined_data_child_arrays(self) -> None:
         """Verifies that release_arrays delegates to combined_data detection and extraction release_arrays."""
-        rng = np.random.default_rng(seed=42)
+        generator = np.random.default_rng(seed=42)
         detection = DetectionData(
-            mean_image=rng.random(size=(16, 16)).astype(np.float32),
-            enhanced_mean_image=rng.random(size=(16, 16)).astype(np.float32),
+            mean_image=generator.random(size=(16, 16)).astype(np.float32),
+            enhanced_mean_image=generator.random(size=(16, 16)).astype(np.float32),
         )
         extraction = ExtractionData(
             roi_statistics=[_make_roi_statistics(pixel_count=5)],
-            cell_fluorescence=rng.random(size=(1, 20)).astype(np.float32),
-            cell_classification=rng.random(size=(1, 2)).astype(np.float32),
+            cell_fluorescence=generator.random(size=(1, 20)).astype(np.float32),
+            cell_classification=generator.random(size=(1, 2)).astype(np.float32),
         )
         combined_data = CombinedData(detection=detection, extraction=extraction)
 
@@ -1148,10 +1205,10 @@ class TestMultiRecordingRuntimeDataSaveLoad:
         data.timing.registration_time = 120
         data.timing.total_discovery_time = 300
 
-        rng = np.random.default_rng(seed=10)
+        generator = np.random.default_rng(seed=10)
         data.registration = MultiRecordingRegistrationData(
-            deform_field_y=rng.random(size=(16, 16)).astype(np.float32),
-            deform_field_x=rng.random(size=(16, 16)).astype(np.float32),
+            deform_field_y=generator.random(size=(16, 16)).astype(np.float32),
+            deform_field_x=generator.random(size=(16, 16)).astype(np.float32),
         )
         data.tracking = MultiRecordingTrackingData(
             template_masks=[_make_roi_mask(pixel_count=4)],
@@ -1173,16 +1230,15 @@ class TestMultiRecordingRuntimeDataSaveLoad:
         assert loaded.registration.deform_field_y is None
         assert loaded.tracking.template_masks is None
 
-        # combined_data should be None.
         assert loaded.combined_data is None
 
     def test_save_does_not_corrupt_original_arrays(self, tmp_path: Path) -> None:
         """Verifies that the shallow-copy pattern in save does not null the original instance arrays."""
         data = MultiRecordingRuntimeData()
-        rng = np.random.default_rng(seed=11)
+        generator = np.random.default_rng(seed=11)
         data.registration = MultiRecordingRegistrationData(
-            deform_field_y=rng.random(size=(8, 8)).astype(np.float32),
-            deform_field_x=rng.random(size=(8, 8)).astype(np.float32),
+            deform_field_y=generator.random(size=(8, 8)).astype(np.float32),
+            deform_field_x=generator.random(size=(8, 8)).astype(np.float32),
         )
         data.tracking = MultiRecordingTrackingData(template_masks=[_make_roi_mask(pixel_count=3)])
 
@@ -1195,10 +1251,10 @@ class TestMultiRecordingRuntimeDataSaveLoad:
     def test_load_then_load_arrays_round_trip(self, tmp_path: Path) -> None:
         """Verifies that load + load_arrays recovers registration, tracking, and extraction arrays."""
         data = MultiRecordingRuntimeData()
-        rng = np.random.default_rng(seed=12)
+        generator = np.random.default_rng(seed=12)
         data.registration = MultiRecordingRegistrationData(
-            deform_field_y=rng.random(size=(16, 16)).astype(np.float32),
-            deform_field_x=rng.random(size=(16, 16)).astype(np.float32),
+            deform_field_y=generator.random(size=(16, 16)).astype(np.float32),
+            deform_field_x=generator.random(size=(16, 16)).astype(np.float32),
             deformed_roi_masks=[_make_roi_mask(pixel_count=5)],
         )
         data.tracking = MultiRecordingTrackingData(template_masks=[_make_roi_mask(pixel_count=6)])
@@ -1220,10 +1276,10 @@ class TestMultiRecordingRuntimeDataSaveLoad:
     def test_load_then_memory_map_arrays(self, tmp_path: Path) -> None:
         """Verifies that load + memory_map_arrays produces memory-mapped arrays."""
         data = MultiRecordingRuntimeData()
-        rng = np.random.default_rng(seed=13)
+        generator = np.random.default_rng(seed=13)
         data.registration = MultiRecordingRegistrationData(
-            deform_field_y=rng.random(size=(16, 16)).astype(np.float32),
-            deform_field_x=rng.random(size=(16, 16)).astype(np.float32),
+            deform_field_y=generator.random(size=(16, 16)).astype(np.float32),
+            deform_field_x=generator.random(size=(16, 16)).astype(np.float32),
         )
         data.save(output_path=tmp_path)
 
@@ -1231,15 +1287,15 @@ class TestMultiRecordingRuntimeDataSaveLoad:
         loaded.memory_map_arrays()
 
         assert loaded.registration.deform_field_y is not None
-        assert is_memory_mapped(loaded.registration.deform_field_y)
+        assert is_memory_mapped(array=loaded.registration.deform_field_y)
 
     def test_release_arrays_clears_child_arrays(self) -> None:
         """Verifies that release_arrays clears all child array fields."""
         data = MultiRecordingRuntimeData()
-        rng = np.random.default_rng(seed=14)
+        generator = np.random.default_rng(seed=14)
         data.registration = MultiRecordingRegistrationData(
-            deform_field_y=rng.random(size=(8, 8)).astype(np.float32),
-            deform_field_x=rng.random(size=(8, 8)).astype(np.float32),
+            deform_field_y=generator.random(size=(8, 8)).astype(np.float32),
+            deform_field_x=generator.random(size=(8, 8)).astype(np.float32),
         )
         data.tracking = MultiRecordingTrackingData(template_masks=[_make_roi_mask(pixel_count=3)])
         data.extraction = _populate_extraction_data()
@@ -1501,13 +1557,15 @@ class TestOptionalArrayFieldSerialization:
             np.array([10, 20], dtype=np.int32),
         ]
 
-        save_dict: dict[str, np.ndarray] = {}
-        _save_optional_array_field(field_name="test_field", arrays=arrays, save_dictionary=save_dict, dtype=np.int32)
+        save_dictionary: dict[str, NDArray[np.generic]] = {}
+        _save_optional_array_field(
+            field_name="test_field", arrays=arrays, save_dictionary=save_dictionary, dtype=np.int32
+        )
 
         # Saves to npz to simulate the full workflow.
         file_path = tmp_path / "optional_test.npz"
-        np.savez(file_path, allow_pickle=False, **save_dict)
-        data = np.load(file_path, allow_pickle=False)
+        np.savez(file_path, allow_pickle=False, **save_dictionary)
+        data = np.load(file=file_path, allow_pickle=False)
 
         result = _load_optional_array_field(field_name="test_field", item_count=3, data=data, dtype=np.int32)
 
@@ -1520,17 +1578,19 @@ class TestOptionalArrayFieldSerialization:
     def test_all_none_arrays_produce_no_keys(self) -> None:
         """Verifies that all-None arrays produce no keys in the save dictionary."""
         arrays: list[None] = [None, None, None]
-        save_dict: dict[str, np.ndarray] = {}
-        _save_optional_array_field(field_name="empty_field", arrays=arrays, save_dictionary=save_dict, dtype=np.bool_)
+        save_dictionary: dict[str, NDArray[np.generic]] = {}
+        _save_optional_array_field(
+            field_name="empty_field", arrays=arrays, save_dictionary=save_dictionary, dtype=np.bool_
+        )
 
-        assert "empty_field" not in save_dict
-        assert "empty_field_counts" not in save_dict
+        assert "empty_field" not in save_dictionary
+        assert "empty_field_counts" not in save_dictionary
 
     def test_load_returns_all_none_when_key_missing(self, tmp_path: Path) -> None:
         """Verifies that loading a missing field returns a list of None values."""
         file_path = tmp_path / "no_field.npz"
         np.savez(file_path, allow_pickle=False, dummy=np.array([1]))
-        data = np.load(file_path, allow_pickle=False)
+        data = np.load(file=file_path, allow_pickle=False)
 
         result = _load_optional_array_field(field_name="missing", item_count=5, data=data, dtype=np.float32)
 
@@ -1545,12 +1605,14 @@ class TestOptionalArrayFieldSerialization:
             None,
         ]
 
-        save_dict: dict[str, np.ndarray] = {}
-        _save_optional_array_field(field_name="bool_field", arrays=arrays, save_dictionary=save_dict, dtype=np.bool_)
+        save_dictionary: dict[str, NDArray[np.generic]] = {}
+        _save_optional_array_field(
+            field_name="bool_field", arrays=arrays, save_dictionary=save_dictionary, dtype=np.bool_
+        )
 
         file_path = tmp_path / "bool_test.npz"
-        np.savez(file_path, allow_pickle=False, **save_dict)
-        data = np.load(file_path, allow_pickle=False)
+        np.savez(file_path, allow_pickle=False, **save_dictionary)
+        data = np.load(file=file_path, allow_pickle=False)
 
         result = _load_optional_array_field(field_name="bool_field", item_count=3, data=data, dtype=np.bool_)
 
@@ -1561,74 +1623,20 @@ class TestOptionalArrayFieldSerialization:
         assert result[2] is None
 
 
-_REGISTRATION_ARRAY_FIELDS = (
-    "bad_frames",
-    "reference_image",
-    "rigid_y_offsets",
-    "rigid_x_offsets",
-    "rigid_correlations",
-    "nonrigid_y_offsets",
-    "nonrigid_x_offsets",
-    "nonrigid_correlations",
-    "principal_component_extreme_images",
-    "principal_component_projections",
-    "principal_component_shift_metrics",
-)
-
-_DETECTION_ARRAY_FIELDS = (
-    "mean_image",
-    "enhanced_mean_image",
-    "maximum_projection",
-    "correlation_map",
-    "mean_image_channel_2",
-    "enhanced_mean_image_channel_2",
-    "maximum_projection_channel_2",
-    "correlation_map_channel_2",
-)
-
-_EXTRACTION_RESULT_FIELDS = (
-    "cell_fluorescence",
-    "neuropil_fluorescence",
-    "subtracted_fluorescence",
-    "spikes",
-    "cell_classification",
-    "cell_fluorescence_channel_2",
-    "neuropil_fluorescence_channel_2",
-    "subtracted_fluorescence_channel_2",
-    "spikes_channel_2",
-    "cell_classification_channel_2",
-    "cell_colocalization",
-    "corrected_structural_mean_image",
-)
-
-_MULTI_REGISTRATION_ARRAY_FIELDS = (
-    "deform_field_y",
-    "deform_field_x",
-    "transformed_mean_image",
-    "transformed_enhanced_mean_image",
-    "transformed_maximum_projection",
-    "transformed_mean_image_channel_2",
-    "transformed_enhanced_mean_image_channel_2",
-    "transformed_maximum_projection_channel_2",
-    "deformed_roi_masks",
-    "deformed_roi_masks_channel_2",
-)
-
-
 def _populate_multi_registration_data() -> MultiRecordingRegistrationData:
     """Creates a MultiRecordingRegistrationData instance with all arrays and mask lists populated."""
-    rng = np.random.default_rng(seed=21)
+    generator = np.random.default_rng(seed=21)
     height = 16
     width = 16
     return MultiRecordingRegistrationData(
-        deform_field_y=rng.random(size=(height, width)).astype(np.float32),
-        deform_field_x=rng.random(size=(height, width)).astype(np.float32),
-        transformed_mean_image=rng.random(size=(height, width)).astype(np.float32),
-        transformed_enhanced_mean_image=rng.random(size=(height, width)).astype(np.float32),
-        transformed_maximum_projection=rng.random(size=(height, width)).astype(np.float32),
-        transformed_mean_image_channel_2=rng.random(size=(height, width)).astype(np.float32),
-        transformed_enhanced_mean_image_channel_2=rng.random(size=(height, width)).astype(np.float32),
-        transformed_maximum_projection_channel_2=rng.random(size=(height, width)).astype(np.float32),
+        deform_field_y=generator.random(size=(height, width)).astype(np.float32),
+        deform_field_x=generator.random(size=(height, width)).astype(np.float32),
+        transformed_mean_image=generator.random(size=(height, width)).astype(np.float32),
+        transformed_enhanced_mean_image=generator.random(size=(height, width)).astype(np.float32),
+        transformed_maximum_projection=generator.random(size=(height, width)).astype(np.float32),
+        transformed_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+        transformed_enhanced_mean_image_channel_2=generator.random(size=(height, width)).astype(np.float32),
+        transformed_maximum_projection_channel_2=generator.random(size=(height, width)).astype(np.float32),
         deformed_roi_masks=[_make_roi_mask(pixel_count=5)],
         deformed_roi_masks_channel_2=[_make_roi_mask(pixel_count=4, cluster_id=2)],
     )

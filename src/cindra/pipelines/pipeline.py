@@ -132,7 +132,8 @@ def run_single_recording_pipeline(
         # REMOTE mode: Validates the requested job_id against the pipeline's universe, aligns the tracker with
         # every valid job so that ``start_job`` finds the requested ID, and executes the matching job.
         id_to_job: dict[str, tuple[str, str]] = {
-            ProcessingTracker.generate_job_id(job_name=name, specifier=spec): (name, spec) for name, spec in universe
+            ProcessingTracker.generate_job_id(job_name=name, specifier=specifier): (name, specifier)
+            for name, specifier in universe
         }
 
         if job_id not in id_to_job:
@@ -173,12 +174,12 @@ def run_single_recording_pipeline(
 
         tracker.align_jobs(jobs=jobs, universe=universe)
 
-        for name, spec in jobs:
+        for name, specifier in jobs:
             _execute_single_recording_job(
                 configuration=configuration,
                 job_name=SingleRecordingJobNames(name),
-                specifier=spec,
-                job_id=ProcessingTracker.generate_job_id(job_name=name, specifier=spec),
+                specifier=specifier,
+                job_id=ProcessingTracker.generate_job_id(job_name=name, specifier=specifier),
                 tracker=tracker,
                 workers=stage_workers.get(name),
             )
@@ -284,11 +285,14 @@ def run_multi_recording_pipeline(
             to accept the measured default for the stage and -1 to request every available core.
 
     Raises:
-        FileNotFoundError: If the multi-recording configuration data cannot be loaded from the specified file.
-        ValueError: If recording validation fails, recording_directories is empty, or the specified job_id does not
-            match any available jobs.
+        FileNotFoundError: If the multi-recording configuration data cannot be loaded from the specified file, or if a
+            recording directory holds no combined_metadata.npz file.
+        RuntimeError: If a recording directory holds multiple combined_metadata.npz files, or if the recording paths do
+            not contain unique identifying components.
+        ValueError: If recording validation fails, recording_directories is empty, target_recording does not name a
+            resolved recording, or the specified job_id does not match any available jobs.
     """
-    config = _load_multi_recording_configuration(configuration_path=configuration_path)
+    configuration = _load_multi_recording_configuration(configuration_path=configuration_path)
 
     # Maps each stage to its requested allocation so that every job reads the count intended for its own stage.
     stage_workers: dict[str, int | None] = {
@@ -297,8 +301,8 @@ def run_multi_recording_pipeline(
     }
 
     console.echo(
-        message=f"Processing {len(config.recording_io.recording_directories)} recordings for dataset "
-        f"'{config.recording_io.dataset_name}'..."
+        message=f"Processing {len(configuration.recording_io.recording_directories)} recordings for dataset "
+        f"'{configuration.recording_io.dataset_name}'...",
     )
 
     # Resolves MultiRecordingRuntimeContext instances to extract recording IDs and the main recording output
@@ -307,7 +311,7 @@ def run_multi_recording_pipeline(
     # disables bootstrap persistence because the prepare tool already wrote the shared configuration and every
     # recording's multi_recording_runtime_data.yaml single-threaded. Skipping the per-worker re-save prevents
     # concurrent worker threads from racing on the same YAML files and producing corrupted output.
-    contexts = resolve_multi_recording_contexts(configuration=config, persist=job_id is None)
+    contexts = resolve_multi_recording_contexts(configuration=configuration, persist=job_id is None)
     recording_ids: list[str] = [context.runtime.io.recording_id for context in contexts]
     main_recording_path = contexts[0].runtime.output_path
     if main_recording_path is None:
@@ -340,7 +344,8 @@ def run_multi_recording_pipeline(
         # REMOTE mode: Validates the requested job_id against the pipeline's universe, aligns the tracker with
         # every valid job so that ``start_job`` finds the requested ID, and executes the matching job.
         id_to_job: dict[str, tuple[str, str]] = {
-            ProcessingTracker.generate_job_id(job_name=name, specifier=spec): (name, spec) for name, spec in universe
+            ProcessingTracker.generate_job_id(job_name=name, specifier=specifier): (name, specifier)
+            for name, specifier in universe
         }
 
         if job_id not in id_to_job:
@@ -355,7 +360,7 @@ def run_multi_recording_pipeline(
 
         resolved_name, resolved_specifier = id_to_job[job_id]
         _execute_multi_recording_job(
-            configuration=config,
+            configuration=configuration,
             job_name=MultiRecordingJobNames(resolved_name),
             specifier=resolved_specifier,
             job_id=job_id,
@@ -377,12 +382,12 @@ def run_multi_recording_pipeline(
 
         tracker.align_jobs(jobs=jobs, universe=universe)
 
-        for name, spec in jobs:
+        for name, specifier in jobs:
             _execute_multi_recording_job(
-                configuration=config,
+                configuration=configuration,
                 job_name=MultiRecordingJobNames(name),
-                specifier=spec,
-                job_id=ProcessingTracker.generate_job_id(job_name=name, specifier=spec),
+                specifier=specifier,
+                job_id=ProcessingTracker.generate_job_id(job_name=name, specifier=specifier),
                 tracker=tracker,
                 workers=stage_workers[name],
             )
@@ -434,15 +439,15 @@ def execute_multi_recording_job(
         ValueError: If the configuration specifies no recording directories or no dataset name, or if job_name is not a
             recognized multi-recording job.
     """
-    config = _load_multi_recording_configuration(configuration_path=configuration_path)
+    configuration = _load_multi_recording_configuration(configuration_path=configuration_path)
 
     # The discovery and extraction stages re-load the shared bootstrap with persistence disabled, so it must exist
     # before they run. The single-threaded discovery job opts in to write it, and later extraction jobs rely on it.
     if persist_bootstrap:
-        resolve_multi_recording_contexts(configuration=config, persist=True)
+        resolve_multi_recording_contexts(configuration=configuration, persist=True)
 
     _execute_multi_recording_job(
-        configuration=config,
+        configuration=configuration,
         job_name=MultiRecordingJobNames(job_name),
         specifier=specifier,
         job_id=job_id,
@@ -481,7 +486,7 @@ def _load_single_recording_configuration(configuration_path: Path) -> tuple[Sing
     # Loads configuration data from the provided file.
     try:
         configuration: SingleRecordingConfiguration = SingleRecordingConfiguration.from_yaml(
-            file_path=configuration_path
+            file_path=configuration_path,
         )
     except Exception:
         message = (
@@ -538,7 +543,7 @@ def _load_multi_recording_configuration(configuration_path: Path) -> MultiRecord
 
     # Loads configuration data from the provided file.
     try:
-        config: MultiRecordingConfiguration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
+        configuration: MultiRecordingConfiguration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
     except Exception:
         message = (
             "Unable to run the multi-recording cindra processing pipeline, as the input configuration file is not a "
@@ -549,7 +554,7 @@ def _load_multi_recording_configuration(configuration_path: Path) -> MultiRecord
         console.error(message=message, error=FileNotFoundError)
 
     # Validates that the configuration contains the required recording directories.
-    if not config.recording_io.recording_directories:
+    if not configuration.recording_io.recording_directories:
         message = (
             "Unable to run the multi-recording cindra processing pipeline. The "
             "configuration file must specify at least two recording directories "
@@ -559,7 +564,7 @@ def _load_multi_recording_configuration(configuration_path: Path) -> MultiRecord
         console.error(message=message, error=ValueError)
 
     # Validates that the configuration contains a dataset name.
-    if not config.recording_io.dataset_name:
+    if not configuration.recording_io.dataset_name:
         message = (
             "Unable to run the multi-recording cindra processing pipeline. The "
             "configuration file must specify a dataset name under "
@@ -569,12 +574,12 @@ def _load_multi_recording_configuration(configuration_path: Path) -> MultiRecord
         console.error(message=message, error=ValueError)
 
     # Configures the console's progress bar display state based on the configuration flag.
-    if config.runtime.display_progress_bars:
+    if configuration.runtime.display_progress_bars:
         console.enable_progress()
     else:
         console.disable_progress()
 
-    return config
+    return configuration
 
 
 def _execute_single_recording_job(
@@ -639,18 +644,18 @@ def _execute_single_recording_job(
 
             # Loads contexts from disk and combines all processed planes into a dataset. Arrays are not
             # loaded automatically due to their memory footprint, so they must be loaded explicitly before
-            # combining. Detection arrays provide background images; extraction arrays provide ROI statistics
+            # combining. Detection arrays provide background images. Extraction arrays provide ROI statistics
             # and fluorescence traces.
             root_path = configuration.file_io.output_path / "cindra"
             contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
-            if not isinstance(contexts, list):  # pragma: no cover — load with plane_index=-1 always returns a list
+            if not isinstance(contexts, list):  # pragma: no cover - load with plane_index=-1 always returns a list
                 contexts = [contexts]
             for context in contexts:
                 # pragma justification: resolved plane contexts always carry a configured output path.
                 if context.runtime.output_path is not None:  # pragma: no branch
-                    context.runtime.detection.memory_map_arrays(context.runtime.output_path)
-                    context.runtime.extraction.memory_map_arrays(context.runtime.output_path)
-                    context.runtime.extraction.memory_map_results(context.runtime.output_path)
+                    context.runtime.detection.memory_map_arrays(output_path=context.runtime.output_path)
+                    context.runtime.extraction.memory_map_arrays(output_path=context.runtime.output_path)
+                    context.runtime.extraction.memory_map_results(output_path=context.runtime.output_path)
             save_combined_data(contexts=contexts)
 
         else:
@@ -689,7 +694,7 @@ def _execute_multi_recording_job(
             job's stage and -1 to request every available core.
 
     Raises:
-        ValueError: If the job_name is not recognized.
+        ValueError: If the job_name is not recognized or the requested worker count is invalid.
     """
     console.echo(message=f"Running '{job_name}' job (specifier='{specifier}') with ID {job_id}...")
     tracker.start_job(job_id=job_id)

@@ -1,4 +1,6 @@
-"""Provides utility functions for filtering and downsampling data arrays during ROI detection."""
+"""Provides utility functions for filtering and downsampling data arrays during ROI detection, together with the
+meshgrid, spatial taper mask, and registration block helpers shared with the registration pipeline.
+"""
 
 from __future__ import annotations
 
@@ -56,7 +58,7 @@ def compute_temporal_standard_deviation(frames: NDArray[np.float32]) -> NDArray[
     return result
 
 
-def downsample(data: NDArray[np.float32], taper_edge: bool = True) -> NDArray[np.float32]:
+def downsample(data: NDArray[np.float32], *, taper_edge: bool = True) -> NDArray[np.float32]:
     """Downsamples a 3D array by a factor of 2 in both spatial dimensions.
 
     Notes:
@@ -75,13 +77,13 @@ def downsample(data: NDArray[np.float32], taper_edge: bool = True) -> NDArray[np
     """
     # Precomputes the downsampling parameters and the output array.
     depth, height, width = data.shape
-    out_height = (height + 1) // 2
-    out_width = (width + 1) // 2
+    output_height = (height + 1) // 2
+    output_width = (width + 1) // 2
     even_height = (height // 2) * 2
     even_width = (width // 2) * 2
     taper_factor = 0.5 if taper_edge else 1.0
 
-    downsampled = np.zeros((depth, out_height, out_width), dtype=np.float32)
+    downsampled = np.zeros((depth, output_height, output_width), dtype=np.float32)
 
     # Processes the main 2x2 blocks using reshape (creates a view, not a copy).
     if even_height > 0 and even_width > 0:
@@ -108,13 +110,9 @@ def downsample(data: NDArray[np.float32], taper_edge: bool = True) -> NDArray[np
 def compute_thresholded_variance(frames: NDArray[np.float32], intensity_threshold: float) -> NDArray[np.float32]:
     """Computes the thresholded root-sum-of-squares of pixel intensities across frames.
 
-    Notes:
-        This function computes a root-sum-of-squares measure for pixels exceeding the intensity threshold. Uses
-        np.where with in-place squaring to avoid allocating separate boolean mask and squared-frames temporaries.
-
     Args:
         frames: The input frame array with shape (num_frames, height, width).
-        intensity_threshold: The minimum pixel intensity required for inclusion in the standard deviation
+        intensity_threshold: The minimum pixel intensity required for inclusion in the root-sum-of-squares
             calculation. Pixels below this threshold contribute zero to the sum.
 
     Returns:
@@ -153,9 +151,9 @@ def compute_spatial_taper_mask(sigma: float, height: int, width: int) -> NDArray
     taper_start_column = np.float32(((width - 1) / 2) - 2 * sigma)
 
     # Applies sigmoid function: 1.0 at center, 0.5 at taper_start, approaches 0 at edges.
-    sigma_f32 = np.float32(sigma)
-    row_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((row_distances - taper_start_row) / sigma_f32))
-    column_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((column_distances - taper_start_column) / sigma_f32))
+    sigma_float32 = np.float32(sigma)
+    row_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((row_distances - taper_start_row) / sigma_float32))
+    column_taper = np.float32(1.0) / (np.float32(1.0) + np.exp((column_distances - taper_start_column) / sigma_float32))
 
     # Combines row and column tapers multiplicatively for 2D falloff.
     taper_mask: NDArray[np.float32] = row_taper * column_taper
@@ -259,45 +257,6 @@ def compute_registration_blocks(
     return y_blocks, x_blocks, (y_block_count, x_block_count), actual_block_size, smoothing_kernel
 
 
-def _apply_gaussian_high_pass(frames: NDArray[np.float32], kernel_size: int) -> None:
-    """Applies a high-pass filter to the input frames in-place using a Gaussian kernel.
-
-    Args:
-        frames: The input frame array with shape (num_frames, height, width). Modified in-place.
-        kernel_size: The Gaussian kernel size in frames.
-    """
-    frames -= gaussian_filter(input=frames, sigma=[kernel_size, 0, 0])
-
-
-def _apply_rolling_mean_high_pass(frames: NDArray[np.float32], kernel_size: int) -> None:
-    """Applies a high-pass filter to the input frames in-place using a non-overlapping rolling mean kernel.
-
-    Notes:
-        This method is more efficient than Gaussian filtering for large kernel sizes. The filter subtracts the mean
-        of each non-overlapping temporal window from all frames within that window.
-
-    Args:
-        frames: The input frame array with shape (num_frames, height, width). Modified in-place.
-        kernel_size: The rolling window size in frames.
-    """
-    # Determines the number of complete windows based on the frame count.
-    num_frames, height, width = frames.shape
-    num_complete_windows = num_frames // kernel_size
-
-    # Reshapes to (num_windows, kernel_size, height, width). This creates a view, not a copy.
-    if num_complete_windows > 0:
-        # Applies the filter to all windows at once.
-        complete = frames[: num_complete_windows * kernel_size].reshape(
-            num_complete_windows, kernel_size, height, width
-        )
-        complete -= complete.mean(axis=1, keepdims=True)
-
-    # Handles remaining frames that don't fill a complete window.
-    remainder = num_frames % kernel_size
-    if remainder > 0:
-        frames[-remainder:] -= frames[-remainder:].mean(axis=0)
-
-
 def mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
     """Creates a mean-centered distance meshgrid of the specified dimensions.
 
@@ -324,3 +283,42 @@ def mean_centered_meshgrid(height: int, width: int) -> tuple[NDArray[np.float32]
     column_distances, row_distances = np.meshgrid(column_distances_1d, row_distances_1d)
 
     return column_distances, row_distances
+
+
+def _apply_gaussian_high_pass(frames: NDArray[np.float32], kernel_size: int) -> None:
+    """Applies a high-pass filter to the input frames in-place using a Gaussian kernel.
+
+    Args:
+        frames: The input frame array with shape (num_frames, height, width). Modified in-place.
+        kernel_size: The Gaussian kernel size in frames.
+    """
+    frames -= gaussian_filter(input=frames, sigma=[kernel_size, 0, 0])
+
+
+def _apply_rolling_mean_high_pass(frames: NDArray[np.float32], kernel_size: int) -> None:
+    """Applies a high-pass filter to the input frames in-place using a non-overlapping rolling mean kernel.
+
+    Notes:
+        Subtracts the mean of each non-overlapping temporal window from all frames within that window, which keeps
+        the filter cost bounded as the kernel size grows.
+
+    Args:
+        frames: The input frame array with shape (num_frames, height, width). Modified in-place.
+        kernel_size: The rolling window size in frames.
+    """
+    # Determines the number of complete windows based on the frame count.
+    num_frames, height, width = frames.shape
+    num_complete_windows = num_frames // kernel_size
+
+    # Reshapes to (num_windows, kernel_size, height, width). This creates a view, not a copy.
+    if num_complete_windows > 0:
+        # Applies the filter to all windows at once.
+        complete = frames[: num_complete_windows * kernel_size].reshape(
+            num_complete_windows, kernel_size, height, width
+        )
+        complete -= complete.mean(axis=1, keepdims=True)
+
+    # Handles remaining frames that don't fill a complete window.
+    remainder = num_frames % kernel_size
+    if remainder > 0:
+        frames[-remainder:] -= frames[-remainder:].mean(axis=0)

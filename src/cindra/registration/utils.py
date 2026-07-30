@@ -46,7 +46,7 @@ def apply_phase_correlation(
     width = frames.shape[-1]
 
     # Transforms frames to frequency domain.
-    frames_fft = scipy_rfft2(frames, axes=(-2, -1), workers=workers)
+    frames_fft = scipy_rfft2(x=frames, axes=(-2, -1), workers=workers)
 
     # Normalizes by magnitude to extract phase-only information. This makes the correlation robust to
     # intensity variations between frames. Epsilon prevents division by zero at DC component.
@@ -56,7 +56,7 @@ def apply_phase_correlation(
     frames_fft *= kernel
 
     # Transforms back to spatial domain to get correlation surface. The peak location indicates the offset.
-    return scipy_irfft2(frames_fft, s=(frames.shape[-2], width), axes=(-2, -1), workers=workers).astype(
+    return scipy_irfft2(x=frames_fft, s=(frames.shape[-2], width), axes=(-2, -1), workers=workers).astype(
         np.float32, copy=False
     )
 
@@ -151,7 +151,7 @@ def compute_gaussian_frequency_filter(sigma: float, height: int, width: int) -> 
 
     # Normalizes kernel to unit sum and transforms to frequency domain.
     gaussian_kernel /= gaussian_kernel.sum()
-    return scipy_rfft2(ifftshift(gaussian_kernel), axes=(-2, -1)).astype(np.complex64)
+    return scipy_rfft2(x=ifftshift(x=gaussian_kernel), axes=(-2, -1)).astype(np.complex64)
 
 
 def apply_temporal_smoothing(frames: NDArray[np.float32], sigma: float) -> NDArray[np.float32]:
@@ -175,7 +175,8 @@ def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[n
         window: The window size for smoothing. Must be an even integer.
 
     Returns:
-        The spatially smoothed data with the same shape as input.
+        The spatially smoothed data. Singleton axes are dropped, so a 2D input and a single-frame 3D stack are both
+        returned as 2D arrays.
 
     Raises:
         ValueError: If the window size is not an even integer.
@@ -209,7 +210,6 @@ def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[n
     data_summed = data_summed[:, :, window:] - data_summed[:, :, :-window]
     data_summed /= window**2
 
-    # Squeezes back to 2D if input was 2D.
     result: NDArray[np.float32] = data_summed.squeeze()
     return result
 
@@ -222,7 +222,8 @@ def apply_spatial_high_pass(data: NDArray[np.float32], window: int) -> NDArray[n
         window: The window size for the low-pass component to subtract.
 
     Returns:
-        The high-pass filtered data with the same shape as input.
+        The high-pass filtered data. Singleton axes are dropped, so a 2D input and a single-frame 3D stack are both
+        returned as 2D arrays.
     """
     # Promotes 2D input to 3D for uniform processing.
     if data.ndim == 2:  # noqa: PLR2004
@@ -237,7 +238,6 @@ def apply_spatial_high_pass(data: NDArray[np.float32], window: int) -> NDArray[n
     low_pass /= normalization
     data_filtered = data - low_pass
 
-    # Squeezes back to 2D if input was 2D.
     return data_filtered.squeeze()
 
 
@@ -253,7 +253,7 @@ def compute_reference_fft(reference_image: NDArray[np.float32]) -> NDArray[np.co
     Returns:
         The complex conjugate of the FFT with shape (height, width // 2 + 1).
     """
-    return np.conj(scipy_rfft2(reference_image, axes=(-2, -1))).astype(np.complex64)
+    return np.conj(scipy_rfft2(x=reference_image, axes=(-2, -1))).astype(np.complex64)
 
 
 @lru_cache(maxsize=5)
@@ -269,8 +269,8 @@ def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray
         subpixel: The subpixel resolution factor (e.g., 10 means 0.1 pixel precision).
 
     Returns:
-        A tuple of (kernel_matrix, num_upsampled_points) where kernel_matrix is the upsampling transformation
-        matrix and num_upsampled_points is the number of points in the upsampled grid.
+        A tuple of (kernel_matrix, upsampled_point_count) where kernel_matrix is the upsampling transformation
+        matrix and upsampled_point_count is the number of points in the upsampled grid.
     """
     # Creates low-resolution grid centered at zero with integer spacing.
     low_resolution_coordinates = np.arange(-padding, padding + 1, dtype=np.float64)
@@ -278,7 +278,7 @@ def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray
     # Creates high-resolution grid with subpixel spacing. The +0.001 ensures the endpoint is included
     # since arange excludes the stop value.
     high_resolution_coordinates = np.arange(-padding, padding + 0.001, 1.0 / subpixel, dtype=np.float64)
-    num_upsampled = high_resolution_coordinates.shape[0]
+    upsampled_point_count = high_resolution_coordinates.shape[0]
 
     # Computes RBF interpolation kernel: inv(K(source, source)) @ K(source, target).
     # Uses float64 internally for numerical stability during matrix inversion.
@@ -291,7 +291,7 @@ def compute_upsampling_kernel(padding: int, subpixel: int = 10) -> tuple[NDArray
     kernel_matrix = np.linalg.inv(source_weights) @ interpolation_weights
 
     # Casts to float32 since precision is no longer critical after inversion.
-    return kernel_matrix.astype(np.float32), num_upsampled
+    return kernel_matrix.astype(np.float32), upsampled_point_count
 
 
 def _compute_gaussian_rbf_weights(

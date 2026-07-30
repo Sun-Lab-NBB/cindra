@@ -45,12 +45,13 @@ available, invoke `/cindra-mcp-environment-setup` to diagnose and resolve connec
 These tools are registered on the `cindra-mcp` server. Tool parameters and return values are
 self-documented via MCP introspection.
 
-| Tool                        | Purpose                                                                   |
-|-----------------------------|---------------------------------------------------------------------------|
-| `generate_config_file_tool` | Generates a default configuration YAML for the specified pipeline type    |
-| `discover_recordings_tool`  | Discovers single and multi-recording candidates under a root directory    |
-| `read_config_file_tool`     | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
-| `validate_config_file_tool` | Validates a cindra config against schema, reports errors and non-defaults |
+| Tool                                | Purpose                                                                   |
+|-------------------------------------|---------------------------------------------------------------------------|
+| `generate_config_file_tool`         | Generates a default configuration YAML for the specified pipeline type    |
+| `discover_recordings_tool`          | Discovers single and multi-recording candidates under a root directory    |
+| `read_config_file_tool`             | Reads any YAML file as a raw dictionary (supports legacy and non-cindra)  |
+| `validate_config_file_tool`         | Validates a cindra config against schema, reports errors and non-defaults |
+| `validate_recording_readiness_tool` | Validates that raw TIFFs and acquisition parameters are ready to process  |
 
 ---
 
@@ -65,8 +66,10 @@ configuration directly from the file without any runtime overrides.
 CPU worker allocation lives outside the configuration file. Each processing stage receives its worker count as an
 invocation argument, supplied by the `cindra run` options `-bw/--binarize-workers`, `-rw/--register-workers` and
 `-pw/--process-workers`, or by `execute_processing_jobs_tool` and `execute_full_pipeline_tool` at dispatch time.
-Omitting a worker option applies the measured default of 4 workers for binarization, 8 for registration and 10 for
-processing. Setting a worker option to -1 requests every available core.
+Omitting a `cindra run` worker option applies the measured default of 4 workers for binarization, 8 for registration
+and 10 for processing, and setting one to -1 requests every available core. The MCP tools invert that convention:
+their `workers_per_job` defaults to -1, which accepts those same measured defaults, and any positive value overrides
+every non-fixed resource class alike.
 
 ---
 
@@ -76,7 +79,7 @@ These parameters are set automatically by the pipeline and should not be manuall
 
 | Parameter                       | Set by     | Value                                               |
 |---------------------------------|------------|-----------------------------------------------------|
-| `file_io.data_path`             | batch tool | Recording's session root path (not raw data subdir) |
+| `file_io.data_path`             | batch tool | Recording's session root path, above the raw data   |
 | `file_io.output_path`           | user/batch | Recording's processed output path (required)        |
 | `runtime.display_progress_bars` | CLI/MCP    | Whether to show progress bars                       |
 
@@ -128,12 +131,14 @@ independent ROI detection on both channels.
 Controls input data ingestion and output directory paths. During binarization (the first processing step), the
 pipeline reads raw multipage TIFF files from the data directory, splits them by imaging plane, and writes each
 plane's frames into a contiguous binary file optimized for fast random access during processing.
-This TIFF-to-binary conversion only runs once unless `repeat_binarization` is enabled.
+This TIFF-to-binary conversion is skipped on subsequent runs unless `repeat_binarization` is enabled or the existing
+binaries are invalid (missing, sized inconsistently with the recorded plane geometry, or left marked by an interrupted
+registration).
 
 | Parameter             | Type         | Default | Description                                                 |
 |-----------------------|--------------|---------|-------------------------------------------------------------|
 | `data_path`           | Path or None | None    | Root directory containing input TIFFs. **Set by pipeline.** |
-| `output_path`         | Path or None | None    | Output directory root. **Required; set by user or batch.**  |
+| `output_path`         | Path or None | None    | Output directory root. **Required, set by user or batch.**  |
 | `ignored_file_names`  | tuple[str]   | ()      | File stems (no extension) of TIFFs to exclude.              |
 | `repeat_binarization` | bool         | False   | Force re-conversion even when binaries are intact.          |
 
@@ -241,8 +246,10 @@ residual deformations. In practice, nearly all in vivo recordings benefit from b
 
 Detects individual neurons (ROIs) from the registered movie. The movie is temporally binned, high-pass filtered
 to remove neuropil background, then decomposed via iterative source extraction to identify spatial components
-(cell masks) and their temporal activity. Each candidate ROI is classified as cell or artifact using a
-pre-trained classifier based on morphological features (compactness, skewness, pixel count).
+(cell masks) and their temporal activity. When `preclassification_threshold` is above zero, each candidate ROI is
+preclassified as cell or non-cell using a pre-trained two-feature classifier (normalized pixel count and
+compactness). Skewness requires extracted fluorescence traces, so it only joins the feature set during the final
+classification in Section 8.
 
 | Parameter                     | Type  | Default | Description                                                        |
 |-------------------------------|-------|---------|--------------------------------------------------------------------|
@@ -352,6 +359,8 @@ and deconvolves the result to produce an estimated spike rate trace per ROI.
 ## Configuration file format
 
 ```yaml
+pipeline_type: single-recording
+
 runtime:
   display_progress_bars: false
 
@@ -366,17 +375,20 @@ file_io:
 # Other sections use defaults...
 ```
 
+The `pipeline_type` discriminator is mandatory. `generate_config_file_tool` writes it automatically, but a manually
+authored file that omits it is rejected by both `validate_config_file_tool` and `cindra run`.
+
 ---
 
 ## Configuration lifecycle
 
 Configuration files follow a two-tier lifecycle:
 
-1. **Template configs** — De-novo configurations generated via `generate_config_file_tool` or manually created.
+1. **Template configs**: de-novo configurations generated via `generate_config_file_tool` or manually created.
    Templates can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings.
    Templates are never modified by the pipeline.
 
-2. **Resolved copies** — When `prepare_single_recording_batch_tool` runs, it loads the template, applies
+2. **Resolved copies**: when `prepare_single_recording_batch_tool` runs, it loads the template, applies
    recording-specific overrides (`file_io.data_path` from `recording_paths`, `file_io.output_path` from the
    required `recording_output_paths` parameter, `runtime.display_progress_bars=False`), and saves the
    resolved copy as `cindra/configuration.yaml` inside each recording's output directory. The per-recording copy is
@@ -393,7 +405,7 @@ and let it handle per-recording fine-tuning automatically.
 
 1. **Discover recordings** using `discover_recordings_tool` (check the `single_recording_candidates` list) to find
    directories with raw data.
-2. **Verify data readiness** — use `validate_recording_readiness_tool` on each discovered recording to confirm that
+2. **Verify data readiness**: use `validate_recording_readiness_tool` on each discovered recording to confirm that
    raw data and acquisition parameters are ready. If any recording fails validation, invoke
    `/acquisition-data-preparation` to resolve before continuing.
 3. **Generate a template configuration** using `generate_config_file_tool` with `pipeline_type="single-recording"`.
@@ -402,7 +414,7 @@ and let it handle per-recording fine-tuning automatically.
 4. **Review and modify** the template YAML file, setting at minimum `main.tau` and `main.two_channels`.
 5. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
-6. **Configuration complete** — the validated template file is ready for use. This skill does not start
+6. **Configuration complete**: the validated template file is ready for use. This skill does not start
    processing. If invoked standalone, the configuration is ready. To run it, proceed to
    `/single-recording-processing`. If invoked from another skill, return control to the caller.
 

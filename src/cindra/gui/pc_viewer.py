@@ -39,11 +39,11 @@ class PCViewer(QMainWindow):
         _loaded: Determines whether PC data has been loaded and is ready for display.
         _current_frame: Animation toggle state for PC extreme image cycling.
         _pc_count: Number of principal components available.
-        _pc_images: PC extreme images array with shape (2, num_pcs, height, width), or None.
+        _pc_images: PC extreme images array with shape (2, principal_component_count, height, width), or None.
         _image_height: Height of PC images in pixels.
         _image_width: Width of PC images in pixels.
-        _pc_metrics: Registration offset metrics array with shape (num_pcs, 3), or None.
-        _pc_projections: Per-frame PC projection array with shape (num_frames, num_pcs), or None.
+        _pc_metrics: Registration offset metrics array with shape (principal_component_count, 3), or None.
+        _pc_projections: Per-frame PC projection array with shape (frame_count, principal_component_count), or None.
         _central_widget: Central widget container.
         _layout: Grid layout for arranging all controls and views.
         _graphics_widget: PyQtGraph graphics layout for image and plot views.
@@ -121,9 +121,9 @@ class PCViewer(QMainWindow):
         self._layout.setRowStretch(2, 0)
 
         # Configures pixel offset metrics plot. Top content margin provides space for the legend row.
-        self._metrics_plot = self._graphics_widget.addPlot(row=0, col=0)
+        self._metrics_plot: pg.PlotItem = self._graphics_widget.addPlot(row=0, col=0)
         configure_plot(
-            self._metrics_plot,
+            plot=self._metrics_plot,
             mouse_x=False,
             mouse_y=False,
             title="PC Registration Offsets",
@@ -131,18 +131,22 @@ class PCViewer(QMainWindow):
             bottom_label="PC #",
         )
 
-        self._difference_view_box = self._graphics_widget.addViewBox(
+        self._difference_view_box: pg.ViewBox = self._graphics_widget.addViewBox(
             name="plot1",
             lockAspect=True,
             row=1,
             col=0,
             invertY=True,
         )
-        self._merged_view_box = self._graphics_widget.addViewBox(lockAspect=True, row=1, col=1, invertY=True)
+        self._merged_view_box: pg.ViewBox = self._graphics_widget.addViewBox(
+            lockAspect=True, row=1, col=1, invertY=True
+        )
         self._merged_view_box.setMenuEnabled(False)
         self._merged_view_box.setXLink("plot1")
         self._merged_view_box.setYLink("plot1")
-        self._animated_view_box = self._graphics_widget.addViewBox(lockAspect=True, row=1, col=2, invertY=True)
+        self._animated_view_box: pg.ViewBox = self._graphics_widget.addViewBox(
+            lockAspect=True, row=1, col=2, invertY=True
+        )
         self._animated_view_box.setMenuEnabled(False)
         self._animated_view_box.setXLink("plot1")
         self._animated_view_box.setYLink("plot1")
@@ -164,9 +168,9 @@ class PCViewer(QMainWindow):
 
         self._graphics_widget.scene().sigMouseClicked.connect(self._plot_clicked)
 
-        self._projection_plot = self._graphics_widget.addPlot(row=0, col=1, colspan=2)
+        self._projection_plot: pg.PlotItem = self._graphics_widget.addPlot(row=0, col=1, colspan=2)
         configure_plot(
-            self._projection_plot,
+            plot=self._projection_plot,
             mouse_x=False,
             mouse_y=True,
             title="PC Projection Weight",
@@ -224,6 +228,53 @@ class PCViewer(QMainWindow):
             "loaded": self._loaded,
         }
 
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
+        """Handles keyboard navigation for PC stepping and animation control.
+
+        Notes:
+            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
+        """
+        if event.modifiers() != QtCore.Qt.KeyboardModifier.ShiftModifier:
+            # Left/right arrow keys step through principal components, pausing animation first.
+            if event.key() == QtCore.Qt.Key.Key_Left:
+                self._pause_animation()
+                pc_number = int(self._pc_edit.text())
+                pc_number = max(pc_number - 1, 1)
+                self._pc_edit.setText(str(pc_number))
+                self._plot_frame()
+            elif event.key() == QtCore.Qt.Key.Key_Right:
+                self._pause_animation()
+                pc_number = int(self._pc_edit.text())
+                pc_number = min(pc_number + 1, self._pc_count)
+                self._pc_edit.setText(str(pc_number))
+                self._plot_frame()
+            # Up/down arrow keys cycle through imaging planes.
+            elif event.key() == QtCore.Qt.Key.Key_Up:
+                index = self._plane_selector.currentIndex()
+                if index > 0:
+                    self._plane_selector.setCurrentIndex(index - 1)
+            elif event.key() == QtCore.Qt.Key.Key_Down:
+                index = self._plane_selector.currentIndex()
+                if index < self._plane_selector.count() - 1:
+                    self._plane_selector.setCurrentIndex(index + 1)
+            # Spacebar toggles between play and pause for the PC extreme image animation.
+            elif event.key() == QtCore.Qt.Key.Key_Space:
+                if self._play_button.isEnabled():
+                    self._play_button.setChecked(True)
+                    self._start_animation()
+                else:
+                    self._pause_animation()
+
+    def eventFilter(self, source: QtCore.QObject, event: QtCore.QEvent) -> bool:  # noqa: N802
+        """Returns focus to the main window when Escape is pressed inside an edit field.
+
+        Notes:
+            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
+        """
+        if escape_returns_focus(window=self, event=event):
+            return True
+        return super().eventFilter(source, event)
+
     def _on_plane_changed(self, index: int) -> None:
         """Handles plane selector index changes by switching to the selected plane.
 
@@ -277,57 +328,10 @@ class PCViewer(QMainWindow):
         self._plot_frame()
         self._play_button.setEnabled(True)
 
-    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
-        """Handles keyboard navigation for PC stepping and animation control.
-
-        Notes:
-            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
-        """
-        if event.modifiers() != QtCore.Qt.KeyboardModifier.ShiftModifier:
-            # Left/right arrow keys step through principal components, pausing animation first.
-            if event.key() == QtCore.Qt.Key.Key_Left:
-                self._pause_animation()
-                pc_number = int(self._pc_edit.text())
-                pc_number = max(pc_number - 1, 1)
-                self._pc_edit.setText(str(pc_number))
-                self._plot_frame()
-            elif event.key() == QtCore.Qt.Key.Key_Right:
-                self._pause_animation()
-                pc_number = int(self._pc_edit.text())
-                pc_number = min(pc_number + 1, self._pc_count)
-                self._pc_edit.setText(str(pc_number))
-                self._plot_frame()
-            # Up/down arrow keys cycle through imaging planes.
-            elif event.key() == QtCore.Qt.Key.Key_Up:
-                index = self._plane_selector.currentIndex()
-                if index > 0:
-                    self._plane_selector.setCurrentIndex(index - 1)
-            elif event.key() == QtCore.Qt.Key.Key_Down:
-                index = self._plane_selector.currentIndex()
-                if index < self._plane_selector.count() - 1:
-                    self._plane_selector.setCurrentIndex(index + 1)
-            # Spacebar toggles between play and pause for the PC extreme image animation.
-            elif event.key() == QtCore.Qt.Key.Key_Space:
-                if self._play_button.isEnabled():
-                    self._play_button.setChecked(True)
-                    self._start_animation()
-                else:
-                    self._pause_animation()
-
-    def eventFilter(self, source: QtCore.QObject, event: QtCore.QEvent) -> bool:  # noqa: N802
-        """Returns focus to the main window when Escape is pressed inside an edit field.
-
-        Notes:
-            Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
-        """
-        if escape_returns_focus(self, event):
-            return True
-        return super().eventFilter(source, event)
-
     def _create_bottom_panel(self) -> None:
         """Creates the bottom control panel with the PC selector, metric labels, and playback controls.
 
-        Widgets keep their natural size; only the trailing stretch grows when the window is resized.
+        Widgets keep their natural size, and only the trailing stretch grows when the window is resized.
         Fixed spacing separates each logical group.
         """
         bold_font = FONTS.large_bold
@@ -364,7 +368,7 @@ class PCViewer(QMainWindow):
 
         # Playback controls.
         playback = create_play_pause_group(
-            self,
+            parent=self,
             play_tooltip="Start automatic PC cycling.",
             pause_tooltip="Stop automatic PC cycling.",
             no_focus=True,
@@ -461,7 +465,7 @@ class PCViewer(QMainWindow):
         self._metrics_plot.disableAutoRange()
         colors = (COLORS.cyan, COLORS.red, COLORS.magenta)
         metric_names = ["rigid", "nonrigid", "nonrigid max"]
-        self._legend = add_plot_legend(self._metrics_plot, column_count=PC_STYLE.legend_column_count)
+        self._legend = add_plot_legend(plot=self._metrics_plot, column_count=PC_STYLE.legend_column_count)
         for index in range(3):
             curve = self._metrics_plot.plot(
                 np.arange(1, self._pc_count + 1, dtype=np.int32), self._pc_metrics[:, index], pen=colors[index]
@@ -515,7 +519,7 @@ class PCViewer(QMainWindow):
             for item in items:
                 if (
                     item in (self._difference_view_box, self._merged_view_box, self._animated_view_box)
-                    and event.button() == 1  # type: ignore[attr-defined]
+                    and event.button() == QtCore.Qt.MouseButton.LeftButton  # type: ignore[attr-defined]
                     and event.double()  # type: ignore[attr-defined]
                 ):
                     self._zoom_plot()

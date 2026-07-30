@@ -21,18 +21,21 @@ if TYPE_CHECKING:
 def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
     """Selects ROIs from single-recording pipeline outputs that meet multi-recording tracking criteria.
 
-    This function performs ROI selection filtering on each recording using the ROI selection parameters from the
+    Performs ROI selection filtering on each recording using the ROI selection parameters from the
     configuration. The CombinedData for each recording is accessed from runtime.combined_data (loaded during context
     resolution), and the selected ROI indices are stored in runtime.io.selected_roi_indices (channel 1) and
-    runtime.io.selected_roi_indices_channel_2 (channel 2, if available).
+    runtime.io.selected_roi_indices_channel_2 (channel 2, if available). Each processed recording's runtime data file
+    is written to disk after its selection completes.
 
     Notes:
         Selection is an on-demand operation. When repeat_selection is False (default), recordings with existing ROI
         selections are skipped. When repeat_selection is True, selection is re-run for all recordings even if selections
         already exist.
 
-        For recordings with two functional channels, both channels are filtered independently using the same selection
-        criteria. The output messages report ROI counts for both channels when channel 2 data is present.
+        For recordings with two functional channels, both channels are filtered independently. Channel 2 uses its own
+        probability_threshold_channel_2, maximum_size_channel_2, and mroi_region_margin_channel_2 parameters when they
+        are configured, and falls back to the channel 1 parameters otherwise. The output messages report ROI counts
+        for both channels when channel 2 data is present.
 
     Args:
         contexts: The list of MultiRecordingRuntimeContext instances to process. Each context must have combined_data
@@ -60,7 +63,6 @@ def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
         )
         has_channel_2_selection = bool(runtime.io.selected_roi_indices_channel_2)
 
-        # Skips if channel 1 has selections AND (no channel 2 data OR channel 2 has selections).
         if has_channel_1_selection and (not has_channel_2_data or has_channel_2_selection) and not repeat_selection:
             channel_1_count = len(runtime.io.selected_roi_indices)
             channel_2_count = len(runtime.io.selected_roi_indices_channel_2)
@@ -79,9 +81,8 @@ def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
         # Memory-maps combined extraction arrays needed for ROI selection (roi_statistics, classification).
         combined_data = runtime.combined_data
         if combined_data is not None and runtime.io.data_path is not None:
-            combined_data.extraction.memory_map_arrays(runtime.io.data_path)
+            combined_data.extraction.memory_map_arrays(output_path=runtime.io.data_path)
 
-        # Performs ROI selection filtering for both channels.
         channel_1_count, channel_2_count = _filter_rois(runtime=runtime, configuration=configuration)
 
         # Formats output message based on whether channel 2 data is present.
@@ -95,7 +96,6 @@ def select_recording_rois(contexts: list[MultiRecordingRuntimeContext]) -> None:
         else:
             console.echo(message=f"Selected {count_message} for recording {recording_id}.", level=LogLevel.SUCCESS)
 
-        # Saves the updated runtime data with the selected ROI indices.
         context.save_runtime()
 
         # Releases combined extraction arrays to free memory.
@@ -114,7 +114,7 @@ def _filter_channel_rois(
     """Filters ROIs from a single channel using the multi-recording ROI selection criteria.
 
     Applies probability threshold, maximum size, and MROI region border margin filters to select ROIs suitable for
-    cross-recording tracking. This helper function handles filtering for one channel and is called separately for
+    cross-recording tracking. Handles filtering for one channel and is called separately for
     channel 1 and channel 2 data.
 
     Args:
@@ -130,7 +130,6 @@ def _filter_channel_rois(
     Returns:
         A tuple of indices into roi_statistics for ROIs that passed all selection filters.
     """
-    # Filters ROIs by classifier probability and pixel count.
     selected_indices: list[int] = []
     for index, roi in enumerate(roi_statistics):
         # Applies the probability threshold filter.
@@ -211,7 +210,6 @@ def _filter_rois(
     region_margin = configuration.roi_selection.mroi_region_margin
     mroi_region_borders = runtime.io.mroi_region_borders
 
-    # Filters channel 1 ROIs and stores indices.
     runtime.io.selected_roi_indices = _filter_channel_rois(
         roi_statistics=combined_data.extraction.roi_statistics,
         cell_classification=combined_data.extraction.cell_classification,

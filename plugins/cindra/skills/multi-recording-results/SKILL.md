@@ -57,49 +57,64 @@ manual file reads whenever possible.
 | `query_multi_recording_registration_quality_tool` | Queries deformation field statistics and transformed image availability per recording |
 | `query_multi_recording_tracking_summary_tool`     | Queries template count, recording count distribution, and cluster statistics          |
 | `query_roi_statistics_tool`                       | Queries per-ROI spatial statistics (use `dataset` parameter for multi-recording)      |
-| `query_traces_tool`                               | Queries fluorescence traces for specific ROIs (use `dataset` parameter for multi-rec) |
+| `query_traces_tool`                               | Queries fluorescence traces for ROIs (use `dataset` parameter for multi-recording)    |
 | `query_cross_recording_traces_tool`               | Queries fluorescence traces for specific ROIs across all recordings in a dataset      |
 
 ### Recommended query order
 
-1. `query_multi_recording_overview_tool` — understand dataset composition and processing completeness
-2. `query_multi_recording_registration_quality_tool` — review deformation field magnitudes and transformed
+1. `query_multi_recording_overview_tool`: understand dataset composition and processing completeness
+2. `query_multi_recording_registration_quality_tool`: review deformation field magnitudes and transformed
    image availability
-3. `query_multi_recording_tracking_summary_tool` — review template counts, cluster IDs, and recording count distribution
-4. `query_roi_statistics_tool` (with `dataset` parameter) — inspect per-ROI spatial statistics and tracking metadata
-5. `query_traces_tool` (with `dataset` parameter) — examine tracked ROI fluorescence activity per recording
-6. `query_cross_recording_traces_tool` — compare longitudinal activity patterns for the same ROIs across sessions
+3. `query_multi_recording_tracking_summary_tool`: review template counts, cluster IDs, and recording count distribution
+4. `query_roi_statistics_tool` (with `dataset` parameter): inspect per-ROI spatial statistics and tracking metadata
+5. `query_traces_tool` (with `dataset` parameter): examine tracked ROI fluorescence activity per recording
+6. `query_cross_recording_traces_tool`: compare longitudinal activity patterns for the same ROIs across sessions
 
-**Important:** Deformation field magnitude does not indicate registration quality — it only reflects how much the
+**Important:** Deformation field magnitude does not indicate registration quality. It only reflects how much the
 field of view shifted between sessions. Similarly, an ROI appearing in fewer recordings does not indicate tracking
-failure — ROIs can be active in some sessions and inactive in others. The only reliable way to assess cross-day
+failure. ROIs can be active in some sessions and inactive in others. The only reliable way to assess cross-day
 registration quality is visual inspection: confirm that backward-deformed templates overlap with the same structures
 across days. Use `/visualization` for this.
 
 ### Query tool argument semantics
 
 The `recording_path` argument for the verify and query tools must be the recording output directory, the parent of
-the `cindra/` folder. This equals the `recording_output_paths` entries passed to and returned by the prepare tool
-when the output root differs from the raw-data root, not the raw-data path itself. The tools resolve the `cindra/`
-subdirectory automatically.
+the `cindra/` folder. This equals the `recording_paths` entries passed to `prepare_multi_recording_batch_tool`, which
+are the per-recording output directories the single-recording pipeline wrote into (the `recording_output_paths` given
+to `prepare_single_recording_batch_tool`, echoed back as each entry's `output_path`), not the raw-data path itself.
+The tools resolve the `cindra/` subdirectory automatically.
 
 The ROI indices accepted by `query_traces_tool`, `query_roi_statistics_tool`, and `query_cross_recording_traces_tool`
 are 0-based positional row indices into the per-recording arrays. They are not the tracking `cluster_id`, which is a
-separate 1-based identity (0 = unclustered). Out-of-range indices are silently dropped without an error, so a
-confidently "successful" empty result can mean a wrong index rather than missing data.
+separate 1-based identity (0 = unclustered). Out-of-range indices are silently dropped, so a confidently "successful"
+empty result from `query_roi_statistics_tool` or `query_cross_recording_traces_tool` can mean a wrong index rather
+than missing data. `query_traces_tool` drops out-of-range indices silently too, but fails with "No valid ROI indices
+provided" when every requested index is out of range.
 
 `query_cross_recording_traces_tool` excludes recordings with incomplete extraction into a `skipped_recordings` list,
 so "all recordings" really means all recordings with complete extraction. Surface `skipped_recordings` to the user
 when it is present.
 
+The `dataset` argument is required by `verify_multi_recording_output_tool`, `query_multi_recording_overview_tool`,
+`query_multi_recording_registration_quality_tool`, `query_multi_recording_tracking_summary_tool`, and
+`query_cross_recording_traces_tool`, and it is what switches `query_roi_statistics_tool` and `query_traces_tool` into
+multi-recording mode. It resolves as an exact directory lookup (`{cindra_root}/multi_recording/{dataset}`) against a
+name the pipeline lowercases at preparation time, so pass the value `resolve_dataset_name_tool` or
+`prepare_multi_recording_batch_tool` returned rather than the user's original casing. `query_roi_statistics_tool` and
+`query_traces_tool` additionally accept `recording_index` (0-based, default 0 = the entry recording). Without it, a
+per-recording query silently reports only the entry recording, so iterate it across the dataset when comparing
+recordings.
+
 ---
 
 ## Output data reference
 
-All results are saved under `{cindra_root}/multi_recording/{dataset_name}/` within each recording's cindra output
-directory. The pipeline produces per-recording output for every recording, plus a shared configuration file in the main
-recording (first after natural sorting). Channel 2 files are only present for dual-channel recordings where both
-channels are functional.
+All results are saved under the dataset output root, `{cindra_root}/multi_recording/{dataset_name}/`, within each
+recording's cindra output directory. The pipeline produces per-recording output for every recording, plus a shared
+configuration file in the main recording (first after natural sorting). Channel 2 masks, statistics, and traces are
+only present for dual-channel recordings where both channels are functional. `transformed_mean_image_channel_2.npy` is
+the one exception: it appears for any dual-channel recording, because binarization computes the channel-2 mean image
+even when the second channel is structural.
 
 ### Directory structure
 
@@ -126,10 +141,13 @@ channels are functional.
 
 ### Processing phase and file creation timeline
 
-**Phase 1 — Discovery:** Executed once across all recordings. Creates `multi_recording_configuration.yaml` (main
-recording only), `multi_recording_runtime_data.yaml` for each recording, and runs the following sub-steps:
+**Phase 1 (Discovery):** Executed once across all recordings. `multi_recording_configuration.yaml` (main recording
+only) and `multi_recording_runtime_data.yaml` for each recording already exist before this phase runs, because
+`prepare_multi_recording_batch_tool` (or the CLI pipeline entry) writes them while bootstrapping the dataset. The
+phase runs the following sub-steps:
 
-1. **Context resolution:** Creates output directories, saves configuration and initial runtime data.
+1. **Context resolution:** Reloads the bootstrap the prepare step wrote. The discovery job is load-only here and
+   fails outright if a recording's `multi_recording_runtime_data.yaml` is missing.
 2. **ROI selection:** Filters single-recording ROIs by probability, size, and MROI margins. Updates
    `multi_recording_runtime_data.yaml` with selected ROI indices.
 3. **Registration:** Computes diffeomorphic deformation fields, transforms reference images and selected ROI masks
@@ -139,7 +157,7 @@ recording only), `multi_recording_runtime_data.yaml` for each recording, and run
 5. **Backward projection:** Applies inverse deformation to project template masks back to each recording's native
    coordinate system. Creates `roi_masks.npz` and `roi_statistics.npz`.
 
-**Phase 2 — Extraction:** Executed independently per recording (parallelizable). Extracts fluorescence from registered
+**Phase 2 (Extraction):** Executed independently per recording (parallelizable). Extracts fluorescence from registered
 binary data using backward-transformed template masks. Creates `cell_fluorescence.npy`,
 `neuropil_fluorescence.npy`, `subtracted_fluorescence.npy`, `spikes.npy`, and optionally
 `cell_colocalization.npy`.
@@ -191,7 +209,7 @@ deformation to the shared visual space.
 | `centroids`       | int32   | (num_rois, 2)   | ROI centroid coordinates (y, x) in shared visual space |
 | `radius`          | float32 | (num_rois,)     | Fitted radius per ROI                                  |
 | `cluster_id`      | uint32  | (num_rois,)     | Tracking cluster ID (0 = unclustered)                  |
-| `recording_count` | uint16  | (num_rois,)     | Number of recordings ROI appears in                    |
+| `recording_count` | uint16  | (num_rois,)     | Always 0 in this file, set only on template masks      |
 | `frame_width`     | uint32  | (1,)            | Frame width in pixels                                  |
 
 ---
@@ -209,11 +227,11 @@ recordings contributed to the template.
 
 ### Backward-transformed extraction data (roi_masks.npz, roi_statistics.npz)
 
-Saved at the multi_recording output root. Uses the same `ROIStatistics.save_list()` serialization format as
+Saved at the dataset output root. Uses the same `ROIStatistics.save_list()` serialization format as
 single-recording output. Contains template masks projected back to the recording's native coordinate system via inverse
 deformation, with full shape statistics computed for each ROI.
 
-**roi_masks.npz** — same NPZ keys and dtypes as the tracking template masks (see above).
+**roi_masks.npz** holds the same NPZ keys and dtypes as the tracking template masks (see above).
 
 **roi_statistics.npz:**
 
@@ -226,7 +244,7 @@ deformation, with full shape statistics computed for each ROI.
 | `aspect_ratio`           | float32 | (num_rois,) | Ellipse axis ratio indicating elongation               |
 | `normalized_pixel_count` | float32 | (num_rois,) | Pixel count normalized by expected ROI size (soma)     |
 | `skewness`               | float32 | (num_rois,) | Neuropil-corrected fluorescence skewness               |
-| `plane_index`            | int32   | (num_rois,) | Imaging plane index for each ROI                       |
+| `plane_index`            | int32   | (num_rois,) | Always 0 for tracked ROIs (combined-view masks)        |
 | `soma_mask`              | bool    | (n_pixels,) | Flattened soma masks (present when populated)          |
 | `soma_mask_counts`       | uint32  | (num_rois,) | Per-ROI lengths indexing `soma_mask`                   |
 | `overlap_mask`           | bool    | (n_pixels,) | Flattened overlap masks (present when populated)       |
@@ -235,7 +253,7 @@ deformation, with full shape statistics computed for each ROI.
 | `neuropil_mask_counts`   | uint32  | (num_rois,) | Per-ROI lengths indexing `neuropil_mask`               |
 
 The `soma_mask`, `overlap_mask`, and `neuropil_mask` data arrays (with their `_counts` companions) appear only
-when the corresponding per-ROI data is populated; otherwise the keys are absent.
+when the corresponding per-ROI data is populated. Otherwise the keys are absent.
 
 Channel 2 uses identical keys in `roi_masks_channel_2.npz` and `roi_statistics_channel_2.npz`.
 
@@ -243,11 +261,13 @@ Channel 2 uses identical keys in `roi_masks_channel_2.npz` and `roi_statistics_c
 
 ### Fluorescence traces
 
-Saved at the multi_recording output root. All files are `.npy` format, float32 dtype.
+Saved at the dataset output root. All files are `.npy` format, float32 dtype.
 
 `frames` is the frame count of the combined view over the recording's registered plane binaries, which is that of the
-recording's shortest plane. It can therefore exceed the recording's single-recording combined `frame_count`, because
-that value is trimmed to the shortest plane that contributed traces rather than to the shortest binary.
+recording's shortest plane binary. It can therefore fall below the recording's single-recording combined
+`frame_count`, because that value is trimmed to the shortest plane that contributed traces while the combined view
+spans every plane binary, including a plane that never completed processing. The two values match whenever every
+plane contributed.
 
 **Channel 1 (always present):**
 
@@ -286,12 +306,24 @@ channel-2 ROIs), so column 0 holds the matched channel-2 ROI index (-1 when unma
 A YAML file containing scalar metadata from all processing stages. Array fields are set to None in the YAML and
 saved as separate `.npy`/`.npz` files (documented above).
 
-| Section        | Key fields                                                                                                                                                                                                                                                                                                                                                                         |
-|----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `io`           | `recording_id`, `data_path`, `dataset_name`, `mroi_region_borders`, `dataset_output_paths`, `selected_roi_indices`, `selected_roi_indices_channel_2`                                                                                                                                                                                                                               |
-| `registration` | `deform_field_y`, `deform_field_x`, `transformed_mean_image`, `transformed_enhanced_mean_image`, `transformed_maximum_projection` (and `*_channel_2` variants), `deformed_roi_masks`, `deformed_roi_masks_channel_2` — all array fields, set to None in YAML because their data is saved separately as `.npy` files in `registration_arrays/` and `.npz` files at the dataset root |
-| `tracking`     | `template_masks`, `template_masks_channel_2`, `template_diameter`, `template_diameter_channel_2` (mask fields saved as NPZ, set to None in YAML)                                                                                                                                                                                                                                   |
-| `timing`       | `registration_time`, `tracking_time`, `backward_transform_time`, `total_discovery_time`, `extraction_time`, `deconvolution_time`, `total_extraction_time`, `date_processed`, `python_version`, `cindra_version`                                                                                                                                                                    |
+| Section        | Key fields                                                                        |
+|----------------|-----------------------------------------------------------------------------------|
+| `io`           | Recording identity, dataset membership, and selected ROI indices, itemized below. |
+| `registration` | Deformation fields, transformed images, and deformed ROI masks, itemized below.   |
+| `tracking`     | Consensus template masks and template diameters, itemized below.                  |
+| `timing`       | Stage durations, phase totals, and version stamps, itemized below.                |
+
+- `io`: `recording_id`, `data_path`, `dataset_name`, `mroi_region_borders`, `dataset_output_paths`,
+  `selected_roi_indices`, `selected_roi_indices_channel_2`.
+- `registration`: `deform_field_y`, `deform_field_x`, `transformed_mean_image`, `transformed_enhanced_mean_image`,
+  `transformed_maximum_projection` (and the `*_channel_2` variants), `deformed_roi_masks`,
+  `deformed_roi_masks_channel_2`. All are array fields, set to None in the YAML because their data is saved
+  separately as `.npy` files in `registration_arrays/` and `.npz` files at the dataset output root.
+- `tracking`: `template_masks`, `template_masks_channel_2`, `template_diameter`, `template_diameter_channel_2`.
+  The mask fields are saved as NPZ and set to None in the YAML.
+- `timing`: `registration_time`, `tracking_time`, `backward_transform_time`, `total_discovery_time`,
+  `extraction_time`, `deconvolution_time`, `total_extraction_time`, `date_processed`, `python_version`,
+  `cindra_version`.
 
 ---
 
@@ -306,7 +338,7 @@ saved as separate `.npy`/`.npz` files (documented above).
 | Plane indices       | int32   | plane_index                              |
 | Deformation fields  | float32 | deform_field_y, deform_field_x           |
 
-The fluorescence trace and colocalization `.npy` files are saved with `allow_pickle=False`; the
+The fluorescence trace and colocalization `.npy` files are saved with `allow_pickle=False`. The
 `registration_arrays/*.npy` files use NumPy save defaults but contain only numeric arrays that load safely with
 `allow_pickle=False`. Arrays support memory-mapped loading via `np.load(path, mmap_mode='r+')` for efficient
 access to large datasets. NPZ archives do not support memory mapping and are always eagerly loaded.

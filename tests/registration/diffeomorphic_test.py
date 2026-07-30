@@ -63,7 +63,7 @@ class TestDiffeomorphicDemonsRegistration:
         assert registration._images[1].dtype == np.float32
 
     def test_constructor_preserves_float32(self) -> None:
-        """Verifies that float32 images are not re-converted."""
+        """Verifies that a float32 image is stored without conversion."""
         image = np.ones((32, 32), dtype=np.float32)
         registration = DiffeomorphicDemonsRegistration(images=[image, image])
         assert registration._images[0] is image
@@ -113,44 +113,44 @@ class TestDiffeomorphicDemonsRegistration:
             images=images, scale_sampling=5, final_scale=1.0, final_grid_sampling=8.0
         )
         registration.register(progress=False)
-        for i in range(2):
-            deformation = registration.get_deformation(image_index=i)
+        for image_index in range(2):
+            deformation = registration.get_deformation(image_index=image_index)
             # Deformations should be near-zero for identical images.
             assert np.max(np.abs(deformation[0])) < 2.0
             assert np.max(np.abs(deformation[1])) < 2.0
 
     def test_register_produces_deformations(self) -> None:
         """Verifies that registration produces finite, full-resolution, non-trivial deformations for distinct images."""
-        rng = np.random.default_rng(seed=42)
-        image1 = rng.standard_normal((32, 32)).astype(np.float32)
-        image2 = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        first_image = generator.standard_normal((32, 32)).astype(np.float32)
+        second_image = generator.standard_normal((32, 32)).astype(np.float32)
         registration = DiffeomorphicDemonsRegistration(
-            images=[image1, image2], scale_sampling=5, final_scale=1.0, final_grid_sampling=8.0
+            images=[first_image, second_image], scale_sampling=5, final_scale=1.0, final_grid_sampling=8.0
         )
         registration.register(progress=False)
         assert 0 in registration._deformations
         assert 1 in registration._deformations
-        deformation0 = registration.get_deformation(image_index=0)
-        deformation1 = registration.get_deformation(image_index=1)
+        first_deformation = registration.get_deformation(image_index=0)
+        second_deformation = registration.get_deformation(image_index=1)
         # Final deformation fields span the full image resolution and contain only finite values.
-        assert deformation0[0].shape == (32, 32)
-        assert deformation0[1].shape == (32, 32)
-        assert deformation1[0].shape == (32, 32)
-        assert deformation1[1].shape == (32, 32)
-        assert np.all(np.isfinite(deformation0[0]))
-        assert np.all(np.isfinite(deformation0[1]))
-        assert np.all(np.isfinite(deformation1[0]))
-        assert np.all(np.isfinite(deformation1[1]))
+        assert first_deformation[0].shape == (32, 32)
+        assert first_deformation[1].shape == (32, 32)
+        assert second_deformation[0].shape == (32, 32)
+        assert second_deformation[1].shape == (32, 32)
+        assert np.all(np.isfinite(first_deformation[0]))
+        assert np.all(np.isfinite(first_deformation[1]))
+        assert np.all(np.isfinite(second_deformation[0]))
+        assert np.all(np.isfinite(second_deformation[1]))
         # Distinct input images must produce a non-trivial (non-zero) deformation.
-        assert np.max(np.abs(deformation0[0])) > 1e-3
+        assert np.max(np.abs(first_deformation[0])) > 1e-3
 
     def test_register_without_smooth_scale(self) -> None:
         """Verifies that registration runs with smooth scale transitions disabled."""
-        rng = np.random.default_rng(seed=7)
-        image1 = rng.standard_normal((32, 32)).astype(np.float32)
-        image2 = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=7)
+        first_image = generator.standard_normal((32, 32)).astype(np.float32)
+        second_image = generator.standard_normal((32, 32)).astype(np.float32)
         registration = DiffeomorphicDemonsRegistration(
-            images=[image1, image2],
+            images=[first_image, second_image],
             scale_sampling=5,
             final_scale=1.0,
             final_grid_sampling=8.0,
@@ -162,11 +162,11 @@ class TestDiffeomorphicDemonsRegistration:
 
     def test_register_without_freeze_edges(self) -> None:
         """Verifies that registration runs with edge freezing disabled."""
-        rng = np.random.default_rng(seed=11)
-        image1 = rng.standard_normal((32, 32)).astype(np.float32)
-        image2 = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=11)
+        first_image = generator.standard_normal((32, 32)).astype(np.float32)
+        second_image = generator.standard_normal((32, 32)).astype(np.float32)
         registration = DiffeomorphicDemonsRegistration(
-            images=[image1, image2],
+            images=[first_image, second_image],
             scale_sampling=5,
             final_scale=1.0,
             final_grid_sampling=8.0,
@@ -281,7 +281,7 @@ class TestDiffeomorphicRegistrationAccuracy:
         second_run = _register_accuracy_images(images=[reference, translated])
 
         # Bit-identical output makes any numerical change to the registration internals detectable, which allows a
-        # refactor to be verified as behavior-preserving rather than assumed to be.
+        # refactor to be verified as behavior-preserving.
         for image_index in range(2):
             first_deformation = first_run.get_deformation(image_index=image_index)
             second_deformation = second_run.get_deformation(image_index=image_index)

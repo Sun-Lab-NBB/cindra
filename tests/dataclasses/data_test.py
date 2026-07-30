@@ -1,4 +1,4 @@
-"""Contains tests for the dataclass state management methods in single_recording_data and multi_recording_data."""
+"""Contains tests for the state management methods and computed properties of the cindra dataclasses."""
 
 from __future__ import annotations
 
@@ -160,7 +160,7 @@ class TestRegistrationDataPrepareForSaving:
         assert data.principal_component_shift_metrics is None
 
     def test_preserves_scalar_fields(self) -> None:
-        """Verifies that prepare_for_saving() does not modify scalar fields."""
+        """Verifies that prepare_for_saving() preserves scalar fields."""
         data = RegistrationData()
         data.valid_y_range = (10, 200)
         data.valid_x_range = (5, 150)
@@ -268,7 +268,7 @@ class TestDetectionDataPrepareForSaving:
         assert data.correlation_map_channel_2 is None
 
     def test_preserves_scalar_fields(self) -> None:
-        """Verifies that prepare_for_saving() does not modify scalar fields."""
+        """Verifies that prepare_for_saving() preserves scalar fields."""
         data = DetectionData()
         data.roi_diameter = 12
         data.aspect_ratio = 1.5
@@ -308,7 +308,7 @@ class TestDetectionDataReleaseArrays:
         assert data.correlation_map_channel_2 is None
 
     def test_preserves_scalar_fields(self) -> None:
-        """Verifies that release_arrays() does not modify scalar fields."""
+        """Verifies that release_arrays() preserves scalar fields."""
         data = DetectionData()
         data.roi_diameter = 12
         data.aspect_ratio = 1.5
@@ -322,7 +322,7 @@ class TestDetectionDataReleaseArrays:
 
 
 class TestROIMaskRaveledPixels:
-    """Tests ROIMask.raveled_pixels cached property."""
+    """Tests the ROIMask.raveled_pixels cached property."""
 
     def test_computes_correct_raveled_indices(self) -> None:
         """Verifies that raveled pixel indices are computed as y * frame_width + x."""
@@ -362,7 +362,7 @@ class TestROIMaskRaveledPixels:
 
 
 class TestROIMaskCirclePixels:
-    """Tests ROIMask.circle_pixels cached property."""
+    """Tests the ROIMask.circle_pixels cached property."""
 
     def test_returns_tuple_of_two_arrays(self) -> None:
         """Verifies that circle_pixels returns a tuple of (y_circle, x_circle) arrays."""
@@ -709,7 +709,7 @@ class TestMultiRecordingTrackingDataPrepareForSaving:
         assert data.template_masks_channel_2 is None
 
     def test_release_preserves_scalar_fields(self) -> None:
-        """Verifies that release_arrays() does not affect scalar fields like template_diameter."""
+        """Verifies that release_arrays() preserves scalar fields such as template_diameter."""
         data = MultiRecordingTrackingData()
         data.template_diameter = 15
         data.template_masks = []

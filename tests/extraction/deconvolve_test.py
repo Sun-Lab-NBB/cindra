@@ -13,9 +13,9 @@ class TestComputeDeltaFluorescence:
 
     def test_output_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype match expectations."""
-        rng = np.random.default_rng(42)
-        cell = rng.standard_normal((5, 200)).astype(np.float32) + 100.0
-        neuropil = rng.standard_normal((5, 200)).astype(np.float32) + 80.0
+        generator = np.random.default_rng(seed=42)
+        cell = generator.standard_normal((5, 200)).astype(np.float32) + 100.0
+        neuropil = generator.standard_normal((5, 200)).astype(np.float32) + 80.0
         result = compute_delta_fluorescence(
             cell_fluorescence=cell,
             neuropil_fluorescence=neuropil,
@@ -105,8 +105,8 @@ class TestComputeDeltaFluorescence:
 
     def test_constant_percentile_baseline(self) -> None:
         """Verifies the constant_percentile baseline method uses per-ROI percentile."""
-        rng = np.random.default_rng(42)
-        cell = rng.standard_normal((2, 200)).astype(np.float32) + 100.0
+        generator = np.random.default_rng(seed=42)
+        cell = generator.standard_normal((2, 200)).astype(np.float32) + 100.0
         neuropil = np.zeros((2, 200), dtype=np.float32)
         result = compute_delta_fluorescence(
             cell_fluorescence=cell,
@@ -142,7 +142,7 @@ class TestComputeDeltaFluorescence:
         """Verifies that an even baseline window is incremented to odd for symmetric filtering."""
         cell = np.ones((1, 100), dtype=np.float32) * 100.0
         neuropil = np.zeros((1, 100), dtype=np.float32)
-        # sampling_rate=30, window=1.0 => 30 frames (even) => 31 (odd). Should not error.
+        # sampling_rate=30, window=1.0 => 30 frames (even) => incremented to 31 (odd).
         result = compute_delta_fluorescence(
             cell_fluorescence=cell,
             neuropil_fluorescence=neuropil,
@@ -161,8 +161,8 @@ class TestApplyOasisDeconvolution:
 
     def test_output_shape_and_dtype(self) -> None:
         """Verifies the output shape and dtype match expectations."""
-        rng = np.random.default_rng(42)
-        fluorescence = np.maximum(rng.standard_normal((5, 200)).astype(np.float32), 0.0)
+        generator = np.random.default_rng(seed=42)
+        fluorescence = np.maximum(generator.standard_normal((5, 200)).astype(np.float32), 0.0)
         result = apply_oasis_deconvolution(
             cell_fluorescence=fluorescence,
             batch_size=3,
@@ -185,8 +185,8 @@ class TestApplyOasisDeconvolution:
 
     def test_non_negative_spikes(self) -> None:
         """Verifies that all deconvolved spike values are non-negative."""
-        rng = np.random.default_rng(42)
-        fluorescence = np.maximum(rng.standard_normal((10, 300)).astype(np.float32), 0.0)
+        generator = np.random.default_rng(seed=42)
+        fluorescence = np.maximum(generator.standard_normal((10, 300)).astype(np.float32), 0.0)
         result = apply_oasis_deconvolution(
             cell_fluorescence=fluorescence,
             batch_size=5,
@@ -218,8 +218,8 @@ class TestApplyOasisDeconvolution:
 
     def test_batching_produces_consistent_results(self) -> None:
         """Verifies that different batch sizes produce identical results."""
-        rng = np.random.default_rng(42)
-        fluorescence = np.maximum(rng.standard_normal((8, 150)).astype(np.float32), 0.0)
+        generator = np.random.default_rng(seed=42)
+        fluorescence = np.maximum(generator.standard_normal((8, 150)).astype(np.float32), 0.0)
         result_small_batch = apply_oasis_deconvolution(
             cell_fluorescence=fluorescence.copy(),
             batch_size=2,

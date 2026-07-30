@@ -102,9 +102,9 @@ def _build_multi_context(
 ) -> MultiRecordingRuntimeContext:
     """Builds a minimal single-plane MultiRecordingRuntimeContext backed by synthetic constant binary movies.
 
-    Writes the channel 1 movie (and the optional channel 2 movie) as raw int16 binaries, wires a single-plane
-    CombinedData with the combined geometry and cached binary paths, and returns a context whose extraction data is
-    left empty for the caller to populate with backward-transformed tracked ROI statistics.
+    Writes the channel 1 movie, and the optional channel 2 movie, as raw int16 binaries. Wires a single-plane
+    CombinedData with the combined geometry and cached binary paths, then returns a context whose extraction
+    data the caller populates with backward-transformed tracked ROI statistics.
     """
     output_directory = tmp_path / "rec0" / "cindra" / "multi_recording" / "dataset"
     binary_directory = tmp_path / "rec0" / "cindra" / "binaries"
@@ -156,7 +156,7 @@ class TestExtractMultiRecording:
         frame_height = frame_width = 32
         frame_count = 12
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: MultiRecordingConfiguration) -> None:
@@ -165,18 +165,18 @@ class TestExtractMultiRecording:
             configuration.spike_deconvolution.extract_spikes = False
 
         context = _build_multi_context(
-            tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie, configure=configure
         )
-        rois = _make_roi_statistics(((12, 12), (20, 20)), frame_height=frame_height, frame_width=frame_width)
+        rois = _make_roi_statistics(centers=((12, 12), (20, 20)), frame_height=frame_height, frame_width=frame_width)
         context.runtime.extraction.roi_statistics = rois
 
         extract_traces(context=context, workers=1)
 
         output_directory = context.runtime.output_path
-        cell_fluorescence = _load_result(output_directory, "cell_fluorescence")
-        neuropil_fluorescence = _load_result(output_directory, "neuropil_fluorescence")
-        subtracted_fluorescence = _load_result(output_directory, "subtracted_fluorescence")
-        spikes = _load_result(output_directory, "spikes")
+        cell_fluorescence = _load_result(output_directory=output_directory, name="cell_fluorescence")
+        neuropil_fluorescence = _load_result(output_directory=output_directory, name="neuropil_fluorescence")
+        subtracted_fluorescence = _load_result(output_directory=output_directory, name="subtracted_fluorescence")
+        spikes = _load_result(output_directory=output_directory, name="spikes")
 
         assert cell_fluorescence.shape == (len(rois), frame_count)
         np.testing.assert_allclose(cell_fluorescence, float(_CONSTANT_PIXEL_VALUE), rtol=1e-4)
@@ -193,7 +193,7 @@ class TestExtractMultiRecording:
         frame_height = frame_width = 32
         frame_count = 40
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: MultiRecordingConfiguration) -> None:
@@ -202,17 +202,17 @@ class TestExtractMultiRecording:
             configuration.spike_deconvolution.baseline_window = 1.0
 
         context = _build_multi_context(
-            tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie, configure=configure
         )
         context.runtime.extraction.roi_statistics = _make_roi_statistics(
-            ((16, 16),), frame_height=frame_height, frame_width=frame_width
+            centers=((16, 16),), frame_height=frame_height, frame_width=frame_width
         )
 
         extract_traces(context=context, workers=1)
 
         output_directory = context.runtime.output_path
-        subtracted_fluorescence = _load_result(output_directory, "subtracted_fluorescence")
-        spikes = _load_result(output_directory, "spikes")
+        subtracted_fluorescence = _load_result(output_directory=output_directory, name="subtracted_fluorescence")
+        spikes = _load_result(output_directory=output_directory, name="spikes")
 
         assert subtracted_fluorescence.shape == (1, frame_count)
         assert spikes.shape == (1, frame_count)
@@ -225,10 +225,13 @@ class TestExtractMultiRecording:
         frame_height = frame_width = 32
         frame_count = 10
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
         movie_channel_2 = _constant_movie(
-            _CONSTANT_PIXEL_VALUE_CHANNEL_2, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE_CHANNEL_2,
+            frame_count=frame_count,
+            frame_height=frame_height,
+            frame_width=frame_width,
         )
 
         def configure(configuration: MultiRecordingConfiguration) -> None:
@@ -236,7 +239,7 @@ class TestExtractMultiRecording:
             configuration.spike_deconvolution.extract_spikes = False
 
         context = _build_multi_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=frame_height,
             frame_width=frame_width,
             movie=movie,
@@ -245,18 +248,20 @@ class TestExtractMultiRecording:
         )
         centers = ((12, 12), (20, 20))
         context.runtime.extraction.roi_statistics = _make_roi_statistics(
-            centers, frame_height=frame_height, frame_width=frame_width
+            centers=centers, frame_height=frame_height, frame_width=frame_width
         )
         context.runtime.extraction.roi_statistics_channel_2 = _make_roi_statistics(
-            centers, frame_height=frame_height, frame_width=frame_width
+            centers=centers, frame_height=frame_height, frame_width=frame_width
         )
 
         extract_traces(context=context, workers=1)
 
         output_directory = context.runtime.output_path
-        cell_fluorescence = _load_result(output_directory, "cell_fluorescence")
-        cell_fluorescence_channel_2 = _load_result(output_directory, "cell_fluorescence_channel_2")
-        cell_colocalization = _load_result(output_directory, "cell_colocalization")
+        cell_fluorescence = _load_result(output_directory=output_directory, name="cell_fluorescence")
+        cell_fluorescence_channel_2 = _load_result(
+            output_directory=output_directory, name="cell_fluorescence_channel_2"
+        )
+        cell_colocalization = _load_result(output_directory=output_directory, name="cell_colocalization")
 
         np.testing.assert_allclose(cell_fluorescence, float(_CONSTANT_PIXEL_VALUE), rtol=1e-4)
         # Channel 2 reuses the same weighted-sum kernel against its own constant movie, recovering its constant.
@@ -268,7 +273,7 @@ class TestExtractMultiRecording:
         frame_height = frame_width = 32
         frame_count = 8
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: MultiRecordingConfiguration) -> None:
@@ -276,9 +281,9 @@ class TestExtractMultiRecording:
             configuration.spike_deconvolution.extract_spikes = False
 
         context = _build_multi_context(
-            tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie, configure=configure
         )
-        rois = _make_roi_statistics(((16, 16),), frame_height=frame_height, frame_width=frame_width)
+        rois = _make_roi_statistics(centers=((16, 16),), frame_height=frame_height, frame_width=frame_width)
 
         output_directory = context.runtime.output_path
         context.runtime.extraction.roi_statistics = rois
@@ -289,7 +294,7 @@ class TestExtractMultiRecording:
 
         extract_traces(context=context, workers=1)
 
-        cell_fluorescence = _load_result(output_directory, "cell_fluorescence")
+        cell_fluorescence = _load_result(output_directory=output_directory, name="cell_fluorescence")
         assert cell_fluorescence.shape == (len(rois), frame_count)
         np.testing.assert_allclose(cell_fluorescence, float(_CONSTANT_PIXEL_VALUE), rtol=1e-4)
 
@@ -297,9 +302,11 @@ class TestExtractMultiRecording:
         """Verifies that extraction raises RuntimeError when the combined single-recording data is not loaded."""
         frame_height = frame_width = 16
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=8, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=8, frame_height=frame_height, frame_width=frame_width
         )
-        context = _build_multi_context(tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie)
+        context = _build_multi_context(
+            tmp_path=tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie
+        )
         context.runtime.combined_data = None
 
         with pytest.raises(RuntimeError):
@@ -309,9 +316,11 @@ class TestExtractMultiRecording:
         """Verifies that extraction raises RuntimeError when no tracked ROI statistics are available."""
         frame_height = frame_width = 16
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=8, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=8, frame_height=frame_height, frame_width=frame_width
         )
-        context = _build_multi_context(tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie)
+        context = _build_multi_context(
+            tmp_path=tmp_path, frame_height=frame_height, frame_width=frame_width, movie=movie
+        )
         context.runtime.extraction.roi_statistics = None
 
         with pytest.raises(RuntimeError):

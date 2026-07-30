@@ -23,7 +23,7 @@ Launches, manages, and assists with cindra GUI viewers for visual inspection of 
 - Querying and interpreting live viewer display state
 - Guiding users through viewer controls and interaction patterns
 - Viewer prerequisites and data requirements
-- Combining GUI viewer state with MCP query tools for data-driven assistance
+- Combining GUI viewer state with headless query tools for data-driven assistance
 
 **Does not cover:**
 - Processing workflow orchestration (see `/single-recording-processing`,
@@ -49,7 +49,7 @@ CLI commands, scripts, or Python imports. If cindra-gui MCP tools are not availa
 `/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
 
 When assisting the user with data interpretation in a viewer, combine `query_viewer_state_tool`
-from the cindra-gui MCP server with query tools from the cindra MCP server (headless). The GUI
+from the cindra-gui MCP server with the headless query tools from the cindra MCP server. The GUI
 tools manage the viewer window, and the headless query tools provide the underlying data.
 
 ---
@@ -65,24 +65,24 @@ tools manage the viewer window, and the headless query tools provide the underly
 | `close_viewer_tool`       | Terminates a viewer subprocess and cleans up state files                    |
 | `query_viewer_state_tool` | Returns the live display state of an active viewer                          |
 
-### Data query tools (cindra MCP server)
+### Headless query tools (cindra MCP server)
 
 Use these headless query tools alongside viewer state to provide data-driven assistance. These
 tools are documented in detail by `/single-recording-results` and `/multi-recording-results`. The
 `get_recording_status_tool` (cindra MCP server) is also used to confirm processing is complete before
 launching a viewer (see the launch-and-inspect workflow).
 
-| Tool                                              | Use with viewer |
-|---------------------------------------------------|-----------------|
-| `query_single_recording_metadata_tool`            | Any viewer      |
-| `query_registration_quality_tool`                 | Registration    |
-| `query_detection_summary_tool`                    | ROI             |
-| `query_roi_statistics_tool`                       | ROI             |
-| `query_traces_tool`                               | ROI             |
-| `query_multi_recording_overview_tool`             | ROI, Tracking   |
-| `query_multi_recording_registration_quality_tool` | Tracking        |
-| `query_multi_recording_tracking_summary_tool`     | Tracking        |
-| `query_cross_recording_traces_tool`               | ROI (multi-rec) |
+| Tool                                              | Use with viewer       |
+|---------------------------------------------------|-----------------------|
+| `query_single_recording_metadata_tool`            | Any viewer            |
+| `query_registration_quality_tool`                 | Registration          |
+| `query_detection_summary_tool`                    | ROI                   |
+| `query_roi_statistics_tool`                       | ROI                   |
+| `query_traces_tool`                               | ROI                   |
+| `query_multi_recording_overview_tool`             | ROI, Tracking         |
+| `query_multi_recording_registration_quality_tool` | Tracking              |
+| `query_multi_recording_tracking_summary_tool`     | Tracking              |
+| `query_cross_recording_traces_tool`               | ROI (multi-recording) |
 
 ---
 
@@ -162,7 +162,7 @@ launch_viewer_tool(viewer_type="registration", recording_path="<path>")
 
 **Parameters:**
 - `recording_path`: Absolute path to the recording directory containing `cindra/` output
-- `dataset` parameter is not used by the registration viewer
+- `dataset`: Ignored, because the registration viewer reads a single recording's own registration output
 
 **Capabilities:**
 - **Binary player**: Play back registered frames at 5x speed, step through frames with arrow
@@ -197,12 +197,12 @@ dictionary structure depends on the viewer type.
 | `roi_count`                | int       | Total number of ROIs in the recording               |
 | `frame_count`              | int       | Frames in the visualized traces                     |
 | `two_channels`             | bool      | Whether the recording has two functional channels   |
-| `all_recordings_visible`   | bool      | Whether all multi-recording ROIs are shown          |
+| `all_recordings_visible`   | bool      | Whether the stacked all-recordings trace view is on |
 | `roi_source`               | str       | Current ROI source dropdown text                    |
 | `active_dataset`           | str\|null | Active multi-recording dataset name, or null        |
 | `available_datasets`       | list[str] | List of available multi-recording dataset names     |
 | `view_index`               | int       | Active plane view: -1 combined, 0+ per-plane index  |
-| `current_recording_index`  | int\|null | Multi-rec focused recording index, null if single   |
+| `current_recording_index`  | int\|null | Multi-recording focused recording index, or null    |
 
 **`trace_visibility` sub-fields:**
 
@@ -249,7 +249,7 @@ Returns a nested dictionary with two sub-viewers:
 | Field              | Type | Description                                  |
 |--------------------|------|----------------------------------------------|
 | `current_frame`    | int  | Currently displayed frame index              |
-| `frame_count`              | int       | Frames in the visualized traces                     |
+| `frame_count`      | int  | Total frames available for playback          |
 | `channel_2_active` | bool | Whether channel 2 is displayed               |
 | `two_channels`     | bool | Whether the recording has two channels       |
 | `playing`          | bool | Whether playback is active                   |
@@ -271,11 +271,10 @@ Returns a nested dictionary with two sub-viewers:
 
 ## Enum value reference
 
-State fields report the lowercase enum value (e.g. `maximum_projection`), while the on-screen dropdowns show a
-display label that is not always the title-cased value (e.g. `maximum_projection` shows as "Maximum Projection",
-`rois_only` shows as "ROIs"). When telling the user which control to operate, read the exact label from the
-Dropdown label column in [references/viewer-enums.md](references/viewer-enums.md), which also holds the full value
-lists for `background_view`, `roi_color_mode`, `mask_layer`, and `coordinate_space`.
+Enum-valued state fields report a lowercase value whose on-screen dropdown label can differ from the title-cased
+form. Read the exact label from the Dropdown label column in
+[references/viewer-enums.md](references/viewer-enums.md), which holds the full value lists for `background_view`,
+`roi_color_mode`, `mask_layer`, and `coordinate_space`.
 
 ---
 
@@ -347,8 +346,8 @@ viewer is currently showing.
 
 ### Multi-viewer workflow
 
-You can launch multiple viewers simultaneously for the same or different recordings. Each viewer
-gets a unique `viewer_id`. Use `list_viewers_tool` to track all active instances.
+Multiple viewers can run simultaneously for the same or different recordings. Each viewer gets a
+unique `viewer_id`. Use `list_viewers_tool` to track all active instances.
 
 Common multi-viewer patterns:
 - Registration viewer + ROI viewer for the same recording (verify registration then inspect ROIs)
@@ -393,8 +392,9 @@ match `selected_roi_indices` / `primary_roi_index` in the state, so resolve any 
 **"Is the tracking good?"**. Query tracking viewer state to see the current `mask_layer` and
 `coordinate_space`. Suggest cycling through mask layers (original → deformed → template →
 tracked) to verify spatial consistency. Use `query_multi_recording_tracking_summary_tool` for
-recording count distribution statistics. ROIs tracked across many recordings indicate reliable
-tracking.
+recording count distribution statistics. Recording count reflects how many sessions an ROI was
+detected in, not tracking reliability, because ROIs can be active in some sessions and inactive in
+others.
 
 **"Why are some ROIs missing in this recording?"**. Check `current_recording_id` from state.
 Explain that not all ROIs are active in every recording session. Use

@@ -8,7 +8,7 @@ Authors: Ivan Kondratyev, Natalie Yeung
 
 # Configures numba threading layer for parallel execution across all modules. This must be set before any numba
 # functions are compiled, hence it appears before other imports. macOS uses OpenMP (libomp via llvm-openmp) because
-# tbb4py publishes no Apple Silicon wheel; all other platforms use TBB for lower overhead on flat prange loops.
+# tbb4py publishes no Apple Silicon wheel. All other platforms use TBB for lower overhead on flat prange loops.
 import sys
 
 from numba import config
@@ -42,7 +42,7 @@ from .dataclasses import (  # noqa: E402
 # Ensures console output is enabled whenever the cindra library is imported. The 'Console' class is
 # used over 'print' for all terminal outputs. With minimal configuration, this class can be extended to log terminal
 # outputs instead of or in addition to sending them to the terminal.
-if not console.enabled:  # pragma: no branch — the console-enabled state is only reachable as False on first import.
+if not console.enabled:  # pragma: no branch - the console-enabled state is only reachable as False on first import.
     console.enable()
 
 __all__ = [

@@ -13,11 +13,11 @@ def _make_roi(
     pixel_count: int = 50,
 ) -> ROIStatistics:
     """Creates a minimal ROIStatistics instance for testing."""
-    y = np.arange(pixel_count, dtype=np.int32) % 10
-    x = np.arange(pixel_count, dtype=np.int32) // 10
+    y_pixels = np.arange(pixel_count, dtype=np.int32) % 10
+    x_pixels = np.arange(pixel_count, dtype=np.int32) // 10
     mask = ROIMask(
-        y_pixels=y,
-        x_pixels=x,
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
         pixel_weights=np.ones(pixel_count, dtype=np.float32),
         centroid=centroid,
         frame_width=100,

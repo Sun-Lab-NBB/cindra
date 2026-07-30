@@ -1,4 +1,4 @@
-"""Provides assets for combining multiplane data into unified datasets."""
+"""Provides assets for combining multi-plane data into unified datasets."""
 
 from __future__ import annotations
 
@@ -41,13 +41,9 @@ def compute_plane_offsets(
         A tuple of two elements. The first element is an array of y-displacement values, and the second element is an
         array of x-displacement values.
     """
-    # Extracts data from the first context for reference.
     first_context = plane_contexts[0]
-
-    # Determines the number of planes.
     plane_number = len(plane_contexts)
 
-    # Initializes NumPy arrays to store the calculated displacement values for y-axis and x-axis.
     y_displacement = np.zeros(plane_number, dtype=np.int32)
     x_displacement = np.zeros(plane_number, dtype=np.int32)
 
@@ -75,8 +71,9 @@ def compute_plane_offsets(
         unique_positions = np.unique(np.vstack((y_displacement, x_displacement)), axis=1)
         roi_number = unique_positions.shape[1]
 
-        # If fewer unique positions than virtual planes exist, we have multiple z-planes per ROI. In this case, we need
-        # two-level tiling: preserve ROI positions within each tile, but offset entire tiles for each z-plane.
+        # Fewer unique positions than virtual planes means the recording holds multiple z-planes per ROI, which
+        # requires two-level tiling: ROI positions are preserved within each tile, and entire tiles are offset for
+        # each z-plane.
         if roi_number < plane_number:
             # Computes the number of z-planes (total virtual planes divided by unique ROI positions).
             plane_number //= roi_number
@@ -99,16 +96,18 @@ def compute_plane_offsets(
                     x_displacement[roi_plane_index] += (plane_index % column_number) * maximum_width
                     y_displacement[roi_plane_index] += (plane_index // column_number) * maximum_height
 
-    # Returns the lists of the y-axis and x-axis displacement values.
     return y_displacement, x_displacement
 
 
 def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     """Combines processed data from multiple planes into a unified dataset.
 
-    This function combines multi-plane and multi-ROI recording data into a unified dataset, reassembling the original
+    Combines multi-plane and multi-ROI recording data into a unified dataset, reassembling the original
     recording from individually processed planes. The combined data is returned as a CombinedData instance containing
-    detection images and extraction data for both channels.
+    detection images, extraction data for both channels, the per-plane geometry, the registered binary paths, tau, and
+    the sampling rate. Planes that did not complete detection or extraction contribute nothing, and the combined traces
+    are trimmed to the frame count of the shortest contributing plane, which is stored as CombinedData.frame_count
+    alongside the untrimmed per-plane counts in CombinedData.plane_frame_counts.
 
     Args:
         plane_contexts: A list of RuntimeContext instances, one for each plane being combined.
@@ -126,7 +125,7 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
     # Computes the y-axis and x-axis displacement for each plane. These displacement values are used to arrange
     # individual planes back into the original recording movie.
-    y_offsets, x_offsets = compute_plane_offsets(plane_contexts)
+    y_offsets, x_offsets = compute_plane_offsets(plane_contexts=plane_contexts)
 
     # Queries the height and width for each plane.
     heights = np.array([context.runtime.io.frame_height for context in plane_contexts], dtype=np.uint16)
@@ -140,19 +139,20 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     # data when both hardware channels are functional. When only the second hardware channel is functional, the import
     # layer swaps it into channel_1_data.bin, leaving channel_2_data.bin with non-functional data.
     has_two_channels = plane_contexts[0].configuration.main.two_channels
-    main_config = plane_contexts[0].configuration.main
-    second_channel_functional = main_config.first_channel_functional and main_config.second_channel_functional
+    main_configuration = plane_contexts[0].configuration.main
+    second_channel_functional = (
+        main_configuration.first_channel_functional and main_configuration.second_channel_functional
+    )
 
-    # Initializes 2D NumPy arrays to store the combined images.
     combined_mean_image = np.zeros((combined_height, combined_width), dtype=np.float32)
     combined_enhanced_mean_image = np.zeros((combined_height, combined_width), dtype=np.float32)
     combined_correlation_map = np.zeros((combined_height, combined_width), dtype=np.float32)
 
     # Checks if maximum projection images are available in any plane.
-    has_max_projection = any(context.runtime.detection.maximum_projection is not None for context in plane_contexts)
-    combined_max_projection: NDArray[np.float32] | None = None
-    if has_max_projection:
-        combined_max_projection = np.zeros((combined_height, combined_width), dtype=np.float32)
+    has_maximum_projection = any(context.runtime.detection.maximum_projection is not None for context in plane_contexts)
+    combined_maximum_projection: NDArray[np.float32] | None = None
+    if has_maximum_projection:
+        combined_maximum_projection = np.zeros((combined_height, combined_width), dtype=np.float32)
 
     # Initializes the combined corrected structural mean image if any plane has one. This image is produced by
     # intensity colocalization when one channel is structural (not functional).
@@ -167,14 +167,14 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     combined_mean_image_channel_2: NDArray[np.float32] | None = None
     combined_enhanced_mean_image_channel_2: NDArray[np.float32] | None = None
     combined_correlation_map_channel_2: NDArray[np.float32] | None = None
-    combined_max_projection_channel_2: NDArray[np.float32] | None = None
+    combined_maximum_projection_channel_2: NDArray[np.float32] | None = None
     if has_two_channels:
         combined_mean_image_channel_2 = np.zeros((combined_height, combined_width), dtype=np.float32)
         if second_channel_functional:
             combined_enhanced_mean_image_channel_2 = np.zeros((combined_height, combined_width), dtype=np.float32)
             combined_correlation_map_channel_2 = np.zeros((combined_height, combined_width), dtype=np.float32)
-            if has_max_projection:
-                combined_max_projection_channel_2 = np.zeros((combined_height, combined_width), dtype=np.float32)
+            if has_maximum_projection:
+                combined_maximum_projection_channel_2 = np.zeros((combined_height, combined_width), dtype=np.float32)
 
     # Logs the combining operation.
     channel_count = 2 if has_two_channels else 1
@@ -204,7 +204,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
             level=LogLevel.WARNING,
         )
 
-    # Initializes lists to accumulate combined data across planes.
     combined_roi_statistics: list[ROIStatistics] = []
     combined_roi_statistics_channel_2: list[ROIStatistics] = []
     combined_cell_fluorescence_list: list[NDArray[np.float32]] = []
@@ -219,7 +218,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     combined_spikes_channel_2_list: list[NDArray[np.float32]] = []
     combined_cell_classification_channel_2_list: list[NDArray[np.float32]] = []
 
-    # Loops over all available planes to process each plane's data.
     for plane_index, context in enumerate(plane_contexts):
         # Skips planes without ROI statistics (no detected ROIs).
         if context.runtime.extraction.roi_statistics is None:
@@ -279,17 +277,17 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
         # Updates maximum projection if available. Like correlation maps, these are full-frame arrays.
         if (
-            has_max_projection
-            and combined_max_projection is not None
+            has_maximum_projection
+            and combined_maximum_projection is not None
             and context.runtime.detection.maximum_projection is not None
         ):
-            combined_max_projection[np.ix_(y_range, x_range)] = context.runtime.detection.maximum_projection
+            combined_maximum_projection[np.ix_(y_range, x_range)] = context.runtime.detection.maximum_projection
         if (
             second_channel_functional
-            and combined_max_projection_channel_2 is not None
+            and combined_maximum_projection_channel_2 is not None
             and context.runtime.detection.maximum_projection_channel_2 is not None
         ):
-            combined_max_projection_channel_2[np.ix_(y_range, x_range)] = (
+            combined_maximum_projection_channel_2[np.ix_(y_range, x_range)] = (
                 context.runtime.detection.maximum_projection_channel_2
             )
 
@@ -343,7 +341,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         plane_subtracted_fluorescence = plane_subtracted_fluorescence[:, :combined_frame_count]
         plane_spikes = plane_spikes[:, :combined_frame_count]
 
-        # Appends channel 1 data to combined lists.
         combined_cell_fluorescence_list.append(plane_cell_fluorescence)
         combined_neuropil_fluorescence_list.append(plane_neuropil_fluorescence)
         combined_subtracted_fluorescence_list.append(plane_subtracted_fluorescence)
@@ -384,7 +381,6 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
         console.echo(message=f"Appended plane {plane_index} data to combined view.", level=LogLevel.SUCCESS)
 
-    # Raises an error if no valid planes were found.
     if not combined_roi_statistics:
         message = (
             "Unable to combine plane data. No valid planes with ROI statistics were found. Ensure that at least one "
@@ -392,19 +388,16 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         )
         console.error(message=message, error=ValueError)
 
-    # Concatenates all accumulated arrays.
     combined_cell_fluorescence = np.concatenate(combined_cell_fluorescence_list, axis=0)
     combined_neuropil_fluorescence = np.concatenate(combined_neuropil_fluorescence_list, axis=0)
     combined_subtracted_fluorescence = np.concatenate(combined_subtracted_fluorescence_list, axis=0)
     combined_spikes = np.concatenate(combined_spikes_list, axis=0)
     combined_cell_classification = np.concatenate(combined_cell_classification_list, axis=0)
 
-    # Concatenates colocalization data if available.
     combined_cell_colocalization: NDArray[np.float32] | None = None
     if combined_cell_colocalization_list:
         combined_cell_colocalization = np.concatenate(combined_cell_colocalization_list, axis=0)
 
-    # Concatenates channel 2 extraction data if available.
     combined_cell_fluorescence_channel_2: NDArray[np.float32] | None = None
     combined_neuropil_fluorescence_channel_2: NDArray[np.float32] | None = None
     combined_subtracted_fluorescence_channel_2: NDArray[np.float32] | None = None
@@ -419,19 +412,17 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         combined_spikes_channel_2 = np.concatenate(combined_spikes_channel_2_list, axis=0)
         combined_cell_classification_channel_2 = np.concatenate(combined_cell_classification_channel_2_list, axis=0)
 
-    # Builds the DetectionData instance with combined images.
     detection = DetectionData(
         mean_image=combined_mean_image,
         enhanced_mean_image=combined_enhanced_mean_image,
         correlation_map=combined_correlation_map,
-        maximum_projection=combined_max_projection,
+        maximum_projection=combined_maximum_projection,
         mean_image_channel_2=combined_mean_image_channel_2,
         enhanced_mean_image_channel_2=combined_enhanced_mean_image_channel_2,
         correlation_map_channel_2=combined_correlation_map_channel_2,
-        maximum_projection_channel_2=combined_max_projection_channel_2,
+        maximum_projection_channel_2=combined_maximum_projection_channel_2,
     )
 
-    # Builds the ExtractionData instance with combined extraction data.
     extraction = ExtractionData(
         roi_statistics=combined_roi_statistics or None,
         cell_fluorescence=combined_cell_fluorescence,
@@ -456,13 +447,11 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
     for context in plane_contexts:
         path = context.runtime.io.registered_binary_path
         if path is None:
-            console.error(
-                message=(
-                    f"Unable to combine plane data. The registered binary path is not set for plane "
-                    f"{context.runtime.io.plane_index}. Ensure registration completed successfully."
-                ),
-                error=RuntimeError,
+            message = (
+                f"Unable to combine plane data. The registered binary path is not set for plane "
+                f"{context.runtime.io.plane_index}. Ensure registration completed successfully."
             )
+            console.error(message=message, error=RuntimeError)
         channel_1_paths.append(path)
     registered_binary_paths = tuple(channel_1_paths)
 
@@ -472,13 +461,11 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         for context in plane_contexts:
             path_channel_2 = context.runtime.io.registered_binary_path_channel_2
             if path_channel_2 is None:
-                console.error(
-                    message=(
-                        f"Unable to combine plane data. The registered binary path for channel 2 is not set for "
-                        f"plane {context.runtime.io.plane_index}. Ensure registration completed successfully."
-                    ),
-                    error=RuntimeError,
+                message = (
+                    f"Unable to combine plane data. The registered binary path for channel 2 is not set for "
+                    f"plane {context.runtime.io.plane_index}. Ensure registration completed successfully."
                 )
+                console.error(message=message, error=RuntimeError)
             channel_2_paths.append(path_channel_2)
         registered_binary_paths_channel_2 = tuple(channel_2_paths)
 

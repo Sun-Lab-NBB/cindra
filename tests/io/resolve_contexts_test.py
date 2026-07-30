@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 def _make_single_configuration(output_path: Path, data_path: Path | None = None) -> SingleRecordingConfiguration:
-    """Builds a single-recording configuration with the given output and data paths and serial execution settings."""
+    """Builds a single-recording configuration with the given output and data paths and progress bars disabled."""
     configuration = SingleRecordingConfiguration()
     configuration.file_io.output_path = output_path
     configuration.file_io.data_path = data_path

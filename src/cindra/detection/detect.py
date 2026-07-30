@@ -13,7 +13,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from ..io import BinaryFile
 from .denoise import pca_denoise
-from .detect_rois import detect
+from .detect_rois import detect_rois_in_frames
 from .roi_statistics import compute_roi_statistics
 from ..classification import classify
 
@@ -57,7 +57,7 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
     """Detects ROIs from registered binary data and updates the runtime context in-place.
 
     Notes:
-        This function orchestrates the full detection pipeline for one or both functional channels. When both channels
+        Orchestrates the full detection pipeline for one or both functional channels. When both channels
         are functional (independent ROI detection), the pipeline runs independently on each channel since different
         ROI populations may have different soma sizes and spatial scales. Results are written into
         context.runtime.detection, context.runtime.extraction, and context.runtime.timing.
@@ -115,10 +115,8 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
     # pipeline, since registration creates the binary file before detection runs.
     channel_1_path = io_data.registered_binary_path
     if channel_1_path is None:
-        console.error(
-            message="Unable to run ROI detection: registered binary file path is not set for channel 1.",
-            error=RuntimeError,
-        )
+        message = "Unable to run ROI detection. The registered binary file path is not set for channel 1."
+        console.error(message=message, error=RuntimeError)
 
     # Runs channel 1 detection.
     mean_image, enhanced_mean_image, maximum_projection, correlation_map, roi_diameter, roi_statistics = (
@@ -257,12 +255,12 @@ def _create_enhanced_mean_image(
 
     # Subtracts background fluorescence using a median filter. Casts medfilt2d output to float32 to prevent float64
     # promotion of the entire downstream chain. Reuses the background array for the result.
-    background_removed = medfilt2d(mean_image, kernel_size=filter_kernel_size).astype(np.float32)
+    background_removed = medfilt2d(input=mean_image, kernel_size=filter_kernel_size).astype(np.float32)
     np.subtract(mean_image, background_removed, out=background_removed)
 
     # Normalizes ROI contrast by dividing by local absolute median.
     abs_background_removed = np.abs(background_removed)
-    local_variance = medfilt2d(abs_background_removed, kernel_size=filter_kernel_size).astype(np.float32)
+    local_variance = medfilt2d(input=abs_background_removed, kernel_size=filter_kernel_size).astype(np.float32)
     np.add(local_variance, _VARIANCE_EPSILON, out=local_variance)
     np.divide(background_removed, local_variance, out=background_removed)
 
@@ -287,6 +285,7 @@ def _apply_preclassification(
     frame_height: int,
     frame_width: int,
     preclassification_threshold: float,
+    *,
     crop_to_soma: bool,
     custom_classifier_path: Path | None,
     plane_index: int,
@@ -296,10 +295,10 @@ def _apply_preclassification(
     """Filters detected ROIs using a lightweight pre-classification model before signal extraction.
 
     Notes:
-        This function computes the minimal shape statistics needed for classification (compactness and normalized pixel
+        Computes the minimal shape statistics needed for classification (compactness and normalized pixel
         count), runs a 2-feature logistic regression model, and removes ROIs whose cell probability falls below the
-        threshold. Unlike the final classification stage performed by the extraction package, this does not require
-        extracted fluorescence traces.
+        threshold. The model operates on shape statistics alone, so it runs before fluorescence traces are
+        extracted.
 
     Args:
         roi_statistics: The list of ROIStatistics instances to filter.
@@ -365,7 +364,7 @@ def _detect_channel(
     """Runs the full detection pipeline for a single imaging channel.
 
     Notes:
-        This function handles binning, optional denoising, sparse ROI detection, coordinate offset correction,
+        Handles binning, optional denoising, sparse ROI detection, coordinate offset correction,
         optional preclassification, and final overlap filtering for one channel. It is called by detect_plane_rois
         once per functional channel.
 
@@ -425,7 +424,7 @@ def _detect_channel(
     )
     console.echo(message=message, level=LogLevel.SUCCESS)
 
-    # Stores the mean image before detect() modifies binned_frames in-place.
+    # Stores the mean image before detect_rois_in_frames() modifies binned_frames in-place.
     mean_image = binned_frames.mean(axis=0)
 
     # Applies optional PCA denoising to improve signal-to-noise ratio.
@@ -446,7 +445,7 @@ def _detect_channel(
     )
 
     with threadpool_limits(limits=workers):
-        maximum_projection, correlation_map, spatial_scale_pixels, roi_statistics = detect(
+        maximum_projection, correlation_map, spatial_scale_pixels, roi_statistics = detect_rois_in_frames(
             frames=binned_frames,
             temporal_highpass_window=detection_config.temporal_highpass_window,
             spatial_highpass_window=detection_config.spatial_highpass_window,

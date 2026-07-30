@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 from PySide6 import QtGui, QtCore
 import pyqtgraph as pg  # type: ignore[import-untyped]
+from ataraxis_time import TimeUnits, rate_to_interval
 from PySide6.QtWidgets import (
     QMenu,
     QLabel,
@@ -58,13 +59,15 @@ class BinaryPlayer(QMainWindow):
         _offset_scatter: Scatter plot overlay indicating the current frame on the offset plot.
         _average_rigid_y_offsets: Average rigid Y offsets across all planes.
         _average_rigid_x_offsets: Average rigid X offsets across all planes.
-
         _step_edit: Input field for the frame step size.
         _frame_number_label: Label displaying the current frame number.
         _frame_slider: Horizontal slider for frame navigation.
         _play_button: Button to start video playback.
         _pause_button: Button to pause video playback.
         _update_timer: Timer driving frame advancement during playback.
+        _file_button: Button exposing the File menu used to load a different recording.
+        _skip_backward_button: Button that steps playback backward by the current frame delta.
+        _skip_forward_button: Button that steps playback forward by the current frame delta.
     """
 
     # Notifies listeners when the user loads a new recording via the File menu.
@@ -87,7 +90,7 @@ class BinaryPlayer(QMainWindow):
 
         # Initializes playback state.
         self._current_frame: int = 0
-        self._frame_delta: int = 100
+        self._frame_delta: int = BINARY_CONFIG.default_frame_delta
         self._display_range: NDArray[np.float32] = np.zeros((2,), dtype=np.float32)
         self._time_step: float = 0.0
         self._image: NDArray[np.int16] | None = None
@@ -142,9 +145,9 @@ class BinaryPlayer(QMainWindow):
         self._main_view_box.addItem(self._main_image)
 
         # Configures rigid registration offset plot.
-        self._offset_plot = self._graphics_widget.addPlot(name="plot_offset", row=1, col=0, colspan=2)
+        self._offset_plot: pg.PlotItem = self._graphics_widget.addPlot(name="plot_offset", row=1, col=0, colspan=2)
         configure_plot(
-            self._offset_plot,
+            plot=self._offset_plot,
             title="Rigid Registration Offsets",
             left_label="Offset (px)",
             bottom_label="Frame",
@@ -166,13 +169,13 @@ class BinaryPlayer(QMainWindow):
         self._step_edit.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         self._step_edit.setFont(big_font)
         self._step_edit.setToolTip("Set the number of frames to skip per navigation step.")
-        self._step_edit.setValidator(QtGui.QIntValidator(1, 10000))
+        self._step_edit.setValidator(QtGui.QIntValidator(1, BINARY_CONFIG.maximum_frame_delta))
         self._step_edit.returnPressed.connect(self._apply_step)
         self._step_edit.returnPressed.connect(self.setFocus)
         self._step_edit.installEventFilter(self)
         info_bar.addWidget(step_label)
         info_bar.addWidget(self._step_edit)
-        info_bar.addSpacing(20)
+        info_bar.addSpacing(BINARY_STYLE.group_spacing)
         self._frame_number_label: QLabel = QLabel("Current frame: 0")
         self._frame_number_label.setStyleSheet(STYLE.white_label)
         info_bar.addWidget(self._frame_number_label)
@@ -250,7 +253,7 @@ class BinaryPlayer(QMainWindow):
         # Up/down arrow keys adjust the frame step size.
         if event.modifiers() != QtCore.Qt.KeyboardModifier.ShiftModifier:
             if event.key() == QtCore.Qt.Key.Key_Up:
-                self._frame_delta = min(self._frame_delta + 1, 10000)
+                self._frame_delta = min(self._frame_delta + 1, BINARY_CONFIG.maximum_frame_delta)
                 self._step_edit.setText(str(self._frame_delta))
                 self._frame_slider.setSingleStep(self._frame_delta)
             elif event.key() == QtCore.Qt.Key.Key_Down:
@@ -271,7 +274,7 @@ class BinaryPlayer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        if escape_returns_focus(self, event):
+        if escape_returns_focus(window=self, event=event):
             return True
         return super().eventFilter(source, event)
 
@@ -287,12 +290,12 @@ class BinaryPlayer(QMainWindow):
         self._skip_backward_button.clicked.connect(self._step_backward)
 
         playback = create_play_pause_group(
-            self,
+            parent=self,
             play_tooltip="Start frame playback.",
             pause_tooltip="Stop frame playback.",
         )
-        self._play_button = playback.play_button
-        self._pause_button = playback.pause_button
+        self._play_button: QToolButton = playback.play_button
+        self._pause_button: QToolButton = playback.pause_button
         self._play_button.clicked.connect(self._start_playback)
         self._pause_button.clicked.connect(self._pause_playback)
 
@@ -386,7 +389,10 @@ class BinaryPlayer(QMainWindow):
         # Configures the frame display slider.
         frame_count = self.data.frame_count
         last_frame = frame_count - 1
-        self._time_step = 1.0 / self.data.sampling_rate * 1000 / BINARY_CONFIG.playback_speed_multiplier
+        self._time_step = (
+            rate_to_interval(rate=self.data.sampling_rate, to_units=TimeUnits.MILLISECOND, as_float=True)
+            / BINARY_CONFIG.playback_speed_multiplier
+        )
         self._frame_delta = min(BINARY_CONFIG.default_frame_delta, max(1, last_frame))
         self._step_edit.setText(str(self._frame_delta))
         self._frame_slider.setSingleStep(self._frame_delta)
@@ -400,7 +406,7 @@ class BinaryPlayer(QMainWindow):
         average_y = np.zeros(frame_count, dtype=np.float32)
         average_x = np.zeros(frame_count, dtype=np.float32)
         for plane_index in range(plane_count):
-            rigid_y, rigid_x = self.data.plane_rigid_offsets(plane_index)
+            rigid_y, rigid_x = self.data.plane_rigid_offsets(plane_index=plane_index)
             average_y += rigid_y
             average_x += rigid_x
         average_y = np.asarray(average_y / plane_count, dtype=np.float32)
@@ -409,7 +415,7 @@ class BinaryPlayer(QMainWindow):
         self._average_rigid_x_offsets = average_x
 
         # Plots average Y (gold) and X (green) offset curves with a horizontal legend.
-        add_plot_legend(self._offset_plot, column_count=BINARY_STYLE.legend_column_count)
+        add_plot_legend(plot=self._offset_plot, column_count=BINARY_STYLE.legend_column_count)
         self._offset_plot.plot(x_values, average_y, pen=pg.mkPen(COLORS.gold), name="Average Y offset")
         self._offset_plot.plot(x_values, average_x, pen=pg.mkPen(COLORS.green), name="Average X offset")
         shift_min = min(float(average_y.min()), float(average_x.min()))
@@ -420,9 +426,9 @@ class BinaryPlayer(QMainWindow):
         shift_max += (shift_max - shift_min) * PLOT_STYLE.legend_headroom
         self._offset_plot.setLimits(xMin=0, xMax=last_frame)
         self._offset_plot.setRange(xRange=(0, last_frame), yRange=(shift_min, shift_max), padding=0.0)
-        self._offset_scatter = pg.ScatterPlotItem()
+        self._offset_scatter: pg.ScatterPlotItem = pg.ScatterPlotItem()
         self._offset_plot.addItem(self._offset_scatter)
-        self._update_offset_scatter(0)
+        self._update_offset_scatter(frame_index=0)
 
         self._channel_2_button.setVisible(self.data.two_channels)
 
@@ -453,12 +459,14 @@ class BinaryPlayer(QMainWindow):
     def _render_frame(self) -> None:
         """Reads and displays the frame at ``_current_frame`` and updates all navigation controls."""
         # Reads the current stitched frame combining all planes.
-        self._image = np.asarray(self.data.read_stitched_frame(self._current_frame))
+        self._image = np.asarray(self.data.read_stitched_frame(frame_index=self._current_frame))
 
         # If channel 2 overlay is active, composites both channels into an RGB image with channel 1 in
         # the red plane and channel 2 in the green plane.
         if self.data.two_channels and self._channel_2_visible:
-            channel_2_frame = np.asarray(self.data.read_stitched_frame_channel_2(self._current_frame))[:, :, np.newaxis]
+            channel_2_frame = np.asarray(self.data.read_stitched_frame_channel_2(frame_index=self._current_frame))[
+                :, :, np.newaxis
+            ]
             self._image = np.concatenate(
                 (self._image[:, :, np.newaxis], channel_2_frame, np.zeros_like(channel_2_frame)),
                 axis=-1,
@@ -470,7 +478,7 @@ class BinaryPlayer(QMainWindow):
         self._frame_number_label.setText(f"Current frame: {self._current_frame}")
 
         # Moves the red dot indicators on the rigid registration offset plot to the current frame.
-        self._update_offset_scatter(self._current_frame)
+        self._update_offset_scatter(frame_index=self._current_frame)
 
     def _go_to_frame(self) -> None:
         """Seeks to the frame indicated by the frame slider position.
@@ -536,11 +544,11 @@ class BinaryPlayer(QMainWindow):
                 is_time_plot = True
             # Double-click on the main image resets the zoom to fit the full frame.
             elif item == self._main_view_box:
-                if event.button() == 1 and event.double():  # type: ignore[attr-defined]
+                if event.button() == QtCore.Qt.MouseButton.LeftButton and event.double():  # type: ignore[attr-defined]
                     self._zoom_image()
-            # For time-series plots, a single click seeks to that frame; a double click resets the
+            # For time-series plots, a single click seeks to that frame. A double click resets the
             # x-axis zoom to the full recording range.
-            if is_time_plot and event.button() == 1:  # type: ignore[attr-defined]
+            if is_time_plot and event.button() == QtCore.Qt.MouseButton.LeftButton:  # type: ignore[attr-defined]
                 if event.double():  # type: ignore[attr-defined]
                     zoom = True
                 else:

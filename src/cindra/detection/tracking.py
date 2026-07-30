@@ -18,7 +18,8 @@ if TYPE_CHECKING:
 
 _DEFAULT_JACCARD_DISTANCE: float = 10000.0
 """The default Jaccard distance value used to initialize the distance matrix. This large value ensures that ROI pairs
-that are not evaluated (due to centroid distance filtering) are never clustered together."""
+that are not evaluated (because their centroids are farther apart than maximum_distance, or because both ROIs come
+from the same recording) are never clustered together."""
 
 
 def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -> None:
@@ -31,7 +32,11 @@ def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -
 
     Notes:
         This function modifies the input contexts in-place, updating each context's ``runtime.tracking.template_masks``
-        (and ``template_masks_channel_2`` for dual-channel recordings) with the generated template ROIs.
+        and ``runtime.tracking.template_diameter`` (and the ``template_masks_channel_2`` and
+        ``template_diameter_channel_2`` fields for dual-channel recordings) with the generated template ROIs and their
+        estimated diameter, and recording ``runtime.timing.tracking_time``. When the first recording's output directory
+        already contains ``tracking_template_masks.npz`` and ``repeat_registration`` is disabled, tracking is skipped
+        and each context's stored tracking arrays are loaded from disk instead.
 
     Args:
         contexts: The list of MultiRecordingRuntimeContext instances, one per recording. Each context must have
@@ -189,7 +194,7 @@ def _cluster_rois_in_bin(
     different_recording_mask = recordings_array[candidate_pairs[:, 0]] != recordings_array[candidate_pairs[:, 1]]
     valid_pairs = candidate_pairs[different_recording_mask]
 
-    if len(valid_pairs) == 0:
+    if not valid_pairs.size:
         return []
 
     # Initializes the Jaccard distance matrix with a large default value for unevaluated pairs.
@@ -253,7 +258,7 @@ def _create_template_roi(
     prevalence_mask = (counts / len(cluster_rois)) >= (pixel_prevalence / 100)
     filtered_pixels = unique_pixels[prevalence_mask]
 
-    if len(filtered_pixels) == 0:
+    if not filtered_pixels.size:
         return None
 
     # Computes average weight per pixel using bincount for O(m) aggregation instead of O(n*m) loop.
@@ -281,6 +286,7 @@ def _create_template_roi(
 
 def _collect_recording_rois(
     contexts: list[MultiRecordingRuntimeContext],
+    *,
     channel_2: bool,
 ) -> tuple[list[ROIMask], list[int]]:
     """Collects all unclustered ROIs from the registered recordings.
@@ -421,11 +427,8 @@ def _filter_templates(
     return filtered_templates
 
 
-def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], channel_2: bool) -> None:
+def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], *, channel_2: bool) -> None:
     """Tracks ROIs for a single channel across multiple recordings.
-
-    Notes:
-        Performs the core tracking algorithm for either channel 1 or channel 2 ROIs.
 
     Args:
         contexts: The list of MultiRecordingRuntimeContext instances, one per recording.
@@ -568,7 +571,7 @@ def _track_channel_rois(contexts: list[MultiRecordingRuntimeContext], channel_2:
     filtered_templates = _filter_templates(template_masks=template_masks, minimum_size=minimum_size)
 
     # Estimates template diameter from pixel counts for use by _backward_deform_masks. Shape statistics are not
-    # computed here since templates are lightweight ROIMask instances; full statistics are only computed after
+    # computed here since templates are lightweight ROIMask instances. Full statistics are only computed after
     # backward deformation when ROIStatistics are needed for extraction and GUI.
     template_diameter = 0
     if filtered_templates:

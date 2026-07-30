@@ -199,8 +199,8 @@ class TestCreateRoiMasks:
         )
         masks = _create_roi_masks(roi_statistics=[roi], width=20, include_overlap=False)
         indices, weights = masks[0]
-        assert len(indices) == 0
-        assert len(weights) == 0
+        assert indices.size == 0
+        assert weights.size == 0
 
 
 class TestCreateNeuropilMasks:
@@ -223,21 +223,21 @@ class TestCreateNeuropilMasks:
 
         roi_flat = set((roi.mask.y_pixels * 50 + roi.mask.x_pixels).tolist())
         neuropil_set = set(neuropil_flat.tolist())
-        assert len(roi_flat & neuropil_set) == 0
+        assert not (roi_flat & neuropil_set)
 
     def test_minimum_neuropil_size(self) -> None:
         """Verifies that neuropil masks have at least the minimum requested size."""
         roi = _make_circular_roi(center_y=25, center_x=25, radius=3, frame_height=50, frame_width=50)
-        min_size = 100
+        minimum_size = 100
         neuropil_masks = _create_neuropil_masks(
             roi_statistics=[roi],
             height=50,
             width=50,
             inner_neuropil_border_radius=2,
-            minimum_neuropil_pixels=min_size,
+            minimum_neuropil_pixels=minimum_size,
             cell_probability_percentile=0,
         )
-        assert neuropil_masks[0].size >= min_size
+        assert neuropil_masks[0].size >= minimum_size
 
     def test_cached_masks_returned(self) -> None:
         """Verifies that cached neuropil masks are returned on second call."""
@@ -251,7 +251,6 @@ class TestCreateNeuropilMasks:
             minimum_neuropil_pixels=50,
             cell_probability_percentile=0,
         )
-        # Confirms the second call returns the cached value.
         masks_second = _create_neuropil_masks(
             roi_statistics=[roi],
             height=50,
@@ -274,7 +273,6 @@ class TestCreateNeuropilMasks:
             minimum_neuropil_pixels=50,
             cell_probability_percentile=0,
         )
-        # Confirms the recompute call reproduces the cache-priming mask rather than returning a different result.
         masks = _create_neuropil_masks(
             roi_statistics=[roi],
             height=50,

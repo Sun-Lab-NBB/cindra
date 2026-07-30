@@ -13,8 +13,8 @@ from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
 from cindra.io import (
     create_registration_marker,
-    resolve_single_recording_contexts,
     resolve_registration_marker_path,
+    resolve_single_recording_contexts,
 )
 from cindra.allocation import SingleRecordingJobNames
 from cindra.io.context import PARAMETERS_FILENAME
@@ -68,12 +68,13 @@ _TEST_WORKERS: int = 1
 def _build_flickering_movie(*, frame_count: int, seed: int) -> NDArray[np.int16]:
     """Builds a synthetic movie whose spatially fixed Gaussian blobs flicker independently across frames.
 
-    Detection keys on temporal variance, so a movie of identical frames yields no detectable ROIs. Each blob is
-    therefore scaled by an independent positive random amplitude per frame to plant localized temporal signal.
+    Notes:
+        Detection keys on temporal variance, so a movie of identical frames yields no detectable ROIs. Each blob is
+        therefore scaled by an independent positive random amplitude per frame to plant localized temporal signal.
     """
     generator = np.random.default_rng(seed=seed)
     rows, columns = np.mgrid[0:_FRAME_HEIGHT, 0:_FRAME_WIDTH]
-    movie = np.full((frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), _BACKGROUND_LEVEL, dtype=np.float64)
+    movie = np.full((frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=_BACKGROUND_LEVEL, dtype=np.float64)
     for center_row, center_column in _BLOB_CENTERS:
         blob = np.exp(-(((rows - center_row) ** 2 + (columns - center_column) ** 2) / (2.0 * _BLOB_SIGMA**2)))
         amplitudes = _BLOB_AMPLITUDE * (0.5 + np.abs(generator.standard_normal(frame_count)))
@@ -115,7 +116,7 @@ def _prepare_pipeline_inputs(
     """Writes a raw recording and a saved configuration file, returning the configuration path and output directory."""
     data_directory = root / "data"
     output_directory = root / "output"
-    _write_raw_recording(data_directory, frame_count=frame_count, seed=seed)
+    _write_raw_recording(data_directory=data_directory, frame_count=frame_count, seed=seed)
     configuration = _make_configuration(data_directory=data_directory, output_directory=output_directory)
     configuration.runtime.display_progress_bars = display_progress_bars
     configuration_path = root / "configuration.yaml"
@@ -127,7 +128,7 @@ def _binarize_to_disk(root: Path, *, frame_count: int = _FRAME_COUNT, seed: int 
     """Writes a raw recording and binarizes it, returning the configuration bound to the on-disk binary outputs."""
     data_directory = root / "data"
     output_directory = root / "output"
-    _write_raw_recording(data_directory, frame_count=frame_count, seed=seed)
+    _write_raw_recording(data_directory=data_directory, frame_count=frame_count, seed=seed)
     configuration = _make_configuration(data_directory=data_directory, output_directory=output_directory)
     # Writes the single-threaded filesystem bootstrap that binarize_recording's load-only resolution depends on.
     resolve_single_recording_contexts(configuration=configuration, persist=True)
@@ -190,7 +191,7 @@ class TestRunSingleRecordingPipeline:
 
     def test_runs_explicit_flags_for_single_target_plane(self, tmp_path: Path) -> None:
         """Verifies that explicit phase flags with a specific target plane process only that plane and combine it."""
-        configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path, display_progress_bars=True)
+        configuration_path, output_directory = _prepare_pipeline_inputs(root=tmp_path, display_progress_bars=True)
 
         run_single_recording_pipeline(
             configuration_path=configuration_path,
@@ -324,7 +325,7 @@ class TestBinarizeRecording:
         assert binary_path.exists()
 
     def test_recreates_missing_binaries(self, tmp_path: Path) -> None:
-        """Verifies that binarization recreates the binaries when an existing registered binary file is missing."""
+        """Verifies that binarization recreates the binaries when a previously written binary file is deleted."""
         configuration = _binarize_to_disk(tmp_path)
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
         binary_path.unlink()
@@ -360,7 +361,7 @@ class TestBinarizeRecording:
         assert not resolve_registration_marker_path(binary_path=binary_path).exists()
 
     def test_skips_a_registered_binary(self, tmp_path: Path) -> None:
-        """Verifies that a binary whose contents registration rewrote in place is not mistaken for a damaged one."""
+        """Verifies that a binary whose contents registration rewrote in place is treated as valid and left intact."""
         configuration = _binarize_to_disk(tmp_path)
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
 
@@ -399,6 +400,7 @@ class TestRegisterRecordingPlane:
         configuration = _make_configuration(data_directory=None, output_directory=tmp_path / "output")
 
         def _fake_load(**_kwargs: object) -> list[object]:
+            """Returns a two-element list, standing in for a load that resolved multiple plane contexts."""
             return [object(), object()]
 
         monkeypatch.setattr(RuntimeContext, "load", _fake_load)
@@ -408,7 +410,7 @@ class TestRegisterRecordingPlane:
 
     def test_frame_count_below_minimum_raises(self, tmp_path: Path) -> None:
         """Verifies that a plane with fewer than the minimum required frames raises a ValueError."""
-        configuration = _binarize_to_disk(tmp_path, frame_count=40)
+        configuration = _binarize_to_disk(root=tmp_path, frame_count=40)
 
         with pytest.raises(ValueError, match="at least"):
             register_recording_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
@@ -451,6 +453,7 @@ class TestProcessPlane:
         configuration = _make_configuration(data_directory=None, output_directory=tmp_path / "output")
 
         def _fake_load(**_kwargs: object) -> list[object]:
+            """Returns a two-element list, standing in for a load that resolved multiple plane contexts."""
             return [object(), object()]
 
         monkeypatch.setattr(RuntimeContext, "load", _fake_load)
@@ -460,7 +463,7 @@ class TestProcessPlane:
 
     def test_frame_count_below_minimum_raises(self, tmp_path: Path) -> None:
         """Verifies that a plane with fewer than the minimum required frames raises a ValueError."""
-        configuration = _binarize_to_disk(tmp_path, frame_count=40)
+        configuration = _binarize_to_disk(root=tmp_path, frame_count=40)
 
         with pytest.raises(ValueError, match="at least"):
             process_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
@@ -484,7 +487,7 @@ class TestProcessPlane:
         process_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
 
         # The extraction results are written to disk rather than held in the reloaded context, which memory-maps its
-        # arrays on demand, so the on-disk artifacts are what proves detection and extraction both ran.
+        # arrays on demand, so the on-disk artifacts are what prove detection and extraction both ran.
         plane_directory = tmp_path / "output" / "cindra" / "plane_0"
         assert (plane_directory / "roi_statistics.npz").exists()
         assert (plane_directory / "cell_fluorescence.npy").exists()
@@ -493,11 +496,11 @@ class TestProcessPlane:
         context = RuntimeContext.load(root_path=tmp_path / "output" / "cindra", plane_index=0)
         assert not isinstance(context, list)
         assert context.runtime.timing.processing_workers == _TEST_WORKERS
-        assert context.runtime.timing.date_processed != ""
+        assert context.runtime.timing.date_processed
 
     def test_detection_disabled_skips_detection(self, tmp_path: Path) -> None:
-        """Verifies that disabling ROI detection skips detection on a registered plane above the recommendation."""
-        configuration = _register_to_disk(tmp_path, frame_count=200)
+        """Verifies that disabling ROI detection skips it on a registered plane at the recommended frame count."""
+        configuration = _register_to_disk(root=tmp_path, frame_count=200)
         configuration.roi_detection.enabled = False
 
         process_plane(configuration=configuration, plane_index=0, workers=_TEST_WORKERS)
@@ -509,7 +512,7 @@ class TestProcessPlane:
         context = RuntimeContext.load(root_path=tmp_path / "output" / "cindra", plane_index=0)
         assert not isinstance(context, list)
         assert context.runtime.timing.processing_workers == _TEST_WORKERS
-        assert context.runtime.timing.date_processed != ""
+        assert context.runtime.timing.date_processed
 
 
 class TestSaveCombinedData:
@@ -624,7 +627,7 @@ class TestExecuteSingleRecordingJob:
         assert tracker.get_job_status(job_id=job_id) == ProcessingStatus.FAILED
 
     def test_invalid_worker_count_fails_and_reraises(self, tmp_path: Path) -> None:
-        """Verifies that an invalid worker request marks the job failed instead of escaping untracked."""
+        """Verifies that an invalid worker request marks the job failed on the tracker before the error propagates."""
         tracker = ProcessingTracker(file_path=tmp_path / "tracker.yaml")
         tracker.initialize_jobs(jobs=[(SingleRecordingJobNames.REGISTER, "plane_0")])
         job_id = ProcessingTracker.generate_job_id(job_name=SingleRecordingJobNames.REGISTER, specifier="plane_0")

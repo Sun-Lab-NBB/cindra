@@ -1,4 +1,4 @@
-"""Provides diffeomorphic across-recording registration entry point for the multi-recording cindra processing
+"""Provides the diffeomorphic across-recording registration entry point for the multi-recording cindra processing
 pipeline.
 """
 
@@ -125,7 +125,7 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
 
     # Applies deformation fields to each recording in parallel.
     if workers > 1:
-        # pragma: no cover — parallel ThreadPoolExecutor branch, integration tests run serially with workers=1.
+        # pragma: no cover, parallel ThreadPoolExecutor branch, integration tests run serially with workers=1.
         pool_width, pool_numba_threads = _resolve_pool_allocation(  # pragma: no cover
             workers=workers, task_count=len(contexts)
         )
@@ -172,7 +172,7 @@ def register_recordings(contexts: list[MultiRecordingRuntimeContext], *, workers
     for context in contexts:
         context.runtime.registration.release_arrays()
         # The reference-collection loop above raises when combined_data is None, so it is always present here.
-        if context.runtime.combined_data is not None:  # pragma: no branch — combined_data is guaranteed non-None here
+        if context.runtime.combined_data is not None:  # pragma: no branch, combined_data is guaranteed non-None here
             context.runtime.combined_data.detection.release_arrays()
 
     console.echo(
@@ -188,6 +188,9 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
     using the original registered binary data.
 
     Notes:
+        When the first recording's output directory already contains roi_statistics.npz and repeat_registration is
+        False (default), the function echoes a skip message and returns without re-projecting the templates.
+
         The worker budget is split between the thread pool width and each pool thread's own Numba mask, since the
         Numba mask is thread-local and pool threads do not inherit the mask held by the submitting thread.
 
@@ -220,12 +223,12 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
     for context in contexts:
         output_path = context.runtime.output_path
         # save_runtime() below raises when output_path is None, so every context carries a valid output path here.
-        if output_path is not None:  # pragma: no branch — output_path is guaranteed non-None for persisted contexts
+        if output_path is not None:  # pragma: no branch, output_path is guaranteed non-None for persisted contexts
             context.runtime.registration.memory_map_arrays(output_path)
             context.runtime.tracking.load_arrays(output_path)
 
     if workers > 1:
-        # pragma: no cover — parallel ThreadPoolExecutor branch, integration tests run serially with workers=1.
+        # pragma: no cover, parallel ThreadPoolExecutor branch, integration tests run serially with workers=1.
         pool_width, pool_numba_threads = _resolve_pool_allocation(  # pragma: no cover
             workers=workers, task_count=len(contexts)
         )
@@ -306,25 +309,26 @@ def _warp_mask_pixels(
         deformation: The Deformation instance to apply.
 
     Returns:
-        A tuple of (y_pixels, x_pixels, pixel_weights, centroid) for the transformed mask.
+        The vertical and horizontal pixel coordinates of the warped mask in global frame space, the pixel weights
+        carried over from the source mask, and the median coordinate of the warped pixels used as the new centroid.
     """
     margin = 50
     y_min, y_max = int(mask.y_pixels.min()) - margin, int(mask.y_pixels.max()) + margin + 1
     x_min, x_max = int(mask.x_pixels.min()) - margin, int(mask.x_pixels.max()) + margin + 1
     crop_height, crop_width = y_max - y_min, x_max - x_min
 
-    cropped_deform, adjusted_origin = deformation.crop(origin=(y_min, x_min), crop_size=(crop_height, crop_width))
+    cropped_deformation, adjusted_origin = deformation.crop(origin=(y_min, x_min), crop_size=(crop_height, crop_width))
 
     local_y = mask.y_pixels - adjusted_origin[0]
     local_x = mask.x_pixels - adjusted_origin[1]
 
-    actual_height, actual_width = cropped_deform.field_shape
+    actual_height, actual_width = cropped_deformation.field_shape
     weight_image = np.zeros((actual_height, actual_width), dtype=np.float32)
 
     valid_mask = (local_y >= 0) & (local_y < actual_height) & (local_x >= 0) & (local_x < actual_width)
     weight_image[local_y[valid_mask], local_x[valid_mask]] = mask.pixel_weights[valid_mask]
 
-    warped_weights = cropped_deform.apply_deformation(data=weight_image, interpolation=0)
+    warped_weights = cropped_deformation.apply_deformation(data=weight_image, interpolation=0)
 
     new_local_y, new_local_x = np.nonzero(warped_weights)
     new_weights = warped_weights[new_local_y, new_local_x]

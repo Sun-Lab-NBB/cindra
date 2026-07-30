@@ -5,6 +5,7 @@ This CLI is installed as a separate entry-point from the main 'cindra' CLI to av
 headless pipeline execution.
 """
 
+from typing import Literal
 from pathlib import Path
 
 import click
@@ -47,7 +48,10 @@ def cindra_gui() -> None:
     help="Path to the state file for cross-process state exchange with the GUI MCP server.",
 )
 def gui_roi(recording_path: Path, dataset: str | None, state_file: Path | None) -> None:
-    """Launches the ROI viewer for single-recording pipeline output."""
+    """Launches the ROI viewer for single-recording pipeline output.
+
+    Providing --dataset switches the viewer to the multi-recording tracked-ROI view for the named dataset.
+    """
     run_roi_viewer(recording_path=recording_path, dataset=dataset, state_path=state_file)
 
 
@@ -109,6 +113,6 @@ def gui_tracking(recording_path: Path, dataset: str | None, state_file: Path | N
     show_default=True,
     help="The transport protocol to use for MCP communication.",
 )
-def gui_mcp(transport: str) -> None:
+def gui_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
     """Starts the GUI MCP server for agentic viewer lifecycle management and display state queries."""
-    run_gui_server(transport=transport)  # type: ignore[arg-type]
+    run_gui_server(transport=transport)

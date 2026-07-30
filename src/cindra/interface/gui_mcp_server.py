@@ -1,7 +1,7 @@
 """Provides the MCP server for managing GUI viewer subprocesses and querying their display state.
 
 Exposes tools that enable AI agents to launch, list, close, and query the current display state of GUI viewer
-windows. All data loading and interpretation is handled by the results tools in the non-GUI MCP server; this server
+windows. All data loading and interpretation is handled by the results tools in the non-GUI MCP server. This server
 focuses exclusively on viewer lifecycle management and live display state queries.
 """
 
@@ -16,20 +16,20 @@ from dataclasses import dataclass
 
 from mcp.server.fastmcp import FastMCP
 
-from ..gui.viewer_state import read_viewer_state, cleanup_state_file, generate_state_path
+from ..gui import read_viewer_state, cleanup_state_file, generate_state_path
 
 gui_mcp = FastMCP(name="cindra-gui-mcp", json_response=True)
 """The GUI MCP server instance initialized with JSON response mode for structured output."""
 
 
-@dataclass
+@dataclass(slots=True)
 class _ViewerProcess:
     """Tracks a managed GUI viewer subprocess."""
 
     viewer_id: str
     """The unique identifier for this viewer instance."""
-    viewer_type: str
-    """The type of viewer ('roi', 'tracking', or 'registration')."""
+    viewer_type: Literal["roi", "tracking", "registration"]
+    """The kind of viewer this process renders."""
     recording_path: str
     """The path to the recording loaded in the viewer."""
     dataset: str | None
@@ -37,7 +37,7 @@ class _ViewerProcess:
     state_path: str
     """The path to the temporary state file used for cross-process state exchange."""
     process: subprocess.Popen[str]
-    """The subprocess.Popen instance for the viewer process."""
+    """The running child process hosting the viewer window."""
 
 
 _viewer_registry: dict[str, _ViewerProcess] = {}
@@ -86,13 +86,18 @@ def launch_viewer_tool(
     viewer_id = uuid.uuid4().hex[:12]
     state_path = generate_state_path(viewer_id=viewer_id)
 
-    cindra_gui_exe = str(Path(sys.executable).parent / "cindra-gui")
-    cmd = [cindra_gui_exe, viewer_type, "--recording-path", str(path), "--state-file", state_path]
+    cindra_gui_executable = str(Path(sys.executable).parent / "cindra-gui")
+    command = [cindra_gui_executable, viewer_type, "--recording-path", str(path), "--state-file", state_path]
     if dataset is not None and viewer_type in ("roi", "tracking"):
-        cmd.extend(["--dataset", dataset])
+        command.extend(["--dataset", dataset])
 
     try:
-        process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)  # noqa: S603
+        process = subprocess.Popen(
+            args=command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
     except OSError as error:
         return {"success": False, "error": f"Unable to launch viewer subprocess. {error}"}
 
@@ -126,7 +131,9 @@ def list_viewers_tool() -> dict[str, Any]:
 
     Returns:
         A JSON dictionary containing 'success' flag, 'viewers' list (each with 'viewer_id', 'viewer_type',
-        'recording_path', 'dataset', 'active_dataset', and 'alive' flag), and 'count' of active viewers.
+        'recording_path', 'dataset', 'active_dataset', and 'alive' flag), and 'count' of listed viewers. A viewer
+        whose process has exited is listed once with 'alive' set to False and is then dropped from the registry, so
+        'count' can exceed the number of live viewers on that one call.
     """
     viewers: list[dict[str, Any]] = []
     dead_ids: list[str] = []
@@ -151,7 +158,7 @@ def list_viewers_tool() -> dict[str, Any]:
                 try:
                     state = read_viewer_state(state_path=state_file)
                     viewer_info["active_dataset"] = state.get("active_dataset")
-                except Exception:  # noqa: S110 - Best-effort state read; viewer list should not fail.
+                except Exception:  # noqa: S110 - Best-effort state read. The viewer list should not fail.
                     pass
 
         viewers.append(viewer_info)
@@ -211,7 +218,9 @@ def query_viewer_state_tool(viewer_id: str) -> dict[str, Any]:
 
     Returns:
         A JSON dictionary containing 'success' flag, 'viewer_id', and 'state' dictionary holding the viewer's current
-        display settings in the viewer-type-specific shape described above. On failure, contains an 'error' message.
+        display settings in the viewer-type-specific shape described above. While the viewer is still starting up and
+        has not written its state file, 'state' is the placeholder {'loaded': False} for every viewer type and an
+        extra 'note' key reports the startup delay. On failure, contains an 'error' message.
     """
     entry = _get_viewer(viewer_id)
     if entry is None:

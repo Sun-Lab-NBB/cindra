@@ -216,7 +216,8 @@ def resolve_pipeline_jobs(phases: tuple[PipelinePhase, ...], specifiers: Sequenc
 
 
 def _resolve_prerequisites(
-    jobs: Iterable[tuple[str, str]], phases: tuple[PipelinePhase, ...]
+    jobs: Iterable[tuple[str, str]],
+    phases: tuple[PipelinePhase, ...],
 ) -> dict[tuple[str, str], tuple[tuple[str, str], ...]]:
     """Builds the prerequisite graph over a set of jobs using a pipeline's phase chain.
 

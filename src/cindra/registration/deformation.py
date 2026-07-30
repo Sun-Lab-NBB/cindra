@@ -12,6 +12,11 @@ import scipy.special
 
 from .spline_grid import SplineGrid, compute_cardinal_coefficients
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from numpy.typing import NDArray
+
 _MINIMUM_DIFFUSION_SIGMA: float = 0.1
 """The minimum sigma value below which the diffusion kernel returns a delta function (no smoothing)."""
 
@@ -25,10 +30,8 @@ _BOUNDARY_TOLERANCE: float = -0.5
 """The boundary tolerance for determining if a sample point falls within valid image bounds. Pixels are centered at
 integer coordinates, so valid samples extend from -0.5 to (dimension - 0.5)."""
 
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-    from numpy.typing import NDArray
+_UNBOUNDED_SPLAT_EXTENT: float = 1_000_000.0
+"""The magnitude used to push a splat bound past the image extent when a source neighbor falls outside the field."""
 
 
 def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np.float32]:
@@ -36,7 +39,7 @@ def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np
 
     Args:
         data: The data to filter with the kernel.
-        sigma: The smoothing parameter. Can be a single value applied to all dimensions or a list with one value per
+        sigma: The smoothing parameter. Can be a single value applied to all dimensions or a list with one value for
             each data dimension.
 
     Returns:
@@ -48,7 +51,7 @@ def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np
     # Applies 1D diffusion filtering along each dimension.
     result = data
     for dimension in range(data.ndim):
-        kernel = _create_diffusion_kernel(sigma_list[dimension])
+        kernel = _create_diffusion_kernel(sigma=sigma_list[dimension])
         result = scipy.ndimage.convolve1d(input=result, weights=kernel, axis=dimension, mode="nearest")
 
     return result
@@ -57,7 +60,7 @@ def diffuse(data: NDArray[np.float32], sigma: float | list[float]) -> NDArray[np
 def zoom(
     data: NDArray[np.float32],
     factor: float | tuple[float, float],
-    order: int = 3,
+    order: int = _CUBIC_INTERPOLATION_ORDER,
 ) -> NDArray[np.float32]:
     """Resizes 2D data by the specified scale factor using interpolation.
 
@@ -92,7 +95,7 @@ class Deformation:
     interpolation. The class stores relative displacement fields (deltas) for each dimension.
 
     Notes:
-        Use `Deformation.identity()` to create identity (no-op) deformations. Use the regular constructor only for
+        Use ``Deformation.identity()`` to create identity (no-op) deformations. Use the regular constructor only for
         creating deformations from explicit displacement field arrays.
 
     Args:
@@ -135,10 +138,10 @@ class Deformation:
     @property
     def is_identity(self) -> bool:
         """Returns whether this deformation represents an identity (no-op) transformation."""
-        return len(self._fields) == 0
+        return not self._fields
 
     @property
-    def ndim(self) -> int:
+    def dimension_count(self) -> int:
         """Returns the number of dimensions of the deformation."""
         return len(self._field_shape)
 
@@ -168,7 +171,7 @@ class Deformation:
 
     def __add__(self, other: Deformation) -> Deformation:
         """Combines two deformations by element-wise addition of their fields."""
-        return self.add(other)
+        return self.add(other=other)
 
     def copy(self) -> Deformation:
         """Creates a deep copy of this deformation.
@@ -304,7 +307,9 @@ class Deformation:
         """
         return _make_samples_absolute(delta_x=self._fields[1], delta_y=self._fields[0])
 
-    def apply_deformation(self, data: NDArray[np.float32], interpolation: int = 3) -> NDArray[np.float32]:
+    def apply_deformation(
+        self, data: NDArray[np.float32], interpolation: int = _CUBIC_INTERPOLATION_ORDER
+    ) -> NDArray[np.float32]:
         """Applies this deformation to warp the input data.
 
         Uses backward mapping to sample the source data at locations defined by the deformation field.
@@ -345,7 +350,8 @@ class Deformation:
         the current deformation is diffeomorphic (invertible).
 
         Returns:
-            A new Deformation representing the approximate inverse transformation.
+            A new Deformation representing the approximate inverse transformation, or this same instance if it is an
+            identity deformation.
         """
         if self.is_identity:
             return self
@@ -382,7 +388,8 @@ class Deformation:
             freeze_edges: Determines whether to freeze edges to zero deformation.
 
         Returns:
-            A new regularized Deformation instance, or None if the grid is too small for the requested constraints.
+            A new regularized Deformation instance, this same instance if it is an identity deformation, or None if
+            the grid is too small for the requested constraints.
         """
         if self.is_identity:
             return self
@@ -517,14 +524,14 @@ def _warp(  # pragma: no cover
         samples_y: The 1D flattened array of y-coordinates to sample at.
         order: Interpolation order (0=nearest, 1=bilinear, 3=cubic Cardinal spline).
     """
-    num_samples = samples_x.size
+    sample_count = samples_x.size
     height = data.shape[0]
     width = data.shape[1]
 
-    # Cubic Cardinal Spline Interpolation (order=3). Uses a 4x4 neighborhood around each sample point. Cardinal
+    # Applies cubic cardinal spline interpolation (order=3) over a 4x4 neighborhood around each sample point. Cardinal
     # splines pass through control points exactly, with tension controlling curve tightness.
     if order == _CUBIC_INTERPOLATION_ORDER:
-        for sample_index in numba.prange(num_samples):
+        for sample_index in numba.prange(sample_count):
             # Allocates coefficient arrays inside the parallel loop to avoid race conditions.
             coefficients_x = np.empty((4,), dtype=np.float32)
             coefficients_y = np.empty((4,), dtype=np.float32)
@@ -605,9 +612,9 @@ def _warp(  # pragma: no cover
             else:
                 result[sample_index] = 0.0
 
-    # Bilinear Interpolation (order=1). Uses a 2x2 neighborhood with linear weights based on fractional position.
+    # Applies bilinear interpolation (order=1) over a 2x2 neighborhood with weights from the fractional position.
     elif order == _BILINEAR_INTERPOLATION_ORDER:
-        for sample_index in numba.prange(num_samples):
+        for sample_index in numba.prange(sample_count):
             # Decomposes sample coordinates into integer indices and fractional offsets.
             sample_x = samples_x[sample_index]
             pixel_x = math.floor(sample_x)
@@ -652,9 +659,9 @@ def _warp(  # pragma: no cover
             else:
                 result[sample_index] = 0.0
 
-    # Nearest Neighbor Interpolation (order=0). Rounds to the nearest pixel index without blending.
+    # Applies nearest neighbor interpolation (order=0), rounding to the nearest pixel index without blending.
     else:
-        for sample_index in numba.prange(num_samples):
+        for sample_index in numba.prange(sample_count):
             # Rounds sample coordinates to nearest integer pixel.
             sample_x = samples_x[sample_index]
             pixel_x = math.floor(sample_x + 0.5)
@@ -710,22 +717,23 @@ def _project(  # pragma: no cover
 
             for neighbor_offset_y in range(-1, 2):
                 for neighbor_offset_x in range(-1, 2):
-                    # Skips the center pixel (already have its target).
+                    # Skips the center pixel and the four edge-adjacent neighbors, leaving only the four diagonal
+                    # neighbors to bound the splat.
                     if neighbor_offset_y * neighbor_offset_x == 0:
                         continue
 
                     # Handles boundary cases by extending bounds to large values.
                     if source_y + neighbor_offset_y < 0:
-                        bounds_min_y = target_y - 1000000.0
+                        bounds_min_y = target_y - _UNBOUNDED_SPLAT_EXTENT
                         continue
                     if source_x + neighbor_offset_x < 0:
-                        bounds_min_x = target_x - 1000000.0
+                        bounds_min_x = target_x - _UNBOUNDED_SPLAT_EXTENT
                         continue
                     if source_y + neighbor_offset_y >= height:
-                        bounds_max_y = target_y + 1000000.0
+                        bounds_max_y = target_y + _UNBOUNDED_SPLAT_EXTENT
                         continue
                     if source_x + neighbor_offset_x >= width:
-                        bounds_max_x = target_x + 1000000.0
+                        bounds_max_x = target_x + _UNBOUNDED_SPLAT_EXTENT
                         continue
 
                     # Updates bounds based on neighbor's target position.
@@ -786,7 +794,7 @@ def _resize(
     data: NDArray[np.float32],
     new_height: int,
     new_width: int,
-    order: int = 3,
+    order: int = _CUBIC_INTERPOLATION_ORDER,
 ) -> NDArray[np.float32]:
     """Resizes 2D data to the specified shape using interpolation.
 
