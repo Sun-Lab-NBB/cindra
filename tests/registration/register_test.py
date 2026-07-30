@@ -2,10 +2,47 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from cindra.detection import compute_registration_blocks
-from cindra.registration.register import _compute_crop, _pick_initial_reference, _apply_precomputed_offsets_batch
+from cindra.registration.register import (
+    _compute_crop,
+    _compute_reference,
+    _pick_initial_reference,
+    _apply_precomputed_offsets_batch,
+)
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+
+def _build_baseline_frames(frame_count: int, size: int, baseline: float, seed: int) -> NDArray[np.float32]:
+    """Builds a stack of blob frames with integer-pixel shifts rendered on top of a positive intensity baseline.
+
+    Args:
+        frame_count: The number of frames to render.
+        size: The height and width of each square frame in pixels.
+        baseline: The constant intensity offset added to every pixel of every frame.
+        seed: The seed for the random generator used to render the per-frame noise.
+
+    Returns:
+        The rendered frame stack with shape (frame_count, size, size) as a float32 array.
+    """
+    generator = np.random.default_rng(seed=seed)
+    y_grid = np.arange(size, dtype=np.float32)[:, np.newaxis]
+    x_grid = np.arange(size, dtype=np.float32)[np.newaxis, :]
+
+    template = np.zeros((size, size), dtype=np.float32)
+    for center_y, center_x in ((12, 14), (30, 20), (22, 36)):
+        template += 90.0 * np.exp(-(((y_grid - center_y) ** 2 + (x_grid - center_x) ** 2) / 18.0))
+
+    frames = np.empty((frame_count, size, size), dtype=np.float32)
+    for index in range(frame_count):
+        shifted = np.roll(template, shift=(index % 5 - 2, index % 3 - 1), axis=(0, 1))
+        frames[index] = baseline + shifted + generator.normal(scale=6.0, size=(size, size))
+    return frames
 
 
 class TestComputeCrop:
@@ -152,6 +189,41 @@ class TestPickInitialReference:
         # The reference should correlate with the underlying signal.
         assert reference.shape == (16, 16)
         assert np.std(reference) > 0
+
+    def test_leaves_input_frames_unchanged(self) -> None:
+        """Verifies the input frames keep their original values, including their raw intensity scale."""
+        frames = _build_baseline_frames(frame_count=24, size=48, baseline=1000.0, seed=17)
+        original = frames.copy()
+
+        _pick_initial_reference(frames=frames, top_correlations=5)
+
+        np.testing.assert_array_equal(frames, original)
+
+
+class TestComputeReference:
+    """Tests the _compute_reference function."""
+
+    def test_reference_stays_on_raw_intensity_scale(self) -> None:
+        """Verifies the reference keeps the intensity scale of frames carrying a large positive baseline."""
+        frames = _build_baseline_frames(frame_count=24, size=48, baseline=1000.0, seed=17)
+        frames_mean = float(frames.mean())
+
+        reference = _compute_reference(
+            frames=frames,
+            pre_smoothing_sigma=0.0,
+            spatial_highpass_window=10,
+            edge_taper_pixels=10.0,
+            spatial_smoothing_sigma=1.15,
+            maximum_offset_fraction=0.1,
+            temporal_smoothing_sigma=0.0,
+            workers=1,
+            one_photon_enabled=False,
+        )
+
+        # register_plane derives the 1st and 99th percentile clip bounds from this reference and applies them to raw
+        # binary frames, so a reference on a different intensity scale saturates every pixel of the correlation input.
+        assert reference.shape == (48, 48)
+        assert abs(float(reference.mean()) - frames_mean) < 0.05 * frames_mean
 
 
 class TestApplyPrecomputedOffsetsBatch:

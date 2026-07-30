@@ -13,6 +13,7 @@ from .combine import combine_planes, compute_plane_offsets
 from .context import (
     PARAMETERS_FILENAME,
     MAXIMUM_CHANNEL_COUNT,
+    OUTPUT_DIRECTORY_NAME,
     resolve_recording_roots,
     extract_unique_components,
     resolve_multi_recording_contexts,
@@ -21,6 +22,7 @@ from .context import (
 
 __all__ = [
     "MAXIMUM_CHANNEL_COUNT",
+    "OUTPUT_DIRECTORY_NAME",
     "PARAMETERS_FILENAME",
     "TIFF_EXTENSIONS",
     "BinaryFile",

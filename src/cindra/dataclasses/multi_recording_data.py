@@ -269,37 +269,37 @@ class MultiRecordingRegistrationData:
         if self.deform_field_y is None:
             path = registration_directory / "deform_field_y.npy"
             if path.exists():
-                self.deform_field_y = np.load(path, mmap_mode="r+")
+                self.deform_field_y = np.load(path, mmap_mode="r")
         if self.deform_field_x is None:
             path = registration_directory / "deform_field_x.npy"
             if path.exists():
-                self.deform_field_x = np.load(path, mmap_mode="r+")
+                self.deform_field_x = np.load(path, mmap_mode="r")
 
         if self.transformed_mean_image is None:
             path = registration_directory / "transformed_mean_image.npy"
             if path.exists():
-                self.transformed_mean_image = np.load(path, mmap_mode="r+")
+                self.transformed_mean_image = np.load(path, mmap_mode="r")
         if self.transformed_enhanced_mean_image is None:
             path = registration_directory / "transformed_enhanced_mean_image.npy"
             if path.exists():
-                self.transformed_enhanced_mean_image = np.load(path, mmap_mode="r+")
+                self.transformed_enhanced_mean_image = np.load(path, mmap_mode="r")
         if self.transformed_maximum_projection is None:
             path = registration_directory / "transformed_maximum_projection.npy"
             if path.exists():
-                self.transformed_maximum_projection = np.load(path, mmap_mode="r+")
+                self.transformed_maximum_projection = np.load(path, mmap_mode="r")
 
         if self.transformed_mean_image_channel_2 is None:
             path = registration_directory / "transformed_mean_image_channel_2.npy"
             if path.exists():
-                self.transformed_mean_image_channel_2 = np.load(path, mmap_mode="r+")
+                self.transformed_mean_image_channel_2 = np.load(path, mmap_mode="r")
         if self.transformed_enhanced_mean_image_channel_2 is None:
             path = registration_directory / "transformed_enhanced_mean_image_channel_2.npy"
             if path.exists():
-                self.transformed_enhanced_mean_image_channel_2 = np.load(path, mmap_mode="r+")
+                self.transformed_enhanced_mean_image_channel_2 = np.load(path, mmap_mode="r")
         if self.transformed_maximum_projection_channel_2 is None:
             path = registration_directory / "transformed_maximum_projection_channel_2.npy"
             if path.exists():
-                self.transformed_maximum_projection_channel_2 = np.load(path, mmap_mode="r+")
+                self.transformed_maximum_projection_channel_2 = np.load(path, mmap_mode="r")
 
         # Eagerly loads channel 1 deformed ROI masks, because NumPy cannot memory-map .npz archives.
         masks_path = output_path / "registration_deformed_masks.npz"

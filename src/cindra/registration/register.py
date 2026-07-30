@@ -398,16 +398,22 @@ def _pick_initial_reference(frames: NDArray[np.float32], top_correlations: int =
     then averages the top_correlations most-correlated frames to produce the initial reference.
 
     Args:
-        frames: The processed recording's frames with shape (num_frames, height, width). Modified in-place: each
-            frame has its mean intensity subtracted as part of the correlation computation.
+        frames: The processed recording's frames with shape (num_frames, height, width). The mean subtraction used by
+            the correlation computation is applied to an internal working copy, so the input array retains its
+            original intensity scale.
         top_correlations: The number of top frame correlations to average.
 
     Returns:
-        The initial reference image with shape (height, width).
+        The initial reference image with shape (height, width), on a mean-subtracted intensity scale. The first
+        refinement iteration in _compute_reference recomputes the reference as a mean of the frames it aligns, so the
+        final reference carries the intensity scale of those frames.
     """
     frame_count, height, width = frames.shape
 
-    # Flattens frames and subtracts mean for correlation computation.
+    # Flattens frames and subtracts the per-frame mean for correlation computation. The subtraction allocates a
+    # working copy, so the caller's frames stay on their original intensity scale. _compute_reference refines the
+    # reference from those same frames, and register_plane derives the percentile clip bounds used during frame
+    # registration from the resulting reference.
     frames_flat = frames.reshape(frame_count, -1)
     frames_flat -= frames_flat.mean(axis=1, keepdims=True)
 
@@ -423,8 +429,9 @@ def _pick_initial_reference(frames: NDArray[np.float32], top_correlations: int =
     mean_top_correlations = np.mean(top_correlations_per_frame, axis=1)
     seed_index = np.argmax(mean_top_correlations)
 
-    # Averages the seed frame with its top correlated frames. The mean-subtracted frames are used intentionally,
-    # because this initial reference only bootstraps the iterative refinement in _compute_reference.
+    # Averages the seed frame with its top correlated frames. The mean-subtracted working copy is used here, because
+    # the first refinement iteration in _compute_reference recomputes the reference as a mean of the frames it aligns,
+    # which carry their own intensity scale.
     top_indices = np.argpartition(correlation_matrix[seed_index, :], kth=-top_correlations)[-top_correlations:]
     reference_image = np.mean(frames_flat[top_indices, :], axis=0)
 

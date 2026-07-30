@@ -3,6 +3,7 @@
 from pathlib import Path  # noqa: TC003 - the module does not defer annotation evaluation.
 
 import numba
+from natsort import natsorted
 from ataraxis_time import PrecisionTimer, TimerPrecisions, get_timestamp
 from ataraxis_base_utilities import LogLevel, console
 
@@ -104,7 +105,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
             console.echo(
                 message=(
                     f"Rebuilding {len(marked_binaries)} binary file(s) that a previous interrupted registration left "
-                    f"in an indeterminate state: {sorted(str(path) for path in marked_binaries)}."
+                    f"in an indeterminate state: {natsorted(str(path) for path in marked_binaries)}."
                 ),
                 level=LogLevel.WARNING,
             )
@@ -119,7 +120,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
                 console.echo(
                     message=(
                         f"Rebuilding {len(malformed_binaries)} binary file(s) whose size does not match the frame "
-                        f"geometry recorded for their plane: {sorted(str(path) for path in malformed_binaries)}."
+                        f"geometry recorded for their plane: {natsorted(str(path) for path in malformed_binaries)}."
                     ),
                     level=LogLevel.WARNING,
                 )

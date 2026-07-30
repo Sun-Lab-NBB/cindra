@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
@@ -20,11 +20,11 @@ from ..dataclasses import (
     SingleRecordingConfiguration,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 PARAMETERS_FILENAME: str = "cindra_parameters.json"
 """The name of the acquisition parameters JSON file expected in each recording's data directory."""
+
+OUTPUT_DIRECTORY_NAME: str = "cindra"
+"""The name of the output directory the single-recording pipeline creates under each recording's output root."""
 
 MAXIMUM_CHANNEL_COUNT: int = 2
 """The maximum number of imaging channels supported by the pipeline."""
@@ -458,11 +458,11 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
 def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path, ...]:
     """Resolves a set of discovered marker-file directories to their recording root directories.
 
-    Recording roots are the meaningful top-level directories that uniquely identify each recording session. Raw data
-    and pipeline outputs may be nested at arbitrary depths below the root, but the root itself is essential for proper
-    recording identification, display labels, and configuration paths. Uses ``extract_unique_components``
-    to identify the first path component (from the end) that uniquely distinguishes each path, then truncates each
-    path at that component to strip shared structural subdirectories without assuming a fixed directory hierarchy.
+    Recording roots are the meaningful top-level directories that uniquely identify each recording session. A marker
+    directory that is itself a pipeline output directory resolves to its parent, which is the path every downstream
+    status, cleaning, and preparation tool expects. Any other marker directory, whose depth below the recording root
+    is user-defined, is truncated at the trailing components it shares with every other such directory, which strips
+    a common structural subdirectory without assuming any particular name.
 
     Args:
         paths: Directories containing discovered marker files (e.g., parents of ``cindra_parameters.json``
@@ -471,20 +471,26 @@ def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path,
 
     Returns:
         A deduplicated tuple of recording root paths, one per unique recording.
-
-    Raises:
-        RuntimeError: If one or more paths do not contain unique components.
     """
-    unique_ids = extract_unique_components(paths=list(paths))
-    roots: list[Path] = []
-    for path, unique_id in zip(paths, unique_ids, strict=True):
-        # Walks up from the path to the ancestor whose name matches the unique component.
-        current = path
-        while current.name != unique_id and current != current.parent:
-            current = current.parent
-        if current not in roots:
-            roots.append(current)
-    return tuple(roots)
+    path_list = list(paths)
+
+    # The combination stage always writes combined_metadata.npz directly into <output_root>/cindra, so an output
+    # marker's parent is the recording root by construction and needs no inference.
+    roots: list[Path | None] = [path.parent if path.name == OUTPUT_DIRECTORY_NAME else None for path in path_list]
+
+    # Resolves the remaining directories against each other only, so an authoritative output root is never shortened
+    # by a component a raw-data sibling happens to share.
+    raw_indices = [index for index, root in enumerate(roots) if root is None]
+    raw_roots = _strip_shared_suffix(paths=[path_list[index] for index in raw_indices])
+    for index, raw_root in zip(raw_indices, raw_roots, strict=True):
+        roots[index] = raw_root
+
+    unique_roots: list[Path] = []
+    for root in roots:
+        if root is not None and root not in unique_roots:
+            unique_roots.append(root)
+
+    return tuple(unique_roots)
 
 
 def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
@@ -663,3 +669,33 @@ def _compute_mroi_region_borders(data_path: Path) -> tuple[int, ...]:
     # another begins, which are all x-coordinates except the minimum (leftmost region).
     sorted_x = sorted(acquisition.roi_x_coordinates)
     return tuple(sorted_x[1:])
+
+
+def _strip_shared_suffix(paths: list[Path]) -> list[Path]:
+    """Truncates each path at the longest trailing component sequence shared by every input path.
+
+    Args:
+        paths: The directories to truncate.
+
+    Returns:
+        The truncated paths, stored in the same order as the input paths. Paths that share no trailing components
+        are returned unchanged.
+    """
+    unique_paths = list(dict.fromkeys(paths))
+
+    # A shared suffix is only meaningful when at least two distinct paths are compared.
+    if len(unique_paths) <= 1:
+        return list(paths)
+
+    reversed_parts = [list(path.parts)[::-1] for path in unique_paths]
+    shortest_length = min(len(parts) for parts in reversed_parts)
+
+    shared_count = 0
+    # Stops one component short of the shortest path, so every root retains at least one identifying component.
+    while shared_count < shortest_length - 1 and len({parts[shared_count] for parts in reversed_parts}) == 1:
+        shared_count += 1
+
+    if shared_count == 0:
+        return list(paths)
+
+    return [Path(*path.parts[: len(path.parts) - shared_count]) for path in paths]

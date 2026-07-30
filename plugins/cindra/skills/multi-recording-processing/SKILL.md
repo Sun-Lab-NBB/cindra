@@ -236,7 +236,8 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
    ```
 
    Ask the user to confirm or override. Both `workers_per_job` and `max_parallel_jobs` default to
-   `-1` (automatic). Only pass explicit values if the user requests an override. Report the values
+   None, which accepts the measured allocation. Only pass explicit values if the user requests an
+   override, using a positive count for an exact value or -1 for every available core. Report the values
    returned in the `resource_classes` mapping of the execute tool response rather than recomputing
    them per phase.
 
@@ -332,8 +333,9 @@ one job per dataset, and the extract phase contributes one job per recording. On
 Neither count shrinks on a small host: a 16-core machine still asks for 30 discovery workers against a budget of 14 and
 dispatches one job regardless, because the dispatcher always admits a single job even when the budget cannot cover it.
 
-Both `workers_per_job` and `max_parallel_jobs` default to `-1` and can be overridden in `execute_processing_jobs_tool`
-or `execute_full_pipeline_tool`. An override is a single scalar applied to every non-fixed class alike, so passing
+Both `workers_per_job` and `max_parallel_jobs` default to None and can be overridden in
+`execute_processing_jobs_tool` or `execute_full_pipeline_tool`. A positive value is used exactly and -1 requests every
+available core. An override is a single scalar applied to every non-fixed class alike, so passing
 `workers_per_job=20` sets discovery and extraction to 20 both. Both execute tools return a session-level `cpu_budget`
 and a `resource_classes` mapping keyed by class name, with `discovery` and `extraction` entries carrying
 `workers_per_job`, `max_parallel_jobs` and `job_count`. `get_processing_jobs_status_tool` returns the same mapping with

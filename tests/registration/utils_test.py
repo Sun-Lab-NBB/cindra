@@ -237,6 +237,32 @@ class TestApplySpatialSmoothing:
         result = apply_spatial_smoothing(data=data, window=4)
         assert result is not None
 
+    def test_single_frame_stack_keeps_frame_axis(self) -> None:
+        """Verifies a single-frame 3D stack is returned as a 3D array."""
+        data = np.ones((1, 20, 20), dtype=np.float32) * 3.0
+        result = apply_spatial_smoothing(data=data, window=4)
+        assert result.shape == (1, 20, 20)
+
+    def test_single_frame_stack_matches_2d_input(self) -> None:
+        """Verifies a single-frame 3D stack produces the same values as the equivalent 2D image."""
+        generator = np.random.default_rng(42)
+        image = generator.standard_normal((20, 20)).astype(np.float32)
+        stack_result = apply_spatial_smoothing(data=image[np.newaxis, :, :], window=4)
+        image_result = apply_spatial_smoothing(data=image, window=4)
+        np.testing.assert_array_equal(stack_result[0], image_result)
+
+    def test_singleton_spatial_axis_preserved(self) -> None:
+        """Verifies a 3D stack with a single-pixel height keeps both the frame and the height axes."""
+        data = np.ones((2, 1, 20), dtype=np.float32) * 4.0
+        result = apply_spatial_smoothing(data=data, window=4)
+        assert result.shape == (2, 1, 20)
+
+    def test_2d_singleton_row_preserved(self) -> None:
+        """Verifies a 2D image with a single-pixel height is returned as a 2D array."""
+        data = np.ones((1, 20), dtype=np.float32) * 4.0
+        result = apply_spatial_smoothing(data=data, window=4)
+        assert result.shape == (1, 20)
+
 
 class TestApplySpatialHighPass:
     """Tests apply_spatial_high_pass."""
@@ -266,6 +292,32 @@ class TestApplySpatialHighPass:
         data = np.ones((5, 16, 16), dtype=np.float32)
         result = apply_spatial_high_pass(data=data, window=4)
         assert result.shape == data.shape
+
+    def test_single_frame_stack_keeps_frame_axis(self) -> None:
+        """Verifies a single-frame 3D stack is returned as a 3D array."""
+        data = np.ones((1, 20, 20), dtype=np.float32) * 100.0
+        result = apply_spatial_high_pass(data=data, window=4)
+        assert result.shape == (1, 20, 20)
+
+    def test_single_frame_stack_matches_2d_input(self) -> None:
+        """Verifies a single-frame 3D stack produces the same values as the equivalent 2D image."""
+        generator = np.random.default_rng(42)
+        image = generator.standard_normal((20, 20)).astype(np.float32)
+        stack_result = apply_spatial_high_pass(data=image[np.newaxis, :, :], window=4)
+        image_result = apply_spatial_high_pass(data=image, window=4)
+        np.testing.assert_array_equal(stack_result[0], image_result)
+
+    def test_singleton_spatial_axis_preserved(self) -> None:
+        """Verifies a 3D stack with a single-pixel height keeps both the frame and the height axes."""
+        data = np.ones((2, 1, 20), dtype=np.float32) * 100.0
+        result = apply_spatial_high_pass(data=data, window=4)
+        assert result.shape == (2, 1, 20)
+
+    def test_2d_singleton_row_preserved(self) -> None:
+        """Verifies a 2D image with a single-pixel height is returned as a 2D array."""
+        data = np.ones((1, 20), dtype=np.float32) * 100.0
+        result = apply_spatial_high_pass(data=data, window=4)
+        assert result.shape == (1, 20)
 
 
 class TestComputeReferenceFft:

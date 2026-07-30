@@ -14,6 +14,7 @@ from dataclasses import field, dataclass
 
 import yaml  # type: ignore[import-untyped]
 import numpy as np
+from natsort import natsorted
 
 from .mcp_instance import mcp
 
@@ -1742,7 +1743,7 @@ def _find_multi_recording_root(cindra_root: Path, dataset: str) -> tuple[Path | 
     available = [directory.name for directory in multi_recording_path.iterdir() if directory.is_dir()]
     if not available:
         return None, "No dataset directories found under multi_recording/"
-    return None, f"Dataset '{dataset}' not found. Available datasets: {', '.join(sorted(available))}"
+    return None, f"Dataset '{dataset}' not found. Available datasets: {', '.join(natsorted(available))}"
 
 
 def _resolve_data_path(cindra_root: Path, plane_index: int) -> tuple[Path | None, str | None]:
@@ -1761,7 +1762,7 @@ def _resolve_data_path(cindra_root: Path, plane_index: int) -> tuple[Path | None
 
     plane_path = cindra_root / f"plane_{plane_index}"
     if not plane_path.exists():
-        available = sorted(
+        available = natsorted(
             path.name for path in cindra_root.iterdir() if path.is_dir() and path.name.startswith("plane_")
         )
         return None, f"Plane directory plane_{plane_index} not found. Available: {', '.join(available) or 'none'}"
@@ -1809,9 +1810,10 @@ def _list_plane_directories(cindra_root: Path) -> list[Path]:
         cindra_root: The cindra output directory path to search for plane directories.
 
     Returns:
-        A lexicographically sorted list of plane directory paths found under the given root.
+        A naturally-sorted list of plane directory paths found under the given root, so that plane_2 precedes
+        plane_10.
     """
-    return sorted(
+    return natsorted(
         (path for path in cindra_root.iterdir() if path.is_dir() and path.name.startswith("plane_")),
         key=lambda path: path.name,
     )
@@ -1829,7 +1831,7 @@ def _discover_available_datasets(cindra_root: Path) -> list[str]:
     multi_recording_path = cindra_root / "multi_recording"
     if not multi_recording_path.exists():
         return []
-    return sorted(directory.name for directory in multi_recording_path.iterdir() if directory.is_dir())
+    return natsorted(directory.name for directory in multi_recording_path.iterdir() if directory.is_dir())
 
 
 def _check_file_exists(

@@ -91,11 +91,18 @@ tool.
 ## Output data reference
 
 All results are saved under `{output_path}/cindra/`. The pipeline produces combined (multi-plane merged) data at
-the root level and per-plane data in numbered subdirectories. Every two-channel recording produces
-`channel_2_data.bin`, `detection_data/mean_image_channel_2.npy`, `cell_fluorescence_channel_2.npy`, and
-`neuropil_fluorescence_channel_2.npy`. The remaining channel 2 files (the other three detection images, the ROI
-`.npz` files, `subtracted_fluorescence_channel_2.npy`, `spikes_channel_2.npy`, and
-`cell_classification_channel_2.npy`) are present only when both channels are functional.
+the root level and per-plane data in numbered subdirectories. Channel 2 output depends on whether the second channel is
+functional, meaning both `main.first_channel_functional` and `main.second_channel_functional` are True. Every
+two-channel recording produces, in each `plane_N/` directory, `channel_2_data.bin`,
+`detection_data/mean_image_channel_2.npy`, `cell_fluorescence_channel_2.npy`, and
+`neuropil_fluorescence_channel_2.npy`, plus the combined `detection_data/mean_image_channel_2.npy` at the root. A
+structural (non-functional) channel 2 still gets a full fluorescence extraction pass, but it borrows the channel 1 ROI
+masks instead of detecting its own ROIs, so its traces carry one row per channel 1 ROI and come with no independent
+detection, classification, or deconvolution. Every other channel 2 file requires both channels to be functional: the
+other three detection images at both levels, the ROI `.npz` files, `subtracted_fluorescence_channel_2.npy`,
+`spikes_channel_2.npy`, `cell_classification_channel_2.npy`, and the root-level combined
+`cell_fluorescence_channel_2.npy` and `neuropil_fluorescence_channel_2.npy`. Those last two are the asymmetry to
+watch, because combination omits them for a structural channel 2 even though every plane directory holds its own copy.
 
 ### Directory structure
 
@@ -229,7 +236,9 @@ Combined detection images (cindra/detection_data/):
 - [ ] `enhanced_mean_image.npy` exists
 - [ ] `maximum_projection.npy` exists
 - [ ] `correlation_map.npy` exists
-- [ ] Channel 2 variants exist if `main.two_channels` is True and both channels are functional
+- [ ] `mean_image_channel_2.npy` exists if `main.two_channels` is True, whether or not channel 2 is functional
+- [ ] `enhanced_mean_image_channel_2.npy`, `maximum_projection_channel_2.npy`, and `correlation_map_channel_2.npy`
+      exist if both channels are functional
 
 Combined extraction data (cindra/):
 - [ ] `roi_masks.npz` exists and contains `pixel_counts`, `y_pixels`, `x_pixels`, `pixel_weights` keys
@@ -240,7 +249,9 @@ Combined extraction data (cindra/):
 - [ ] `spikes.npy` exists with shape matching cell_fluorescence (zero-filled when
       spike_deconvolution.extract_spikes is False)
 - [ ] `cell_classification.npy` exists with shape (num_rois, 2)
-- [ ] Channel 2 trace and classification files exist if both channels are functional
+- [ ] Every channel 2 trace and classification file exists if both channels are functional. This includes
+      `cell_fluorescence_channel_2.npy` and `neuropil_fluorescence_channel_2.npy`, which combination omits at this
+      level for a structural channel 2 even though each plane directory holds them
 
 Per-plane directories (cindra/plane_0/ through cindra/plane_{N-1}/):
 - [ ] Each expected plane directory exists
@@ -263,6 +274,11 @@ Per-plane detection and extraction data (plane_N/):
 - [ ] `roi_masks.npz` and `roi_statistics.npz` exist
 - [ ] Fluorescence trace .npy files exist with consistent shapes across all traces
 - [ ] `cell_classification.npy` exists with shape (num_rois, 2)
+- [ ] `detection_data/mean_image_channel_2.npy`, `cell_fluorescence_channel_2.npy`, and
+      `neuropil_fluorescence_channel_2.npy` exist if `main.two_channels` is True, whether or not channel 2 is
+      functional. The two trace files carry one row per channel 1 ROI when channel 2 is structural
+- [ ] The remaining channel 2 detection images, ROI `.npz` files, trace files, and `cell_classification_channel_2.npy`
+      exist if both channels are functional
 
 Multi-recording readiness (if multi-recording processing is planned):
 - [ ] `combined_metadata.npz` contains `registered_binary_paths` key

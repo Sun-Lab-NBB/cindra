@@ -457,7 +457,9 @@ class TestCombinePlanes:
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
     ) -> None:
         """Verifies that MROI recordings with repeated positions tile z-planes into a combined grid."""
-        positions = ((0, 0), (0, _FRAME_WIDTH), (0, 0), (0, _FRAME_WIDTH))
+        # Two ROIs with two z-planes each, ordered the way the context resolver emits virtual planes: ROI-major, so
+        # both planes of ROI 0 precede both planes of ROI 1.
+        positions = ((0, 0), (0, 0), (0, _FRAME_WIDTH), (0, _FRAME_WIDTH))
         contexts: list[RuntimeContext] = []
         for index, (y_offset, x_offset) in enumerate(positions):
             context = single_recording_context(
@@ -479,6 +481,12 @@ class TestCombinePlanes:
         assert combined.plane_count == 4
         assert combined.combined_height == _FRAME_HEIGHT * 2
         assert combined.combined_width == _FRAME_WIDTH * 2
+
+        # Each of the four virtual planes lands on its own rectangle, so no plane overwrites another in the combined
+        # images or the stitched movie.
+        np.testing.assert_array_equal(combined.plane_x_offsets, [0, 0, _FRAME_WIDTH, _FRAME_WIDTH])
+        np.testing.assert_array_equal(combined.plane_y_offsets, [0, _FRAME_HEIGHT, 0, _FRAME_HEIGHT])
+
         rois = combined.extraction.roi_statistics
         assert rois is not None
         assert len(rois) == 1

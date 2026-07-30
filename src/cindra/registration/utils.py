@@ -175,8 +175,8 @@ def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[n
         window: The window size for smoothing. Must be an even integer.
 
     Returns:
-        The spatially smoothed data. Singleton axes are dropped, so a 2D input and a single-frame 3D stack are both
-        returned as 2D arrays.
+        The spatially smoothed data. A 2D input returns a 2D array, and a 3D input returns a 3D array of the
+        same shape.
 
     Raises:
         ValueError: If the window size is not an even integer.
@@ -185,8 +185,10 @@ def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[n
         message = f"Unable to apply spatial smoothing. Filter window must be an even integer, but got {window}."
         console.error(message=message, error=ValueError)
 
-    # Promotes 2D input to 3D for uniform processing.
-    if data.ndim == 2:  # noqa: PLR2004
+    # Promotes 2D input to 3D for uniform processing. The flag records the promotion so that the output drops only an
+    # axis this function added, leaving a genuine single-frame stack three-dimensional.
+    promoted = data.ndim == 2  # noqa: PLR2004
+    if promoted:
         data = data[np.newaxis, :, :]
 
     # Pads spatial dimensions with zeros to handle window edges. Border pixels are summed over partial (zero-filled)
@@ -210,7 +212,7 @@ def apply_spatial_smoothing(data: NDArray[np.float32], window: int) -> NDArray[n
     data_summed = data_summed[:, :, window:] - data_summed[:, :, :-window]
     data_summed /= window**2
 
-    result: NDArray[np.float32] = data_summed.squeeze()
+    result: NDArray[np.float32] = data_summed[0] if promoted else data_summed
     return result
 
 
@@ -222,11 +224,13 @@ def apply_spatial_high_pass(data: NDArray[np.float32], window: int) -> NDArray[n
         window: The window size for the low-pass component to subtract.
 
     Returns:
-        The high-pass filtered data. Singleton axes are dropped, so a 2D input and a single-frame 3D stack are both
-        returned as 2D arrays.
+        The high-pass filtered data. A 2D input returns a 2D array, and a 3D input returns a 3D array of the
+        same shape.
     """
-    # Promotes 2D input to 3D for uniform processing.
-    if data.ndim == 2:  # noqa: PLR2004
+    # Promotes 2D input to 3D for uniform processing. The flag records the promotion so that the output drops only an
+    # axis this function added, leaving a genuine single-frame stack three-dimensional.
+    promoted = data.ndim == 2  # noqa: PLR2004
+    if promoted:
         data = data[np.newaxis, :, :]
 
     # Retrieves cached normalization weights that correct for zero-padding at borders.
@@ -238,7 +242,8 @@ def apply_spatial_high_pass(data: NDArray[np.float32], window: int) -> NDArray[n
     low_pass /= normalization
     data_filtered = data - low_pass
 
-    return data_filtered.squeeze()
+    result: NDArray[np.float32] = data_filtered[0] if promoted else data_filtered
+    return result
 
 
 def compute_reference_fft(reference_image: NDArray[np.float32]) -> NDArray[np.complex64]:
@@ -349,5 +354,8 @@ def _get_normalization_weights(height: int, width: int, window: int) -> NDArray[
     Returns:
         The normalization weights with shape (height, width).
     """
+    # Smooths a single-image batch and drops the batch axis, since the weights broadcast against both 2D images and
+    # 3D frame stacks.
     ones_array = np.ones((1, height, width), dtype=np.float32)
-    return apply_spatial_smoothing(data=ones_array, window=window)
+    weights: NDArray[np.float32] = apply_spatial_smoothing(data=ones_array, window=window)[0]
+    return weights

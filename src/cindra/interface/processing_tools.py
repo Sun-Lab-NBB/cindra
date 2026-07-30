@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from enum import StrEnum
 import shutil
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from threading import Lock, Thread
 from dataclasses import field, dataclass
@@ -39,6 +39,7 @@ from ..pipelines import (
     run_single_recording_pipeline,
 )
 from ..allocation import (
+    ALL_CORES_REQUEST,
     DISCOVERY_WORKERS,
     EXTRACTION_WORKERS,
     PROCESSING_WORKERS,
@@ -55,6 +56,9 @@ from ..allocation import (
     resolve_single_recording_jobs,
 )
 from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 from .mcp_instance import mcp
 
 _RESERVED_CORES: int = 2
@@ -975,7 +979,11 @@ def reset_processing_phases_tool(
     # Expands the requested phases to include all downstream dependents. Resetting an upstream phase invalidates
     # all phases that depend on its output, so they must be reset too.
     requested_phases = list(phases)
-    phases = sorted(resolve_downstream_phases(phase_names=phases, single_recording=pipeline_type == "single-recording"))
+    single_recording = pipeline_type == "single-recording"
+    phases = _order_phases_by_execution(
+        resolve_downstream_phases(phase_names=phases, single_recording=single_recording),
+        single_recording=single_recording,
+    )
 
     tracker = ProcessingTracker(file_path=path)
 
@@ -1089,8 +1097,10 @@ def clean_processing_output_tool(
 
     # Expands the requested phases to include all downstream dependents.
     requested_phases = list(phases)
-    effective_phases = sorted(
-        resolve_downstream_phases(phase_names=phases, single_recording=pipeline_type == "single-recording")
+    single_recording = pipeline_type == "single-recording"
+    effective_phases = _order_phases_by_execution(
+        resolve_downstream_phases(phase_names=phases, single_recording=single_recording),
+        single_recording=single_recording,
     )
 
     deleted_files: list[str] = []
@@ -1108,7 +1118,7 @@ def clean_processing_output_tool(
         effective_set = set(effective_phases)
 
         # Cleans per-plane files, partitioning the shared detection_data directory by the phase that owns each array.
-        plane_directories = sorted(
+        plane_directories = natsorted(
             entry for entry in cindra_root.iterdir() if entry.is_dir() and entry.name.startswith("plane_")
         )
         for plane_directory in plane_directories:
@@ -1265,8 +1275,8 @@ def clean_processing_output_tool(
 def execute_processing_jobs_tool(
     jobs: list[dict[str, str]],
     *,
-    workers_per_job: int = -1,
-    max_parallel_jobs: int = -1,
+    workers_per_job: int | None = None,
+    max_parallel_jobs: int | None = None,
 ) -> dict[str, object]:
     """Dispatches pipeline jobs for background execution with prerequisite validation and resource allocation.
 
@@ -1297,12 +1307,14 @@ def execute_processing_jobs_tool(
             configuration file), 'tracker_path' (absolute path to the ProcessingTracker file), 'job_id' (the
             hexadecimal job identifier from the prepare manifest), and 'pipeline_type' ('single-recording' or
             'multi-recording').
-        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Set to
-            -1 to accept the measured defaults, which are 4 cores for binarization, 8 for registration, 10 for
+        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Leave
+            as None to accept the measured defaults, which are 4 cores for binarization, 8 for registration, 10 for
             processing, 1 for combination, 30 for multi-recording discovery, and 16 for multi-recording extraction.
-            The override is a single scalar applied to every non-fixed class alike.
+            Set to -1 to give every job the whole session core budget. The override is a single scalar applied to
+            every non-fixed class alike.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
-            non-fixed resource class. Set to -1 to accept the derived caps.
+            non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
+            the job count bounds concurrency.
 
     Returns:
         Always contains a 'success' flag indicating the tool ran. On a started session, also contains a 'started' flag,
@@ -1717,8 +1729,8 @@ def execute_full_pipeline_tool(
     configuration_path: str | None = None,
     recording_output_paths: list[str] | None = None,
     dataset_configurations: list[dict[str, object]] | None = None,
-    workers_per_job: int = -1,
-    max_parallel_jobs: int = -1,
+    workers_per_job: int | None = None,
+    max_parallel_jobs: int | None = None,
 ) -> dict[str, object]:
     """Executes a complete pipeline from preparation through all phases with automatic dependency sequencing.
 
@@ -1738,11 +1750,13 @@ def execute_full_pipeline_tool(
             single-recording pipelines and must match the length of recording_paths.
         dataset_configurations: List of dataset configuration dictionaries. Required for multi-recording pipelines.
             Each must contain 'configuration_path', 'recording_paths', and 'dataset_name'.
-        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Set to
-            -1 to accept the measured defaults of 4 cores for binarization, 1 for combination, 8 for registration, 10
-            for processing, 30 for multi-recording discovery, and 16 for multi-recording extraction.
+        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Leave
+            as None to accept the measured defaults of 4 cores for binarization, 1 for combination, 8 for
+            registration, 10 for processing, 30 for multi-recording discovery, and 16 for multi-recording extraction.
+            Set to -1 to give every job the whole session core budget.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
-            non-fixed resource class. Set to -1 to accept the derived caps.
+            non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
+            the job count bounds concurrency.
 
     Returns:
         Always contains a 'success' flag indicating the tool ran, and callers MUST also check the 'started' flag rather
@@ -2002,8 +2016,8 @@ def _check_active_session(action: str) -> dict[str, object] | None:
 
 def _start_execution_session(
     all_jobs: dict[tuple[str, str], _PendingJob],
-    workers_per_job: int,
-    max_parallel_jobs: int,
+    workers_per_job: int | None,
+    max_parallel_jobs: int | None,
     extra_result_fields: dict[str, object],
 ) -> dict[str, object]:
     """Resolves per-class resource allocation, stamps it onto the queued jobs, and starts the execution manager.
@@ -2025,8 +2039,10 @@ def _start_execution_session(
 
     Args:
         all_jobs: All submitted jobs keyed by dispatch key, in the order the manager should consider them.
-        workers_per_job: Requested CPU cores per job (-1 to accept each resource class default).
-        max_parallel_jobs: Requested maximum concurrent jobs per resource class (-1 to accept the derived caps).
+        workers_per_job: Requested CPU cores per job, -1 for every available core, or None to accept each resource
+            class default.
+        max_parallel_jobs: Requested maximum concurrent jobs per resource class, -1 to lift the caps, or None to
+            accept the derived caps.
         extra_result_fields: Additional key-value pairs to include in the result dictionary.
 
     Returns:
@@ -2034,6 +2050,23 @@ def _start_execution_session(
         details, and any extra fields.
     """
     global _job_execution_state
+
+    # Rejects a non-positive override rather than letting it fall through as a negative core count. None is the only
+    # way to ask for a default, so a caller passing 0 or a negative value has confused the two.
+    for override_name, override_value in (
+        ("workers_per_job", workers_per_job),
+        ("max_parallel_jobs", max_parallel_jobs),
+    ):
+        if override_value is not None and override_value <= 0 and override_value != ALL_CORES_REQUEST:
+            return {
+                "success": False,
+                "started": False,
+                "error": (
+                    f"Unable to start the execution session. The '{override_name}' override must be a positive "
+                    f"integer, -1 to request every available core, or None to accept the measured default, but "
+                    f"encountered {override_value}."
+                ),
+            }
 
     budget = resolve_worker_count(requested_workers=-1, reserved_cores=_RESERVED_CORES)
     available_memory = _resolve_available_memory_gigabytes()
@@ -2101,14 +2134,36 @@ def _start_execution_session(
     return result
 
 
+def _order_phases_by_execution(phase_names: Iterable[str], *, single_recording: bool) -> list[str]:
+    """Orders phase job names by the order the pipeline executes them.
+
+    Notes:
+        Callers report the resulting list to the user, who reads a phase list as a sequence. Alphabetical order would
+        render the single-recording chain as binarization, combination, processing, registration, which inverts the
+        two middle phases relative to the order they run in.
+
+    Args:
+        phase_names: The phase job names to order.
+        single_recording: Determines whether to apply the single-recording or the multi-recording phase chain.
+
+    Returns:
+        The phase job names in pipeline execution order. Names outside the phase model are appended alphabetically.
+    """
+    phases = SINGLE_RECORDING_PHASES if single_recording else MULTI_RECORDING_PHASES
+    execution_order = {str(phase.job_name): index for index, phase in enumerate(phases)}
+    known = [name for name in phase_names if name in execution_order]
+    unknown = [name for name in phase_names if name not in execution_order]
+    return sorted(known, key=lambda name: execution_order[name]) + sorted(unknown)
+
+
 def _resolve_class_allocation(
     resource_class: _ResourceClass,
     *,
     budget: int,
     available_memory: float | None,
     job_count: int,
-    workers_per_job: int,
-    max_parallel_jobs: int,
+    workers_per_job: int | None,
+    max_parallel_jobs: int | None,
 ) -> tuple[int, int]:
     """Resolves the per-job worker count and the concurrency cap of one resource class.
 
@@ -2127,8 +2182,9 @@ def _resolve_class_allocation(
         budget: The number of CPU cores available to the session after reserving system cores.
         available_memory: The available system memory in gigabytes, or None when the platform does not report it.
         job_count: The number of jobs of this class in the session, which caps the useful concurrency.
-        workers_per_job: The requested CPU cores per job (-1 to accept the class default).
-        max_parallel_jobs: The requested concurrency cap (-1 to accept the derived cap).
+        workers_per_job: The requested CPU cores per job, -1 to request every available core, or None to accept
+            the class default.
+        max_parallel_jobs: The requested concurrency cap, -1 to lift the cap, or None to accept the derived cap.
 
     Returns:
         A (workers_per_job, max_parallel_jobs) tuple for this resource class.
@@ -2137,9 +2193,18 @@ def _resolve_class_allocation(
         workers = resource_class.workers_per_job
         return workers, min(resource_class.fixed_parallel_jobs, max(1, job_count))
 
-    workers = workers_per_job if workers_per_job > 0 else resource_class.workers_per_job
+    if workers_per_job is None:
+        workers = resource_class.workers_per_job
+    elif workers_per_job == ALL_CORES_REQUEST:
+        workers = budget
+    else:
+        workers = workers_per_job
 
-    if max_parallel_jobs > 0:
+    # An all-cores concurrency request lifts the derived cap, leaving the job count as the only bound.
+    if max_parallel_jobs == ALL_CORES_REQUEST:
+        return workers, max(1, job_count)
+
+    if max_parallel_jobs is not None:
         return workers, max_parallel_jobs
 
     capacity = max(1, budget // workers)

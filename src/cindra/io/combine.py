@@ -34,6 +34,10 @@ def compute_plane_offsets(
         space, re-assembling the recording from individually processed planes. This is used as part of outputting the
         cindra-processed data as a 'combined' dataset that integrates the data from all available planes.
 
+        The plane contexts are expected in the order produced by the single-recording context resolver. For MROI
+        recordings, that order is ROI-major, so a virtual plane's index equals its ROI index times the z-plane count
+        plus its z-plane index.
+
     Args:
         plane_contexts: A list of RuntimeContext instances, one for each plane being processed.
 
@@ -76,7 +80,7 @@ def compute_plane_offsets(
         # each z-plane.
         if roi_number < plane_number:
             # Computes the number of z-planes (total virtual planes divided by unique ROI positions).
-            plane_number //= roi_number
+            z_plane_number = plane_number // roi_number
 
             heights_array = np.array([context.runtime.io.frame_height for context in plane_contexts])
             widths_array = np.array([context.runtime.io.frame_width for context in plane_contexts])
@@ -86,15 +90,16 @@ def compute_plane_offsets(
             maximum_width = (x_displacement + widths_array).max()
 
             # Calculates the number of columns needed to arrange z-plane tiles in a roughly square grid.
-            column_number = int(np.ceil(np.sqrt(maximum_height * maximum_width * plane_number) / maximum_width))
+            column_number = int(np.ceil(np.sqrt(maximum_height * maximum_width * z_plane_number) / maximum_width))
 
             # Adds tile offsets to the base MROI positions. Each z-plane gets its own tile, and within each tile the
-            # ROIs maintain their relative MROI positions.
-            for plane_index in range(plane_number):
-                for roi_index in range(roi_number):
-                    roi_plane_index = plane_index * roi_number + roi_index
-                    x_displacement[roi_plane_index] += (plane_index % column_number) * maximum_width
-                    y_displacement[roi_plane_index] += (plane_index // column_number) * maximum_height
+            # ROIs maintain their relative MROI positions. The context resolver lays virtual planes out ROI-major, as
+            # virtual_plane_index = roi_index * z_plane_number + z_index, so a virtual plane's z-plane index is its own
+            # index modulo the z-plane count.
+            for virtual_plane_index in range(plane_number):
+                z_index = virtual_plane_index % z_plane_number
+                x_displacement[virtual_plane_index] += (z_index % column_number) * maximum_width
+                y_displacement[virtual_plane_index] += (z_index // column_number) * maximum_height
 
     return y_displacement, x_displacement
 
