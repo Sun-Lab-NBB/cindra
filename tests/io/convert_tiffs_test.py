@@ -398,6 +398,56 @@ class TestGetFrameDimensions:
                 tiff_files=[empty_tiff], contexts=[context], acquisition=acquisition, decode_workers=1
             )
 
+    def test_differently_shaped_tiff_raises(self, tmp_path: Path) -> None:
+        """Verifies that a TIFF holding differently shaped frames raises an error that names it and the remedy."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(data_path, plane_number=1, channel_number=1)
+
+        # Reproduces an anatomical z-stack sitting beside the recording's imaging files, which is shaped differently
+        # and would otherwise fail to broadcast into a binary sized for the recording.
+        recording_tiff = data_path / "mesoscope_000001.tif"
+        zstack_tiff = data_path / "zstack.tif"
+        _write_constant_tiff(recording_tiff, frame_values=[1, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        _write_constant_tiff(zstack_tiff, frame_values=[3], height=_FRAME_HEIGHT * 2, width=_FRAME_WIDTH * 2)
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        context = _build_context(
+            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
+        )
+
+        with pytest.raises(ValueError, match=r"ignored_file_names"):
+            _get_frame_dimensions(
+                tiff_files=[recording_tiff, zstack_tiff],
+                contexts=[context],
+                acquisition=acquisition,
+                decode_workers=1,
+            )
+
+    def test_uniformly_shaped_tiffs_pass(self, tmp_path: Path) -> None:
+        """Verifies that files sharing a frame shape resolve dimensions without raising."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(data_path, plane_number=1, channel_number=1)
+        first_tiff = data_path / "mesoscope_000001.tif"
+        second_tiff = data_path / "mesoscope_000002.tif"
+        _write_constant_tiff(first_tiff, frame_values=[1, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        _write_constant_tiff(second_tiff, frame_values=[3, 4], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        context = _build_context(
+            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
+        )
+
+        heights, widths = _get_frame_dimensions(
+            tiff_files=[first_tiff, second_tiff], contexts=[context], acquisition=acquisition, decode_workers=1
+        )
+
+        assert heights == [_FRAME_HEIGHT]
+        assert widths == [_FRAME_WIDTH]
+
 
 class TestCreateBinaryFiles:
     """Tests _create_binary_files."""
