@@ -1,4 +1,4 @@
-"""Contains integration tests for the RuntimeContext and MultiRecordingRuntimeContext disk persistence entry points."""
+"""Contains integration tests for RuntimeContext and MultiRecordingRuntimeContext persistence and path relocation."""
 
 from __future__ import annotations
 
@@ -54,11 +54,11 @@ def _populate_single_runtime_arrays(
     runtime: SingleRecordingRuntimeData, *, height: int, width: int, frame_count: int
 ) -> None:
     """Populates registration, detection, and extraction arrays so that a save/load round-trip carries data."""
-    rng = np.random.default_rng(seed=7)
-    runtime.registration.reference_image = rng.random(size=(height, width)).astype(np.float32)
+    generator = np.random.default_rng(seed=7)
+    runtime.registration.reference_image = generator.random(size=(height, width)).astype(np.float32)
     runtime.registration.rigid_y_offsets = np.arange(frame_count, dtype=np.int32)
     runtime.registration.rigid_x_offsets = (np.arange(frame_count, dtype=np.int32) * 2).astype(np.int32)
-    runtime.detection.mean_image = rng.random(size=(height, width)).astype(np.float32)
+    runtime.detection.mean_image = generator.random(size=(height, width)).astype(np.float32)
     runtime.extraction.roi_statistics = [_make_roi_statistics(frame_width=width)]
 
 
@@ -170,8 +170,8 @@ class TestRuntimeContextLoad:
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
     ) -> None:
         """Verifies that load with plane_index=-1 returns a list of contexts with matching scalars and arrays."""
-        context = single_recording_context(tmp_path, frame_height=24, frame_width=24, frame_count=12)
-        _populate_single_runtime_arrays(context.runtime, height=24, width=24, frame_count=12)
+        context = single_recording_context(tmp_path=tmp_path, frame_height=24, frame_width=24, frame_count=12)
+        _populate_single_runtime_arrays(runtime=context.runtime, height=24, width=24, frame_count=12)
         context.save_shared()
         context.save_runtime()
 
@@ -210,8 +210,8 @@ class TestRuntimeContextLoad:
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
     ) -> None:
         """Verifies that load with a specific plane index returns a single context whose arrays memory-map."""
-        context = single_recording_context(tmp_path, frame_height=20, frame_width=20, frame_count=10)
-        _populate_single_runtime_arrays(context.runtime, height=20, width=20, frame_count=10)
+        context = single_recording_context(tmp_path=tmp_path, frame_height=20, frame_width=20, frame_count=10)
+        _populate_single_runtime_arrays(runtime=context.runtime, height=20, width=20, frame_count=10)
         context.save_shared()
         context.save_runtime()
 
@@ -223,7 +223,7 @@ class TestRuntimeContextLoad:
 
         reloaded.runtime.memory_map_arrays()
         assert reloaded.runtime.registration.reference_image is not None
-        assert is_memory_mapped(reloaded.runtime.registration.reference_image)
+        assert is_memory_mapped(array=reloaded.runtime.registration.reference_image)
         np.testing.assert_allclose(
             context.runtime.registration.reference_image, reloaded.runtime.registration.reference_image, rtol=1e-6
         )
@@ -236,14 +236,14 @@ class TestRuntimeContextLoad:
         generator = np.random.default_rng(seed=3)
         movie_channel_2 = generator.integers(low=100, high=1000, size=(10, 18, 18)).astype(np.int16)
         context = single_recording_context(
-            source, frame_height=18, frame_width=18, frame_count=10, movie_channel_2=movie_channel_2
+            tmp_path=source, frame_height=18, frame_width=18, frame_count=10, movie_channel_2=movie_channel_2
         )
-        _populate_single_runtime_arrays(context.runtime, height=18, width=18, frame_count=10)
+        _populate_single_runtime_arrays(runtime=context.runtime, height=18, width=18, frame_count=10)
         context.save_shared()
         context.save_runtime()
 
         destination = tmp_path / "destination"
-        shutil.copytree(source, destination)
+        shutil.copytree(src=source, dst=destination)
 
         reloaded = RuntimeContext.load(root_path=destination / "output", plane_index=0)
         assert isinstance(reloaded, RuntimeContext)
@@ -356,7 +356,7 @@ class TestMultiRecordingRuntimeContextLoad:
 
     def test_load_all_recordings_round_trip(self, tmp_path: Path) -> None:
         """Verifies that load with recording_index=-1 returns all recording contexts with combined data loaded."""
-        _build_multi_dataset(tmp_path, recording_count=2)
+        _build_multi_dataset(base=tmp_path, recording_count=2)
 
         loaded = MultiRecordingRuntimeContext.load(root_path=tmp_path / "rec0")
 
@@ -373,7 +373,7 @@ class TestMultiRecordingRuntimeContextLoad:
 
     def test_load_entry_recording_by_index(self, tmp_path: Path) -> None:
         """Verifies that load returns the entry recording directly when its index matches the resolved path."""
-        _build_multi_dataset(tmp_path, recording_count=2)
+        _build_multi_dataset(base=tmp_path, recording_count=2)
 
         loaded = MultiRecordingRuntimeContext.load(root_path=tmp_path / "rec0", recording_index=0)
 
@@ -383,7 +383,7 @@ class TestMultiRecordingRuntimeContextLoad:
 
     def test_load_other_recording_by_index(self, tmp_path: Path) -> None:
         """Verifies that load returns a non-entry recording by re-reading its runtime data from disk."""
-        _build_multi_dataset(tmp_path, recording_count=2)
+        _build_multi_dataset(base=tmp_path, recording_count=2)
 
         loaded = MultiRecordingRuntimeContext.load(root_path=tmp_path / "rec0", recording_index=1)
 
@@ -394,10 +394,10 @@ class TestMultiRecordingRuntimeContextLoad:
     def test_load_after_relocation_corrects_paths(self, tmp_path: Path) -> None:
         """Verifies that load relocates stale dataset paths across recordings after the dataset tree is moved."""
         source = tmp_path / "source"
-        _build_multi_dataset(source, recording_count=2)
+        _build_multi_dataset(base=source, recording_count=2)
 
         destination = tmp_path / "destination"
-        shutil.copytree(source, destination)
+        shutil.copytree(src=source, dst=destination)
 
         loaded = MultiRecordingRuntimeContext.load(root_path=destination / "rec0")
 
@@ -415,10 +415,10 @@ class TestMultiRecordingRuntimeContextLoad:
     def test_load_after_relocation_with_one_recording_already_relocated(self, tmp_path: Path) -> None:
         """Verifies that load skips re-relocating a recording whose stored output path already matches its location."""
         source = tmp_path / "source"
-        output_paths = _build_multi_dataset(source, recording_count=2)
+        output_paths = _build_multi_dataset(base=source, recording_count=2)
 
         destination = tmp_path / "destination"
-        shutil.copytree(source, destination)
+        shutil.copytree(src=source, dst=destination)
 
         # Re-saves the non-entry recording in place at the destination so its stored output_path already matches the
         # resolved location, exercising the relocation skip branch for an already-correct recording.
@@ -437,10 +437,10 @@ class TestMultiRecordingRuntimeContextLoad:
     def test_load_after_relocation_without_data_paths(self, tmp_path: Path) -> None:
         """Verifies that load relocates a moved dataset whose recordings carry no single-recording data path."""
         source = tmp_path / "source"
-        _build_multi_dataset(source, recording_count=2, set_data_path=False)
+        _build_multi_dataset(base=source, recording_count=2, set_data_path=False)
 
         destination = tmp_path / "destination"
-        shutil.copytree(source, destination)
+        shutil.copytree(src=source, dst=destination)
 
         loaded = MultiRecordingRuntimeContext.load(root_path=destination / "rec0")
 
@@ -459,7 +459,7 @@ class TestMultiRecordingRuntimeContextLoad:
 
     def test_load_raises_when_multiple_runtimes_found(self, tmp_path: Path) -> None:
         """Verifies that load raises RuntimeError when more than one runtime file exists under the root."""
-        _build_multi_dataset(tmp_path, recording_count=2)
+        _build_multi_dataset(base=tmp_path, recording_count=2)
 
         with pytest.raises(RuntimeError, match="expected exactly one"):
             MultiRecordingRuntimeContext.load(root_path=tmp_path)
@@ -477,14 +477,14 @@ class TestMultiRecordingRuntimeContextLoad:
 
     def test_load_raises_when_configuration_missing(self, tmp_path: Path) -> None:
         """Verifies that load raises FileNotFoundError when the configuration file is absent."""
-        _build_multi_dataset(tmp_path, recording_count=1, write_config=False)
+        _build_multi_dataset(base=tmp_path, recording_count=1, write_config=False)
 
         with pytest.raises(FileNotFoundError, match="Configuration file does not exist"):
             MultiRecordingRuntimeContext.load(root_path=tmp_path / "rec0")
 
     def test_load_raises_when_recording_index_out_of_range(self, tmp_path: Path) -> None:
         """Verifies that load raises IndexError when the requested recording index is out of range."""
-        _build_multi_dataset(tmp_path, recording_count=1)
+        _build_multi_dataset(base=tmp_path, recording_count=1)
 
         with pytest.raises(IndexError, match="is out of range"):
             MultiRecordingRuntimeContext.load(root_path=tmp_path / "rec0", recording_index=99)
@@ -608,7 +608,7 @@ class TestLoadMultiRecordingData:
         runtime = MultiRecordingRuntimeData()
         runtime.io.data_path = data_path
 
-        _load_multi_recording_data(runtime)
+        _load_multi_recording_data(runtime=runtime)
 
         assert runtime.combined_data is not None
         assert runtime.combined_data.sampling_rate == pytest.approx(20.0)
@@ -618,6 +618,6 @@ class TestLoadMultiRecordingData:
         runtime = MultiRecordingRuntimeData()
         runtime.io.data_path = None
 
-        _load_multi_recording_data(runtime)
+        _load_multi_recording_data(runtime=runtime)
 
         assert runtime.combined_data is None

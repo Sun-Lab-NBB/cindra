@@ -10,7 +10,7 @@ class ROIColorMode(IntEnum):
     """Selects the statistic used to color ROI overlays in the image panels."""
 
     RANDOM = 0
-    """Assigns each ROI a random color from the active colormap."""
+    """Assigns each ROI a random hue rendered at full HSV saturation and value, independent of the active colormap."""
 
     SKEWNESS = 1
     """Colors ROIs by the skewness of their baseline-subtracted fluorescence time series."""
@@ -107,6 +107,28 @@ class BackgroundView(IntEnum):
     functional-to-structural channel colocalization. Only enabled when colocalization data exists."""
 
 
+class BackgroundViewLabel(StrEnum):
+    """Provides human-readable display labels for the BackgroundView dropdown, indexed by BackgroundView value."""
+
+    ROIS_ONLY = "ROIs"
+    """The display label for the ROIs-only background mode."""
+
+    MEAN_IMAGE = "Mean Image"
+    """The display label for the temporal mean image background mode."""
+
+    ENHANCED_MEAN_IMAGE = "Mean Image (Enhanced)"
+    """The display label for the contrast-enhanced mean image background mode."""
+
+    CORRELATION_MAP = "Correlation Map"
+    """The display label for the pixel-wise activity correlation map background mode."""
+
+    MAXIMUM_PROJECTION = "Maximum Projection"
+    """The display label for the maximum intensity projection background mode."""
+
+    CORRECTED_STRUCTURAL = "Corrected Structural"
+    """The display label for the bleed-through-corrected structural channel background mode."""
+
+
 class TraceMode(IntEnum):
     """Selects the fluorescence trace type displayed in the trace panel."""
 
@@ -124,7 +146,7 @@ class TraceMode(IntEnum):
 
 
 class TraceModeLabel(StrEnum):
-    """Provides human-readable display labels for the TraceMode dropdown, indexed by TraceMode value."""
+    """Provides human-readable display labels for the TraceMode visibility checkboxes, indexed by TraceMode value."""
 
     RAW_FLUORESCENCE = "fluorescence"
     """The display label for the raw fluorescence trace mode."""
@@ -165,28 +187,6 @@ class CoordinateSpace(IntEnum):
 
     TRANSFORMED = 1
     """Displays reference images warped to align with the cross-recording template coordinate space."""
-
-
-class BackgroundViewLabel(StrEnum):
-    """Provides human-readable display labels for the BackgroundView dropdown, indexed by BackgroundView value."""
-
-    ROIS_ONLY = "ROIs"
-    """The display label for the ROIs-only background mode."""
-
-    MEAN_IMAGE = "Mean Image"
-    """The display label for the temporal mean image background mode."""
-
-    ENHANCED_MEAN_IMAGE = "Mean Image (Enhanced)"
-    """The display label for the contrast-enhanced mean image background mode."""
-
-    CORRELATION_MAP = "Correlation Map"
-    """The display label for the pixel-wise activity correlation map background mode."""
-
-    MAXIMUM_PROJECTION = "Maximum Projection"
-    """The display label for the maximum intensity projection background mode."""
-
-    CORRECTED_STRUCTURAL = "Corrected Structural"
-    """The display label for the bleed-through-corrected structural channel background mode."""
 
 
 class Colormap(StrEnum):
@@ -232,8 +232,8 @@ class _ROIViewerConstants:
 
     overlap_layers: int = 3
     """The number of overlap layers stored in the ROI index map. Each pixel tracks up to this many overlapping ROIs in a
-    depth stack, enabling click-through selection and brightness-based overlap visualization. ROIs beyond this depth are
-    silently dropped."""
+    depth stack. Layer 0 drives ROI selection and overlay coloring, while the deeper layers only supply the overlap
+    count used for brightness-based overlap visualization. ROIs beyond this depth are silently dropped."""
     fixed_colorbar_range: tuple[float, ...] = (0.0, 0.5, 1.0)
     """The (low, mid, high) colorbar tick values used for color modes that lack data-driven percentile ranges. Applied
     to the random, cell probability, cell classification, and correlation modes where the statistic is either
@@ -262,7 +262,7 @@ class _ROIViewerConstants:
     distance between adjacent traces in both single-recording and multi-recording trace plots, with larger values
     decreasing separation (trace spacing is computed as 1.0 / scale_factor)."""
     average_threshold: int = 5
-    """An average trace is rendered only when more than this many ROIs are selected; at or below this count, only
+    """An average trace is rendered only when more than this many ROIs are selected. At or below this count, only
     individual traces are shown to avoid displaying a noisy average from too few samples."""
     average_scale_divisor: float = 25.0
     """The divisor used to compute the vertical scale of the average trace relative to the number of selected ROIs.
@@ -301,6 +301,8 @@ class _BinaryPlayerConstants:
     are used to compute the mean and standard deviation that define the display intensity range."""
     default_frame_delta: int = 100
     """The default frame step size for arrow key navigation, playback advancement, and slider single-step."""
+    maximum_frame_delta: int = 10000
+    """The maximum frame step size accepted by the navigation step input field and by arrow-key step adjustment."""
     frame_slider_tick_interval: int = 5
     """The tick spacing for the frame navigation slider. Controls how many frame positions are represented by each
     discrete tick mark on the slider widget."""

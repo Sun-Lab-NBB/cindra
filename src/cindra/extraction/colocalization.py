@@ -32,6 +32,7 @@ def compute_intensity_colocalization(
     frame_height: int,
     frame_width: int,
     colocalization_threshold: float,
+    *,
     allow_overlap: bool,
     cell_probability_percentile: int,
     inner_neuropil_border_radius: int,
@@ -58,8 +59,8 @@ def compute_intensity_colocalization(
             intensity measurement.
         frame_height: The height of the imaging field in pixels.
         frame_width: The width of the imaging field in pixels.
-        colocalization_threshold: The minimum probability for classifying an ROI as colocalized. For intensity-based
-            colocalization, this represents the inside-to-total intensity ratio threshold.
+        colocalization_threshold: The probability threshold above which an ROI is classified as colocalized. For
+            intensity-based colocalization, this represents the inside-to-total intensity ratio threshold.
         allow_overlap: Determines whether to include overlapping ROI pixels in the created masks.
         cell_probability_percentile: The percentile threshold for classifying pixels as belonging to a cell versus
             neuropil.
@@ -358,7 +359,7 @@ def _compute_overlap_matrix(
     count_2 = len(rois_channel_2)
 
     # Handles edge cases with empty ROI lists. Returns early to satisfy type narrowing requirements.
-    if count_1 == 0 or count_2 == 0:
+    if not rois_channel_1 or not rois_channel_2:
         return np.zeros((count_1, count_2), dtype=np.float32)
 
     # Builds sparse binary masks for both channels.

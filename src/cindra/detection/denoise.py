@@ -1,4 +1,4 @@
-"""Provides PCA-based denoising algorithm applied to the recording frames before ROI detection."""
+"""Provides the PCA-based denoising algorithm applied to the recording frames before ROI detection."""
 
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
+from threadpoolctl import threadpool_limits  # type: ignore[import-untyped]
 from sklearn.decomposition import PCA  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
 from .utils import compute_spatial_taper_mask, compute_registration_blocks
+from ..allocation import ALL_CORES_REQUEST
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -27,18 +29,28 @@ def pca_denoise(
     Notes:
         The movie is divided into overlapping blocks, and PCA is applied to each block independently. The denoised
         blocks are then blended together using a taper mask to ensure smooth transitions between adjacent blocks.
-        This approach reduces noise while preserving spatially localized signals. When parallel_workers is greater
-        than 1, PCA fitting runs concurrently across blocks using a thread pool. LAPACK's SVD implementation used by
-        sklearn releases the GIL, making threading effective for this workload. The subsequent accumulation step
+        This approach reduces noise while preserving spatially localized signals. Whenever more than one worker is
+        available, PCA fitting runs concurrently across blocks using a thread pool. LAPACK's SVD implementation used
+        by sklearn releases the GIL, making threading effective for this workload. The subsequent accumulation step
         remains sequential to avoid write conflicts on overlapping block regions.
 
     Args:
         frames: The input movie array with shape (num_frames, height, width). Modified in-place.
         block_size: The spatial dimensions (height, width) of each processing block.
         component_fraction: The fraction of PCA components to retain, relative to the smaller block dimension.
-        parallel_workers: The number of parallel threads for PCA fitting. Values of -1 or 0 use all available cores.
-            Defaults to 1 (sequential).
+        parallel_workers: The number of parallel threads for PCA fitting. Use -1 to request every available core, or
+            a positive count to use exactly that many threads. Defaults to 1 (sequential).
+
+    Raises:
+        ValueError: If parallel_workers is zero or is a negative value other than -1.
     """
+    if parallel_workers <= 0 and parallel_workers != ALL_CORES_REQUEST:
+        message = (
+            f"Unable to apply PCA denoising. The requested parallel worker count must be a positive integer, or -1 "
+            f"to request every available core, but encountered {parallel_workers}."
+        )
+        console.error(message=message, error=ValueError)
+
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
@@ -55,9 +67,9 @@ def pca_denoise(
     normalization = np.zeros((height, width), dtype=np.float32)
     reconstruction = np.zeros_like(frames)
 
-    # Resolves the effective worker count. Values <= 0 mean unlimited (all available cores), which
-    # ThreadPoolExecutor interprets as None.
-    effective_workers: int | None = None if parallel_workers <= 0 else parallel_workers
+    # Resolves the effective worker count. The all-cores request maps to None, which ThreadPoolExecutor interprets as
+    # its own default width.
+    effective_workers: int | None = None if parallel_workers == ALL_CORES_REQUEST else parallel_workers
 
     # Extracts and centers each block for PCA.
     block_slices: list[tuple[slice, slice]] = []
@@ -72,17 +84,20 @@ def pca_denoise(
 
     # Fits PCA and reconstructs each block. When multiple workers are available, the fitting runs in parallel across
     # blocks since each block's SVD is independent. LAPACK releases the GIL during SVD computation.
-    if effective_workers is not None and effective_workers <= 1:
-        reconstructed_blocks = [
-            _fit_and_reconstruct_block(block=block, num_components=num_components) for block in centered_blocks
-        ]
-    else:
-        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-            futures = [
-                executor.submit(_fit_and_reconstruct_block, block=block, num_components=num_components)
-                for block in centered_blocks
+    # Limits each block fit to a single BLAS thread. The worker budget is already spent on the block pool below, so
+    # leaving the BLAS thread count unconstrained would multiply the two and oversubscribe the host.
+    with threadpool_limits(limits=1):
+        if effective_workers is not None and effective_workers <= 1:
+            reconstructed_blocks = [
+                _fit_and_reconstruct_block(block=block, num_components=num_components) for block in centered_blocks
             ]
-            reconstructed_blocks = [future.result() for future in futures]
+        else:
+            with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                futures = [
+                    executor.submit(_fit_and_reconstruct_block, block=block, num_components=num_components)
+                    for block in centered_blocks
+                ]
+                reconstructed_blocks = [future.result() for future in futures]
 
     # Accumulates the tapered reconstructions sequentially to avoid write conflicts on overlapping block regions.
     for (y_slice, x_slice), block_reconstruction in zip(block_slices, reconstructed_blocks, strict=True):

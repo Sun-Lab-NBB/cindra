@@ -40,7 +40,9 @@ _BASE_CENTERS: tuple[tuple[int, int], ...] = ((18, 18), (40, 22), (24, 44), (46,
 """The blob centroids for the reference recording, also reused as channel 1 ROI mask centroids."""
 
 
-def _blob(builder: Callable[..., NDArray[np.float64]], centers: tuple[tuple[int, int], ...]) -> NDArray[np.float32]:
+def _build_blob_image(
+    builder: Callable[..., NDArray[np.float64]], centers: tuple[tuple[int, int], ...]
+) -> NDArray[np.float32]:
     """Builds a structured Gaussian-blob reference image cast to float32."""
     image = builder(
         height=_FRAME_SIZE,
@@ -53,7 +55,7 @@ def _blob(builder: Callable[..., NDArray[np.float64]], centers: tuple[tuple[int,
     return image.astype(np.float32)
 
 
-def _circle_mask(
+def _make_circle_mask(
     centroid: tuple[int, int],
     radius: int,
     frame_width: int,
@@ -107,16 +109,16 @@ def _make_detection(
     detection = DetectionData()
     detection.roi_diameter = 8
     if "mean" in image_kinds:
-        detection.mean_image = _blob(builder, centers)
+        detection.mean_image = _build_blob_image(builder=builder, centers=centers)
     if "enhanced_mean" in image_kinds:
-        detection.enhanced_mean_image = _blob(builder, centers)
+        detection.enhanced_mean_image = _build_blob_image(builder=builder, centers=centers)
     if "maximum_projection" in image_kinds:
-        detection.maximum_projection = _blob(builder, centers)
+        detection.maximum_projection = _build_blob_image(builder=builder, centers=centers)
     if two_channel:
         detection.roi_diameter_channel_2 = 8
-        detection.mean_image_channel_2 = _blob(builder, centers)
-        detection.enhanced_mean_image_channel_2 = _blob(builder, centers)
-        detection.maximum_projection_channel_2 = _blob(builder, centers)
+        detection.mean_image_channel_2 = _build_blob_image(builder=builder, centers=centers)
+        detection.enhanced_mean_image_channel_2 = _build_blob_image(builder=builder, centers=centers)
+        detection.maximum_projection_channel_2 = _build_blob_image(builder=builder, centers=centers)
     return detection
 
 
@@ -138,7 +140,7 @@ def _build_recording_context(
     data_path = tmp_path / recording_id / "cindra"
     output_path = data_path / "multi_recording" / "dataset"
 
-    detection = _make_detection(builder, centers, image_kinds, two_channel=two_channel)
+    detection = _make_detection(builder=builder, centers=centers, image_kinds=image_kinds, two_channel=two_channel)
     CombinedData(
         detection=detection,
         extraction=ExtractionData(),
@@ -149,11 +151,11 @@ def _build_recording_context(
         sampling_rate=30.0,
     ).save(root_path=data_path)
 
-    masks = [_circle_mask(centroid=center, radius=4, frame_width=_FRAME_SIZE) for center in centers]
+    masks = [_make_circle_mask(centroid=center, radius=4, frame_width=_FRAME_SIZE) for center in centers]
     if write_channel_1_masks:
-        ROIMask.save_list(masks, data_path / "roi_masks.npz")
+        ROIMask.save_list(mask_list=masks, file_path=data_path / "roi_masks.npz")
     if write_channel_2_masks:
-        ROIMask.save_list(masks, data_path / "roi_masks_channel_2.npz")
+        ROIMask.save_list(mask_list=masks, file_path=data_path / "roi_masks_channel_2.npz")
 
     runtime = MultiRecordingRuntimeData()
     runtime.output_path = output_path
@@ -177,11 +179,21 @@ def _build_recording_pair(
 ) -> list[MultiRecordingRuntimeContext]:
     """Builds two registration contexts whose reference images differ by a small uniform translation."""
     reference = _build_recording_context(
-        tmp_path, builder, configuration, recording_id="rec0", centers=_BASE_CENTERS, **kwargs
+        tmp_path=tmp_path,
+        builder=builder,
+        configuration=configuration,
+        recording_id="rec0",
+        centers=_BASE_CENTERS,
+        **kwargs,
     )
     shifted_centers = tuple((center[0] + shift, center[1] + shift) for center in _BASE_CENTERS)
     moved = _build_recording_context(
-        tmp_path, builder, configuration, recording_id="rec1", centers=shifted_centers, **kwargs
+        tmp_path=tmp_path,
+        builder=builder,
+        configuration=configuration,
+        recording_id="rec1",
+        centers=shifted_centers,
+        **kwargs,
     )
     return [reference, moved]
 
@@ -196,7 +208,7 @@ def _build_projection_context(
 ) -> MultiRecordingRuntimeContext:
     """Builds a projection context with identity deformation fields on disk and in-memory template masks."""
     output_path = tmp_path / recording_id / "cindra" / "multi_recording" / "dataset"
-    ensure_directory_exists(output_path)
+    ensure_directory_exists(path=output_path)
 
     runtime = MultiRecordingRuntimeData()
     runtime.output_path = output_path
@@ -214,18 +226,18 @@ def _build_projection_context(
     # Persists identity (zero-displacement) deformation fields so backward projection preserves template positions.
     runtime.registration.deform_field_y = np.zeros((_FRAME_SIZE, _FRAME_SIZE), dtype=np.float32)
     runtime.registration.deform_field_x = np.zeros((_FRAME_SIZE, _FRAME_SIZE), dtype=np.float32)
-    runtime.registration.save_arrays(output_path)
+    runtime.registration.save_arrays(output_path=output_path)
     runtime.registration.release_arrays()
 
     if channel_1_templates:
         runtime.tracking.template_masks = [
-            _circle_mask(centroid=(20, 20), radius=4, frame_width=_FRAME_SIZE, cluster_id=1, recording_count=2),
-            _circle_mask(centroid=(42, 24), radius=4, frame_width=_FRAME_SIZE, cluster_id=2, recording_count=2),
+            _make_circle_mask(centroid=(20, 20), radius=4, frame_width=_FRAME_SIZE, cluster_id=1, recording_count=2),
+            _make_circle_mask(centroid=(42, 24), radius=4, frame_width=_FRAME_SIZE, cluster_id=2, recording_count=2),
         ]
         runtime.tracking.template_diameter = 8
     if channel_2_templates:
         runtime.tracking.template_masks_channel_2 = [
-            _circle_mask(centroid=(30, 30), radius=4, frame_width=_FRAME_SIZE, cluster_id=3, recording_count=2),
+            _make_circle_mask(centroid=(30, 30), radius=4, frame_width=_FRAME_SIZE, cluster_id=3, recording_count=2),
         ]
         runtime.tracking.template_diameter_channel_2 = 8
 
@@ -236,7 +248,7 @@ def _read_deform_fields(context: MultiRecordingRuntimeContext) -> tuple[NDArray[
     """Memory-maps the saved deformation fields and returns in-memory copies of the Y and X components."""
     output_path = context.runtime.output_path
     assert output_path is not None
-    context.runtime.registration.memory_map_arrays(output_path)
+    context.runtime.registration.memory_map_arrays(output_path=output_path)
     field_y = np.array(context.runtime.registration.deform_field_y, dtype=np.float32)
     field_x = np.array(context.runtime.registration.deform_field_x, dtype=np.float32)
     context.runtime.registration.release_arrays()
@@ -251,7 +263,7 @@ class TestRegisterRecordings:
     ) -> None:
         """Verifies that serial registration writes deformation fields, transformed images, and deformed masks."""
         configuration = _make_configuration()
-        contexts = _build_recording_pair(tmp_path, gaussian_blob_image, configuration)
+        contexts = _build_recording_pair(tmp_path=tmp_path, builder=gaussian_blob_image, configuration=configuration)
 
         register_recordings(contexts=contexts, workers=1)
 
@@ -271,7 +283,7 @@ class TestRegisterRecordings:
             assert np.all(np.isfinite(field_y))
             assert np.all(np.isfinite(field_x))
 
-            deformed_masks = ROIMask.load_list(output_path / "registration_deformed_masks.npz")
+            deformed_masks = ROIMask.load_list(file_path=output_path / "registration_deformed_masks.npz")
             assert len(deformed_masks) == len(_BASE_CENTERS)
 
     def test_identical_images_produce_near_zero_deformation(
@@ -279,7 +291,9 @@ class TestRegisterRecordings:
     ) -> None:
         """Verifies that registering two identical reference images yields near-zero deformation fields."""
         configuration = _make_configuration()
-        contexts = _build_recording_pair(tmp_path, gaussian_blob_image, configuration, shift=0)
+        contexts = _build_recording_pair(
+            tmp_path=tmp_path, builder=gaussian_blob_image, configuration=configuration, shift=0
+        )
 
         register_recordings(contexts=contexts, workers=1)
 
@@ -294,9 +308,9 @@ class TestRegisterRecordings:
         """Verifies registration against maximum-projection images while skipping forward mask deformation."""
         configuration = _make_configuration(image_type=ReferenceImageType.MAXIMUM_PROJECTION)
         contexts = _build_recording_pair(
-            tmp_path,
-            gaussian_blob_image,
-            configuration,
+            tmp_path=tmp_path,
+            builder=gaussian_blob_image,
+            configuration=configuration,
             image_kinds=("maximum_projection",),
             selected_indices=(),
         )
@@ -316,9 +330,9 @@ class TestRegisterRecordings:
         """Verifies that a two-channel recording transforms and saves channel 2 images and deformed masks."""
         configuration = _make_configuration()
         contexts = _build_recording_pair(
-            tmp_path,
-            gaussian_blob_image,
-            configuration,
+            tmp_path=tmp_path,
+            builder=gaussian_blob_image,
+            configuration=configuration,
             image_kinds=("mean", "enhanced_mean", "maximum_projection"),
             two_channel=True,
             selected_indices_channel_2=(0, 1, 2, 3),
@@ -344,9 +358,9 @@ class TestRegisterRecordings:
         """Verifies that selected ROI indices without on-disk mask files leave deformed masks unwritten."""
         configuration = _make_configuration()
         contexts = _build_recording_pair(
-            tmp_path,
-            gaussian_blob_image,
-            configuration,
+            tmp_path=tmp_path,
+            builder=gaussian_blob_image,
+            configuration=configuration,
             selected_indices=(0, 1, 2, 3),
             selected_indices_channel_2=(0, 1, 2, 3),
             write_channel_1_masks=False,
@@ -366,10 +380,10 @@ class TestRegisterRecordings:
     ) -> None:
         """Verifies that a second registration call short-circuits when registration data already exists on disk."""
         configuration = _make_configuration()
-        contexts = _build_recording_pair(tmp_path, gaussian_blob_image, configuration)
+        contexts = _build_recording_pair(tmp_path=tmp_path, builder=gaussian_blob_image, configuration=configuration)
         register_recordings(contexts=contexts, workers=1)
 
-        # Removing combined data would break a re-run; the skip path must not touch it, so no error proves the skip.
+        # Removing combined data would break a re-run. The skip path must not touch it, so no error proves the skip.
         for context in contexts:
             context.runtime.combined_data = None
 
@@ -385,7 +399,7 @@ class TestRegisterRecordings:
     ) -> None:
         """Verifies that enabling repeat_registration re-runs registration despite existing registration data."""
         configuration = _make_configuration()
-        contexts = _build_recording_pair(tmp_path, gaussian_blob_image, configuration)
+        contexts = _build_recording_pair(tmp_path=tmp_path, builder=gaussian_blob_image, configuration=configuration)
         register_recordings(contexts=contexts, workers=1)
 
         configuration.diffeomorphic_registration.repeat_registration = True
@@ -401,7 +415,7 @@ class TestRegisterRecordings:
     ) -> None:
         """Verifies that a recording without loaded combined data raises a ValueError during registration."""
         configuration = _make_configuration()
-        contexts = _build_recording_pair(tmp_path, gaussian_blob_image, configuration)
+        contexts = _build_recording_pair(tmp_path=tmp_path, builder=gaussian_blob_image, configuration=configuration)
         contexts[0].runtime.combined_data = None
 
         with pytest.raises(ValueError, match="combined_data must be loaded"):
@@ -412,7 +426,12 @@ class TestRegisterRecordings:
     ) -> None:
         """Verifies that requesting an unavailable reference image type raises a ValueError."""
         configuration = _make_configuration(image_type=ReferenceImageType.MEAN)
-        contexts = _build_recording_pair(tmp_path, gaussian_blob_image, configuration, image_kinds=("enhanced_mean",))
+        contexts = _build_recording_pair(
+            tmp_path=tmp_path,
+            builder=gaussian_blob_image,
+            configuration=configuration,
+            image_kinds=("enhanced_mean",),
+        )
 
         with pytest.raises(ValueError, match="required reference image"):
             register_recordings(contexts=contexts, workers=1)
@@ -439,8 +458,8 @@ class TestProjectTemplatesToRecordings:
         """Verifies that backward projection writes channel 1 ROI statistics for the tracked templates."""
         configuration = _make_configuration()
         contexts = [
-            _build_projection_context(tmp_path, configuration, recording_id="rec0"),
-            _build_projection_context(tmp_path, configuration, recording_id="rec1"),
+            _build_projection_context(tmp_path=tmp_path, configuration=configuration, recording_id="rec0"),
+            _build_projection_context(tmp_path=tmp_path, configuration=configuration, recording_id="rec1"),
         ]
 
         project_templates_to_recordings(contexts=contexts, workers=1)
@@ -454,7 +473,7 @@ class TestProjectTemplatesToRecordings:
             assert context.runtime.timing.backward_transform_time >= 0
 
             roi_statistics = ROIStatistics.load_list(
-                masks_path=output_path / "roi_masks.npz", stats_path=output_path / "roi_statistics.npz"
+                masks_path=output_path / "roi_masks.npz", statistics_path=output_path / "roi_statistics.npz"
             )
             assert len(roi_statistics) == 2
             # Identity deformation preserves template centroids, and tracked ROIs carry a zeroed footprint.
@@ -466,10 +485,18 @@ class TestProjectTemplatesToRecordings:
         configuration = _make_configuration()
         contexts = [
             _build_projection_context(
-                tmp_path, configuration, recording_id="rec0", channel_1_templates=False, channel_2_templates=True
+                tmp_path=tmp_path,
+                configuration=configuration,
+                recording_id="rec0",
+                channel_1_templates=False,
+                channel_2_templates=True,
             ),
             _build_projection_context(
-                tmp_path, configuration, recording_id="rec1", channel_1_templates=False, channel_2_templates=True
+                tmp_path=tmp_path,
+                configuration=configuration,
+                recording_id="rec1",
+                channel_1_templates=False,
+                channel_2_templates=True,
             ),
         ]
 
@@ -486,10 +513,18 @@ class TestProjectTemplatesToRecordings:
         configuration = _make_configuration()
         contexts = [
             _build_projection_context(
-                tmp_path, configuration, recording_id="rec0", channel_1_templates=False, channel_2_templates=False
+                tmp_path=tmp_path,
+                configuration=configuration,
+                recording_id="rec0",
+                channel_1_templates=False,
+                channel_2_templates=False,
             ),
             _build_projection_context(
-                tmp_path, configuration, recording_id="rec1", channel_1_templates=False, channel_2_templates=False
+                tmp_path=tmp_path,
+                configuration=configuration,
+                recording_id="rec1",
+                channel_1_templates=False,
+                channel_2_templates=False,
             ),
         ]
 
@@ -505,12 +540,12 @@ class TestProjectTemplatesToRecordings:
         """Verifies that a second projection call short-circuits when the projection output already exists."""
         configuration = _make_configuration()
         contexts = [
-            _build_projection_context(tmp_path, configuration, recording_id="rec0"),
-            _build_projection_context(tmp_path, configuration, recording_id="rec1"),
+            _build_projection_context(tmp_path=tmp_path, configuration=configuration, recording_id="rec0"),
+            _build_projection_context(tmp_path=tmp_path, configuration=configuration, recording_id="rec1"),
         ]
         project_templates_to_recordings(contexts=contexts, workers=1)
 
-        # Clearing the in-memory templates would break a re-run; the skip path must not reach them.
+        # Clearing the in-memory templates would break a re-run. The skip path must not reach them.
         for context in contexts:
             context.runtime.tracking.template_masks = None
 

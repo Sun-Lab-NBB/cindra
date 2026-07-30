@@ -20,6 +20,53 @@ _INT16_MAX_VALUE: int = 2**15 - 2
 _DEFAULT_BIN_BATCH_SIZE: int = 500
 """The default maximum batch size for frame binning operations."""
 
+_REGISTRATION_MARKER_CONTENTS: str = (
+    "The registration stage was writing motion-corrected frames into the binary this marker sits beside when it was "
+    "interrupted. The binary therefore holds corrected frames up to some unknown point and raw frames after it. "
+    "Re-run the binarization stage for this recording to rebuild the binary from its source TIFF files.\n"
+)
+"""The text written into a registration marker, so that the marker explains itself to whoever finds it on disk."""
+
+
+def resolve_registration_marker_path(binary_path: Path) -> Path:
+    """Returns the path of the marker that flags a binary as being mid-registration.
+
+    Notes:
+        The registration stage rewrites a plane binary in place, so an interrupted run leaves the binary holding a
+        mixture of corrected and raw frames with nothing in the registration outputs recording that. The marker exists
+        for the duration of the rewrite and names the binary it guards, which lets a later run refuse to consume a
+        binary whose contents are indeterminate.
+
+    Args:
+        binary_path: The path to the binary the marker guards.
+
+    Returns:
+        The marker path, which sits beside the binary it guards.
+    """
+    return binary_path.with_name(f"{binary_path.name}.registering")
+
+
+def create_registration_marker(binary_path: Path) -> None:
+    """Marks a binary as being mid-registration.
+
+    Args:
+        binary_path: The path to the binary whose rewrite is about to begin.
+    """
+    resolve_registration_marker_path(binary_path=binary_path).write_text(_REGISTRATION_MARKER_CONTENTS)
+
+
+def clear_registration_marker(binary_path: Path) -> None:
+    """Clears the mid-registration mark from a binary, which declares its contents consistent again.
+
+    Notes:
+        Clearing a marker that does not exist is not an error, so the binarization stage can call this for every
+        binary it writes without first checking whether an interrupted registration left one behind.
+
+    Args:
+        binary_path: The path to the binary to clear the mark from.
+    """
+    resolve_registration_marker_path(binary_path=binary_path).unlink(missing_ok=True)
+
 
 class BinaryFile:
     """Creates or opens a cindra binary (.bin) for reading and/or writing image data.
@@ -61,14 +108,12 @@ class BinaryFile:
         *,
         read_only: bool = False,
     ) -> None:
-        # Initializes class attributes using input arguments.
         self.height: int = height
         self.width: int = width
         self.file_path: Path = Path(file_path)
         self.dtype: str = dtype
         self._read_only: bool = read_only
 
-        # Checks if the file exists, sets to True if it needs to be written, False if it exists.
         write = not self.file_path.exists()
 
         # Prevents opening a non-existent file in read-only mode.
@@ -79,7 +124,6 @@ class BinaryFile:
             )
             console.error(message=message, error=ValueError)
 
-        # If the file does not exist and the number of frames is not provided, raises a ValueError.
         if write and frame_number == 0:
             message = (
                 f"Unable to create a new cindra binary {file_path}, as the number of frames to be "
@@ -88,7 +132,6 @@ class BinaryFile:
             )
             console.error(message=message, error=ValueError)
 
-        # If the file exists, reads the number of frames from the file metadata.
         elif not write:
             frame_number = self.frame_number
 
@@ -104,7 +147,6 @@ class BinaryFile:
         else:
             mode = "r+"
 
-        # Creates a memory-mapped NumPy array to access and interface with the contents of the binary file.
         self.file: np.memmap[Any, np.dtype[np.int16]] = np.memmap(  # type: ignore[call-overload]
             filename=str(self.file_path),
             dtype=self.dtype,
@@ -137,7 +179,6 @@ class BinaryFile:
         if destination_file_name.suffix != ".bin":
             destination_file_name = destination_file_name.with_suffix(".bin")
 
-        # Uses NumPy API to convert the file.
         np.load(source_file_name).tofile(destination_file_name)
 
     @property
@@ -169,6 +210,13 @@ class BinaryFile:
         """Closes the memory-mapped file view."""
         self.file._mmap.close()  # type: ignore[attr-defined]
 
+    def __repr__(self) -> str:
+        """Returns a string representation of the BinaryFile instance."""
+        return (
+            f"BinaryFile(file_path={self.file_path}, height={self.height}, width={self.width}, "
+            f"dtype={self.dtype}, read_only={self._read_only})"
+        )
+
     def __enter__(self) -> Self:
         """Returns self to enable use as a context manager."""
         return self
@@ -185,9 +233,9 @@ class BinaryFile:
     def __setitem__(self, indices: slice | int | tuple[int, ...] | NDArray[Any], data: NDArray[np.int16]) -> None:
         """Sets data in the binary file at specific indices.
 
-        Assigns data to the binary file at the provided indices. If the data is not in 'int16'
-        format, it is restricted to the maximum value that can be represented by a 16-bit signed integer and converted
-        to an 'int16' format.
+        If the data is not in 'int16' format, its values are capped at one below the maximum value representable by
+        a 16-bit signed integer (32766) and the data is converted to an 'int16' format. Values below the int16
+        minimum are not clipped.
 
         Args:
             indices: A slice, integer, or iterable that specifies the indices at which to write the data.
@@ -201,11 +249,11 @@ class BinaryFile:
             message = f"Unable to write data to the BinaryFile {self.file_path}. The file was opened in read-only mode."
             console.error(message=message, error=PermissionError)
 
-        # Checks and converts data type to int16, if needed. Clips values to the maximum representable int16 value.
+        # Checks and converts data type to int16, if needed. Clips values to _INT16_MAX_VALUE, which is one below the
+        # maximum representable int16 value.
         if data.dtype != "int16":
             data = np.minimum(data, _INT16_MAX_VALUE).astype(dtype="int16")
 
-        # Writes data to the memory-mapped file.
         self.file[indices] = data
 
     def __getitem__(self, indices: slice | int | tuple[int, ...] | NDArray[Any]) -> NDArray[np.int16]:
@@ -217,7 +265,6 @@ class BinaryFile:
         Returns:
             A NumPy array of the data read from the binary file at the specified indices.
         """
-        # Directly passes indices to the memory-mapped file.
         return self.file[indices]
 
     @property
@@ -233,21 +280,20 @@ class BinaryFile:
     ) -> NDArray[np.float32]:
         """Subsamples the movie by selecting evenly-spaced frames across the recording.
 
-        This method selects frames at regular intervals to create a representative subset of the full recording. Unlike
-        temporal binning which averages consecutive frames, subsampling preserves individual frame characteristics while
-        reducing memory requirements.
+        Selects frames at regular intervals to create a representative subset of the full recording. Each
+        returned frame keeps its original pixel values, and sampling a subset keeps memory requirements low.
 
         Args:
             sample_count: The number of frames to sample from the movie. The actual number of returned frames is
                 min(sample_count, frame_number).
-            x_range: A tuple of (start, end) indices for cropping frames along the x-axis. If None, the full width
-                is used.
-            y_range: A tuple of (start, end) indices for cropping frames along the y-axis. If None, the full height
-                is used.
+            x_range: A tuple of (start, end) indices for cropping frames along the x-axis. Cropping is applied only
+                when both x_range and y_range are provided. If set to None, no cropping (x or y) is performed.
+            y_range: A tuple of (start, end) indices for cropping frames along the y-axis. Cropping is applied only
+                when both x_range and y_range are provided. If set to None, no cropping (x or y) is performed.
 
         Returns:
-            A 3D float32 array with shape (num_samples, height, width) containing the subsampled and optionally
-            cropped frames.
+            The subsampled and optionally cropped frames, shaped as (sample_count, height, width), where the leading
+            dimension is capped at the file's frame count.
         """
         # Determines the actual number of samples, capped by the total frame count.
         actual_samples = min(sample_count, self.frame_number)
@@ -273,8 +319,8 @@ class BinaryFile:
     ) -> NDArray[np.float32]:
         """Bins the frames of the movie (frame sequence) stored inside the file wrapped by this instance.
 
-        This method groups the frames stored inside the file into bins of the size 'bin_size'. Optionally, the method
-        also rejects bad frames and crops good frames according to the provided x- and y-dimension ranges.
+        Groups the frames stored inside the file into bins of the size 'bin_size'. Optionally, also rejects bad
+        frames and crops good frames according to the provided x- and y-dimension ranges.
 
         Args:
             bin_size: The size of each bin, in frames.
@@ -285,9 +331,9 @@ class BinaryFile:
             bad_frames: A boolean one-dimensional NumPy array mask that has the same length as the number of frames
                 stored inside the BinaryFile managed by this instance. The array should be True at each bad frame and
                 False at each good frame.
-            reject_threshold: The minimum fraction of good frames to all frames inside the batch for bad frames to be
-                discarded. If the fraction of good frames in the batch is less than this threshold, then both bad and
-                good frames are kept and binned as part of the batch processing.
+            reject_threshold: The fraction of good frames to all frames inside the batch that must be exceeded for bad
+                frames to be discarded. If the fraction of good frames in the batch does not exceed this threshold,
+                then both bad and good frames are kept and binned as part of the batch processing.
 
         Returns:
             A 3-dimensional NumPy array that stores the binned movie. The first dimension specifies the
@@ -334,12 +380,11 @@ class BinaryFile:
                 # (from int16) type.
                 binned_movie = movie.reshape(-1, bin_size, height, width).astype(dtype=np.float32).mean(axis=1)
                 batches.extend(binned_movie)
-            elif data.shape[0] > 0:  # pragma: no branch — a batch always retains at least one frame.
+            elif data.shape[0] > 0:  # pragma: no branch, a batch always retains at least one frame.
                 # Batch has fewer frames than bin_size (likely due to many bad frames). Averages the batch into a single
                 # bin to preserve data.
                 batches.append(data.astype(dtype=np.float32).mean(axis=0))
 
-        # Stacks and returns the batches as a single NumPy array representing the binned movie.
         return np.stack(batches)
 
     def write_tiff(
@@ -351,7 +396,7 @@ class BinaryFile:
     ) -> None:
         """Writes the contents of the BinaryFile wrapped by this instance into a .tiff file.
 
-        This method can be used to convert a subset of the movie stored in the BinaryFile into a .tiff file for further
+        Converts a subset of the movie stored in the BinaryFile into a .tiff file for further
         analysis or visualization purposes. Note, the output data is encoded into a single BigTiff stack.
 
         Args:
@@ -398,8 +443,14 @@ class BinaryFile:
 class BinaryFileCombined:
     """Creates or opens a collection of cindra binaries (.bin) for reading image data across planes.
 
-    This class allows working with multiple imaging planes, each stored inside a separate cindra binary.
-    It provides similar functionality to the BinaryFile class but extends it to handle multiple planes.
+    Works with multiple imaging planes, each stored inside a separate cindra binary. Extends the BinaryFile
+    functionality to handle multiple planes.
+
+    Notes:
+        The managed binaries may hold different frame counts, which happens when an acquisition stopped partway
+        through a volume and delivered one extra frame to the leading planes. The combined view is capped at the
+        shortest file's frame count and a warning is emitted, because a frame count mismatch is an expected outcome
+        of a partial final volume.
 
     Args:
         height: The height of the combined ROI, in pixels, obtained by combining all managed planes (BinaryFiles).
@@ -424,9 +475,8 @@ class BinaryFileCombined:
         plane_x_coordinates: Stores the top-left-corner pixel x-coordinates of each plane managed by this instance.
         file_paths: Stores the absolute paths to the BinaryFiles for each plane managed by this instance.
         files: Stores opened (memory-mapped) BinaryFile instances for each plane managed by this instance.
-
-    Raises:
-        ValueError: If the frame count is different across two or more opened BinaryFiles.
+        _frame_number: Stores the number of frames spanned by the combined view, which is the frame count of the
+            shortest managed file.
     """
 
     def __init__(
@@ -439,7 +489,6 @@ class BinaryFileCombined:
         plane_x_coordinates: NDArray[np.int32],
         file_paths: list[Path] | tuple[Path, ...],
     ) -> None:
-        # Initializes class attributes using input arguments.
         self.height: int = height
         self.width: int = width
         self.plane_heights: NDArray[np.uint16] = plane_heights
@@ -448,21 +497,26 @@ class BinaryFileCombined:
         self.plane_x_coordinates: NDArray[np.int32] = plane_x_coordinates
         self.file_paths: tuple[Path, ...] = tuple(Path(path) for path in file_paths)
 
-        # Opens BinaryFile instances for requested planes, using the input data.
         self.files: list[BinaryFile] = [
             BinaryFile(height=int(height), width=int(width), file_path=file_path)
             for height, width, file_path in zip(self.plane_heights, self.plane_widths, self.file_paths, strict=False)
         ]
 
-        # Verifies that all opened files have the same number of frames.
+        # Resolves the combined frame count as that of the shortest managed file. A recording whose acquisition stopped
+        # partway through a volume delivers one frame more to its leading planes than to its trailing ones, so the plane
+        # binaries can legitimately differ in length. Capping the combined view at the shortest file keeps every
+        # combined frame backed by real data on every plane, which matches how the combination stage trims its traces.
         frame_numbers = [file.frame_number for file in self.files]
+        self._frame_number: int = min(frame_numbers)
         if len(set(frame_numbers)) > 1:
-            message = (
-                f"Unable to create a new BinaryFileCombined instance from the target files "
-                f"{[file.name for file in self.file_paths]} stored under root {self.file_paths[0].parent}, as the "
-                f"number of frames across the files does not match."
+            console.echo(
+                message=(
+                    f"Capping the combined view of the plane binaries stored under root {self.file_paths[0].parent} at "
+                    f"{self._frame_number} frames. The binaries hold between {self._frame_number} and "
+                    f"{max(frame_numbers)} frames, which happens when an acquisition stopped partway through a volume."
+                ),
+                level=LogLevel.WARNING,
             )
-            console.error(message=message, error=ValueError)
 
     def __enter__(self) -> Self:
         """Returns self to enable use as a context manager."""
@@ -482,25 +536,27 @@ class BinaryFileCombined:
         for file in self.files:
             file.close()
 
+    def __repr__(self) -> str:
+        """Returns a string representation of the BinaryFileCombined instance."""
+        return (
+            f"BinaryFileCombined(height={self.height}, width={self.width}, "
+            f"plane_count={len(self.files)}, frame_number={self._frame_number})"
+        )
+
     @property
     def byte_number(self) -> NDArray[np.int64]:
         """Returns an array that stores the size of each managed BinaryFile, in bytes."""
-        byte_number = np.zeros(len(self.files), dtype=np.int64)
-        for file_index, file in enumerate(self.files):
-            byte_number[file_index] = file.byte_number
-        return byte_number
+        return np.array([file.byte_number for file in self.files], dtype=np.int64)
 
     @property
     def frame_number(self) -> int:
-        """Returns the total number of frames stored in each managed file, which is always the same across all
-        files.
-        """
-        return self.files[0].frame_number
+        """Returns the number of frames the combined view spans, which is that of the shortest managed file."""
+        return self._frame_number
 
     @property
     def shape(self) -> tuple[int, NDArray[np.uint16], NDArray[np.uint16]]:
         """Returns the dimensions of the managed files as (frame_number, plane_heights, plane_widths), where
-        frame_number is the same for all files and the arrays contain per-file plane dimensions.
+        frame_number is the frame count of the shortest managed file and the arrays contain per-file plane dimensions.
         """
         return self.frame_number, self.plane_heights, self.plane_widths
 

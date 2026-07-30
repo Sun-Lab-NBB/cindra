@@ -43,9 +43,14 @@ def _registered_context(
     configure: Callable[[SingleRecordingConfiguration], None] | None = None,
 ) -> RuntimeContext:
     """Builds a context with a structured movie and valid crop ranges ready for metric computation."""
-    movie = _metric_movie(gaussian_blob_image)
+    movie = _metric_movie(gaussian_blob_image=gaussian_blob_image)
     context = single_recording_context(
-        tmp_path, frame_height=128, frame_width=128, frame_count=_FRAME_COUNT, movie=movie, configure=configure
+        tmp_path=tmp_path,
+        frame_height=128,
+        frame_width=128,
+        frame_count=_FRAME_COUNT,
+        movie=movie,
+        configure=configure,
     )
     context.runtime.registration.valid_y_range = (8, 120)
     context.runtime.registration.valid_x_range = (8, 120)
@@ -83,11 +88,16 @@ class TestComputePcMetrics:
             configuration.registration.registration_metric_principal_components = 3
             configuration.nonrigid_registration.enabled = False
 
-        context = _registered_context(tmp_path, single_recording_context, gaussian_blob_image, configure=configure)
+        context = _registered_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+            configure=configure,
+        )
 
         compute_pc_metrics(context=context, workers=1)
 
-        _assert_metric_outputs(context)
+        _assert_metric_outputs(context=context)
 
     def test_computes_metric_outputs_with_nonrigid(
         self,
@@ -102,11 +112,16 @@ class TestComputePcMetrics:
             configuration.nonrigid_registration.enabled = True
             configuration.nonrigid_registration.block_size = (32, 32)
 
-        context = _registered_context(tmp_path, single_recording_context, gaussian_blob_image, configure=configure)
+        context = _registered_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+            configure=configure,
+        )
 
         compute_pc_metrics(context=context, workers=1)
 
-        _assert_metric_outputs(context)
+        _assert_metric_outputs(context=context)
 
     def test_applies_bidirectional_correction(
         self,
@@ -120,14 +135,19 @@ class TestComputePcMetrics:
             configuration.registration.registration_metric_principal_components = 3
             configuration.nonrigid_registration.enabled = False
 
-        context = _registered_context(tmp_path, single_recording_context, gaussian_blob_image, configure=configure)
+        context = _registered_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+            configure=configure,
+        )
         # Marks an outstanding (un-applied) bidirectional phase offset so the correction branch executes.
         context.runtime.registration.bidirectional_phase_offset = 2
         context.runtime.registration.bidirectional_phase_corrected = False
 
         compute_pc_metrics(context=context, workers=1)
 
-        _assert_metric_outputs(context)
+        _assert_metric_outputs(context=context)
 
     def test_computes_metrics_in_one_photon_mode(
         self,
@@ -143,11 +163,16 @@ class TestComputePcMetrics:
             configuration.one_photon_registration.enabled = True
             configuration.one_photon_registration.pre_smoothing_sigma = 2.0
 
-        context = _registered_context(tmp_path, single_recording_context, gaussian_blob_image, configure=configure)
+        context = _registered_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+            configure=configure,
+        )
 
         compute_pc_metrics(context=context, workers=1)
 
-        _assert_metric_outputs(context)
+        _assert_metric_outputs(context=context)
 
     def test_raises_when_binary_path_unset(
         self,
@@ -156,7 +181,11 @@ class TestComputePcMetrics:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that compute_pc_metrics raises a ValueError when the registered binary path is missing."""
-        context = _registered_context(tmp_path, single_recording_context, gaussian_blob_image)
+        context = _registered_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+        )
         context.runtime.io.registered_binary_path = None
 
         with pytest.raises(ValueError, match="Unable to compute the registration quality metrics"):
@@ -169,7 +198,11 @@ class TestComputePcMetrics:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that compute_pc_metrics raises a FileNotFoundError when the registered binary file is absent."""
-        context = _registered_context(tmp_path, single_recording_context, gaussian_blob_image)
+        context = _registered_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+        )
         context.runtime.io.registered_binary_path = tmp_path / "does_not_exist.bin"
 
         with pytest.raises(FileNotFoundError):

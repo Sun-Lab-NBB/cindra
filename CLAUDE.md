@@ -5,11 +5,6 @@
 At the beginning of each coding session, before making any code changes, you should build a comprehensive understanding
 of the codebase by invoking the `/explore-codebase` skill.
 
-This ensures you:
-- Understand the project architecture before modifying code
-- Follow existing patterns and conventions
-- Do not introduce inconsistencies or break integrations
-
 ## Style guide compliance
 
 You MUST invoke the appropriate style skill before performing ANY of the following tasks:
@@ -63,44 +58,45 @@ pipeline work, `/cindra-pipeline` is the end-to-end orchestration entry point th
 
 **Ataraxis automation plugin skills:**
 
-| Skill                   | Description                                                              |
-|-------------------------|--------------------------------------------------------------------------|
-| `/explore-codebase`     | Perform in-depth codebase exploration at session start                   |
-| `/explore-dependencies` | Explore ataraxis dependency APIs for a live API snapshot                 |
-| `/python-style`         | Apply cindra Python coding conventions (REQUIRED for all Python changes) |
-| `/cpp-style`            | Apply cindra C++ coding conventions (not used by this Python-only repo)  |
-| `/csharp-style`         | Apply cindra C# coding conventions (not used by this Python-only repo)   |
-| `/readme-style`         | Apply cindra README conventions (REQUIRED for README changes)            |
-| `/commit`               | Draft cindra style-compliant git commit messages                         |
-| `/skill-design`         | Generate and verify skill files and CLAUDE.md project instructions       |
-| `/project-layout`       | Apply cindra project directory layout conventions                        |
-| `/pyproject-style`      | Apply cindra pyproject.toml conventions                                  |
-| `/tox-config`           | Apply cindra tox.ini conventions                                         |
-| `/api-docs`             | Apply cindra API documentation conventions                               |
-| `/audit-style`          | Audit files for style compliance against the style skills                |
-| `/audit-facts`          | Audit documentation for factual accuracy against source code             |
-| `/pr`                   | Draft a style-compliant pull request summary                             |
-| `/release`              | Draft style-compliant release notes from merged PRs                      |
+| Skill                   | Description                                                                |
+|-------------------------|----------------------------------------------------------------------------|
+| `/explore-codebase`     | Performs in-depth codebase exploration at session start                    |
+| `/explore-dependencies` | Explores ataraxis dependency APIs for a live API snapshot                  |
+| `/python-style`         | Applies cindra Python coding conventions (REQUIRED for all Python changes) |
+| `/cpp-style`            | Applies cindra C++ coding conventions (not used by this Python-only repo)  |
+| `/csharp-style`         | Applies cindra C# coding conventions (not used by this Python-only repo)   |
+| `/readme-style`         | Applies cindra README conventions (REQUIRED for README changes)            |
+| `/commit`               | Drafts cindra style-compliant git commit messages                          |
+| `/skill-design`         | Generates and verifies skill files and CLAUDE.md project instructions      |
+| `/project-layout`       | Applies cindra project directory layout conventions                        |
+| `/pyproject-style`      | Applies cindra pyproject.toml conventions                                  |
+| `/tox-config`           | Applies cindra tox.ini conventions                                         |
+| `/api-docs`             | Applies cindra API documentation conventions                               |
+| `/audit-style`          | Audits files for style compliance against the style skills                 |
+| `/audit-facts`          | Audits documentation for factual accuracy against source code              |
+| `/pr`                   | Drafts a style-compliant pull request summary                              |
+| `/platformio-config`    | Applies cindra PlatformIO conventions (not used by this Python-only repo)  |
+| `/release`              | Drafts style-compliant release notes from merged PRs                       |
 
 **Cindra plugin skills:**
 
 | Skill                             | Description                                                      |
 |-----------------------------------|------------------------------------------------------------------|
 | `/cindra-pipeline`                | End-to-end pipeline orchestration and session entry point        |
-| `/single-recording-processing`    | Orchestrate single-recording batch processing via MCP            |
-| `/multi-recording-processing`     | Orchestrate multi-recording batch processing via MCP             |
+| `/single-recording-processing`    | Orchestrates single-recording batch processing via MCP           |
+| `/multi-recording-processing`     | Orchestrates multi-recording batch processing via MCP            |
 | `/single-recording-configuration` | Reference for single-recording pipeline configuration parameters |
 | `/multi-recording-configuration`  | Reference for multi-recording pipeline configuration parameters  |
 | `/single-recording-results`       | Reference for single-recording pipeline output data formats      |
 | `/multi-recording-results`        | Reference for multi-recording pipeline output data formats       |
 | `/acquisition-data-preparation`   | Guide for preparing raw imaging data for cindra processing       |
-| `/visualization`                  | Launch and manage cindra GUI viewers for visual inspection       |
-| `/cindra-mcp-environment-setup`   | Diagnose and resolve MCP server connectivity issues              |
+| `/visualization`                  | Launches and manages cindra GUI viewers for visual inspection    |
+| `/cindra-mcp-environment-setup`   | Diagnoses and resolves MCP server connectivity issues            |
 
 ## MCP server integration
 
 The cindra Claude Code plugin registers two MCP servers that expose neural imaging pipeline tools for agentic AI
-interaction. The plugin provides the server registrations and skills; the cindra pip package provides the server
+interaction. The plugin provides the server registrations and skills. The cindra pip package provides the server
 implementations (`cindra mcp` and `cindra-gui mcp` CLI commands). Both must be installed for MCP tools to function.
 When working with this project or its dependencies, prefer using available MCP tools over direct code execution when
 appropriate.
@@ -140,6 +136,7 @@ pipeline outputs.
 | Directory                    | Purpose                                                         |
 |------------------------------|-----------------------------------------------------------------|
 | `src/cindra/`                | Main library source code                                        |
+| `src/cindra/allocation/`     | Pipeline phase model, job names, and CPU worker allocation      |
 | `src/cindra/classification/` | Cell type classification (distinguishing cells from artifacts)  |
 | `src/cindra/dataclasses/`    | Configuration and runtime data structures (YamlConfig-based)    |
 | `src/cindra/detection/`      | ROI detection, tracking, and statistics computation             |
@@ -158,17 +155,35 @@ pipeline outputs.
   internal binary format and initializes RuntimeContext per plane. Phase 2 runs per-plane motion correction and
   registration-quality metrics (parallelizable across planes). Phase 3 runs per-plane detection, classification, and
   extraction, and requires the plane to be registered (parallelizable across planes). Phase 4 merges plane-specific
-  results into a unified `combined_metadata.npz` dataset. Phases 2 and 3 carry a `plane_{index}` tracker specifier.
+  results into a unified `combined_metadata.npz` dataset, trimming the combined traces to the shortest contributing
+  plane and recording `frame_count` and `plane_frame_counts` alongside the geometry. That metadata file doubles as the
+  pipeline-completion marker, so it is written after its payload arrays and moved into place from a temporary name.
+  Phase 1 rejects a data directory whose TIFF files do not all hold frames of the same shape, naming
+  `file_io.ignored_file_names` as the exclusion mechanism. Phases 2 and 3 carry a `plane_{index}` tracker specifier.
 - **Multi-recording pipeline**: Two-phase workflow (discover, extract). Phase 1 selects ROIs from each recording,
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap,
   and projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
   deconvolution for tracked ROI templates (parallelizable across recordings).
-- **Context pattern**: `RuntimeContext` and `MultiRecordingRuntimeContext` combine configuration, acquisition
-  parameters, and runtime data into single objects passed through pipeline steps.
+- **Phase model**: `cindra.allocation` exports the pipeline phase model (`SINGLE_RECORDING_PHASES`,
+  `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`) together with the resolvers that expand it into a
+  recording's job universe (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`, `resolve_pipeline_jobs`),
+  build the prerequisite graph (`resolve_single_recording_prerequisites`, `resolve_multi_recording_prerequisites`),
+  expand a phase to its dependents (`resolve_downstream_phases`), and format the per-plane tracker specifier
+  (`resolve_plane_specifier`, `PLANE_SPECIFIER_PREFIX`). The pipelines and the MCP layer read the model rather than
+  restating the phase order, so a phase is added or reordered there and every consumer follows.
+- **Context pattern**: `RuntimeContext` combines configuration, acquisition parameters, and runtime data into a single
+  object passed through pipeline steps. `MultiRecordingRuntimeContext` follows the same pattern, but carries only
+  configuration and runtime data.
 - **Configuration-driven execution**: Pipelines read all processing parameters from YAML files (YamlConfig
   subclasses). The CLI writes overrides to the config file before execution rather than passing arguments. Worker
   counts are the exception: they are explicit API parameters resolved through `cindra.allocation`, which keeps the
   configuration file immutable and safe to share between concurrently dispatched jobs.
+- **Worker sentinel contract**: One convention governs every worker and concurrency argument in the repository. `None`
+  accepts the measured default for that stage or resource class, `-1` (`ALL_CORES_REQUEST`) requests every available
+  core, and a positive integer is used exactly. Any other non-positive value is rejected. This holds for
+  `resolve_stage_workers`, the `cindra run` worker options, the pipeline entry points, and the `workers_per_job` and
+  `max_parallel_jobs` arguments of the execute MCP tools. For `max_parallel_jobs`, `-1` lifts the derived cap so that
+  only the job count bounds concurrency. Keep the source, the skills, and the README stating this identically.
 - **ProcessingTracker**: File-based YAML pipeline state tracking with FileLock for multi-process coordination. Manages
   job states (SCHEDULED, RUNNING, SUCCEEDED, FAILED) for resumable batch processing.
 - **Subprocess GUI isolation**: GUI viewers launch as separate subprocesses with state file exchange via temporary
@@ -178,20 +193,34 @@ pipeline outputs.
   `processing_tools`, `results_tools`) imported at module level to trigger `@mcp.tool()` registration.
   Processing uses a prepare-then-execute model: preparation tools create execution manifests (trackers,
   per-recording configurations, job lists) without starting computation, and execution tools dispatch jobs
-  with prerequisite validation, saturating core allocation, and automatic phase sequencing. I/O-bound jobs
-  (binarize, combine) use fixed concurrency; compute-bound jobs use saturating allocation.
+  with prerequisite validation, per-class resource allocation, and automatic phase sequencing. Every job class except
+  combination carries a measured per-job worker count from `cindra.allocation`. The combination class holds the single
+  core its serial merge needs. The I/O-bound classes (binarize, combine) pair the count with a fixed concurrency cap.
+  The compute-bound classes (register, process, discover, extract) derive their concurrency from the session CPU
+  budget, and the processing class additionally from available system memory.
 
 ### Key patterns
 
 - **Numba parallelization**: The Numba threading layer is configured in `__init__.py` (TBB on non-Mac, OpenMP on
   macOS) immediately after importing `numba.config` and before importing any modules that compile `@njit` functions.
-  Functions use `@njit(cache=True, parallel=True)` with `prange` for frame-level parallelization. Numba is excluded
-  from type checking via a `pyproject.toml` mypy override; the `# type: ignore[import-untyped]` comments apply to the
-  scikit-learn, threadpoolctl, PyQtGraph, and yaml imports, and `# pragma: no cover` on JIT-compiled function bodies
-  is expected. None of these should be removed.
+  Functions use `@njit(cache=True, parallel=True)` with `prange` over each kernel's outermost independent axis, which
+  is frames in registration and ROIs in extraction. Numba is excluded from type checking via a `pyproject.toml` mypy
+  override. The `# type: ignore[import-untyped]` comments apply to the scikit-learn, threadpoolctl, PyQtGraph, and
+  yaml imports, and `# pragma: no cover` on JIT-compiled function bodies is expected. None of these should be removed.
+- **BLAS confinement**: Every site that dispatches a scikit-learn or LAPACK fit wraps it in `threadpool_limits`, so the
+  BLAS thread count cannot multiply against the job's worker budget. `detection/detect.py` and
+  `registration/metrics.py` limit to the job's `workers`. `detection/denoise.py` limits to 1, because its own block
+  pool already spends the budget.
+- **Registration integrity**: Registration rewrites the plane binary in place and guards the rewrite with a
+  `<binary>.registering` marker (`create_registration_marker`, `clear_registration_marker`,
+  `resolve_registration_marker_path`, exported from `cindra.io`). `register_plane` refuses to run while a marker
+  exists, and `binarize_recording` treats a marked binary, or one whose size disagrees with its plane's recorded frame
+  geometry, as invalid and rebuilds it from the source TIFFs without requiring `repeat_binarization`.
 - **Memory efficiency**: Pre-allocates arrays with `np.empty` when overwritten immediately. Uses flattened mask arrays
   with offset indices to reduce per-ROI allocations. Memory maps registration arrays on demand via
   `memory_map_arrays()`. Results tools use lightweight NumPy/YAML reads for targeted queries without full data loading.
+  Groupwise diffeomorphic registration visits each unordered image pair once and caches each image's gradient with the
+  deformed image it derives from, keeping the working set linear rather than quadratic in group size.
 - **Polymorphic dispatch**: `extract_traces()` checks `isinstance(context, RuntimeContext)` to route between
   single-recording and multi-recording extraction paths.
 - **Channel 2 behavior**: Channel 2 data returns empty arrays (`[]`) instead of None when absent. Channel 1 data
@@ -226,7 +255,8 @@ tox                # Run full pipeline (uninstall -> export -> lint -> ... -> in
 
 Tests use pytest with pytest-xdist for parallel execution (`-n logical --dist loadgroup`). Coverage is collected and
 aggregated by the `coverage` tox environment. Test files mirror the source structure under `tests/` with a `_test.py`
-suffix. Test directories: `classification/`, `dataclasses/`, `detection/`, `extraction/`, `io/`, `registration/`.
+suffix. Test directories: `allocation/`, `classification/`, `dataclasses/`, `detection/`, `extraction/`, `io/`,
+`pipelines/`, `registration/`.
 
 The detailed component map, CLI command reference, dependency table, and per-area workflow
 guidance are maintained in an imported reference file to keep these instructions focused:

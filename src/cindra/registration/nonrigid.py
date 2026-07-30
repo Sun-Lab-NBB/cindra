@@ -1,9 +1,12 @@
-"""Provides nonrigid (piecewise) registration algorithm for motion correction."""
+"""Provides the nonrigid (piecewise) registration algorithm for motion correction."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from numba import njit, prange
 import numpy as np
 from scipy.fft import rfft2
-from numpy.typing import NDArray  # noqa: TC002 - Required at runtime for numba function signatures
 
 from .utils import (
     NORMALIZATION_EPSILON,
@@ -14,14 +17,17 @@ from .utils import (
 )
 from ..detection import compute_spatial_taper_mask
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
 _SNR_EPSILON: float = 1e-10
 """The small epsilon value used to prevent division by zero in SNR calculations."""
 
 _SUBPIXEL_FACTOR: int = 10
-"""The upsampling factor for DFT-based subpixel peak localization. A value of 10 provides 0.1 pixel precision."""
+"""The upsampling factor for Gaussian RBF subpixel peak localization. A value of 10 provides 0.1 pixel precision."""
 
 _UPSAMPLING_PADDING: int = 3
-"""The half-width of the region around integer peaks used for DFT upsampling. A value of 3 uses a 7x7 region."""
+"""The half-width of the region around integer peaks used for RBF upsampling. A value of 3 uses a 7x7 region."""
 
 _CORRELATION_BATCH_SIZE: int = 64
 """The maximum number of blocks to process in a single FFT batch during phase correlation. Limits memory usage."""
@@ -42,7 +48,8 @@ def compute_nonrigid_reference_data(
     Args:
         reference_image: The reference image with shape (height, width).
         taper_slope: Controls the steepness of the edge falloff for the spatial taper mask.
-        smoothing_sigma: The standard deviation for Gaussian smoothing in the frequency domain.
+        smoothing_sigma: The standard deviation for Gaussian smoothing in the frequency domain. Twice this value also
+            sets the falloff of the per-block spatial taper mask.
         y_blocks: The list of y-coordinate ranges for each block.
         x_blocks: The list of x-coordinate ranges for each block.
 
@@ -70,7 +77,7 @@ def compute_nonrigid_reference_data(
     # Computes the block-level taper mask used for each extracted block. compute_spatial_taper_mask returns float32,
     # and np.tile preserves dtype, so no cast is needed.
     block_taper = compute_spatial_taper_mask(sigma=2 * smoothing_sigma, height=block_height, width=block_width)
-    taper_mask = np.tile(block_taper, (num_blocks, 1, 1))
+    taper_mask = np.tile(A=block_taper, reps=(num_blocks, 1, 1))
     mean_offset = np.empty((num_blocks, block_height, block_width), dtype=np.float32)
 
     for block_index, (y_range, x_range) in enumerate(zip(y_blocks, x_blocks, strict=True)):
@@ -117,7 +124,7 @@ def compute_nonrigid_offsets(
         reference_kernel: The phase-normalized FFT kernel with shape (num_blocks, block_height, rfft_width)
             from compute_nonrigid_reference_data. Used for cross-correlation with frame blocks.
         snr_threshold: The SNR threshold below which additional smoothing is applied to correlation peaks.
-            Higher values apply more smoothing; typical values range from 1.0 to 1.5.
+            Higher values apply more smoothing. Typical values range from 1.0 to 1.5.
         smoothing_kernel: The block smoothing kernel from compute_registration_blocks. Used for SNR-based
             adaptive smoothing of correlation peaks across neighboring blocks.
         x_blocks: The list of x-coordinate ranges for each block from compute_registration_blocks.
@@ -135,8 +142,8 @@ def compute_nonrigid_offsets(
     block_height, block_width = taper_mask.shape[-2], taper_mask.shape[-1]
 
     # Computes maximum registration offset, constrained by block dimensions.
-    max_block_radius = np.floor(np.minimum(block_height, block_width) / 2.0) - _UPSAMPLING_PADDING
-    correlation_radius = int(np.minimum(np.round(maximum_offset), max_block_radius))
+    maximum_block_radius = np.floor(np.minimum(block_height, block_width) / 2.0) - _UPSAMPLING_PADDING
+    correlation_radius = int(np.minimum(np.round(maximum_offset), maximum_block_radius))
     num_blocks = len(y_blocks)
 
     # Extracts all blocks from the frame data.
@@ -192,14 +199,14 @@ def compute_nonrigid_offsets(
             if np.sum(low_snr_mask) == 0:
                 break
             block_correlation = smoothed_data[block_index, low_snr_mask, :, :]
-            if smoothing_index > 0:  # pragma: no cover — adaptive smoothing iteration >0
+            if smoothing_index > 0:  # pragma: no cover, adaptive smoothing iterations beyond the first
                 smoothed_correlation[block_index, low_snr_mask, :, :] = block_correlation
             snr[low_snr_mask] = _compute_correlation_snr(
                 correlation_data=block_correlation,
                 padding=_UPSAMPLING_PADDING,
             )
 
-    # Computes subpixel offsets using DFT upsampling (vectorized over all blocks and frames).
+    # Computes subpixel offsets using Gaussian RBF upsampling (vectorized over all blocks and frames).
     midpoint = upsampled_size // 2
     region_size = 2 * _UPSAMPLING_PADDING + 1
     central_size = 2 * correlation_radius + 1
@@ -317,35 +324,33 @@ def _compute_correlation_snr(  # pragma: no cover
     Returns:
         The SNR values with shape (num_frames,) representing the ratio of peak signal to background.
     """
-    # Unpacks the input data for efficient processing below.
     num_frames = correlation_data.shape[0]
     window_height = correlation_data.shape[1]
     window_width = correlation_data.shape[2]
     snr = np.empty(num_frames, dtype=np.float32)
 
-    # Parallelizes processing over frames.
     for frame_index in prange(num_frames):
         # Finds peak value and location in central region (excluding padding).
         peak_value = np.float32(-np.inf)
         peak_y = 0
         peak_x = 0
         for row in range(padding, window_height - padding):
-            for col in range(padding, window_width - padding):
-                value = correlation_data[frame_index, row, col]
+            for column in range(padding, window_width - padding):
+                value = correlation_data[frame_index, row, column]
                 if value > peak_value:
                     peak_value = value
                     peak_y = row - padding
-                    peak_x = col - padding
+                    peak_x = column - padding
 
         # Finds the maximum value outside the peak region.
         background_value = np.float32(-np.inf)
         mask_y_end = peak_y + 2 * padding
         mask_x_end = peak_x + 2 * padding
         for row in range(window_height):
-            for col in range(window_width):
-                if peak_y <= row < mask_y_end and peak_x <= col < mask_x_end:
+            for column in range(window_width):
+                if peak_y <= row < mask_y_end and peak_x <= column < mask_x_end:
                     continue
-                value = correlation_data[frame_index, row, col]
+                value = correlation_data[frame_index, row, column]
                 background_value = max(background_value, value)
 
         # Ensures positivity for outlier cases with very low background.
@@ -368,19 +373,20 @@ def _apply_bilinear_interpolation(  # pragma: no cover
     edge pixel.
 
     Args:
-        source: The source image with shape (height, width).
-        y_coordinates: The target y-coordinates with shape (height, width).
-        x_coordinates: The target x-coordinates with shape (height, width).
-        output: The output array with shape (height, width) where interpolated values are stored.
+        source: The source image, sampled with bilinear interpolation, with shape (source_height, source_width).
+        y_coordinates: The target y-coordinates, with the same shape as output.
+        x_coordinates: The target x-coordinates, with the same shape as output.
+        output: The output array where interpolated values are stored. Its shape defines the sampled grid and does
+            not have to match the source shape.
     """
     height, width = source.shape
-    out_height, out_width = output.shape
+    output_height, output_width = output.shape
 
-    for row in range(out_height):
-        for col in range(out_width):
+    for row in range(output_height):
+        for column in range(output_width):
             # Extracts the floating-point coordinates for the current output pixel.
-            y_coordinate = y_coordinates[row, col]
-            x_coordinate = x_coordinates[row, col]
+            y_coordinate = y_coordinates[row, column]
+            x_coordinate = x_coordinates[row, column]
 
             # Separates coordinates into integer (floor) and fractional components.
             y_floor = int(y_coordinate)
@@ -391,15 +397,15 @@ def _apply_bilinear_interpolation(  # pragma: no cover
             # Clamps the four neighbor indices to valid source image bounds.
             y_floor = min(height - 1, max(0, y_floor))
             x_floor = min(width - 1, max(0, x_floor))
-            y_ceil = min(height - 1, y_floor + 1)
-            x_ceil = min(width - 1, x_floor + 1)
+            y_ceiling = min(height - 1, y_floor + 1)
+            x_ceiling = min(width - 1, x_floor + 1)
 
             # Computes the weighted average of the four neighboring pixels.
-            output[row, col] = (
+            output[row, column] = (
                 source[y_floor, x_floor] * (1 - y_fraction) * (1 - x_fraction)
-                + source[y_floor, x_ceil] * (1 - y_fraction) * x_fraction
-                + source[y_ceil, x_floor] * y_fraction * (1 - x_fraction)
-                + source[y_ceil, x_ceil] * y_fraction * x_fraction
+                + source[y_floor, x_ceiling] * (1 - y_fraction) * x_fraction
+                + source[y_ceiling, x_floor] * y_fraction * (1 - x_fraction)
+                + source[y_ceiling, x_ceiling] * y_fraction * x_fraction
             )
 
 
@@ -431,7 +437,6 @@ def _apply_coordinate_offsets(  # pragma: no cover
         output: The pre-allocated output array with shape (num_frames, height, width) where transformed frames are
             stored.
     """
-    # Parallelizes processing over frames.
     for frame_index in prange(frames.shape[0]):
         _apply_bilinear_interpolation(
             source=frames[frame_index],
@@ -469,7 +474,6 @@ def _interpolate_block_offsets(  # pragma: no cover
         x_offset_maps: The pre-allocated output array with shape (num_frames, height, width) where interpolated
             per-pixel x-offsets are stored.
     """
-    # Parallelizes processing over frames.
     for frame_index in prange(y_block_offsets.shape[0]):
         _apply_bilinear_interpolation(
             source=y_block_offsets[frame_index],
@@ -516,9 +520,9 @@ def _extract_upsampling_regions(  # pragma: no cover
 
         # Copies the region around the peak to the output array.
         for row in range(region_size):
-            for col in range(region_size):
-                output[block_index, frame_index, row, col] = correlation[
-                    block_index, frame_index, peak_y + row, peak_x + col
+            for column in range(region_size):
+                output[block_index, frame_index, row, column] = correlation[
+                    block_index, frame_index, peak_y + row, peak_x + column
                 ]
 
 
@@ -554,8 +558,8 @@ def _upsample_block_offsets(
     x_centers = np.array(x_blocks[: block_counts[1]], dtype=np.float32).mean(axis=1)
 
     # Creates interpolation grids mapping pixel positions to block indices.
-    y_indices = np.interp(np.arange(height), y_centers, np.arange(y_centers.size)).astype(np.float32)
-    x_indices = np.interp(np.arange(width), x_centers, np.arange(x_centers.size)).astype(np.float32)
+    y_indices = np.interp(x=np.arange(height), xp=y_centers, fp=np.arange(y_centers.size)).astype(np.float32)
+    x_indices = np.interp(x=np.arange(width), xp=x_centers, fp=np.arange(x_centers.size)).astype(np.float32)
     x_grid, y_grid = np.meshgrid(x_indices, y_indices)
 
     # Reshapes block offsets from flat to grid format.

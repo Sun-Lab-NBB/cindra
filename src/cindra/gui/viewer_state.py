@@ -41,7 +41,7 @@ def write_viewer_state(state_path: Path, state: dict[str, Any]) -> None:
         state_path: The path to the state file.
         state: The state dictionary to serialize.
     """
-    lock = FileLock(str(state_path) + ".lock")
+    lock = FileLock(state_path.with_name(state_path.name + ".lock"))
     with lock.acquire(timeout=_LOCK_TIMEOUT):
         state_path.write_text(json.dumps(state))
 
@@ -57,7 +57,7 @@ def read_viewer_state(state_path: Path) -> dict[str, Any]:
     Returns:
         The deserialized state dictionary.
     """
-    lock = FileLock(str(state_path) + ".lock")
+    lock = FileLock(state_path.with_name(state_path.name + ".lock"))
     with lock.acquire(timeout=_LOCK_TIMEOUT):
         return json.loads(state_path.read_text())
 
@@ -83,6 +83,12 @@ class StateWriter(QtCore.QObject):
         state_path: The path to the state file.
         get_state: A callable that returns the current viewer state dictionary.
         parent: Optional Qt parent object for automatic lifetime management.
+
+    Attributes:
+        _state_path: Cached path to the state file.
+        _get_state: Cached callback that returns the current viewer state.
+        _last_state: The most recently written state snapshot, or None before the first write.
+        _timer: Timer driving the periodic state polling.
     """
 
     def __init__(

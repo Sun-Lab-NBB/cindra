@@ -2,10 +2,47 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from cindra.detection import compute_registration_blocks
-from cindra.registration.register import _compute_crop, _pick_initial_reference, _apply_precomputed_offsets_batch
+from cindra.registration.register import (
+    _compute_crop,
+    _compute_reference,
+    _pick_initial_reference,
+    _apply_precomputed_offsets_batch,
+)
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+
+def _build_baseline_frames(frame_count: int, size: int, baseline: float, seed: int) -> NDArray[np.float32]:
+    """Builds a stack of blob frames with integer-pixel shifts rendered on top of a positive intensity baseline.
+
+    Args:
+        frame_count: The number of frames to render.
+        size: The height and width of each square frame in pixels.
+        baseline: The constant intensity offset added to every pixel of every frame.
+        seed: The seed for the random generator used to render the per-frame noise.
+
+    Returns:
+        The rendered frame stack with shape (frame_count, size, size) as a float32 array.
+    """
+    generator = np.random.default_rng(seed=seed)
+    y_grid = np.arange(size, dtype=np.float32)[:, np.newaxis]
+    x_grid = np.arange(size, dtype=np.float32)[np.newaxis, :]
+
+    template = np.zeros((size, size), dtype=np.float32)
+    for center_y, center_x in ((12, 14), (30, 20), (22, 36)):
+        template += 90.0 * np.exp(-(((y_grid - center_y) ** 2 + (x_grid - center_x) ** 2) / 18.0))
+
+    frames = np.empty((frame_count, size, size), dtype=np.float32)
+    for index in range(frame_count):
+        shifted = np.roll(template, shift=(index % 5 - 2, index % 3 - 1), axis=(0, 1))
+        frames[index] = baseline + shifted + generator.normal(scale=6.0, size=(size, size))
+    return frames
 
 
 class TestComputeCrop:
@@ -114,8 +151,8 @@ class TestPickInitialReference:
 
     def test_output_shape(self) -> None:
         """Verifies the output shape matches the spatial dimensions of the input frames."""
-        rng = np.random.default_rng(seed=42)
-        frames = rng.standard_normal(size=(30, 16, 16)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        frames = generator.standard_normal(size=(30, 16, 16)).astype(np.float32)
 
         reference = _pick_initial_reference(frames=frames, top_correlations=5)
 
@@ -123,8 +160,8 @@ class TestPickInitialReference:
 
     def test_output_dtype(self) -> None:
         """Verifies the output has float32 or float64 dtype."""
-        rng = np.random.default_rng(seed=42)
-        frames = rng.standard_normal(size=(30, 16, 16)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        frames = generator.standard_normal(size=(30, 16, 16)).astype(np.float32)
 
         reference = _pick_initial_reference(frames=frames, top_correlations=5)
 
@@ -132,8 +169,8 @@ class TestPickInitialReference:
 
     def test_output_is_finite(self) -> None:
         """Verifies the output contains no NaN or Inf values."""
-        rng = np.random.default_rng(seed=42)
-        frames = rng.standard_normal(size=(30, 16, 16)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        frames = generator.standard_normal(size=(30, 16, 16)).astype(np.float32)
 
         reference = _pick_initial_reference(frames=frames, top_correlations=5)
 
@@ -141,10 +178,10 @@ class TestPickInitialReference:
 
     def test_reference_resembles_average(self) -> None:
         """Verifies the reference is a meaningful average of correlated frames."""
-        rng = np.random.default_rng(seed=42)
+        generator = np.random.default_rng(seed=42)
         # Creates frames with a common signal so the reference should resemble it.
-        signal = rng.standard_normal(size=(16, 16)).astype(np.float32) * 10
-        noise = rng.standard_normal(size=(30, 16, 16)).astype(np.float32)
+        signal = generator.standard_normal(size=(16, 16)).astype(np.float32) * 10
+        noise = generator.standard_normal(size=(30, 16, 16)).astype(np.float32)
         frames = signal[np.newaxis, :, :] + noise
 
         reference = _pick_initial_reference(frames=frames, top_correlations=10)
@@ -153,17 +190,52 @@ class TestPickInitialReference:
         assert reference.shape == (16, 16)
         assert np.std(reference) > 0
 
+    def test_leaves_input_frames_unchanged(self) -> None:
+        """Verifies the input frames keep their original values, including their raw intensity scale."""
+        frames = _build_baseline_frames(frame_count=24, size=48, baseline=1000.0, seed=17)
+        original = frames.copy()
+
+        _pick_initial_reference(frames=frames, top_correlations=5)
+
+        np.testing.assert_array_equal(frames, original)
+
+
+class TestComputeReference:
+    """Tests the _compute_reference function."""
+
+    def test_reference_stays_on_raw_intensity_scale(self) -> None:
+        """Verifies the reference keeps the intensity scale of frames carrying a large positive baseline."""
+        frames = _build_baseline_frames(frame_count=24, size=48, baseline=1000.0, seed=17)
+        frames_mean = float(frames.mean())
+
+        reference = _compute_reference(
+            frames=frames,
+            pre_smoothing_sigma=0.0,
+            spatial_highpass_window=10,
+            edge_taper_pixels=10.0,
+            spatial_smoothing_sigma=1.15,
+            maximum_offset_fraction=0.1,
+            temporal_smoothing_sigma=0.0,
+            workers=1,
+            one_photon_enabled=False,
+        )
+
+        # register_plane derives the 1st and 99th percentile clip bounds from this reference and applies them to raw
+        # binary frames, so a reference on a different intensity scale saturates every pixel of the correlation input.
+        assert reference.shape == (48, 48)
+        assert abs(float(reference.mean()) - frames_mean) < 0.05 * frames_mean
+
 
 class TestApplyPrecomputedOffsetsBatch:
     """Tests _apply_precomputed_offsets_batch."""
 
     def test_zero_offsets_preserve_frames(self) -> None:
         """Verifies that zero offsets leave frames unchanged."""
-        rng = np.random.default_rng(seed=42)
+        generator = np.random.default_rng(seed=42)
         batch_size = 5
         height = 16
         width = 16
-        frames = rng.standard_normal((batch_size, height, width)).astype(np.float32)
+        frames = generator.standard_normal((batch_size, height, width)).astype(np.float32)
         original = frames.copy()
 
         y_offsets = np.zeros(batch_size, dtype=np.int32)
@@ -220,8 +292,8 @@ class TestApplyPrecomputedOffsetsBatch:
         batch_size = 4
         height = 20
         width = 24
-        rng = np.random.default_rng(seed=7)
-        frames = rng.standard_normal((batch_size, height, width)).astype(np.float32)
+        generator = np.random.default_rng(seed=7)
+        frames = generator.standard_normal((batch_size, height, width)).astype(np.float32)
 
         y_offsets = np.zeros(batch_size, dtype=np.int32)
         x_offsets = np.zeros(batch_size, dtype=np.int32)
@@ -245,8 +317,8 @@ class TestApplyPrecomputedOffsetsBatch:
         batch_size = 2
         height = 16
         width = 16
-        rng = np.random.default_rng(seed=55)
-        frames = rng.standard_normal((batch_size, height, width)).astype(np.float32)
+        generator = np.random.default_rng(seed=55)
+        frames = generator.standard_normal((batch_size, height, width)).astype(np.float32)
         original = frames.copy()
 
         y_offsets = np.zeros(batch_size, dtype=np.int32)
@@ -273,8 +345,8 @@ class TestApplyPrecomputedOffsetsBatch:
         batch_size = 2
         height = 64
         width = 64
-        rng = np.random.default_rng(seed=88)
-        frames = rng.standard_normal((batch_size, height, width)).astype(np.float32)
+        generator = np.random.default_rng(seed=88)
+        frames = generator.standard_normal((batch_size, height, width)).astype(np.float32)
         original = frames.copy()
 
         y_offsets = np.zeros(batch_size, dtype=np.int32)
@@ -283,8 +355,8 @@ class TestApplyPrecomputedOffsetsBatch:
         blocks = compute_registration_blocks(height=height, width=width, block_size=(32, 32))
         block_count = blocks[2][0] * blocks[2][1]
 
-        y_offsets_nonrigid = rng.standard_normal((batch_size, block_count)).astype(np.float32) * 2
-        x_offsets_nonrigid = rng.standard_normal((batch_size, block_count)).astype(np.float32) * 2
+        y_offsets_nonrigid = generator.standard_normal((batch_size, block_count)).astype(np.float32) * 2
+        x_offsets_nonrigid = generator.standard_normal((batch_size, block_count)).astype(np.float32) * 2
 
         result = _apply_precomputed_offsets_batch(
             frames=frames,

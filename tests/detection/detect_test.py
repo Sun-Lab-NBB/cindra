@@ -16,7 +16,7 @@ class TestCreateEnhancedMeanImage:
         frame_width = 64
         valid_y_range = (4, 60)
         valid_x_range = (4, 60)
-        mean_image = np.random.default_rng(42).standard_normal((56, 56)).astype(np.float32) + 100.0
+        mean_image = np.random.default_rng(seed=42).standard_normal((56, 56)).astype(np.float32) + 100.0
 
         result = _create_enhanced_mean_image(
             mean_image=mean_image,
@@ -34,7 +34,7 @@ class TestCreateEnhancedMeanImage:
         """Verifies output values inside the valid region are in the [0, 1] range."""
         valid_y_range = (2, 30)
         valid_x_range = (2, 30)
-        mean_image = np.random.default_rng(42).standard_normal((28, 28)).astype(np.float32) + 50.0
+        mean_image = np.random.default_rng(seed=42).standard_normal((28, 28)).astype(np.float32) + 50.0
 
         result = _create_enhanced_mean_image(
             mean_image=mean_image,
@@ -57,7 +57,7 @@ class TestCreateEnhancedMeanImage:
         frame_width = 48
         valid_y_range = (8, 40)
         valid_x_range = (8, 40)
-        mean_image = np.random.default_rng(42).standard_normal((32, 32)).astype(np.float32) + 100.0
+        mean_image = np.random.default_rng(seed=42).standard_normal((32, 32)).astype(np.float32) + 100.0
 
         result = _create_enhanced_mean_image(
             mean_image=mean_image,
@@ -89,7 +89,7 @@ class TestCreateEnhancedMeanImage:
         frame_width = 64
         valid_y_range = (16, 48)
         valid_x_range = (16, 48)
-        mean_image = np.random.default_rng(42).standard_normal((32, 32)).astype(np.float32) + 200.0
+        mean_image = np.random.default_rng(seed=42).standard_normal((32, 32)).astype(np.float32) + 200.0
 
         result = _create_enhanced_mean_image(
             mean_image=mean_image,
@@ -133,7 +133,7 @@ class TestCreateEnhancedMeanImage:
 
     def test_zero_roi_diameter_uses_default(self) -> None:
         """Verifies that a zero ROI diameter falls back to the default cell diameter without error."""
-        mean_image = np.random.default_rng(42).standard_normal((28, 28)).astype(np.float32) + 50.0
+        mean_image = np.random.default_rng(seed=42).standard_normal((28, 28)).astype(np.float32) + 50.0
 
         result = _create_enhanced_mean_image(
             mean_image=mean_image,
@@ -150,8 +150,8 @@ class TestCreateEnhancedMeanImage:
 
     def test_output_is_finite(self) -> None:
         """Verifies that all output values are finite (no NaN or infinity)."""
-        rng = np.random.default_rng(99)
-        mean_image = rng.standard_normal((56, 56)).astype(np.float32) + 100.0
+        generator = np.random.default_rng(seed=99)
+        mean_image = generator.standard_normal((56, 56)).astype(np.float32) + 100.0
 
         result = _create_enhanced_mean_image(
             mean_image=mean_image,

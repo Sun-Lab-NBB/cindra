@@ -17,9 +17,9 @@ class TestComputeBidirectionalPhaseOffset:
     def test_zero_offset_for_aligned_frames(self) -> None:
         """Verifies zero offset is returned when odd and even lines are aligned."""
         # Uses a smooth, structured pattern so odd/even line correlation is unambiguous.
-        sample_positions = np.linspace(0, 4 * np.pi, 128, dtype=np.float32)
+        sample_positions = np.linspace(start=0, stop=4 * np.pi, num=128, dtype=np.float32)
         pattern = np.sin(sample_positions)
-        frames = np.tile(pattern, (20, 64, 1))
+        frames = np.tile(A=pattern, reps=(20, 64, 1))
         offset = compute_bidirectional_phase_offset(frames=frames)
         assert offset == 0
 
@@ -35,22 +35,22 @@ class TestComputeBidirectionalPhaseOffset:
         frames = np.zeros((30, 64, width), dtype=np.float32)
         frames[:, ::2, :] = base_pattern
         # np.roll applies a circular shift so the correlation has no edge artifacts.
-        frames[:, 1::2, :] = np.roll(base_pattern, shift=shift)
+        frames[:, 1::2, :] = np.roll(a=base_pattern, shift=shift)
         offset = compute_bidirectional_phase_offset(frames=frames)
         # Compares against the negative applied shift, which is the returned correction offset.
         assert abs(offset - (-shift)) <= 1
 
     def test_returns_int(self) -> None:
         """Verifies the return type is a Python int."""
-        rng = np.random.default_rng(42)
-        frames = rng.standard_normal((5, 32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        frames = generator.standard_normal((5, 32, 32)).astype(np.float32)
         offset = compute_bidirectional_phase_offset(frames=frames)
         assert isinstance(offset, int)
 
     def test_odd_height_frames(self) -> None:
         """Verifies the function handles frames with odd height."""
-        rng = np.random.default_rng(42)
-        frames = rng.standard_normal((5, 33, 64)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        frames = generator.standard_normal((5, 33, 64)).astype(np.float32)
         offset = compute_bidirectional_phase_offset(frames=frames)
         assert isinstance(offset, int)
 
@@ -60,8 +60,8 @@ class TestApplyBidirectionalPhaseCorrection:
 
     def test_zero_offset_no_change(self) -> None:
         """Verifies zero offset produces no change to frames."""
-        rng = np.random.default_rng(42)
-        frames = rng.standard_normal((5, 32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        frames = generator.standard_normal((5, 32, 32)).astype(np.float32)
         original = frames.copy()
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=0)
         np.testing.assert_array_equal(frames, original)
@@ -81,7 +81,7 @@ class TestApplyBidirectionalPhaseCorrection:
         frames[0, 1, :] = np.arange(10, dtype=np.float32)  # Populates the odd line.
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=-3)
         # Confirms the odd line shifted left by 3 with the right border zeroed.
-        np.testing.assert_allclose(frames[0, 1, :7], np.arange(3, 10, dtype=np.float32))
+        np.testing.assert_allclose(frames[0, 1, :7], np.arange(start=3, stop=10, dtype=np.float32))
         np.testing.assert_allclose(frames[0, 1, 7:], 0.0)
 
     def test_in_place_modification(self) -> None:
@@ -93,8 +93,8 @@ class TestApplyBidirectionalPhaseCorrection:
 
     def test_even_lines_unchanged(self) -> None:
         """Verifies even lines are not modified by the correction."""
-        rng = np.random.default_rng(42)
-        frames = rng.standard_normal((2, 10, 20)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        frames = generator.standard_normal((2, 10, 20)).astype(np.float32)
         even_lines = frames[:, ::2, :].copy()
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=3)
         np.testing.assert_array_equal(frames[:, ::2, :], even_lines)

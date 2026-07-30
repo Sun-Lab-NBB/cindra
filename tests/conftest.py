@@ -118,9 +118,9 @@ def single_recording_context() -> Callable[..., RuntimeContext]:
 def gaussian_blob_image() -> Callable[..., NDArray[np.float64]]:
     """Returns a builder for a smooth structured image of Gaussian blobs on a flat background.
 
-    Smooth, structured content is required for phase-correlation registration and for detection to localize ROIs;
-    white noise produces ambiguous correlation peaks. The returned builder accepts the frame geometry, blob centers,
-    blob radius, amplitude, and background level.
+    Smooth, structured content is required for phase-correlation registration and for detection to localize ROIs.
+    White noise produces ambiguous correlation peaks. The returned builder accepts the frame geometry, blob centers,
+    blob standard deviation, amplitude, and background level.
     """
 
     def _make(
@@ -133,7 +133,7 @@ def gaussian_blob_image() -> Callable[..., NDArray[np.float64]]:
         background: float = 100.0,
     ) -> NDArray[np.float64]:
         rows, columns = np.mgrid[0:height, 0:width]
-        image = np.full((height, width), background, dtype=np.float64)
+        image = np.full((height, width), fill_value=background, dtype=np.float64)
         for center_row, center_column in centers:
             squared_distance = (rows - center_row) ** 2 + (columns - center_column) ** 2
             image += amplitude * np.exp(-squared_distance / (2.0 * sigma**2))

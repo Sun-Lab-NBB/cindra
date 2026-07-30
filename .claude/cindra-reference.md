@@ -14,6 +14,7 @@
 | `register_recording_plane`        | `pipelines/single_recording.py`                 | Per-plane registration stage entry point (phase 2)      |
 | `register_plane`                  | `registration/register.py`                      | Per-plane motion correction (rigid + optional nonrigid) |
 | `resolve_stage_workers`           | `allocation/workers.py`                         | Measured per-stage worker defaults and worker resolver  |
+| `SINGLE_RECORDING_PHASES`         | `allocation/phases.py`                          | Phase model: job universe and prerequisite graph        |
 | `DiffeomorphicDemonsRegistration` | `registration/diffeomorphic.py`                 | Cross-day diffeomorphic alignment algorithm             |
 | `Deformation`                     | `registration/deformation.py`                   | Deformation field application and inversion             |
 | `detect_plane_rois`               | `detection/detect.py`                           | ROI detection via sparse detection with PCA denoising   |
@@ -74,6 +75,9 @@
 | `ataraxis-time`            | PrecisionTimer for pipeline step timing                       |
 | `ataraxis-base-utilities`  | Console for unified message handling and error reporting      |
 | `ataraxis-data-structures` | YamlConfig, ProcessingTracker, and data logging utilities     |
+| `threadpoolctl`            | BLAS thread confinement around scikit-learn and LAPACK fits   |
+| `pyyaml`                   | YAML serialization for configuration and tracker files        |
+| `filelock`                 | Cross-process file locking for ProcessingTracker state        |
 | `importlib_metadata`       | Runtime version introspection for the cindra package          |
 | `tbb4py`                   | Intel TBB threading layer for Numba parallelization (non-Mac) |
 | `intel-cmplr-lib-rt`       | Intel compiler runtime paired with `tbb4py` (non-Mac)         |
@@ -85,28 +89,33 @@
 1. Review `src/cindra/pipelines/pipeline.py` for job orchestration and ProcessingTracker integration
 2. Review `src/cindra/pipelines/single_recording.py` for the four-phase single-recording workflow
 3. Review `src/cindra/pipelines/multi_recording.py` for the two-phase multi-recording workflow
-4. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
+4. Job universes and prerequisite edges derive from the phase model in `src/cindra/allocation/phases.py`
+   (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`). Add, remove, or reorder a phase there rather than at each
+   call site, and both the pipelines and the MCP layer follow automatically
+5. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
 
 **Modifying registration:**
 
 1. Review `src/cindra/registration/register.py` for per-plane motion correction entry point
 2. Understand the two-step registration refinement when enabled
-3. Rigid registration uses phase correlation (`rigid.py`); nonrigid uses block-based deformation (`nonrigid.py`)
+3. Rigid registration uses phase correlation (`rigid.py`), and nonrigid uses block-based deformation (`nonrigid.py`)
 4. Cross-recording registration uses diffeomorphic demons (`diffeomorphic.py`) with multiscale pyramid (`pyramid.py`)
+5. Registration rewrites its input binary in place under a `<binary>.registering` marker. Keep the create and clear
+   pair around any new rewrite loop, and confine BLAS fits with `threadpool_limits` as `metrics.py` does
 
 **Modifying detection:**
 
 1. Review `src/cindra/detection/detect.py` for the sparse detection entry point
 2. Understand the PCA denoising step and temporal binning strategy
-3. ROI extension logic is in `detect_rois.py`; statistics computation in `roi_statistics.py`
+3. ROI extension logic is in `detect_rois.py`, and statistics computation is in `roi_statistics.py`
 4. Multi-recording tracking via spatial clustering is in `tracking.py`
 
 **Modifying extraction:**
 
 1. Review `src/cindra/extraction/extract.py` for the polymorphic dispatch pattern
-2. Numba JIT functions use `@njit(cache=True, parallel=True)` with `prange` for frame parallelization
-3. Mask creation and lambda weight computation is in `masks.py`
-4. OASIS deconvolution and delta fluorescence computation is in `deconvolve.py`
+2. Numba JIT functions use `@njit(cache=True, parallel=True)` with `prange` for ROI parallelization
+3. Mask creation and lambda weight computation are in `masks.py`
+4. OASIS deconvolution and delta fluorescence computation are in `deconvolve.py`
 
 **Modifying GUI viewers:**
 
@@ -120,7 +129,7 @@
 1. Review the relevant tool module in `src/cindra/interface/` (acquisition, configuration, processing, or results)
 2. Tools register via `@mcp.tool()` decorator on the shared `mcp` instance from `mcp_instance.py`
 3. Batch processing tools use background manager threads with per-job worker threads
-4. Return formatted strings for user-facing output; use JSON response mode
+4. Return JSON-serializable dictionaries. The shared `mcp` instance runs in JSON response mode
 
 **Adding or modifying CLI commands:**
 
@@ -131,10 +140,15 @@
 
 **Important considerations:**
 
-- The `console` is enabled in `src/cindra/__init__.py` — do not re-enable elsewhere
+- The `console` is enabled in `src/cindra/__init__.py`. Do not re-enable it elsewhere
 - The Numba threading layer is configured in `__init__.py` (TBB on non-Mac, OpenMP on macOS) after importing
-  `numba.config` and before importing modules that compile `@njit` functions — do not move this
+  `numba.config` and before importing modules that compile `@njit` functions. Do not move this
 - The `# type: ignore[import-untyped]` comments on the scikit-learn, threadpoolctl, PyQtGraph, and yaml imports are
-  expected (Numba is excluded via the `pyproject.toml` mypy override; tifffile imports carry no such comment)
+  expected (Numba is excluded via the `pyproject.toml` mypy override, and tifffile imports carry no such comment)
 - The `# pragma: no cover` annotations on `@njit` function bodies are intentional
+- Registration rewrites the plane binary in place and guards the rewrite with a `<binary>.registering` marker
+  (`create_registration_marker`, `clear_registration_marker`, `resolve_registration_marker_path`, exported from
+  `cindra.io`). `register_plane` refuses to run while a marker exists, and `binarize_recording` treats a marked binary,
+  or one whose size disagrees with its plane's recorded frame geometry, as invalid and rebuilds it from the source
+  TIFFs. Preserve this protocol when modifying either stage, because re-running binarization is the recovery path
 - Use `console.error()` from ataraxis-base-utilities for all error handling (no bare `raise`)

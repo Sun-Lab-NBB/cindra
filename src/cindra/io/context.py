@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 
@@ -20,12 +20,11 @@ from ..dataclasses import (
     SingleRecordingConfiguration,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-
 PARAMETERS_FILENAME: str = "cindra_parameters.json"
 """The name of the acquisition parameters JSON file expected in each recording's data directory."""
+
+OUTPUT_DIRECTORY_NAME: str = "cindra"
+"""The name of the output directory the single-recording pipeline creates under each recording's output root."""
 
 MAXIMUM_CHANNEL_COUNT: int = 2
 """The maximum number of imaging channels supported by the pipeline."""
@@ -34,7 +33,7 @@ MAXIMUM_CHANNEL_COUNT: int = 2
 def find_data_directory(data_path: Path) -> Path:
     """Recursively searches for the directory containing the acquisition parameters JSON file.
 
-    This function searches the data_path directory and all subdirectories for a file named 'cindra_parameters.json'.
+    Searches the data_path directory and all subdirectories for a file named 'cindra_parameters.json'.
     Returns the parent directory containing the matched file. This directory is expected to also contain the TIFF
     files.
 
@@ -71,7 +70,7 @@ def resolve_single_recording_contexts(
 ) -> list[RuntimeContext]:
     """Creates RuntimeContext instances for all imaging planes processed by the target single-recording pipeline.
 
-    This function performs the initial setup for single-recording processing: it finds acquisition parameters from
+    Performs the initial setup for single-recording processing: finds acquisition parameters from
     the data directory, creates output directories, and initializes RuntimeContext instances for each of the
     recording's planes.
 
@@ -83,8 +82,8 @@ def resolve_single_recording_contexts(
         runtime data file are saved to disk at the end of resolution, ensuring they reflect the current settings. This
         is the correct mode for single-threaded bootstrap (e.g., the prepare_single_recording_batch_tool invocation).
 
-        With ``persist=False``, no files are written. This mode is required for worker-thread entry (REMOTE mode)
-        because the MCP executor dispatches multiple worker threads in the same process: if each worker bootstraps
+        With ``persist=False``, no files are written. This mode is required for worker-thread entry (REMOTE mode),
+        because the MCP executor dispatches multiple worker threads in the same process. If each worker bootstraps
         the shared configuration and every plane's runtime_data.yaml on entry, concurrent ``open(file, "w")`` calls
         on the same paths race at the byte level and produce corrupted YAML. Workers must therefore only *load* the
         bootstrap written by the earlier prepare step. When ``persist=False``, any missing runtime_data.yaml is
@@ -98,9 +97,10 @@ def resolve_single_recording_contexts(
             file_io. The data_path is only required when raw data needs to be processed (rebinarization) or
             when no processed data exists.
         persist: When True (default), writes the shared configuration plus every plane's runtime_data.yaml at the
-            end of resolution. When False, treats the call as load-only; raises FileNotFoundError if any expected
-            runtime_data.yaml is missing. Worker entry points (REMOTE mode) must call with ``persist=False``; the
-            prepare_single_recording_batch_tool owns bootstrap persistence in a single-threaded context.
+            end of resolution. When False, treats the call as load-only and raises FileNotFoundError if any
+            expected runtime_data.yaml is missing. Worker entry points (REMOTE mode) must call with
+            ``persist=False``. The prepare_single_recording_batch_tool owns bootstrap persistence in a
+            single-threaded context.
 
     Returns:
         A list of RuntimeContext instances, one per plane (or virtual plane for MROI data). Each context contains
@@ -108,9 +108,10 @@ def resolve_single_recording_contexts(
         instance with IOData fields initialized.
 
     Raises:
-        ValueError: If output_path is not configured, or if the acquisition parameters specify more than 2 channels.
-        FileNotFoundError: If neither processed data nor raw data with acquisition parameters is available, or if
-            ``persist=False`` and any plane's runtime_data.yaml does not already exist on disk.
+        ValueError: If output_path is not configured, if no processed data exists at output_path while data_path is
+            also not configured, or if the acquisition parameters specify more than 2 channels.
+        FileNotFoundError: If the acquisition parameters file is not found under data_path, or if ``persist=False``
+            and any plane's runtime_data.yaml does not already exist on disk.
     """
     # Validates that the save path is configured.
     output_path_root = configuration.file_io.output_path
@@ -138,7 +139,6 @@ def resolve_single_recording_contexts(
             console.error(message=message, error=ValueError)
         acquisition = _find_acquisition_parameters(data_path=configuration.file_io.data_path)
 
-    # Validates that the channel count does not exceed the maximum supported channel count.
     if acquisition.channel_number > MAXIMUM_CHANNEL_COUNT:
         message = (
             f"Unable to resolve single-recording contexts. The pipeline supports at most "
@@ -180,7 +180,6 @@ def resolve_single_recording_contexts(
 
         ensure_directory_exists(path=plane_output_path)
 
-        # Initializes the IOData for this plane with binary file paths.
         io_data = IOData(
             output_path=plane_output_path,
             registered_binary_path=plane_output_path / "channel_1_data.bin",
@@ -201,13 +200,11 @@ def resolve_single_recording_contexts(
             io_data.mroi_y_offset = acquisition.roi_y_coordinates[roi_index]
             io_data.mroi_x_offset = acquisition.roi_x_coordinates[roi_index]
 
-        # Creates the SingleRecordingRuntimeData with the initialized IOData.
         runtime_data = SingleRecordingRuntimeData(
             output_path=plane_output_path,
             io=io_data,
         )
 
-        # Creates the RuntimeContext combining the shared configuration, acquisition parameters, and runtime data.
         context = RuntimeContext(
             configuration=configuration,
             acquisition=acquisition,
@@ -224,10 +221,10 @@ def resolve_single_recording_contexts(
         for context in contexts:
             context.save_runtime()
     else:
-        # Worker entry (REMOTE mode): bootstrap must already exist on disk from a prior prepare step. Treat missing
+        # Worker entry (REMOTE mode): bootstrap must already exist on disk from a prior prepare step. Treats missing
         # runtime_data.yaml as a hard error rather than silently persisting concurrently alongside peer workers.
         for context in contexts:
-            # io.output_path is always populated during per-plane construction above; the guard is defensive only.
+            # io.output_path is always populated during per-plane construction above, so the guard is defensive only.
             if context.runtime.io.output_path is None:  # pragma: no cover
                 continue
             runtime_yaml = context.runtime.io.output_path / "runtime_data.yaml"
@@ -251,7 +248,7 @@ def resolve_multi_recording_contexts(
 ) -> list[MultiRecordingRuntimeContext]:
     """Creates MultiRecordingRuntimeContext instances for recordings processed by the target multi-recording pipeline.
 
-    This function performs the initial setup for multi-recording processing: it discovers cindra output
+    Performs the initial setup for multi-recording processing: discovers cindra output
     directories for each recording, derives multi_recording output paths, and initializes
     MultiRecordingRuntimeContext instances.
 
@@ -264,8 +261,8 @@ def resolve_multi_recording_contexts(
         file are saved to disk at the end of resolution, ensuring they reflect the current settings. This is the
         correct mode for single-threaded bootstrap (e.g., the prepare_multi_recording_batch_tool invocation).
 
-        With ``persist=False``, no files are written. This mode is required for worker-thread entry (REMOTE mode)
-        because the MCP executor dispatches multiple worker threads in the same process: if each worker bootstraps
+        With ``persist=False``, no files are written. This mode is required for worker-thread entry (REMOTE mode),
+        because the MCP executor dispatches multiple worker threads in the same process. If each worker bootstraps
         the shared configuration and every recording's multi_recording_runtime_data.yaml on entry, concurrent
         ``open(file, "w")`` calls on the same paths race at the byte level and produce corrupted YAML that
         subsequent workers fail to parse. Workers must therefore only *load* the bootstrap written by the earlier
@@ -284,10 +281,10 @@ def resolve_multi_recording_contexts(
         target_recording_id: When provided, only resolves the context for the recording matching this identifier. The
             returned list contains a single element. When None (default), all recordings are resolved.
         persist: When True (default), writes the shared configuration and every resolved context's
-            multi_recording_runtime_data.yaml at the end of resolution. When False, treats the call as load-only;
-            raises FileNotFoundError if any expected runtime data file is missing. Worker entry points (REMOTE mode)
-            must call with ``persist=False``; the prepare_multi_recording_batch_tool owns bootstrap persistence in
-            a single-threaded context.
+            multi_recording_runtime_data.yaml at the end of resolution. When False, treats the call as load-only
+            and raises FileNotFoundError if any expected runtime data file is missing. Worker entry points (REMOTE
+            mode) must call with ``persist=False``. The prepare_multi_recording_batch_tool owns bootstrap
+            persistence in a single-threaded context.
 
     Returns:
         A list of MultiRecordingRuntimeContext instances, one per recording (or one element when
@@ -356,7 +353,6 @@ def resolve_multi_recording_contexts(
             contexts.append(MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime))
             continue
 
-        # Constructs new IO data with all discovered paths.
         io_data = MultiRecordingIOData(
             recording_id=recording_id,
             data_path=data_path,
@@ -367,10 +363,8 @@ def resolve_multi_recording_contexts(
         # Computes MROI region borders from acquisition parameters if applicable.
         io_data.mroi_region_borders = _compute_mroi_region_borders(data_path=data_path)
 
-        # Constructs the runtime data with the IO data, output path, and preloaded CombinedData.
         runtime = MultiRecordingRuntimeData(output_path=output_path, io=io_data, combined_data=combined_data)
 
-        # Creates the output directory for this recording.
         ensure_directory_exists(path=output_path)
 
         contexts.append(MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime))
@@ -387,12 +381,12 @@ def resolve_multi_recording_contexts(
         for context in contexts:
             context.save_runtime()
     else:
-        # Worker entry (REMOTE mode): bootstrap must already exist on disk from a prior prepare step. Treat missing
+        # Worker entry (REMOTE mode): bootstrap must already exist on disk from a prior prepare step. Treats missing
         # multi_recording_runtime_data.yaml as a hard error rather than silently persisting concurrently alongside
         # peer workers, which would race on the same files and corrupt them.
         for context in contexts:
             runtime_output_path = context.runtime.output_path
-            # output_path is always populated during per-recording construction above; the guard is defensive only.
+            # output_path is always populated during per-recording construction above, so the guard is defensive only.
             if runtime_output_path is None:  # pragma: no cover
                 continue
             runtime_yaml = runtime_output_path / "multi_recording_runtime_data.yaml"
@@ -412,7 +406,7 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
     """Extracts the first component from the end of each input path that uniquely identifies each path globally.
 
     Notes:
-        This function adapts the multi-recording pipeline to directory structures where the unique
+        Adapts the multi-recording pipeline to directory structures where the unique
         recording identifier appears at different levels of the path hierarchy. For example, given paths
         like ``/data/day1/recording`` and ``/data/day2/recording``, the function identifies ``day1`` and
         ``day2`` as the unique components (not ``recording``,
@@ -464,33 +458,39 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
 def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path, ...]:
     """Resolves a set of discovered marker-file directories to their recording root directories.
 
-    Recording roots are the meaningful top-level directories that uniquely identify each recording session. Raw data
-    and pipeline outputs may be nested at arbitrary depths below the root, but the root itself is essential for proper
-    recording identification, display labels, and configuration paths. This function uses ``extract_unique_components``
-    to identify the first path component (from the end) that uniquely distinguishes each path, then truncates each
-    path at that component to strip shared structural subdirectories without assuming a fixed directory hierarchy.
+    Recording roots are the meaningful top-level directories that uniquely identify each recording session. A marker
+    directory that is itself a pipeline output directory resolves to its parent, which is the path every downstream
+    status, cleaning, and preparation tool expects. Any other marker directory, whose depth below the recording root
+    is user-defined, is truncated at the trailing components it shares with every other such directory, which strips
+    a common structural subdirectory without assuming any particular name.
 
     Args:
         paths: Directories containing discovered marker files (e.g., parents of ``cindra_parameters.json``
-            or ``combined_metadata.npz``). The pipeline resolves sub-paths to raw data and outputs internally;
+            or ``combined_metadata.npz``). The pipeline resolves sub-paths to raw data and outputs internally, so
             callers should always work with recording roots rather than implementation-specific subdirectories.
 
     Returns:
         A deduplicated tuple of recording root paths, one per unique recording.
-
-    Raises:
-        RuntimeError: If one or more paths do not contain unique components.
     """
-    unique_ids = extract_unique_components(paths=list(paths))
-    roots: list[Path] = []
-    for path, unique_id in zip(paths, unique_ids, strict=True):
-        # Walks up from the path to the ancestor whose name matches the unique component.
-        current = path
-        while current.name != unique_id and current != current.parent:
-            current = current.parent
-        if current not in roots:
-            roots.append(current)
-    return tuple(roots)
+    path_list = list(paths)
+
+    # The combination stage always writes combined_metadata.npz directly into <output_root>/cindra, so an output
+    # marker's parent is the recording root by construction and needs no inference.
+    roots: list[Path | None] = [path.parent if path.name == OUTPUT_DIRECTORY_NAME else None for path in path_list]
+
+    # Resolves the remaining directories against each other only, so an authoritative output root is never shortened
+    # by a component a raw-data sibling happens to share.
+    raw_indices = [index for index, root in enumerate(roots) if root is None]
+    raw_roots = _strip_shared_suffix(paths=[path_list[index] for index in raw_indices])
+    for index, raw_root in zip(raw_indices, raw_roots, strict=True):
+        roots[index] = raw_root
+
+    unique_roots: list[Path] = []
+    for root in roots:
+        if root is not None and root not in unique_roots:
+            unique_roots.append(root)
+
+    return tuple(unique_roots)
 
 
 def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
@@ -669,3 +669,33 @@ def _compute_mroi_region_borders(data_path: Path) -> tuple[int, ...]:
     # another begins, which are all x-coordinates except the minimum (leftmost region).
     sorted_x = sorted(acquisition.roi_x_coordinates)
     return tuple(sorted_x[1:])
+
+
+def _strip_shared_suffix(paths: list[Path]) -> list[Path]:
+    """Truncates each path at the longest trailing component sequence shared by every input path.
+
+    Args:
+        paths: The directories to truncate.
+
+    Returns:
+        The truncated paths, stored in the same order as the input paths. Paths that share no trailing components
+        are returned unchanged.
+    """
+    unique_paths = list(dict.fromkeys(paths))
+
+    # A shared suffix is only meaningful when at least two distinct paths are compared.
+    if len(unique_paths) <= 1:
+        return list(paths)
+
+    reversed_parts = [list(path.parts)[::-1] for path in unique_paths]
+    shortest_length = min(len(parts) for parts in reversed_parts)
+
+    shared_count = 0
+    # Stops one component short of the shortest path, so every root retains at least one identifying component.
+    while shared_count < shortest_length - 1 and len({parts[shared_count] for parts in reversed_parts}) == 1:
+        shared_count += 1
+
+    if shared_count == 0:
+        return list(paths)
+
+    return [Path(*path.parts[: len(path.parts) - shared_count]) for path in paths]

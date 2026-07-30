@@ -26,7 +26,7 @@ class ReferenceImageType(StrEnum):
     """The maximum intensity projection across all frames, highlighting active structures."""
 
 
-@dataclass
+@dataclass(slots=True)
 class RecordingIO:
     """Stores the parameters that specify input recording locations and output directories."""
 
@@ -37,9 +37,9 @@ class RecordingIO:
     by the single-recording processing pipeline."""
 
     dataset_name: str = ""
-    """Specifies the name of the multi_recording dataset. This name is used to create the output directory under each
-    recording's cindra directory (e.g., recording/cindra/multi_recording/{dataset_name}/) and to identify the dataset
-    in the tracker file."""
+    """Specifies the name of the multi_recording dataset. The name is lowercased and used to create the output
+    directory under each recording's cindra directory (e.g., recording/cindra/multi_recording/{dataset_name}/) and to
+    identify the dataset in the tracker file."""
 
     repeat_selection: bool = False
     """Determines whether to repeat the ROI selection step when processing. When True, the pipeline re-runs ROI
@@ -52,7 +52,7 @@ class RecordingIO:
         self.recording_directories = tuple(natsorted(self.recording_directories))
 
 
-@dataclass
+@dataclass(slots=True)
 class ROISelection:
     """Stores parameters for selecting single-recording-detected ROIs to be tracked across multiple recordings."""
 
@@ -87,7 +87,7 @@ class ROISelection:
     (default), channel 2 ROIs use the same mroi_region_margin as channel 1."""
 
 
-@dataclass
+@dataclass(slots=True)
 class DiffeomorphicRegistration:
     """Stores parameters for diffeomorphic demons registration that aligns multiple recordings to the same
     visual (sampling) space.
@@ -114,10 +114,12 @@ class DiffeomorphicRegistration:
     repeat_registration: bool = False
     """Determines whether to repeat diffeomorphic registration when existing registration data is found. When True,
     the pipeline clears existing deformation fields, transformed images, and deformed ROI masks before re-running
-    registration. When False (default), existing registration results are reused if present."""
+    registration, and it additionally re-runs the dependent cross-recording tracking and template projection steps.
+    When False (default), existing registration results, template masks, and projected ROI statistics are all reused
+    if present."""
 
 
-@dataclass
+@dataclass(slots=True)
 class ROITracking:
     """Stores parameters for tracking ROIs across multiple registered recordings using spatial clustering."""
 
@@ -131,9 +133,9 @@ class ROITracking:
     tracked ROI set. Clusters with members in fewer recordings than this threshold are discarded."""
 
     pixel_prevalence: int = 50
-    """The minimum percentage of registered recordings in which a pixel must appear for it to be included in the ROI's
-    cross-recording template mask. Pixels below this threshold are excluded, so only spatially stable regions of each
-    tracked ROI contribute to the template used for fluorescence extraction across recordings."""
+    """The minimum percentage of a cluster's member ROIs in which a pixel must appear for it to be included in the
+    ROI's cross-recording template mask. Pixels below this threshold are excluded, so only spatially stable regions of
+    each tracked ROI contribute to the template used for fluorescence extraction across recordings."""
 
     step_sizes: tuple[int, int] = (200, 200)
     """The block size, in pixels, as (height, width) used to partition the deformed visual space into spatial bins
@@ -157,12 +159,11 @@ class ROITracking:
 class MultiRecordingConfiguration(YamlConfig):
     """Aggregates the user-defined configuration parameters for the multi-recording cindra pipeline.
 
-    This class stores all user-configurable parameters that control how the pipeline processes data.
-    These parameters are immutable during processing - the pipeline reads them but does not modify them.
+    The pipeline reads these parameters and treats them as immutable for the duration of processing.
 
     Notes:
         This class is based on the reference implementation here:
-        https://github.com/sprustonlab/multi_recording-suite2p-public.
+        https://github.com/sprustonlab/multiday-suite2p-public.
 
         For runtime data (computed by the pipeline), see MultiRecordingRuntimeData.
     """
@@ -170,7 +171,7 @@ class MultiRecordingConfiguration(YamlConfig):
     pipeline_type: PipelineType = field(default=PipelineType.MULTI_RECORDING, init=False)
     """Identifies this configuration as a multi-recording pipeline configuration."""
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
-    """Stores runtime behavior settings shared with the single-recording pipeline (parallel workers, progress bars)."""
+    """Stores runtime behavior settings shared with the single-recording pipeline (progress bar display)."""
     recording_io: RecordingIO = field(default_factory=RecordingIO)
     """Stores parameters that specify input recording locations and output directories."""
     roi_selection: ROISelection = field(default_factory=ROISelection)
@@ -189,9 +190,9 @@ class MultiRecordingConfiguration(YamlConfig):
         """Saves the configuration to a YAML file.
 
         Args:
-            file_path: The path to the .yaml file where to save the configuration data.
+            file_path: The path to the .yaml file in which to save the configuration data.
         """
-        ensure_directory_exists(file_path)
+        ensure_directory_exists(path=file_path)
         self.to_yaml(file_path=file_path)
 
     @classmethod

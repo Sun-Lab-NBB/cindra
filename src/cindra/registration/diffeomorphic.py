@@ -16,8 +16,9 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 _MINIMUM_GRID_DIMENSION: int = 4
-"""The minimum B-spline grid dimension required for frozen edge constraints. Grids smaller than this cannot properly
-constrain edge deformations."""
+"""The B-spline grid dimension threshold used to pre-filter scale levels when freeze_edges is enabled. A level is
+skipped when every dimension of the proposed knot grid falls below this value. SplineGrid itself freezes edges only
+when every dimension holds at least 6 knots, so grids this coarse cannot constrain edge deformations."""
 
 
 class DiffeomorphicDemonsRegistration:
@@ -28,7 +29,8 @@ class DiffeomorphicDemonsRegistration:
     to a common mean space.
 
     Args:
-        images: Two or more 2D images to register. Images are converted to float32 if not already floating point.
+        images: Two or more 2D images to register. Images that do not already use the float32 dtype are converted to
+            float32.
         speed_factor: The relative force of the deformation transform. This is the most important parameter to tune.
             For most cases, a value between 1 and 5 is reasonable.
         scale_sampling: The number of iterations per scale level. Values between 20 and 30 are reasonable, but higher
@@ -78,10 +80,9 @@ class DiffeomorphicDemonsRegistration:
         noise_factor: float = 1.0,
     ) -> None:
         # Ensures that the input images use the fp32 precision, consistent with the rest of the cindra codebase.
-        self._images: list[NDArray[np.float32]] = []
-        for image in images:
-            converted_image = image if image.dtype == np.float32 else image.astype(np.float32)
-            self._images.append(converted_image)
+        self._images: list[NDArray[np.float32]] = [
+            image if image.dtype == np.float32 else image.astype(np.float32) for image in images
+        ]
 
         # Caches registration parameters to class attributes.
         self._speed_factor: float = speed_factor
@@ -101,6 +102,14 @@ class DiffeomorphicDemonsRegistration:
         self._pyramids: list[ScaleSpacePyramid] | None = None
         self._cache: dict[str, tuple[tuple[int, int, float], Deformation | NDArray[np.float32]]] = {}
         self._interpolation_order: int = 1
+
+    def __repr__(self) -> str:
+        """Returns a string representation of the DiffeomorphicDemonsRegistration instance."""
+        return (
+            f"DiffeomorphicDemonsRegistration(image_count={len(self._images)}, "
+            f"speed_factor={self._speed_factor}, scale_sampling={self._scale_sampling}, "
+            f"final_scale={self._final_scale})"
+        )
 
     def get_deformation(self, image_index: int) -> Deformation:
         """Returns the deformation for the specified image.
@@ -130,14 +139,14 @@ class DiffeomorphicDemonsRegistration:
         iteration_factor = 0.5 ** (1.0 / self._scale_sampling)
 
         # Creates scale-space pyramids for each image.
-        self._pyramids = [ScaleSpacePyramid(data=image, min_scale=self._final_scale) for image in self._images]
+        self._pyramids = [ScaleSpacePyramid(data=image, minimum_scale=self._final_scale) for image in self._images]
 
         # Computes maximum scale from image dimensions (quarter of largest dimension).
-        max_scale = max(self._images[0].shape) * 0.25
+        maximum_scale = max(self._images[0].shape) * 0.25
 
-        # Computes the number of scale levels needed to span from final_scale to max_scale.
+        # Computes the number of scale levels needed to span from final_scale to maximum_scale.
         scale_level_count = 1
-        while self._final_scale * 2 ** (scale_level_count - 1) < max_scale:
+        while self._final_scale * 2 ** (scale_level_count - 1) < maximum_scale:
             scale_level_count += 1
 
         # Computes total iterations for the progress bar. When smooth_scale is enabled, the coarsest level is skipped.
@@ -150,7 +159,7 @@ class DiffeomorphicDemonsRegistration:
         # state set by the pipeline entry point.
         previous_state = console.progress_enabled
         if progress:
-            console.enable_progress()  # pragma: no cover — only when caller sets progress=True
+            console.enable_progress()  # pragma: no cover, only when the caller sets progress=True
         else:
             console.disable_progress()
 
@@ -183,7 +192,7 @@ class DiffeomorphicDemonsRegistration:
                         if self._smooth_scale:
                             scale = max(self._final_scale, scale * iteration_factor)
         finally:
-            if previous_state:  # pragma: no cover — restores caller's progress state
+            if previous_state:  # pragma: no cover, restores the caller's progress state
                 console.enable_progress()
             else:
                 console.disable_progress()
@@ -200,11 +209,8 @@ class DiffeomorphicDemonsRegistration:
         """
         iteration_key = (level, iteration, scale)
 
-        # Computes incremental deformation for each image.
-        incremental_deformations = [
-            self._compute_groupwise_deformation(image_index=image_index, iteration_key=iteration_key)
-            for image_index in range(len(self._images))
-        ]
+        # Computes the incremental deformation of every image in one pass over the image pairs.
+        incremental_deformations = self._compute_groupwise_deformations(iteration_key=iteration_key)
 
         # Applies incremental deformations to the running totals.
         for image_index in range(len(self._images)):
@@ -212,54 +218,55 @@ class DiffeomorphicDemonsRegistration:
                 image_index=image_index, incremental_deformation=incremental_deformations[image_index]
             )
 
-    def _compute_groupwise_deformation(
-        self, image_index: int, iteration_key: tuple[int, int, float]
-    ) -> Deformation | None:
-        """Computes the deformation for one image by averaging pairwise deformations to all other images.
+    def _compute_groupwise_deformations(self, iteration_key: tuple[int, int, float]) -> list[Deformation | None]:
+        """Computes the deformation of every image by averaging its pairwise deformations to all other images.
+
+        Notes:
+            The Demons formulation makes the deformation between two images antisymmetric, so one computation per
+            unordered pair supplies both of its images. Visiting each pair once therefore holds two accumulator fields
+            per image rather than one field per ordered pair, which keeps the working set linear in the group size
+            instead of quadratic.
 
         Args:
-            image_index: The index of the image for which to compute the deformation.
-            iteration_key: Tuple of (level, iteration, scale) identifying this iteration.
+            iteration_key: The (level, iteration, scale) identifier for the current iteration.
 
         Returns:
-            The averaged deformation, or None if the grid would be too small.
+            A list holding each image's averaged deformation, or a list of None values if the grid would be too small.
         """
         scale = iteration_key[2]
+        image_count = len(self._images)
+        image_height, image_width = self._images[0].shape
 
-        # Returns None if the B-spline grid would be too small for frozen edges.
+        # Returns None for every image if the B-spline grid would be too small for frozen edges. The check reads the
+        # shared image shape, so it holds for the whole group rather than for one image.
         if self._freeze_edges:
             grid_sampling = self._compute_grid_sampling(scale=scale)
-            image_height, image_width = self._images[0].shape
             grid_shape = SplineGrid.compute_grid_shape(
                 field_height=image_height, field_width=image_width, grid_sampling=grid_sampling
             )
-            # pragma: no cover — grid too coarse at this scale level
             if all(dimension < _MINIMUM_GRID_DIMENSION for dimension in grid_shape):  # pragma: no cover
-                return None
+                return [None] * image_count
 
-        # Accumulates pairwise deformations from this image to all others.
-        image_height, image_width = self._images[0].shape
-        total_deformation = Deformation.identity(height=image_height, width=image_width)
-        pair_count = 0
+        total_deformations: list[Deformation] = [
+            Deformation.identity(height=image_height, width=image_width) for _ in range(image_count)
+        ]
 
-        for other_index in range(len(self._images)):
-            if image_index == other_index:
-                continue
+        # Adds each pair's deformation to the first image's total and its negation to the second image's total. Pairs
+        # are visited in ascending order, so every image accumulates its contributions in ascending partner order.
+        for first_index in range(image_count):
+            for second_index in range(first_index + 1, image_count):
+                pairwise_deformation = self._compute_pairwise_deformation(
+                    source_index=first_index, target_index=second_index, iteration_key=iteration_key
+                )
+                total_deformations[first_index] += pairwise_deformation
+                total_deformations[second_index] += pairwise_deformation.scale(factor=-1.0)
 
-            pairwise_deformation = self._compute_pairwise_deformation(
-                source_index=image_index, target_index=other_index, iteration_key=iteration_key
-            )
-            if (
-                pairwise_deformation is not None
-            ):  # pragma: no branch - _compute_pairwise_deformation always returns a Deformation, never None.
-                pair_count += 1
-                total_deformation += pairwise_deformation
+        # Averages the accumulated deformations. Every image pairs with each of the others exactly once.
+        pair_count = image_count - 1
+        if pair_count > 1:  # pragma: no cover, only reached with more than two images in groupwise registration
+            total_deformations = [total.scale(factor=1.0 / pair_count) for total in total_deformations]
 
-        # Averages the accumulated deformations.
-        if pair_count > 1:  # pragma: no cover — only with >2 images in groupwise registration
-            total_deformation = total_deformation.scale(factor=1.0 / pair_count)
-
-        return total_deformation
+        return list(total_deformations)
 
     def _compute_pairwise_deformation(
         self, source_index: int, target_index: int, iteration_key: tuple[int, int, float]
@@ -271,22 +278,12 @@ class DiffeomorphicDemonsRegistration:
         Args:
             source_index: Index of the source image.
             target_index: Index of the target image.
-            iteration_key: Tuple of (level, iteration, scale) identifying this iteration.
+            iteration_key: The (level, iteration, scale) identifier for the current iteration.
 
         Returns:
             The regularized deformation from source to target.
         """
         scale = iteration_key[2]
-
-        # Checks cache for this pair or its symmetric counterpart.
-        cached = self._get_cached(key=f"deform_{source_index}_{target_index}", iteration_key=iteration_key)
-        if isinstance(cached, Deformation):  # pragma: no cover — cache hit for previously computed pair
-            return cached
-
-        cached = self._get_cached(key=f"deform_{target_index}_{source_index}", iteration_key=iteration_key)
-        if isinstance(cached, Deformation):
-            # Negates the cached symmetric result by scaling by -1.
-            return cached.scale(factor=-1.0)
 
         # Gets images and their gradients at the current scale.
         source_image, source_gradient = self._get_image_and_gradient(
@@ -327,41 +324,46 @@ class DiffeomorphicDemonsRegistration:
 
         # Regularizes using B-spline grid to ensure diffeomorphism.
         force_deformation = Deformation(field_y=field_y.astype(np.float32), field_x=field_x.astype(np.float32))
-        regularized_deformation = self._regularize_deformation(
-            scale=scale, deformation=force_deformation, image_shape=source_image.shape
-        )
-
-        self._set_cached(
-            key=f"deform_{source_index}_{target_index}", iteration_key=iteration_key, data=regularized_deformation
-        )
-        return regularized_deformation
+        return self._regularize_deformation(scale=scale, deformation=force_deformation, image_shape=source_image.shape)
 
     def _get_image_and_gradient(
         self, image_index: int, iteration_key: tuple[int, int, float]
     ) -> tuple[NDArray[np.float32], tuple[NDArray[np.float32], NDArray[np.float32]]]:
         """Returns the image at the current scale along with its gradient.
 
+        Notes:
+            The gradient is cached alongside the deformed image it is derived from. The groupwise loop pairs every
+            image with every other image, so it requests each image once per other group member, and recomputing the
+            two convolutions on every request would scale with the square of the group size.
+
         Args:
             image_index: Index of the image to retrieve.
-            iteration_key: Tuple of (level, iteration, scale) identifying this iteration.
+            iteration_key: The (level, iteration, scale) identifier for the current iteration.
 
         Returns:
-            A tuple of (image, (gradient_y, gradient_x)).
+            The image resampled to the current scale with the accumulated deformation applied, together with its
+            vertical and horizontal central-difference gradients.
         """
         scale = iteration_key[2]
 
-        # Tries to retrieve cached image.
-        cached = self._get_cached(key=f"img_{image_index}", iteration_key=iteration_key)
-        if isinstance(cached, np.ndarray):  # pragma: no cover — cache hit for previously deformed image
-            image = cached
-        else:
-            image = self._get_deformed_image(image_index=image_index, scale=scale)
-            self._set_cached(key=f"img_{image_index}", iteration_key=iteration_key, data=image)
+        # Tries to retrieve the cached image together with the gradient computed from it. The gradient is stored as a
+        # single stacked array, so that it travels through the same cache as every other cached array.
+        cached_image = self._get_cached(key=f"image_{image_index}", iteration_key=iteration_key)
+        cached_gradient = self._get_cached(key=f"gradient_{image_index}", iteration_key=iteration_key)
+        if isinstance(cached_image, np.ndarray) and isinstance(cached_gradient, np.ndarray):
+            return cached_image, (cached_gradient[0], cached_gradient[1])
+
+        image = self._get_deformed_image(image_index=image_index, scale=scale)
 
         # Computes gradient using central differences.
         gradient_kernel = np.array([0.5, 0, -0.5], dtype=np.float32)
         gradient_y = scipy.ndimage.convolve1d(input=image, weights=gradient_kernel, axis=0, mode="nearest")
         gradient_x = scipy.ndimage.convolve1d(input=image, weights=gradient_kernel, axis=1, mode="nearest")
+
+        self._set_cached(key=f"image_{image_index}", iteration_key=iteration_key, data=image)
+        self._set_cached(
+            key=f"gradient_{image_index}", iteration_key=iteration_key, data=np.stack((gradient_y, gradient_x))
+        )
 
         return image, (gradient_y, gradient_x)
 
@@ -376,7 +378,7 @@ class DiffeomorphicDemonsRegistration:
             The deformed image at the specified scale.
         """
         # Validates that pyramids have been initialized (should always be true when this method is called).
-        if self._pyramids is None:  # pragma: no cover — defensive guard; register() always initializes pyramids
+        if self._pyramids is None:  # pragma: no cover, defensive guard because register() always initializes pyramids
             message = "Unable to retrieve image. The pyramids have not been initialized, call register() first."
             console.error(message=message, error=RuntimeError)
 
@@ -398,7 +400,7 @@ class DiffeomorphicDemonsRegistration:
             image_index: Index of the image to update.
             incremental_deformation: The incremental deformation to apply, or None to skip.
         """
-        if incremental_deformation is None or incremental_deformation.is_identity:  # pragma: no cover — no-op skip
+        if incremental_deformation is None or incremental_deformation.is_identity:  # pragma: no cover, no-op skip
             return
 
         # Gets or creates the current accumulated deformation.
@@ -411,7 +413,7 @@ class DiffeomorphicDemonsRegistration:
         current_deformation = current_deformation.resize_field(
             new_height=incremental_deformation.field_shape[0], new_width=incremental_deformation.field_shape[1]
         )
-        self._deformations[image_index] = current_deformation.compose(incremental_deformation)
+        self._deformations[image_index] = current_deformation.compose(other=incremental_deformation)
 
     def _regularize_deformation(
         self, scale: float, deformation: Deformation, image_shape: tuple[int, ...] | None = None
@@ -434,7 +436,7 @@ class DiffeomorphicDemonsRegistration:
         # uses the original-pixel-unit grid_sampling since both scale and grid_sampling must be in the same coordinate
         # system.
         original_grid_sampling = grid_sampling
-        if image_shape is not None and self._images is not None and len(self._images) > 0:
+        if image_shape is not None and self._images:
             downsample_ratio = image_shape[0] / self._images[0].shape[0]
             if downsample_ratio < 1.0:
                 grid_sampling = grid_sampling * downsample_ratio
@@ -483,7 +485,7 @@ class DiffeomorphicDemonsRegistration:
             The cached data if valid, otherwise None.
         """
         entry = self._cache.get(key)
-        if entry and entry[0] == iteration_key:
+        if entry is not None and entry[0] == iteration_key:
             return entry[1]
         return None
 

@@ -44,8 +44,8 @@ skills for output verification.
 **Handoff rules:** If the user asks about specific output files, array shapes, data interpretation,
 registration arrays, tracking templates, or processing result verification, invoke `/multi-recording-results`.
 If the user asks about parameter tuning, registration/tracking configuration, or ROI selection criteria, invoke
-`/multi-recording-configuration`. This skill owns the processing workflow only — not the data it produces or
-the parameters it consumes.
+`/multi-recording-configuration`. This skill owns the processing workflow. The data it produces belongs to
+`/multi-recording-results`, and the parameters it consumes belong to `/multi-recording-configuration`.
 
 ---
 
@@ -91,11 +91,19 @@ single-recording status `completed`). If any recording is incomplete, invoke the
 | `reset_processing_phases_tool`   | Selectively reset completed phases for re-runs                  |
 | `clean_processing_output_tool`   | Delete output files for specific phases to reclaim disk space   |
 
-### Configuration & name resolution tools
+### Name resolution tools
+
+| Tool                        | Purpose                                                       |
+|-----------------------------|---------------------------------------------------------------|
+| `resolve_dataset_name_tool` | Constructs qualified dataset names from base name + specifier |
+
+### Cross-referenced tools
+
+`/multi-recording-configuration` owns the two tools below. Invoke that skill for their parameters and
+usage guidance.
 
 | Tool                        | Purpose                                                          |
 |-----------------------------|------------------------------------------------------------------|
-| `resolve_dataset_name_tool` | Constructs qualified dataset names from base name + specifier    |
 | `discover_recordings_tool`  | Discovers single and multi-recording candidates under a root dir |
 | `generate_config_file_tool` | Generates default multi-recording configuration YAML             |
 
@@ -118,12 +126,12 @@ Phase 1: DISCOVER (phase name: discovery, CPU bound, parallel by dataset)
 ├── Clusters ROI masks across recordings
 ├── Generates template masks for tracked ROIs
 ├── Projects template masks back to each recording's coordinate system
-└── One job per dataset, workers from the shared multi_recording allocation (see Resource management)
+└── One job per dataset, workers from the discovery resource class (30 per job, see Resource management)
 
 Phase 2: EXTRACT (phase name: extraction, CPU bound, parallel by recording)
 ├── Applies template masks to extract fluorescence
 ├── Computes neuropil signals, spike deconvolution
-└── One job per recording, workers from the shared multi_recording allocation (see Resource management)
+└── One job per recording, workers from the extraction resource class (16 per job, see Resource management)
 ```
 
 Batch processing across multiple datasets:
@@ -167,7 +175,7 @@ common parent, and call `resolve_dataset_name_tool` once per group to generate u
 The processing workflow uses a **prepare-then-execute** model:
 
 1. **Prepare** creates an execution manifest (tracker files, per-dataset configurations, job lists) without
-   starting any computation. This step is idempotent — calling it again on the same datasets returns the
+   starting any computation. This step is idempotent, so calling it again on the same datasets returns the
    existing manifest.
 
 2. **Execute** dispatches jobs from the manifest with prerequisite validation, resource allocation, and automatic
@@ -192,47 +200,48 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
 
 ### Workflow steps
 
-1. **Verify prerequisites** — Use `discover_recordings_tool` to find eligible recordings (check the
-   `multi_recording_candidates` list) and `get_recording_status_tool` to confirm each has
-   single-recording status `completed`. If any recording is incomplete, invoke
-   `/single-recording-processing` (or upstream skills as needed).
+1. **Verify prerequisites.** Use `discover_recordings_tool`, documented in
+   `/multi-recording-configuration`, to find eligible recordings (check the `multi_recording_candidates`
+   list) and `get_recording_status_tool` to confirm each has single-recording status `completed`. If any
+   recording is incomplete, invoke `/single-recording-processing` (or upstream skills as needed).
 
-2. **Organize into datasets** — Group recordings by common parent directory, user-provided grouping,
+2. **Organize into datasets.** Group recordings by common parent directory, user-provided grouping,
    or semantic analysis of recording paths. Each group becomes one dataset in the batch.
 
-3. **Resolve dataset names** — Ask the user for a shared base dataset name (e.g., "learning_task").
+3. **Resolve dataset names.** Ask the user for a shared base dataset name (e.g., "learning_task").
    For each group, call `resolve_dataset_name_tool` with the base name and recording paths to
    generate a unique qualified name. The specifier is derived automatically from the common parent
    directory, or the user can provide one explicitly.
 
-4. **Configure** — Ask the user if they have an existing template configuration file. If not,
+4. **Configure.** Ask the user if they have an existing template configuration file. If not,
    invoke `/multi-recording-configuration` to create one. Template configs are reusable across
    datasets and live at user-chosen locations (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). The template's
-   `dataset_name` only needs to be a non-empty string to pass validation — the prepare tool
+   `dataset_name` only needs to be a non-empty, filesystem-safe string to pass validation. The prepare tool
    overwrites it with the qualified dataset name you pass per dataset (lowercased to a
-   filesystem-safe key). Do NOT create per-dataset config copies — the prepare tool automatically
+   filesystem-safe key). Do NOT create per-dataset config copies. The prepare tool automatically
    saves resolved copies as `multi_recording_configuration.yaml` inside each dataset's output
    directory, preserving the original template. Pass the same template path for multiple datasets
    that share parameters.
 
-5. **Confirm CPU allocation** — Compute the saturating allocation for the session using the algorithm
-   in the Resource management section. Discovery and extraction jobs share one `multi_recording`
-   resource class, so the session resolves one allocation from their combined job count. Present the
-   computed values to the user as a summary table before starting. The example below covers 2 datasets
-   of 15 recordings each on a 128-core host, which is 2 discovery jobs plus 30 extraction jobs:
+5. **Confirm CPU allocation.** Read the per-phase defaults from the Resource management section.
+   Discovery and extraction resolve independently, so present one row per class. The example below
+   covers 2 datasets of 15 recordings each on a 128-core host, which is 2 discovery jobs plus 30
+   extraction jobs against a budget of 126:
 
    ```text
-   Resource class  | Jobs | Workers/Job | Max Parallel | Total Cores
-   ----------------|------|-------------|--------------|------------
-   multi_recording |   32 |          30 |            4 |         120
+   Resource class | Jobs | Workers/Job | Max Parallel | Total Cores
+   ---------------|------|-------------|--------------|------------
+   discovery      |    2 |          30 |            2 |          60
+   extraction     |   30 |          16 |            7 |         112
    ```
 
    Ask the user to confirm or override. Both `workers_per_job` and `max_parallel_jobs` default to
-   `-1` (automatic). Only pass explicit values if the user requests an override. Report the values
+   None, which accepts the measured allocation. Only pass explicit values if the user requests an
+   override, using a positive count for an exact value or -1 for every available core. Report the values
    returned in the `resource_classes` mapping of the execute tool response rather than recomputing
    them per phase.
 
-6. **Execute** — Choose one of two approaches:
+6. **Execute.** Choose one of two approaches:
 
    **Simple (recommended for straightforward runs):**
    Call `execute_full_pipeline_tool` with `pipeline_type="multi-recording"` and
@@ -247,7 +256,7 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
       job descriptor needs `configuration_path`, `tracker_path`, `job_id`, and `pipeline_type` from
       the manifest.
 
-7. **Monitor** — Use `get_processing_jobs_status_tool` to check progress. Optionally use
+7. **Monitor.** Use `get_processing_jobs_status_tool` to check progress. Optionally use
    `get_active_execution_timing_tool` for per-job timing and session throughput. These two tools
    reflect only the active in-process execution session and return `active: false` with empty jobs
    when no session is running. This drained state happens not only after an MCP server restart, a
@@ -259,7 +268,7 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
    output directory, see the Output-directory path rule). Present status as a formatted table
    (see Status formatting section).
 
-8. **Handle completion** — When all datasets finish, check for failures. A `success: true` return
+8. **Handle completion.** When all datasets finish, check for failures. A `success: true` return
    only means a tool ran, not that work is ready or done: gate decisions on the domain flag, not on
    `success`. For `verify_multi_recording_output_tool`, gate on `complete` (false whenever `missing`
    is non-empty). For validate tools, gate on `valid`. For `execute_full_pipeline_tool`, gate on
@@ -268,63 +277,69 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
    appropriate skill (see Error routing section). On success, invoke `/multi-recording-results`
    to verify outputs, then `/visualization` for visual inspection.
 
-#### Output-directory path rule
+### Output-directory path rule
 
 `get_recording_status_tool`, `verify_multi_recording_output_tool`, and `clean_processing_output_tool`
 all take the recording OUTPUT directory (the parent of the `cindra/` folder), which equals the
-per-recording `output_path` used during single-recording processing — NOT the raw-data root. This
+per-recording `output_path` used during single-recording processing, rather than the raw-data root. This
 matters on a separate-output layout where output and raw-data roots differ:
 
 - `get_recording_status_tool` and `clean_processing_output_tool` resolve `cindra/` directly under the
   given path with NO fallback. Feeding the raw-data root makes them report `not_started` or
-  "directory not found" — a silent false negative.
+  "directory not found", a silent false negative.
 - `verify_multi_recording_output_tool` also recursively searches for `configuration.yaml`, so it may
   still pass via that fallback even when fed the wrong root. The two then disagree.
 
-Always reuse the output directory captured from the prepare manifest (any recording's `output_path`
-belonging to the dataset) for status, verify, and clean.
+Always reuse the recording OUTPUT directory (the parent of `cindra/`) that single-recording processing
+used, its `output_path` entry in the `prepare_single_recording_batch_tool` manifest, for status, verify,
+and clean. The multi-recording prepare manifest exposes no `output_path` field: each dataset entry holds
+only `configuration_path`, `tracker_path`, `dataset_name`, `pipeline_type`, `discover_job`, and
+`extract_jobs`.
 
 ### Re-running specific phases
 
 To re-run specific phases (e.g., after changing tracking parameters):
 
-1. Use `reset_processing_phases_tool` to reset the target phases to SCHEDULED status. Downstream
+1. Use `reset_processing_phases_tool` with `tracker_path`, `phases`, and
+   `pipeline_type="multi-recording"` to reset the target phases to SCHEDULED status. Downstream
    phases are automatically reset (e.g., resetting `discovery` also resets `extraction`).
 2. Optionally modify the configuration file before re-execution.
 3. Optionally use `clean_processing_output_tool` to delete output files from the reset phases
-   (requires the `dataset` parameter for multi-recording).
+   (requires `pipeline_type="multi-recording"` plus the lowercased `dataset` name).
 4. Call `execute_processing_jobs_tool` with the reset jobs from the manifest.
 
 ---
 
 ## Resource management
 
-Multi-recording jobs belong to the `multi_recording` resource class, which uses saturating core allocation to
-distribute CPU cores across parallel compute-bound jobs. When both `workers_per_job` and `max_parallel_jobs`
-are set to `-1` (automatic), the allocator runs the following algorithm:
+Discovery and extraction run under separate resource classes, each carrying its own measured per-job worker count. The
+session CPU budget is `cpu_count - 2`, with 2 cores reserved for system operations, and the dispatcher holds the sum of
+the cores committed by every class inside that budget, so the two classes interleave rather than each claiming the whole
+budget.
 
-1. **Budget**: `cpu_count - 2` (2 cores reserved for system operations)
-2. **Max parallel jobs**: `min(total_jobs, max(1, budget // 30))` (targets ~30 workers per job, with a floor of 1)
-3. **Raw workers per job**: `budget // max_parallel_jobs`
-4. **Round down** to the nearest multiple of 5
-5. **Saturate**: If workers per job falls below 10 and parallelism > 1, reduce parallelism and
-   recalculate until each job has at least 10 workers
+| Phase    | Resource class | Cores per job | Concurrency cap    |
+|----------|----------------|---------------|--------------------|
+| DISCOVER | `discovery`    | 30            | Session CPU budget |
+| EXTRACT  | `extraction`   | 16            | Session CPU budget |
 
-| CPU Cores | Budget | Jobs | Workers/Job | Max Parallel | Total Utilized |
-|-----------|--------|------|-------------|--------------|----------------|
-| 128       | 126    | 4    | 30          | 4            | 120            |
-| 64        | 62     | 4    | 30          | 2            | 60             |
-| 32        | 30     | 4    | 30          | 1            | 30             |
-| 16        | 14     | 4    | 14 (→ 10)   | 1            | 10             |
+Discovery's 30 is the saturating allocation the phase is admitted at, because its cost grows with the square of the
+recording count. Extraction's 16 is measured: the phase reads each frame batch serially before the kernel runs, so it
+plateaus above that width.
 
-Discovery and extraction jobs share one `multi_recording` resource class, so a session resolves a single
-allocation from the combined count of the discovery and extraction jobs it holds. The discover phase contributes
-one job per dataset, and the extract phase contributes one job per recording. Both `workers_per_job` and
-`max_parallel_jobs` default to `-1` (automatic) and can be overridden explicitly in
-`execute_processing_jobs_tool` or `execute_full_pipeline_tool`. Both execute tools return a session-level
-`cpu_budget` and a `resource_classes` mapping keyed by class name, whose `multi_recording` entry carries
-`workers_per_job`, `max_parallel_jobs` and `job_count`. `get_processing_jobs_status_tool` returns the same
-mapping with `pending` and `active` in place of `job_count`.
+Each class caps its own concurrency at `min(budget // cores_per_job, job_count)`. The discover phase contributes
+one job per dataset, and the extract phase contributes one job per recording. On a 128-core host, with a budget of
+126, discovery therefore runs at most 4 jobs concurrently and extraction at most 7.
+
+Neither count shrinks on a small host: a 16-core machine still asks for 30 discovery workers against a budget of 14 and
+dispatches one job regardless, because the dispatcher always admits a single job even when the budget cannot cover it.
+
+Both `workers_per_job` and `max_parallel_jobs` default to None and can be overridden in
+`execute_processing_jobs_tool` or `execute_full_pipeline_tool`. A positive value is used exactly and -1 requests every
+available core. An override is a single scalar applied to every non-fixed class alike, so passing
+`workers_per_job=20` sets discovery and extraction to 20 both. Both execute tools return a session-level `cpu_budget`
+and a `resource_classes` mapping keyed by class name, with `discovery` and `extraction` entries carrying
+`workers_per_job`, `max_parallel_jobs` and `job_count`. `get_processing_jobs_status_tool` returns the same mapping with
+`pending` and `active` in place of `job_count`.
 
 ---
 
@@ -409,7 +424,7 @@ Multi-Recording Processing Workflow:
 - [ ] All recordings confirmed as single-recording complete (status: completed)
 - [ ] Recordings grouped into datasets
 - [ ] Dataset names resolved via `resolve_dataset_name_tool`
-- [ ] Configuration file confirmed or created per dataset via `/multi-recording-configuration`
+- [ ] Template configuration confirmed or created via `/multi-recording-configuration` (reusable across datasets)
 - [ ] CPU core allocation confirmed with user
 - [ ] Batch prepared or full pipeline executed
 - [ ] Status monitored until all datasets complete or fail

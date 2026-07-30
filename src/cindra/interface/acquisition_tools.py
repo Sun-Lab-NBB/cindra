@@ -61,8 +61,9 @@ def generate_acquisition_parameters_file_tool(
     if not directory.exists():
         return {
             "success": False,
-            "error": f"Unable to generate acquisition parameters file. The directory does not exist: "
-            f"{output_directory}",
+            "error": (
+                f"Unable to generate acquisition parameters file. The directory does not exist: {output_directory}"
+            ),
         }
 
     if not directory.is_dir():
@@ -170,9 +171,11 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
     """Validates that a recording directory is fully ready for cindra single-recording processing.
 
     Verifies that the cindra_parameters.json acquisition parameters file is present and valid, that raw TIFF files
-    exist and are readable with consistent dimensions, and that the TIFF data is compatible with the acquisition
-    parameters. This tool is intended as the final readiness gate before committing compute resources to pipeline
-    execution.
+    exist and are readable, and that the TIFF data is compatible with the acquisition parameters. Files whose frame
+    shape differs from the shape holding the most frames are reported as warnings rather than errors. A raw directory
+    commonly holds an unrelated file such as an anatomical z-stack, which must be excluded through the
+    'file_io.ignored_file_names' configuration parameter. Serves as the final readiness gate before committing
+    compute resources to pipeline execution.
 
     Args:
         recording_directory: The absolute path to the recording directory containing raw TIFF files and a
@@ -211,7 +214,7 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
             "success": False,
             "error": (
                 f"Unable to validate recording readiness. No {PARAMETERS_FILENAME} found in: {recording_directory}. "
-                f"Use generate_acquisition_parameters_file to create one before validating readiness."
+                f"Use generate_acquisition_parameters_file_tool to create one before validating readiness."
             ),
         }
 
@@ -274,6 +277,7 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
     reference_height: int | None = None
     reference_width: int | None = None
     reference_dtype: str | None = None
+    shape_groups: dict[tuple[int, int], list[tuple[str, int]]] = {}
 
     for tiff_path in tiff_paths:
         try:
@@ -294,24 +298,41 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
             file_details.append(
                 {"name": tiff_path.name, "frames": page_count, "height": height, "width": width, "dtype": dtype}
             )
-            total_frames += page_count
+            shape_groups.setdefault((height, width), []).append((tiff_path.name, page_count))
 
-            # Tracks reference dimensions from the first valid file.
-            if reference_height is None:
-                reference_height = height
-                reference_width = width
+            # Tracks the reference dtype from the first valid file. Frame dimensions are resolved after the loop, from
+            # the shape whose files hold the most frames in total.
+            if reference_dtype is None:
                 reference_dtype = dtype
-            else:
-                if height != reference_height or width != reference_width:
-                    errors.append(
-                        f"Dimension mismatch in {tiff_path.name}: {height}x{width} (expected "
-                        f"{reference_height}x{reference_width})."
-                    )
-                if dtype != reference_dtype:
-                    warnings.append(f"Dtype varies in {tiff_path.name}: {dtype} (first file uses {reference_dtype}).")
+            elif dtype != reference_dtype:
+                warnings.append(f"Dtype varies in {tiff_path.name}: {dtype} (first file uses {reference_dtype}).")
 
         except Exception as exception:
             errors.append(f"Unable to read TIFF file {tiff_path.name}: {type(exception).__name__}: {exception}")
+
+    # Resolves the recording's frame shape as the shape whose files hold the most frames in total, and counts
+    # frames from those files alone. Receives a directory rather than a configuration, so it cannot read the
+    # 'file_io.ignored_file_names' exclusions the pipeline applies. A raw directory commonly holds a differently shaped
+    # file that is not part of the recording, such as an anatomical z-stack, and reporting it as an error here would
+    # fail a recording the pipeline processes correctly. The conversion stage still rejects a genuinely ragged
+    # recording, so this tool reports the outliers and leaves the verdict to the exclusions the caller configures.
+    if shape_groups:
+        (reference_height, reference_width), majority_files = max(
+            shape_groups.items(), key=lambda group: sum(page_count for _, page_count in group[1])
+        )
+        total_frames = sum(page_count for _, page_count in majority_files)
+
+        for (height, width), outlier_files in shape_groups.items():
+            if (height, width) == (reference_height, reference_width):
+                continue
+            outlier_names = ", ".join(name for name, _ in outlier_files)
+            warnings.append(
+                f"Frame shape differs in {outlier_names}: {height}x{width}, while the other files hold "
+                f"{reference_height}x{reference_width} frames. Every file the pipeline loads must hold frames of the "
+                f"same shape, so exclude any file that is not part of the recording, such as an anatomical z-stack, "
+                f"through the 'file_io.ignored_file_names' configuration parameter. The frame counts reported below "
+                f"cover the {reference_height}x{reference_width} files alone."
+            )
 
     # Cross-validates TIFF data against acquisition parameters.
     frames_per_plane: int = 0
@@ -322,8 +343,11 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
         if remainder != 0:
             warnings.append(
                 f"Total frames ({total_frames}) do not divide evenly by the interleave stride "
-                f"({interleave_stride} = {plane_number} planes x {channel_number} channels). "
-                f"The last {remainder} frames will be discarded during binarization."
+                f"({interleave_stride} = {plane_number} planes x {channel_number} channels), which happens when an "
+                f"acquisition stops partway through a volume. Binarization keeps the {remainder} trailing frames by "
+                f"sizing each plane binary to the frames its own interleave position receives, so the leading planes "
+                f"hold one frame more than the trailing ones. The combination stage then trims the combined traces to "
+                f"the shortest contributing plane, so only the combined dataset loses those frames."
             )
 
         if frames_per_plane < _MINIMUM_RECOMMENDED_FRAMES_PER_PLANE:
@@ -336,10 +360,10 @@ def validate_recording_readiness_tool(recording_directory: str) -> dict[str, obj
     if isinstance(roi_number, int) and roi_number > 1 and roi_lines and reference_height is not None:
         for roi_index, lines in enumerate(roi_lines):
             if isinstance(lines, list) and lines:
-                max_line = max(lines)
-                if max_line >= reference_height:
+                maximum_line = max(lines)
+                if maximum_line >= reference_height:
                     errors.append(
-                        f"ROI {roi_index} roi_lines maximum ({max_line}) exceeds frame height ({reference_height})."
+                        f"ROI {roi_index} roi_lines maximum ({maximum_line}) exceeds frame height ({reference_height})."
                     )
 
     # Checks dtype compatibility with the pipeline.

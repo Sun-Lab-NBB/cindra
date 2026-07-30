@@ -84,7 +84,7 @@ class TestDownsample:
         assert result.shape == (1, 6, 7)
         # Interior elements from complete 2x2 blocks should be 1.0.
         np.testing.assert_allclose(result[0, :5, :6], 1.0)
-        # Bottom-right corner: tapered twice (0.5 * 0.5 = 0.25)
+        # Bottom-right corner: tapered twice (0.5 * 0.5 = 0.25).
         np.testing.assert_allclose(result[0, -1, -1], 0.25)
 
     def test_odd_dimensions_without_taper(self) -> None:
@@ -305,7 +305,7 @@ class TestComputeRegistrationBlocks:
     """Tests compute_registration_blocks."""
 
     def test_single_block_when_smaller_than_block_size(self) -> None:
-        """Verifies a single block when image is smaller than block size."""
+        """Verifies a single block is produced when the image is smaller than the block size."""
         y_blocks, x_blocks, block_counts, actual_size, _kernel = compute_registration_blocks(
             height=64, width=64, block_size=(128, 128)
         )
@@ -357,7 +357,7 @@ class TestComputeRegistrationBlocks:
         assert kernel.shape == (total_blocks, total_blocks)
 
     def test_block_size_equals_image_size(self) -> None:
-        """Verifies single block when block size equals image size."""
+        """Verifies a single block is produced when the block size equals the image size."""
         _y_blocks, _x_blocks, block_counts, actual_size, _ = compute_registration_blocks(
             height=128, width=128, block_size=(128, 128)
         )

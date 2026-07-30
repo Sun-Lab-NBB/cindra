@@ -90,9 +90,9 @@ class ROIViewer(QMainWindow):
 
     Displays ROI overlays, background images, and fluorescence traces. Supports left-click ROI selection,
     shift/ctrl multi-select, a Classify toggle that flips the clicked ROI's cell/non-cell label on any click
-    (single-recording mode only), keyboard shortcuts for view/color switching, and double-click zoom-to-fit. Flipped
-    labels are held in memory and can be exported as a classifier training dataset via the New and Add to Existing
-    buttons; they are not written back to the recording's classification results.
+    (single-recording mode only), keyboard shortcuts for color mode, colormap, and mask opacity cycling, and
+    double-click zoom-to-fit. Flipped labels are held in memory and can be exported as a classifier training dataset
+    via the New and Add to Existing buttons. The recording's stored classification results stay unchanged.
 
     Args:
         data: The preloaded viewer data to display on startup.
@@ -105,7 +105,7 @@ class ROIViewer(QMainWindow):
         _selected_roi_indices: List of currently selected ROI indices.
         _temporal_bin_size: Number of frames per temporal bin for activity correlation.
         _recording_loaded: Determines whether a recording has been fully loaded and initialized.
-        _colocalization_threshold: Probability threshold for channel 2 colocalization display.
+        _colocalization_threshold: Colocalization probability threshold included in the reported viewer state.
         _classify_mode: Determines whether classifier mode is active (clicks flip ROI labels instead of selecting).
         _pre_classify_color_mode: Stores the color mode before classify was toggled on, for restoration on toggle off.
         _saved_opacity: Mask opacity restored when the spacebar toggles opacity back on after setting it to zero.
@@ -117,8 +117,11 @@ class ROIViewer(QMainWindow):
         _colorbar_image: Rendered colorbar image array, or None.
         _views: Precomputed background view image stack, or None.
         _roi_statistics: List of ROIStatistics instances for the current recording.
-        _cell_classification: Cell classification probability array with shape (roi_count, 2).
-        _cell_colocalization: Channel 2 colocalization probability array with shape (roi_count, 2).
+        _cell_classification: Cell classification probability array with shape (roi_count, 2). This is an in-memory
+            copy of the recording's labels, so Classify mode edits it without rewriting the stored array.
+        _cell_colocalization: Channel 2 colocalization array with shape (roi_count, 2), or an empty array. Column 0
+            holds the is-colocalized flag under intensity colocalization and the matched channel 2 ROI index under
+            spatial colocalization.
         _two_channels: Determines whether the current recording has channel 2 data.
         _cell_fluorescence: Raw cell fluorescence traces array, or an empty array.
         _neuropil_fluorescence: Neuropil fluorescence traces array, or an empty array.
@@ -132,7 +135,7 @@ class ROIViewer(QMainWindow):
         _graphics_splitter: Vertical splitter separating the image and trace panels.
         _image_widget: PyQtGraph graphics layout for the ROI image panel.
         _trace_widget: PyQtGraph graphics layout for the fluorescence trace panel.
-        _status_bar: Status bar displaying recording info and selection state.
+        _status_bar: Status bar attached to the bottom of the window.
         _info_label: Label in the ROI info bar showing the current selection, ROI statistics, and size summary.
         _view_box: View box for the primary ROI image display.
         _background: Image item for the background image display.
@@ -148,16 +151,16 @@ class ROIViewer(QMainWindow):
         _autoselection_label: Label for the top/bottom ranked-ROI count input field.
         _ranked_count_edit: Input field for the number of top/bottom ROIs to select.
         _background_combo: Dropdown for selecting the background image type.
-        _channel_group: Group box for the channel 2 overlay toggle; hidden when channel 2 data does not exist.
+        _channel_group: Group box for the channel 2 overlay toggle, shown only when channel 2 data exists.
         _channel_2_button: Checkable button for toggling channel 2 overlay display.
-        _color_controls: ROI color mode dropdown, colormap chooser, threshold, and temporal bins controls.
-        _params_container: Container for the threshold and bin size inputs; hidden when neither color mode is active.
+        _color_controls: ROI color mode dropdown, colormap chooser, threshold, temporal bins, and opacity controls.
+        _parameters_container: Container for the threshold and bin size inputs, shown while a color mode uses them.
         _threshold_label: Label for the classifier probability threshold input.
         _binning_label: Label for the temporal bin size input.
         _trace_controls: Trace display mode, visibility checkboxes, and max plotted controls.
-        _classifier_group: Group box wrapping the classifier builder controls; hidden in multi-recording mode.
+        _classifier_group: Group box wrapping the classifier builder controls, shown only in single-recording mode.
         _classifier_controls: Classifier builder panel with Classify toggle, New, and Add to Existing buttons.
-        _roi_index_edit: Input field for jumping to a specific ROI by number in the ROI info bar.
+        _roi_index_edit: Input field in the ROI Selection group for jumping to a specific ROI by number.
         _all_recordings_button: Toggle button for stacked all-recordings trace display.
     """
 
@@ -178,7 +181,7 @@ class ROIViewer(QMainWindow):
         self._pre_classify_color_mode: int = ROIColorMode.RANDOM
         self._saved_opacity: int = STYLE.default_mask_opacity
 
-        # Multi-recording state. Persists across _reset_state calls.
+        # Multi-recording state. Reset to False by _reset_state on every data load.
         self._all_recordings_visible: bool = False
 
         # Core data objects.
@@ -260,9 +263,6 @@ class ROIViewer(QMainWindow):
         ):
             edit_field.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
 
-        # Accepts drag-and-drop of directories.
-        self.setAcceptDrops(True)
-
         # Populates the UI with the startup data provided by the caller.
         self.load_data(data=data)
 
@@ -292,7 +292,7 @@ class ROIViewer(QMainWindow):
             if count > 0:
                 step = -1 if event.key() == QtCore.Qt.Key.Key_Up else 1
                 chooser.setCurrentIndex((chooser.currentIndex() + step) % count)
-                self._on_color_changed(self._roi_color_mode)
+                self._on_color_changed(index=self._roi_color_mode)
         elif event.key() in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right):
             combo = self._color_controls.color_combo
             if not combo.isEnabled():
@@ -306,7 +306,7 @@ class ROIViewer(QMainWindow):
                 item = model.item(current) if isinstance(model, QStandardItemModel) else None
                 if item is None or item.isEnabled():
                     combo.setCurrentIndex(current)
-                    self._on_color_changed(current)
+                    self._on_color_changed(index=current)
                     break
 
     def eventFilter(self, source: QtCore.QObject, event: QtCore.QEvent) -> bool:  # noqa: N802
@@ -315,7 +315,7 @@ class ROIViewer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        if escape_returns_focus(self, event):
+        if escape_returns_focus(window=self, event=event):
             return True
         return super().eventFilter(source, event)
 
@@ -424,7 +424,7 @@ class ROIViewer(QMainWindow):
         panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(panel)
 
-        # ROI Source selector (Original / Dataset: ...). Hidden when no multi-recording datasets exist.
+        # ROI Source selector (Original / "<name> Dataset"). Hidden when no multi-recording datasets exist.
         self._roi_source_group = QGroupBox("ROI Source")
         self._roi_source_group.setStyleSheet(STYLE.group_box)
         roi_source_layout = QVBoxLayout(self._roi_source_group)
@@ -619,7 +619,7 @@ class ROIViewer(QMainWindow):
         colormap_label.setStyleSheet(STYLE.white_label)
         colormap_row.addWidget(colormap_label)
         colormap_chooser = QComboBox()
-        colormap_chooser.addItems([cm.value for cm in Colormap])
+        colormap_chooser.addItems([colormap.value for colormap in Colormap])
         colormap_chooser.setCurrentIndex(0)
         colormap_chooser.setFont(FONTS.small_bold)
         colormap_chooser.setToolTip(
@@ -631,12 +631,12 @@ class ROIViewer(QMainWindow):
 
         # Classifier threshold and temporal bin size share the same row since they are mutually exclusive.
         # The container is hidden when neither color mode is active, preventing empty layout gaps.
-        self._params_container = QWidget()
-        params_row = QHBoxLayout(self._params_container)
-        params_row.setContentsMargins(0, 0, 0, 0)
+        self._parameters_container = QWidget()
+        parameters_row = QHBoxLayout(self._parameters_container)
+        parameters_row.setContentsMargins(0, 0, 0, 0)
         self._threshold_label = QLabel("Threshold:")
         self._threshold_label.setStyleSheet(STYLE.white_label)
-        params_row.addWidget(self._threshold_label)
+        parameters_row.addWidget(self._threshold_label)
         threshold_edit = QLineEdit(self)
         threshold_edit.setText("0.5")
         threshold_edit.setFixedWidth(STYLE.edit_width)
@@ -645,10 +645,10 @@ class ROIViewer(QMainWindow):
         threshold_edit.returnPressed.connect(self._on_threshold_changed)
         threshold_edit.returnPressed.connect(self.setFocus)
         threshold_edit.installEventFilter(self)
-        params_row.addWidget(threshold_edit)
+        parameters_row.addWidget(threshold_edit)
         self._binning_label = QLabel("Bin Size:")
         self._binning_label.setStyleSheet(STYLE.white_label)
-        params_row.addWidget(self._binning_label)
+        parameters_row.addWidget(self._binning_label)
         binning_edit = QLineEdit(self)
         binning_edit.setFixedWidth(STYLE.edit_width)
         binning_edit.setValidator(QtGui.QIntValidator(0, 500))
@@ -658,14 +658,14 @@ class ROIViewer(QMainWindow):
         binning_edit.returnPressed.connect(self._recompute_binned_fluorescence)
         binning_edit.returnPressed.connect(self.setFocus)
         binning_edit.installEventFilter(self)
-        params_row.addWidget(binning_edit)
-        params_row.addStretch()
-        self._params_container.setVisible(False)
-        layout.addWidget(self._params_container)
+        parameters_row.addWidget(binning_edit)
+        parameters_row.addStretch()
+        self._parameters_container.setVisible(False)
+        layout.addWidget(self._parameters_container)
 
         # Connects the colormap chooser so that switching colormaps repaints the ROIs using the
         # currently active color mode without recalculating the statistic values.
-        colormap_chooser.activated.connect(lambda: self._on_color_changed(self._roi_color_mode))
+        colormap_chooser.activated.connect(lambda: self._on_color_changed(index=self._roi_color_mode))
 
         controls = ColorControls(
             color_combo=color_combo,
@@ -734,14 +734,14 @@ class ROIViewer(QMainWindow):
         classify_button.toggled.connect(self._on_classify_toggled)
         layout.addWidget(classify_button, 0, 0, 2, 2)
 
-        # Trains a new classifier from scratch using the current cell/non-cell labels.
+        # Saves the current cell/non-cell labels and features as a new classifier training dataset.
         new_button = QPushButton("New", self)
         new_button.setFont(FONTS.small_bold)
         new_button.setToolTip("Create a new classifier training dataset from the current cell/non-cell labels.")
         new_button.clicked.connect(self._on_classifier_new)
         layout.addWidget(new_button, 2, 0, 1, 1)
 
-        # Appends the current recording's labels to an existing classifier and retrains it.
+        # Merges the current recording's labels into an existing training dataset and saves the result.
         add_button = QPushButton("Add to Existing", self)
         add_button.setFont(FONTS.small_bold)
         add_button.setToolTip(
@@ -750,7 +750,7 @@ class ROIViewer(QMainWindow):
         add_button.clicked.connect(self._on_classifier_add_to_existing)
         layout.addWidget(add_button, 2, 1, 1, 1)
 
-        # Status feedback label. Displays classifier training progress or error messages.
+        # Status feedback label. Displays the saved sample counts or dataset load errors.
         # Spans both columns and wraps long text to stay within the panel width.
         status_label = QLabel("")
         status_label.setStyleSheet(STYLE.white_label)
@@ -776,8 +776,8 @@ class ROIViewer(QMainWindow):
         group_box.setStyleSheet(STYLE.group_box)
         layout = QGridLayout(group_box)
 
-        # Trace mode checkboxes in a 2x2 grid. Each toggles visibility of a trace type. In multi-recording
-        # mode, only one can be active at a time; in single-recording mode, multiple can be checked.
+        # Trace mode checkboxes in a 2x2 grid. Each toggles visibility of a trace type. Only one can be active
+        # when multiple ROIs are selected or All Recordings mode is on. Otherwise, multiple can be checked.
         fluorescence_checkbox = QCheckBox(TraceModeLabel.RAW_FLUORESCENCE)
         fluorescence_checkbox.setStyleSheet(STYLE.white_label)
         fluorescence_checkbox.setToolTip("Toggle the raw fluorescence trace in the trace panel.")
@@ -840,10 +840,10 @@ class ROIViewer(QMainWindow):
         # Connects signals after constructing the dataclass so all widget references are stable.
         maximum_trace_count_edit.returnPressed.connect(self._refresh_traces)
         maximum_trace_count_edit.returnPressed.connect(self.setFocus)
-        fluorescence_checkbox.toggled.connect(lambda: self._on_trace_toggle(fluorescence_checkbox))
-        neuropil_checkbox.toggled.connect(lambda: self._on_trace_toggle(neuropil_checkbox))
-        corrected_checkbox.toggled.connect(lambda: self._on_trace_toggle(corrected_checkbox))
-        spikes_checkbox.toggled.connect(lambda: self._on_trace_toggle(spikes_checkbox))
+        fluorescence_checkbox.toggled.connect(lambda: self._on_trace_toggle(toggled=fluorescence_checkbox))
+        neuropil_checkbox.toggled.connect(lambda: self._on_trace_toggle(toggled=neuropil_checkbox))
+        corrected_checkbox.toggled.connect(lambda: self._on_trace_toggle(toggled=corrected_checkbox))
+        spikes_checkbox.toggled.connect(lambda: self._on_trace_toggle(toggled=spikes_checkbox))
 
         return group_box, controls
 
@@ -910,7 +910,7 @@ class ROIViewer(QMainWindow):
     def _reset_state(self) -> None:
         """Resets all display state to defaults before loading new data.
 
-        Does NOT reset ``_context_data`` or the ROI Source dropdown, which persist across state resets.
+        Preserves ``_context_data`` and the ROI Source dropdown selection across state resets.
         """
         self._roi_color_mode = ROIColorMode.RANDOM
         self._background_view = BackgroundView.ROIS_ONLY
@@ -946,10 +946,7 @@ class ROIViewer(QMainWindow):
                 if roi_count > 0
                 else np.empty((0, 2), dtype=np.float32)
             )
-            colocalization = recording.cell_colocalization
-            self._cell_colocalization = (
-                colocalization if colocalization.size > 0 else np.zeros((roi_count, 2), dtype=np.float32)
-            )
+            self._cell_colocalization = recording.cell_colocalization
             self._two_channels = recording.has_channel_2
             self._cell_fluorescence = recording.cell_fluorescence
             self._neuropil_fluorescence = recording.neuropil_fluorescence
@@ -959,7 +956,10 @@ class ROIViewer(QMainWindow):
             self._roi_count = roi_count
         else:
             self._roi_statistics = single_recording.roi_statistics
-            self._cell_classification = single_recording.cell_classification
+            # Copies the classification labels into memory. The pipeline arrays are memory-mapped read-only, and
+            # Classify mode edits this copy so that label flips stay in the viewer until the user exports them as a
+            # classifier training dataset. The recording's own cell_classification.npy is never rewritten.
+            self._cell_classification = np.array(single_recording.cell_classification, dtype=np.float32)
             self._cell_colocalization = single_recording.cell_colocalization
             self._two_channels = single_recording.two_channels
             self._cell_fluorescence = single_recording.cell_fluorescence
@@ -1007,10 +1007,9 @@ class ROIViewer(QMainWindow):
         else:
             self._all_recordings_button.setVisible(False)
 
-            # Shows classifier group for single-recording recordings.
+            # Shows the classifier group, which applies only to single-recording data.
             self._classifier_group.setVisible(True)
 
-        # Resets channel 2 toggle state.
         self._channel_2_button.setChecked(False)
 
         # Builds background views from detection images.
@@ -1029,6 +1028,11 @@ class ROIViewer(QMainWindow):
             channel_2_maximum_projection=single_recording.maximum_projection_channel_2,
         )
 
+        # Resolves the cell colocalization column layout. Only the single-recording structural channel path computes
+        # intensity colocalization, and that path is the sole producer of the corrected structural mean image. Every
+        # other two-channel view carries the spatial layout, where column 0 holds the matched channel 2 ROI index.
+        intensity_colocalization = not is_multi_recording and single_recording.corrected_structural_mean_image.size > 0
+
         # Computes color statistics and builds ROI index maps.
         self._color_arrays = compute_colors(
             roi_statistics=self._roi_statistics,
@@ -1037,9 +1041,9 @@ class ROIViewer(QMainWindow):
             cell_classification=self._cell_classification,
             cell_colocalization=self._cell_colocalization,
             roi_colormap=self._roi_colormap,
-            colocalization_threshold=self._colocalization_threshold,
             classifier_threshold=float(self._color_controls.threshold_edit.text() or "0.5"),
             two_channels=self._two_channels,
+            intensity_colocalization=intensity_colocalization,
         )
         self._roi_maps = initialize_roi_maps(
             roi_statistics=self._roi_statistics,
@@ -1105,7 +1109,6 @@ class ROIViewer(QMainWindow):
             spikes_visible=self._trace_controls.spikes_checkbox.isChecked(),
         )
 
-        # Sets aspect ratio on the image panel.
         self._view_box.setAspectLocked(lock=True, ratio=single_recording.aspect_ratio)
 
         self._recording_loaded = True
@@ -1178,7 +1181,7 @@ class ROIViewer(QMainWindow):
         uses_binning = self._roi_color_mode == ROIColorMode.CORRELATIONS
         self._binning_label.setVisible(uses_binning)
         self._color_controls.binning_edit.setVisible(uses_binning)
-        self._params_container.setVisible(uses_threshold or uses_binning)
+        self._parameters_container.setVisible(uses_threshold or uses_binning)
 
         # Defaults to ROI 0 when switching to correlation mode with no selection.
         if uses_binning and not self._selected_roi_indices:
@@ -1267,8 +1270,9 @@ class ROIViewer(QMainWindow):
         """Toggles classifier mode where clicks flip ROI cell/non-cell labels instead of selecting ROIs.
 
         When toggled on, stores the current color mode, forces CELL_CLASSIFICATION with original labels, and disables
-        ROI Source, ROI Selection, Mask Colors, and Trace Display controls. When toggled off, restores the previous
-        color mode, recolorizes from the probability threshold, and re-enables all disabled sections.
+        the ROI Source, ROI Selection, and Trace Display groups together with the Mask Colors color-mode dropdown,
+        leaving the opacity slider and colormap chooser enabled. When toggled off, restores the previous color mode,
+        recolorizes from the probability threshold, and re-enables all disabled controls.
 
         Args:
             checked: Determines whether classifier mode is active.
@@ -1300,7 +1304,7 @@ class ROIViewer(QMainWindow):
             self._roi_source_group.setEnabled(False)
             self._roi_selection_group.setEnabled(False)
             controls.color_combo.setEnabled(False)
-            self._params_container.setVisible(False)
+            self._parameters_container.setVisible(False)
             self._trace_group.setEnabled(False)
         else:
             # Restores previous color mode and recolorizes from the probability threshold.
@@ -1330,7 +1334,7 @@ class ROIViewer(QMainWindow):
             uses_binning = restored == ROIColorMode.CORRELATIONS
             self._binning_label.setVisible(uses_binning)
             controls.binning_edit.setVisible(uses_binning)
-            self._params_container.setVisible(uses_threshold or uses_binning)
+            self._parameters_container.setVisible(uses_threshold or uses_binning)
             self._trace_group.setEnabled(True)
 
         self._update_plot()
@@ -1478,7 +1482,6 @@ class ROIViewer(QMainWindow):
                 colormap=self._roi_colormap,
             )
 
-        # Renders the colorbar for the active color mode.
         render_colorbar(
             roi_color_mode=self._roi_color_mode,
             color_arrays=self._color_arrays,
@@ -1531,19 +1534,19 @@ class ROIViewer(QMainWindow):
         # Builds the statistics segment from the primary selected ROI.
         roi = self._roi_statistics[roi_index]
         centroid = roi.mask.centroid
-        stats_parts = [f"centroid: [{centroid[0]}, {centroid[1]}]"]
+        statistics_parts = [f"centroid: [{centroid[0]}, {centroid[1]}]"]
         for statistic_name in _STATISTICS_TO_SHOW:
             value = getattr(roi, statistic_name, None)
             if value is None:
                 continue
             if isinstance(value, int):
-                stats_parts.append(f"{statistic_name}: {value}")
+                statistics_parts.append(f"{statistic_name}: {value}")
             else:
-                stats_parts.append(f"{statistic_name}: {value:.2f}")
-        stats = "  ".join(stats_parts)
+                statistics_parts.append(f"{statistic_name}: {value:.2f}")
+        statistics_text = "  ".join(statistics_parts)
 
         size = f"Size: {single_recording.frame_height} x {single_recording.frame_width}"
-        self._info_label.setText(f"{selection}  |  {stats}  |  {size}")
+        self._info_label.setText(f"{selection}  |  {statistics_text}  |  {size}")
 
     def _select_all_rois(self) -> None:
         """Selects all ROIs and refreshes the display."""
@@ -1709,8 +1712,8 @@ class ROIViewer(QMainWindow):
     def _refresh_all_recording_traces(self) -> None:
         """Plots traces from all recordings stacked vertically for the selected ROI.
 
-        Iterates over every recording in the multi-recording dataset, extracts the selected ROI's trace from each,
-        and plots them stacked with recording-index labels on the y-axis.
+        Iterates over the dataset's recordings up to the Maximum Traces limit, skipping recordings without trace data
+        for the ROI, and plots the extracted traces stacked with recording-index labels on the y-axis.
         """
         if self._context_data is None or not self._context_data.is_multi_recording:
             return
@@ -1794,7 +1797,7 @@ class ROIViewer(QMainWindow):
         y_minimum = 0.0
         minimum_contributors = 5
         if plotted_count > ROI_CONFIG.average_threshold and raw_traces:
-            padded = np.full((len(raw_traces), max_frames), np.nan, dtype=np.float32)
+            padded = np.full(shape=(len(raw_traces), max_frames), fill_value=np.nan, dtype=np.float32)
             for trace_index, raw_trace in enumerate(raw_traces):
                 padded[trace_index, : len(raw_trace)] = raw_trace
             contributor_count = np.sum(~np.isnan(padded), axis=0)
@@ -1811,8 +1814,8 @@ class ROIViewer(QMainWindow):
                 average_frames = np.arange(max_frames, dtype=np.int32)
                 # Splits at NaN boundaries to avoid connecting gaps with lines.
                 segments = np.split(
-                    np.arange(max_frames, dtype=np.int32),
-                    np.where(~valid_mask)[0],
+                    ary=np.arange(max_frames, dtype=np.int32),
+                    indices_or_sections=np.where(~valid_mask)[0],
                 )
                 for segment in segments:
                     if len(segment) < 2:  # noqa: PLR2004
@@ -1901,11 +1904,11 @@ class ROIViewer(QMainWindow):
             return
 
         try:
-            data = np.load(file=source_path, allow_pickle=False)
-            existing_training_labels = data["training_labels"].astype(np.bool_)
-            existing_normalized_pixel_count = data["normalized_pixel_count"].astype(np.float32)
-            existing_compactness = data["compactness"].astype(np.float32)
-            existing_skewness = data["skewness"].astype(np.float32)
+            with np.load(file=source_path, allow_pickle=False) as data:
+                existing_training_labels = data["training_labels"].astype(np.bool_)
+                existing_normalized_pixel_count = data["normalized_pixel_count"].astype(np.float32)
+                existing_compactness = data["compactness"].astype(np.float32)
+                existing_skewness = data["skewness"].astype(np.float32)
         except (KeyError, ValueError, FileNotFoundError) as error:
             self._classifier_controls.status_label.setText(f"Error loading file: {error}")
             return

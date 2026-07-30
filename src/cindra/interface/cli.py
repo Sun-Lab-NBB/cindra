@@ -1,5 +1,6 @@
 """Provides the terminal-based interface for running all processing pipelines supported by the library."""
 
+from typing import Literal
 from pathlib import Path
 
 import click
@@ -28,13 +29,13 @@ def cindra_cli() -> None:
     show_default=True,
     help="The transport protocol to use for MCP communication.",
 )
-def cindra_mcp(transport: str) -> None:
+def cindra_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
     """Starts the Model Context Protocol (MCP) server for agentic neural imaging data processing.
 
     The MCP server exposes tools that enable AI agents to discover recording data, execute pipelines,
     monitor processing status, and manage batch operations for both single-recording and multi-recording workflows.
     """
-    run_server(transport=transport)  # type: ignore[arg-type]
+    run_server(transport=transport)
 
 
 @cindra_cli.command("configure")
@@ -50,7 +51,7 @@ def cindra_mcp(transport: str) -> None:
     "--output-path",
     type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
     required=True,
-    help="The absolute path to the (existing) directory where to generate the requested configuration file.",
+    help="The absolute path to the (existing) directory in which to generate the requested configuration file.",
 )
 @click.option(
     "-n",
@@ -64,7 +65,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     """Generates the configuration file for the specified processing pipeline.
 
     Modifying the parameters stored in the generated file allows configuring all aspects of the target processing
-    pipeline. Provide the path to the modified file to the 'run' CLI command group to execute the desired pipeline
+    pipeline. Provide the path to the modified file to the 'run' CLI command to execute the desired pipeline
     with the parameters specified inside the file.
     """
     # Normalizes shorthand aliases and resolves pipeline-specific parameters.
@@ -73,8 +74,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     file_path = output_path.joinpath(resolved_name).with_suffix(".yaml")
 
     # Generates the precursor configuration file in the specified output directory.
-    config = SingleRecordingConfiguration() if single_recording else MultiRecordingConfiguration()
-    config.save(file_path=file_path)
+    configuration = SingleRecordingConfiguration() if single_recording else MultiRecordingConfiguration()
+    configuration.save(file_path=file_path)
 
     message = (
         f"Default {'single-recording' if single_recording else 'multi-recording'} pipeline configuration file: "
@@ -107,7 +108,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     help=(
         "[Single-recording] The number of parallel workers to allocate to the binarization step. When this option is "
         "omitted, the step receives its measured default allocation of 4 workers, which is the point where the "
-        "allocated cores become the TIFF image decode threads. Setting this to -1 uses all available cores."
+        "allocated cores become the TIFF image decode threads. Setting this to -1 uses every available core, minus "
+        "the cores reserved for system use."
     ),
 )
 @click.option(
@@ -119,7 +121,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     help=(
         "[Single-recording] The number of parallel workers to allocate to each plane-registration step. When this "
         "option is omitted, the step receives its measured default allocation of 8 workers, which is the knee of the "
-        "measured registration scaling curve. Setting this to -1 uses all available cores."
+        "measured registration scaling curve. Setting this to -1 uses every available core, minus the cores reserved "
+        "for system use."
     ),
 )
 @click.option(
@@ -131,7 +134,8 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     help=(
         "[Single-recording] The number of parallel workers to allocate to each plane-processing step. When this option "
         "is omitted, the step receives its measured default allocation of 10 workers, where detection reaches its "
-        "measured throughput plateau. Setting this to -1 uses all available cores."
+        "measured throughput plateau. Setting this to -1 uses every available core, minus the cores reserved for "
+        "system use."
     ),
 )
 @click.option(
@@ -141,8 +145,10 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     required=False,
     default=None,
     help=(
-        "[Multi-recording] The number of parallel workers to allocate to the discovery step. Omitting this option or "
-        "setting it to -1 allocates all available cores."
+        "[Multi-recording] The number of parallel workers to allocate to the discovery step. When this option is "
+        "omitted, the step receives its measured default allocation of 30 workers, which is the saturating allocation "
+        "the step is admitted at. Setting this to -1 uses every available core, minus the cores reserved for system "
+        "use."
     ),
 )
 @click.option(
@@ -152,8 +158,10 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     required=False,
     default=None,
     help=(
-        "[Multi-recording] The number of parallel workers to allocate to each per-recording extraction step. Omitting "
-        "this option or setting it to -1 allocates all available cores."
+        "[Multi-recording] The number of parallel workers to allocate to each per-recording extraction step. When this "
+        "option is omitted, the step receives its measured default allocation of 16 workers, which is the point where "
+        "the step stops shortening. Setting this to -1 uses every available core, minus the cores reserved for system "
+        "use."
     ),
 )
 @click.option(
@@ -217,7 +225,7 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     default=False,
     help=(
         "[Single-recording] Determines whether to combine processed plane data into a uniform dataset "
-        "(step 4). Note, this step is required to later process the data as part of a multi-recording "
+        "(step 4). Note that this step is required to later process the data as part of a multi-recording "
         "pipeline."
     ),
 )
@@ -249,9 +257,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     required=False,
     default=None,
     help=(
-        "[Single-recording] The path to the root directory where to create the cindra's output hierarchy and store the "
-        "processed data. When provided, this path overrides the matching field in the pipeline's configuration file. "
-        "The output_path must be set either in the configuration file or via this flag."
+        "[Single-recording] The path to the root directory in which to create the cindra output hierarchy and store "
+        "the processed data. When provided, this path overrides the matching field in the pipeline's configuration "
+        "file. The output_path must be set either in the configuration file or via this flag."
     ),
 )
 @click.option(
@@ -309,6 +317,7 @@ def cindra_run(
     process_workers: int | None,
     discover_workers: int | None,
     extract_workers: int | None,
+    *,
     progress_bars: bool,
     job_id: str | None,
     binarize: bool,
@@ -326,10 +335,10 @@ def cindra_run(
     """Runs the cindra processing pipeline using the specified configuration file.
 
     The pipeline type (single-recording or multi-recording) is automatically detected from the
-    configuration file. When --job-id is provided, only the matching job is executed and all step flags
-    are ignored. The combination step merges the per-plane result files with serial input and output.
+    configuration file. When no step flag is set, every step of the detected pipeline runs in phase order.
+    When --job-id is provided, only the matching job is executed and all step flags are ignored. The
+    combination step merges the per-plane result files with serial input and output.
     """
-    # Detects the pipeline type from the configuration file and dispatches to the appropriate pipeline runner.
     pipeline_type = detect_pipeline_type(file_path=input_path)
 
     if pipeline_type == PipelineType.SINGLE_RECORDING:

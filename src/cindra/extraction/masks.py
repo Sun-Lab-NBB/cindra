@@ -28,6 +28,7 @@ def create_masks(
     roi_statistics: list[ROIStatistics],
     height: int,
     width: int,
+    *,
     neuropil: bool,
     include_overlap: bool,
     cell_probability_percentile: int = 50,
@@ -87,6 +88,7 @@ def create_masks(
 def _create_roi_masks(
     roi_statistics: list[ROIStatistics],
     width: int,
+    *,
     include_overlap: bool,
 ) -> tuple[tuple[NDArray[np.int32], NDArray[np.float32]], ...]:
     """Creates the ROI pixel masks and the normalized lambda weight masks for the input ROIs.
@@ -134,6 +136,7 @@ def _create_neuropil_masks(
     inner_neuropil_border_radius: int,
     minimum_neuropil_pixels: int,
     cell_probability_percentile: int,
+    *,
     recompute: bool = False,
 ) -> tuple[NDArray[np.int32], ...]:
     """Creates the neuropil masks for the input ROIs, caching results on each ROIStatistics instance.
@@ -162,8 +165,8 @@ def _create_neuropil_masks(
     if not recompute and all(roi.neuropil_mask is not None for roi in roi_statistics):
         cached_masks: list[NDArray[np.int32]] = []
         for roi in roi_statistics:
-            # Unreachable due to the all() guard; included for type narrowing.
-            if roi.neuropil_mask is None:  # pragma: no cover — unreachable; guarded by all() check above
+            # Unreachable due to the all() guard, retained only for type narrowing.
+            if roi.neuropil_mask is None:  # pragma: no cover
                 continue
             cached_masks.append(roi.neuropil_mask)
         return tuple(cached_masks)
@@ -179,8 +182,8 @@ def _create_neuropil_masks(
     neuropil_masks: list[NDArray[np.int32]] = []
 
     for roi in roi_statistics:
-        # Extends the ROI to get a ring of pixels around the ROI center. This is the inner border that separates the
-        # neuropil region from the cell region.
+        # Extends the ROI outward by the inner border radius. The result covers the ROI pixels plus the border layer
+        # that separates the neuropil region from the cell region.
         inner_y_pixels, inner_x_pixels = extend_roi(
             y_pixels=roi.mask.y_pixels,
             x_pixels=roi.mask.x_pixels,

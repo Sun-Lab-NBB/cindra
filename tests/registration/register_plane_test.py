@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+from cindra.io import resolve_registration_marker_path
 from cindra.registration import register_plane
+from cindra.registration.register import _register_frames_batch
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -24,7 +26,7 @@ _SECONDARY_BLOB_CENTERS: tuple[tuple[int, int], ...] = ((40, 28), (68, 80), (96,
 """Blob centers for a distinct second-channel synthetic frame."""
 
 
-def _static_blob_movie(
+def _build_static_blob_movie(
     gaussian_blob_image: Callable[..., NDArray[np.float64]],
     frame_count: int = 30,
     centers: tuple[tuple[int, int], ...] = _BLOB_CENTERS,
@@ -32,6 +34,49 @@ def _static_blob_movie(
     """Builds a motion-free structured movie that registers trivially, exercising the registration code paths."""
     base = gaussian_blob_image(height=128, width=128, centers=centers, sigma=4.0, amplitude=2000.0).astype(np.int16)
     return np.broadcast_to(base, (frame_count, 128, 128)).copy()
+
+
+def _make_interrupted_registration_context(
+    tmp_path: Path,
+    single_recording_context: Callable[..., RuntimeContext],
+    gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> RuntimeContext:
+    """Builds a context whose registration fails after its first batch, leaving a partially rewritten binary.
+
+    Args:
+        tmp_path: The temporary directory the context writes its binary into.
+        single_recording_context: The context factory fixture.
+        gaussian_blob_image: The synthetic image builder fixture.
+        monkeypatch: The patcher used to inject the batch failure.
+
+    Returns:
+        The prepared context. Calling register_plane on it raises RuntimeError partway through the batch loop.
+    """
+    movie = _build_static_blob_movie(gaussian_blob_image)
+
+    def configure(configuration: SingleRecordingConfiguration) -> None:
+        # Splits the movie across several batches, so the injected failure lands after at least one batch has already
+        # been written into the binary.
+        configuration.registration.batch_size = 10
+
+    context = single_recording_context(
+        tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+    )
+
+    completed_batches = 0
+
+    def fail_after_first_batch(**kwargs: object) -> object:
+        """Runs the first batch normally and raises on every batch after it."""
+        nonlocal completed_batches
+        completed_batches += 1
+        if completed_batches > 1:
+            message = "Unable to register the frame batch. Simulated mid-loop failure."
+            raise RuntimeError(message)
+        return _register_frames_batch(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("cindra.registration.register._register_frames_batch", fail_after_first_batch)
+    return context
 
 
 class TestRegisterPlane:
@@ -59,13 +104,13 @@ class TestRegisterPlane:
         unregistered_std = movie[:, interior[0], interior[1]].astype(np.float64).std(axis=0).mean()
 
         context = single_recording_context(
-            tmp_path, frame_height=128, frame_width=128, frame_count=frame_count, movie=movie
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=frame_count, movie=movie
         )
 
         register_plane(context=context, workers=1)
 
         binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
-        registered = read_binary_movie(binary_path, 128, 128)
+        registered = read_binary_movie(file_path=binary_path, frame_height=128, frame_width=128)
         registered_std = registered[:, interior[0], interior[1]].astype(np.float64).std(axis=0).mean()
         # Correcting the planted motion collapses the per-pixel temporal spread across frames in the interior region.
         assert registered_std < 0.5 * unregistered_std
@@ -81,7 +126,9 @@ class TestRegisterPlane:
             np.int16
         )
         movie = np.broadcast_to(base, (30, 128, 128)).copy()
-        context = single_recording_context(tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie)
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie
+        )
 
         register_plane(context=context, workers=1)
 
@@ -121,13 +168,13 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane clears existing data and re-runs when re-registration is forced."""
-        movie = _static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.repeat_registration = True
 
         context = single_recording_context(
-            tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
         # Plants a reference image on disk so that the plane reports as already registered before the forced run.
@@ -147,11 +194,13 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane registers both channels and produces a mean image for each."""
-        movie = _static_blob_movie(gaussian_blob_image)
-        movie_channel_2 = _static_blob_movie(gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS)
+        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie_channel_2 = _build_static_blob_movie(
+            gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS
+        )
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=128,
             frame_width=128,
             frame_count=30,
@@ -171,14 +220,16 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane can align by the second channel and apply offsets to the first channel."""
-        movie = _static_blob_movie(gaussian_blob_image)
-        movie_channel_2 = _static_blob_movie(gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS)
+        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie_channel_2 = _build_static_blob_movie(
+            gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS
+        )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.align_by_first_channel = False
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=128,
             frame_width=128,
             frame_count=30,
@@ -200,13 +251,13 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that aligning by the second channel without one present raises a ValueError."""
-        movie = _static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.align_by_first_channel = False
 
         context = single_recording_context(
-            tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
         with pytest.raises(ValueError, match="Unable to register channel 2 frames"):
@@ -219,13 +270,13 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane completes the two-step refinement when it is enabled."""
-        movie = _static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.two_step_registration = True
 
         context = single_recording_context(
-            tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
         register_plane(context=context, workers=1)
@@ -242,7 +293,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane marks frames listed in a bad_frames file as bad."""
-        movie = _static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image)
         data_directory = tmp_path / "raw"
         data_directory.mkdir(parents=True, exist_ok=True)
         np.save(data_directory / "bad_frames.npy", np.array([2, 5], dtype=np.int64))
@@ -251,7 +302,7 @@ class TestRegisterPlane:
             configuration.file_io.data_path = data_directory
 
         context = single_recording_context(
-            tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
         register_plane(context=context, workers=1)
@@ -269,7 +320,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane proceeds normally when a data path is set but no bad_frames file exists."""
-        movie = _static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image)
         data_directory = tmp_path / "raw"
         data_directory.mkdir(parents=True, exist_ok=True)
 
@@ -277,7 +328,7 @@ class TestRegisterPlane:
             configuration.file_io.data_path = data_directory
 
         context = single_recording_context(
-            tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
         register_plane(context=context, workers=1)
@@ -294,15 +345,17 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane runs nonrigid registration across both channels and stores block offsets."""
-        movie = _static_blob_movie(gaussian_blob_image)
-        movie_channel_2 = _static_blob_movie(gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS)
+        movie = _build_static_blob_movie(gaussian_blob_image)
+        movie_channel_2 = _build_static_blob_movie(
+            gaussian_blob_image=gaussian_blob_image, centers=_SECONDARY_BLOB_CENTERS
+        )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.nonrigid_registration.enabled = True
             configuration.nonrigid_registration.block_size = (32, 32)
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=128,
             frame_width=128,
             frame_count=30,
@@ -325,13 +378,13 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that registration metrics are skipped when the recording has too few frames."""
-        movie = _static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.registration_metric_principal_components = 3
 
         context = single_recording_context(
-            tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
         register_plane(context=context, workers=1)
@@ -346,13 +399,13 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane completes with frame normalization disabled and stores sentinel bounds."""
-        movie = _static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.normalize_frames = False
 
         context = single_recording_context(
-            tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
         register_plane(context=context, workers=1)
@@ -368,7 +421,7 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane estimates and applies a non-zero bidirectional phase offset from the data."""
-        movie = _static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image)
         # Plants a bidirectional scanning artifact by shifting odd lines horizontally.
         movie[:, 1::2, :] = np.roll(movie[:, 1::2, :], shift=4, axis=2)
 
@@ -376,7 +429,7 @@ class TestRegisterPlane:
             configuration.registration.compute_bidirectional_phase_offset = True
 
         context = single_recording_context(
-            tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
         register_plane(context=context, workers=1)
@@ -391,13 +444,13 @@ class TestRegisterPlane:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies that register_plane estimates a zero bidirectional phase offset for artifact-free data."""
-        movie = _static_blob_movie(gaussian_blob_image)
+        movie = _build_static_blob_movie(gaussian_blob_image)
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             configuration.registration.compute_bidirectional_phase_offset = True
 
         context = single_recording_context(
-            tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
         )
 
         register_plane(context=context, workers=1)
@@ -405,3 +458,68 @@ class TestRegisterPlane:
         # The artifact-free movie yields no offset, leaving the bidirectional correction untriggered.
         assert context.runtime.registration.bidirectional_phase_offset == 0
         assert not context.runtime.registration.bidirectional_phase_corrected
+
+    def test_leaves_no_registration_marker(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    ) -> None:
+        """Verifies that a completed registration clears the marker that guards its in-place rewrite."""
+        movie = _build_static_blob_movie(gaussian_blob_image)
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie
+        )
+        binary_path = context.runtime.io.registered_binary_path
+
+        register_plane(context=context, workers=1)
+
+        assert binary_path.exists()
+        assert not resolve_registration_marker_path(binary_path=binary_path).exists()
+
+    def test_interrupted_registration_leaves_a_marker(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verifies that a failure partway through the batch loop leaves the binary marked as mid-registration."""
+        context = _make_interrupted_registration_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+            monkeypatch=monkeypatch,
+        )
+        binary_path = context.runtime.io.registered_binary_path
+
+        with pytest.raises(RuntimeError, match="Simulated mid-loop failure"):
+            register_plane(context=context, workers=1)
+
+        # The binary now holds corrected frames up to the failure point and raw frames after it, which only the
+        # marker records.
+        assert resolve_registration_marker_path(binary_path=binary_path).exists()
+
+    def test_marker_blocks_a_later_registration(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verifies that registering a binary an interrupted run left behind raises instead of silently proceeding."""
+        context = _make_interrupted_registration_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+            monkeypatch=monkeypatch,
+        )
+
+        with pytest.raises(RuntimeError, match="Simulated mid-loop failure"):
+            register_plane(context=context, workers=1)
+
+        # Restores the real batch function, so the retry fails on the marker rather than on the injected error.
+        monkeypatch.setattr("cindra.registration.register._register_frames_batch", _register_frames_batch)
+
+        with pytest.raises(RuntimeError, match=r"was\s+interrupted"):
+            register_plane(context=context, workers=1)

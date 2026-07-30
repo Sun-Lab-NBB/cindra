@@ -62,11 +62,11 @@ manual file reads whenever possible.
 
 ### Recommended query order
 
-1. `query_single_recording_metadata_tool` — understand recording properties and processing status
-2. `query_registration_quality_tool` — assess motion correction quality per plane
-3. `query_detection_summary_tool` — review detection image quality and ROI diameter
-4. `query_roi_statistics_tool` — inspect ROI quality metrics and classification
-5. `query_traces_tool` — examine fluorescence activity for specific ROIs
+1. `query_single_recording_metadata_tool`: understand recording properties and processing status
+2. `query_registration_quality_tool`: assess motion correction quality per plane
+3. `query_detection_summary_tool`: review detection image quality and ROI diameter
+4. `query_roi_statistics_tool`: inspect ROI quality metrics and classification
+5. `query_traces_tool`: examine fluorescence activity for specific ROIs
 
 ### Query tool argument semantics
 
@@ -75,17 +75,34 @@ the `cindra/` folder. This equals the `recording_output_paths` entries passed to
 when the output root differs from the raw-data root, not the raw-data path itself. The tools resolve the `cindra/`
 subdirectory automatically.
 
+`query_single_recording_metadata_tool` reports the top-level `frame_count` from the combined traces and each
+`plane_timing` entry's `frame_count` from that plane's `runtime_data.yaml`. A plane count above the top-level count is
+expected rather than corruption: it marks a plane whose trailing frames were trimmed out of the combined traces.
+
 The ROI indices accepted by `query_traces_tool` and `query_roi_statistics_tool` are 0-based positional row indices
-into the per-recording arrays, not a tracking identity. Out-of-range indices are silently dropped without an error,
-so a confidently "successful" empty result can mean a wrong index rather than missing data.
+into the per-recording arrays, not a tracking identity. Both tools silently drop individual out-of-range indices, so
+always compare the returned `roi_index` values against what you requested. When every requested index is out of
+range, `query_roi_statistics_tool` returns an empty `rois` list with `success=true`, while `query_traces_tool` fails
+with "No valid ROI indices provided", so a confidently "successful" empty result can only come from the statistics
+tool.
 
 ---
 
 ## Output data reference
 
 All results are saved under `{output_path}/cindra/`. The pipeline produces combined (multi-plane merged) data at
-the root level and per-plane data in numbered subdirectories. Channel 2 files are only present for two-channel
-recordings where both channels are functional.
+the root level and per-plane data in numbered subdirectories. Channel 2 output depends on whether the second channel is
+functional, meaning both `main.first_channel_functional` and `main.second_channel_functional` are True. Every
+two-channel recording produces, in each `plane_N/` directory, `channel_2_data.bin`,
+`detection_data/mean_image_channel_2.npy`, `cell_fluorescence_channel_2.npy`, and
+`neuropil_fluorescence_channel_2.npy`, plus the combined `detection_data/mean_image_channel_2.npy` at the root. A
+structural (non-functional) channel 2 still gets a full fluorescence extraction pass, but it borrows the channel 1 ROI
+masks instead of detecting its own ROIs, so its traces carry one row per channel 1 ROI and come with no independent
+detection, classification, or deconvolution. Every other channel 2 file requires both channels to be functional: the
+other three detection images at both levels, the ROI `.npz` files, `subtracted_fluorescence_channel_2.npy`,
+`spikes_channel_2.npy`, `cell_classification_channel_2.npy`, and the root-level combined
+`cell_fluorescence_channel_2.npy` and `neuropil_fluorescence_channel_2.npy`. Those last two are the asymmetry to
+watch, because combination omits them for a structural channel 2 even though every plane directory holds its own copy.
 
 ### Directory structure
 
@@ -109,6 +126,7 @@ cindra/
 ├── plane_0/                                    # Per-plane processing results
 │   ├── runtime_data.yaml                       # Plane runtime metadata
 │   ├── channel_1_data.bin                      # Registered binary data
+│   ├── channel_1_data.bin.registering          # Present only while registration rewrites the binary
 │   ├── registration_data/                      # Registration arrays
 │   │   ├── reference_image.npy
 │   │   ├── bad_frames.npy
@@ -139,252 +157,38 @@ cindra/
 
 ### Processing phase and file creation timeline
 
-**Phase 1 — Binarization:** Creates `configuration.yaml`, `acquisition_parameters.yaml`, per-plane
-`channel_1_data.bin` (and `channel_2_data.bin` if two-channel), the initial per-plane `runtime_data.yaml`, and
-per-plane `detection_data/mean_image.npy` (plus `mean_image_channel_2.npy` if two-channel).
+**Phase 1 (binarization):** `configuration.yaml`, `acquisition_parameters.yaml`, and the initial per-plane
+`runtime_data.yaml` are already on disk before this phase runs, because `prepare_single_recording_batch_tool` (or the
+`cindra run` entry point) writes them while resolving the plane contexts, so their presence does not indicate that
+binarization ran. Phase 1 itself creates the per-plane `channel_1_data.bin` (and `channel_2_data.bin` if
+two-channel) and per-plane `detection_data/mean_image.npy` (plus `mean_image_channel_2.npy` if two-channel), then
+records `binarization_time` into each plane's `runtime_data.yaml`. Each plane binary is sized
+by that plane's own interleave frame count, so a recording whose acquisition stopped partway through a volume gives its
+leading planes one frame more than its trailing planes, and channel 2 may hold one frame more or fewer than channel 1 of
+the same plane. Binarization also rebuilds an existing binary whose size disagrees with its recorded plane geometry, or
+that an interrupted registration left marked, without requiring `repeat_binarization`.
 
-**Phase 2 — Registration (per-plane):** Creates `registration_data/`, rewrites the plane binary in place, refreshes
+**Phase 2 (registration, per-plane):** Creates `registration_data/`, rewrites the plane binary in place, refreshes
 `detection_data/mean_image.npy`, and updates `runtime_data.yaml` with the registration section,
-`total_registration_time`, and `registration_workers`.
+`total_registration_time`, and `registration_workers`. For the duration of the in-place rewrite, a
+`{binary}.registering` marker sits beside the binary. A marker left on disk means the registration was interrupted, so
+the binary holds corrected frames up to an unknown point and raw frames after it. Registration refuses to run against a
+marked binary, and re-running binarization rebuilds the binary and clears the marker.
 
-**Phase 3 — Processing (per-plane):** Creates the remaining `detection_data/` images (`enhanced_mean_image.npy`,
+**Phase 3 (processing, per-plane):** Creates the remaining `detection_data/` images (`enhanced_mean_image.npy`,
 `maximum_projection.npy`, `correlation_map.npy`), the ROI `.npz` files, the fluorescence `.npy` traces, and updates
-`runtime_data.yaml` with `total_processing_time`, `processing_workers`, and `date_processed`.
+`runtime_data.yaml` with `total_processing_time`, `processing_workers`, and `date_processed`. Detection also
+overwrites `detection_data/mean_image.npy` with the mean of the temporally binned frames, which drop the bad frames
+and are cropped to the registration valid range before being embedded into a full-frame array that is zero outside
+that range, so the surviving file is not the whole-movie temporal mean registration wrote.
 
-**Phase 4 — Combination:** Creates `combined_metadata.npz`, combined `detection_data/`, and combined ROI and trace
-files at the root level by merging all per-plane results.
+**Phase 4 (combination):** Creates combined `detection_data/` and the combined ROI and trace files at the root level by
+merging all per-plane results, then writes `combined_metadata.npz` last, staging it as `combined_metadata.tmp.npz` and
+moving it into place. The metadata file therefore doubles as an atomic completion marker: it never exists while the
+payload it describes is missing or partially written.
 
----
-
-### Combined metadata
-
-**File:** `combined_metadata.npz`
-
-| NPZ key                             | Dtype   | Shape | Description                                            |
-|-------------------------------------|---------|-------|--------------------------------------------------------|
-| `plane_count`                       | uint8   | (1,)  | Number of planes combined                              |
-| `combined_height`                   | uint32  | (1,)  | Height of combined field of view in pixels             |
-| `combined_width`                    | uint32  | (1,)  | Width of combined field of view in pixels              |
-| `tau`                               | float32 | (1,)  | Calcium indicator timescale in seconds                 |
-| `sampling_rate`                     | float32 | (1,)  | Per-plane sampling rate in Hz                          |
-| `plane_heights`                     | uint16  | (N,)  | Per-plane frame heights                                |
-| `plane_widths`                      | uint16  | (N,)  | Per-plane frame widths                                 |
-| `plane_y_offsets`                   | int32   | (N,)  | Per-plane Y displacement for combined view             |
-| `plane_x_offsets`                   | int32   | (N,)  | Per-plane X displacement for combined view             |
-| `registered_binary_paths`           | str     | (N,)  | Relative paths to channel 1 registered binaries        |
-| `registered_binary_paths_channel_2` | str     | (N,)  | Relative paths to channel 2 registered binaries (2-ch) |
-
----
-
-### Detection images
-
-Saved in `detection_data/` subdirectories at both the combined root and per-plane levels. All files are `.npy`
-format, float32 dtype, with shape `(height, width)`.
-
-**Channel 1 (always present):**
-
-| File                      | Description                                               |
-|---------------------------|-----------------------------------------------------------|
-| `mean_image.npy`          | Temporal mean across all registered frames                |
-| `enhanced_mean_image.npy` | High-pass filtered mean for enhanced ROI visibility       |
-| `maximum_projection.npy`  | Maximum intensity projection across all frames            |
-| `correlation_map.npy`     | Pixel-wise correlation map for identifying active regions |
-
-**Channel 2 (two-channel only, same shape and dtype):**
-
-| File                                | Description                            |
-|-------------------------------------|----------------------------------------|
-| `mean_image_channel_2.npy`          | Channel 2 temporal mean image          |
-| `enhanced_mean_image_channel_2.npy` | Channel 2 high-pass filtered mean      |
-| `maximum_projection_channel_2.npy`  | Channel 2 maximum intensity projection |
-| `correlation_map_channel_2.npy`     | Channel 2 correlation map              |
-
----
-
-### ROI spatial data (roi_masks.npz)
-
-Saved at both the combined root and per-plane levels. Uses the `ROIMask` serialization format.
-
-| NPZ key           | Dtype   | Shape           | Description                                           |
-|-------------------|---------|-----------------|-------------------------------------------------------|
-| `pixel_counts`    | uint32  | (num_rois,)     | Number of pixels in each ROI                          |
-| `y_pixels`        | int32   | (total_pixels,) | Y-coordinates of all ROI pixels (concatenated)        |
-| `x_pixels`        | int32   | (total_pixels,) | X-coordinates of all ROI pixels (concatenated)        |
-| `pixel_weights`   | float32 | (total_pixels,) | Spatial filter weights for each pixel                 |
-| `centroids`       | int32   | (num_rois, 2)   | ROI centroid coordinates (y, x)                       |
-| `radius`          | float32 | (num_rois,)     | Fitted ellipse radius per ROI                         |
-| `cluster_id`      | uint32  | (num_rois,)     | Multi-recording tracking cluster ID (0 = unclustered) |
-| `recording_count` | uint16  | (num_rois,)     | Number of recordings ROI appears in                   |
-| `frame_width`     | uint32  | (1,)            | Frame width in pixels                                 |
-
-To reconstruct per-ROI pixel arrays, split the concatenated `y_pixels`, `x_pixels`, and `pixel_weights` arrays
-using cumulative sums of `pixel_counts`.
-
-Channel 2 data uses identical keys in `roi_masks_channel_2.npz`.
-
----
-
-### ROI shape statistics (roi_statistics.npz)
-
-Saved at both the combined root and per-plane levels. Companion file to `roi_masks.npz`.
-
-| NPZ key                  | Dtype   | Shape       | Description                                            |
-|--------------------------|---------|-------------|--------------------------------------------------------|
-| `footprints`             | uint16  | (num_rois,) | Spatial scale (hop size) used during detection         |
-| `compactness`            | float32 | (num_rois,) | Ratio of actual to expected mean radius (1.0=circular) |
-| `solidity`               | float32 | (num_rois,) | Ratio of soma pixels to convex hull area               |
-| `pixel_count`            | uint32  | (num_rois,) | Total pixels in complete ROI                           |
-| `aspect_ratio`           | float32 | (num_rois,) | Ellipse axis ratio indicating elongation               |
-| `normalized_pixel_count` | float32 | (num_rois,) | Pixel count normalized by expected ROI size (soma)     |
-| `skewness`               | float32 | (num_rois,) | Fluorescence skewness (NaN if unavailable)             |
-| `plane_index`            | int32   | (num_rois,) | Imaging plane index for each ROI                       |
-
-**Optional variable-length arrays** (present only when the data exists):
-
-| NPZ key                | Dtype  | Description                                 |
-|------------------------|--------|---------------------------------------------|
-| `soma_mask_counts`     | uint32 | Per-ROI pixel count for soma masks          |
-| `soma_mask`            | bool   | Concatenated soma boolean masks             |
-| `neuropil_mask_counts` | uint32 | Per-ROI pixel count for neuropil masks      |
-| `neuropil_mask`        | int32  | Concatenated raveled neuropil pixel indices |
-| `overlap_mask_counts`  | uint32 | Per-ROI pixel count for overlap masks       |
-| `overlap_mask`         | bool   | Concatenated overlap boolean masks          |
-
-Variable-length arrays use the same split-by-counts pattern as `roi_masks.npz`.
-
-Channel 2 data uses identical keys in `roi_statistics_channel_2.npz`.
-
----
-
-### Fluorescence traces and classification
-
-Saved at both the combined root and per-plane levels. All files are `.npy` format, float32 dtype.
-
-**Channel 1 (always present):**
-
-| File                          | Shape              | Description                                                            |
-|-------------------------------|--------------------|------------------------------------------------------------------------|
-| `cell_fluorescence.npy`       | (num_rois, frames) | Raw somatic fluorescence traces                                        |
-| `neuropil_fluorescence.npy`   | (num_rois, frames) | Neuropil fluorescence traces                                           |
-| `subtracted_fluorescence.npy` | (num_rois, frames) | Neuropil-and-baseline-subtracted fluorescence                          |
-| `spikes.npy`                  | (num_rois, frames) | Deconvolved spike estimates                                            |
-| `cell_classification.npy`     | (num_rois, 2)      | Column 0: is_cell label (1.0 or 0.0), column 1: classifier probability |
-
-If `spike_deconvolution.extract_spikes` is False, both `subtracted_fluorescence.npy` and `spikes.npy` are filled with
-zeroes. In that case `query_traces_tool` returns an all-zero trace with `success=true` rather than an error, so an
-all-zero spike or corrected trace can mean deconvolution was disabled rather than the absence of activity.
-
-**Channel 2 (two-channel only, same shapes):**
-
-| File                                    | Description                        |
-|-----------------------------------------|------------------------------------|
-| `cell_fluorescence_channel_2.npy`       | Channel 2 raw somatic fluorescence |
-| `neuropil_fluorescence_channel_2.npy`   | Channel 2 neuropil fluorescence    |
-| `subtracted_fluorescence_channel_2.npy` | Channel 2 subtracted fluorescence  |
-| `spikes_channel_2.npy`                  | Channel 2 deconvolved spikes       |
-| `cell_classification_channel_2.npy`     | Channel 2 classification results   |
-
-**Optional colocalization files (combined root and per-plane):**
-
-| File                                  | Shape           | Description                                                     |
-|---------------------------------------|-----------------|-----------------------------------------------------------------|
-| `cell_colocalization.npy`             | (num_rois, 2)   | Channel-2 colocalization; columns depend on the extraction path |
-| `corrected_structural_mean_image.npy` | (height, width) | Bleed-through-corrected structural channel mean                 |
-
-The `cell_colocalization.npy` column semantics depend on the extraction path. When one channel is structural,
-intensity-based colocalization runs (and also writes `corrected_structural_mean_image.npy`): column 0 is the
-is_colocalized label (1.0 or 0.0) and column 1 the probability. When both channels are functional, spatial
-colocalization runs instead: column 0 is the matched channel-2 ROI index (-1 if unmatched) and column 1 the
-overlap score. `query_roi_statistics_tool` surfaces this as a per-ROI `colocalization` pair plus top-level
-`colocalization_mode` and `colocalization_columns`.
-
-The metadata tool's `two_channels` flag means channel 2 is present AND functional, not merely that the recording
-is dual-channel. A recording with a structural (non-functional) channel 2 reports `two_channels=False` yet still
-writes `cell_colocalization.npy`. Use the presence of `cell_colocalization.npy` (not `two_channels`) as the signal
-that channel-2 colocalization was computed.
-
----
-
-### Per-plane registration data
-
-Saved in `plane_N/registration_data/`. All files are `.npy` format.
-
-| File                                     | Dtype   | Shape                              | Description                                                       |
-|------------------------------------------|---------|------------------------------------|-------------------------------------------------------------------|
-| `reference_image.npy`                    | float32 | (height, width)                    | Template image used for alignment                                 |
-| `bad_frames.npy`                         | bool    | (num_frames,)                      | Frames flagged for excessive motion                               |
-| `rigid_y_offsets.npy`                    | int32   | (num_frames,)                      | Rigid registration Y displacement per frame                       |
-| `rigid_x_offsets.npy`                    | int32   | (num_frames,)                      | Rigid registration X displacement per frame                       |
-| `rigid_correlations.npy`                 | float32 | (num_frames,)                      | Phase correlation quality per frame                               |
-| `nonrigid_y_offsets.npy`                 | float32 | (num_frames, num_blocks)           | Nonrigid Y displacement per block per frame                       |
-| `nonrigid_x_offsets.npy`                 | float32 | (num_frames, num_blocks)           | Nonrigid X displacement per block per frame                       |
-| `nonrigid_correlations.npy`              | float32 | (num_frames, num_blocks)           | Nonrigid correlation quality per block per frame                  |
-| `principal_component_extreme_images.npy` | float32 | (2, num_components, height, width) | Mean images at PC extremes (0=low, 1=high)                        |
-| `principal_component_projections.npy`    | float32 | (num_frames, num_components)       | Frame projections onto principal components                       |
-| `principal_component_shift_metrics.npy`  | float32 | (num_components, 3)                | Columns: rigid magnitude, mean nonrigid shift, max nonrigid shift |
-
----
-
-### Per-plane binary data
-
-| File                 | Format           | Description                                                          |
-|----------------------|------------------|----------------------------------------------------------------------|
-| `channel_1_data.bin` | Contiguous int16 | Motion-corrected frames: `[frame0_row0_col0, frame0_row0_col1, ...]` |
-| `channel_2_data.bin` | Contiguous int16 | Channel 2 motion-corrected frames (two-channel only)                 |
-
-Binary files store frames as contiguous int16 arrays. Each frame has `height × width` values. Read with
-`np.memmap(path, dtype=np.int16, mode='r', shape=(frame_count, height, width))` using dimensions from
-`runtime_data.yaml`.
-
----
-
-### Per-plane runtime metadata (runtime_data.yaml)
-
-A YAML file containing scalar metadata from all processing stages. Key sections:
-
-| Section        | Key fields                                                                                                                                        |
-|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `io`           | `frame_height`, `frame_width`, `frame_count`, `sampling_rate`, `plane_index`                                                                      |
-| `registration` | `valid_y_range`, `valid_x_range`, `bidirectional_phase_offset`, `bidirectional_phase_corrected`, `normalization_minimum`, `normalization_maximum` |
-| `detection`    | `roi_diameter`, `roi_diameter_channel_2`, `aspect_ratio`                                                                                          |
-| `timing`       | Stage durations, phase totals, worker counts, and version stamps, itemized below.                                                                 |
-
-The `timing` section stores every duration as an integer number of seconds:
-
-- Stage durations: `binarization_time`, `registration_time`, `two_step_registration_time`,
-  `registration_metrics_time`, `detection_time`, `extraction_time`, `classification_time`, `deconvolution_time`.
-- Channel 2 stage durations: `detection_time_channel_2`, `extraction_time_channel_2`,
-  `classification_time_channel_2`, `deconvolution_time_channel_2`.
-- Phase totals: `total_registration_time` covers motion correction and the registration quality metrics
-  computation. `total_processing_time` covers ROI detection, trace extraction, classification, and spike
-  deconvolution.
-- Worker counts: `registration_workers` and `processing_workers` record the allocation each stage used.
-- Version stamps: `date_processed`, `python_version`, `cindra_version`.
-
-`query_single_recording_metadata_tool` surfaces the phase totals and both worker counts in its `plane_timing`
-entries, so the per-plane worker allocation is readable without opening `runtime_data.yaml`.
-
-Array fields from registration, detection, and extraction are saved as separate `.npy` files (documented above)
-and set to None in the YAML.
-
----
-
-### Data type conventions
-
-| Category            | Dtype   | Examples                                       |
-|---------------------|---------|------------------------------------------------|
-| Pixel coordinates   | int32   | y_pixels, x_pixels, centroids, rigid offsets   |
-| Images and traces   | float32 | mean_image, fluorescence, spikes, correlations |
-| Counts / dimensions | uint32  | pixel_counts, frame_count, combined_height     |
-| Small counts        | uint16  | plane_heights, plane_widths, recording_count   |
-| Booleans            | bool    | bad_frames, soma_mask, overlap_mask            |
-| Plane indices       | int32   | plane_index                                    |
-| Plane counts        | uint8   | plane_count                                    |
-
-Extraction trace, classification, and colocalization `.npy` files and all `.npz` archives are saved with
-`allow_pickle=False`. Detection and registration `.npy` files use NumPy save defaults but contain only numeric
-arrays that load safely with `allow_pickle=False`. Arrays support memory-mapped loading via
-`np.load(path, mmap_mode='r+')` for efficient access to large datasets.
+For every file, array shape, dtype, NPZ key, and data type convention the pipeline produces, see
+[references/output-formats.md](references/output-formats.md).
 
 ---
 
@@ -423,24 +227,31 @@ Single-Recording Output Completeness:
 Root-level files:
 - [ ] `configuration.yaml` exists
 - [ ] `acquisition_parameters.yaml` exists
-- [ ] `combined_metadata.npz` exists and contains `plane_count`, `combined_height`, `combined_width` keys
+- [ ] `combined_metadata.npz` exists and contains `plane_count`, `frame_count`, `plane_frame_counts`,
+      `combined_height`, `combined_width` keys (note that `verify_single_recording_output_tool` checks only the
+      pre-existing keys, so the two frame-count keys are verified here rather than by that tool)
 
 Combined detection images (cindra/detection_data/):
 - [ ] `mean_image.npy` exists
 - [ ] `enhanced_mean_image.npy` exists
 - [ ] `maximum_projection.npy` exists
 - [ ] `correlation_map.npy` exists
-- [ ] Channel 2 variants exist if `main.two_channels` is True and both channels are functional
+- [ ] `mean_image_channel_2.npy` exists if `main.two_channels` is True, whether or not channel 2 is functional
+- [ ] `enhanced_mean_image_channel_2.npy`, `maximum_projection_channel_2.npy`, and `correlation_map_channel_2.npy`
+      exist if both channels are functional
 
 Combined extraction data (cindra/):
 - [ ] `roi_masks.npz` exists and contains `pixel_counts`, `y_pixels`, `x_pixels`, `pixel_weights` keys
 - [ ] `roi_statistics.npz` exists and contains `footprints`, `compactness`, `plane_index` keys
-- [ ] `cell_fluorescence.npy` exists with shape (num_rois, num_frames)
+- [ ] `cell_fluorescence.npy` exists with shape (num_rois, frames)
 - [ ] `neuropil_fluorescence.npy` exists with shape matching cell_fluorescence
 - [ ] `subtracted_fluorescence.npy` exists with shape matching cell_fluorescence
-- [ ] `spikes.npy` exists with shape matching cell_fluorescence (if spike_deconvolution.extract_spikes is True)
+- [ ] `spikes.npy` exists with shape matching cell_fluorescence (zero-filled when
+      spike_deconvolution.extract_spikes is False)
 - [ ] `cell_classification.npy` exists with shape (num_rois, 2)
-- [ ] Channel 2 trace and classification files exist if both channels are functional
+- [ ] Every channel 2 trace and classification file exists if both channels are functional. This includes
+      `cell_fluorescence_channel_2.npy` and `neuropil_fluorescence_channel_2.npy`, which combination omits at this
+      level for a structural channel 2 even though each plane directory holds them
 
 Per-plane directories (cindra/plane_0/ through cindra/plane_{N-1}/):
 - [ ] Each expected plane directory exists
@@ -454,7 +265,8 @@ Per-plane registration data (plane_N/registration_data/):
 - [ ] `rigid_y_offsets.npy` and `rigid_x_offsets.npy` exist
 - [ ] `rigid_correlations.npy` exists
 - [ ] Nonrigid arrays exist if nonrigid_registration.enabled is True
-- [ ] PC metric arrays exist if registration.registration_metric_principal_components > 0
+- [ ] PC metric arrays exist if registration.registration_metric_principal_components > 0 and the plane holds at
+      least 1500 frames
 
 Per-plane detection and extraction data (plane_N/):
 - [ ] `detection_data/` contains the four channel-1 images: `mean_image.npy`, `enhanced_mean_image.npy`,
@@ -462,8 +274,16 @@ Per-plane detection and extraction data (plane_N/):
 - [ ] `roi_masks.npz` and `roi_statistics.npz` exist
 - [ ] Fluorescence trace .npy files exist with consistent shapes across all traces
 - [ ] `cell_classification.npy` exists with shape (num_rois, 2)
+- [ ] `detection_data/mean_image_channel_2.npy`, `cell_fluorescence_channel_2.npy`, and
+      `neuropil_fluorescence_channel_2.npy` exist if `main.two_channels` is True, whether or not channel 2 is
+      functional. The two trace files carry one row per channel 1 ROI when channel 2 is structural
+- [ ] The remaining channel 2 detection images, ROI `.npz` files, trace files, and `cell_classification_channel_2.npy`
+      exist if both channels are functional
 
 Multi-recording readiness (if multi-recording processing is planned):
 - [ ] `combined_metadata.npz` contains `registered_binary_paths` key
 - [ ] All registered binary files referenced in `registered_binary_paths` exist on disk
+- [ ] `combined_metadata.npz` `plane_frame_counts` entries are all equal, or differ only within the tolerance the
+      combined view applies (multi-recording extraction opens the plane binaries as one combined view whose frame count
+      is that of the shortest plane, so unequal counts mean the trailing frames of the longer planes are not extracted)
 ```

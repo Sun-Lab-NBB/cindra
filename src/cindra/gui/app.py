@@ -122,7 +122,6 @@ def run_registration_viewer(recording_path: Path, *, state_path: Path | None = N
 
     # Top-left corner of the binary viewer, in pixels from the screen's top-left corner.
     binary_viewer_x, binary_viewer_y = 50, 50
-    # Default window dimensions from style constants.
     binary_viewer_width = BINARY_STYLE.window_geometry[2]
     binary_viewer_height = BINARY_STYLE.window_geometry[3]
     pc_viewer_width = PC_STYLE.window_geometry[2]
@@ -173,7 +172,7 @@ def run_roi_viewer(
     dataset: str | None = None,
     state_path: Path | None = None,
 ) -> None:
-    """Launches the standalone ROI viewer with right-click reclassification.
+    """Launches the standalone ROI viewer with click-based ROI selection and classifier-mode relabeling.
 
     Creates a QApplication, loads pipeline data from the given recording directory, shows the ROIViewer window, and
     enters the event loop.
