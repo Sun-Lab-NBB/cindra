@@ -415,7 +415,7 @@ def _pick_initial_reference(frames: NDArray[np.float32], top_correlations: int =
     # reference from those same frames, and register_plane derives the percentile clip bounds used during frame
     # registration from the resulting reference.
     frames_flat = frames.reshape(frame_count, -1)
-    frames_flat -= frames_flat.mean(axis=1, keepdims=True)
+    frames_flat = frames_flat - frames_flat.mean(axis=1, keepdims=True)
 
     # Normalizes frames and computes correlation matrix.
     frame_norms = np.linalg.norm(frames_flat, axis=1, keepdims=True)
