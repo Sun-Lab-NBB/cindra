@@ -103,9 +103,10 @@ active when Claude Code launches.
 
 cindra is distributed as a pre-release build, so every install, upgrade, and reinstall command MUST carry pip's
 `--pre` flag. The MCP tool surface these skills document (the four single-recording phases, the per-stage worker
-arguments of the execute tools, and the measured worker defaults in `cindra.allocation`) ships in cindra 2.0.0rc1
-and newer. Without `--pre`, pip resolves an older build whose MCP tools do not match the documented surface, which
-presents as tools that reject a documented phase name or argument while the server itself reports as connected.
+arguments of the execute tools, and the measured worker defaults in `cindra.allocation`, including the multi-recording
+discovery and extraction defaults) ships in cindra 2.0.0+.
+Without `--pre`, pip resolves an older build whose MCP tools do not match the documented surface, which presents as
+tools that reject a documented phase name or argument while the server itself reports as connected.
 
 ---
 
@@ -217,14 +218,17 @@ Then confirm the resolved package version:
 python -c "from importlib.metadata import version; print(version('cindra'))"
 ```
 
-The version MUST be 2.0.0rc1 or newer. A lower version means pip resolved a build whose MCP tools predate the
+The version MUST be 2.0.0+. Any pre-release build of the 2.0.0 line satisfies this, because cindra is distributed as
+a pre-release, so treat a version that starts with `2.0.0` as passing. A version from an earlier release line means
+pip resolved a build whose MCP tools predate the
 documented tool surface, and the fix is to upgrade with the `--pre` flag:
 
 ```bash
 pip install --upgrade --pre cindra
 ```
 
-You MUST report a version below 2.0.0rc1 as a failed diagnostic even when every earlier step passed, because the
+You MUST report a version from a release line below 2.0.0 as a failed diagnostic even when every earlier step passed,
+because the
 servers start and connect while their tools reject the arguments the other cindra skills send.
 
 ### Step 6: Verify OpenMP runtime on macOS
@@ -315,7 +319,7 @@ MCP on the next session, since the current session's MCP subprocesses predate th
 | Import error on `cindra-gui mcp`                          | Broken Qt/PySide6 install                                   | `pip install --force-reinstall --pre cindra` (PySide6 is a core dependency, not an extra)                            |
 | Python version mismatch                                   | Wrong environment activated                                 | Activate environment with Python 3.14                                                                                |
 | MCP server starts but tools are missing                   | Outdated cindra version                                     | `pip install --upgrade --pre cindra`                                                                                 |
-| MCP tool rejects a documented phase or argument           | Installed cindra is older than 2.0.0rc1                     | `pip install --upgrade --pre cindra`, then restart Claude Code                                                       |
+| MCP tool rejects a documented phase or argument           | Installed cindra predates the 2.0.0 line                    | `pip install --upgrade --pre cindra`, then restart Claude Code                                                       |
 | MCP server connected but tools fail                       | Not an environment issue                                    | Check tool-specific error messages                                                                                   |
 | cindra-gui tools unavailable                              | Plugin not installed or outdated                            | Reinstall the cindra Claude Code plugin                                                                              |
 | Skills available but MCP tools missing                    | Plugin installed without pip package                        | `pip install --pre cindra` in the active environment                                                                 |
@@ -356,7 +360,7 @@ MCP Environment Setup:
 - [ ] Verified 'cindra' command is on PATH (which cindra)
 - [ ] Verified 'cindra-gui' command is on PATH if GUI tools are needed (which cindra-gui)
 - [ ] Confirmed Python version matches >=3.14,<3.15
-- [ ] Confirmed the installed cindra version is 2.0.0rc1 or newer
+- [ ] Confirmed the installed cindra version is 2.0.0+ (any pre-release build of the 2.0.0 line qualifies)
 - [ ] Identified environment type (conda, venv, system)
 - [ ] Provided environment-specific resolution steps (install commands carry the --pre flag)
 - [ ] On macOS, verified 'libomp.dylib' is resolvable (python -c "from numba.np.ufunc import omppool")

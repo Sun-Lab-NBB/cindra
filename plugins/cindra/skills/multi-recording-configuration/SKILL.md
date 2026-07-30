@@ -91,6 +91,11 @@ parent directory of this file becomes the cindra root for that recording.
 No special single-recording configuration is required. The pipeline always generates combined output and preserves
 registered binary files by default.
 
+Extraction opens each recording's plane binaries as one combined view whose frame count is that of the recording's
+shortest plane. A recording whose acquisition stopped partway through a volume keeps the extra frames per-plane, so its
+planes hold unequal counts and the trailing frames of the longer planes fall outside the combined view. Check that a
+recording's `combined_metadata.npz` `plane_frame_counts` entries are equal before relying on its full frame range.
+
 ---
 
 ## Pipeline-set parameters
@@ -114,7 +119,10 @@ Runtime behavior settings shared with the single-recording pipeline.
 
 Worker allocation is not a configuration parameter. The discovery and extraction stages each receive their worker
 count as an invocation argument, supplied by `execute_processing_jobs_tool` and `execute_full_pipeline_tool` at
-dispatch time, or by the `cindra run` options `-dw/--discover-workers` and `-ew/--extract-workers`.
+dispatch time, or by the `cindra run` options `-dw/--discover-workers` and `-ew/--extract-workers`. Omitting a worker
+option applies the measured default of 30 workers for discovery and 16 for extraction, published as
+`DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.allocation`. Setting a worker option to -1 requests every
+available core.
 
 ---
 

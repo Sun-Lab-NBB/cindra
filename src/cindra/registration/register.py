@@ -763,8 +763,9 @@ def _validate_binaries_are_not_mid_registration(io_data: IOData, plane_index: in
             message = (
                 f"Unable to register plane {plane_index}. A previous registration of the binary file "
                 f"'{binary_path}' was interrupted, so the file holds motion-corrected frames up to an unknown point "
-                f"and raw frames after it. Re-run the binarization stage with 'repeat_binarization' enabled to "
-                f"rebuild the binary from its source TIFF files, which also clears the marker at '{marker_path}'."
+                f"and raw frames after it. Re-run the binarization stage to rebuild the binary from its source TIFF "
+                f"files, which also clears the marker at '{marker_path}'. Binarization rebuilds a marked binary on "
+                f"its own, so enabling 'repeat_binarization' is not required."
             )
             console.error(message=message, error=RuntimeError)
 

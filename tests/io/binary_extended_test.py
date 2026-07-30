@@ -137,6 +137,35 @@ class TestWriteTiff:
 class TestBinaryFileCombined:
     """Tests the BinaryFileCombined class."""
 
+    def test_caps_the_combined_view_at_the_shortest_plane(self, tmp_path: Path) -> None:
+        """Verifies that planes of unequal length combine into a view spanning the shortest plane's frames."""
+        plane_extent = 4
+
+        # Reproduces a recording whose acquisition stopped partway through a volume, which gives the leading plane one
+        # frame more than the trailing plane.
+        long_path = tmp_path / "plane0.bin"
+        short_path = tmp_path / "plane1.bin"
+        _create_test_binary(long_path, frame_count=11, height=plane_extent, width=plane_extent)
+        _create_test_binary(short_path, frame_count=10, height=plane_extent, width=plane_extent)
+
+        combined = BinaryFileCombined(
+            height=plane_extent * 2,
+            width=plane_extent,
+            plane_heights=np.array([plane_extent, plane_extent], dtype=np.uint16),
+            plane_widths=np.array([plane_extent, plane_extent], dtype=np.uint16),
+            plane_y_coordinates=np.array([0, plane_extent], dtype=np.int32),
+            plane_x_coordinates=np.array([0, 0], dtype=np.int32),
+            file_paths=[long_path, short_path],
+        )
+
+        # Every combined frame must be backed by real data on every plane, so the view spans the shorter plane and a
+        # read across its full range stays inside both files.
+        assert combined.frame_number == 10
+        assert combined.shape[0] == 10
+        assert combined[slice(0, combined.frame_number)].shape == (10, plane_extent * 2, plane_extent)
+
+        combined.close()
+
     def test_reads_combined_frames_from_two_planes(self, tmp_path: Path) -> None:
         """Verifies that frames from two planes are correctly assembled into a combined array."""
         plane_height = 4
@@ -243,8 +272,8 @@ class TestBinaryFileCombined:
             np.testing.assert_array_equal(heights, plane_heights)
             np.testing.assert_array_equal(widths, plane_widths)
 
-    def test_raises_error_for_mismatched_frame_counts(self, tmp_path: Path) -> None:
-        """Verifies that a ValueError is raised when plane binary files have different frame counts."""
+    def test_mismatched_frame_counts_resolve_to_the_shortest_plane(self, tmp_path: Path) -> None:
+        """Verifies that widely differing plane frame counts resolve to the shortest plane rather than raising."""
         plane_height = 4
         plane_width = 4
 
@@ -254,16 +283,19 @@ class TestBinaryFileCombined:
         path_2 = tmp_path / "plane1.bin"
         np.ones((7, plane_height, plane_width), dtype=np.int16).tofile(path_2)
 
-        with pytest.raises(ValueError, match="Unable to create a new BinaryFileCombined"):
-            BinaryFileCombined(
-                height=plane_height * 2,
-                width=plane_width,
-                plane_heights=np.array([plane_height, plane_height], dtype=np.uint16),
-                plane_widths=np.array([plane_width, plane_width], dtype=np.uint16),
-                plane_y_coordinates=np.array([0, plane_height], dtype=np.int32),
-                plane_x_coordinates=np.array([0, 0], dtype=np.int32),
-                file_paths=[path_1, path_2],
-            )
+        combined = BinaryFileCombined(
+            height=plane_height * 2,
+            width=plane_width,
+            plane_heights=np.array([plane_height, plane_height], dtype=np.uint16),
+            plane_widths=np.array([plane_width, plane_width], dtype=np.uint16),
+            plane_y_coordinates=np.array([0, plane_height], dtype=np.int32),
+            plane_x_coordinates=np.array([0, 0], dtype=np.int32),
+            file_paths=[path_1, path_2],
+        )
+
+        assert combined.frame_number == 5
+
+        combined.close()
 
     def test_byte_number_property(self, tmp_path: Path) -> None:
         """Verifies that the byte_number property returns correct sizes for each managed file."""

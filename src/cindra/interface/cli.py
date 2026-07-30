@@ -141,8 +141,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     required=False,
     default=None,
     help=(
-        "[Multi-recording] The number of parallel workers to allocate to the discovery step. Omitting this option or "
-        "setting it to -1 allocates all available cores."
+        "[Multi-recording] The number of parallel workers to allocate to the discovery step. When this option is "
+        "omitted, the step receives its measured default allocation of 30 workers, which is the saturating allocation "
+        "the step is admitted at. Setting this to -1 uses all available cores."
     ),
 )
 @click.option(
@@ -152,8 +153,9 @@ def cindra_config(pipeline: str, output_path: Path, name: str | None) -> None:
     required=False,
     default=None,
     help=(
-        "[Multi-recording] The number of parallel workers to allocate to each per-recording extraction step. Omitting "
-        "this option or setting it to -1 allocates all available cores."
+        "[Multi-recording] The number of parallel workers to allocate to each per-recording extraction step. When this "
+        "option is omitted, the step receives its measured default allocation of 16 workers, which is the point where "
+        "the step stops shortening. Setting this to -1 uses all available cores."
     ),
 )
 @click.option(

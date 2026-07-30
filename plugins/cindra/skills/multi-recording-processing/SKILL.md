@@ -118,12 +118,12 @@ Phase 1: DISCOVER (phase name: discovery, CPU bound, parallel by dataset)
 ├── Clusters ROI masks across recordings
 ├── Generates template masks for tracked ROIs
 ├── Projects template masks back to each recording's coordinate system
-└── One job per dataset, workers from the shared multi_recording allocation (see Resource management)
+└── One job per dataset, workers from the discovery resource class (30 per job, see Resource management)
 
 Phase 2: EXTRACT (phase name: extraction, CPU bound, parallel by recording)
 ├── Applies template masks to extract fluorescence
 ├── Computes neuropil signals, spike deconvolution
-└── One job per recording, workers from the shared multi_recording allocation (see Resource management)
+└── One job per recording, workers from the extraction resource class (16 per job, see Resource management)
 ```
 
 Batch processing across multiple datasets:
@@ -215,16 +215,16 @@ selective re-runs), use `prepare_multi_recording_batch_tool` followed by `execut
    directory, preserving the original template. Pass the same template path for multiple datasets
    that share parameters.
 
-5. **Confirm CPU allocation** — Compute the saturating allocation for the session using the algorithm
-   in the Resource management section. Discovery and extraction jobs share one `multi_recording`
-   resource class, so the session resolves one allocation from their combined job count. Present the
-   computed values to the user as a summary table before starting. The example below covers 2 datasets
-   of 15 recordings each on a 128-core host, which is 2 discovery jobs plus 30 extraction jobs:
+5. **Confirm CPU allocation** — Read the per-stage defaults from the Resource management section.
+   Discovery and extraction resolve independently, so present one row per class. The example below
+   covers 2 datasets of 15 recordings each on a 128-core host, which is 2 discovery jobs plus 30
+   extraction jobs against a budget of 126:
 
    ```text
-   Resource class  | Jobs | Workers/Job | Max Parallel | Total Cores
-   ----------------|------|-------------|--------------|------------
-   multi_recording |   32 |          30 |            4 |         120
+   Resource class | Jobs | Workers/Job | Max Parallel | Total Cores
+   ---------------|------|-------------|--------------|------------
+   discovery      |    2 |          30 |            2 |          60
+   extraction     |   30 |          16 |            7 |         112
    ```
 
    Ask the user to confirm or override. Both `workers_per_job` and `max_parallel_jobs` default to
@@ -299,32 +299,33 @@ To re-run specific phases (e.g., after changing tracking parameters):
 
 ## Resource management
 
-Multi-recording jobs belong to the `multi_recording` resource class, which uses saturating core allocation to
-distribute CPU cores across parallel compute-bound jobs. When both `workers_per_job` and `max_parallel_jobs`
-are set to `-1` (automatic), the allocator runs the following algorithm:
+Discovery and extraction run under separate resource classes, each carrying its own measured per-job worker count. The
+session CPU budget is `cpu_count - 2`, with 2 cores reserved for system operations, and the dispatcher holds the sum of
+the cores committed by every class inside that budget, so the two classes interleave rather than each claiming the whole
+budget.
 
-1. **Budget**: `cpu_count - 2` (2 cores reserved for system operations)
-2. **Max parallel jobs**: `min(total_jobs, max(1, budget // 30))` (targets ~30 workers per job, with a floor of 1)
-3. **Raw workers per job**: `budget // max_parallel_jobs`
-4. **Round down** to the nearest multiple of 5
-5. **Saturate**: If workers per job falls below 10 and parallelism > 1, reduce parallelism and
-   recalculate until each job has at least 10 workers
+| Phase    | Resource class | Cores per job | Concurrency cap    |
+|----------|----------------|---------------|--------------------|
+| DISCOVER | `discovery`    | 30            | Session CPU budget |
+| EXTRACT  | `extraction`   | 16            | Session CPU budget |
 
-| CPU Cores | Budget | Jobs | Workers/Job | Max Parallel | Total Utilized |
-|-----------|--------|------|-------------|--------------|----------------|
-| 128       | 126    | 4    | 30          | 4            | 120            |
-| 64        | 62     | 4    | 30          | 2            | 60             |
-| 32        | 30     | 4    | 30          | 1            | 30             |
-| 16        | 14     | 4    | 14 (→ 10)   | 1            | 10             |
+Discovery's 30 is the saturating allocation the stage is admitted at, because its cost grows with the square of the
+recording count. Extraction's 16 is measured: the stage reads each frame batch serially before the kernel runs, so it
+plateaus above that width.
 
-Discovery and extraction jobs share one `multi_recording` resource class, so a session resolves a single
-allocation from the combined count of the discovery and extraction jobs it holds. The discover phase contributes
-one job per dataset, and the extract phase contributes one job per recording. Both `workers_per_job` and
-`max_parallel_jobs` default to `-1` (automatic) and can be overridden explicitly in
-`execute_processing_jobs_tool` or `execute_full_pipeline_tool`. Both execute tools return a session-level
-`cpu_budget` and a `resource_classes` mapping keyed by class name, whose `multi_recording` entry carries
-`workers_per_job`, `max_parallel_jobs` and `job_count`. `get_processing_jobs_status_tool` returns the same
-mapping with `pending` and `active` in place of `job_count`.
+Each class caps its own concurrency at `min(budget // cores_per_job, job_count)`. The discover phase contributes
+one job per dataset, and the extract phase contributes one job per recording. On a 128-core host, with a budget of
+126, discovery therefore runs at most 4 jobs concurrently and extraction at most 7.
+
+Neither count shrinks on a small host: a 16-core machine still asks for 30 discovery workers against a budget of 14 and
+dispatches one job regardless, because the dispatcher always admits a single job even when the budget cannot cover it.
+
+Both `workers_per_job` and `max_parallel_jobs` default to `-1` and can be overridden in `execute_processing_jobs_tool`
+or `execute_full_pipeline_tool`. An override is a single scalar applied to every non-fixed class alike, so passing
+`workers_per_job=20` sets discovery and extraction to 20 both. Both execute tools return a session-level `cpu_budget`
+and a `resource_classes` mapping keyed by class name, with `discovery` and `extraction` entries carrying
+`workers_per_job`, `max_parallel_jobs` and `job_count`. `get_processing_jobs_status_tool` returns the same mapping with
+`pending` and `active` in place of `job_count`.
 
 ---
 
