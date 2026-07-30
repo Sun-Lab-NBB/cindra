@@ -20,7 +20,7 @@ from dataclasses import field, dataclass
 import yaml  # type: ignore[import-untyped]
 from natsort import natsorted
 from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, TimestampPrecisions, get_timestamp
-from ataraxis_base_utilities import resolve_worker_count, resolve_parallel_job_capacity
+from ataraxis_base_utilities import resolve_worker_count
 from ataraxis_data_structures import JobState, ProcessingStatus, ProcessingTracker
 
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
@@ -62,14 +62,6 @@ _COMBINATION_WORKERS: int = 1
 """The number of CPU cores one combination job holds. The combination stage merges the per-plane result files with
 serial input and output and takes no worker argument, so each of its jobs occupies exactly one core."""
 
-_PREFERRED_WORKERS_PER_JOB: int = 30
-"""The preferred number of CPU cores per parallel processing job for optimal throughput."""
-
-_MINIMUM_WORKERS_PER_JOB: int = 10
-"""The minimum number of CPU cores required per job when running multiple jobs in parallel."""
-
-_WORKER_MULTIPLE: int = 5
-"""Worker counts are rounded down to the nearest multiple of this value for clean allocation."""
 
 _PROCESSING_MEMORY_GIGABYTES_PER_JOB: float = 15.0
 """The peak resident memory, in gigabytes, that one processing job holds. Measured on a real nine-plane run where
@@ -120,9 +112,9 @@ class _ResourceClass:
 
     name: str
     """The name of the resource class, used as the key of the per-class queues and of the reported allocation."""
-    workers_per_job: int | None
-    """The number of CPU cores each job of this class holds, or None when the class has no measured knee and resolves
-    its allocation by saturating the CPU budget across the queued jobs."""
+    workers_per_job: int
+    """The number of CPU cores each job of this class holds, taken from the measured stage defaults in
+    cindra.allocation."""
     fixed_parallel_jobs: int | None
     """The machine-independent concurrency cap of this class, or None when the cap is derived from the CPU budget and,
     for memory-bound classes, from the available system memory. A per-class cap bounds one class in isolation, so the
@@ -1304,11 +1296,9 @@ def execute_processing_jobs_tool(
             hexadecimal job identifier from the prepare manifest), and 'pipeline_type' ('single-recording' or
             'multi-recording').
         workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Set to
-            -1 to accept the measured defaults. The multi-recording class has no measured default and keeps the four
-            saturating-allocation override combinations: both parameters at -1 prefer ~30 cores per job with a minimum
-            of 10 rounded to multiples of 5, this parameter alone derives the parallel capacity from it, the other
-            parameter alone makes workers budget // max_parallel_jobs rounded down to a multiple of 5 with no 10-worker
-            floor, and both together are used as-is.
+            -1 to accept the measured defaults, which are 4 cores for binarization, 8 for registration, 10 for
+            processing, 1 for combination, 30 for multi-recording discovery, and 16 for multi-recording extraction.
+            The override is a single scalar applied to every non-fixed class alike.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Set to -1 to accept the derived caps.
 
@@ -1712,9 +1702,8 @@ def execute_full_pipeline_tool(
         dataset_configurations: List of dataset configuration dictionaries. Required for multi-recording pipelines.
             Each must contain 'configuration_path', 'recording_paths', and 'dataset_name'.
         workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Set to
-            -1 to accept the measured defaults of 4 cores for binarization, 1 for combination, 8 for registration, and
-            10 for processing. The multi-recording class has no measured default and keeps the four
-            saturating-allocation override combinations described by execute_processing_jobs_tool.
+            -1 to accept the measured defaults of 4 cores for binarization, 1 for combination, 8 for registration, 10
+            for processing, 30 for multi-recording discovery, and 16 for multi-recording extraction.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
             non-fixed resource class. Set to -1 to accept the derived caps.
 
@@ -2090,10 +2079,9 @@ def _resolve_class_allocation(
 
     Notes:
         A class with a fixed concurrency cap describes I/O-bound work whose throughput does not follow the core count,
-        so it keeps its measured allocation and ignores both overrides. A class with no measured worker count keeps the
-        saturating allocation, which spreads the CPU budget across the queued jobs. Every other class takes its
-        measured worker count, bounds its concurrency by the CPU budget, and bounds it further by the available system
-        memory when the class declares a per-job memory footprint.
+        so it keeps its measured allocation and ignores both overrides. Every other class takes its measured worker
+        count, bounds its concurrency by the CPU budget, and bounds it further by the available system memory when the
+        class declares a per-job memory footprint.
 
         Every cap resolved here bounds one class in isolation, because a class cannot know which other classes will be
         dispatching alongside it. The dispatcher therefore holds the sum of the cores committed by every class inside
@@ -2114,19 +2102,6 @@ def _resolve_class_allocation(
         # Both fixed classes declare a measured worker count, so the fallback below only satisfies type narrowing.
         workers = resource_class.workers_per_job if resource_class.workers_per_job is not None else 1
         return workers, min(resource_class.fixed_parallel_jobs, max(1, job_count))
-
-    if resource_class.workers_per_job is None:
-        # Applies the four saturating-allocation override combinations to a class with no per-job worker count.
-        if workers_per_job <= 0 and max_parallel_jobs <= 0:
-            return _resolve_saturating_allocation(budget=budget, total_jobs=max(1, job_count))
-        if workers_per_job > 0 >= max_parallel_jobs:
-            workers = resolve_worker_count(requested_workers=workers_per_job, reserved_cores=_RESERVED_CORES)
-            return workers, resolve_parallel_job_capacity(workers_per_job=workers)
-        if workers_per_job <= 0 < max_parallel_jobs:
-            raw_workers = budget // max_parallel_jobs
-            return max(1, (raw_workers // _WORKER_MULTIPLE) * _WORKER_MULTIPLE), max_parallel_jobs
-        workers = resolve_worker_count(requested_workers=workers_per_job, reserved_cores=_RESERVED_CORES)
-        return workers, max_parallel_jobs
 
     workers = workers_per_job if workers_per_job > 0 else resource_class.workers_per_job
 
@@ -2201,34 +2176,6 @@ def _read_linux_available_memory_gigabytes() -> float | None:
         return available_kibibytes / _KIBIBYTES_PER_GIGABYTE
 
     return None
-
-
-def _resolve_saturating_allocation(budget: int, total_jobs: int) -> tuple[int, int]:
-    """Resolves worker and parallelism counts to saturate available cores across multiple jobs.
-
-    Prefers ~30 workers per job and distributes the CPU budget across as many concurrent jobs as possible, subject to
-    a minimum of 10 workers per job when running in parallel. Worker counts are rounded down to the nearest multiple
-    of 5 for clean allocation.
-
-    Args:
-        budget: The total number of available CPU cores (after reserving system cores).
-        total_jobs: The total number of jobs to execute.
-
-    Returns:
-        A (workers_per_job, max_parallel_jobs) tuple.
-    """
-    max_at_preferred = max(1, budget // _PREFERRED_WORKERS_PER_JOB)
-    max_parallel = min(total_jobs, max_at_preferred)
-    raw_workers = budget // max_parallel
-    workers = max(1, (raw_workers // _WORKER_MULTIPLE) * _WORKER_MULTIPLE)
-
-    # Reduces parallelism until each job has at least the minimum worker count.
-    while workers < _MINIMUM_WORKERS_PER_JOB and max_parallel > 1:
-        max_parallel -= 1
-        raw_workers = budget // max_parallel
-        workers = max(1, (raw_workers // _WORKER_MULTIPLE) * _WORKER_MULTIPLE)
-
-    return workers, max_parallel
 
 
 def _resolve_prerequisite_job_ids(

@@ -134,8 +134,16 @@ This TIFF-to-binary conversion only runs once unless `repeat_binarization` is en
 |-----------------------|--------------|---------|-------------------------------------------------------------|
 | `data_path`           | Path or None | None    | Root directory containing input TIFFs. **Set by pipeline.** |
 | `output_path`         | Path or None | None    | Output directory root. **Required; set by user or batch.**  |
-| `ignored_file_names`  | tuple[str]   | ()      | File stems (without extension) to skip when loading TIFFs.  |
-| `repeat_binarization` | bool         | False   | Re-run TIFF to binary conversion even if binaries exist.    |
+| `ignored_file_names`  | tuple[str]   | ()      | File stems (no extension) of TIFFs to exclude.              |
+| `repeat_binarization` | bool         | False   | Force re-conversion even when binaries are intact.          |
+
+Every TIFF the pipeline loads must hold frames of the same shape. A differently shaped file in the data directory, most
+commonly an anatomical z-stack, fails binarization with an error naming the file and this parameter, so list its stem in
+`ignored_file_names` to exclude it. Match on the stem without the extension, so `zstack` rather than `zstack.tiff`.
+
+`repeat_binarization` forces a rebuild of binaries that are otherwise intact. It is not needed to recover a damaged
+recording: binarization already rebuilds a binary whose size disagrees with its plane geometry, or that an interrupted
+registration left marked, on its own.
 
 ---
 
@@ -428,7 +436,8 @@ Single-Recording Configuration Compliance:
 - [ ] `main.tau` matches the calcium indicator used (0.4 for GCaMP6f, ~1.5 for GCaMP6s)
 - [ ] `main.two_channels` set correctly for the recording type
 - [ ] `main.ignored_flyback_planes` lists correct flyback plane indices if applicable
-- [ ] `file_io.ignored_file_names` lists any TIFFs to exclude
+- [ ] `file_io.ignored_file_names` excludes every TIFF in the data directory that is not part of the recording (a
+      differently shaped file, such as an anatomical z-stack, fails binarization)
 - [ ] Review any warnings from `validate_config_file_tool` (pipeline-set parameters, channel consistency)
 - [ ] Acquisition data prepared, `validate_recording_readiness_tool` passed (else run `/acquisition-data-preparation`)
 ```

@@ -195,7 +195,7 @@ dictionary structure depends on the viewer type.
 | `temporal_bin_size`        | int       | Temporal binning window for correlation computation |
 | `colocalization_threshold` | float     | Probability threshold for channel 2 classification  |
 | `roi_count`                | int       | Total number of ROIs in the recording               |
-| `frame_count`              | int       | Total number of frames in the recording             |
+| `frame_count`              | int       | Frames in the visualized traces                     |
 | `two_channels`             | bool      | Whether the recording has two functional channels   |
 | `all_recordings_visible`   | bool      | Whether all multi-recording ROIs are shown          |
 | `roi_source`               | str       | Current ROI source dropdown text                    |
@@ -249,7 +249,7 @@ Returns a nested dictionary with two sub-viewers:
 | Field              | Type | Description                                  |
 |--------------------|------|----------------------------------------------|
 | `current_frame`    | int  | Currently displayed frame index              |
-| `frame_count`      | int  | Total number of frames                       |
+| `frame_count`              | int       | Frames in the visualized traces                     |
 | `channel_2_active` | bool | Whether channel 2 is displayed               |
 | `two_channels`     | bool | Whether the recording has two channels       |
 | `playing`          | bool | Whether playback is active                   |

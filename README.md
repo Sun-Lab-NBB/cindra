@@ -150,6 +150,12 @@ the raw data directory must be prepared with the correct structure.
 
 #### TIFF Files
 
+Every TIFF file in the directory must hold frames of the same shape. Binarization checks this before conversion and
+fails with an error naming the offending files if any differ, because a foreign file — most commonly an anatomical
+z-stack stored alongside the functional recording — would otherwise corrupt the interleave accounting. Exclude any such
+file with the `file_io.ignored_file_names` configuration parameter, which matches on the file stem without its
+extension.
+
 The pipeline expects a flat directory containing one or more `.tif` / `.tiff` files. For multi-plane or multichannel
 acquisitions, frames must be interleaved in the following order within each TIFF file:
 plane0_channel1, plane0_channel2, plane1_channel1, plane1_channel2, and so on, repeating for each time point. This
@@ -247,6 +253,17 @@ This section describes the key data files produced by the pipelines. All per-pla
 Registration writes corrected frames back to the same binary files created during binarization. There are no separate
 "registered" binary files — `channel_1_data.bin` is overwritten in place with motion-corrected data.
 
+Because the rewrite happens in place, registration creates a `channel_1_data.bin.registering` marker file beside the
+binary for the duration of the rewrite and removes it once every frame carries the same correction. If a run is
+interrupted, the marker survives, and the binary holds corrected frames up to an unknown point and raw frames after it.
+Registration refuses to run against a marked binary. Re-run the binarization phase to rebuild the binary from its
+source TIFF files, which also clears the marker.
+
+Each binary is sized by the number of frames its own plane-and-channel interleave position receives. When an
+acquisition stops partway through a volume, the leading interleave positions receive one frame more than the trailing
+ones, so plane binaries, and the two channels of one plane, may differ by a single frame. This preserves the frames of
+the partial final volume rather than discarding them.
+
 | File                 | Format               | Description                                                                            |
 |----------------------|----------------------|----------------------------------------------------------------------------------------|
 | `channel_1_data.bin` | int16 (frames, h, w) | Channel 1 imaging frames (raw after binarization, motion-corrected after registration) |
@@ -307,10 +324,10 @@ Stored at `<output_path>/cindra/`:
 
 | File                    | Description                                                                                |
 |-------------------------|--------------------------------------------------------------------------------------------|
-| `combined_metadata.npz` | Plane geometry (offsets, dimensions), sampling rate, tau, and paths to registered binaries |
+| `combined_metadata.npz` | Plane geometry, sampling rate, tau, combined and per-plane frame counts, binary paths      |
 | `roi_masks.npz`         | ROI masks with coordinates adjusted to the combined coordinate system                      |
 | `roi_statistics.npz`    | ROI statistics tagged with source plane index                                              |
-| `cell_fluorescence.npy` | Concatenated fluorescence traces across all planes                                         |
+| `cell_fluorescence.npy` | Fluorescence traces across all planes, trimmed to the shortest plane's frame count         |
 | `spikes.npy`            | Concatenated spike trains across all planes                                                |
 | `detection_data/`       | Combined detection images (mean, enhanced mean, maximum projection, correlation map)       |
 
@@ -352,6 +369,13 @@ pipeline reads from. During conversion, interleaved frames are separated by plan
 computed for each plane. TIFF files are slow to read frame-by-frame due to file format overhead, and the binary format
 provides instant random access to any frame through memory mapping — essential for reading frames out of order or in 
 parallel.
+
+Binarization is idempotent. When the output directory already holds a complete set of plane binaries whose sizes match
+the geometry recorded for their planes, the conversion is skipped. A binary is rebuilt from the source TIFFs when it is
+missing, when it carries a `.registering` marker left by an interrupted registration, when its size disagrees with its
+plane's recorded frame geometry (which is what an interrupted conversion leaves behind), or when the
+`file_io.repeat_binarization` configuration parameter is enabled. Re-running this phase is therefore the recovery path
+for both an interrupted conversion and an interrupted registration, and it needs no configuration change.
 
 Reads:
 
@@ -525,6 +549,18 @@ entire recording volume. The combined dataset is also the required input for the
 Plane images are tiled into combined images using computed spatial offsets, ROI coordinates are adjusted to the combined
 coordinate system, and fluorescence arrays are concatenated across planes.
 
+Planes may hold slightly different frame counts when an acquisition stops partway through a volume, so the combined
+traces are trimmed to the shortest contributing plane rather than padded to the longest. This keeps every combined frame
+backed by real data on every plane. The trimmed length is recorded as `frame_count` in `combined_metadata.npz`, and each
+plane's untrimmed length as `plane_frame_counts`, so a plane whose count exceeds `frame_count` had trailing frames
+dropped from the combined product. Planes whose processing phase did not complete contribute nothing and are excluded
+from the trim target.
+
+`combined_metadata.npz` also doubles as the marker that downstream consumers, including the multi-recording pipeline,
+check to decide whether the single-recording pipeline completed. It is therefore written after every array it describes
+and moved into place from a temporary `combined_metadata.tmp.npz` staging name, so an interrupted run never leaves a
+marker describing a payload that is not on disk.
+
 Reads:
 
 | File / Data                       | Description                                                    |
@@ -539,7 +575,7 @@ Produces:
 
 | File / Data             | Description                                                 |
 |-------------------------|-------------------------------------------------------------|
-| `combined_metadata.npz` | Plane geometry, sampling rate, tau, registered binary paths |
+| `combined_metadata.npz` | Plane geometry, sampling rate, tau, `frame_count`, `plane_frame_counts`, binary paths |
 | `roi_masks.npz`         | ROI masks with plane-adjusted coordinates                   |
 | `roi_statistics.npz`    | ROI statistics tagged with source plane index               |
 | `cell_fluorescence.npy` | Concatenated fluorescence traces across all planes          |
@@ -729,7 +765,23 @@ run_single_recording_pipeline(configuration_path=Path("/path/to/config.yaml"), c
 md_config = MultiRecordingConfiguration()
 md_config.to_yaml(Path("/path/to/md_config.yaml"))
 run_multi_recording_pipeline(configuration_path=Path("/path/to/md_config.yaml"))
+
+# Multi-recording phases also take their own worker allocations.
+run_multi_recording_pipeline(configuration_path=Path("/path/to/md_config.yaml"), discover=True, discovery_workers=30)
+run_multi_recording_pipeline(configuration_path=Path("/path/to/md_config.yaml"), extract=True, extraction_workers=16)
 ```
+
+Every stage takes its worker count as a direct API parameter rather than a configuration field, which keeps the
+configuration file immutable and therefore safe to share between concurrently dispatched jobs. Omitting a worker
+parameter gives the stage its measured default (`BINARIZATION_WORKERS`, `REGISTRATION_WORKERS`, `PROCESSING_WORKERS`,
+`DISCOVERY_WORKERS`, `EXTRACTION_WORKERS`, all exported from `cindra`), and passing `-1` requests every available core.
+
+External schedulers that need to enumerate a recording's jobs and their dependencies without driving the pipeline
+themselves can read the phase model exported from `cindra.allocation`. `SINGLE_RECORDING_PHASES` and
+`MULTI_RECORDING_PHASES` describe the ordered phases, `resolve_single_recording_jobs()` and
+`resolve_multi_recording_jobs()` expand them into a job universe of `(job_name, specifier)` pairs, and
+`resolve_single_recording_prerequisites()` and `resolve_multi_recording_prerequisites()` return the jobs each job
+depends on. This keeps a scheduler's view of the pipeline in step with the library rather than restating it.
 
 ### CLI Commands
 
@@ -806,7 +858,7 @@ cindra mcp
 | `prepare_multi_recording_batch_tool`              | Prepares multi-recording batch processing jobs without execution    |
 | `reset_processing_phases_tool`                    | Resets completed processing phases for re-execution                 |
 | `clean_processing_output_tool`                    | Deletes processing output artifacts for clean re-processing         |
-| `execute_processing_jobs_tool`                    | Dispatches prepared processing jobs with saturating core allocation |
+| `execute_processing_jobs_tool`                    | Dispatches prepared processing jobs with per-class core allocation  |
 | `get_processing_jobs_status_tool`                 | Queries the status of active processing jobs                        |
 | `get_active_execution_timing_tool`                | Gets execution timing metrics for active processing jobs            |
 | `cancel_processing_jobs_tool`                     | Cancels currently running processing jobs                           |

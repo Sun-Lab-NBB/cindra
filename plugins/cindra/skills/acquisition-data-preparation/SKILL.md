@@ -126,8 +126,11 @@ Single plane, single channel:
 ```
 
 The total frame count across all TIFF files should be evenly divisible by `plane_number * channel_number`.
-If not, the pipeline silently drops the trailing frames that do not complete a full stride. This is not a
-runtime error, but warn the user that incomplete final volumes will be discarded.
+If it is not, typically because the recording stopped partway through a volume, binarization does not discard the
+trailing frames. Each plane binary is sized to the frames that plane actually receives, so the leading planes hold one
+frame more than the trailing ones and per-plane outputs have slightly different lengths. The combination phase then
+trims the combined traces to the shortest contributing plane and logs a warning naming the range. Per-plane results
+keep every frame, so only the combined dataset is trimmed.
 
 For MROI data, all ROIs share the same raw frames. Each ROI is extracted as a horizontal slice using `roi_lines`.
 
@@ -136,6 +139,17 @@ For MROI data, all ROIs share the same raw frames. Each ROI is extracted as a ho
 The pipeline loads all TIFF files in the data directory in natural sort order and concatenates them. Frames from
 all files are treated as one continuous sequence following the interleave pattern. Use
 `file_io.ignored_file_names` (see `/single-recording-configuration` Section 3) to exclude specific files.
+
+### Excluding files that are not part of the recording
+
+A raw mesoscope directory commonly holds an anatomical z-stack, for example `zstack.tiff`, alongside the imaging files.
+Its frames are shaped differently, and binarization requires every discovered TIFF to hold frames of the same shape, so
+it must be excluded through `file_io.ignored_file_names`. Match on the file stem without the extension, so `zstack`
+rather than `zstack.tiff`.
+
+`validate_recording_readiness_tool` does not read the pipeline configuration, so it inspects the z-stack too and reports
+its shape as a warning rather than an error. The recording is still ready. Confirm the excluded stems are listed in the
+configuration and proceed, and do not ask the user to delete or reshape the file.
 
 ---
 
@@ -374,13 +388,25 @@ registered before ROI detection...", so a binarize-then-process dispatch stops a
 ### Frame count not divisible by plane_number * channel_number
 
 **Causes and fixes:**
-- **Incomplete final volume:** The recording was stopped mid-volume. Remove trailing incomplete frames from the
-  last TIFF, or exclude the last TIFF via `file_io.ignored_file_names` in the pipeline configuration
-  (see `/single-recording-configuration` Section 3).
+- **Incomplete final volume:** The recording was stopped mid-volume. This is not an error and needs no fix.
+  Binarization keeps those frames per-plane, and only the combined traces are trimmed to the shortest plane.
 - **Flyback frames included:** Some microscopes include flyback plane frames. Add these to
   `main.ignored_flyback_planes` in the pipeline configuration (the flyback planes are still part of the
   interleave pattern but are discarded during processing).
 - **Wrong plane/channel count:** Re-examine the experiment metadata to confirm the actual values.
+
+### Frame shape differs between TIFF files
+
+Binarization fails with `Unable to determine frame dimensions. Every TIFF file in the data directory must hold frames of
+the same shape...`, naming the offending files and both shapes.
+
+**Causes and fixes:**
+- **Anatomical z-stack in the data directory:** the usual cause. Add the file's stem to `file_io.ignored_file_names`
+  and re-run binarization. Do not delete the z-stack.
+- **Mixed acquisitions in one directory:** two recordings with different fields of view were written to the same
+  folder. Separate them into one directory per recording.
+- **Genuinely ragged recording:** re-check the acquisition, because cindra cannot combine differently shaped frames
+  into one plane binary.
 
 ### MROI line index determination
 
@@ -419,7 +445,8 @@ Acquisition Data Preparation Compliance:
 - [ ] For MROI data: roi_lines, roi_x_coordinates, roi_y_coordinates are set correctly
 - [ ] Review any warnings from validation (unrecognized fields, unused MROI fields)
 - [ ] `validate_recording_readiness_tool` reports no errors (final readiness gate)
-- [ ] Review readiness warnings (interleave remainder, low frame count, dtype cast, dimension mismatches)
+- [ ] Review readiness warnings (interleave remainder, low frame count, dtype cast, differing frame shapes)
+- [ ] Any differing-frame-shape warning names a file already listed in `file_io.ignored_file_names`
 ```
 
 **End point**: Data preparation is complete once all recordings pass the checklist above. If this skill was

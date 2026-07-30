@@ -501,15 +501,21 @@ class BinaryFileCombined:
             for height, width, file_path in zip(self.plane_heights, self.plane_widths, self.file_paths, strict=False)
         ]
 
-        # Verifies that all opened files have the same number of frames.
+        # Resolves the combined frame count as that of the shortest managed file. A recording whose acquisition stopped
+        # partway through a volume delivers one frame more to its leading planes than to its trailing ones, so the plane
+        # binaries can legitimately differ in length. Capping the combined view at the shortest file keeps every
+        # combined frame backed by real data on every plane, which matches how the combination stage trims its traces.
         frame_numbers = [file.frame_number for file in self.files]
+        self._frame_number: int = min(frame_numbers)
         if len(set(frame_numbers)) > 1:
-            message = (
-                f"Unable to create a new BinaryFileCombined instance from the target files "
-                f"{[file.name for file in self.file_paths]} stored under root {self.file_paths[0].parent}, as the "
-                f"number of frames across the files does not match."
+            console.echo(
+                message=(
+                    f"Capping the combined view of the plane binaries stored under root {self.file_paths[0].parent} at "
+                    f"{self._frame_number} frames. The binaries hold between {self._frame_number} and "
+                    f"{max(frame_numbers)} frames, which happens when an acquisition stopped partway through a volume."
+                ),
+                level=LogLevel.WARNING,
             )
-            console.error(message=message, error=ValueError)
 
     def __enter__(self) -> Self:
         """Returns self to enable use as a context manager."""
@@ -539,15 +545,13 @@ class BinaryFileCombined:
 
     @property
     def frame_number(self) -> int:
-        """Returns the total number of frames stored in each managed file, which is always the same across all
-        files.
-        """
-        return self.files[0].frame_number
+        """Returns the number of frames the combined view spans, which is that of the shortest managed file."""
+        return self._frame_number
 
     @property
     def shape(self) -> tuple[int, NDArray[np.uint16], NDArray[np.uint16]]:
         """Returns the dimensions of the managed files as (frame_number, plane_heights, plane_widths), where
-        frame_number is the same for all files and the arrays contain per-file plane dimensions.
+        frame_number is the frame count of the shortest managed file and the arrays contain per-file plane dimensions.
         """
         return self.frame_number, self.plane_heights, self.plane_widths
 

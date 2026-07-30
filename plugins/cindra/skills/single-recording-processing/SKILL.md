@@ -261,6 +261,18 @@ Cleaning `registration` deletes the plane's `registration_data` directory, which
 that detection reads. Registration rewrites the plane binary in place, so clean `binarization` to rebuild that
 binary from the raw TIFFs.
 
+**Recovering an interrupted registration.** Registration rewrites the plane binary in place and holds a
+`<binary>.registering` marker for the duration. If the job is killed, the marker persists and every later registration
+of that plane fails with "Unable to register plane {index}. A previous registration of the binary file ... was
+interrupted". Cleaning or resetting `registration` does NOT clear it, because the marker sits beside the `.bin` rather
+than inside `registration_data`.
+
+Recover by resetting the `binarization` phase with `reset_processing_phases_tool` and re-dispatching. Binarization
+detects the marker, rebuilds the binary from the raw TIFFs, and clears the marker. You do NOT need to set
+`repeat_binarization`, and you do NOT need `clean_processing_output_tool`. Binarization also rebuilds automatically when
+a binary's size disagrees with the frame geometry recorded for its plane, which is what an interrupted conversion leaves
+behind. `repeat_binarization` remains necessary only to force a rebuild of binaries that are intact.
+
 ---
 
 ## Resource management
@@ -281,8 +293,9 @@ The binarization and combination classes ignore both `workers_per_job` and `max_
 processing classes accept either parameter as an override of the measured default and of the derived concurrency cap,
 via `execute_processing_jobs_tool` or `execute_full_pipeline_tool`.
 
-The saturating allocation algorithm applies to the `multi_recording` resource class, which has no measured knee. With
-both parameters at `-1`, it prefers 30 cores per job, enforces a minimum of 10, and rounds down to a multiple of 5.
+The multi-recording discovery and extraction stages run under their own `discovery` and `extraction` classes, with
+measured defaults of 30 and 16 cores per job. Both accept `workers_per_job` and `max_parallel_jobs` as overrides. See
+`/multi-recording-processing` for their concurrency caps. No resource class uses saturating allocation.
 
 Present the measured per-phase defaults when confirming CPU allocation with the user. A `workers_per_job` value of 30
 overrides the processing default of 10 and can exhaust memory, because the processing class budgets 15 GB per job.
@@ -344,6 +357,8 @@ When processing fails for some recordings, read the error messages and route to 
 |---------------------------------------------------|-----------------------------------|
 | Missing `cindra_parameters.json`, TIFF read error | `/acquisition-data-preparation`   |
 | Invalid parameter values, wrong plane/channel     | `/acquisition-data-preparation`   |
+| TIFF files hold frames of differing shapes        | `/acquisition-data-preparation`   |
+| Registration of the binary file was interrupted   | Reset `binarization`, re-dispatch |
 | Configuration parameter issues                    | `/single-recording-configuration` |
 | MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`   |
 

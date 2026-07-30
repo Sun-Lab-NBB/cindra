@@ -75,6 +75,10 @@ the `cindra/` folder. This equals the `recording_output_paths` entries passed to
 when the output root differs from the raw-data root, not the raw-data path itself. The tools resolve the `cindra/`
 subdirectory automatically.
 
+`query_single_recording_metadata_tool` reports the top-level `frame_count` from the combined traces and each
+`plane_timing` entry's `frame_count` from that plane's `runtime_data.yaml`. A plane count above the top-level count is
+expected rather than corruption: it marks a plane whose trailing frames were trimmed out of the combined traces.
+
 The ROI indices accepted by `query_traces_tool` and `query_roi_statistics_tool` are 0-based positional row indices
 into the per-recording arrays, not a tracking identity. Out-of-range indices are silently dropped without an error,
 so a confidently "successful" empty result can mean a wrong index rather than missing data.
@@ -109,6 +113,7 @@ cindra/
 ├── plane_0/                                    # Per-plane processing results
 │   ├── runtime_data.yaml                       # Plane runtime metadata
 │   ├── channel_1_data.bin                      # Registered binary data
+│   ├── channel_1_data.bin.registering          # Present only while registration rewrites the binary
 │   ├── registration_data/                      # Registration arrays
 │   │   ├── reference_image.npy
 │   │   ├── bad_frames.npy
@@ -141,18 +146,27 @@ cindra/
 
 **Phase 1 — Binarization:** Creates `configuration.yaml`, `acquisition_parameters.yaml`, per-plane
 `channel_1_data.bin` (and `channel_2_data.bin` if two-channel), the initial per-plane `runtime_data.yaml`, and
-per-plane `detection_data/mean_image.npy` (plus `mean_image_channel_2.npy` if two-channel).
+per-plane `detection_data/mean_image.npy` (plus `mean_image_channel_2.npy` if two-channel). Each plane binary is sized
+by that plane's own interleave frame count, so a recording whose acquisition stopped partway through a volume gives its
+leading planes one frame more than its trailing planes, and channel 2 may hold one frame more or fewer than channel 1 of
+the same plane. Binarization also rebuilds an existing binary whose size disagrees with its recorded plane geometry, or
+that an interrupted registration left marked, without requiring `repeat_binarization`.
 
 **Phase 2 — Registration (per-plane):** Creates `registration_data/`, rewrites the plane binary in place, refreshes
 `detection_data/mean_image.npy`, and updates `runtime_data.yaml` with the registration section,
-`total_registration_time`, and `registration_workers`.
+`total_registration_time`, and `registration_workers`. For the duration of the in-place rewrite, a
+`{binary}.registering` marker sits beside the binary. A marker left on disk means the registration was interrupted, so
+the binary holds corrected frames up to an unknown point and raw frames after it. Registration refuses to run against a
+marked binary, and re-running binarization rebuilds the binary and clears the marker.
 
 **Phase 3 — Processing (per-plane):** Creates the remaining `detection_data/` images (`enhanced_mean_image.npy`,
 `maximum_projection.npy`, `correlation_map.npy`), the ROI `.npz` files, the fluorescence `.npy` traces, and updates
 `runtime_data.yaml` with `total_processing_time`, `processing_workers`, and `date_processed`.
 
-**Phase 4 — Combination:** Creates `combined_metadata.npz`, combined `detection_data/`, and combined ROI and trace
-files at the root level by merging all per-plane results.
+**Phase 4 — Combination:** Creates combined `detection_data/` and the combined ROI and trace files at the root level by
+merging all per-plane results, then writes `combined_metadata.npz` last, staging it as `combined_metadata.tmp.npz` and
+moving it into place. The metadata file therefore doubles as an atomic completion marker: it never exists while the
+payload it describes is missing or partially written.
 
 ---
 
@@ -163,6 +177,8 @@ files at the root level by merging all per-plane results.
 | NPZ key                             | Dtype   | Shape | Description                                            |
 |-------------------------------------|---------|-------|--------------------------------------------------------|
 | `plane_count`                       | uint8   | (1,)  | Number of planes combined                              |
+| `frame_count`                       | uint32  | (1,)  | Frames the combined traces span                        |
+| `plane_frame_counts`                | uint32  | (N,)  | Per-plane frame counts recorded during binarization    |
 | `combined_height`                   | uint32  | (1,)  | Height of combined field of view in pixels             |
 | `combined_width`                    | uint32  | (1,)  | Width of combined field of view in pixels              |
 | `tau`                               | float32 | (1,)  | Calcium indicator timescale in seconds                 |
@@ -173,6 +189,11 @@ files at the root level by merging all per-plane results.
 | `plane_x_offsets`                   | int32   | (N,)  | Per-plane X displacement for combined view             |
 | `registered_binary_paths`           | str     | (N,)  | Relative paths to channel 1 registered binaries        |
 | `registered_binary_paths_channel_2` | str     | (N,)  | Relative paths to channel 2 registered binaries (2-ch) |
+
+`frame_count` is the frame count of the shortest plane that contributed traces, which is what the combined traces were
+trimmed to. `plane_frame_counts` holds each plane's untrimmed count, so a plane whose entry exceeds `frame_count` had
+trailing frames dropped from the combined product. A `frame_count` of 0 with an empty `plane_frame_counts` means the
+archive predates these fields rather than that the recording holds no frames.
 
 ---
 
@@ -260,6 +281,13 @@ Channel 2 data uses identical keys in `roi_statistics_channel_2.npz`.
 
 Saved at both the combined root and per-plane levels. All files are `.npy` format, float32 dtype.
 
+At the combined root, `frames` is the frame count of the shortest plane that contributed traces, recorded as
+`frame_count` in `combined_metadata.npz`. When a recording's acquisition stopped partway through a volume, its leading
+planes hold one frame more than its trailing planes. Combination trims every plane's traces to the shortest contributing
+plane rather than padding the shorter ones, and logs a warning naming the range. Planes that did not complete extraction
+contribute no rows and are excluded from the trim target. Compare `frame_count` against `plane_frame_counts` to see
+whether trimming occurred. At the per-plane level, `frames` is that plane's own `io.frame_count`.
+
 **Channel 1 (always present):**
 
 | File                          | Shape              | Description                                                            |
@@ -334,7 +362,8 @@ Saved in `plane_N/registration_data/`. All files are `.npy` format.
 
 Binary files store frames as contiguous int16 arrays. Each frame has `height × width` values. Read with
 `np.memmap(path, dtype=np.int16, mode='r', shape=(frame_count, height, width))` using dimensions from
-`runtime_data.yaml`.
+`runtime_data.yaml`. Read each plane's `frame_count` from its own `runtime_data.yaml`: planes of one recording can hold
+different frame counts, and a plane's channel 2 can hold one frame more or fewer than its channel 1.
 
 ---
 
@@ -423,7 +452,9 @@ Single-Recording Output Completeness:
 Root-level files:
 - [ ] `configuration.yaml` exists
 - [ ] `acquisition_parameters.yaml` exists
-- [ ] `combined_metadata.npz` exists and contains `plane_count`, `combined_height`, `combined_width` keys
+- [ ] `combined_metadata.npz` exists and contains `plane_count`, `frame_count`, `plane_frame_counts`,
+      `combined_height`, `combined_width` keys (note that `verify_single_recording_output_tool` checks only the
+      pre-existing keys, so the two frame-count keys are verified here rather than by that tool)
 
 Combined detection images (cindra/detection_data/):
 - [ ] `mean_image.npy` exists
@@ -466,4 +497,7 @@ Per-plane detection and extraction data (plane_N/):
 Multi-recording readiness (if multi-recording processing is planned):
 - [ ] `combined_metadata.npz` contains `registered_binary_paths` key
 - [ ] All registered binary files referenced in `registered_binary_paths` exist on disk
+- [ ] `combined_metadata.npz` `plane_frame_counts` entries are all equal, or differ only within the tolerance the
+      combined view applies (multi-recording extraction opens the plane binaries as one combined view whose frame count
+      is that of the shortest plane, so unequal counts mean the trailing frames of the longer planes are not extracted)
 ```

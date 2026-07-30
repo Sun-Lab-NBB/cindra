@@ -158,11 +158,22 @@ pipeline outputs.
   internal binary format and initializes RuntimeContext per plane. Phase 2 runs per-plane motion correction and
   registration-quality metrics (parallelizable across planes). Phase 3 runs per-plane detection, classification, and
   extraction, and requires the plane to be registered (parallelizable across planes). Phase 4 merges plane-specific
-  results into a unified `combined_metadata.npz` dataset. Phases 2 and 3 carry a `plane_{index}` tracker specifier.
+  results into a unified `combined_metadata.npz` dataset, trimming the combined traces to the shortest contributing
+  plane and recording `frame_count` and `plane_frame_counts` alongside the geometry. That metadata file doubles as the
+  pipeline-completion marker, so it is written after its payload arrays and moved into place from a temporary name.
+  Phase 1 rejects a data directory whose TIFF files do not all hold frames of the same shape, naming
+  `file_io.ignored_file_names` as the exclusion mechanism. Phases 2 and 3 carry a `plane_{index}` tracker specifier.
 - **Multi-recording pipeline**: Two-phase workflow (discover, extract). Phase 1 selects ROIs from each recording,
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap,
   and projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
   deconvolution for tracked ROI templates (parallelizable across recordings).
+- **Phase model**: `cindra.allocation` exports the pipeline phase model (`SINGLE_RECORDING_PHASES`,
+  `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`) together with the resolvers that expand it into a
+  recording's job universe (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`, `resolve_pipeline_jobs`),
+  build the prerequisite graph (`resolve_single_recording_prerequisites`, `resolve_multi_recording_prerequisites`),
+  expand a phase to its dependents (`resolve_downstream_phases`), and format the per-plane tracker specifier
+  (`resolve_plane_specifier`, `PLANE_SPECIFIER_PREFIX`). The pipelines and the MCP layer read the model rather than
+  restating the phase order, so a phase is added or reordered there and every consumer follows.
 - **Context pattern**: `RuntimeContext` and `MultiRecordingRuntimeContext` combine configuration, acquisition
   parameters, and runtime data into single objects passed through pipeline steps.
 - **Configuration-driven execution**: Pipelines read all processing parameters from YAML files (YamlConfig
@@ -178,8 +189,10 @@ pipeline outputs.
   `processing_tools`, `results_tools`) imported at module level to trigger `@mcp.tool()` registration.
   Processing uses a prepare-then-execute model: preparation tools create execution manifests (trackers,
   per-recording configurations, job lists) without starting computation, and execution tools dispatch jobs
-  with prerequisite validation, saturating core allocation, and automatic phase sequencing. I/O-bound jobs
-  (binarize, combine) use fixed concurrency; compute-bound jobs use saturating allocation.
+  with prerequisite validation, per-class resource allocation, and automatic phase sequencing. Every job class
+  carries a measured per-job worker count from `cindra.allocation`. The I/O-bound classes (binarize, combine) pair it
+  with a fixed concurrency cap; the compute-bound classes (register, process, discover, extract) derive their
+  concurrency from the session CPU budget, and the processing class additionally from available system memory.
 
 ### Key patterns
 
@@ -189,9 +202,20 @@ pipeline outputs.
   from type checking via a `pyproject.toml` mypy override; the `# type: ignore[import-untyped]` comments apply to the
   scikit-learn, threadpoolctl, PyQtGraph, and yaml imports, and `# pragma: no cover` on JIT-compiled function bodies
   is expected. None of these should be removed.
+- **BLAS confinement**: Every site that dispatches a scikit-learn or LAPACK fit wraps it in `threadpool_limits`, so the
+  BLAS thread count cannot multiply against the job's worker budget. `detection/detect.py` and
+  `registration/metrics.py` limit to the job's `workers`; `detection/denoise.py` limits to 1, because its own block
+  pool already spends the budget.
+- **Registration integrity**: Registration rewrites the plane binary in place and guards the rewrite with a
+  `<binary>.registering` marker (`create_registration_marker`, `clear_registration_marker`,
+  `resolve_registration_marker_path`, exported from `cindra.io`). `register_plane` refuses to run while a marker
+  exists, and `binarize_recording` treats a marked binary, or one whose size disagrees with its plane's recorded frame
+  geometry, as invalid and rebuilds it from the source TIFFs without requiring `repeat_binarization`.
 - **Memory efficiency**: Pre-allocates arrays with `np.empty` when overwritten immediately. Uses flattened mask arrays
   with offset indices to reduce per-ROI allocations. Memory maps registration arrays on demand via
   `memory_map_arrays()`. Results tools use lightweight NumPy/YAML reads for targeted queries without full data loading.
+  Groupwise diffeomorphic registration visits each unordered image pair once and caches each image's gradient with the
+  deformed image it derives from, keeping the working set linear rather than quadratic in group size.
 - **Polymorphic dispatch**: `extract_traces()` checks `isinstance(context, RuntimeContext)` to route between
   single-recording and multi-recording extraction paths.
 - **Channel 2 behavior**: Channel 2 data returns empty arrays (`[]`) instead of None when absent. Channel 1 data
