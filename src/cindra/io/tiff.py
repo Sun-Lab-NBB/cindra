@@ -24,6 +24,9 @@ TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
 _MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
 """The minimum number of image dimensions considered 'multidimensional'."""
 
+_MISMATCH_REPORT_LIMIT: int = 5
+"""The maximum number of differently shaped TIFF files named individually in the frame-shape mismatch error."""
+
 
 def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> None:
     """Converts TIFF files to cindra binary format for all planes.
@@ -435,7 +438,8 @@ def _get_frame_dimensions(
         A tuple of two lists: (heights, widths) where each list has one entry per plane/context.
 
     Raises:
-        ValueError: If the first TIFF file is empty.
+        ValueError: If the first TIFF file is empty, or if the discovered files do not all hold frames of the same
+            shape.
     """
     # Opens the first TIFF and reads the first frame to get base dimensions.
     with TiffFile(tiff_files[0]) as tiff:
@@ -451,6 +455,8 @@ def _get_frame_dimensions(
             else tiff.asarray(maxworkers=decode_workers)
         )
     base_height, base_width = first_frame.shape[-2], first_frame.shape[-1]
+
+    _validate_uniform_frame_shape(tiff_files=tiff_files, base_height=base_height, base_width=base_width)
 
     # Calculates dimensions for each plane/context.
     heights: list[int] = []
@@ -471,6 +477,49 @@ def _get_frame_dimensions(
         widths.append(plane_width)
 
     return heights, widths
+
+
+def _validate_uniform_frame_shape(tiff_files: list[Path], base_height: int, base_width: int) -> None:
+    """Verifies that every discovered TIFF file holds frames of the same shape.
+
+    Notes:
+        The conversion sizes every plane binary from the first file's frame shape and assumes the remaining files
+        match it. A data directory can also hold TIFF files that are not part of the recording, such as an anatomical
+        z-stack, and those are usually shaped differently. Such a file otherwise reaches the conversion loop, where
+        its frames fail to broadcast into a binary sized for the recording and report a shape error that names
+        neither the file nor the reason.
+
+        The check reads one page header per file rather than walking each file's full page chain, which costs
+        milliseconds even for a recording spanning tens of files.
+
+    Args:
+        tiff_files: The discovered TIFF files, in conversion order.
+        base_height: The frame height read from the first file.
+        base_width: The frame width read from the first file.
+
+    Raises:
+        ValueError: If any file holds frames of a different shape than the first file.
+    """
+    mismatched: list[str] = []
+    for tiff_path in tiff_files[1:]:
+        with TiffFile(tiff_path) as tiff:
+            page_shape = tiff.pages[0].shape
+
+        if (page_shape[-2], page_shape[-1]) != (base_height, base_width):
+            mismatched.append(f"'{tiff_path.name}' {(page_shape[-2], page_shape[-1])}")
+
+    if mismatched:
+        reported = ", ".join(mismatched[:_MISMATCH_REPORT_LIMIT])
+        remainder = len(mismatched) - _MISMATCH_REPORT_LIMIT
+        if remainder > 0:
+            reported = f"{reported}, and {remainder} more"
+        message = (
+            f"Unable to determine frame dimensions. Every TIFF file in the data directory must hold frames of the "
+            f"same shape, but {len(mismatched)} file(s) differ from the ({base_height}, {base_width}) frames of "
+            f"'{tiff_files[0].name}': {reported}. Exclude any file that is not part of the recording, such as an "
+            f"anatomical z-stack, through the 'file_io.ignored_file_names' configuration parameter."
+        )
+        console.error(message=message, error=ValueError)
 
 
 def _resolve_interleave_frame_count(total_frames: int, interleave_stride: int, position: int) -> int:
