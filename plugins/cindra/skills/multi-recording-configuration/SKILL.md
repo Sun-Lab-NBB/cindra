@@ -102,10 +102,10 @@ recording's `combined_metadata.npz` `plane_frame_counts` entries are equal befor
 
 These parameters are set automatically by the pipeline and should not be manually configured:
 
-| Parameter                            | Set by         | Value                                                     |
-|--------------------------------------|----------------|-----------------------------------------------------------|
-| `recording_io.recording_directories` | MCP batch tool | List of recording paths (from `recording_paths` argument) |
-| `runtime.display_progress_bars`      | CLI/MCP        | Whether to show progress bars                             |
+| Parameter                            | Set by  | Value                                                |
+|--------------------------------------|---------|------------------------------------------------------|
+| `recording_io.recording_directories` | CLI/MCP | List of recording paths (`recording_paths` or `-rp`) |
+| `runtime.display_progress_bars`      | CLI/MCP | Whether to show progress bars                        |
 
 ---
 
@@ -117,12 +117,10 @@ Runtime behavior settings shared with the single-recording pipeline.
 |-------------------------|------|---------|------------------------------------------------------|
 | `display_progress_bars` | bool | False   | Show progress bars. Disable for parallel processing. |
 
-Worker allocation is not a configuration parameter. The discovery and extraction stages each receive their worker
-count as an invocation argument, supplied by `execute_processing_jobs_tool` and `execute_full_pipeline_tool` at
-dispatch time, or by the `cindra run` options `-dw/--discover-workers` and `-ew/--extract-workers`. Omitting a worker
-option applies the measured default of 30 workers for discovery and 16 for extraction, published as
-`DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.allocation`. Setting a worker option to -1 requests every
-available core.
+Worker allocation reaches the discovery and extraction stages as an invocation argument, as described in the
+Configuration overview section. Omitting a worker option applies the measured default of 30 workers for discovery
+and 16 for extraction, published as `DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.allocation`. Setting a
+worker option to -1 requests every available core.
 
 ---
 
@@ -143,10 +141,10 @@ unless `repeat_selection` is enabled.
 
 ### Important notes on `recording_io`
 
-- `recording_directories` is populated by the MCP batch tool from the `recording_paths` argument.
-- `dataset_name` **must be set by the user** — it identifies the output and must be unique per dataset in a batch.
+- `recording_directories` is populated by the MCP batch tool from its `recording_paths` argument, or by
+  `cindra run -rp/--recording-path`.
+- `dataset_name` **must be set by the user**. It identifies the output and must be unique per dataset in a batch.
   Use `resolve_dataset_name_tool` to construct qualified names from a shared base name and a batch-specific specifier.
-- The first recording (after natural sorting) becomes the "main recording" storing the shared configuration file.
 - When `repeat_selection` is True, ROI selection is re-run using current criteria even if selections already exist.
   This allows updated single-recording results or modified selection criteria to be integrated.
 
@@ -177,7 +175,8 @@ Set these independently when channel 2 ROIs have different classification or siz
 - **Fewer false positives**: Raise `probability_threshold` (0.9+) to only track high-confidence cells.
 - **Large ROIs excluded**: Increase `maximum_size` (1500–2000) if legitimate cells exceed the default limit.
 - **MROI edge artifacts**: Increase `mroi_region_margin` (40–60) to exclude more ROIs near region borders
-  where registration distortion is highest. Set to 0 for non-MROI recordings.
+  where registration distortion is highest. The parameter applies to MROI recordings, which are the only ones for
+  which region borders are computed.
 - **After re-running single-recording processing**: Set `repeat_selection=True` to re-apply selection criteria
   against updated single-recording results, then set back to False.
 
@@ -229,7 +228,7 @@ back to each recording's native coordinates for fluorescence extraction.
 |--------------------|-----------------|------------|--------------------------------------------------------------------------|
 | `threshold`        | float           | 0.75       | Jaccard distance threshold for clustering. Lower = stricter matching.    |
 | `mask_prevalence`  | int             | 50         | Min % of recordings that must contain the ROI. Higher = more reliable.   |
-| `pixel_prevalence` | int             | 50         | Min % of recordings a pixel must appear in for template mask.            |
+| `pixel_prevalence` | int             | 50         | Min % of a cluster's member masks a pixel must appear in.                |
 | `step_sizes`       | tuple[int, int] | (200, 200) | Spatial bin size [h, w] in pixels for partitioning the clustering space. |
 | `bin_size`         | int             | 50         | Overlap margin (pixels) between adjacent bins for border ROI clustering. |
 | `maximum_distance` | int             | 20         | Max centroid distance (pixels) between masks to consider same ROI.       |
@@ -326,9 +325,16 @@ See `/single-recording-configuration` Section 9 for full tuning guidance. The sa
 ### Minimal configuration (required fields only)
 
 ```yaml
+pipeline_type: multi-recording
+
 recording_io:
   dataset_name: "animal_A_learning_task"
 ```
+
+The `pipeline_type: multi-recording` discriminator must be present at the top level of every multi-recording
+configuration file. `generate_config_file_tool` writes it automatically, and both `validate_config_file_tool` and
+`cindra run` reject a file that omits it. The examples below show only the sections being customized and assume the
+discriminator is already present.
 
 ### Typical configuration
 
@@ -399,12 +405,12 @@ spike_deconvolution:
 
 Configuration files follow a two-tier lifecycle:
 
-1. **Template configs** — De-novo configurations generated via `generate_config_file_tool` or manually created.
+1. **Template configs**: De-novo configurations generated via `generate_config_file_tool` or manually created.
    Templates can live anywhere (e.g., `/Data/CA1_GCaMP6f_MD.yaml`) and are reusable across datasets.
    Templates are never modified by the pipeline. One template can serve multiple datasets that share the
    same processing parameters (only `dataset_name` differs, and this is handled by the batch tool).
 
-2. **Resolved copies** — When `prepare_multi_recording_batch_tool` runs, it loads the template,
+2. **Resolved copies**: When `prepare_multi_recording_batch_tool` runs, it loads the template,
    applies runtime-specific overrides (`recording_io.dataset_name` lowercased to a filesystem-safe key,
    `recording_io.recording_directories` natural-sorted from the supplied `recording_paths`, and
    `runtime.display_progress_bars=False`), and saves the resolved copy as
@@ -422,20 +428,20 @@ and let it handle per-dataset fine-tuning automatically.
 
 1. **Discover candidates** using `discover_recordings_tool` to find recordings with completed single-recording
    output (check the `multi_recording_candidates` list in the response).
-2. **Verify prerequisites** — confirm all discovered recordings have completed single-recording processing
+2. **Verify prerequisites**: Confirm all discovered recordings have completed single-recording processing
    (all four phases). If any recording is incomplete, invoke `/single-recording-processing` (or
    `/acquisition-data-preparation` if raw data is not yet prepared) to complete the prerequisite chain before
    continuing.
 3. **Generate a template configuration** using `generate_config_file_tool` with `pipeline_type="multi-recording"`.
    Save it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). Alternatively, use `read_config_file_tool`
    to inspect an existing or legacy configuration for conversion.
-4. **Set `dataset_name`** — use `resolve_dataset_name_tool` to construct a qualified name from a shared
+4. **Set `dataset_name`**: Use `resolve_dataset_name_tool` to construct a qualified name from a shared
    base name and a batch-specific specifier derived from recording paths. This is the only required user
    parameter.
 5. **Review and tune** registration and tracking parameters based on expected tissue drift.
 6. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
-7. **Configuration complete** — the validated template file is ready for use. This skill does not start
+7. **Configuration complete**: The validated template file is ready for use. This skill does not start
    processing. If invoked standalone, the configuration is ready. To run it, proceed to
    `/multi-recording-processing`. If invoked from another skill, return control to the caller.
 

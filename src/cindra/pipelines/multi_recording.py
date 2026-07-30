@@ -70,7 +70,10 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration, *
 
 
 def extract_multi_recording_fluorescence(
-    configuration: MultiRecordingConfiguration, recording_id: str, *, workers: int
+    configuration: MultiRecordingConfiguration,
+    recording_id: str,
+    *,
+    workers: int,
 ) -> None:
     """Extracts fluorescence data from ROIs tracked across imaging recordings for the specified recording.
 
@@ -95,19 +98,23 @@ def extract_multi_recording_fluorescence(
     # Reloads only the target recording's context from disk. The target_recording_id parameter avoids loading
     # CombinedData and runtime arrays for every other recording in the dataset. The outer pipeline entry
     # (run_multi_recording_pipeline) or the prepare_multi_recording_batch_tool already wrote the shared configuration
-    # and the target recording's multi_recording_runtime_data.yaml, so this call is load-only to avoid racing against
-    # peer worker threads on the same YAML files (every EXTRACT worker otherwise re-saves the shared configuration).
+    # and the target recording's multi_recording_runtime_data.yaml. This call is therefore load-only, so that peer
+    # worker threads do not race on the same YAML files, because every EXTRACT worker would otherwise re-save the
+    # shared configuration.
     contexts = resolve_multi_recording_contexts(
-        configuration=configuration, target_recording_id=recording_id, persist=False
+        configuration=configuration,
+        target_recording_id=recording_id,
+        persist=False,
     )
     target_context = contexts[0]
 
-    # Memory-maps extraction arrays from disk. resolve_multi_recording_contexts() only loads YAML scalars, so
-    # roi_statistics will be None until arrays are explicitly loaded. Uses memory mapping because the data is only
-    # needed for validation here; extract_traces() reloads what it needs independently.
+    # Loads the extraction arrays from disk. resolve_multi_recording_contexts() only loads YAML scalars, so
+    # roi_statistics is None until the arrays are read: memory_map_arrays() eagerly loads the ROI statistics archives
+    # (.npz cannot be memory-mapped) and memory-maps the classification arrays. The validation below and the
+    # extraction itself both read these arrays, and extract_traces() skips its own load while roi_statistics is set.
     # pragma justification: the resolved runtime context always carries a configured output path.
     if target_context.runtime.output_path is not None:  # pragma: no branch
-        target_context.runtime.extraction.memory_map_arrays(target_context.runtime.output_path)
+        target_context.runtime.extraction.memory_map_arrays(output_path=target_context.runtime.output_path)
 
     # Validates that backward-transformed ROI statistics exist from the discovery phase.
     if target_context.runtime.extraction.roi_statistics is None:

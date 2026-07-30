@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     )
 
 EMPTY: NDArray[np.float32] = np.empty(0, dtype=np.float32)
-"""Empty array sentinel returned for absent trace or classification data."""
+"""Empty array sentinel returned for absent trace, image, classification, or colocalization data."""
 
 
 @dataclass(slots=True)
@@ -117,8 +117,8 @@ class SingleRecordingData:
             message = "Unable to load combined trace arrays. The output path is not set in the plane's IO data."
             console.error(message=message, error=FileNotFoundError)
         combined_output = combined_output.parent
-        self._combined.extraction.memory_map_arrays(combined_output)
-        self._combined.extraction.memory_map_results(combined_output)
+        self._combined.extraction.memory_map_arrays(output_path=combined_output)
+        self._combined.extraction.memory_map_results(output_path=combined_output)
 
         # Memory-maps per-plane extraction result arrays (traces, classification, colocalization). Skips
         # memory_map_arrays() which was already called by the factory for ROI statistics and classification.
@@ -131,7 +131,7 @@ class SingleRecordingData:
                     f"plane's IO data."
                 )
                 console.error(message=message, error=FileNotFoundError)
-            runtime.extraction.memory_map_results(plane_output)
+            runtime.extraction.memory_map_results(output_path=plane_output)
 
         # Caches display labels for all views.
         self._view_labels = ("Combined", *(f"Plane {context.runtime.io.plane_index}" for context in self._contexts))
@@ -423,7 +423,7 @@ class SingleRecordingData:
     @property
     def principal_component_shift_metrics(self) -> NDArray[np.float32] | None:
         """Returns the registration offset metrics computed by aligning PC extreme images as an array with shape
-        (num_components, 3) where columns contain mean rigid, mean nonrigid, and maximum nonrigid offset magnitudes.
+        (num_components, 3) where columns contain the rigid, mean nonrigid, and maximum nonrigid offset magnitudes.
         """
         return self._current_registration.principal_component_shift_metrics
 
@@ -495,7 +495,8 @@ class SingleRecordingData:
         return self._combined_binary_channel_2[frame_index : frame_index + 1][0]
 
     def plane_rigid_offsets(self, plane_index: int) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
-        """Returns the rigid registration (y, x) offset arrays for a specific plane without mutating _view_index.
+        """Returns the rigid registration (y, x) offset arrays for the requested plane, leaving the active view index
+        unchanged.
 
         Falls back to zero arrays when the underlying registration data is None.
         """
@@ -547,7 +548,7 @@ class SingleRecordingData:
         if not isinstance(contexts, list):
             contexts = [contexts]
 
-        # Explicitly memory-maps per-plane arrays since context resolution no longer loads them eagerly. Also resolves
+        # Explicitly memory-maps per-plane arrays, because context resolution leaves them unmapped. Also resolves
         # the cindra output root from the first available plane output path, since RuntimeContext.load() already
         # searched root_path recursively for the output directory.
         console.echo(message="Memory-mapping per-plane data...")
@@ -557,9 +558,9 @@ class SingleRecordingData:
             if plane_output is not None:
                 if cindra_root is None:
                     cindra_root = plane_output.parent
-                context.runtime.registration.memory_map_arrays(plane_output)
-                context.runtime.detection.memory_map_arrays(plane_output)
-                context.runtime.extraction.memory_map_arrays(plane_output)
+                context.runtime.registration.memory_map_arrays(output_path=plane_output)
+                context.runtime.detection.memory_map_arrays(output_path=plane_output)
+                context.runtime.extraction.memory_map_arrays(output_path=plane_output)
 
         if cindra_root is None:
             message = (
@@ -569,7 +570,7 @@ class SingleRecordingData:
 
         console.echo(message="Loading combined plane data...")
         combined = CombinedData.load(root_path=cindra_root)
-        combined.detection.load_arrays(cindra_root)
+        combined.detection.load_arrays(output_path=cindra_root)
         console.echo(message="Recording's data: loaded.", level=LogLevel.SUCCESS)
         return cls(_contexts=contexts, _combined=combined, _view_index=view_index)
 
@@ -597,10 +598,8 @@ class SingleRecordingData:
 
     @property
     def _current_detection(self) -> DetectionData:
-        """Returns the DetectionData instance for the current view.
-
-        Uses combined detection data when the combined view is active, otherwise falls back to the current plane's
-        detection data.
+        """Returns the DetectionData instance for the current view, using the combined detection data when the
+        combined view is active and the current plane's detection data otherwise.
         """
         if self._view_index == -1:
             return self._combined.detection
@@ -612,8 +611,9 @@ class MultiRecordingData:
     """Wraps the output of the multi-recording processing pipeline for a single recording and serves it to
     consumer GUIs.
 
-    Each instance represents one recording within a multi-recording dataset. All arrays are resolved eagerly at
-    initialization: ``.npy`` files are memory-mapped and ``.npz`` files are loaded into RAM.
+    Each instance represents one recording within a multi-recording dataset. All arrays are resolved at
+    initialization: the registration and extraction result ``.npy`` files are memory-mapped, while the ``.npz`` files
+    and the classification ``.npy`` files are loaded into RAM.
     """
 
     _context: MultiRecordingRuntimeContext = field(repr=False)
@@ -623,14 +623,14 @@ class MultiRecordingData:
         """Memory-maps registration arrays and eagerly loads tracking and extraction arrays for this recording."""
         output_path = self._runtime.output_path
         if output_path is not None:
-            self._runtime.registration.memory_map_arrays(output_path)
-            self._runtime.tracking.load_arrays(output_path)
-            self._runtime.extraction.load_arrays(output_path)
-            self._runtime.extraction.memory_map_results(output_path)
+            self._runtime.registration.memory_map_arrays(output_path=output_path)
+            self._runtime.tracking.load_arrays(output_path=output_path)
+            self._runtime.extraction.load_arrays(output_path=output_path)
+            self._runtime.extraction.memory_map_results(output_path=output_path)
         combined = self._runtime.combined_data
         if combined is not None and self._runtime.io.data_path is not None:
-            combined.detection.memory_map_arrays(self._runtime.io.data_path)
-            combined.extraction.memory_map_arrays(self._runtime.io.data_path)
+            combined.detection.memory_map_arrays(output_path=self._runtime.io.data_path)
+            combined.extraction.memory_map_arrays(output_path=self._runtime.io.data_path)
 
     @property
     def recording_id(self) -> str:
@@ -798,7 +798,7 @@ class MultiRecordingData:
         selected_indices = self._runtime.io.selected_roi_indices
         if not selected_indices:
             return list(all_masks)
-        return [all_masks[i] for i in selected_indices]
+        return [all_masks[index] for index in selected_indices]
 
     @property
     def original_masks_channel_2(self) -> list[ROIStatistics]:
@@ -809,7 +809,7 @@ class MultiRecordingData:
         selected_indices = self._runtime.io.selected_roi_indices_channel_2
         if not selected_indices:
             return list(all_masks)
-        return [all_masks[i] for i in selected_indices]
+        return [all_masks[index] for index in selected_indices]
 
     @property
     def deformed_masks(self) -> list[ROIMask]:
@@ -1120,7 +1120,7 @@ class ViewerData:
         """Loads single-recording data and discovers available multi-recording datasets.
 
         Loads single-recording pipeline data from ``root_path``, then discovers available multi-recording dataset names
-        (lightweight). A dataset is only loaded when explicitly requested via the ``dataset`` parameter; otherwise
+        (lightweight). A dataset is only loaded when explicitly requested via the ``dataset`` parameter. Otherwise,
         the instance starts in single-recording mode and consumers can load a dataset later via the dropdown.
 
         Args:

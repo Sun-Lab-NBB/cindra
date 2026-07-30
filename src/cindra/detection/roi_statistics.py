@@ -24,7 +24,8 @@ def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10)
 
     Args:
         rois: The list of ROIMask instances to analyze.
-        default_diameter: The fallback diameter to return if the ROI list is empty or all ROIs have zero pixels.
+        default_diameter: The fallback diameter to return if the ROI list is empty or if the median ROI pixel count
+            is zero.
 
     Returns:
         The estimated ROI diameter in pixels, computed as the diameter of a circle with area equal to the median
@@ -36,7 +37,7 @@ def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10)
     # Collects pixel counts from all ROIs. Uses the y_pixels array length as the authoritative pixel count.
     pixel_counts = np.array([len(roi.y_pixels) for roi in rois], dtype=np.float32)
 
-    if len(pixel_counts) == 0 or np.median(pixel_counts) == 0:
+    if not pixel_counts.size or np.median(pixel_counts) == 0:
         return default_diameter
 
     # Computes the diameter of a circle with area equal to the median pixel count: area = π * r², so
@@ -48,7 +49,7 @@ def estimate_diameter_from_rois(rois: list[ROIMask], default_diameter: int = 10)
 
 
 def compute_median_pixel_position(y_pixels: NDArray[np.int32], x_pixels: NDArray[np.int32]) -> tuple[int, int]:
-    """Computes the ROI centroid as the x and y coordinates of the pixel closest to the coordinate-wise median.
+    """Computes the ROI centroid as the y and x coordinates of the pixel closest to the coordinate-wise median.
 
     Args:
         y_pixels: The y-coordinates of the ROI's pixels.
@@ -70,6 +71,7 @@ def compute_roi_statistics(
     aspect: float | None = None,
     diameter: int | None = None,
     maximum_overlap_fraction: float | None = None,
+    *,
     crop: bool = True,
     lightweight: bool = False,
 ) -> None:
@@ -174,7 +176,7 @@ def compute_roi_statistics(
             wrapper.data.mask.overlap_mask = wrapper.get_overlap_mask(overlap_count_image=overlap_counts)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _EllipseData:
     """Defines an ellipse fitted to the ROI's pixels via weighted covariance analysis.
 
@@ -202,17 +204,17 @@ class _EllipseData:
 
     @property
     def area(self) -> float:
-        """Pi scaled by the geometric mean of the semi-major and semi-minor axis lengths."""
+        """Returns pi scaled by the geometric mean of the semi-major and semi-minor axis lengths."""
         return float((self.radii[0] * self.radii[1]) ** 0.5 * np.pi)
 
     @property
     def radius(self) -> float:
-        """The effective radius of the ROI ellipse scaled by the mean of y_scale and x_scale."""
+        """Returns the effective radius of the ROI ellipse scaled by the mean of y_scale and x_scale."""
         return float(self.radii[0] * np.mean((self.x_scale, self.y_scale)))
 
     @property
     def aspect_ratio(self) -> float:
-        """The normalized aspect ratio bounded between 0 and 2, where 1 indicates a circular shape."""
+        """Returns the normalized aspect ratio bounded between 0 and 2, where 1 indicates a circular shape."""
         major, minor = self.radii
         return 2 * major / (major + minor + 0.01)
 
@@ -220,8 +222,8 @@ class _EllipseData:
 def _compute_distance_kernel(radius: int) -> NDArray[np.float32]:
     """Computes a 2D array of Euclidean distances from the center point.
 
-    This function generates a reference distance distribution used to compute the baseline mean R-squared value for ROI
-    compactness calculations.
+    This function generates a reference distance distribution used to compute the baseline mean radius (see
+    _ROI.baseline_mean_radius) for ROI compactness calculations.
 
     Args:
         radius: The radius of the kernel in pixels.
@@ -254,7 +256,7 @@ class _ROI:
     _baseline_cache: ClassVar[dict[int, NDArray[np.float32]]] = {}
     """Cache of sorted baseline distances keyed by diameter, avoiding recomputation across instances."""
 
-    def __init__(self, data: ROIStatistics, diameter: int, crop: bool = True) -> None:
+    def __init__(self, data: ROIStatistics, diameter: int, *, crop: bool = True) -> None:
         """Initializes the _ROI wrapper for computing derived statistics from an ROIStatistics instance.
 
         Args:
@@ -282,33 +284,33 @@ class _ROI:
 
     @property
     def data(self) -> ROIStatistics:
-        """The underlying ROIStatistics instance."""
+        """Returns the underlying ROIStatistics instance."""
         return self._data
 
     @property
     def y_pixels(self) -> NDArray[np.int32]:
-        """The y-coordinates of the ROI pixels."""
+        """Returns the y-coordinates of the ROI pixels."""
         return self._data.mask.y_pixels
 
     @property
     def x_pixels(self) -> NDArray[np.int32]:
-        """The x-coordinates of the ROI pixels."""
+        """Returns the x-coordinates of the ROI pixels."""
         return self._data.mask.x_pixels
 
     @property
     def pixel_weights(self) -> NDArray[np.float32]:
-        """The pixel weights (lambda values) for the ROI."""
+        """Returns the pixel weights (lambda values) for the ROI."""
         return self._data.mask.pixel_weights
 
     @property
     def centroid(self) -> tuple[int, int]:
-        """The centroid (y, x) pixel position of the ROI."""
+        """Returns the centroid (y, x) pixel position of the ROI."""
         return self._data.mask.centroid[0], self._data.mask.centroid[1]
 
     @property
     def soma_mask(self) -> NDArray[np.bool_]:
-        """The boolean mask indicating which pixels belong to the soma region of this ROI, computed and cached on first
-        access.
+        """Returns the boolean mask indicating which pixels belong to the soma region of this ROI, computed and
+        cached on first access.
         """
         if self._cached_soma_mask is not None:
             return self._cached_soma_mask
@@ -318,7 +320,7 @@ class _ROI:
 
     @property
     def mean_radius(self) -> float:
-        """The mean diameter-normalized distance from ROI pixels to their median center."""
+        """Returns the mean diameter-normalized distance from ROI pixels to their median center."""
         y_pixels = self.y_pixels[self.soma_mask]
         x_pixels = self.x_pixels[self.soma_mask]
         # Normalizes distances by ROI diameter for scale-invariance, matching the original suite2p approach.
@@ -330,7 +332,7 @@ class _ROI:
 
     @property
     def baseline_mean_radius(self) -> float:
-        """The expected mean radius for a uniformly distributed set of pixels of the same count as the ROI."""
+        """Returns the expected mean radius for a uniformly distributed set of pixels of the same count as the ROI."""
         # Uses a diameter-dependent kernel. The kernel is computed from a meshgrid spanning 2*diameter in each
         # direction, with distances normalized by diameter, matching the original suite2p approach.
         diameter = self._diameter
@@ -343,12 +345,12 @@ class _ROI:
 
     @property
     def compactness(self) -> float:
-        """The ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
+        """Returns the ratio of actual to expected mean radius, where values near 1 indicate compact circular ROIs."""
         return max(1.0, self.mean_radius / (1e-10 + self.baseline_mean_radius))
 
     @property
     def solidity(self) -> float:
-        """The ROI's solidity as the ratio of soma pixel count to convex hull area."""
+        """Returns the ROI solidity as the ratio of soma pixel count to convex hull area."""
         minimum_pixels_for_hull = 10
         default_area = 10.0
 
@@ -360,70 +362,20 @@ class _ROI:
         points = np.column_stack((self.y_pixels[self.soma_mask], self.x_pixels[self.soma_mask]))
         try:
             area = ConvexHull(points).volume
-        except ValueError, QhullError:  # pragma: no cover — degenerate geometry fallback
+        except ValueError, QhullError:  # pragma: no cover, degenerate geometry fallback
             area = default_area
 
         return pixel_count / area
 
     @property
     def soma_pixel_count(self) -> int:
-        """The number of pixels in the soma region."""
+        """Returns the number of pixels in the soma region."""
         return int(self.soma_mask.sum())
 
     @property
     def pixel_count(self) -> int:
-        """The total number of pixels in the ROI."""
+        """Returns the total number of pixels in the ROI."""
         return self.x_pixels.size
-
-    def _compute_soma_mask(self) -> NDArray[np.bool_]:
-        """Computes the soma mask by finding the radius where pixel weight density drops.
-
-        Returns:
-            A boolean mask indicating soma pixels.
-        """
-        minimum_pixels_for_crop = 10
-
-        # Returns all-True mask if cropping is disabled or ROI is too small for meaningful gradient analysis.
-        if not self._crop or self.y_pixels.size <= minimum_pixels_for_crop:
-            return np.ones(self.y_pixels.size, dtype=np.bool_)
-
-        # Computes Euclidean distance from each pixel to the ROI centroid.
-        distances = np.hypot(self.y_pixels - self.centroid[0], self.x_pixels - self.centroid[1])
-
-        # Sorts pixels by distance to enable efficient cumulative weight computation via cumsum.
-        sorted_indices = np.argsort(distances)
-        sorted_distances = distances[sorted_indices]
-        cumsum_weights = np.cumsum(self.pixel_weights[sorted_indices])
-
-        # Samples cumulative weights at integer radii. Uses searchsorted to find the index where each radius would
-        # be inserted, then looks up the cumulative weight at that position.
-        radii = np.arange(1, int(distances.max()) + 1, dtype=np.float32)
-        indices = np.searchsorted(sorted_distances, radii, side="left")
-        cumulative_weights = np.where(indices > 0, cumsum_weights[np.clip(indices - 1, 0, len(cumsum_weights) - 1)], 0)
-
-        # Computes radial gradient of cumulative weights. A sharp drop indicates the soma boundary.
-        weight_gradient = np.diff(cumulative_weights)
-        if weight_gradient.size == 0 or weight_gradient.max() == 0:  # pragma: no cover — degenerate weight distribution
-            return np.ones(self.y_pixels.size, dtype=np.bool_)
-
-        # Finds the radius where gradient first drops below 1/3 of its peak after rising above threshold.
-        gradient_threshold_divisor = 3
-        threshold = weight_gradient.max() / gradient_threshold_divisor
-        crop_radius = radii[-1]
-
-        above_threshold_indices = np.nonzero(weight_gradient > threshold)[0]
-        if len(above_threshold_indices) > 0:  # pragma: no branch — non-negative weights guarantee a match
-            first_above_index = above_threshold_indices[0]
-            below_threshold_after = np.nonzero(weight_gradient[first_above_index:] < threshold)[0]
-            if len(below_threshold_after) > 0:
-                crop_radius = radii[below_threshold_after[0] + first_above_index]
-
-        # Returns mask of pixels within the computed crop radius.
-        crop_mask = distances < crop_radius
-        if crop_mask.sum() == 0:  # pragma: no cover — degenerate crop radius
-            return np.ones(self.y_pixels.size, dtype=np.bool_)
-
-        return crop_mask
 
     def fit_ellipse(self, y_scale: int, x_scale: int) -> _EllipseData:
         """Fits a 2D Gaussian ellipse to the ROI pixels via covariance eigendecomposition.
@@ -561,3 +513,53 @@ class _ROI:
                 working_overlap[roi.y_pixels, roi.x_pixels] = pixels - 1
 
         return keep_flags[::-1]
+
+    def _compute_soma_mask(self) -> NDArray[np.bool_]:
+        """Computes the soma mask by finding the radius where pixel weight density drops.
+
+        Returns:
+            A boolean mask indicating soma pixels.
+        """
+        minimum_pixels_for_crop = 10
+
+        # Returns all-True mask if cropping is disabled or ROI is too small for meaningful gradient analysis.
+        if not self._crop or self.y_pixels.size <= minimum_pixels_for_crop:
+            return np.ones(self.y_pixels.size, dtype=np.bool_)
+
+        # Computes Euclidean distance from each pixel to the ROI centroid.
+        distances = np.hypot(self.y_pixels - self.centroid[0], self.x_pixels - self.centroid[1])
+
+        # Sorts pixels by distance to enable efficient cumulative weight computation via cumsum.
+        sorted_indices = np.argsort(distances)
+        sorted_distances = distances[sorted_indices]
+        cumsum_weights = np.cumsum(self.pixel_weights[sorted_indices])
+
+        # Samples cumulative weights at integer radii. Uses searchsorted to find the index where each radius would
+        # be inserted, then looks up the cumulative weight at that position.
+        radii = np.arange(1, int(distances.max()) + 1, dtype=np.float32)
+        indices = np.searchsorted(sorted_distances, radii, side="left")
+        cumulative_weights = np.where(indices > 0, cumsum_weights[np.clip(indices - 1, 0, len(cumsum_weights) - 1)], 0)
+
+        # Computes radial gradient of cumulative weights. A sharp drop indicates the soma boundary.
+        weight_gradient = np.diff(cumulative_weights)
+        if weight_gradient.size == 0 or weight_gradient.max() == 0:  # pragma: no cover, degenerate weight distribution
+            return np.ones(self.y_pixels.size, dtype=np.bool_)
+
+        # Finds the radius where gradient first drops below 1/3 of its peak after rising above threshold.
+        gradient_threshold_divisor = 3
+        threshold = weight_gradient.max() / gradient_threshold_divisor
+        crop_radius = radii[-1]
+
+        above_threshold_indices = np.nonzero(weight_gradient > threshold)[0]
+        if above_threshold_indices.size:  # pragma: no branch, non-negative weights guarantee a match
+            first_above_index = above_threshold_indices[0]
+            below_threshold_after = np.nonzero(weight_gradient[first_above_index:] < threshold)[0]
+            if below_threshold_after.size:
+                crop_radius = radii[below_threshold_after[0] + first_above_index]
+
+        # Returns mask of pixels within the computed crop radius.
+        crop_mask = distances < crop_radius
+        if crop_mask.sum() == 0:  # pragma: no cover, degenerate crop radius
+            return np.ones(self.y_pixels.size, dtype=np.bool_)
+
+        return crop_mask

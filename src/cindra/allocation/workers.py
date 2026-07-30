@@ -53,7 +53,8 @@ worker count."""
 
 
 def resolve_stage_workers(
-    job_name: SingleRecordingJobNames | MultiRecordingJobNames, requested_workers: int | None = None
+    job_name: SingleRecordingJobNames | MultiRecordingJobNames,
+    requested_workers: int | None = None,
 ) -> int:
     """Resolves the number of workers to allocate to the target pipeline stage.
 

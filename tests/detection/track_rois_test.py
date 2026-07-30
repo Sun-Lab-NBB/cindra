@@ -32,13 +32,13 @@ def _make_block_mask(
     cluster_id: int = 0,
 ) -> ROIMask:
     """Creates a square block ROIMask spanning a size-by-size pixel region anchored at the given origin."""
-    rows, cols = np.meshgrid(
+    rows, columns = np.meshgrid(
         np.arange(y_origin, y_origin + size),
         np.arange(x_origin, x_origin + size),
         indexing="ij",
     )
     y_pixels = rows.ravel().astype(np.int32)
-    x_pixels = cols.ravel().astype(np.int32)
+    x_pixels = columns.ravel().astype(np.int32)
     weights = np.full(shape=y_pixels.shape, fill_value=weight, dtype=np.float32)
     centroid = (int(np.median(y_pixels)), int(np.median(x_pixels)))
     return ROIMask(
@@ -82,7 +82,7 @@ def _make_context(
     runtime.registration.deformed_roi_masks = deformed_masks
     runtime.registration.deformed_roi_masks_channel_2 = deformed_masks_channel_2
     if with_combined_data:
-        runtime.combined_data = _make_combined_data(image_size)
+        runtime.combined_data = _make_combined_data(image_size=image_size)
     return MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime)
 
 
@@ -121,10 +121,16 @@ class TestTrackRoisAcrossRecordings:
         ]
 
         context_0 = _make_context(
-            tmp_path / "rec0", configuration, image_size=image_size, deformed_masks=recording_0_masks
+            output_path=tmp_path / "rec0",
+            configuration=configuration,
+            image_size=image_size,
+            deformed_masks=recording_0_masks,
         )
         context_1 = _make_context(
-            tmp_path / "rec1", configuration, image_size=image_size, deformed_masks=recording_1_masks
+            output_path=tmp_path / "rec1",
+            configuration=configuration,
+            image_size=image_size,
+            deformed_masks=recording_1_masks,
         )
         contexts = [context_0, context_1]
 
@@ -160,15 +166,15 @@ class TestTrackRoisAcrossRecordings:
         channel_2_recording_1 = [_make_block_mask(y_origin=148, x_origin=148, size=6, frame_width=image_size)]
 
         context_0 = _make_context(
-            tmp_path / "rec0",
-            configuration,
+            output_path=tmp_path / "rec0",
+            configuration=configuration,
             image_size=image_size,
             deformed_masks=channel_1_recording_0,
             deformed_masks_channel_2=channel_2_recording_0,
         )
         context_1 = _make_context(
-            tmp_path / "rec1",
-            configuration,
+            output_path=tmp_path / "rec1",
+            configuration=configuration,
             image_size=image_size,
             deformed_masks=channel_1_recording_1,
             deformed_masks_channel_2=channel_2_recording_1,
@@ -193,15 +199,15 @@ class TestTrackRoisAcrossRecordings:
         channel_2_recording_1 = [_make_block_mask(y_origin=48, x_origin=48, size=6, frame_width=image_size)]
 
         context_0 = _make_context(
-            tmp_path / "rec0",
-            configuration,
+            output_path=tmp_path / "rec0",
+            configuration=configuration,
             image_size=image_size,
             deformed_masks=None,
             deformed_masks_channel_2=channel_2_recording_0,
         )
         context_1 = _make_context(
-            tmp_path / "rec1",
-            configuration,
+            output_path=tmp_path / "rec1",
+            configuration=configuration,
             image_size=image_size,
             deformed_masks=None,
             deformed_masks_channel_2=channel_2_recording_1,
@@ -219,7 +225,7 @@ class TestTrackRoisAcrossRecordings:
         image_size = 400
         configuration = MultiRecordingConfiguration()
 
-        # Every recording observes the prevalent ROI; only recording 0 observes the isolated ROI. With three
+        # Every recording observes the prevalent ROI. Only recording 0 observes the isolated ROI. With three
         # recordings and a 50% mask prevalence, a cluster must appear in at least two recordings to be retained.
         contexts = []
         for index in range(3):
@@ -227,7 +233,12 @@ class TestTrackRoisAcrossRecordings:
             if index == 0:
                 masks.append(_make_block_mask(y_origin=148, x_origin=148, size=6, frame_width=image_size))
             contexts.append(
-                _make_context(tmp_path / f"rec{index}", configuration, image_size=image_size, deformed_masks=masks)
+                _make_context(
+                    output_path=tmp_path / f"rec{index}",
+                    configuration=configuration,
+                    image_size=image_size,
+                    deformed_masks=masks,
+                )
             )
 
         track_rois_across_recordings(contexts=contexts)
@@ -248,10 +259,16 @@ class TestTrackRoisAcrossRecordings:
         recording_1_masks = [_make_block_mask(y_origin=203, x_origin=48, size=6, frame_width=image_size)]
 
         context_0 = _make_context(
-            tmp_path / "rec0", configuration, image_size=image_size, deformed_masks=recording_0_masks
+            output_path=tmp_path / "rec0",
+            configuration=configuration,
+            image_size=image_size,
+            deformed_masks=recording_0_masks,
         )
         context_1 = _make_context(
-            tmp_path / "rec1", configuration, image_size=image_size, deformed_masks=recording_1_masks
+            output_path=tmp_path / "rec1",
+            configuration=configuration,
+            image_size=image_size,
+            deformed_masks=recording_1_masks,
         )
         contexts = [context_0, context_1]
 
@@ -266,8 +283,8 @@ class TestTrackRoisAcrossRecordings:
     def test_returns_when_channel_has_no_rois(self, tmp_path: Path) -> None:
         """Verifies that an empty deformed mask list yields no templates without raising."""
         configuration = MultiRecordingConfiguration()
-        context_0 = _make_context(tmp_path / "rec0", configuration, deformed_masks=[])
-        context_1 = _make_context(tmp_path / "rec1", configuration, deformed_masks=[])
+        context_0 = _make_context(output_path=tmp_path / "rec0", configuration=configuration, deformed_masks=[])
+        context_1 = _make_context(output_path=tmp_path / "rec1", configuration=configuration, deformed_masks=[])
 
         track_rois_across_recordings(contexts=[context_0, context_1])
 
@@ -278,8 +295,18 @@ class TestTrackRoisAcrossRecordings:
         image_size = 400
         configuration = MultiRecordingConfiguration()
         masks = [_make_block_mask(y_origin=48, x_origin=48, size=6, frame_width=image_size)]
-        context_0 = _make_context(tmp_path / "rec0", configuration, deformed_masks=masks, with_combined_data=False)
-        context_1 = _make_context(tmp_path / "rec1", configuration, deformed_masks=masks, with_combined_data=False)
+        context_0 = _make_context(
+            output_path=tmp_path / "rec0",
+            configuration=configuration,
+            deformed_masks=masks,
+            with_combined_data=False,
+        )
+        context_1 = _make_context(
+            output_path=tmp_path / "rec1",
+            configuration=configuration,
+            deformed_masks=masks,
+            with_combined_data=False,
+        )
 
         track_rois_across_recordings(contexts=[context_0, context_1])
 
@@ -292,8 +319,12 @@ class TestTrackRoisAcrossRecordings:
         masks = [_make_block_mask(y_origin=48, x_origin=48, size=6, frame_width=image_size)]
 
         # Recording 0 contributes no deformed masks at all, so channel detection and ROI collection must both skip it.
-        context_0 = _make_context(tmp_path / "rec0", configuration, image_size=image_size, deformed_masks=None)
-        context_1 = _make_context(tmp_path / "rec1", configuration, image_size=image_size, deformed_masks=masks)
+        context_0 = _make_context(
+            output_path=tmp_path / "rec0", configuration=configuration, image_size=image_size, deformed_masks=None
+        )
+        context_1 = _make_context(
+            output_path=tmp_path / "rec1", configuration=configuration, image_size=image_size, deformed_masks=masks
+        )
 
         track_rois_across_recordings(contexts=[context_0, context_1])
 
@@ -304,8 +335,18 @@ class TestTrackRoisAcrossRecordings:
     def test_handles_dataset_without_any_deformed_masks(self, tmp_path: Path) -> None:
         """Verifies that a dataset where no recording carries deformed masks tracks nothing without raising."""
         configuration = MultiRecordingConfiguration()
-        context_0 = _make_context(tmp_path / "rec0", configuration, deformed_masks=None, deformed_masks_channel_2=None)
-        context_1 = _make_context(tmp_path / "rec1", configuration, deformed_masks=None, deformed_masks_channel_2=None)
+        context_0 = _make_context(
+            output_path=tmp_path / "rec0",
+            configuration=configuration,
+            deformed_masks=None,
+            deformed_masks_channel_2=None,
+        )
+        context_1 = _make_context(
+            output_path=tmp_path / "rec1",
+            configuration=configuration,
+            deformed_masks=None,
+            deformed_masks_channel_2=None,
+        )
 
         track_rois_across_recordings(contexts=[context_0, context_1])
 
@@ -323,12 +364,18 @@ class TestTrackRoisAcrossRecordings:
 
         output_0 = tmp_path / "rec0"
         output_0.mkdir(parents=True, exist_ok=True)
-        ROIMask.save_list([existing_template], output_0 / "tracking_template_masks.npz")
+        ROIMask.save_list(mask_list=[existing_template], file_path=output_0 / "tracking_template_masks.npz")
 
-        context_0 = _make_context(output_0, configuration, image_size=image_size, deformed_masks=None)
+        context_0 = _make_context(
+            output_path=output_0, configuration=configuration, image_size=image_size, deformed_masks=None
+        )
         # The second recording carries no output_path, exercising the load-skip branch within the early return.
         context_1 = _make_context(
-            tmp_path / "rec1", configuration, image_size=image_size, deformed_masks=None, set_output_path=False
+            output_path=tmp_path / "rec1",
+            configuration=configuration,
+            image_size=image_size,
+            deformed_masks=None,
+            set_output_path=False,
         )
 
         track_rois_across_recordings(contexts=[context_0, context_1])

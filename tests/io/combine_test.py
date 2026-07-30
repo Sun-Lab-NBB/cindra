@@ -28,7 +28,7 @@ def _make_context(
         mroi_x_offset: The optional MROI x-offset.
 
     Returns:
-        A RuntimeContext instance with minimal configuration.
+        The context populated with the requested frame geometry and MROI offsets.
     """
     runtime = SingleRecordingRuntimeData()
     runtime.io.frame_height = frame_height
@@ -67,11 +67,9 @@ class TestComputePlaneOffsets:
         assert y_displacement.shape == (4,)
         assert x_displacement.shape == (4,)
 
-        # The first plane should be at (0, 0).
         assert y_displacement[0] == 0
         assert x_displacement[0] == 0
 
-        # All displacements should be non-negative multiples of the plane dimensions.
         assert np.all(y_displacement >= 0)
         assert np.all(x_displacement >= 0)
         assert np.all(y_displacement % height == 0)

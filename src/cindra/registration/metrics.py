@@ -30,7 +30,8 @@ if TYPE_CHECKING:
     from ..dataclasses import RuntimeContext
 
 _MINIMUM_SAMPLE_COUNT: int = 2000
-"""The minimum number of frames sampled from the recording for PC metrics computation."""
+"""The smaller of the two frame-sample counts used for PC metrics computation, selected for recordings with few frames
+or large frame dimensions. The sampled frame count is additionally capped by the recording's frame count."""
 
 _MAXIMUM_SAMPLE_COUNT: int = 5000
 """The maximum number of frames sampled from the recording for PC metrics computation."""
@@ -63,8 +64,8 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
         offset metrics computed by aligning PC extremes.
 
         The worker count drives both the FFT thread pool used by phase correlation and the Numba thread mask used by
-        the nonrigid warping kernels. The Numba mask is thread-local, so concurrently dispatched planes can hold
-        different worker budgets inside a single process.
+        the edge-taper and nonrigid offset-estimation kernels. The Numba mask is thread-local, so concurrently
+        dispatched planes can hold different worker budgets inside a single process.
 
     Args:
         context: The runtime context containing pipeline configuration and runtime data for the current plane. Modified
@@ -178,7 +179,7 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
     )
 
     # Stores PC extreme images in the runtime context. Stacks low and high projections along axis 0.
-    principal_component_extreme_images = np.stack((pc_low, pc_high), axis=0)
+    principal_component_extreme_images = np.stack(arrays=(pc_low, pc_high), axis=0)
 
     console.echo(
         message=(
@@ -256,7 +257,7 @@ def _compute_pc_extremes(
     projections: NDArray[np.float32] = pca.components_.T.astype(np.float32)
 
     # Pre-computes sorted indices for all components at once.
-    sorted_indices = np.argsort(projections, axis=0)
+    sorted_indices = np.argsort(a=projections, axis=0)
 
     # Computes mean images from extreme frames for each PC. Indexes directly into the original frames array to avoid
     # creating a transposed copy of the entire dataset.
@@ -338,14 +339,14 @@ def _register_pc_extremes(
 
         # Applies one-photon preprocessing to reference image.
         if one_photon_mode and spatial_highpass_window is not None:
-            if pre_smoothing_window:
+            if pre_smoothing_window is not None and pre_smoothing_window > 0:
                 reference_image = apply_spatial_smoothing(data=reference_image, window=pre_smoothing_window)
             reference_image = apply_spatial_high_pass(data=reference_image, window=spatial_highpass_window)
 
         # Clips reference image to 1st-99th percentile range.
-        intensity_min = np.percentile(reference_image, q=1)
-        intensity_max = np.percentile(reference_image, q=99)
-        reference_image = np.clip(reference_image, intensity_min, intensity_max)
+        intensity_min = np.percentile(a=reference_image, q=1)
+        intensity_max = np.percentile(a=reference_image, q=99)
+        reference_image = np.clip(a=reference_image, a_min=intensity_min, a_max=intensity_max)
 
         # Computes edge taper and phase correlation kernel for rigid registration.
         taper_mask, mean_offset = compute_edge_taper(reference_image=reference_image, taper_slope=taper_slope)
@@ -365,12 +366,12 @@ def _register_pc_extremes(
 
         # Applies one-photon preprocessing to target frame.
         if one_photon_mode and spatial_highpass_window is not None:
-            if pre_smoothing_window:
+            if pre_smoothing_window is not None and pre_smoothing_window > 0:
                 target_frame = apply_spatial_smoothing(data=target_frame, window=pre_smoothing_window)
             target_frame = apply_spatial_high_pass(data=target_frame, window=spatial_highpass_window)
 
         # Clips target frame in-place and adds batch dimension.
-        np.clip(target_frame, intensity_min, intensity_max, out=target_frame)
+        np.clip(a=target_frame, a_min=intensity_min, a_max=intensity_max, out=target_frame)
         preprocessed_target = target_frame[np.newaxis, :, :]
 
         # Computes rigid registration offsets.

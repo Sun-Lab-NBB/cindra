@@ -11,8 +11,9 @@ class SingleRecordingJobNames(StrEnum):
     """Defines the job names for the single-recording processing pipeline components.
 
     Notes:
-        The members are declared in execution order. That order is rendered into error messages and seeds the phase
-        validation sets used by the interface layer, so it must match the order in which the pipeline runs the stages.
+        The members are declared in execution order, and that order is rendered into the error messages that list
+        the valid job names. The authoritative phase order and prerequisite graph live in SINGLE_RECORDING_PHASES
+        (allocation/phases.py). The interface layer derives only an unordered validation set from these members.
     """
 
     BINARIZE = "binarization"

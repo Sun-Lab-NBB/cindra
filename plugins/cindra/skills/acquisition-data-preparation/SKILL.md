@@ -64,6 +64,9 @@ self-documented via MCP introspection.
 - `generate_acquisition_parameters_file_tool` and `validate_acquisition_parameters_file_tool` do not inspect TIFF files.
   Acquisition metadata must come from the user, experiment logs, microscope software output, or other external
   sources. Use `validate_recording_readiness_tool` for combined parameter + TIFF validation.
+- `validate_acquisition_parameters_file_tool` and `validate_recording_readiness_tool` return a `success` flag that only
+  reports whether the tool ran. Gate every downstream step on the separate `valid` field, which is False whenever the
+  tool collects any validation errors and can be False while `success` is True.
 
 ---
 
@@ -89,8 +92,9 @@ TIFF files must be in the same directory as the JSON file (non-recursive TIFF sc
 ### Supported formats
 
 The pipeline reads standard multipage TIFF files (`.tif` or `.tiff` extension). All data is automatically converted
-to int16 for processing. uint16 and int32 data is divided by 2 before conversion to fit the int16 range. All other
-data types are cast directly to int16 without scaling.
+to int16 for processing. uint16 and int32 data is halved by floor division and then clipped to the int16 range, so
+int32 magnitudes that still exceed that range after halving saturate at -32768 or 32767 instead of wrapping. All
+other data types are cast directly to int16 without scaling.
 
 ### Non-TIFF source data
 
@@ -157,11 +161,14 @@ configuration and proceed, and do not ask the user to delete or reshape the file
 
 ### Required fields (all recordings)
 
-| Field            | Type  | Description                                                                                                                                                                               |
-|------------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `frame_rate`     | float | Volume acquisition rate in Hz. For multi-plane recordings, this is the rate at which complete volumes are acquired, not the per-plane rate. Per-plane rate = `frame_rate / plane_number`. |
-| `plane_number`   | int   | Number of Z-planes acquired per volume. 1 for single-plane imaging.                                                                                                                       |
-| `channel_number` | int   | Number of channels per plane. Must be 1 or 2.                                                                                                                                             |
+| Field            | Type  | Description                                                         |
+|------------------|-------|---------------------------------------------------------------------|
+| `frame_rate`     | float | Volume acquisition rate in Hz.                                      |
+| `plane_number`   | int   | Number of Z-planes acquired per volume. 1 for single-plane imaging. |
+| `channel_number` | int   | Number of channels per plane. Must be 1 or 2.                       |
+
+For multi-plane recordings, `frame_rate` is the rate at which complete volumes are acquired, and the
+per-plane rate is `frame_rate / plane_number`.
 
 ### MROI fields (required when roi_number > 1)
 
@@ -359,27 +366,37 @@ For dual-channel recordings, cindra routes the functional channel into `channel_
 channel into `channel_2_data.bin` per plane. When adopting binaries directly, place the functional-channel data
 in `channel_1_data.bin`, since the rest of the pipeline assumes channel 1 holds the functional channel.
 
-**Step 5: Verify file sizes.**
+**Step 5: Verify file sizes and record the frame geometry.**
 
 For each binary file, confirm that the file size matches the expected value:
 `frame_count * height * width * 2` bytes. A mismatch indicates incorrect dimensions, frame count, or data
 type. Ask the user to re-check their metadata.
 
+Then write the confirmed geometry into the `io:` section of each plane's
+`recording/cindra/plane_N/runtime_data.yaml`, setting `frame_height`, `frame_width`, and `frame_count`. The
+bootstrap from Step 3 leaves all three at 0, because only TIFF conversion populates them and binarization returns
+early without touching them once it finds valid binaries. Every later stage reads the geometry from this file, so
+a plane left at 0 fails registration with "Unable to register plane {index}. A plane must contain at least 50
+frames to be processed, but the input plane contains only 0 frames."
+
 **Step 6: Run binarization.**
 
 With the bootstrap (Step 3) and valid binaries (Step 4) in place, run binarization normally. Cindra loads the
-existing plane contexts, confirms each `registered_binary_path` exists, and skips TIFF conversion. If
-binarization instead attempts conversion or reports missing binaries, the bootstrap or file placement is
-incorrect, so re-check Steps 3-4 and the format requirements above.
+existing plane contexts and skips TIFF conversion only when three checks pass for every plane: each
+`registered_binary_path` exists, no `<binary>.registering` marker sits beside it, and the binary's size matches the
+frame geometry recorded for its plane in Step 5. Any check failing, or `file_io.repeat_binarization` being True,
+makes cindra rebuild every plane's binary from the source TIFFs instead, which cannot succeed for adopted data
+because no raw TIFFs exist, so re-check Steps 3-5 and the format requirements above.
 
 **Step 7: Run registration for every plane.**
 
 Adopted data follows the standard phase order of binarization, registration, processing, and combination. Run
 the registration phase for every plane before dispatching any processing job. Registration writes the reference
-image, the motion offsets, the valid pixel ranges, and the bad-frame mask into each plane's `registration_data/`
-directory, and processing reads all of them back before detecting ROIs. A plane that carries no
-`registration_data/` fails at the start of processing with "Unable to process plane {index}. The plane must be
-registered before ROI detection...", so a binarize-then-process dispatch stops at the first processing job.
+image, the motion offsets, and the bad-frame mask into each plane's `registration_data/` directory and the valid
+pixel ranges into the plane's `runtime_data.yaml`, and processing reads all of them back before detecting ROIs. A
+plane that carries no `registration_data/` fails at the start of processing with "Unable to process plane {index}.
+The plane must be registered before ROI detection...", so a binarize-then-process dispatch stops at the first
+processing job.
 
 ---
 

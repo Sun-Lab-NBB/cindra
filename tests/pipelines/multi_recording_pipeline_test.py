@@ -15,7 +15,6 @@ from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 from cindra.allocation import MultiRecordingJobNames
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
-import cindra.pipelines.pipeline as pipeline_module
 from cindra.pipelines.pipeline import (
     execute_multi_recording_job,
     _execute_multi_recording_job,
@@ -60,7 +59,7 @@ def _build_flickering_movie(*, seed: int) -> NDArray[np.int16]:
     """Builds a synthetic movie whose spatially fixed Gaussian blobs flicker independently across frames."""
     generator = np.random.default_rng(seed=seed)
     rows, columns = np.mgrid[0:_FRAME_HEIGHT, 0:_FRAME_WIDTH]
-    movie = np.full((_FRAME_COUNT, _FRAME_HEIGHT, _FRAME_WIDTH), _BACKGROUND_LEVEL, dtype=np.float64)
+    movie = np.full((_FRAME_COUNT, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=_BACKGROUND_LEVEL, dtype=np.float64)
     for center_row, center_column in _BLOB_CENTERS:
         blob = np.exp(-(((rows - center_row) ** 2 + (columns - center_column) ** 2) / (2.0 * _BLOB_SIGMA**2)))
         amplitudes = _BLOB_AMPLITUDE * (0.5 + np.abs(generator.standard_normal(_FRAME_COUNT)))
@@ -114,8 +113,8 @@ def _make_multi_configuration(
 
 def _prepare_dataset(tmp_path: Path, *, display_progress_bars: bool = False) -> tuple[Path, Path, Path]:
     """Processes two synthetic recordings and writes a multi-recording configuration referencing both of them."""
-    first_output = _build_processed_recording(tmp_path / "rec1", seed=0)
-    second_output = _build_processed_recording(tmp_path / "rec2", seed=1)
+    first_output = _build_processed_recording(root=tmp_path / "rec1", seed=0)
+    second_output = _build_processed_recording(root=tmp_path / "rec2", seed=1)
     configuration = _make_multi_configuration(
         recording_directories=(first_output, second_output), display_progress_bars=display_progress_bars
     )
@@ -143,7 +142,9 @@ class TestRunMultiRecordingPipeline:
 
     def test_remote_and_target_recording_extraction(self, tmp_path: Path) -> None:
         """Verifies that discovery, remote extraction, and targeted local extraction populate both recordings."""
-        configuration_path, first_output, second_output = _prepare_dataset(tmp_path, display_progress_bars=True)
+        configuration_path, first_output, second_output = _prepare_dataset(
+            tmp_path=tmp_path, display_progress_bars=True
+        )
 
         run_multi_recording_pipeline(configuration_path=configuration_path, discover=True)
 
@@ -219,9 +220,10 @@ class TestRunMultiRecordingPipeline:
         configuration.save(file_path=configuration_path)
 
         def _fake_resolve(**_kwargs: object) -> list[object]:
+            """Returns a single stand-in context whose runtime output path is unset."""
             return [SimpleNamespace(runtime=SimpleNamespace(io=SimpleNamespace(recording_id="rec1"), output_path=None))]
 
-        monkeypatch.setattr(pipeline_module, "resolve_multi_recording_contexts", _fake_resolve)
+        monkeypatch.setattr("cindra.pipelines.pipeline.resolve_multi_recording_contexts", _fake_resolve)
 
         with pytest.raises(ValueError, match="output path is not configured"):
             run_multi_recording_pipeline(configuration_path=configuration_path, discover=True)

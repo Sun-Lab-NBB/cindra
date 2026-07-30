@@ -151,7 +151,7 @@ def _oasis_matrix(  # pragma: no cover
         Implements the unconstrained non-negative AR(1) OASIS solver from Friedrich et al. (2017). The algorithm
         models calcium fluorescence as a series of exponentially decaying "pools", where each pool represents a
         contiguous trace segment governed by a single initial amplitude and a shared decay rate. For each new time
-        point, a single-frame pool is created and the algorithm checks backward through adjacent pools: if a previous
+        point, a single-frame pool is created. The algorithm then checks backward through adjacent pools: if a previous
         pool's decayed value exceeds the current pool's amplitude, the implied spike between them would be negative,
         violating the non-negativity constraint. Merging resolves this by computing the optimal shared amplitude for the
         combined segment via weighted least squares. After processing all time-points, spike amplitudes are extracted as

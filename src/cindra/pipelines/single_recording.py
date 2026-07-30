@@ -35,8 +35,11 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
 
     Notes:
         This function executes the first phase of the single-recording pipeline: it converts the raw recording data
-        into the internal binary format and initializes the per-plane runtime data hierarchy. If valid binaries
-        already exist at the output path, the conversion is skipped.
+        into the internal binary format and initializes the per-plane runtime data hierarchy. The conversion is
+        skipped only when every plane already has a valid binary at the output path and 'repeat_binarization' is
+        disabled in the FileIO configuration section. A binary left marked by an interrupted registration, or one
+        whose size disagrees with its plane's recorded frame geometry, is treated as invalid and rebuilt from the
+        source TIFF files even when that parameter is disabled.
 
     Args:
         configuration: The single-recording pipeline configuration.
@@ -44,7 +47,10 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
             the caller resolves before invoking this function.
 
     Raises:
-        ValueError: If data_path or output_path is not configured.
+        ValueError: If data_path or output_path is not configured, or if the discovered TIFF files do not all hold
+            frames of the same shape.
+        FileNotFoundError: If a plane's runtime_data.yaml was not written by an earlier bootstrap step, or if no TIFF
+            files are found in the data directory.
     """
     # Validates that data_path is configured.
     if configuration.file_io.data_path is None:
@@ -71,7 +77,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
 
         # Loads all existing contexts. Uses plane_index=-1 to load all planes, which always returns a list.
         loaded_contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
-        if not isinstance(loaded_contexts, list):  # pragma: no cover — load with plane_index=-1 always returns a list
+        if not isinstance(loaded_contexts, list):  # pragma: no cover - load with plane_index=-1 always returns a list
             loaded_contexts = [loaded_contexts]
 
         # Validates that required binary files exist for all contexts.
@@ -129,7 +135,7 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
                 level=LogLevel.WARNING,
             )
         else:
-            # Binaries are missing or invalid - fall through to recreate.
+            # Binaries are missing or invalid, so the code below recreates them from the source TIFF files.
             console.echo(
                 message="Existing binaries are missing or invalid. Recreating from TIFF files...",
                 level=LogLevel.WARNING,
@@ -144,7 +150,6 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
     # per-plane runtime_data.yaml files, so this call is load-only to avoid racing against peer worker threads.
     contexts = resolve_single_recording_contexts(configuration=configuration, persist=False)
 
-    # Converts TIFF data to binary format.
     convert_tiffs_to_binary(contexts=contexts, workers=workers)
 
     # Records the binarization time and saves runtime data for each plane. Each plane's runtime_data.yaml has only
@@ -196,7 +201,6 @@ def register_recording_plane(configuration: SingleRecordingConfiguration, plane_
     context.runtime.timing.total_registration_time = timer.elapsed
     context.runtime.timing.registration_workers = workers
 
-    # Persists the updated runtime data to disk.
     context.save_runtime()
 
     message = (
@@ -225,6 +229,9 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int,
             caller resolves before invoking this function.
 
     Raises:
+        ValueError: If output_path is not configured, or if the plane contains fewer frames than the processing
+            minimum.
+        TypeError: If the runtime context loader returns multiple contexts for the target plane.
         RuntimeError: If the target plane has not been registered.
     """
     context = _resolve_plane_context(
@@ -268,7 +275,6 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int,
     context.runtime.timing.processing_workers = workers
     context.runtime.timing.date_processed = str(get_timestamp())
 
-    # Persists the updated runtime data to disk.
     context.save_runtime()
 
     message = (
@@ -293,7 +299,6 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
         message = "Unable to combine planes. At least one RuntimeContext must be provided."
         console.error(message=message, error=ValueError)
 
-    # Gets the root output path from the first context's configuration.
     root_path = contexts[0].configuration.file_io.output_path
     if root_path is None:
         message = (
@@ -302,11 +307,9 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
         )
         console.error(message=message, error=ValueError)
 
-    # Combines all planes into a unified dataset.
     combined_data = combine_planes(plane_contexts=contexts)
 
-    # Saves the combined data to the root cindra directory.
-    combined_data.save(root_path / "cindra")
+    combined_data.save(root_path=root_path / "cindra")
     console.echo(message=f"Combined data saved to: {root_path / 'cindra'}", level=LogLevel.SUCCESS)
 
 
@@ -336,7 +339,7 @@ def _resolve_malformed_binaries(contexts: list[RuntimeContext]) -> list[Path]:
     for context in contexts:
         io_data = context.runtime.io
         frame_bytes = io_data.frame_height * io_data.frame_width * _BINARY_ITEM_SIZE
-        if frame_bytes <= 0:  # pragma: no cover — a persisted plane always records its frame dimensions
+        if frame_bytes <= 0:  # pragma: no cover - a persisted plane always records its frame dimensions
             continue
 
         for path, expected_frames, tolerance in (
@@ -406,7 +409,6 @@ def _resolve_plane_context(
         )
         console.error(message=message, error=ValueError)
 
-    # Loads the RuntimeContext for the target plane from disk.
     root_path = configuration.file_io.output_path / "cindra"
     context = RuntimeContext.load(root_path=root_path, plane_index=plane_index)
     if isinstance(context, list):

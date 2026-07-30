@@ -13,12 +13,12 @@ class TestSplineGridInit:
     def test_properties(self) -> None:
         """Verifies core properties after initialization."""
         grid = SplineGrid(field_height=100, field_width=200, sampling=10.0)
-        assert grid.ndim == 2
+        assert grid.dimension_count == 2
         assert grid.field_shape == (100, 200)
         assert grid.grid_sampling == 10.0
 
     def test_grid_shape_formula(self) -> None:
-        """Verifies the grid shape follows int((dim - 1) / sampling) + 4."""
+        """Verifies the grid shape follows int((dimension - 1) / sampling) + 4."""
         grid = SplineGrid(field_height=100, field_width=50, sampling=10.0)
         expected_height = int((100 - 1) / 10.0) + 4
         expected_width = int((50 - 1) / 10.0) + 4
@@ -75,7 +75,7 @@ class TestSplineGridSetFromFields:
         field_x = np.ones((50, 50), dtype=np.float32) * target_value
         grid.set_from_fields(field_y=field_y, field_x=field_x)
         recovered_y, recovered_x = grid.deformation_fields
-        # B-spline fit is approximate; check interior pixels avoid edge effects.
+        # B-spline fit is approximate, so the check targets interior pixels that avoid edge effects.
         np.testing.assert_allclose(recovered_y[10:-10, 10:-10], target_value, atol=0.15)
         np.testing.assert_allclose(recovered_x[10:-10, 10:-10], target_value, atol=0.15)
 
@@ -141,6 +141,6 @@ class TestSplineGridUnfold:
         field_x = np.ones((50, 50), dtype=np.float32) * 100.0
         grid.set_from_fields(field_y=field_y, field_x=field_x, injective=True, freeze_edges=False)
         recovered_y, _ = grid.deformation_fields
-        # After injectivity constraint, values should be bounded below the theoretical limit.
+        # Expects the injectivity constraint to bound the recovered values below the theoretical limit.
         limit = (1.0 / 2.046392675) * 5.0 * 0.9
         assert np.max(np.abs(recovered_y)) < limit * 2.0

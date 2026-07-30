@@ -92,7 +92,7 @@ dependencies = [
 Homepage = "https://github.com/Sun-Lab-NBB/cindra"
 Documentation = "https://cindra-api-docs.netlify.app/"
 
-# All interactions with the library are performed via the 'cindra' and 'cindra-gui' CLI commands.
+# Exposes the headless 'cindra' CLI (configuration, pipeline execution, MCP server) and the separate 'cindra-gui' CLI.
 [project.scripts]
 cindra = "cindra.interface.cli:cindra_cli"          # Top-level CLI group
 cindra-gui = "cindra.interface.gui_cli:cindra_gui"  # GUI launcher (separate to avoid loading Qt during headless runs)
@@ -232,7 +232,7 @@ filterwarnings = [
     "ignore:Precision loss occurred in moment calculation:RuntimeWarning",
 ]
 
-# This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
+# Coverage measurement section. Configures branch coverage and excludes untestable modules from measurement.
 [tool.coverage.run]
 
 # Measures branch coverage in addition to statement coverage, so that partial branches (one side of a conditional or
@@ -248,6 +248,7 @@ omit = [
     "*/cindra/interface/*",
 ]
 
+# This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
 [tool.coverage.paths]
 
 # Maps coverage measured in any environment's site-packages (the tox test venv or the conda dev environment) back to
@@ -263,7 +264,7 @@ directory = "reports/coverage_html"
 omit = ["src/cindra/gui/*", "src/cindra/interface/*"]
 
 # Fails the coverage report if combined statement and branch coverage drops below 100%, locking in full coverage of all
-# measured modules and preventing regressions. GUI and interface modules are omitted above; pragma-excluded lines
+# measured modules and preventing regressions. GUI and interface modules are omitted above. Pragma-excluded lines
 # (Numba JIT bodies and pipeline orchestration entry points) do not count against this threshold.
 fail_under = 100
 exclude_lines = [

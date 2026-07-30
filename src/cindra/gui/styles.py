@@ -119,8 +119,10 @@ class _BinaryPlayerStyle:
     window_geometry: tuple[int, int, int, int] = (50, 50, 1400, 1070)
     """The initial window position (x, y) and size (width, height) for the binary player."""
     legend_column_count: int = 2
-    """The number of columns in the registration offset plot legend. This ensures that the legend uses the
-    horizontal, rather than a vertical layout."""
+    """The number of columns in the registration offset plot legend. Spreading the entries across two columns lays
+    the legend out horizontally."""
+    group_spacing: int = 20
+    """The pixel spacing inserted between logical widget groups in the frame navigation info bar."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,15 +137,15 @@ class _PCViewerStyle:
     window_geometry: tuple[int, int, int, int] = (50, 50, 1300, 800)
     """The initial window position (x, y) and size (width, height) for the PC viewer."""
     legend_column_count: int = 3
-    """The number of columns in the PC metrics plot legend. This ensures that the legend uses the horizontal,
-    rather than a vertical layout."""
+    """The number of columns in the PC metrics plot legend. Spreading the entries across three columns lays the
+    legend out horizontally."""
 
 
 @dataclass(frozen=True, slots=True)
 class _Colors:
     """Defines the RGB color palette shared across all viewer windows.
 
-    All colors are expressed as ``(R, G, B)`` integer tuples in the 0-255 range.  Viewers select
+    All colors are expressed as ``(R, G, B)`` integer tuples in the 0-255 range. Viewers select
     from this palette at their call sites, giving each entry a local semantic name.
     """
 

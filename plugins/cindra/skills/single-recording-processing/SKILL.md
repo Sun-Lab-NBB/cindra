@@ -40,8 +40,8 @@ verification.
 
 **Handoff rules:** If the user asks about specific output files, array shapes, data interpretation, or processing
 result verification, invoke `/single-recording-results`. If the user asks about parameter tuning or configuration
-options, invoke `/single-recording-configuration`. This skill owns the processing workflow only — not the data
-it produces or the parameters it consumes.
+options, invoke `/single-recording-configuration`. This skill owns the processing workflow. The results skill owns
+the data it produces and the configuration skill owns the parameters it consumes.
 
 ---
 
@@ -96,7 +96,7 @@ Four-phase sequential pipeline per recording:
 ```text
 Phase 1: BINARIZE (phase name binarization, I/O bound, 4 cores per job, up to 4 concurrent jobs)
 ├── Converts raw TIFFs to binary format
-└── Determines plane count, one job per recording with an empty specifier
+└── Initializes the per-plane runtime data hierarchy, one job per recording with an empty specifier
 
 Phase 2: REGISTER (phase name registration, per plane, 8 cores per job)
 ├── Motion correction plus the registration-quality metrics computation
@@ -132,7 +132,7 @@ advances independently.
 The processing workflow uses a **prepare-then-execute** model:
 
 1. **Prepare** creates an execution manifest (tracker files, per-recording configurations, job lists) without
-   starting any computation. This step is idempotent — calling it again on the same recordings returns the
+   starting any computation. This step is idempotent, so calling it again on the same recordings returns the
    existing manifest.
 
 2. **Execute** dispatches jobs from the manifest with prerequisite validation, resource allocation, and automatic
@@ -157,31 +157,31 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
 
 ### Workflow steps
 
-1. **Discover recordings** — Use `discover_recordings_tool` (check the `single_recording_candidates` list) or
+1. **Discover recordings**: Use `discover_recordings_tool` (check the `single_recording_candidates` list) or
    accept explicit paths from user.
 
-2. **Validate raw data** — Use `validate_recording_readiness_tool` on each recording. Skip for recordings where
+2. **Validate raw data**: Use `validate_recording_readiness_tool` on each recording. Skip for recordings where
    `get_recording_status_tool` shows status `binarizing`, `registering`, `processing`, `combining`, or `completed`.
    If validation fails, invoke `/acquisition-data-preparation` to resolve issues before continuing.
 
-3. **Configure** — Ask the user if they have an existing template configuration file. If not,
+3. **Configure**: Ask the user if they have an existing template configuration file. If not,
    invoke `/single-recording-configuration` to create one. Template configs are reusable across
    recordings and live at user-chosen locations (e.g., `/Data/CA1_GCaMP6f_SD.yaml`). Do NOT create
-   per-recording config copies — the prepare tool automatically saves resolved copies as
+   per-recording config copies. The prepare tool automatically saves resolved copies as
    `cindra/configuration.yaml` inside each recording's output directory, preserving the original
    template. Pass the same template path for all recordings that share parameters.
 
-4. **Confirm output directory** — Ask the user where processed data should be written. Each
-   recording requires an explicit output path; the pipeline does not auto-resolve output locations.
+4. **Confirm output directory**: Ask the user where processed data should be written. Each
+   recording requires an explicit output path. The pipeline does not auto-resolve output locations.
    Common patterns include writing output alongside the raw data (producing a `cindra/` subdirectory
    inside each recording) or writing to a separate root by mirroring the recording directory
    structure. `recording_output_paths` is a required parameter for both `prepare_single_recording_batch_tool`
    and `execute_full_pipeline_tool`.
 
-5. **Confirm CPU allocation** — Present the per-phase measured defaults and ask the user whether to
+5. **Confirm CPU allocation**: Present the per-phase measured defaults and ask the user whether to
    accept them or override them (see Resource management section).
 
-6. **Execute** — Choose one of two approaches:
+6. **Execute**: Choose one of two approaches:
 
    **Simple (recommended for straightforward runs):**
    Call `execute_full_pipeline_tool` with `pipeline_type="single-recording"`, the confirmed recording
@@ -196,14 +196,14 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
       `pipeline_type`, `binarize_job`, `register_jobs`, `process_jobs`, and `combine_job`. The two
       `*_jobs` keys hold one entry per plane, and each job dict holds `job_id`, `name`, `specifier`,
       and `status`. The response also carries `total_recordings`, `total_jobs`, and
-      `migrated_recordings` when an existing tracker gained per-plane registration jobs. Selecting by
-      phase MUST include `register_jobs`, because every processing job depends on the registration job
-      carrying the same `plane_{index}` specifier.
+      `migrated_recordings` when an existing tracker gained per-plane registration jobs. When
+      selecting by phase, you MUST include `register_jobs`, because every processing job depends on
+      the registration job carrying the same `plane_{index}` specifier.
    c. Call `execute_processing_jobs_tool` with the selected job descriptors and worker settings. Each
       job descriptor needs `configuration_path`, `tracker_path`, `job_id`, and `pipeline_type` from
       the manifest.
 
-7. **Monitor** — Use `get_processing_jobs_status_tool` to check progress. Optionally use
+7. **Monitor**: Use `get_processing_jobs_status_tool` to check progress. Optionally use
    `get_active_execution_timing_tool` for per-job timing and session throughput. These two tools
    reflect only the active in-process execution session and return `active: false` with empty jobs
    when no session is running. This drained state happens not only after an MCP server restart, a
@@ -215,10 +215,10 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
    the output directory, see the Output-directory path rule). Present status as a formatted table
    (see Status formatting section).
 
-8. **Handle completion** — When all recordings finish, check for failures. A `success: true` return
+8. **Handle completion**: When all recordings finish, check for failures. A `success: true` return
    only means a tool ran, not that work is ready or done: gate decisions on the domain flag, not on
    `success`. For `verify_single_recording_output_tool`, gate on `complete` (false whenever `missing`
-   is non-empty); for validate tools, gate on `valid`; for `execute_full_pipeline_tool`, gate on
+   is non-empty). For validate tools, gate on `valid`. For `execute_full_pipeline_tool`, gate on
    `started` (it returns `started: false` with a `next_step` when all phases are already complete).
    Checking `success` alone can advance on an unready or already-complete state. Route errors to the
    appropriate skill (see Error routing section). On success, invoke `/single-recording-results`
@@ -228,12 +228,12 @@ selective re-runs), use `prepare_single_recording_batch_tool` followed by `execu
 
 `get_recording_status_tool`, `verify_single_recording_output_tool`, and `clean_processing_output_tool`
 all take the recording OUTPUT directory (the parent of the `cindra/` folder), which equals the
-`recording_output_paths` / per-entry `output_path` the prepare tool returns — NOT the raw-data root.
+`recording_output_paths` / per-entry `output_path` the prepare tool returns, NOT the raw-data root.
 This matters on a separate-output layout where output and raw-data roots differ:
 
 - `get_recording_status_tool` and `clean_processing_output_tool` resolve `cindra/` directly under the
   given path with NO fallback. Feeding the raw-data root makes them report `not_started` or
-  "directory not found" — a silent false negative.
+  "directory not found", a silent false negative.
 - `verify_single_recording_output_tool` also recursively searches for `configuration.yaml`, so it may
   still pass via that fallback even when fed the wrong root. The two then disagree.
 
@@ -284,21 +284,24 @@ committed by every class inside that budget.
 
 | Phase    | Resource class | Cores per job | Concurrency cap                      |
 |----------|----------------|---------------|--------------------------------------|
-| BINARIZE | binarization   | 4             | Fixed at 4                           |
-| REGISTER | registration   | 8             | Session CPU budget                   |
-| PROCESS  | processing     | 10            | CPU budget and memory, 15 GB per job |
-| COMBINE  | combination    | 1             | Fixed at 4                           |
+| BINARIZE | `binarization` | 4             | Fixed at 4                           |
+| REGISTER | `registration` | 8             | Session CPU budget                   |
+| PROCESS  | `processing`   | 10            | CPU budget and memory, 15 GB per job |
+| COMBINE  | `combination`  | 1             | Fixed at 4                           |
 
-The binarization and combination classes ignore both `workers_per_job` and `max_parallel_jobs`. The registration and
-processing classes accept either parameter as an override of the measured default and of the derived concurrency cap,
-via `execute_processing_jobs_tool` or `execute_full_pipeline_tool`.
+The `binarization` and `combination` classes ignore both `workers_per_job` and `max_parallel_jobs`. The
+`registration` and `processing` classes accept either parameter as an override of the measured default and of the
+derived concurrency cap, via `execute_processing_jobs_tool` or `execute_full_pipeline_tool`.
 
 The multi-recording discovery and extraction stages run under their own `discovery` and `extraction` classes, with
 measured defaults of 30 and 16 cores per job. Both accept `workers_per_job` and `max_parallel_jobs` as overrides. See
-`/multi-recording-processing` for their concurrency caps. No resource class uses saturating allocation.
+`/multi-recording-processing` for their concurrency caps. Discovery's 30 is the saturating allocation the stage is
+admitted at, because its cost grows with the square of the recording count.
 
 Present the measured per-phase defaults when confirming CPU allocation with the user. A `workers_per_job` value of 30
-overrides the processing default of 10 and can exhaust memory, because the processing class budgets 15 GB per job.
+overrides the processing default of 10 and lowers the processing concurrency to at most the CPU budget divided by 30, so
+it reduces rather than raises the memory the class holds. The override that can exhaust memory is a positive
+`max_parallel_jobs`, which replaces the derived cap outright and therefore discards the 15 GB per job memory bound.
 
 ---
 
@@ -322,7 +325,7 @@ Summary: 10/30 recordings complete | 2 processing | 18 queued | 0 failed
 
 The `jobs` mapping that `get_recording_status_tool` returns holds exactly four keys, `binarize`, `register`,
 `process`, and `combine`. The `register` and `process` keys map each `plane_{index}` specifier to a lowercased status
-string, so the table MUST carry a column for each of the four keys.
+string. You MUST give the table a column for each of the four keys.
 
 ---
 
@@ -362,7 +365,10 @@ When processing fails for some recordings, read the error messages and route to 
 | Configuration parameter issues                    | `/single-recording-configuration` |
 | MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`   |
 
-Wait for the current execution session to complete before starting retries.
+Wait for the current execution session to complete before starting retries. `cancel_processing_jobs_tool` clears the
+admission pool and every resource class queue but does NOT stop already-dispatched worker threads, and it clears the
+session state immediately, so a new session can start while cancelled jobs still run. After cancelling, poll
+`get_recording_status_tool` on the affected recordings until no job remains RUNNING before dispatching again.
 
 ---
 

@@ -67,8 +67,8 @@ class TestApplyEdgeTaper:
 
     def test_identity_mask_preserves_frames(self) -> None:
         """Verifies identity mask with zero offset preserves original frames."""
-        rng = np.random.default_rng(42)
-        frames = rng.standard_normal((3, 16, 16)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        frames = generator.standard_normal((3, 16, 16)).astype(np.float32)
         mask = np.ones((16, 16), dtype=np.float32)
         offset = np.zeros((16, 16), dtype=np.float32)
         result = apply_edge_taper(frames=frames, taper_mask=mask, mean_offset=offset)
@@ -92,26 +92,26 @@ class TestComputePhaseCorrelationKernel:
 
     def test_no_smoothing(self) -> None:
         """Verifies the kernel works without Gaussian smoothing."""
-        rng = np.random.default_rng(42)
-        reference = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((32, 32)).astype(np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0)
         assert kernel.shape == (32, 32 // 2 + 1)
 
     def test_with_smoothing(self) -> None:
         """Verifies the kernel works with Gaussian smoothing."""
-        rng = np.random.default_rng(42)
-        reference = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((32, 32)).astype(np.float32)
         kernel_no_smooth = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0)
         kernel_smooth = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=1.5)
         assert not np.allclose(kernel_no_smooth, kernel_smooth)
 
     def test_normalized_magnitude(self) -> None:
         """Verifies the kernel magnitudes are approximately normalized."""
-        rng = np.random.default_rng(42)
-        reference = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((32, 32)).astype(np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference, smoothing_sigma=0.0)
         magnitudes = np.abs(kernel)
-        # After normalization, magnitudes should be close to 1.0 (within epsilon tolerance).
+        # Expects normalized magnitudes close to 1.0, within the epsilon tolerance.
         np.testing.assert_allclose(magnitudes, 1.0, atol=0.15)
 
 
@@ -120,10 +120,10 @@ class TestComputeRigidOffsets:
 
     def test_zero_offset_for_identical_frames(self) -> None:
         """Verifies zero offsets when frames match the reference."""
-        rng = np.random.default_rng(42)
-        reference = rng.standard_normal((64, 64)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((64, 64)).astype(np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference)
-        frames = np.tile(reference, (3, 1, 1))
+        frames = np.tile(A=reference, reps=(3, 1, 1))
         y_offsets, x_offsets, _correlation = compute_rigid_offsets(
             frames=frames,
             reference_kernel=kernel,
@@ -138,10 +138,10 @@ class TestComputeRigidOffsets:
 
     def test_detects_known_translation(self) -> None:
         """Verifies detection of a known rigid translation."""
-        rng = np.random.default_rng(42)
-        reference = rng.standard_normal((64, 64)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((64, 64)).astype(np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference)
-        shifted = np.roll(reference, shift=(3, -2), axis=(0, 1))
+        shifted = np.roll(a=reference, shift=(3, -2), axis=(0, 1))
         frames = shifted[np.newaxis, :, :]
         y_offsets, x_offsets, _correlation = compute_rigid_offsets(
             frames=frames,
@@ -155,10 +155,10 @@ class TestComputeRigidOffsets:
 
     def test_output_dtypes(self) -> None:
         """Verifies the output dtypes are correct."""
-        rng = np.random.default_rng(42)
-        reference = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((32, 32)).astype(np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference)
-        frames = np.tile(reference, (2, 1, 1))
+        frames = np.tile(A=reference, reps=(2, 1, 1))
         y_offsets, x_offsets, correlation = compute_rigid_offsets(
             frames=frames,
             reference_kernel=kernel,
@@ -172,10 +172,10 @@ class TestComputeRigidOffsets:
 
     def test_with_temporal_smoothing(self) -> None:
         """Verifies offsets can be computed with temporal smoothing enabled."""
-        rng = np.random.default_rng(42)
-        reference = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((32, 32)).astype(np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference)
-        frames = np.tile(reference, (10, 1, 1))
+        frames = np.tile(A=reference, reps=(10, 1, 1))
         y_offsets, x_offsets, _correlation = compute_rigid_offsets(
             frames=frames,
             reference_kernel=kernel,
@@ -189,10 +189,10 @@ class TestComputeRigidOffsets:
 
     def test_positive_correlation_for_matching_frames(self) -> None:
         """Verifies that matching frames produce high positive correlation values."""
-        rng = np.random.default_rng(42)
-        reference = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((32, 32)).astype(np.float32)
         kernel = compute_phase_correlation_kernel(reference_image=reference)
-        frames = np.tile(reference, (2, 1, 1))
+        frames = np.tile(A=reference, reps=(2, 1, 1))
         _, _, correlation = compute_rigid_offsets(
             frames=frames,
             reference_kernel=kernel,
@@ -208,8 +208,8 @@ class TestTranslateFrame:
 
     def test_zero_offset_identity(self) -> None:
         """Verifies zero offset produces no change."""
-        rng = np.random.default_rng(42)
-        frame = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        frame = generator.standard_normal((32, 32)).astype(np.float32)
         result = translate_frame(frame=frame, y_offset=0, x_offset=0)
         np.testing.assert_array_equal(result, frame)
 
@@ -236,7 +236,7 @@ class TestTranslateFrame:
         frame = np.zeros((8, 8), dtype=np.float32)
         frame[2, 3] = 1.0
         result = translate_frame(frame=frame, y_offset=1, x_offset=1)
-        # (2, 3) should move to (2-1, 3-1) = (1, 2)
+        # The pixel at (2, 3) moves to (2-1, 3-1) = (1, 2).
         assert result[1, 2] == 1.0
 
     def test_preserves_shape_and_dtype(self) -> None:
@@ -248,8 +248,8 @@ class TestTranslateFrame:
 
     def test_roundtrip_translation(self) -> None:
         """Verifies that applying opposite translations returns the original frame."""
-        rng = np.random.default_rng(42)
-        frame = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        frame = generator.standard_normal((32, 32)).astype(np.float32)
         shifted = translate_frame(frame=frame, y_offset=5, x_offset=-3)
         restored = translate_frame(frame=shifted, y_offset=-5, x_offset=3)
         np.testing.assert_array_equal(restored, frame)

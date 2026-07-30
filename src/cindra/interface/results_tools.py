@@ -2,7 +2,7 @@
 
 These tools enable AI agents to verify output completeness, assess processing quality, and inspect specific
 results from both single-recording and multi-recording pipelines. All tools load data directly from disk using
-lightweight numpy and YAML operations for efficient targeted queries without the overhead of full data loading.
+lightweight numpy and YAML operations for efficient targeted queries.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ _CELL_LABEL_THRESHOLD: float = 0.5
 """The threshold above which a classification label value is considered a cell."""
 
 
-@dataclass
+@dataclass(slots=True)
 class _VerificationState:
     """Tracks verification state for output completeness checks."""
 
@@ -58,7 +58,7 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
 
     Args:
         recording_path: Absolute path to the recording output directory, which is the parent of the cindra/ folder
-            and equals the recording_output_paths entries returned by the prepare tool when the output root differs
+            and equals the per-recording 'output_path' returned by the prepare tool when the output root differs
             from the raw-data root. The cindra/ subdirectory is resolved automatically, falling back to a recursive
             search for configuration.yaml.
 
@@ -66,7 +66,7 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
         On success, contains 'complete' flag, 'plane_count', 'two_channels' indicator, total check counts
         ('total_checks', 'passed', 'failed'), 'missing' list of absent required files, and optional 'warnings'. On
         failure, contains an 'error' message. Both cases include a 'success' flag. A 'success' value of True only
-        means the tool ran; callers MUST gate downstream steps on the 'complete' field, which is False whenever
+        means the tool ran. Callers MUST gate downstream steps on the 'complete' field, which is False whenever
         'missing' is non-empty. Each 'missing' entry is a bare filename for an absent file or 'file[key]' for an
         absent NPZ key. The 'warnings' list holds non-fatal issues such as a registered-binary path that does not
         resolve on disk.
@@ -88,20 +88,29 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
                 two_channels = len(channel_2_paths) > 0 and str(channel_2_paths[0]) != ""
 
     # Root-level files.
-    _check_file_exists("configuration.yaml", cindra_root / "configuration.yaml", state)
-    _check_file_exists("acquisition_parameters.yaml", cindra_root / "acquisition_parameters.yaml", state)
-    _check_file_exists("combined_metadata.npz", combined_metadata_path, state)
+    _check_file_exists(label="configuration.yaml", path=cindra_root / "configuration.yaml", state=state)
+    _check_file_exists(
+        label="acquisition_parameters.yaml", path=cindra_root / "acquisition_parameters.yaml", state=state
+    )
+    _check_file_exists(label="combined_metadata.npz", path=combined_metadata_path, state=state)
     _check_npz_keys(
-        "combined_metadata.npz",
-        combined_metadata_path,
-        ["plane_count", "combined_height", "combined_width", "tau", "sampling_rate", "registered_binary_paths"],
-        state,
+        label="combined_metadata.npz",
+        path=combined_metadata_path,
+        required_keys=[
+            "plane_count",
+            "combined_height",
+            "combined_width",
+            "tau",
+            "sampling_rate",
+            "registered_binary_paths",
+        ],
+        state=state,
     )
 
     # Combined detection images.
     detection_directory = cindra_root / "detection_data"
     for name in ("mean_image.npy", "enhanced_mean_image.npy", "maximum_projection.npy", "correlation_map.npy"):
-        _check_file_exists(f"detection_data/{name}", detection_directory / name, state)
+        _check_file_exists(label=f"detection_data/{name}", path=detection_directory / name, state=state)
     if two_channels:
         for name in (
             "mean_image_channel_2.npy",
@@ -109,22 +118,24 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
             "maximum_projection_channel_2.npy",
             "correlation_map_channel_2.npy",
         ):
-            _check_file_exists(f"detection_data/{name}", detection_directory / name, state, required=False)
+            _check_file_exists(
+                label=f"detection_data/{name}", path=detection_directory / name, state=state, required=False
+            )
 
     # Combined extraction data.
-    _check_file_exists("roi_masks.npz", cindra_root / "roi_masks.npz", state)
+    _check_file_exists(label="roi_masks.npz", path=cindra_root / "roi_masks.npz", state=state)
     _check_npz_keys(
-        "roi_masks.npz",
-        cindra_root / "roi_masks.npz",
-        ["pixel_counts", "y_pixels", "x_pixels", "pixel_weights", "centroids"],
-        state,
+        label="roi_masks.npz",
+        path=cindra_root / "roi_masks.npz",
+        required_keys=["pixel_counts", "y_pixels", "x_pixels", "pixel_weights", "centroids"],
+        state=state,
     )
-    _check_file_exists("roi_statistics.npz", cindra_root / "roi_statistics.npz", state)
+    _check_file_exists(label="roi_statistics.npz", path=cindra_root / "roi_statistics.npz", state=state)
     _check_npz_keys(
-        "roi_statistics.npz",
-        cindra_root / "roi_statistics.npz",
-        ["footprints", "compactness", "plane_index"],
-        state,
+        label="roi_statistics.npz",
+        path=cindra_root / "roi_statistics.npz",
+        required_keys=["footprints", "compactness", "plane_index"],
+        state=state,
     )
     for name in (
         "cell_fluorescence.npy",
@@ -133,7 +144,7 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
         "spikes.npy",
         "cell_classification.npy",
     ):
-        _check_file_exists(name, cindra_root / name, state)
+        _check_file_exists(label=name, path=cindra_root / name, state=state)
     if two_channels:
         for name in (
             "cell_fluorescence_channel_2.npy",
@@ -142,25 +153,29 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
             "spikes_channel_2.npy",
             "cell_classification_channel_2.npy",
         ):
-            _check_file_exists(name, cindra_root / name, state, required=False)
+            _check_file_exists(label=name, path=cindra_root / name, state=state, required=False)
 
     # Per-plane directories.
     planes = _list_plane_directories(cindra_root)
     plane_count = len(planes)
-    for plane_dir in planes:
-        plane_name = plane_dir.name
-        _check_file_exists(f"{plane_name}/runtime_data.yaml", plane_dir / "runtime_data.yaml", state)
-        _check_file_exists(f"{plane_name}/channel_1_data.bin", plane_dir / "channel_1_data.bin", state)
+    for plane_directory in planes:
+        plane_name = plane_directory.name
+        _check_file_exists(
+            label=f"{plane_name}/runtime_data.yaml", path=plane_directory / "runtime_data.yaml", state=state
+        )
+        _check_file_exists(
+            label=f"{plane_name}/channel_1_data.bin", path=plane_directory / "channel_1_data.bin", state=state
+        )
         if two_channels:
             _check_file_exists(
-                f"{plane_name}/channel_2_data.bin",
-                plane_dir / "channel_2_data.bin",
-                state,
+                label=f"{plane_name}/channel_2_data.bin",
+                path=plane_directory / "channel_2_data.bin",
+                state=state,
                 required=False,
             )
 
         # Per-plane registration data.
-        registration_directory = plane_dir / "registration_data"
+        registration_directory = plane_directory / "registration_data"
         for name in (
             "reference_image.npy",
             "bad_frames.npy",
@@ -168,12 +183,14 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
             "rigid_x_offsets.npy",
             "rigid_correlations.npy",
         ):
-            _check_file_exists(f"{plane_name}/registration_data/{name}", registration_directory / name, state)
+            _check_file_exists(
+                label=f"{plane_name}/registration_data/{name}", path=registration_directory / name, state=state
+            )
         for name in ("nonrigid_y_offsets.npy", "nonrigid_x_offsets.npy", "nonrigid_correlations.npy"):
             _check_file_exists(
-                f"{plane_name}/registration_data/{name}",
-                registration_directory / name,
-                state,
+                label=f"{plane_name}/registration_data/{name}",
+                path=registration_directory / name,
+                state=state,
                 required=False,
             )
         for name in (
@@ -182,18 +199,22 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
             "principal_component_shift_metrics.npy",
         ):
             _check_file_exists(
-                f"{plane_name}/registration_data/{name}",
-                registration_directory / name,
-                state,
+                label=f"{plane_name}/registration_data/{name}",
+                path=registration_directory / name,
+                state=state,
                 required=False,
             )
 
         # Per-plane detection and extraction data.
-        plane_detection_directory = plane_dir / "detection_data"
+        plane_detection_directory = plane_directory / "detection_data"
         for name in ("mean_image.npy", "enhanced_mean_image.npy", "maximum_projection.npy", "correlation_map.npy"):
-            _check_file_exists(f"{plane_name}/detection_data/{name}", plane_detection_directory / name, state)
-        _check_file_exists(f"{plane_name}/roi_masks.npz", plane_dir / "roi_masks.npz", state)
-        _check_file_exists(f"{plane_name}/roi_statistics.npz", plane_dir / "roi_statistics.npz", state)
+            _check_file_exists(
+                label=f"{plane_name}/detection_data/{name}", path=plane_detection_directory / name, state=state
+            )
+        _check_file_exists(label=f"{plane_name}/roi_masks.npz", path=plane_directory / "roi_masks.npz", state=state)
+        _check_file_exists(
+            label=f"{plane_name}/roi_statistics.npz", path=plane_directory / "roi_statistics.npz", state=state
+        )
         for name in (
             "cell_fluorescence.npy",
             "neuropil_fluorescence.npy",
@@ -201,7 +222,7 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
             "spikes.npy",
             "cell_classification.npy",
         ):
-            _check_file_exists(f"{plane_name}/{name}", plane_dir / name, state)
+            _check_file_exists(label=f"{plane_name}/{name}", path=plane_directory / name, state=state)
 
     # Multi-recording readiness: validates that registered binary paths exist on disk.
     if combined_metadata_path.exists():
@@ -241,16 +262,16 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
 
     Args:
         recording_path: Absolute path to the recording output directory, which is the parent of the cindra/ folder
-            and equals the recording_output_paths entries returned by the prepare tool when the output root differs
+            and equals the per-recording 'output_path' returned by the prepare tool when the output root differs
             from the raw-data root. The cindra/ subdirectory is resolved automatically.
         dataset: The multi-recording dataset name to verify. Matched case-sensitively against the on-disk dataset
-            directory, which is lowercased at preparation time; pass the value returned by resolve_dataset_name_tool
+            directory, which is lowercased at preparation time. Pass the value returned by resolve_dataset_name_tool
             or prepare_multi_recording_batch_tool.
 
     Returns:
         On success, contains 'complete' flag, 'recording_count', per-recording verification summaries, 'missing'
         files, and optional 'warnings'. On failure, contains an 'error' message. Both cases include a 'success'
-        flag. A 'success' value of True only means the tool ran; callers MUST gate downstream steps on the
+        flag. A 'success' value of True only means the tool ran. Callers MUST gate downstream steps on the
         'complete' field, which is False whenever 'missing' is non-empty. Each 'missing' entry is a bare filename
         for an absent file, 'file[key]' for an absent NPZ key, or a 'recording_i/...' prefixed path for a
         per-recording entry. The 'warnings' list holds non-fatal issues such as a registered-binary path that does
@@ -260,7 +281,7 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
     if cindra_root is None:
         return {"success": False, "error": f"Unable to verify output. {error}"}
 
-    dataset_path, error = _find_multi_recording_root(cindra_root, dataset)
+    dataset_path, error = _find_multi_recording_root(cindra_root=cindra_root, dataset=dataset)
     if dataset_path is None:
         return {"success": False, "error": f"Unable to verify output. {error}"}
 
@@ -279,33 +300,35 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
     recording_count = len(dataset_output_paths)
     recording_results: list[dict[str, Any]] = []
 
-    # Shared configuration (main recording only — first in natural sort order).
-    config_found = False
-    for output_path_str in dataset_output_paths:
-        output_path = Path(output_path_str)
+    # Shared configuration (main recording only, first in natural sort order).
+    configuration_found = False
+    for output_path_string in dataset_output_paths:
+        output_path = Path(output_path_string)
         if (output_path / "multi_recording_configuration.yaml").exists():
             _check_file_exists(
-                "multi_recording_configuration.yaml",
-                output_path / "multi_recording_configuration.yaml",
-                state,
+                label="multi_recording_configuration.yaml",
+                path=output_path / "multi_recording_configuration.yaml",
+                state=state,
             )
-            config_found = True
+            configuration_found = True
             break
-    if not config_found:
+    if not configuration_found:
         state.missing.append("multi_recording_configuration.yaml")
         state.total_checks += 1
 
     # Per-recording verification.
-    for i, output_path_str in enumerate(dataset_output_paths):
-        output_path = Path(output_path_str)
-        recording_prefix = f"recording_{i}"
+    for index, output_path_string in enumerate(dataset_output_paths):
+        output_path = Path(output_path_string)
+        recording_prefix = f"recording_{index}"
 
         recording_runtime = _load_yaml(output_path / "multi_recording_runtime_data.yaml")
         recording_id = (
-            recording_runtime.get("io", {}).get("recording_id", f"unknown_{i}") if recording_runtime else f"unknown_{i}"
+            recording_runtime.get("io", {}).get("recording_id", f"unknown_{index}")
+            if recording_runtime is not None
+            else f"unknown_{index}"
         )
         recording_result: dict[str, Any] = {
-            "index": i,
+            "index": index,
             "recording_id": recording_id,
             "output_path": str(output_path),
         }
@@ -321,9 +344,9 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
         recording_result["exists"] = True
 
         _check_file_exists(
-            f"{recording_prefix}/multi_recording_runtime_data.yaml",
-            output_path / "multi_recording_runtime_data.yaml",
-            state,
+            label=f"{recording_prefix}/multi_recording_runtime_data.yaml",
+            path=output_path / "multi_recording_runtime_data.yaml",
+            state=state,
         )
 
         # Registration data.
@@ -336,46 +359,48 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
             "transformed_maximum_projection.npy",
         ):
             _check_file_exists(
-                f"{recording_prefix}/registration_arrays/{name}",
-                registration_directory / name,
-                state,
+                label=f"{recording_prefix}/registration_arrays/{name}",
+                path=registration_directory / name,
+                state=state,
             )
 
         _check_file_exists(
-            f"{recording_prefix}/registration_deformed_masks.npz",
-            output_path / "registration_deformed_masks.npz",
-            state,
+            label=f"{recording_prefix}/registration_deformed_masks.npz",
+            path=output_path / "registration_deformed_masks.npz",
+            state=state,
         )
         _check_npz_keys(
-            f"{recording_prefix}/registration_deformed_masks.npz",
-            output_path / "registration_deformed_masks.npz",
-            ["pixel_counts", "y_pixels", "x_pixels"],
-            state,
+            label=f"{recording_prefix}/registration_deformed_masks.npz",
+            path=output_path / "registration_deformed_masks.npz",
+            required_keys=["pixel_counts", "y_pixels", "x_pixels"],
+            state=state,
         )
 
         # Tracking data.
         _check_file_exists(
-            f"{recording_prefix}/tracking_template_masks.npz",
-            output_path / "tracking_template_masks.npz",
-            state,
+            label=f"{recording_prefix}/tracking_template_masks.npz",
+            path=output_path / "tracking_template_masks.npz",
+            state=state,
         )
         _check_npz_keys(
-            f"{recording_prefix}/tracking_template_masks.npz",
-            output_path / "tracking_template_masks.npz",
-            ["pixel_counts", "cluster_id", "recording_count"],
-            state,
+            label=f"{recording_prefix}/tracking_template_masks.npz",
+            path=output_path / "tracking_template_masks.npz",
+            required_keys=["pixel_counts", "cluster_id", "recording_count"],
+            state=state,
         )
 
         # Extraction data.
-        _check_file_exists(f"{recording_prefix}/roi_masks.npz", output_path / "roi_masks.npz", state)
-        _check_file_exists(f"{recording_prefix}/roi_statistics.npz", output_path / "roi_statistics.npz", state)
+        _check_file_exists(label=f"{recording_prefix}/roi_masks.npz", path=output_path / "roi_masks.npz", state=state)
+        _check_file_exists(
+            label=f"{recording_prefix}/roi_statistics.npz", path=output_path / "roi_statistics.npz", state=state
+        )
         for name in (
             "cell_fluorescence.npy",
             "neuropil_fluorescence.npy",
             "subtracted_fluorescence.npy",
             "spikes.npy",
         ):
-            _check_file_exists(f"{recording_prefix}/{name}", output_path / name, state)
+            _check_file_exists(label=f"{recording_prefix}/{name}", path=output_path / name, state=state)
 
         # Channel 2 files (optional).
         for name in (
@@ -388,16 +413,18 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
             "subtracted_fluorescence_channel_2.npy",
             "spikes_channel_2.npy",
         ):
-            _check_file_exists(f"{recording_prefix}/{name}", output_path / name, state, required=False)
+            _check_file_exists(label=f"{recording_prefix}/{name}", path=output_path / name, state=state, required=False)
 
         _check_file_exists(
-            f"{recording_prefix}/cell_colocalization.npy",
-            output_path / "cell_colocalization.npy",
-            state,
+            label=f"{recording_prefix}/cell_colocalization.npy",
+            path=output_path / "cell_colocalization.npy",
+            state=state,
             required=False,
         )
 
-        recording_result["complete"] = not any(m.startswith(recording_prefix) for m in state.missing)
+        recording_result["complete"] = not any(
+            missing_entry.startswith(recording_prefix) for missing_entry in state.missing
+        )
         recording_results.append(recording_result)
 
     return {
@@ -448,7 +475,6 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
         "cindra_path": str(cindra_root),
     }
 
-    # Loads combined metadata scalars.
     combined_metadata_path = cindra_root / "combined_metadata.npz"
     if combined_metadata_path.exists():
         try:
@@ -456,10 +482,10 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
             result["plane_count"] = int(metadata["plane_count"][0])
             result["combined_height"] = int(metadata["combined_height"][0])
             result["combined_width"] = int(metadata["combined_width"][0])
-            result["tau"] = round(float(metadata["tau"][0]), 4)
-            result["sampling_rate"] = round(float(metadata["sampling_rate"][0]), 4)
-            result["plane_heights"] = [int(h) for h in metadata["plane_heights"]]
-            result["plane_widths"] = [int(w) for w in metadata["plane_widths"]]
+            result["tau"] = round(float(metadata["tau"][0]), ndigits=4)
+            result["sampling_rate"] = round(float(metadata["sampling_rate"][0]), ndigits=4)
+            result["plane_heights"] = [int(height) for height in metadata["plane_heights"]]
+            result["plane_widths"] = [int(width) for width in metadata["plane_widths"]]
 
             two_channels = False
             if "registered_binary_paths_channel_2" in metadata:
@@ -490,13 +516,13 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
     # Per-plane timing data from runtime_data.yaml files.
     planes = _list_plane_directories(cindra_root)
     timing_entries: list[dict[str, Any]] = []
-    for plane_dir in planes:
-        runtime = _load_yaml(plane_dir / "runtime_data.yaml")
+    for plane_directory in planes:
+        runtime = _load_yaml(plane_directory / "runtime_data.yaml")
         if runtime is None:
             continue
         timing = runtime.get("timing", {})
         io_section = runtime.get("io", {})
-        entry: dict[str, Any] = {"plane": plane_dir.name}
+        entry: dict[str, Any] = {"plane": plane_directory.name}
 
         for field_name in ("frame_height", "frame_width", "frame_count"):
             value = io_section.get(field_name)
@@ -520,7 +546,7 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
         ):
             value = timing.get(field_name)
             if value is not None:
-                entry[field_name] = round(value, 2) if isinstance(value, float) else value
+                entry[field_name] = round(value, ndigits=2) if isinstance(value, float) else value
         timing_entries.append(entry)
 
     if timing_entries:
@@ -546,18 +572,20 @@ def query_registration_quality_tool(
         plane_index: The imaging plane index to query (0-based). Registration data is always per-plane.
 
     Returns:
-        On success, contains registration offset summaries ('rigid_y_offsets', 'rigid_x_offsets') and correlation
-        summaries, each a {min, max, mean, std} object. Offsets are measured in pixels. Correlation is the
-        phase-correlation coefficient, where higher means better alignment. Also contains 'bad_frame_count' and
-        'bad_frame_percentage', optional nonrigid offset summaries, and optional 'pc_shift_metrics'. A per-metric
-        '<key>_error' key may appear when that metric fails to load. On failure, contains an 'error' message. Both
+        On success, contains rigid offset summaries ('rigid_y_offsets', 'rigid_x_offsets'), each a
+        {min, max, mean, std, shape} object, and correlation summaries, each a {min, max, mean, std} object. Offsets
+        are measured in pixels. Correlation is the phase-correlation coefficient, where higher means better
+        alignment. Also contains 'total_frames', 'bad_frame_count', and 'bad_frame_percentage', optional nonrigid
+        offset summaries that add 'num_blocks' to the offset object, and optional 'pc_shift_metrics' paired with
+        'pc_component_count'. A 'rigid_y_offsets_error' or 'rigid_x_offsets_error' key appears when that array fails
+        to load. Every other metric is silently omitted on failure. On failure, contains an 'error' message. Both
         cases include a 'success' flag.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query registration quality. {error}"}
 
-    plane_path, error = _resolve_data_path(cindra_root, plane_index)
+    plane_path, error = _resolve_data_path(cindra_root=cindra_root, plane_index=plane_index)
     if plane_path is None:
         return {"success": False, "error": f"Unable to query registration quality. {error}"}
 
@@ -606,7 +634,9 @@ def query_registration_quality_tool(
             bad_count = int(np.sum(bad_frames))
             result["total_frames"] = total_frames
             result["bad_frame_count"] = bad_count
-            result["bad_frame_percentage"] = round(100.0 * bad_count / total_frames, 2) if total_frames > 0 else 0.0
+            result["bad_frame_percentage"] = (
+                round(100.0 * bad_count / total_frames, ndigits=2) if total_frames > 0 else 0.0
+            )
 
     # Nonrigid registration offsets (optional).
     for name, key in [
@@ -628,21 +658,21 @@ def query_registration_quality_tool(
             result["nonrigid_correlations"] = _array_summary(np.load(nonrigid_correlation_path, mmap_mode="r"))
 
     # Principal component shift metrics (optional).
-    pc_metrics_path = registration_directory / "principal_component_shift_metrics.npy"
-    if pc_metrics_path.exists():
+    principal_component_metrics_path = registration_directory / "principal_component_shift_metrics.npy"
+    if principal_component_metrics_path.exists():
         with contextlib.suppress(Exception):
-            pc_metrics = np.load(pc_metrics_path, mmap_mode="r")
-            # Shape: (num_components, 3) — columns: mean rigid, mean nonrigid, max nonrigid.
+            principal_component_metrics = np.load(principal_component_metrics_path, mmap_mode="r")
+            # Shape: (num_components, 3), columns: rigid magnitude, mean nonrigid, max nonrigid.
             result["pc_shift_metrics"] = [
                 {
-                    "component": i,
-                    "mean_rigid_shift": round(float(pc_metrics[i, 0]), 4),
-                    "mean_nonrigid_shift": round(float(pc_metrics[i, 1]), 4),
-                    "max_nonrigid_shift": round(float(pc_metrics[i, 2]), 4),
+                    "component": component_index,
+                    "mean_rigid_shift": round(float(principal_component_metrics[component_index, 0]), ndigits=4),
+                    "mean_nonrigid_shift": round(float(principal_component_metrics[component_index, 1]), ndigits=4),
+                    "max_nonrigid_shift": round(float(principal_component_metrics[component_index, 2]), ndigits=4),
                 }
-                for i in range(pc_metrics.shape[0])
+                for component_index in range(principal_component_metrics.shape[0])
             ]
-            result["pc_component_count"] = int(pc_metrics.shape[0])
+            result["pc_component_count"] = int(principal_component_metrics.shape[0])
 
     return result
 
@@ -660,7 +690,8 @@ def query_detection_summary_tool(
 
     Args:
         recording_path: Absolute path to a cindra pipeline output directory.
-        plane_index: -1 for combined view (default), 0+ for a specific imaging plane.
+        plane_index: The plane to query, where -1 selects the combined view (default) and 0 or above selects a
+            specific imaging plane.
 
     Returns:
         On success, per-image statistics are nested under an 'images' mapping. Its keys cover channel-1 images
@@ -668,14 +699,14 @@ def query_detection_summary_tool(
         ('mean_image_channel_2', 'enhanced_mean_image_channel_2', 'maximum_projection_channel_2',
         'correlation_map_channel_2'). Each entry contains {min, max, mean, std, shape}, or {'error': <message>} on
         load failure. The top-level 'roi_diameter' and 'aspect_ratio' appear only when available. This tool returns
-        no detected-ROI count; query query_roi_statistics_tool or query_single_recording_metadata_tool for ROI or
+        no detected-ROI count. Query query_roi_statistics_tool or query_single_recording_metadata_tool for ROI or
         cell counts. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query detection summary. {error}"}
 
-    data_path, error = _resolve_data_path(cindra_root, plane_index)
+    data_path, error = _resolve_data_path(cindra_root=cindra_root, plane_index=plane_index)
     if data_path is None:
         return {"success": False, "error": f"Unable to query detection summary. {error}"}
 
@@ -709,9 +740,9 @@ def query_detection_summary_tool(
         if path.exists():
             try:
                 image = np.load(path, mmap_mode="r")
-                stats = _array_summary(image)
-                stats["shape"] = list(image.shape)
-                result["images"][label] = stats
+                statistics = _array_summary(image)
+                statistics["shape"] = list(image.shape)
+                result["images"][label] = statistics
             except Exception as error:
                 result["images"][label] = {"error": str(error)}
 
@@ -724,7 +755,7 @@ def query_detection_summary_tool(
             if detection_metadata.get("roi_diameter") is not None:
                 result["roi_diameter"] = detection_metadata["roi_diameter"]
             if detection_metadata.get("aspect_ratio") is not None:
-                result["aspect_ratio"] = round(float(detection_metadata["aspect_ratio"]), 4)
+                result["aspect_ratio"] = round(float(detection_metadata["aspect_ratio"]), ndigits=4)
 
     return result
 
@@ -741,12 +772,13 @@ def query_roi_statistics_tool(
 ) -> dict[str, object]:
     """Queries per-ROI spatial statistics for a cindra-processed recording or multi-recording dataset.
 
-    Returns statistics including pixel count, skewness, compactness, footprint area, aspect ratio, solidity, and
+    Returns statistics including pixel count, skewness, compactness, footprint scale, aspect ratio, solidity, and
     centroid coordinates for the requested ROIs. In single-recording mode (dataset is None), also returns cell
     classification labels and, when present, channel-2 colocalization data. In multi-recording mode (dataset is
-    provided), enriches entries with cluster ID and recording count from tracking metadata when available;
-    classification and colocalization are single-recording-only, because tracked recordings reuse the
-    backward-transformed source masks without reclassification. Supports sorting by any statistic and limiting to
+    provided), enriches entries with cluster ID and recording count from tracking metadata when available.
+    Classification and colocalization are not reported in multi-recording mode, because tracked recordings reuse
+    the backward-transformed source masks without reclassification. Multi-recording extraction still writes
+    cell_colocalization.npy when both channels were functional. Supports sorting by any statistic and limiting to
     top N results for efficient quality assessment.
 
     Args:
@@ -756,9 +788,9 @@ def query_roi_statistics_tool(
             'queried_count' may be smaller than the number requested and 'rois' may be empty with success True.
         sort_by: Sort results by this statistic name ('skewness', 'compactness', 'footprint', 'aspect_ratio',
             'pixel_count', 'solidity', 'normalized_pixel_count'). Results are returned in descending order.
-        top_n: When sort_by is provided, returns the top N after sorting; otherwise returns the first N entries.
-        plane_index: -1 for combined view (default), 0+ for a specific imaging plane. Only used in single-recording
-            mode.
+        top_n: When sort_by is provided, returns the top N after sorting. Otherwise, returns the first N entries.
+        plane_index: The plane to query, where -1 selects the combined view (default) and 0 or above selects a
+            specific imaging plane. Only used in single-recording mode.
         dataset: The multi-recording dataset name. When provided, switches to multi-recording mode and ignores
             plane_index.
         recording_index: The recording index within the dataset to query (0-based). Only used in multi-recording mode.
@@ -772,8 +804,9 @@ def query_roi_statistics_tool(
         and 'colocalization_columns'. The colocalization column meaning depends on the extraction path:
         'colocalization_mode' is 'intensity' with columns ['is_colocalized', 'probability'] when a structural channel
         was used, or 'spatial' with columns ['matched_channel_2_index', 'overlap_score'] when both channels were
-        functional. In multi-recording mode, includes 'has_template_metadata' and optional 'cluster_id' /
-        'recording_count' per ROI. On failure, contains an 'error' message. Both cases include a 'success' flag.
+        functional. Single-recording mode also contains 'plane_index'. In multi-recording mode, includes 'dataset',
+        'recording_index', 'recording_id', 'has_template_metadata', and optional 'cluster_id' / 'recording_count'
+        per ROI. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
@@ -787,27 +820,27 @@ def query_roi_statistics_tool(
         if data_path is None:
             return {"success": False, "error": f"Unable to query ROI statistics. {error}"}
     else:
-        data_path, error = _resolve_data_path(cindra_root, plane_index)
+        data_path, error = _resolve_data_path(cindra_root=cindra_root, plane_index=plane_index)
         if data_path is None:
             return {"success": False, "error": f"Unable to query ROI statistics. {error}"}
         recording_id = None
 
-    stats_path = data_path / "roi_statistics.npz"
+    statistics_path = data_path / "roi_statistics.npz"
     masks_path = data_path / "roi_masks.npz"
-    if not stats_path.exists() or not masks_path.exists():
+    if not statistics_path.exists() or not masks_path.exists():
         return {
             "success": False,
             "error": f"Unable to query ROI statistics. ROI data files not found at: {data_path}.",
         }
 
     try:
-        stats_data = np.load(stats_path, allow_pickle=False)
+        statistics_data = np.load(statistics_path, allow_pickle=False)
         masks_data = np.load(masks_path, allow_pickle=False)
     except Exception as load_error:
         return {"success": False, "error": f"Unable to load ROI data: {load_error}"}
 
     entries, total_rois = _build_roi_statistics_entries(
-        stats_data=stats_data,
+        statistics_data=statistics_data,
         masks_data=masks_data,
         roi_indices=roi_indices,
         include_plane_index=(dataset is None),
@@ -824,10 +857,10 @@ def query_roi_statistics_tool(
 
         if classification is not None:
             for _, entry in entries:
-                i = entry["roi_index"]
-                if i < classification.shape[0]:
-                    entry["is_cell"] = bool(classification[i, 0] > _CELL_LABEL_THRESHOLD)
-                    entry["classification_probability"] = round(float(classification[i, 1]), 4)
+                roi_index = entry["roi_index"]
+                if roi_index < classification.shape[0]:
+                    entry["is_cell"] = bool(classification[roi_index, 0] > _CELL_LABEL_THRESHOLD)
+                    entry["classification_probability"] = round(float(classification[roi_index, 1]), ndigits=4)
 
         # Adds channel-2 colocalization data when present. Column semantics depend on the extraction path:
         # intensity-based colocalization (run when one channel is structural, which also writes
@@ -841,11 +874,11 @@ def query_roi_statistics_tool(
 
         if colocalization is not None:
             for _, entry in entries:
-                i = entry["roi_index"]
-                if i < colocalization.shape[0]:
+                roi_index = entry["roi_index"]
+                if roi_index < colocalization.shape[0]:
                     entry["colocalization"] = [
-                        round(float(colocalization[i, 0]), 4),
-                        round(float(colocalization[i, 1]), 4),
+                        round(float(colocalization[roi_index, 0]), ndigits=4),
+                        round(float(colocalization[roi_index, 1]), ndigits=4),
                     ]
     else:
         # Multi-recording mode: adds tracking template metadata.
@@ -862,12 +895,11 @@ def query_roi_statistics_tool(
 
         if template_data is not None:
             for _, entry in entries:
-                i = entry["roi_index"]
-                if i < len(template_data["cluster_id"]):
-                    entry["cluster_id"] = int(template_data["cluster_id"][i])
-                    entry["recording_count"] = int(template_data["recording_count"][i])
+                roi_index = entry["roi_index"]
+                if roi_index < len(template_data["cluster_id"]):
+                    entry["cluster_id"] = int(template_data["cluster_id"][roi_index])
+                    entry["recording_count"] = int(template_data["recording_count"][roi_index])
 
-    # Applies sorting and capping.
     entries, sort_error = _sort_and_cap_entries(entries=entries, sort_by=sort_by, top_n=top_n)
     if sort_error is not None:
         return {"success": False, "error": sort_error}
@@ -924,15 +956,16 @@ def query_traces_tool(
         roi_indices: List of ROI indices to retrieve traces for (maximum 50). These are 0-based positional row
             indices into the per-recording trace arrays of shape (num_rois, frames), not tracking cluster IDs. Indices
             outside [0, num_rois) are silently skipped, so compare the returned 'roi_index' values against what you
-            requested; the call errors only when none of the indices are valid.
+            requested. The call errors only when none of the indices are valid.
         trace_type: The type of fluorescence trace to return. 'fluorescence' for raw cell fluorescence,
             'neuropil' for neuropil fluorescence, 'corrected' for neuropil-subtracted, 'spikes' for deconvolved. For
             'spikes' and 'corrected', spikes.npy and subtracted_fluorescence.npy are written but zero-filled when
             spike_deconvolution.extract_spikes was disabled at processing time, so an all-zero returned trace can mean
             deconvolution was off rather than absence of activity.
-        downsample_factor: Factor by which to downsample traces (1 = no downsampling, 10 = every 10th sample).
-        plane_index: -1 for combined view (default), 0+ for a specific imaging plane. Only used in single-recording
-            mode.
+        downsample_factor: Factor by which to downsample traces (1 = no downsampling, 10 = every 10th sample). A
+            value below 1 is silently raised to 1 and the clamped value is echoed back.
+        plane_index: The plane to query, where -1 selects the combined view (default) and 0 or above selects a
+            specific imaging plane. Only used in single-recording mode.
         dataset: The multi-recording dataset name. When provided, switches to multi-recording mode and ignores
             plane_index.
         recording_index: The recording index within the dataset to query (0-based). Only used in multi-recording mode.
@@ -946,9 +979,10 @@ def query_traces_tool(
         On success, contains 'trace_type', 'downsample_factor', 'frame_count' (the recording's total frame count
         before any windowing or downsampling), the resolved 'start_frame' (inclusive) and 'end_frame' (exclusive),
         'returned_sample_count' (the length of each returned trace), and 'traces', a list of {'roi_index', 'trace'}
-        entries. Each 'trace' is a flat list of float fluorescence values rounded to 4 decimals; returned sample k
-        corresponds to original frame start_frame + k * downsample_factor. On failure, contains an 'error' message.
-        Both cases include a 'success' flag.
+        entries. Each 'trace' is a flat list of float fluorescence values rounded to 4 decimals. Returned sample k
+        corresponds to original frame start_frame + k * downsample_factor. Single-recording mode adds 'plane_index'.
+        Multi-recording mode adds 'dataset', 'recording_index', 'recording_id', and 'total_rois'. On failure, contains
+        an 'error' message. Both cases include a 'success' flag.
     """
     if len(roi_indices) > _MAX_TRACE_ROIS:
         return {
@@ -983,7 +1017,7 @@ def query_traces_tool(
         if data_path is None:
             return {"success": False, "error": f"Unable to query traces. {error}"}
     else:
-        data_path, error = _resolve_data_path(cindra_root, plane_index)
+        data_path, error = _resolve_data_path(cindra_root=cindra_root, plane_index=plane_index)
         if data_path is None:
             return {"success": False, "error": f"Unable to query traces. {error}"}
         recording_id = None
@@ -1001,7 +1035,7 @@ def query_traces_tool(
         return {"success": False, "error": f"Unable to load trace data: {load_error}"}
 
     roi_count = traces.shape[0]
-    valid_indices = [i for i in roi_indices if 0 <= i < roi_count]
+    valid_indices = [index for index in roi_indices if 0 <= index < roi_count]
     if not valid_indices:
         return {"success": False, "error": "Unable to query traces. No valid ROI indices provided."}
 
@@ -1023,7 +1057,7 @@ def query_traces_tool(
         trace = traces[roi_index][resolved_start:resolved_end]
         if downsample_factor > 1:
             trace = trace[::downsample_factor]
-        results.append({"roi_index": roi_index, "trace": [round(float(value), 4) for value in trace]})
+        results.append({"roi_index": roi_index, "trace": [round(float(value), ndigits=4) for value in trace]})
 
     result: dict[str, object] = {
         "success": True,
@@ -1061,10 +1095,10 @@ def query_multi_recording_overview_tool(
 
     Args:
         recording_path: Absolute path to the recording output directory, which is the parent of the cindra/ folder
-            and equals the recording_output_paths entries returned by the prepare tool when the output root differs
+            and equals the per-recording 'output_path' returned by the prepare tool when the output root differs
             from the raw-data root. The cindra/ subdirectory is resolved automatically.
         dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
-            directory, which is lowercased at preparation time; pass the value returned by resolve_dataset_name_tool
+            directory, which is lowercased at preparation time. Pass the value returned by resolve_dataset_name_tool
             or prepare_multi_recording_batch_tool.
 
     Returns:
@@ -1076,7 +1110,7 @@ def query_multi_recording_overview_tool(
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query multi-recording overview. {error}"}
 
-    dataset_path, error = _find_multi_recording_root(cindra_root, dataset)
+    dataset_path, error = _find_multi_recording_root(cindra_root=cindra_root, dataset=dataset)
     if dataset_path is None:
         return {"success": False, "error": f"Unable to query multi-recording overview. {error}"}
 
@@ -1088,9 +1122,9 @@ def query_multi_recording_overview_tool(
     recordings: list[dict[str, Any]] = []
     template_roi_count: int | None = None
 
-    for i, output_path_str in enumerate(dataset_output_paths):
-        output_path = Path(output_path_str)
-        recording_entry: dict[str, Any] = {"index": i, "output_path": str(output_path)}
+    for index, output_path_string in enumerate(dataset_output_paths):
+        output_path = Path(output_path_string)
+        recording_entry: dict[str, Any] = {"index": index, "output_path": str(output_path)}
 
         if not output_path.exists():
             recording_entry["exists"] = False
@@ -1101,7 +1135,7 @@ def query_multi_recording_overview_tool(
         recording_runtime = _load_yaml(output_path / "multi_recording_runtime_data.yaml")
         if recording_runtime is not None:
             recording_io = recording_runtime.get("io", {})
-            recording_entry["recording_id"] = recording_io.get("recording_id", f"unknown_{i}")
+            recording_entry["recording_id"] = recording_io.get("recording_id", f"unknown_{index}")
             recording_entry["data_path"] = recording_io.get("data_path")
 
             selected = recording_io.get("selected_roi_indices", [])
@@ -1122,7 +1156,7 @@ def query_multi_recording_overview_tool(
             ):
                 value = recording_timing.get(field_name)
                 if value is not None:
-                    recording_entry[field_name] = round(value, 2) if isinstance(value, float) else value
+                    recording_entry[field_name] = round(value, ndigits=2) if isinstance(value, float) else value
 
         # Mask counts from NPZ files.
         for npz_name, key_name in [
@@ -1168,7 +1202,7 @@ def query_multi_recording_registration_quality_tool(
     Args:
         recording_path: Absolute path to a recording directory that belongs to the dataset.
         dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
-            directory, which is lowercased at preparation time; pass the value returned by resolve_dataset_name_tool
+            directory, which is lowercased at preparation time. Pass the value returned by resolve_dataset_name_tool
             or prepare_multi_recording_batch_tool.
 
     Returns:
@@ -1181,7 +1215,7 @@ def query_multi_recording_registration_quality_tool(
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query registration quality. {error}"}
 
-    dataset_path, error = _find_multi_recording_root(cindra_root, dataset)
+    dataset_path, error = _find_multi_recording_root(cindra_root=cindra_root, dataset=dataset)
     if dataset_path is None:
         return {"success": False, "error": f"Unable to query registration quality. {error}"}
 
@@ -1192,13 +1226,13 @@ def query_multi_recording_registration_quality_tool(
     dataset_output_paths = runtime.get("io", {}).get("dataset_output_paths", [str(dataset_path)])
     recordings: list[dict[str, Any]] = []
 
-    for i, output_path_str in enumerate(dataset_output_paths):
-        output_path = Path(output_path_str)
-        recording_entry: dict[str, Any] = {"index": i}
+    for index, output_path_string in enumerate(dataset_output_paths):
+        output_path = Path(output_path_string)
+        recording_entry: dict[str, Any] = {"index": index}
 
         recording_runtime = _load_yaml(output_path / "multi_recording_runtime_data.yaml")
         if recording_runtime is not None:
-            recording_entry["recording_id"] = recording_runtime.get("io", {}).get("recording_id", f"unknown_{i}")
+            recording_entry["recording_id"] = recording_runtime.get("io", {}).get("recording_id", f"unknown_{index}")
 
         registration_directory = output_path / "registration_arrays"
         if not registration_directory.exists():
@@ -1217,11 +1251,11 @@ def query_multi_recording_registration_quality_tool(
             if path.exists():
                 with contextlib.suppress(Exception):
                     field_array = np.load(path, mmap_mode="r")
-                    stats = _array_summary(field_array)
-                    stats["shape"] = list(field_array.shape)
-                    stats["abs_mean"] = round(float(np.mean(np.abs(field_array))), 4)
-                    stats["abs_max"] = round(float(np.max(np.abs(field_array))), 4)
-                    recording_entry[field_name] = stats
+                    statistics = _array_summary(field_array)
+                    statistics["shape"] = list(field_array.shape)
+                    statistics["abs_mean"] = round(float(np.mean(np.abs(field_array))), ndigits=4)
+                    statistics["abs_max"] = round(float(np.max(np.abs(field_array))), ndigits=4)
+                    recording_entry[field_name] = statistics
 
         # Combined displacement magnitude.
         y_path = registration_directory / "deform_field_y.npy"
@@ -1265,25 +1299,29 @@ def query_multi_recording_tracking_summary_tool(
 
     Returns template mask count, recording count distribution (how many recordings each tracked ROI spans),
     cluster ID range, and per-ROI centroid and recording count data. Recording count reflects how many sessions
-    an ROI was detected in, not tracking reliability — ROIs can be active in some sessions and inactive in
+    an ROI was detected in, not tracking reliability. ROIs can be active in some sessions and inactive in
     others.
 
     Args:
         recording_path: Absolute path to a recording directory that belongs to the dataset.
         dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
-            directory, which is lowercased at preparation time; pass the value returned by resolve_dataset_name_tool
+            directory, which is lowercased at preparation time. Pass the value returned by resolve_dataset_name_tool
             or prepare_multi_recording_batch_tool.
 
     Returns:
-        On success, contains 'template_count', 'recording_count_distribution' histogram, cluster statistics,
-        and per-template summary data. On failure, contains an 'error' message. Both cases include a
-        'success' flag.
+        On success, contains 'template_count', the 'recording_count_distribution' histogram keyed by recording
+        count, 'mean_recording_count', 'median_recording_count', 'min_recording_count', and 'max_recording_count'.
+        It also contains a 'pixel_count_summary' {min, max, mean, std} object, 'cluster_id_range' as
+        [minimum, maximum], and a 'templates' list of per-template {index, centroid, pixel_count, cluster_id,
+        recording_count} entries capped at the first 200 templates. When the cap applies, 'templates_truncated' is
+        True and 'templates_shown' reports the cap. A 'channel_2_template_count' appears when channel-2 template
+        masks exist. On failure, contains an 'error' message. Both cases include a 'success' flag.
     """
     cindra_root, error = _find_cindra_root(recording_path)
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query tracking summary. {error}"}
 
-    dataset_path, error = _find_multi_recording_root(cindra_root, dataset)
+    dataset_path, error = _find_multi_recording_root(cindra_root=cindra_root, dataset=dataset)
     if dataset_path is None:
         return {"success": False, "error": f"Unable to query tracking summary. {error}"}
 
@@ -1307,19 +1345,19 @@ def query_multi_recording_tracking_summary_tool(
 
     # Recording count distribution: how many templates span N recordings.
     unique_counts, histogram = np.unique(recording_counts, return_counts=True)
-    distribution = {int(count): int(freq) for count, freq in zip(unique_counts, histogram, strict=True)}
+    distribution = {int(count): int(frequency) for count, frequency in zip(unique_counts, histogram, strict=True)}
 
     # Per-template summary (capped for large datasets).
     max_templates = 200
     templates: list[dict[str, Any]] = [
         {
-            "index": i,
-            "centroid": [int(centroids[i, 0]), int(centroids[i, 1])],
-            "pixel_count": int(pixel_counts[i]),
-            "cluster_id": int(cluster_ids[i]),
-            "recording_count": int(recording_counts[i]),
+            "index": template_index,
+            "centroid": [int(centroids[template_index, 0]), int(centroids[template_index, 1])],
+            "pixel_count": int(pixel_counts[template_index]),
+            "cluster_id": int(cluster_ids[template_index]),
+            "recording_count": int(recording_counts[template_index]),
         }
-        for i in range(min(template_count, max_templates))
+        for template_index in range(min(template_count, max_templates))
     ]
 
     result: dict[str, Any] = {
@@ -1328,7 +1366,7 @@ def query_multi_recording_tracking_summary_tool(
         "dataset": dataset,
         "template_count": template_count,
         "recording_count_distribution": distribution,
-        "mean_recording_count": round(float(np.mean(recording_counts)), 2),
+        "mean_recording_count": round(float(np.mean(recording_counts)), ndigits=2),
         "median_recording_count": int(np.median(recording_counts)),
         "min_recording_count": int(np.min(recording_counts)),
         "max_recording_count": int(np.max(recording_counts)),
@@ -1370,14 +1408,15 @@ def query_cross_recording_traces_tool(
     Args:
         recording_path: Absolute path to a recording directory that belongs to the dataset.
         dataset: The multi-recording dataset name to query. Matched case-sensitively against the on-disk dataset
-            directory, which is lowercased at preparation time; pass the value returned by resolve_dataset_name_tool
+            directory, which is lowercased at preparation time. Pass the value returned by resolve_dataset_name_tool
             or prepare_multi_recording_batch_tool.
         roi_indices: List of ROI indices to retrieve traces for across all recordings (maximum 50). These are 0-based
             positional per-recording row indices, not the multi-recording tracking cluster_id, which is a separate
             concept. An out-of-range ROI yields an empty 'recordings' list for that ROI with success True.
         trace_type: The type of fluorescence trace to return. 'fluorescence' for raw cell fluorescence,
             'neuropil' for neuropil fluorescence, 'corrected' for neuropil-subtracted, 'spikes' for deconvolved.
-        downsample_factor: Factor by which to downsample traces (1 = no downsampling, 10 = every 10th sample).
+        downsample_factor: Factor by which to downsample traces (1 = no downsampling, 10 = every 10th sample). A
+            value below 1 is silently raised to 1 and the clamped value is echoed back.
         start_frame: The first frame index (inclusive) of the window to return, applied per recording before
             downsampling. Defaults to 0 (the first frame).
         end_frame: The end frame index (exclusive) of the window to return, applied per recording before
@@ -1389,8 +1428,10 @@ def query_cross_recording_traces_tool(
         before windowing or downsampling), the resolved 'start_frame' and 'end_frame', and 'trace', a flat list of
         float values rounded to 4 decimals. Recordings whose extraction is incomplete are reported under optional
         'skipped_recordings' and excluded from the traces, so the result covers only the subset with complete
-        extraction, not necessarily every recording in the dataset. On failure, contains an 'error' message. Both
-        cases include a 'success' flag.
+        extraction, not necessarily every recording in the dataset. A recording is additionally omitted from an ROI's
+        'recordings' list, without a 'skipped_recordings' entry, when the requested window resolves empty for it
+        (start_frame at or beyond that recording's frame count, or end_frame not greater than start_frame). On
+        failure, contains an 'error' message. Both cases include a 'success' flag.
     """
     if len(roi_indices) > _MAX_TRACE_ROIS:
         return {
@@ -1420,7 +1461,7 @@ def query_cross_recording_traces_tool(
     if cindra_root is None:
         return {"success": False, "error": f"Unable to query cross-recording traces. {error}"}
 
-    dataset_path, error = _find_multi_recording_root(cindra_root, dataset)
+    dataset_path, error = _find_multi_recording_root(cindra_root=cindra_root, dataset=dataset)
     if dataset_path is None:
         return {"success": False, "error": f"Unable to query cross-recording traces. {error}"}
 
@@ -1433,28 +1474,26 @@ def query_cross_recording_traces_tool(
 
     dataset_output_paths = runtime.get("io", {}).get("dataset_output_paths", [str(dataset_path)])
 
-    # Builds recording info list from per-recording runtime data.
-    recording_info: list[tuple[int, str, Path]] = []
-    for i, output_path_str in enumerate(dataset_output_paths):
-        output_path = Path(output_path_str)
+    recording_information: list[tuple[int, str, Path]] = []
+    for index, output_path_string in enumerate(dataset_output_paths):
+        output_path = Path(output_path_string)
         recording_runtime = _load_yaml(output_path / "multi_recording_runtime_data.yaml")
         recording_id = (
-            recording_runtime.get("io", {}).get("recording_id", f"unknown_{i}")
+            recording_runtime.get("io", {}).get("recording_id", f"unknown_{index}")
             if recording_runtime is not None
-            else f"unknown_{i}"
+            else f"unknown_{index}"
         )
-        recording_info.append((i, recording_id, output_path))
+        recording_information.append((index, recording_id, output_path))
 
     downsample_factor = max(1, downsample_factor)
     skipped_recordings: list[dict[str, object]] = []
     skipped_keys: set[tuple[int, str]] = set()
 
-    # Collects traces for each ROI across all recordings.
     rois_result: list[dict[str, object]] = []
     for roi_index in roi_indices:
         per_recording: list[dict[str, object]] = []
 
-        for recording_index, recording_id, output_path in recording_info:
+        for recording_index, recording_id, output_path in recording_information:
             trace_path = output_path / file_map[trace_type]
             if not trace_path.exists():
                 skip_key = (recording_index, f"Trace file not found: {file_map[trace_type]}")
@@ -1496,7 +1535,7 @@ def query_cross_recording_traces_tool(
                     "frame_count": frame_count,
                     "start_frame": resolved_start,
                     "end_frame": resolved_end,
-                    "trace": [round(float(value), 4) for value in trace],
+                    "trace": [round(float(value), ndigits=4) for value in trace],
                 }
             )
 
@@ -1508,7 +1547,7 @@ def query_cross_recording_traces_tool(
         "dataset": dataset,
         "trace_type": trace_type,
         "downsample_factor": downsample_factor,
-        "recording_count": len(recording_info),
+        "recording_count": len(recording_information),
         "rois": rois_result,
     }
 
@@ -1531,7 +1570,7 @@ def _resolve_multi_recording_data_path(
     Returns:
         A tuple of (data_path, recording_id, error_message). If data_path is None, error_message describes the issue.
     """
-    dataset_path, error = _find_multi_recording_root(cindra_root, dataset)
+    dataset_path, error = _find_multi_recording_root(cindra_root=cindra_root, dataset=dataset)
     if dataset_path is None:
         return None, None, error
 
@@ -1566,7 +1605,7 @@ def _resolve_multi_recording_data_path(
 
 
 def _build_roi_statistics_entries(
-    stats_data: np.lib.npyio.NpzFile,
+    statistics_data: np.lib.npyio.NpzFile,
     masks_data: np.lib.npyio.NpzFile,
     roi_indices: list[int] | None,
     *,
@@ -1575,7 +1614,7 @@ def _build_roi_statistics_entries(
     """Builds per-ROI statistics entries from loaded NPZ data.
 
     Args:
-        stats_data: The loaded roi_statistics.npz data.
+        statistics_data: The loaded roi_statistics.npz data.
         masks_data: The loaded roi_masks.npz data.
         roi_indices: Specific ROI indices to include, or None for all ROIs.
         include_plane_index: Determines whether to include the plane_index field in each entry.
@@ -1583,35 +1622,39 @@ def _build_roi_statistics_entries(
     Returns:
         A tuple of (entries, total_rois) where entries is a list of (index, entry_dict) pairs.
     """
-    footprints = stats_data["footprints"]
-    compactness = stats_data["compactness"]
-    solidity = stats_data["solidity"]
-    pixel_count = stats_data["pixel_count"]
-    aspect_ratio = stats_data["aspect_ratio"]
-    normalized_pixel_count = stats_data["normalized_pixel_count"]
-    skewness = stats_data["skewness"]
+    footprints = statistics_data["footprints"]
+    compactness = statistics_data["compactness"]
+    solidity = statistics_data["solidity"]
+    pixel_count = statistics_data["pixel_count"]
+    aspect_ratio = statistics_data["aspect_ratio"]
+    normalized_pixel_count = statistics_data["normalized_pixel_count"]
+    skewness = statistics_data["skewness"]
     centroids = masks_data["centroids"]
     total_rois = len(footprints)
 
-    indices = list(range(total_rois)) if roi_indices is None else [i for i in roi_indices if 0 <= i < total_rois]
+    indices = (
+        list(range(total_rois))
+        if roi_indices is None
+        else [roi_index for roi_index in roi_indices if 0 <= roi_index < total_rois]
+    )
     entries: list[tuple[int, dict[str, Any]]] = []
-    for i in indices:
+    for roi_index in indices:
         entry: dict[str, Any] = {
-            "roi_index": i,
-            "centroid": [int(centroids[i, 0]), int(centroids[i, 1])],
-            "pixel_count": int(pixel_count[i]),
-            "footprint": int(footprints[i]),
-            "compactness": round(float(compactness[i]), 4),
-            "solidity": round(float(solidity[i]), 4),
-            "aspect_ratio": round(float(aspect_ratio[i]), 4),
-            "normalized_pixel_count": round(float(normalized_pixel_count[i]), 4),
+            "roi_index": roi_index,
+            "centroid": [int(centroids[roi_index, 0]), int(centroids[roi_index, 1])],
+            "pixel_count": int(pixel_count[roi_index]),
+            "footprint": int(footprints[roi_index]),
+            "compactness": round(float(compactness[roi_index]), ndigits=4),
+            "solidity": round(float(solidity[roi_index]), ndigits=4),
+            "aspect_ratio": round(float(aspect_ratio[roi_index]), ndigits=4),
+            "normalized_pixel_count": round(float(normalized_pixel_count[roi_index]), ndigits=4),
         }
         if include_plane_index:
-            entry["plane_index"] = int(stats_data["plane_index"][i])
+            entry["plane_index"] = int(statistics_data["plane_index"][roi_index])
 
-        skewness_value = skewness[i]
-        entry["skewness"] = round(float(skewness_value), 4) if not np.isnan(skewness_value) else None
-        entries.append((i, entry))
+        skewness_value = skewness[roi_index]
+        entry["skewness"] = round(float(skewness_value), ndigits=4) if not np.isnan(skewness_value) else None
+        entries.append((roi_index, entry))
 
     return entries, total_rois
 
@@ -1696,7 +1739,7 @@ def _find_multi_recording_root(cindra_root: Path, dataset: str) -> tuple[Path | 
     if not multi_recording_path.exists():
         return None, f"No multi_recording directory found under: {cindra_root}"
 
-    available = [d.name for d in multi_recording_path.iterdir() if d.is_dir()]
+    available = [directory.name for directory in multi_recording_path.iterdir() if directory.is_dir()]
     if not available:
         return None, "No dataset directories found under multi_recording/"
     return None, f"Dataset '{dataset}' not found. Available datasets: {', '.join(sorted(available))}"
@@ -1707,7 +1750,8 @@ def _resolve_data_path(cindra_root: Path, plane_index: int) -> tuple[Path | None
 
     Args:
         cindra_root: The cindra output directory path.
-        plane_index: -1 for combined view, 0+ for per-plane view.
+        plane_index: The plane to resolve, where -1 selects the combined view and 0 or above selects a per-plane
+            view.
 
     Returns:
         A tuple of (data_path, error_message).
@@ -1717,7 +1761,9 @@ def _resolve_data_path(cindra_root: Path, plane_index: int) -> tuple[Path | None
 
     plane_path = cindra_root / f"plane_{plane_index}"
     if not plane_path.exists():
-        available = sorted(p.name for p in cindra_root.iterdir() if p.is_dir() and p.name.startswith("plane_"))
+        available = sorted(
+            path.name for path in cindra_root.iterdir() if path.is_dir() and path.name.startswith("plane_")
+        )
         return None, f"Plane directory plane_{plane_index} not found. Available: {', '.join(available) or 'none'}"
 
     return plane_path, None
@@ -1727,21 +1773,21 @@ def _array_summary(array: NDArray[np.float32]) -> dict[str, object]:
     """Computes summary statistics for a numpy array.
 
     Args:
-        array: The numpy array to summarize.
+        array: The data whose distribution is summarized. NaN entries are ignored.
 
     Returns:
         A dictionary containing the min, max, mean, and standard deviation of the array.
     """
     return {
-        "min": round(float(np.nanmin(array)), 4),
-        "max": round(float(np.nanmax(array)), 4),
-        "mean": round(float(np.nanmean(array)), 4),
-        "std": round(float(np.nanstd(array)), 4),
+        "min": round(float(np.nanmin(array)), ndigits=4),
+        "max": round(float(np.nanmax(array)), ndigits=4),
+        "mean": round(float(np.nanmean(array)), ndigits=4),
+        "std": round(float(np.nanstd(array)), ndigits=4),
     }
 
 
 def _load_yaml(file_path: Path) -> dict[str, Any] | None:
-    """Loads a YAML file and returns the parsed dictionary, or None if loading fails.
+    """Loads and parses the YAML file at the specified path.
 
     Args:
         file_path: The filesystem path to the YAML file to load.
@@ -1763,11 +1809,11 @@ def _list_plane_directories(cindra_root: Path) -> list[Path]:
         cindra_root: The cindra output directory path to search for plane directories.
 
     Returns:
-        A naturally-sorted list of plane directory paths found under the given root.
+        A lexicographically sorted list of plane directory paths found under the given root.
     """
     return sorted(
-        [p for p in cindra_root.iterdir() if p.is_dir() and p.name.startswith("plane_")],
-        key=lambda p: p.name,
+        (path for path in cindra_root.iterdir() if path.is_dir() and path.name.startswith("plane_")),
+        key=lambda path: path.name,
     )
 
 
@@ -1778,12 +1824,12 @@ def _discover_available_datasets(cindra_root: Path) -> list[str]:
         cindra_root: The cindra output directory path to search for multi-recording datasets.
 
     Returns:
-        A list of dataset name strings discovered under the given recording path.
+        A sorted list of dataset names found under the multi_recording subdirectory of the given cindra root.
     """
     multi_recording_path = cindra_root / "multi_recording"
     if not multi_recording_path.exists():
         return []
-    return sorted(d.name for d in multi_recording_path.iterdir() if d.is_dir())
+    return sorted(directory.name for directory in multi_recording_path.iterdir() if directory.is_dir())
 
 
 def _check_file_exists(
@@ -1797,7 +1843,7 @@ def _check_file_exists(
 
     Args:
         label: The descriptive label for the file being checked.
-        path: The filesystem path to check.
+        path: The expected output file whose presence determines the check outcome.
         state: The mutable verification state to update.
         required: Determines whether a missing file is reported as a failure.
 

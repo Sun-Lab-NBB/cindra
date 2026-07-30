@@ -14,351 +14,6 @@ from .multi_recording_configuration import MultiRecordingConfiguration
 from .single_recording_configuration import AcquisitionParameters, SingleRecordingConfiguration
 
 
-@dataclass(slots=True)
-class RuntimeContext:
-    """Combines configuration, acquisition parameters, and runtime data used in the single-recording
-    processing pipeline.
-
-    Notes:
-        This class provides a unified interface for pipeline functions to access user configuration (immutable),
-        acquisition parameters (from input data), and runtime data (computed by pipeline). It replaces the legacy ops
-        dictionary pattern with a type-safe structure.
-
-        Each RuntimeContext instance represents a single plane (or virtual plane for MROI data). The configuration and
-        acquisition fields are shared across all planes, while the runtime field contains plane-specific data.
-    """
-
-    configuration: SingleRecordingConfiguration
-    """The user-defined processing configuration, which remains immutable during processing."""
-
-    acquisition: AcquisitionParameters
-    """The acquisition parameters loaded from the input data's JSON file. This describes the recording setup including
-    frame rate, plane count, channel count, and MROI geometry if applicable."""
-
-    runtime: SingleRecordingRuntimeData
-    """The runtime data, which is computed and updated by pipeline stages."""
-
-    def save_shared(self) -> None:
-        """Saves shared configuration and acquisition parameters to the root output directory.
-
-        This method derives the root path from self.configuration.file_io.output_path and creates the cindra
-        subdirectory if it does not exist. It should be called once at pipeline initialization to save the static data
-        shared across all planes.
-
-        Raises:
-            ValueError: If output_path is not configured in the configuration.
-        """
-        if self.configuration.file_io.output_path is None:
-            message = (
-                "Unable to save shared configuration data. The output_path must be configured in the FileIO section "
-                "of the configuration, but it is currently None."
-            )
-            console.error(message=message, error=ValueError)
-
-        root_path = self.configuration.file_io.output_path / "cindra"
-        root_path.mkdir(parents=True, exist_ok=True)
-
-        self.configuration.save(file_path=root_path / "configuration.yaml")
-        self.acquisition.to_yaml(file_path=root_path / "acquisition_parameters.yaml")
-
-    def save_runtime(self) -> None:
-        """Saves this plane's runtime data to its output directory.
-
-        This method uses self.runtime.io.output_path as the save location. This directory is set during plane
-        initialization and is plane-specific (e.g., plane_0/).
-
-        Raises:
-            ValueError: If output_path is not set in the runtime IOData.
-        """
-        if self.runtime.io.output_path is None:
-            message = (
-                "Unable to save runtime data. The output_path must be set in the IOData section of the "
-                "runtime data, but it is currently None."
-            )
-            console.error(message=message, error=ValueError)
-
-        self.runtime.save(output_path=self.runtime.io.output_path)
-
-    @classmethod
-    def load(cls, root_path: Path, plane_index: int = -1) -> RuntimeContext | list[RuntimeContext]:
-        """Loads one or more RuntimeContext instances from disk.
-
-        Searches root_path recursively for configuration.yaml to discover the cindra output directory, then loads
-        shared configuration, acquisition parameters, and plane-specific runtime data. If the dataset was moved to a
-        different location, stale output_path values in each plane's runtime YAML are silently corrected so that
-        array loading succeeds.
-
-        Args:
-            root_path: The path to the recording's root processed data directory. The method searches
-                recursively for configuration.yaml to locate the cindra output directory.
-            plane_index: The index of the plane to load. Use -1 to load all available planes.
-
-        Returns:
-            A single RuntimeContext if plane_index >= 0, or a list of all RuntimeContext instances if plane_index
-            is -1.
-
-        Raises:
-            FileNotFoundError: If no configuration.yaml is found, or if required files are missing.
-            RuntimeError: If multiple configuration.yaml files are found under root_path.
-        """
-        # Discovers the cindra output directory within the root_path directory tree.
-        matches = list(root_path.rglob("configuration.yaml"))
-
-        if not matches:
-            message = (
-                f"Unable to load RuntimeContext. No configuration.yaml file was found under {root_path}. "
-                f"Ensure the single-recording pipeline has been run for this recording."
-            )
-            console.error(message=message, error=FileNotFoundError)
-
-        if len(matches) > 1:
-            message = (
-                f"Unable to load RuntimeContext. Found {len(matches)} configuration.yaml files under "
-                f"{root_path}, but expected exactly one."
-            )
-            console.error(message=message, error=RuntimeError)
-
-        cindra_root = matches[0].parent
-
-        config_path = cindra_root / "configuration.yaml"
-        acquisition_path = cindra_root / "acquisition_parameters.yaml"
-
-        if not acquisition_path.exists():
-            message = (
-                f"Unable to load RuntimeContext. Acquisition parameters file does not exist at the expected path: "
-                f"{acquisition_path}."
-            )
-            console.error(message=message, error=FileNotFoundError)
-
-        config = SingleRecordingConfiguration.load(file_path=config_path)
-        acquisition = AcquisitionParameters.from_yaml(file_path=acquisition_path)
-
-        if plane_index == -1:
-            # Loads all planes.
-            plane_directories = natsorted([d for d in cindra_root.glob("plane_*") if d.is_dir()])
-            contexts: list[RuntimeContext] = []
-
-            for plane_directory in plane_directories:
-                runtime = _load_single_recording_runtime(plane_directory=plane_directory)
-                contexts.append(cls(configuration=config, acquisition=acquisition, runtime=runtime))
-
-            return contexts
-
-        # Loads a specific plane.
-        plane_path = cindra_root / f"plane_{plane_index}"
-        if not plane_path.exists():
-            message = (
-                f"Unable to load RuntimeContext. Plane directory does not exist at the specified path: {plane_path}."
-            )
-            console.error(message=message, error=FileNotFoundError)
-
-        runtime = _load_single_recording_runtime(plane_directory=plane_path)
-        return cls(configuration=config, acquisition=acquisition, runtime=runtime)
-
-
-@dataclass(slots=True)
-class MultiRecordingRuntimeContext:
-    """Combines configuration and runtime data used in the multi-recording processing pipeline.
-
-    Notes:
-        This class provides a unified interface for multi-recording pipeline functions to access user configuration
-        (immutable) and per-recording runtime data (computed during processing). It replaces the legacy ops dictionary
-        pattern used in the original multi-recording implementation with a type-safe structure.
-
-        Each MultiRecordingRuntimeContext instance represents a single recording. The configuration is shared across all
-        recording contexts, while the runtime field contains recording-specific data. This mirrors the RuntimeContext
-        pattern where each instance represents a single plane.
-    """
-
-    configuration: MultiRecordingConfiguration
-    """The user-defined processing configuration, which remains immutable during processing."""
-
-    runtime: MultiRecordingRuntimeData
-    """The per-recording runtime data, which is computed and updated by pipeline stages."""
-
-    def save_shared(self) -> None:
-        """Saves the shared configuration to the main recording's output directory.
-
-        This method saves the immutable configuration to the first recording's multi_recording directory. It
-        should be called once at the start of processing.
-
-        Raises:
-            ValueError: If output_path is not set in the runtime data.
-        """
-        if self.runtime.output_path is None:
-            message = (
-                "Unable to save configuration. The output_path must be set in the runtime data, "
-                "but it is currently None."
-            )
-            console.error(message=message, error=ValueError)
-
-        main_recording_path = self.runtime.io.dataset_output_paths[0]
-        ensure_directory_exists(main_recording_path)
-
-        self.configuration.save(file_path=main_recording_path / "multi_recording_configuration.yaml")
-
-    def save_runtime(self) -> None:
-        """Saves this recording's runtime data to its output directory.
-
-        This method uses self.runtime.output_path as the save location. This directory is recording-specific.
-
-        Raises:
-            ValueError: If output_path is not set in the runtime data.
-        """
-        if self.runtime.output_path is None:
-            message = (
-                "Unable to save runtime data. The output_path must be set in the runtime data, "
-                "but it is currently None."
-            )
-            console.error(message=message, error=ValueError)
-
-        self.runtime.save(output_path=self.runtime.output_path)
-
-    @classmethod
-    def load(
-        cls, root_path: Path, recording_index: int = -1
-    ) -> MultiRecordingRuntimeContext | list[MultiRecordingRuntimeContext]:
-        """Loads one or more previously-saved MultiRecordingRuntimeContext instances from a recording's data directory.
-
-        Searches root_path recursively for a multi_recording_runtime_data.yaml file, loads that recording's runtime
-        data, then uses its stored dataset_output_paths to reconstruct the full dataset hierarchy. If the dataset was
-        moved to a different location (e.g., transferred between machines), all cached absolute paths are
-        automatically relocated to match the new directory structure.
-
-        Args:
-            root_path: The path to any dataset recording's root processed data directory. The method searches
-                recursively for the multi_recording_runtime_data.yaml file within this directory tree.
-            recording_index: The index of the recording to load. Use -1 to load all available recordings.
-
-        Returns:
-            A single MultiRecordingRuntimeContext if recording_index >= 0, or a list of all
-            MultiRecordingRuntimeContext instances if recording_index is -1.
-
-        Raises:
-            FileNotFoundError: If no multi_recording_runtime_data.yaml is found, or configuration files are missing.
-            RuntimeError: If multiple multi_recording_runtime_data.yaml files are found under root_path.
-            IndexError: If recording_index is out of range.
-        """
-        # Discovers the multi_recording_runtime_data.yaml file within the root_path directory tree.
-        matches = list(root_path.rglob("multi_recording_runtime_data.yaml"))
-
-        if not matches:
-            message = (
-                f"Unable to load MultiRecordingRuntimeContext. No multi_recording_runtime_data.yaml file was "
-                f"found under {root_path}. Ensure the multi-recording pipeline has been run for this recording."
-            )
-            console.error(message=message, error=FileNotFoundError)
-
-        if len(matches) > 1:
-            message = (
-                f"Unable to load MultiRecordingRuntimeContext. Found {len(matches)} "
-                f"multi_recording_runtime_data.yaml files under {root_path}, but expected exactly one."
-            )
-            console.error(message=message, error=RuntimeError)
-
-        resolved_output_path = matches[0].parent
-
-        # Loads the entry-point recording's runtime to access dataset_output_paths.
-        entry_runtime = MultiRecordingRuntimeData.load(output_path=resolved_output_path)
-        output_paths = entry_runtime.io.dataset_output_paths
-
-        if not output_paths:
-            message = (
-                f"Unable to load MultiRecordingRuntimeContext. The runtime data at {resolved_output_path} does not "
-                f"contain dataset_output_paths. Ensure the data was saved by resolve_multi_recording_contexts()."
-            )
-            console.error(message=message, error=FileNotFoundError)
-
-        # Detects whether the dataset was moved by comparing the resolved path to the cached output_path. If they
-        # differ, computes a prefix substitution, relocates and re-saves ALL recordings (both multi-recording
-        # and underlying single-recording data) so future loads find correct paths.
-        if entry_runtime.output_path is not None and entry_runtime.output_path != resolved_output_path:
-            old_prefix, new_prefix = _compute_relocation_prefixes(
-                old_path=entry_runtime.output_path, new_path=resolved_output_path
-            )
-            _relocate_runtime_paths(runtime=entry_runtime, old_prefix=old_prefix, new_prefix=new_prefix)
-            output_paths = entry_runtime.io.dataset_output_paths
-
-            # Persists corrected paths for every recording's multi-recording data and underlying
-            # single-recording data. The entry recording has already been relocated in-place above. Other
-            # recordings are loaded (with stale YAML content), relocated, and saved. Single-recording plane
-            # data is relocated by calling _load_single_recording_runtime() which detects the path mismatch
-            # and persists corrected paths.
-            entry_runtime.save(output_path=entry_runtime.output_path)
-            if entry_runtime.io.data_path is not None:
-                for plane_dir in entry_runtime.io.data_path.glob("plane_*"):
-                    if plane_dir.is_dir() and (plane_dir / "runtime_data.yaml").exists():
-                        _load_single_recording_runtime(plane_directory=plane_dir)
-
-            for recording_output_path in output_paths:
-                if recording_output_path == resolved_output_path:
-                    continue
-
-                # Computes per-recording relocation prefixes instead of reusing the entry recording's prefix. Each
-                # recording has its own recording-specific directory segment, so cross-recording prefix
-                # substitution fails.
-                other_runtime = MultiRecordingRuntimeData.load(output_path=recording_output_path)
-                if other_runtime.output_path is not None and other_runtime.output_path != recording_output_path:
-                    recording_old_prefix, recording_new_prefix = _compute_relocation_prefixes(
-                        old_path=other_runtime.output_path, new_path=recording_output_path
-                    )
-                    _relocate_runtime_paths(
-                        runtime=other_runtime, old_prefix=recording_old_prefix, new_prefix=recording_new_prefix
-                    )
-                    other_runtime.save(output_path=recording_output_path)
-
-                if other_runtime.io.data_path is not None:
-                    for plane_dir in other_runtime.io.data_path.glob("plane_*"):
-                        if plane_dir.is_dir() and (plane_dir / "runtime_data.yaml").exists():
-                            _load_single_recording_runtime(plane_directory=plane_dir)
-
-            # Reloads the entry runtime from the corrected YAML so that paths are resolved against the new location.
-            entry_runtime = MultiRecordingRuntimeData.load(output_path=resolved_output_path)
-            output_paths = entry_runtime.io.dataset_output_paths
-
-        # Loads configuration from the first output path (the main recording after natural sorting).
-        config_path = output_paths[0] / "multi_recording_configuration.yaml"
-        if not config_path.exists():
-            message = (
-                f"Unable to load MultiRecordingRuntimeContext. Configuration file does not exist at the expected "
-                f"path: {config_path}."
-            )
-            console.error(message=message, error=FileNotFoundError)
-        configuration = MultiRecordingConfiguration.load(file_path=config_path)
-
-        # Eagerly loads arrays and CombinedData onto the entry runtime before returning it.
-        _load_multi_recording_data(entry_runtime)
-
-        if recording_index == -1:
-            # Loads all recordings. Reuses the already-loaded entry runtime to avoid redundant I/O.
-            contexts: list[MultiRecordingRuntimeContext] = []
-            for output_path in output_paths:
-                if output_path == resolved_output_path:
-                    contexts.append(cls(configuration=configuration, runtime=entry_runtime))
-                else:
-                    runtime = MultiRecordingRuntimeData.load(output_path=output_path)
-                    _load_multi_recording_data(runtime)
-                    contexts.append(cls(configuration=configuration, runtime=runtime))
-            return contexts
-
-        # Loads a specific recording.
-        if recording_index < 0 or recording_index >= len(output_paths):
-            message = (
-                f"Unable to load MultiRecordingRuntimeContext. Recording index {recording_index} is out of range. "
-                f"Valid range is 0 to {len(output_paths) - 1}."
-            )
-            console.error(message=message, error=IndexError)
-
-        # Reuses the already-loaded entry runtime if it matches the requested index.
-        target_path = output_paths[recording_index]
-        if target_path == resolved_output_path:
-            return cls(configuration=configuration, runtime=entry_runtime)
-
-        runtime = MultiRecordingRuntimeData.load(output_path=target_path)
-        _load_multi_recording_data(runtime)
-        return cls(configuration=configuration, runtime=runtime)
-
-
 def _load_single_recording_runtime(plane_directory: Path) -> SingleRecordingRuntimeData:
     """Loads a SingleRecordingRuntimeData instance and corrects stale paths if the dataset was relocated.
 
@@ -371,8 +26,8 @@ def _load_single_recording_runtime(plane_directory: Path) -> SingleRecordingRunt
         plane_directory: The actual on-disk path to the plane directory (e.g., ``cindra/plane_0``).
 
     Returns:
-        A fully-loaded SingleRecordingRuntimeData instance with all paths and arrays resolved against the
-        correct location.
+        A SingleRecordingRuntimeData instance whose scalar fields and cached paths are resolved against the correct
+        location. NumPy array fields remain None and are loaded on demand by each consumer.
     """
     runtime = SingleRecordingRuntimeData.load(output_path=plane_directory)
 
@@ -475,8 +130,7 @@ def _relocate_runtime_paths(
     """Applies a prefix substitution to all cached paths in a runtime data instance.
 
     Args:
-        runtime: The runtime data instance whose paths will be updated in-place. Accepts either
-            SingleRecordingRuntimeData or MultiRecordingRuntimeData instances.
+        runtime: The runtime data instance whose paths will be updated in-place.
         old_prefix: The stale path prefix to replace.
         new_prefix: The correct path prefix on the current filesystem.
     """
@@ -527,8 +181,352 @@ def _load_multi_recording_data(runtime: MultiRecordingRuntimeData) -> None:
     Arrays are loaded on demand by each consumer (pipeline functions, GUI factory methods).
 
     Args:
-        runtime: A MultiRecordingRuntimeData instance that has been deserialized from YAML but has not had CombinedData
-            loaded yet.
+        runtime: The runtime data that has been deserialized from YAML but has not had CombinedData loaded yet.
     """
     if runtime.combined_data is None and runtime.io.data_path is not None:
         runtime.combined_data = CombinedData.load(root_path=runtime.io.data_path)
+
+
+@dataclass(slots=True)
+class RuntimeContext:
+    """Combines configuration, acquisition parameters, and runtime data used in the single-recording
+    processing pipeline.
+
+    Notes:
+        This class provides a unified interface for pipeline functions to access user configuration (immutable),
+        acquisition parameters (from input data), and runtime data (computed by pipeline).
+
+        Each RuntimeContext instance represents a single plane (or virtual plane for MROI data). The configuration and
+        acquisition fields are shared across all planes, while the runtime field contains plane-specific data.
+    """
+
+    configuration: SingleRecordingConfiguration
+    """The user-defined processing configuration, which remains immutable during processing."""
+
+    acquisition: AcquisitionParameters
+    """The acquisition parameters loaded from the input data's JSON file. This describes the recording setup including
+    frame rate, plane count, channel count, and MROI geometry if applicable."""
+
+    runtime: SingleRecordingRuntimeData
+    """The runtime data, which is computed and updated by pipeline stages."""
+
+    def save_shared(self) -> None:
+        """Saves shared configuration and acquisition parameters to the root output directory.
+
+        This method derives the root path from self.configuration.file_io.output_path and creates the cindra
+        subdirectory if it does not exist. It should be called once at pipeline initialization to save the static data
+        shared across all planes.
+
+        Raises:
+            ValueError: If output_path is not configured in the configuration.
+        """
+        if self.configuration.file_io.output_path is None:
+            message = (
+                "Unable to save shared configuration data. The output_path must be configured in the FileIO section "
+                "of the configuration, but it is currently None."
+            )
+            console.error(message=message, error=ValueError)
+
+        root_path = self.configuration.file_io.output_path / "cindra"
+        ensure_directory_exists(path=root_path)
+
+        self.configuration.save(file_path=root_path / "configuration.yaml")
+        self.acquisition.to_yaml(file_path=root_path / "acquisition_parameters.yaml")
+
+    def save_runtime(self) -> None:
+        """Saves this plane's runtime data to its output directory.
+
+        This method uses self.runtime.io.output_path as the save location. This directory is set during plane
+        initialization and is plane-specific (e.g., plane_0/).
+
+        Raises:
+            ValueError: If output_path is not set in the runtime IOData.
+        """
+        if self.runtime.io.output_path is None:
+            message = (
+                "Unable to save runtime data. The output_path must be set in the IOData section of the "
+                "runtime data, but it is currently None."
+            )
+            console.error(message=message, error=ValueError)
+
+        self.runtime.save(output_path=self.runtime.io.output_path)
+
+    @classmethod
+    def load(cls, root_path: Path, plane_index: int = -1) -> RuntimeContext | list[RuntimeContext]:
+        """Loads one or more RuntimeContext instances from disk.
+
+        Searches root_path recursively for configuration.yaml to discover the cindra output directory, then loads
+        shared configuration, acquisition parameters, and plane-specific runtime data. If the dataset was moved to a
+        different location, stale output_path values in each plane's runtime YAML are silently corrected so that
+        array loading succeeds.
+
+        Args:
+            root_path: The path to the recording's root processed data directory. The method searches
+                recursively for configuration.yaml to locate the cindra output directory.
+            plane_index: The index of the plane to load. Use -1 to load all available planes.
+
+        Returns:
+            A single RuntimeContext if plane_index >= 0, or a list of all RuntimeContext instances if plane_index
+            is -1.
+
+        Raises:
+            FileNotFoundError: If no configuration.yaml is found, or if required files are missing.
+            RuntimeError: If multiple configuration.yaml files are found under root_path.
+        """
+        # Discovers the cindra output directory within the root_path directory tree.
+        matches = list(root_path.rglob("configuration.yaml"))
+
+        if not matches:
+            message = (
+                f"Unable to load RuntimeContext. No configuration.yaml file was found under {root_path}. "
+                f"Ensure the single-recording pipeline has been run for this recording."
+            )
+            console.error(message=message, error=FileNotFoundError)
+
+        if len(matches) > 1:
+            message = (
+                f"Unable to load RuntimeContext. Found {len(matches)} configuration.yaml files under "
+                f"{root_path}, but expected exactly one."
+            )
+            console.error(message=message, error=RuntimeError)
+
+        cindra_root = matches[0].parent
+
+        configuration_path = cindra_root / "configuration.yaml"
+        acquisition_path = cindra_root / "acquisition_parameters.yaml"
+
+        if not acquisition_path.exists():
+            message = (
+                f"Unable to load RuntimeContext. Acquisition parameters file does not exist at the expected path: "
+                f"{acquisition_path}."
+            )
+            console.error(message=message, error=FileNotFoundError)
+
+        configuration = SingleRecordingConfiguration.load(file_path=configuration_path)
+        acquisition = AcquisitionParameters.from_yaml(file_path=acquisition_path)
+
+        if plane_index == -1:
+            # Loads all planes.
+            plane_directories = natsorted(
+                [directory for directory in cindra_root.glob("plane_*") if directory.is_dir()]
+            )
+            contexts: list[RuntimeContext] = []
+
+            for plane_directory in plane_directories:
+                runtime = _load_single_recording_runtime(plane_directory=plane_directory)
+                contexts.append(cls(configuration=configuration, acquisition=acquisition, runtime=runtime))
+
+            return contexts
+
+        # Loads a specific plane.
+        plane_path = cindra_root / f"plane_{plane_index}"
+        if not plane_path.exists():
+            message = (
+                f"Unable to load RuntimeContext. Plane directory does not exist at the specified path: {plane_path}."
+            )
+            console.error(message=message, error=FileNotFoundError)
+
+        runtime = _load_single_recording_runtime(plane_directory=plane_path)
+        return cls(configuration=configuration, acquisition=acquisition, runtime=runtime)
+
+
+@dataclass(slots=True)
+class MultiRecordingRuntimeContext:
+    """Combines configuration and runtime data used in the multi-recording processing pipeline.
+
+    Notes:
+        This class provides a unified interface for multi-recording pipeline functions to access user configuration
+        (immutable) and per-recording runtime data (computed during processing).
+
+        Each MultiRecordingRuntimeContext instance represents a single recording. The configuration is shared across all
+        recording contexts, while the runtime field contains recording-specific data. This mirrors the RuntimeContext
+        pattern where each instance represents a single plane.
+    """
+
+    configuration: MultiRecordingConfiguration
+    """The user-defined processing configuration, which remains immutable during processing."""
+
+    runtime: MultiRecordingRuntimeData
+    """The per-recording runtime data, which is computed and updated by pipeline stages."""
+
+    def save_shared(self) -> None:
+        """Saves the shared configuration to the main recording's output directory.
+
+        This method saves the immutable configuration to the first recording's multi_recording directory. It
+        should be called once at the start of processing.
+
+        Raises:
+            ValueError: If output_path is not set in the runtime data.
+        """
+        if self.runtime.output_path is None:
+            message = (
+                "Unable to save configuration. The output_path must be set in the runtime data, "
+                "but it is currently None."
+            )
+            console.error(message=message, error=ValueError)
+
+        main_recording_path = self.runtime.io.dataset_output_paths[0]
+        ensure_directory_exists(path=main_recording_path)
+
+        self.configuration.save(file_path=main_recording_path / "multi_recording_configuration.yaml")
+
+    def save_runtime(self) -> None:
+        """Saves this recording's runtime data to its output directory.
+
+        This method uses self.runtime.output_path as the save location. This directory is recording-specific.
+
+        Raises:
+            ValueError: If output_path is not set in the runtime data.
+        """
+        if self.runtime.output_path is None:
+            message = (
+                "Unable to save runtime data. The output_path must be set in the runtime data, "
+                "but it is currently None."
+            )
+            console.error(message=message, error=ValueError)
+
+        self.runtime.save(output_path=self.runtime.output_path)
+
+    @classmethod
+    def load(
+        cls, root_path: Path, recording_index: int = -1
+    ) -> MultiRecordingRuntimeContext | list[MultiRecordingRuntimeContext]:
+        """Loads one or more previously-saved MultiRecordingRuntimeContext instances from a recording's data directory.
+
+        Searches root_path recursively for a multi_recording_runtime_data.yaml file, loads that recording's runtime
+        data, then uses its stored dataset_output_paths to reconstruct the full dataset hierarchy. If the dataset was
+        moved to a different location (e.g., transferred between machines), all cached absolute paths are
+        automatically relocated to match the new directory structure.
+
+        Args:
+            root_path: The path to any dataset recording's root processed data directory. The method searches
+                recursively for the multi_recording_runtime_data.yaml file within this directory tree.
+            recording_index: The index of the recording to load. Use -1 to load all available recordings.
+
+        Returns:
+            A single MultiRecordingRuntimeContext if recording_index >= 0, or a list of all
+            MultiRecordingRuntimeContext instances if recording_index is -1.
+
+        Raises:
+            FileNotFoundError: If no multi_recording_runtime_data.yaml is found, or configuration files are missing.
+            RuntimeError: If multiple multi_recording_runtime_data.yaml files are found under root_path.
+            IndexError: If recording_index is out of range.
+        """
+        # Discovers the multi_recording_runtime_data.yaml file within the root_path directory tree.
+        matches = list(root_path.rglob("multi_recording_runtime_data.yaml"))
+
+        if not matches:
+            message = (
+                f"Unable to load MultiRecordingRuntimeContext. No multi_recording_runtime_data.yaml file was "
+                f"found under {root_path}. Ensure the multi-recording pipeline has been run for this recording."
+            )
+            console.error(message=message, error=FileNotFoundError)
+
+        if len(matches) > 1:
+            message = (
+                f"Unable to load MultiRecordingRuntimeContext. Found {len(matches)} "
+                f"multi_recording_runtime_data.yaml files under {root_path}, but expected exactly one."
+            )
+            console.error(message=message, error=RuntimeError)
+
+        resolved_output_path = matches[0].parent
+
+        # Loads the entry-point recording's runtime to access dataset_output_paths.
+        entry_runtime = MultiRecordingRuntimeData.load(output_path=resolved_output_path)
+        output_paths = entry_runtime.io.dataset_output_paths
+
+        if not output_paths:
+            message = (
+                f"Unable to load MultiRecordingRuntimeContext. The runtime data at {resolved_output_path} does not "
+                f"contain dataset_output_paths. Ensure the data was saved by resolve_multi_recording_contexts()."
+            )
+            console.error(message=message, error=FileNotFoundError)
+
+        # Detects whether the dataset was moved by comparing the resolved path to the cached output_path. If they
+        # differ, computes a prefix substitution, relocates and re-saves ALL recordings (both multi-recording
+        # and underlying single-recording data) so future loads find correct paths.
+        if entry_runtime.output_path is not None and entry_runtime.output_path != resolved_output_path:
+            old_prefix, new_prefix = _compute_relocation_prefixes(
+                old_path=entry_runtime.output_path, new_path=resolved_output_path
+            )
+            _relocate_runtime_paths(runtime=entry_runtime, old_prefix=old_prefix, new_prefix=new_prefix)
+            output_paths = entry_runtime.io.dataset_output_paths
+
+            # Persists corrected paths for every recording's multi-recording data and underlying
+            # single-recording data. The entry recording has already been relocated in-place above. Other
+            # recordings are loaded (with stale YAML content), relocated, and saved. Single-recording plane
+            # data is relocated by calling _load_single_recording_runtime() which detects the path mismatch
+            # and persists corrected paths.
+            entry_runtime.save(output_path=entry_runtime.output_path)
+            if entry_runtime.io.data_path is not None:
+                for plane_directory in entry_runtime.io.data_path.glob("plane_*"):
+                    if plane_directory.is_dir() and (plane_directory / "runtime_data.yaml").exists():
+                        _load_single_recording_runtime(plane_directory=plane_directory)
+
+            for recording_output_path in output_paths:
+                if recording_output_path == resolved_output_path:
+                    continue
+
+                # Computes per-recording relocation prefixes instead of reusing the entry recording's prefix. Each
+                # recording has its own recording-specific directory segment, so cross-recording prefix
+                # substitution fails.
+                other_runtime = MultiRecordingRuntimeData.load(output_path=recording_output_path)
+                if other_runtime.output_path is not None and other_runtime.output_path != recording_output_path:
+                    recording_old_prefix, recording_new_prefix = _compute_relocation_prefixes(
+                        old_path=other_runtime.output_path, new_path=recording_output_path
+                    )
+                    _relocate_runtime_paths(
+                        runtime=other_runtime, old_prefix=recording_old_prefix, new_prefix=recording_new_prefix
+                    )
+                    other_runtime.save(output_path=recording_output_path)
+
+                if other_runtime.io.data_path is not None:
+                    for plane_directory in other_runtime.io.data_path.glob("plane_*"):
+                        if plane_directory.is_dir() and (plane_directory / "runtime_data.yaml").exists():
+                            _load_single_recording_runtime(plane_directory=plane_directory)
+
+            # Reloads the entry runtime from the corrected YAML so that paths are resolved against the new location.
+            entry_runtime = MultiRecordingRuntimeData.load(output_path=resolved_output_path)
+            output_paths = entry_runtime.io.dataset_output_paths
+
+        # Loads configuration from the first output path (the main recording after natural sorting).
+        configuration_path = output_paths[0] / "multi_recording_configuration.yaml"
+        if not configuration_path.exists():
+            message = (
+                f"Unable to load MultiRecordingRuntimeContext. Configuration file does not exist at the expected "
+                f"path: {configuration_path}."
+            )
+            console.error(message=message, error=FileNotFoundError)
+        configuration = MultiRecordingConfiguration.load(file_path=configuration_path)
+
+        # Loads the entry runtime's CombinedData metadata (scalars only) before returning it. Arrays load on demand.
+        _load_multi_recording_data(runtime=entry_runtime)
+
+        if recording_index == -1:
+            # Loads all recordings. Reuses the already-loaded entry runtime to avoid redundant I/O.
+            contexts: list[MultiRecordingRuntimeContext] = []
+            for output_path in output_paths:
+                if output_path == resolved_output_path:
+                    contexts.append(cls(configuration=configuration, runtime=entry_runtime))
+                else:
+                    runtime = MultiRecordingRuntimeData.load(output_path=output_path)
+                    _load_multi_recording_data(runtime=runtime)
+                    contexts.append(cls(configuration=configuration, runtime=runtime))
+            return contexts
+
+        # Loads a specific recording.
+        if recording_index < 0 or recording_index >= len(output_paths):
+            message = (
+                f"Unable to load MultiRecordingRuntimeContext. Recording index {recording_index} is out of range. "
+                f"Valid range is 0 to {len(output_paths) - 1}."
+            )
+            console.error(message=message, error=IndexError)
+
+        # Reuses the already-loaded entry runtime if it matches the requested index.
+        target_path = output_paths[recording_index]
+        if target_path == resolved_output_path:
+            return cls(configuration=configuration, runtime=entry_runtime)
+
+        runtime = MultiRecordingRuntimeData.load(output_path=target_path)
+        _load_multi_recording_data(runtime=runtime)
+        return cls(configuration=configuration, runtime=runtime)

@@ -30,16 +30,16 @@ Diagnoses and resolves cindra and cindra-gui MCP server connectivity and environ
 - MCP tool usage for results querying and output verification (see `/single-recording-results`,
   `/multi-recording-results`)
 - MCP tool usage for visualization (see `/visualization`)
-- cindra package development or contribution workflows (no cindra skill, out of scope for this lattice)
+- cindra package development and contribution workflows
 
 ---
 
 ## Agent requirements
 
-This skill is the deliberate exception to the MCP-first rule the other cindra skills follow: it runs precisely
-when the cindra MCP tools are unavailable, so it uses shell and CLI diagnostics (for example `which cindra`,
-`python --version`, `pip check cindra`) rather than `@mcp.tool()` functions. Once connectivity is restored, the
-other cindra skills resume using the MCP tools.
+You MUST use shell and CLI diagnostics (for example `which cindra`, `python --version`, `pip check cindra`) while
+this skill is active, because it runs precisely when the cindra MCP tools are unavailable. This skill is the
+deliberate exception to the MCP-first rule the other cindra skills follow. Once connectivity is restored, the other
+cindra skills resume using the MCP tools.
 
 ---
 
@@ -102,9 +102,9 @@ active when Claude Code launches.
 ### Package version requirement
 
 cindra is distributed as a pre-release build, so every install, upgrade, and reinstall command MUST carry pip's
-`--pre` flag. The MCP tool surface these skills document (the four single-recording phases, the per-stage worker
-arguments of the execute tools, and the measured worker defaults in `cindra.allocation`, including the multi-recording
-discovery and extraction defaults) ships in cindra 2.0.0+.
+`--pre` flag. The MCP tool surface these skills document (the four single-recording phases, the `workers_per_job` and
+`max_parallel_jobs` arguments of the execute tools, and the measured worker defaults in `cindra.allocation`, including
+the multi-recording discovery and extraction defaults) ships in cindra 2.0.0+.
 Without `--pre`, pip resolves an older build whose MCP tools do not match the documented surface, which presents as
 tools that reject a documented phase name or argument while the server itself reports as connected.
 
@@ -220,16 +220,15 @@ python -c "from importlib.metadata import version; print(version('cindra'))"
 
 The version MUST be 2.0.0+. Any pre-release build of the 2.0.0 line satisfies this, because cindra is distributed as
 a pre-release, so treat a version that starts with `2.0.0` as passing. A version from an earlier release line means
-pip resolved a build whose MCP tools predate the
-documented tool surface, and the fix is to upgrade with the `--pre` flag:
+pip resolved a build whose MCP tools predate the documented tool surface, and the fix is to upgrade with the
+`--pre` flag:
 
 ```bash
 pip install --upgrade --pre cindra
 ```
 
 You MUST report a version from a release line below 2.0.0 as a failed diagnostic even when every earlier step passed,
-because the
-servers start and connect while their tools reject the arguments the other cindra skills send.
+because the servers start and connect while their tools reject the arguments the other cindra skills send.
 
 ### Step 6: Verify OpenMP runtime on macOS
 
@@ -242,11 +241,13 @@ Python environment. When `libomp.dylib` is not resolvable, `import cindra` (and 
 ```text
 ValueError: No threading layer could be loaded.
 HINT:
-Intel TBB is required, try:
-$ conda/pip install tbb
+Intel OpenMP is required, try:
+$ conda/pip install intel-openmp
 ```
 
-The error message mentions TBB, but on macOS the correct runtime is OpenMP. Run:
+Numba emits this hint whenever the requested `omp` layer fails to load on macOS. The supported resolution is the
+LLVM OpenMP runtime (`libomp.dylib`) installed below, rather than the `intel-openmp` package the hint names. First
+confirm the cause with:
 
 ```bash
 python -c "from numba.np.ufunc import omppool"
@@ -285,9 +286,9 @@ or export `DYLD_LIBRARY_PATH` before launching Claude Code:
 export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib:${DYLD_LIBRARY_PATH}"
 ```
 
-You MUST skip this step on Linux and Windows, where the OpenMP runtime is present by default (via
-`libgomp` on Linux, Intel OpenMP bundled with the Intel compiler runtime on Windows) and this
-diagnostic does not apply.
+You MUST skip this step on Linux and Windows, where cindra selects Numba's TBB threading layer instead
+(`tbb4py` and `intel-cmplr-lib-rt` are declared as `sys_platform != 'darwin'` dependencies), so Numba never
+loads `omppool` and this diagnostic does not apply.
 
 ### Step 7: Restart the MCP server
 
@@ -301,10 +302,10 @@ propagate to already-spawned MCP server subprocesses.
 
 ### Step 8: Resume the intended work
 
-After connectivity is restored, return to whatever required MCP. If no restart was needed (the environment was
-already healthy), return control to the invoking skill, or proceed to `/acquisition-data-preparation` to begin
-the single-recording pipeline when invoked standalone. If a restart was required, resume the work that needed
-MCP on the next session, since the current session's MCP subprocesses predate the fix.
+After connectivity is restored, return to the work that required the MCP tools. If no restart was needed (the
+environment was already healthy), return control to the invoking skill, or proceed to `/acquisition-data-preparation`
+to begin the single-recording pipeline when invoked standalone. If a restart was required, resume the work that
+required the MCP tools on the next session, since the current session's MCP subprocesses predate the fix.
 
 ---
 

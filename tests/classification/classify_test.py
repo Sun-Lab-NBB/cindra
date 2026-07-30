@@ -36,14 +36,14 @@ def _make_roi(
 
 def _create_classifier_file(path: Path, sample_count: int = 200) -> None:
     """Creates a temporary classifier .npz file."""
-    rng = np.random.default_rng(42)
-    labels = rng.choice([True, False], size=sample_count)
+    generator = np.random.default_rng(seed=42)
+    labels = generator.choice([True, False], size=sample_count)
     np.savez(
         path,
         training_labels=labels,
-        normalized_pixel_count=rng.standard_normal(sample_count).astype(np.float32) + 1.0,
-        compactness=rng.standard_normal(sample_count).astype(np.float32) + 1.5,
-        skewness=rng.standard_normal(sample_count).astype(np.float32),
+        normalized_pixel_count=generator.standard_normal(sample_count).astype(np.float32) + 1.0,
+        compactness=generator.standard_normal(sample_count).astype(np.float32) + 1.5,
+        skewness=generator.standard_normal(sample_count).astype(np.float32),
     )
 
 
@@ -53,7 +53,7 @@ class TestClassifier:
     def test_loads_and_fits(self, tmp_path: Path) -> None:
         """Verifies that the classifier loads training data and fits the model."""
         path = tmp_path / "test_classifier.npz"
-        _create_classifier_file(path)
+        _create_classifier_file(path=path)
         classifier = Classifier(classifier_path=path)
         assert hasattr(classifier, "_model")
         assert classifier._model is not None
@@ -80,7 +80,7 @@ class TestClassifier:
     def test_classify_output_shape(self, tmp_path: Path) -> None:
         """Verifies that classify returns the correct output shape."""
         path = tmp_path / "test_classifier.npz"
-        _create_classifier_file(path)
+        _create_classifier_file(path=path)
         classifier = Classifier(classifier_path=path)
         rois = [_make_roi() for _ in range(5)]
         result = classifier.classify(roi_statistics=rois)
@@ -89,7 +89,7 @@ class TestClassifier:
     def test_classify_output_dtype(self, tmp_path: Path) -> None:
         """Verifies that classify returns float32 output."""
         path = tmp_path / "test_classifier.npz"
-        _create_classifier_file(path)
+        _create_classifier_file(path=path)
         classifier = Classifier(classifier_path=path)
         rois = [_make_roi()]
         result = classifier.classify(roi_statistics=rois)
@@ -98,7 +98,7 @@ class TestClassifier:
     def test_classify_probabilities_bounded(self, tmp_path: Path) -> None:
         """Verifies that classification probabilities are between 0 and 1."""
         path = tmp_path / "test_classifier.npz"
-        _create_classifier_file(path)
+        _create_classifier_file(path=path)
         classifier = Classifier(classifier_path=path)
         rois = [_make_roi(compactness=compactness) for compactness in [1.0, 1.5, 2.0, 5.0]]
         result = classifier.classify(roi_statistics=rois)
@@ -108,7 +108,7 @@ class TestClassifier:
     def test_classify_is_cell_binary(self, tmp_path: Path) -> None:
         """Verifies that the is_cell column contains only 0.0 or 1.0."""
         path = tmp_path / "test_classifier.npz"
-        _create_classifier_file(path)
+        _create_classifier_file(path=path)
         classifier = Classifier(classifier_path=path)
         rois = [_make_roi() for _ in range(10)]
         result = classifier.classify(roi_statistics=rois)
@@ -117,7 +117,7 @@ class TestClassifier:
     def test_classify_threshold(self, tmp_path: Path) -> None:
         """Verifies that the probability threshold is respected."""
         path = tmp_path / "test_classifier.npz"
-        _create_classifier_file(path)
+        _create_classifier_file(path=path)
         classifier = Classifier(classifier_path=path)
         rois = [_make_roi()]
         result_low = classifier.classify(roi_statistics=rois, probability_threshold=0.0)
@@ -130,7 +130,7 @@ class TestClassifier:
     def test_classify_empty_raises(self, tmp_path: Path) -> None:
         """Verifies that classifying an empty list raises ValueError."""
         path = tmp_path / "test_classifier.npz"
-        _create_classifier_file(path)
+        _create_classifier_file(path=path)
         classifier = Classifier(classifier_path=path)
         with pytest.raises(ValueError, match="Unable to classify ROIs"):
             classifier.classify(roi_statistics=[])
@@ -138,7 +138,7 @@ class TestClassifier:
     def test_feature_subset(self, tmp_path: Path) -> None:
         """Verifies that specifying a feature subset uses only those features."""
         path = tmp_path / "test_classifier.npz"
-        _create_classifier_file(path)
+        _create_classifier_file(path=path)
         classifier = Classifier(classifier_path=path, feature_names=("normalized_pixel_count", "compactness"))
         assert len(classifier._available_features) == 2
         assert "skewness" not in classifier._available_features
@@ -146,7 +146,7 @@ class TestClassifier:
     def test_handles_none_skewness(self, tmp_path: Path) -> None:
         """Verifies that ROIs with None skewness are handled correctly."""
         path = tmp_path / "test_classifier.npz"
-        _create_classifier_file(path)
+        _create_classifier_file(path=path)
         classifier = Classifier(classifier_path=path)
         roi = _make_roi()
         roi.skewness = None
@@ -157,13 +157,13 @@ class TestClassifier:
     def test_all_nan_feature_excluded(self, tmp_path: Path) -> None:
         """Verifies that an all-NaN feature is filtered out while a valid feature remains available."""
         path = tmp_path / "nan_feature.npz"
-        rng = np.random.default_rng(42)
+        generator = np.random.default_rng(seed=42)
         sample_count = 200
         np.savez(
             path,
             training_labels=np.array([True, False] * (sample_count // 2), dtype=np.bool_),
-            normalized_pixel_count=rng.standard_normal(sample_count).astype(np.float32) + 1.0,
-            compactness=np.full(sample_count, np.nan, dtype=np.float32),
+            normalized_pixel_count=generator.standard_normal(sample_count).astype(np.float32) + 1.0,
+            compactness=np.full(shape=sample_count, fill_value=np.nan, dtype=np.float32),
         )
         classifier = Classifier(classifier_path=path)
         assert "compactness" not in classifier._available_features
@@ -189,14 +189,14 @@ class TestCreateTrainingDataset:
     def test_roundtrip(self, tmp_path: Path) -> None:
         """Verifies that a saved dataset can be loaded by the Classifier."""
         path = tmp_path / "roundtrip.npz"
-        rng = np.random.default_rng(42)
+        generator = np.random.default_rng(seed=42)
         sample_count = 200
         Classifier.create_training_dataset(
             file_path=path,
-            training_labels=rng.choice([True, False], size=sample_count),
-            normalized_pixel_count=rng.standard_normal(sample_count).astype(np.float32) + 1.0,
-            compactness=rng.standard_normal(sample_count).astype(np.float32) + 1.5,
-            skewness=rng.standard_normal(sample_count).astype(np.float32),
+            training_labels=generator.choice([True, False], size=sample_count),
+            normalized_pixel_count=generator.standard_normal(sample_count).astype(np.float32) + 1.0,
+            compactness=generator.standard_normal(sample_count).astype(np.float32) + 1.5,
+            skewness=generator.standard_normal(sample_count).astype(np.float32),
         )
         classifier = Classifier(classifier_path=path)
         rois = [_make_roi()]
@@ -229,13 +229,13 @@ class TestClassifyFunction:
     def test_custom_classifier(self, tmp_path: Path) -> None:
         """Verifies that a custom classifier path is used."""
         path = tmp_path / "custom.npz"
-        _create_classifier_file(path)
+        _create_classifier_file(path=path)
         rois = [_make_roi()]
         result = classify(roi_statistics=rois, custom_classifier_path=path)
         assert result.shape == (1, 2)
 
     def test_preclassification_mode(self) -> None:
-        """Verifies that preclassification mode uses a 2-feature model."""
+        """Verifies that preclassification mode returns a classification result for each supplied ROI."""
         rois = [_make_roi()]
         result = classify(roi_statistics=rois, preclassification=True)
         assert result.shape == (1, 2)

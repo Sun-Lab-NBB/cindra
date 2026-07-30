@@ -1,9 +1,13 @@
 """Provides bidirectional phase offset correction algorithm for line-scanned imaging data."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy import fft
+
+from .utils import NORMALIZATION_EPSILON
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -29,12 +33,12 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.float32]) -> int:
     # Computes the real FFT of odd lines (1, 3, 5, ...) along the x-axis. Uses rfft since input is real-valued,
     # which is ~2x faster than fft and uses half the memory. Casts to complex64 to prevent complex128 promotion.
     odd_lines_fft = fft.rfft(x=frames[:, 1::2, :], axis=2, workers=-1).astype(np.complex64)
-    odd_lines_fft /= np.abs(odd_lines_fft) + np.float32(1e-5)
+    odd_lines_fft /= np.abs(odd_lines_fft) + np.float32(NORMALIZATION_EPSILON)
 
     # Computes the conjugate FFT of even lines (0, 2, 4, ...) along the x-axis.
     even_lines_fft = fft.rfft(x=frames[:, ::2, :], axis=2, workers=-1).astype(np.complex64)
     np.conj(even_lines_fft, out=even_lines_fft)
-    even_lines_fft /= np.abs(even_lines_fft) + np.float32(1e-5)
+    even_lines_fft /= np.abs(even_lines_fft) + np.float32(NORMALIZATION_EPSILON)
 
     # Truncates even lines to match odd lines count (in case of odd height).
     even_lines_fft = even_lines_fft[:, : odd_lines_fft.shape[1], :]

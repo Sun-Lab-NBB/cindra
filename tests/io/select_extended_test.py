@@ -33,7 +33,7 @@ def _make_roi(centroid: tuple[int, int] = (20, 20), pixel_count: int = 50) -> RO
     return roi
 
 
-def _make_runtime_and_config(
+def _make_runtime_and_configuration(
     roi_count: int = 3,
     probabilities: list[float] | None = None,
     probability_threshold: float = 0.5,
@@ -43,14 +43,15 @@ def _make_runtime_and_config(
 
     Args:
         roi_count: The number of ROIs to create.
-        probabilities: The probability values for each ROI. If None, all ROIs get probability 0.9.
+        probabilities: The values written to the first classification column for each ROI. The second column, which
+            selection reads, holds 1.0 when the value exceeds 0.5 and 0.0 otherwise. Defaults to 0.9 for every ROI.
         probability_threshold: The minimum probability threshold for ROI selection.
         maximum_size: The maximum allowed ROI size in pixels.
 
     Returns:
         A tuple of (runtime, configuration) instances with combined_data populated.
     """
-    rois = [_make_roi(centroid=(20 + i * 15, 20 + i * 15)) for i in range(roi_count)]
+    rois = [_make_roi(centroid=(20 + index * 15, 20 + index * 15)) for index in range(roi_count)]
     if probabilities is None:
         probabilities = [0.9] * roi_count
     classification = np.array(
@@ -83,7 +84,7 @@ class TestFilterRois:
 
     def test_selects_all_rois_with_permissive_filters(self) -> None:
         """Verifies that all ROIs are selected when filters are permissive."""
-        runtime, configuration = _make_runtime_and_config(
+        runtime, configuration = _make_runtime_and_configuration(
             roi_count=3,
             probability_threshold=0.0,
             maximum_size=100000,
@@ -97,7 +98,7 @@ class TestFilterRois:
 
     def test_probability_filter_excludes_low_probability_rois(self) -> None:
         """Verifies that ROIs below the probability threshold are excluded."""
-        runtime, configuration = _make_runtime_and_config(
+        runtime, configuration = _make_runtime_and_configuration(
             roi_count=3,
             probabilities=[0.9, 0.3, 0.8],
             probability_threshold=0.5,
@@ -110,20 +111,20 @@ class TestFilterRois:
 
     def test_size_filter_excludes_large_rois(self) -> None:
         """Verifies that ROIs exceeding the maximum size are excluded."""
-        runtime, configuration = _make_runtime_and_config(
+        runtime, configuration = _make_runtime_and_configuration(
             roi_count=2,
             probability_threshold=0.0,
             maximum_size=49,
         )
 
-        # Default ROIs have pixel_count=50; maximum_size is inclusive, so 50 > 49 is excluded.
+        # Default ROIs have pixel_count=50, and maximum_size is inclusive, so 50 > 49 is excluded.
         channel_1_count, _ = _filter_rois(runtime=runtime, configuration=configuration)
 
         assert channel_1_count == 0
 
     def test_stores_indices_in_runtime(self) -> None:
         """Verifies that selected indices are stored in runtime.io.selected_roi_indices."""
-        runtime, configuration = _make_runtime_and_config(
+        runtime, configuration = _make_runtime_and_configuration(
             roi_count=4,
             probabilities=[0.9, 0.1, 0.8, 0.05],
             probability_threshold=0.5,
@@ -140,14 +141,14 @@ class TestFilterRois:
     def test_filters_channel_2_rois_when_present(self) -> None:
         """Verifies that channel 2 ROIs are filtered independently when channel 2 data is present."""
         roi_count = 3
-        runtime, configuration = _make_runtime_and_config(
+        runtime, configuration = _make_runtime_and_configuration(
             roi_count=roi_count,
             probability_threshold=0.5,
             maximum_size=10000,
         )
 
         # Channel 2 selection must run independently of channel 1 selection.
-        channel_2_rois = [_make_roi(centroid=(30 + i * 10, 30 + i * 10)) for i in range(roi_count)]
+        channel_2_rois = [_make_roi(centroid=(30 + index * 10, 30 + index * 10)) for index in range(roi_count)]
         channel_2_classification = np.array([[0.9, 1.0], [0.2, 0.0], [0.8, 1.0]], dtype=np.float32)
         assert runtime.combined_data is not None
         runtime.combined_data.extraction.roi_statistics_channel_2 = channel_2_rois
@@ -206,7 +207,7 @@ class TestFilterRois:
     def test_raises_error_when_channel_2_classification_missing(self) -> None:
         """Verifies that a ValueError is raised when channel 2 statistics exist but classification is missing."""
         roi_count = 2
-        runtime, configuration = _make_runtime_and_config(
+        runtime, configuration = _make_runtime_and_configuration(
             roi_count=roi_count,
             probability_threshold=0.5,
         )

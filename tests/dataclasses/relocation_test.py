@@ -33,14 +33,12 @@ class TestComputeRelocationPrefixes:
         assert new_prefix == new_path
 
     def test_identical_paths_returns_root_prefixes(self) -> None:
-        """Verifies that identical paths produce single-component root prefixes since the entire path is a common
-        suffix.
-        """
+        """Verifies that identical paths produce equal empty prefixes because the entire path is a common suffix."""
         path = Path("/data/recordings/cindra/plane_0")
 
         old_prefix, new_prefix = _compute_relocation_prefixes(old_path=path, new_path=path)
 
-        # Identical paths share every component, so neither prefix retains content beyond the root.
+        # Identical paths share every component, so both prefixes collapse to the same empty relative path.
         assert old_prefix == new_prefix
 
     def test_single_component_difference(self) -> None:

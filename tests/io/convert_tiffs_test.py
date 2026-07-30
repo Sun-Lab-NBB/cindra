@@ -10,6 +10,7 @@ import pytest
 from tifffile import TiffWriter
 
 from cindra.io.tiff import (
+    _MISMATCH_REPORT_LIMIT,
     _create_binary_files,
     _get_frame_dimensions,
     convert_tiffs_to_binary,
@@ -48,12 +49,12 @@ def _write_constant_tiff(file_path: Path, frame_values: list[int], height: int, 
     """Writes a multi-page TIFF where page k is a constant int16 image filled with frame_values[k]."""
     with TiffWriter(file_path) as writer:
         for value in frame_values:
-            writer.write(np.full((height, width), value, dtype=np.int16))
+            writer.write(np.full((height, width), fill_value=value, dtype=np.int16))
 
 
 def _constant_stack(frame_values: list[int], height: int, width: int) -> NDArray[np.int16]:
     """Builds the int16 frame stack expected on disk for a sequence of constant frame values."""
-    return np.stack([np.full((height, width), value, dtype=np.int16) for value in frame_values])
+    return np.stack([np.full((height, width), fill_value=value, dtype=np.int16) for value in frame_values])
 
 
 def _build_configuration(*, data_path: Path | None, output_path: Path) -> SingleRecordingConfiguration:
@@ -98,9 +99,11 @@ class TestConvertTiffsToBinary:
         """Verifies that single-plane single-channel conversion writes the TIFF frames verbatim and sets metadata."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=1, channel_number=1)
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
         frame_values = [0, 1, 2, 3, 4]
-        _write_constant_tiff(data_path / "recording.tif", frame_values, _FRAME_HEIGHT, _FRAME_WIDTH)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
 
         configuration = _build_configuration(data_path=data_path, output_path=output_path)
         acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
@@ -117,10 +120,14 @@ class TestConvertTiffsToBinary:
         assert context.runtime.registration.valid_y_range == (0, _FRAME_HEIGHT)
         assert context.runtime.registration.valid_x_range == (0, _FRAME_WIDTH)
 
-        binary = read_binary_movie(io_data.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
-        assert np.array_equal(binary, _constant_stack(frame_values, _FRAME_HEIGHT, _FRAME_WIDTH))
+        binary = read_binary_movie(
+            file_path=io_data.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+        )
+        assert np.array_equal(
+            binary, _constant_stack(frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        )
 
-        expected_mean = np.full((_FRAME_HEIGHT, _FRAME_WIDTH), np.mean(frame_values), dtype=np.float32)
+        expected_mean = np.full((_FRAME_HEIGHT, _FRAME_WIDTH), fill_value=np.mean(frame_values), dtype=np.float32)
         assert np.allclose(context.runtime.detection.mean_image, expected_mean)
 
     def test_multi_plane_interleaves_frames(
@@ -129,9 +136,11 @@ class TestConvertTiffsToBinary:
         """Verifies that two-plane conversion deinterleaves frames into even and odd plane streams."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=2, channel_number=1)
+        _write_parameters_json(directory=data_path, plane_number=2, channel_number=1)
         frame_values = [0, 1, 2, 3, 4, 5, 6, 7]
-        _write_constant_tiff(data_path / "recording.tif", frame_values, _FRAME_HEIGHT, _FRAME_WIDTH)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
 
         configuration = _build_configuration(data_path=data_path, output_path=output_path)
         acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=2, channel_number=1)
@@ -144,10 +153,18 @@ class TestConvertTiffsToBinary:
 
         convert_tiffs_to_binary(contexts=[context_0, context_1], workers=1)
 
-        binary_0 = read_binary_movie(context_0.runtime.io.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
-        binary_1 = read_binary_movie(context_1.runtime.io.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
-        assert np.array_equal(binary_0, _constant_stack([0, 2, 4, 6], _FRAME_HEIGHT, _FRAME_WIDTH))
-        assert np.array_equal(binary_1, _constant_stack([1, 3, 5, 7], _FRAME_HEIGHT, _FRAME_WIDTH))
+        binary_0 = read_binary_movie(
+            file_path=context_0.runtime.io.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+        )
+        binary_1 = read_binary_movie(
+            file_path=context_1.runtime.io.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+        )
+        assert np.array_equal(
+            binary_0, _constant_stack(frame_values=[0, 2, 4, 6], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        )
+        assert np.array_equal(
+            binary_1, _constant_stack(frame_values=[1, 3, 5, 7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        )
         assert context_0.runtime.io.frame_count == 4
         assert context_1.runtime.io.frame_count == 4
         assert np.allclose(context_0.runtime.detection.mean_image, 3.0)
@@ -159,9 +176,11 @@ class TestConvertTiffsToBinary:
         """Verifies that two-channel conversion routes channels into separate binaries across multiple batches."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=1, channel_number=2)
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=2)
         frame_values = [0, 1, 2, 3, 4, 5, 6, 7]
-        _write_constant_tiff(data_path / "recording.tif", frame_values, _FRAME_HEIGHT, _FRAME_WIDTH)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
 
         configuration = _build_configuration(data_path=data_path, output_path=output_path)
         configuration.main.two_channels = True
@@ -179,10 +198,18 @@ class TestConvertTiffsToBinary:
         convert_tiffs_to_binary(contexts=[context], workers=1)
 
         io_data = context.runtime.io
-        binary_1 = read_binary_movie(io_data.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
-        binary_2 = read_binary_movie(io_data.registered_binary_path_channel_2, _FRAME_HEIGHT, _FRAME_WIDTH)
-        assert np.array_equal(binary_1, _constant_stack([0, 2, 4, 6], _FRAME_HEIGHT, _FRAME_WIDTH))
-        assert np.array_equal(binary_2, _constant_stack([1, 3, 5, 7], _FRAME_HEIGHT, _FRAME_WIDTH))
+        binary_1 = read_binary_movie(
+            file_path=io_data.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+        )
+        binary_2 = read_binary_movie(
+            file_path=io_data.registered_binary_path_channel_2, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+        )
+        assert np.array_equal(
+            binary_1, _constant_stack(frame_values=[0, 2, 4, 6], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        )
+        assert np.array_equal(
+            binary_2, _constant_stack(frame_values=[1, 3, 5, 7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        )
         assert io_data.frame_count == 4
         assert np.allclose(context.runtime.detection.mean_image, 3.0)
         assert np.allclose(context.runtime.detection.mean_image_channel_2, 4.0)
@@ -193,9 +220,11 @@ class TestConvertTiffsToBinary:
         """Verifies that disabling first_channel_functional routes the functional stream to the second interleave."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=1, channel_number=2)
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=2)
         frame_values = [0, 1, 2, 3, 4, 5, 6, 7]
-        _write_constant_tiff(data_path / "recording.tif", frame_values, _FRAME_HEIGHT, _FRAME_WIDTH)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
 
         configuration = _build_configuration(data_path=data_path, output_path=output_path)
         configuration.main.two_channels = True
@@ -212,11 +241,19 @@ class TestConvertTiffsToBinary:
         convert_tiffs_to_binary(contexts=[context], workers=1)
 
         io_data = context.runtime.io
-        binary_1 = read_binary_movie(io_data.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
-        binary_2 = read_binary_movie(io_data.registered_binary_path_channel_2, _FRAME_HEIGHT, _FRAME_WIDTH)
+        binary_1 = read_binary_movie(
+            file_path=io_data.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+        )
+        binary_2 = read_binary_movie(
+            file_path=io_data.registered_binary_path_channel_2, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+        )
         # With the functional channel set to the second interleave slot, the functional binary receives the odd frames.
-        assert np.array_equal(binary_1, _constant_stack([1, 3, 5, 7], _FRAME_HEIGHT, _FRAME_WIDTH))
-        assert np.array_equal(binary_2, _constant_stack([0, 2, 4, 6], _FRAME_HEIGHT, _FRAME_WIDTH))
+        assert np.array_equal(
+            binary_1, _constant_stack(frame_values=[1, 3, 5, 7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        )
+        assert np.array_equal(
+            binary_2, _constant_stack(frame_values=[0, 2, 4, 6], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        )
 
     def test_mroi_single_channel_slices_roi_lines(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -224,9 +261,11 @@ class TestConvertTiffsToBinary:
         """Verifies that MROI conversion crops each frame to its ROI line range before writing the binary."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=1, channel_number=1)
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
         frame_values = [0, 1, 2, 3]
-        _write_constant_tiff(data_path / "recording.tif", frame_values, _FRAME_HEIGHT, _FRAME_WIDTH)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
 
         configuration = _build_configuration(data_path=data_path, output_path=output_path)
         acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1, roi_number=2)
@@ -246,8 +285,10 @@ class TestConvertTiffsToBinary:
         assert io_data.frame_height == roi_height
         assert io_data.frame_width == _FRAME_WIDTH
 
-        binary = read_binary_movie(io_data.registered_binary_path, roi_height, _FRAME_WIDTH)
-        assert np.array_equal(binary, _constant_stack(frame_values, roi_height, _FRAME_WIDTH))
+        binary = read_binary_movie(
+            file_path=io_data.registered_binary_path, frame_height=roi_height, frame_width=_FRAME_WIDTH
+        )
+        assert np.array_equal(binary, _constant_stack(frame_values=frame_values, height=roi_height, width=_FRAME_WIDTH))
 
     def test_mroi_two_channels_slices_both_streams(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -255,9 +296,11 @@ class TestConvertTiffsToBinary:
         """Verifies that MROI two-channel conversion crops both channel streams to the ROI line range."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=1, channel_number=2)
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=2)
         frame_values = [0, 1, 2, 3, 4, 5, 6, 7]
-        _write_constant_tiff(data_path / "recording.tif", frame_values, _FRAME_HEIGHT, _FRAME_WIDTH)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
 
         configuration = _build_configuration(data_path=data_path, output_path=output_path)
         configuration.main.two_channels = True
@@ -277,10 +320,18 @@ class TestConvertTiffsToBinary:
         io_data = context.runtime.io
         roi_height = mroi_lines[-1] - mroi_lines[0] + 1
         assert io_data.frame_height == roi_height
-        binary_1 = read_binary_movie(io_data.registered_binary_path, roi_height, _FRAME_WIDTH)
-        binary_2 = read_binary_movie(io_data.registered_binary_path_channel_2, roi_height, _FRAME_WIDTH)
-        assert np.array_equal(binary_1, _constant_stack([0, 2, 4, 6], roi_height, _FRAME_WIDTH))
-        assert np.array_equal(binary_2, _constant_stack([1, 3, 5, 7], roi_height, _FRAME_WIDTH))
+        binary_1 = read_binary_movie(
+            file_path=io_data.registered_binary_path, frame_height=roi_height, frame_width=_FRAME_WIDTH
+        )
+        binary_2 = read_binary_movie(
+            file_path=io_data.registered_binary_path_channel_2, frame_height=roi_height, frame_width=_FRAME_WIDTH
+        )
+        assert np.array_equal(
+            binary_1, _constant_stack(frame_values=[0, 2, 4, 6], height=roi_height, width=_FRAME_WIDTH)
+        )
+        assert np.array_equal(
+            binary_2, _constant_stack(frame_values=[1, 3, 5, 7], height=roi_height, width=_FRAME_WIDTH)
+        )
 
     def test_multiple_files_continue_on_empty_plane_batch(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -288,11 +339,15 @@ class TestConvertTiffsToBinary:
         """Verifies that a file boundary shifting the interleave can leave a plane with no frames in a batch."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=2, channel_number=1)
+        _write_parameters_json(directory=data_path, plane_number=2, channel_number=1)
         # The first file holds three frames (an odd count), shifting the interleave offset so that the trailing
         # single-frame file contributes no frames to plane 0 but one frame to plane 1.
-        _write_constant_tiff(data_path / "recording_0.tif", [0, 1, 2], _FRAME_HEIGHT, _FRAME_WIDTH)
-        _write_constant_tiff(data_path / "recording_1.tif", [3], _FRAME_HEIGHT, _FRAME_WIDTH)
+        _write_constant_tiff(
+            file_path=data_path / "recording_0.tif", frame_values=[0, 1, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
+        _write_constant_tiff(
+            file_path=data_path / "recording_1.tif", frame_values=[3], height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
 
         configuration = _build_configuration(data_path=data_path, output_path=output_path)
         acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=2, channel_number=1)
@@ -305,10 +360,14 @@ class TestConvertTiffsToBinary:
 
         convert_tiffs_to_binary(contexts=[context_0, context_1], workers=1)
 
-        binary_0 = read_binary_movie(context_0.runtime.io.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
-        binary_1 = read_binary_movie(context_1.runtime.io.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
-        assert np.array_equal(binary_0, _constant_stack([0, 2], _FRAME_HEIGHT, _FRAME_WIDTH))
-        assert np.array_equal(binary_1, _constant_stack([1, 3], _FRAME_HEIGHT, _FRAME_WIDTH))
+        binary_0 = read_binary_movie(
+            file_path=context_0.runtime.io.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+        )
+        binary_1 = read_binary_movie(
+            file_path=context_1.runtime.io.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+        )
+        assert np.array_equal(binary_0, _constant_stack(frame_values=[0, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH))
+        assert np.array_equal(binary_1, _constant_stack(frame_values=[1, 3], height=_FRAME_HEIGHT, width=_FRAME_WIDTH))
 
     def test_single_frame_tiff(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -316,8 +375,10 @@ class TestConvertTiffsToBinary:
         """Verifies that a single-page TIFF is converted into a single-frame binary."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=1, channel_number=1)
-        _write_constant_tiff(data_path / "recording.tif", [7], _FRAME_HEIGHT, _FRAME_WIDTH)
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=[7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
 
         configuration = _build_configuration(data_path=data_path, output_path=output_path)
         acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
@@ -329,8 +390,10 @@ class TestConvertTiffsToBinary:
 
         io_data = context.runtime.io
         assert io_data.frame_count == 1
-        binary = read_binary_movie(io_data.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
-        assert np.array_equal(binary, _constant_stack([7], _FRAME_HEIGHT, _FRAME_WIDTH))
+        binary = read_binary_movie(
+            file_path=io_data.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+        )
+        assert np.array_equal(binary, _constant_stack(frame_values=[7], height=_FRAME_HEIGHT, width=_FRAME_WIDTH))
 
     def test_ignored_file_names_are_excluded(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
@@ -338,9 +401,11 @@ class TestConvertTiffsToBinary:
         """Verifies that files whose stem matches ignored_file_names are skipped during discovery."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=1, channel_number=1)
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
         frame_values = [0, 1, 2, 3]
-        _write_constant_tiff(data_path / "recording.tif", frame_values, _FRAME_HEIGHT, _FRAME_WIDTH)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
         (data_path / "ignored.tif").write_bytes(b"not a real tiff")
 
         configuration = _build_configuration(data_path=data_path, output_path=output_path)
@@ -354,8 +419,38 @@ class TestConvertTiffsToBinary:
 
         io_data = context.runtime.io
         assert io_data.frame_count == len(frame_values)
-        binary = read_binary_movie(io_data.registered_binary_path, _FRAME_HEIGHT, _FRAME_WIDTH)
-        assert np.array_equal(binary, _constant_stack(frame_values, _FRAME_HEIGHT, _FRAME_WIDTH))
+        binary = read_binary_movie(
+            file_path=io_data.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+        )
+        assert np.array_equal(
+            binary, _constant_stack(frame_values=frame_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        )
+
+    def test_frame_count_mismatch_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a binary sized for more frames than the source files deliver raises a RuntimeError."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
+        _write_constant_tiff(
+            file_path=data_path / "recording.tif", frame_values=[0, 1, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH
+        )
+
+        # Inflates the interleave accounting by one frame, so each binary is sized for a frame the TIFF never delivers.
+        # This reproduces an accounting disagreement that would otherwise leave a silently truncated binary behind.
+        def _inflated_frame_count(total_frames: int, interleave_stride: int, position: int) -> int:  # noqa: ARG001
+            """Returns an inflated per-position frame count that exceeds what the source TIFF files deliver."""
+            return (total_frames // interleave_stride) + 1
+
+        monkeypatch.setattr("cindra.io.tiff._resolve_interleave_frame_count", _inflated_frame_count)
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        context = _build_context(
+            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
+        )
+
+        with pytest.raises(RuntimeError, match=r"binary file\s+was sized for 4 frames"):
+            convert_tiffs_to_binary(contexts=[context], workers=1)
 
     def test_empty_contexts_raises(self) -> None:
         """Verifies that providing no contexts raises a ValueError."""
@@ -382,7 +477,7 @@ class TestGetFrameDimensions:
         """Verifies that an empty (zero-page) first TIFF file raises a ValueError."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=1, channel_number=1)
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
         empty_tiff = data_path / "empty.tif"
         with TiffWriter(empty_tiff):
             pass
@@ -402,14 +497,14 @@ class TestGetFrameDimensions:
         """Verifies that a TIFF holding differently shaped frames raises an error that names it and the remedy."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=1, channel_number=1)
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
 
         # Reproduces an anatomical z-stack sitting beside the recording's imaging files, which is shaped differently
         # and would otherwise fail to broadcast into a binary sized for the recording.
         recording_tiff = data_path / "mesoscope_000001.tif"
         zstack_tiff = data_path / "zstack.tif"
-        _write_constant_tiff(recording_tiff, frame_values=[1, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
-        _write_constant_tiff(zstack_tiff, frame_values=[3], height=_FRAME_HEIGHT * 2, width=_FRAME_WIDTH * 2)
+        _write_constant_tiff(file_path=recording_tiff, frame_values=[1, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        _write_constant_tiff(file_path=zstack_tiff, frame_values=[3], height=_FRAME_HEIGHT * 2, width=_FRAME_WIDTH * 2)
 
         configuration = _build_configuration(data_path=data_path, output_path=output_path)
         acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
@@ -425,15 +520,48 @@ class TestGetFrameDimensions:
                 decode_workers=1,
             )
 
+    def test_many_differently_shaped_tiffs_truncate_the_report(self, tmp_path: Path) -> None:
+        """Verifies that more mismatched files than the report limit are summarized with a remainder count."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
+
+        recording_tiff = data_path / "mesoscope_000001.tif"
+        _write_constant_tiff(file_path=recording_tiff, frame_values=[1], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+
+        # Writes one more mismatched file than the report limit, so the message names the limit and counts the rest.
+        mismatched_count = _MISMATCH_REPORT_LIMIT + 1
+        mismatched_tiffs = []
+        for file_index in range(mismatched_count):
+            mismatched_tiff = data_path / f"zstack_{file_index}.tif"
+            _write_constant_tiff(
+                file_path=mismatched_tiff, frame_values=[2], height=_FRAME_HEIGHT * 2, width=_FRAME_WIDTH * 2
+            )
+            mismatched_tiffs.append(mismatched_tiff)
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        context = _build_context(
+            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
+        )
+
+        with pytest.raises(ValueError, match=r"and 1 more"):
+            _get_frame_dimensions(
+                tiff_files=[recording_tiff, *mismatched_tiffs],
+                contexts=[context],
+                acquisition=acquisition,
+                decode_workers=1,
+            )
+
     def test_uniformly_shaped_tiffs_pass(self, tmp_path: Path) -> None:
         """Verifies that files sharing a frame shape resolve dimensions without raising."""
         data_path = tmp_path / "data"
         output_path = tmp_path / "output"
-        _write_parameters_json(data_path, plane_number=1, channel_number=1)
+        _write_parameters_json(directory=data_path, plane_number=1, channel_number=1)
         first_tiff = data_path / "mesoscope_000001.tif"
         second_tiff = data_path / "mesoscope_000002.tif"
-        _write_constant_tiff(first_tiff, frame_values=[1, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
-        _write_constant_tiff(second_tiff, frame_values=[3, 4], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        _write_constant_tiff(file_path=first_tiff, frame_values=[1, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+        _write_constant_tiff(file_path=second_tiff, frame_values=[3, 4], height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
 
         configuration = _build_configuration(data_path=data_path, output_path=output_path)
         acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)

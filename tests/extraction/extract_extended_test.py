@@ -13,16 +13,7 @@ def _make_circular_roi(
     radius: int = 5,
     frame_width: int = 64,
 ) -> ROIStatistics:
-    """Creates an ROIStatistics instance with a circular mask.
-
-    Args:
-        centroid: The (y, x) centroid position.
-        radius: The radius of the circular mask in pixels.
-        frame_width: The width of the frame in pixels.
-
-    Returns:
-        An ROIStatistics instance with circular pixel coordinates.
-    """
+    """Creates an ROIStatistics instance backed by a circular mask with L2-normalized pixel weights."""
     y_pixels = []
     x_pixels = []
     for delta_y in range(-radius, radius + 1):
@@ -71,15 +62,15 @@ class TestCreateAndUnpackMasks:
 
         assert len(roi_masks) == 2
         for indices, weights in roi_masks:
-            assert len(indices) > 0
-            assert len(weights) > 0
+            assert indices.size > 0
+            assert weights.size > 0
             assert indices.dtype == np.int32
             assert weights.dtype == np.float32
 
         assert neuropil_masks is not None
         assert len(neuropil_masks) == 2
         for neuropil_indices in neuropil_masks:
-            assert len(neuropil_indices) > 0
+            assert neuropil_indices.size > 0
 
     def test_without_neuropil_extraction(self) -> None:
         """Verifies that mask creation without neuropil extraction returns None for neuropil masks."""
@@ -100,14 +91,16 @@ class TestCreateAndUnpackMasks:
         )
 
         assert len(roi_masks) == 1
-        assert len(roi_masks[0][0]) > 0
+        assert roi_masks[0][0].size > 0
 
         assert neuropil_masks is None
 
     def test_multiple_rois_produce_matching_mask_count(self) -> None:
         """Verifies that the number of cell masks matches the number of input ROIs."""
         roi_count = 5
-        roi_statistics = [_make_circular_roi(centroid=(10 + i * 10, 10 + i * 10), radius=3) for i in range(roi_count)]
+        roi_statistics = [
+            _make_circular_roi(centroid=(10 + index * 10, 10 + index * 10), radius=3) for index in range(roi_count)
+        ]
 
         roi_masks, _ = _create_and_unpack_masks(
             roi_statistics=roi_statistics,

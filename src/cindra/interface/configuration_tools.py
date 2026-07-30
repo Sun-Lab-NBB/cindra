@@ -28,10 +28,10 @@ from ..dataclasses import (
 )
 from .mcp_instance import mcp
 
-_MAX_SPEED_FACTOR: int = 5
+_MAXIMUM_SPEED_FACTOR: int = 5
 """The upper bound of the typical speed_factor range for diffeomorphic registration."""
 
-_MAX_PERCENTAGE: int = 100
+_MAXIMUM_PERCENTAGE: int = 100
 """The maximum valid value for percentage-based parameters (prevalence, percentile)."""
 
 _FORBIDDEN_FILESYSTEM_CHARACTERS: frozenset[str] = frozenset('\\/:*?"<>|\x00')
@@ -47,9 +47,11 @@ def generate_config_file_tool(
 ) -> dict[str, str | bool]:
     """Generates a default configuration YAML file for the specified pipeline type.
 
-    Creates a configuration file with sensible defaults that can be used directly or modified before processing. For
-    the full set of writable parameters and their constraints, consult the single-recording-configuration and
-    multi-recording-configuration cindra skills.
+    Creates a configuration file with defaults for every user-tunable parameter. The single-recording defaults
+    validate as generated, while the multi-recording defaults leave 'recording_io.dataset_name' empty, which
+    validate_config_file_tool reports as an error until a name is set (prepare_multi_recording_batch_tool sets it,
+    together with 'recording_io.recording_directories', for batch runs). For the full set of writable parameters and
+    their constraints, consult the single-recording-configuration and multi-recording-configuration cindra skills.
 
     Args:
         output_path: The absolute path where the configuration file should be saved.
@@ -99,7 +101,7 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
     Returns:
         On success, contains 'single_recording_candidates' and 'multi_recording_candidates' lists of recording root
         paths with their respective counts, and any permission 'errors' encountered during the search. On failure,
-        contains an 'error' describing the issue.
+        contains an 'error' describing the issue. Both cases include a 'success' flag.
     """
     root_path = Path(root_directory)
 
@@ -166,13 +168,13 @@ def resolve_dataset_name_tool(
     """Constructs a qualified dataset name by combining a shared base name with a batch-specific specifier.
 
     When multiple groups of recordings share the same analysis type (dataset_name), each group needs a unique qualified
-    name for its output directory and batch processing key. This tool combines the user-provided dataset name with a
+    name for its output directory and batch processing key. Combines the user-provided dataset name with a
     specifier that distinguishes the group.
 
     When no specifier is provided, one is derived automatically from the deepest common parent directory of the
     recording paths. For example, recordings under /data/animal_A/rec1 and /data/animal_A/rec2 yield specifier
-    'animal_A'. The agent can also determine the specifier through semantic decomposition of recording names or
-    directory structure, or the user can provide one explicitly.
+    'animal_a', because all returned names are lowercased. The agent can also determine the specifier through
+    semantic decomposition of recording names or directory structure, or the user can provide one explicitly.
 
     Args:
         dataset_name: The shared name identifying the analysis type (e.g., 'learning_task'). This is the base name
@@ -185,7 +187,8 @@ def resolve_dataset_name_tool(
 
     Returns:
         On success, contains the qualified 'dataset_name' (specifier_base), the 'base_name', and the 'specifier'
-        used. On failure, contains an 'error' describing the issue. Both cases include a 'success' flag.
+        used, all lowercased. On failure, contains an 'error' describing the issue. Both cases include a 'success'
+        flag.
     """
     if not dataset_name:
         return {
@@ -237,7 +240,7 @@ def read_config_file_tool(file_path: str) -> dict[str, str | bool | list[str] | 
     """Reads a YAML configuration file and returns its raw contents as a dictionary.
 
     Notes:
-        This function does not require conformance to the current cindra configuration schema making it suitable for
+        Accepts any YAML mapping regardless of the current cindra configuration schema, which makes it suitable for
         reading legacy cindra configurations, or any other YAML files that need to be inspected or converted.
 
     Args:
@@ -313,10 +316,10 @@ def validate_config_file_tool(file_path: str) -> dict[str, str | bool | list[str
     Returns:
         On success, contains the resolved 'file_path', 'pipeline_type', and overall 'valid' status, plus 'errors',
         'warnings', and 'non_default_parameters' when non-empty (each of these three keys is omitted when empty).
-        'errors' and 'warnings' are lists of human-readable strings; 'non_default_parameters' maps each changed
+        'errors' and 'warnings' are lists of human-readable strings, and 'non_default_parameters' maps each changed
         'section.parameter' dotted path to a {'current', 'default'} value pair. A 'success' value of True only means
-        the tool ran — gate downstream steps on the 'valid' field, which is False whenever 'errors' is non-empty. On
-        failure, contains an 'error' describing the issue. Both cases include a 'success' flag.
+        the tool ran, so gate downstream steps on the 'valid' field, which is False whenever 'errors' is non-empty.
+        On failure, contains an 'error' describing the issue. Both cases include a 'success' flag.
     """
     path = Path(file_path)
 
@@ -403,7 +406,7 @@ def validate_config_file_tool(file_path: str) -> dict[str, str | bool | list[str
     return result
 
 
-def _to_json_compatible(value: object) -> object:
+def _convert_to_json_compatible(value: object) -> object:
     """Converts a Python value to a JSON-compatible type for MCP tool output.
 
     Args:
@@ -417,15 +420,12 @@ def _to_json_compatible(value: object) -> object:
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, tuple):
-        return [_to_json_compatible(item) for item in value]
+        return [_convert_to_json_compatible(item) for item in value]
     return value
 
 
 def _identify_non_default_parameters(config: object, default: object, prefix: str = "") -> dict[str, dict[str, object]]:
     """Compares a loaded configuration against its default instance and reports the parameters that differ.
-
-    Returns a mapping of dotted parameter paths to their current and default values for all parameters that differ
-    from the default.
 
     Args:
         config: The loaded configuration dataclass instance to compare.
@@ -451,8 +451,8 @@ def _identify_non_default_parameters(config: object, default: object, prefix: st
             differences.update(nested)
         elif current_value != default_value:
             differences[full_path] = {
-                "current": _to_json_compatible(current_value),
-                "default": _to_json_compatible(default_value),
+                "current": _convert_to_json_compatible(current_value),
+                "default": _convert_to_json_compatible(default_value),
             }
 
     return differences
@@ -482,7 +482,7 @@ def _validate_single_recording(
             "channel available."
         )
 
-    # File I/O section — pipeline-set parameter warnings.
+    # File I/O section warnings for pipeline-set parameters.
     if config.file_io.data_path is not None:
         warnings.append("file_io.data_path is set (pipeline-set parameter — will be overwritten at runtime).")
     if config.file_io.output_path is not None:
@@ -609,9 +609,9 @@ def _validate_single_recording(
             f"signal_extraction.inner_neuropil_border_radius must be non-negative "
             f"(current: {config.signal_extraction.inner_neuropil_border_radius})."
         )
-    if not 0 <= config.signal_extraction.cell_probability_percentile <= _MAX_PERCENTAGE:
+    if not 0 <= config.signal_extraction.cell_probability_percentile <= _MAXIMUM_PERCENTAGE:
         errors.append(
-            f"signal_extraction.cell_probability_percentile must be in [0, {_MAX_PERCENTAGE}] "
+            f"signal_extraction.cell_probability_percentile must be in [0, {_MAXIMUM_PERCENTAGE}] "
             f"(current: {config.signal_extraction.cell_probability_percentile})."
         )
     if not 0 <= config.signal_extraction.classification_threshold <= 1:
@@ -645,9 +645,9 @@ def _validate_single_recording(
             f"spike_deconvolution.baseline_sigma must be non-negative "
             f"(current: {config.spike_deconvolution.baseline_sigma})."
         )
-    if not 0 <= config.spike_deconvolution.baseline_percentile <= _MAX_PERCENTAGE:
+    if not 0 <= config.spike_deconvolution.baseline_percentile <= _MAXIMUM_PERCENTAGE:
         errors.append(
-            f"spike_deconvolution.baseline_percentile must be in [0, {_MAX_PERCENTAGE}] "
+            f"spike_deconvolution.baseline_percentile must be in [0, {_MAXIMUM_PERCENTAGE}] "
             f"(current: {config.spike_deconvolution.baseline_percentile})."
         )
     valid_baseline_methods = {member.value for member in BaselineMethod}
@@ -742,9 +742,9 @@ def _validate_multi_recording(
             f"diffeomorphic_registration.speed_factor must be positive "
             f"(current: {config.diffeomorphic_registration.speed_factor})."
         )
-    elif not 1 <= config.diffeomorphic_registration.speed_factor <= _MAX_SPEED_FACTOR:
+    elif not 1 <= config.diffeomorphic_registration.speed_factor <= _MAXIMUM_SPEED_FACTOR:
         warnings.append(
-            f"diffeomorphic_registration.speed_factor is outside the typical 1-{_MAX_SPEED_FACTOR} range "
+            f"diffeomorphic_registration.speed_factor is outside the typical 1-{_MAXIMUM_SPEED_FACTOR} range "
             f"(current: {config.diffeomorphic_registration.speed_factor})."
         )
     valid_image_types = {member.value for member in ReferenceImageType}
@@ -757,14 +757,14 @@ def _validate_multi_recording(
     # ROI tracking section validations.
     if not 0 <= config.roi_tracking.threshold <= 1:
         errors.append(f"roi_tracking.threshold must be in [0, 1] (current: {config.roi_tracking.threshold}).")
-    if not 0 <= config.roi_tracking.mask_prevalence <= _MAX_PERCENTAGE:
+    if not 0 <= config.roi_tracking.mask_prevalence <= _MAXIMUM_PERCENTAGE:
         errors.append(
-            f"roi_tracking.mask_prevalence must be in [0, {_MAX_PERCENTAGE}] "
+            f"roi_tracking.mask_prevalence must be in [0, {_MAXIMUM_PERCENTAGE}] "
             f"(current: {config.roi_tracking.mask_prevalence})."
         )
-    if not 0 <= config.roi_tracking.pixel_prevalence <= _MAX_PERCENTAGE:
+    if not 0 <= config.roi_tracking.pixel_prevalence <= _MAXIMUM_PERCENTAGE:
         errors.append(
-            f"roi_tracking.pixel_prevalence must be in [0, {_MAX_PERCENTAGE}] "
+            f"roi_tracking.pixel_prevalence must be in [0, {_MAXIMUM_PERCENTAGE}] "
             f"(current: {config.roi_tracking.pixel_prevalence})."
         )
     if any(dimension <= 0 for dimension in config.roi_tracking.step_sizes):
@@ -791,9 +791,9 @@ def _validate_multi_recording(
             f"signal_extraction.inner_neuropil_border_radius must be non-negative "
             f"(current: {config.signal_extraction.inner_neuropil_border_radius})."
         )
-    if not 0 <= config.signal_extraction.cell_probability_percentile <= _MAX_PERCENTAGE:
+    if not 0 <= config.signal_extraction.cell_probability_percentile <= _MAXIMUM_PERCENTAGE:
         errors.append(
-            f"signal_extraction.cell_probability_percentile must be in [0, {_MAX_PERCENTAGE}] "
+            f"signal_extraction.cell_probability_percentile must be in [0, {_MAXIMUM_PERCENTAGE}] "
             f"(current: {config.signal_extraction.cell_probability_percentile})."
         )
     if not 0 <= config.signal_extraction.classification_threshold <= 1:
@@ -827,9 +827,9 @@ def _validate_multi_recording(
             f"spike_deconvolution.baseline_sigma must be non-negative "
             f"(current: {config.spike_deconvolution.baseline_sigma})."
         )
-    if not 0 <= config.spike_deconvolution.baseline_percentile <= _MAX_PERCENTAGE:
+    if not 0 <= config.spike_deconvolution.baseline_percentile <= _MAXIMUM_PERCENTAGE:
         errors.append(
-            f"spike_deconvolution.baseline_percentile must be in [0, {_MAX_PERCENTAGE}] "
+            f"spike_deconvolution.baseline_percentile must be in [0, {_MAXIMUM_PERCENTAGE}] "
             f"(current: {config.spike_deconvolution.baseline_percentile})."
         )
 

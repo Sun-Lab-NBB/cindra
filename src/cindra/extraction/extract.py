@@ -42,8 +42,7 @@ def extract_traces(context: RuntimeContext | MultiRecordingRuntimeContext, *, wo
         concurrently dispatched recordings can hold different worker budgets inside a single process.
 
     Args:
-        context: The runtime context for the recording being processed. Accepts either a single-recording
-            RuntimeContext or a multi-recording MultiRecordingRuntimeContext. Modified in-place to store extraction
+        context: The runtime context for the recording being processed. Modified in-place to store extraction
             outputs including fluorescence traces, deconvolved spikes, and colocalization data.
         workers: The number of parallel workers allocated to this extraction job. Must be a positive integer.
     """
@@ -144,6 +143,7 @@ def _create_and_unpack_masks(
     roi_statistics: list[ROIStatistics],
     frame_height: int,
     frame_width: int,
+    *,
     extract_neuropil: bool,
     allow_overlap: bool,
     cell_probability_percentile: int,
@@ -356,7 +356,7 @@ def _extract_single_recording(context: RuntimeContext) -> None:
     Notes:
         Orchestrates the full extraction pipeline for one or both channels. For structural channel 2
         data, channel 1 masks are reused and intensity colocalization is computed. For functional channel 2 data,
-        independent masks are created and spatial colocalization is computed between the two channel's ROIs. Results
+        independent masks are created and spatial colocalization is computed between the two channels' ROIs. Results
         are written into context.runtime.extraction and context.runtime.timing.
 
     Args:
@@ -607,9 +607,10 @@ def _extract_functional_channel_2(
     """Extracts functional channel 2 fluorescence with independent masks and computes spatial colocalization.
 
     Notes:
-        When both channels are functional, channel 2 has its own independently detected ROIs. Creates
-        masks from those ROIs, extracts fluorescence, classifies ROIs, computes delta fluorescence and spike
-        deconvolution, and finally computes spatial colocalization between channel 1 and channel 2 ROIs.
+        When both channels are functional, channel 2 has its own independently detected ROIs. Creates masks from
+        those ROIs, extracts fluorescence, computes neuropil-corrected skewness for the channel 2 ROI statistics,
+        classifies ROIs, computes delta fluorescence and spike deconvolution, and finally computes spatial
+        colocalization between channel 1 and channel 2 ROIs.
 
     Args:
         context: The RuntimeContext containing configuration and mutable runtime data. Modified in-place to store
@@ -742,7 +743,8 @@ def _extract_functional_channel_2(
         extraction_data.spikes_channel_2 = np.zeros_like(extraction_data.cell_fluorescence_channel_2)
 
     # Computes spatial colocalization between channel 1 and channel 2 ROIs.
-    if extraction_data.roi_statistics is not None:  # pragma: no branch — channel 1 statistics always exist here
+    # Channel 1 ROI statistics always exist at this point, so the guard never takes the negative branch.
+    if extraction_data.roi_statistics is not None:  # pragma: no branch
         extraction_data.cell_colocalization = compute_spatial_colocalization(
             rois_channel_1=extraction_data.roi_statistics,
             rois_channel_2=roi_statistics_channel_2,
@@ -758,7 +760,7 @@ def _extract_multi_recording_channel(
     extraction_config: SignalExtraction,
     deconvolution_config: SpikeDeconvolution,
     channel_label: str,
-    tau: float,
+    time_constant: float,
     sampling_rate: float,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.float32], NDArray[np.float32]]:
     """Extracts fluorescence, computes delta-F, and deconvolves spikes for one channel of a multi-recording extraction.
@@ -774,13 +776,13 @@ def _extract_multi_recording_channel(
         extraction_config: The signal extraction configuration parameters.
         deconvolution_config: The spike deconvolution configuration parameters.
         channel_label: A descriptive label for the channel being processed, used in log messages.
-        tau: The timescale of the calcium indicator sensor in seconds.
+        time_constant: The timescale of the calcium indicator sensor in seconds.
         sampling_rate: The per-plane sampling rate in Hertz.
 
     Returns:
-        A tuple of four arrays: cell fluorescence, neuropil fluorescence, neuropil-subtracted fluorescence, and
-        deconvolved spikes. Each has shape (roi_count, frame_count). If spike extraction is disabled, the subtracted
-        fluorescence and spikes arrays are filled with zeroes.
+        A tuple of four arrays: cell fluorescence, neuropil fluorescence, neuropil-and-baseline-corrected delta
+        fluorescence, and deconvolved spikes. Each has shape (roi_count, frame_count). If spike extraction is
+        disabled, the delta fluorescence and spikes arrays are filled with zeroes.
     """
     # Creates cell and neuropil masks from backward-transformed tracked ROI statistics.
     roi_masks, neuropil_masks = _create_and_unpack_masks(
@@ -819,7 +821,7 @@ def _extract_multi_recording_channel(
         spikes = apply_oasis_deconvolution(
             cell_fluorescence=subtracted_fluorescence,
             batch_size=extraction_config.batch_size,
-            time_constant=tau,
+            time_constant=time_constant,
             sampling_rate=sampling_rate,
         )
         console.echo(
@@ -845,10 +847,7 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
 
     Notes:
         Expects that the multi-recording discovery phase has already been completed, meaning
-        backward-transformed ROI statistics are available in the recording's extraction data. Tracked ROIs are always
-        extracted with ``allow_overlap=True`` since multi-recording template masks are spatially distinct
-        by construction.
-        No reclassification is performed because tracked ROIs are already known cells.
+        backward-transformed ROI statistics are available in the recording's extraction data.
 
     Args:
         context: The MultiRecordingRuntimeContext for the recording being processed. Modified in-place to
@@ -856,8 +855,8 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
             and colocalization data.
 
     Raises:
-        RuntimeError: If backward-transformed ROI statistics are not available, if the combined data is not loaded,
-            or if required binary paths are missing from the single-recording plane contexts.
+        RuntimeError: If the combined single-recording data is not loaded or if backward-transformed ROI statistics
+            are not available.
     """
     # Resolves configuration and runtime references.
     extraction_config = context.configuration.signal_extraction
@@ -930,7 +929,7 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
             extraction_config=extraction_config,
             deconvolution_config=deconvolution_config,
             channel_label=f"recording {recording_id} channel 1",
-            tau=tau,
+            time_constant=tau,
             sampling_rate=sampling_rate,
         )
 
@@ -976,7 +975,7 @@ def _extract_multi_recording(context: MultiRecordingRuntimeContext) -> None:
                 extraction_config=extraction_config,
                 deconvolution_config=deconvolution_config,
                 channel_label=f"recording {recording_id} channel 2",
-                tau=tau,
+                time_constant=tau,
                 sampling_rate=sampling_rate,
             )
 
