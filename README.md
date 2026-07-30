@@ -803,8 +803,8 @@ The `run` command supports executing individual pipeline phases (`--binarize`, `
 for single-recording, `--discover` and `--extract` for multi-recording), targeting specific planes (`--target-plane`) or
 recordings (`--target-recording`), and allocating workers per phase (`--binarize-workers`, `--register-workers`,
 `--process-workers`, `--discover-workers`, `--extract-workers`). Omitting a worker option gives that phase its measured
-default allocation, and the combination phase takes no worker option because it merges the per-plane result files with
-serial input and output.
+default allocation, passing `-1` requests every available core, and any positive value is used exactly. The combination
+phase takes no worker option because it merges the per-plane result files with serial input and output.
 
 #### cindra-gui
 

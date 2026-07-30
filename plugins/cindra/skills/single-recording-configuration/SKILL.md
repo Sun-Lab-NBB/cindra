@@ -66,10 +66,10 @@ configuration directly from the file without any runtime overrides.
 CPU worker allocation lives outside the configuration file. Each processing stage receives its worker count as an
 invocation argument, supplied by the `cindra run` options `-bw/--binarize-workers`, `-rw/--register-workers` and
 `-pw/--process-workers`, or by `execute_processing_jobs_tool` and `execute_full_pipeline_tool` at dispatch time.
-Omitting a `cindra run` worker option applies the measured default of 4 workers for binarization, 8 for registration
-and 10 for processing, and setting one to -1 requests every available core. The MCP tools invert that convention:
-their `workers_per_job` defaults to -1, which accepts those same measured defaults, and any positive value overrides
-every non-fixed resource class alike.
+Both interfaces share one convention. Omitting a `cindra run` worker option, or leaving the MCP `workers_per_job`
+as None, applies the measured default of 4 workers for binarization, 8 for registration and 10 for processing.
+Setting either to -1 requests every available core. Any positive value is used exactly, and on the MCP tools it
+overrides every non-fixed resource class alike.
 
 ---
 

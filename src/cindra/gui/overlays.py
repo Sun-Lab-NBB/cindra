@@ -31,7 +31,8 @@ _STATISTIC_FIELD_MAP: dict[int, str] = {
     ROIColorMode.RECORDING_COUNT: "recording_count",
 }
 """Maps ROIColorMode values to the corresponding ROIStatistics/ROIMask attribute names for percentile-based color
-modes. The recording_count value is resolved on ROIMask, and unmapped attributes default to 0.0."""
+modes. The recording_count value is resolved on ROIMask, the colocalization_probability value is resolved from column
+1 of the cell_colocalization array, and unmapped attributes default to 0.0."""
 
 
 def build_views(
@@ -126,10 +127,10 @@ def compute_colors(
     cell_classification: NDArray[np.float32],
     cell_colocalization: NDArray[np.float32],
     roi_colormap: str,
-    colocalization_threshold: float,
     classifier_threshold: float = 0.5,
     *,
     two_channels: bool = False,
+    intensity_colocalization: bool = False,
 ) -> ColorArrays:
     """Computes color statistics and RGB color arrays for all ROIs.
 
@@ -142,11 +143,15 @@ def compute_colors(
         frame_height: Height of the field of view in pixels.
         frame_width: Width of the field of view in pixels.
         cell_classification: Cell classification array with shape (roi_count, 2).
-        cell_colocalization: Cell colocalization array with shape (roi_count, 2).
+        cell_colocalization: Cell colocalization array with shape (roi_count, 2). Column 0 holds the is-colocalized
+            flag under intensity colocalization and the matched channel 2 ROI index, with -1 for unmatched ROIs,
+            under spatial colocalization. Column 1 holds the colocalization probability or the mask overlap score.
+            An array of any other shape leaves every ROI attributed to channel 1.
         roi_colormap: Name of the matplotlib colormap applied when mapping ROI statistics to overlay colors.
-        colocalization_threshold: Display threshold applied to cell colocalization probabilities.
         classifier_threshold: Probability cutoff for initial binary cell/non-cell label assignment.
         two_channels: Determines whether channel 2 data is available.
+        intensity_colocalization: Determines whether the cell colocalization array uses the intensity column layout
+            produced for a structural channel 2 instead of the spatial layout produced for a functional channel 2.
 
     Returns:
         Computed color arrays for all ROIs.
@@ -165,10 +170,19 @@ def compute_colors(
     if two_channels:
         # Shifts hues into the channel 2 color range so the two channels are visually distinct.
         random_colors = random_colors / ROI_CONFIG.channel_2_color_divisor + ROI_CONFIG.channel_2_color_offset
-        is_channel_2 = cell_colocalization[:, 0] > colocalization_threshold
+        has_colocalization = cell_colocalization.ndim > 1 and cell_colocalization.shape[0] == roi_count
+        if not has_colocalization:
+            # Colocalization data is unavailable, so every ROI stays attributed to channel 1.
+            is_channel_2 = np.zeros((roi_count,), dtype=np.bool_)
+        elif intensity_colocalization:
+            # Column 0 holds the is-colocalized flag the extraction stage already thresholded.
+            is_channel_2 = cell_colocalization[:, 0] > 0
+        else:
+            # Column 0 holds the matched channel 2 ROI index, with -1 marking unmatched ROIs.
+            is_channel_2 = cell_colocalization[:, 0] >= 0
         # Preserves the original hues for normalization before zeroing channel 2 ROIs.
         random_hues = random_colors.copy()
-        # Zeros channel 2 ROIs so they render as black in the random color view.
+        # Zeros channel 2 ROIs so they render as red in the random color view.
         random_colors[is_channel_2] = 0
     else:
         random_hues = random_colors.copy()
@@ -184,6 +198,15 @@ def compute_colors(
         if field_name == "recording_count":
             # recording_count lives on ROIMask, not ROIStatistics, so it requires nested access.
             values = np.array([roi.mask.recording_count for roi in roi_statistics], dtype=np.float32)
+        elif field_name == "colocalization_probability":
+            # The colocalization score lives in column 1 of cell_colocalization rather than on ROIStatistics. The
+            # extraction stage writes the probability there in intensity mode and the mask overlap score in spatial
+            # mode, and both are per-ROI scores the percentile ramp can color directly.
+            values = (
+                cell_colocalization[:, 1].astype(np.float32)
+                if cell_colocalization.ndim > 1 and cell_colocalization.shape[0] == roi_count
+                else np.zeros((roi_count,), dtype=np.float32)
+            )
         else:
             values = np.array([getattr(roi, field_name, None) or 0.0 for roi in roi_statistics], dtype=np.float32)
         precomputed_statistics[field_name] = values.reshape(-1, 1)
@@ -619,11 +642,12 @@ def flip_rois(
 
     Toggles the classification labels (column 0) for all ROIs in ``selected_roi_indices`` and
     updates their overlay colors using the active colormap endpoints. The caller is responsible
-    for saving and updating the plot.
+    for updating the plot.
 
     Args:
         roi_statistics: The ROI statistics for the current view.
-        cell_classification: Cell classification array (column 0 labels are modified in place).
+        cell_classification: Cell classification array (column 0 labels are modified in place). The viewer passes an
+            in-memory copy, so the flips persist only until the labels are exported as a training dataset.
         color_arrays: The computed color arrays.
         roi_maps: The ROI index maps.
         selected_roi_indices: Indices of all ROIs to flip.

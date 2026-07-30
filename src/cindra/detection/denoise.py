@@ -12,6 +12,7 @@ from sklearn.decomposition import PCA  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
 from .utils import compute_spatial_taper_mask, compute_registration_blocks
+from ..allocation import ALL_CORES_REQUEST
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -37,9 +38,19 @@ def pca_denoise(
         frames: The input movie array with shape (num_frames, height, width). Modified in-place.
         block_size: The spatial dimensions (height, width) of each processing block.
         component_fraction: The fraction of PCA components to retain, relative to the smaller block dimension.
-        parallel_workers: The number of parallel threads for PCA fitting. Values of -1 or 0 use all available cores.
-            Defaults to 1 (sequential).
+        parallel_workers: The number of parallel threads for PCA fitting. Use -1 to request every available core, or
+            a positive count to use exactly that many threads. Defaults to 1 (sequential).
+
+    Raises:
+        ValueError: If parallel_workers is zero or is a negative value other than -1.
     """
+    if parallel_workers <= 0 and parallel_workers != ALL_CORES_REQUEST:
+        message = (
+            f"Unable to apply PCA denoising. The requested parallel worker count must be a positive integer, or -1 "
+            f"to request every available core, but encountered {parallel_workers}."
+        )
+        console.error(message=message, error=ValueError)
+
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
@@ -56,9 +67,9 @@ def pca_denoise(
     normalization = np.zeros((height, width), dtype=np.float32)
     reconstruction = np.zeros_like(frames)
 
-    # Resolves the effective worker count. Values <= 0 mean unlimited (all available cores), which
-    # ThreadPoolExecutor interprets as None.
-    effective_workers: int | None = None if parallel_workers <= 0 else parallel_workers
+    # Resolves the effective worker count. The all-cores request maps to None, which ThreadPoolExecutor interprets as
+    # its own default width.
+    effective_workers: int | None = None if parallel_workers == ALL_CORES_REQUEST else parallel_workers
 
     # Extracts and centers each block for PCA.
     block_slices: list[tuple[slice, slice]] = []

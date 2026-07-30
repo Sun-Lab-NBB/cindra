@@ -379,37 +379,37 @@ class RegistrationData:
 
         path = registration_directory / "bad_frames.npy"
         if path.exists():
-            self.bad_frames = np.load(path, mmap_mode="r+")
+            self.bad_frames = np.load(path, mmap_mode="r")
         path = registration_directory / "reference_image.npy"
         if path.exists():
-            self.reference_image = np.load(path, mmap_mode="r+")
+            self.reference_image = np.load(path, mmap_mode="r")
         path = registration_directory / "rigid_y_offsets.npy"
         if path.exists():
-            self.rigid_y_offsets = np.load(path, mmap_mode="r+")
+            self.rigid_y_offsets = np.load(path, mmap_mode="r")
         path = registration_directory / "rigid_x_offsets.npy"
         if path.exists():
-            self.rigid_x_offsets = np.load(path, mmap_mode="r+")
+            self.rigid_x_offsets = np.load(path, mmap_mode="r")
         path = registration_directory / "rigid_correlations.npy"
         if path.exists():
-            self.rigid_correlations = np.load(path, mmap_mode="r+")
+            self.rigid_correlations = np.load(path, mmap_mode="r")
         path = registration_directory / "nonrigid_y_offsets.npy"
         if path.exists():
-            self.nonrigid_y_offsets = np.load(path, mmap_mode="r+")
+            self.nonrigid_y_offsets = np.load(path, mmap_mode="r")
         path = registration_directory / "nonrigid_x_offsets.npy"
         if path.exists():
-            self.nonrigid_x_offsets = np.load(path, mmap_mode="r+")
+            self.nonrigid_x_offsets = np.load(path, mmap_mode="r")
         path = registration_directory / "nonrigid_correlations.npy"
         if path.exists():
-            self.nonrigid_correlations = np.load(path, mmap_mode="r+")
+            self.nonrigid_correlations = np.load(path, mmap_mode="r")
         path = registration_directory / "principal_component_extreme_images.npy"
         if path.exists():
-            self.principal_component_extreme_images = np.load(path, mmap_mode="r+")
+            self.principal_component_extreme_images = np.load(path, mmap_mode="r")
         path = registration_directory / "principal_component_projections.npy"
         if path.exists():
-            self.principal_component_projections = np.load(path, mmap_mode="r+")
+            self.principal_component_projections = np.load(path, mmap_mode="r")
         path = registration_directory / "principal_component_shift_metrics.npy"
         if path.exists():
-            self.principal_component_shift_metrics = np.load(path, mmap_mode="r+")
+            self.principal_component_shift_metrics = np.load(path, mmap_mode="r")
 
 
 @dataclass(slots=True)
@@ -560,30 +560,30 @@ class DetectionData:
         # Channel 1 arrays.
         path = detection_directory / "mean_image.npy"
         if path.exists():
-            self.mean_image = np.load(path, mmap_mode="r+")
+            self.mean_image = np.load(path, mmap_mode="r")
         path = detection_directory / "enhanced_mean_image.npy"
         if path.exists():
-            self.enhanced_mean_image = np.load(path, mmap_mode="r+")
+            self.enhanced_mean_image = np.load(path, mmap_mode="r")
         path = detection_directory / "maximum_projection.npy"
         if path.exists():
-            self.maximum_projection = np.load(path, mmap_mode="r+")
+            self.maximum_projection = np.load(path, mmap_mode="r")
         path = detection_directory / "correlation_map.npy"
         if path.exists():
-            self.correlation_map = np.load(path, mmap_mode="r+")
+            self.correlation_map = np.load(path, mmap_mode="r")
 
         # Channel 2 arrays.
         path = detection_directory / "mean_image_channel_2.npy"
         if path.exists():
-            self.mean_image_channel_2 = np.load(path, mmap_mode="r+")
+            self.mean_image_channel_2 = np.load(path, mmap_mode="r")
         path = detection_directory / "enhanced_mean_image_channel_2.npy"
         if path.exists():
-            self.enhanced_mean_image_channel_2 = np.load(path, mmap_mode="r+")
+            self.enhanced_mean_image_channel_2 = np.load(path, mmap_mode="r")
         path = detection_directory / "maximum_projection_channel_2.npy"
         if path.exists():
-            self.maximum_projection_channel_2 = np.load(path, mmap_mode="r+")
+            self.maximum_projection_channel_2 = np.load(path, mmap_mode="r")
         path = detection_directory / "correlation_map_channel_2.npy"
         if path.exists():
-            self.correlation_map_channel_2 = np.load(path, mmap_mode="r+")
+            self.correlation_map_channel_2 = np.load(path, mmap_mode="r")
 
 
 @dataclass
@@ -1224,12 +1224,12 @@ class ExtractionData:
         # Channel 1 classification.
         cell_classification_path = output_path / "cell_classification.npy"
         if self.cell_classification is None and cell_classification_path.exists():
-            self.cell_classification = np.load(cell_classification_path, mmap_mode="r+")
+            self.cell_classification = np.load(cell_classification_path, mmap_mode="r")
 
         # Channel 2 classification.
         cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
-            self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, mmap_mode="r+")
+            self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, mmap_mode="r")
 
     def memory_map_results(self, output_path: Path) -> None:
         """Memory-maps all extraction result arrays from disk.
@@ -1244,55 +1244,55 @@ class ExtractionData:
         # Channel 1 traces.
         cell_fluorescence_path = output_path / "cell_fluorescence.npy"
         if self.cell_fluorescence is None and cell_fluorescence_path.exists():
-            self.cell_fluorescence = np.load(cell_fluorescence_path, mmap_mode="r+")
+            self.cell_fluorescence = np.load(cell_fluorescence_path, mmap_mode="r")
 
         neuropil_fluorescence_path = output_path / "neuropil_fluorescence.npy"
         if self.neuropil_fluorescence is None and neuropil_fluorescence_path.exists():
-            self.neuropil_fluorescence = np.load(neuropil_fluorescence_path, mmap_mode="r+")
+            self.neuropil_fluorescence = np.load(neuropil_fluorescence_path, mmap_mode="r")
 
         subtracted_fluorescence_path = output_path / "subtracted_fluorescence.npy"
         if self.subtracted_fluorescence is None and subtracted_fluorescence_path.exists():
-            self.subtracted_fluorescence = np.load(subtracted_fluorescence_path, mmap_mode="r+")
+            self.subtracted_fluorescence = np.load(subtracted_fluorescence_path, mmap_mode="r")
 
         spikes_path = output_path / "spikes.npy"
         if self.spikes is None and spikes_path.exists():
-            self.spikes = np.load(spikes_path, mmap_mode="r+")
+            self.spikes = np.load(spikes_path, mmap_mode="r")
 
         # Channel 1 classification.
         cell_classification_path = output_path / "cell_classification.npy"
         if self.cell_classification is None and cell_classification_path.exists():
-            self.cell_classification = np.load(cell_classification_path, mmap_mode="r+")
+            self.cell_classification = np.load(cell_classification_path, mmap_mode="r")
 
         # Channel 2 traces.
         cell_fluorescence_channel_2_path = output_path / "cell_fluorescence_channel_2.npy"
         if self.cell_fluorescence_channel_2 is None and cell_fluorescence_channel_2_path.exists():
-            self.cell_fluorescence_channel_2 = np.load(cell_fluorescence_channel_2_path, mmap_mode="r+")
+            self.cell_fluorescence_channel_2 = np.load(cell_fluorescence_channel_2_path, mmap_mode="r")
 
         neuropil_fluorescence_channel_2_path = output_path / "neuropil_fluorescence_channel_2.npy"
         if self.neuropil_fluorescence_channel_2 is None and neuropil_fluorescence_channel_2_path.exists():
-            self.neuropil_fluorescence_channel_2 = np.load(neuropil_fluorescence_channel_2_path, mmap_mode="r+")
+            self.neuropil_fluorescence_channel_2 = np.load(neuropil_fluorescence_channel_2_path, mmap_mode="r")
 
         subtracted_fluorescence_channel_2_path = output_path / "subtracted_fluorescence_channel_2.npy"
         if self.subtracted_fluorescence_channel_2 is None and subtracted_fluorescence_channel_2_path.exists():
-            self.subtracted_fluorescence_channel_2 = np.load(subtracted_fluorescence_channel_2_path, mmap_mode="r+")
+            self.subtracted_fluorescence_channel_2 = np.load(subtracted_fluorescence_channel_2_path, mmap_mode="r")
 
         spikes_channel_2_path = output_path / "spikes_channel_2.npy"
         if self.spikes_channel_2 is None and spikes_channel_2_path.exists():
-            self.spikes_channel_2 = np.load(spikes_channel_2_path, mmap_mode="r+")
+            self.spikes_channel_2 = np.load(spikes_channel_2_path, mmap_mode="r")
 
         # Channel 2 classification.
         cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
-            self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, mmap_mode="r+")
+            self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, mmap_mode="r")
 
         # Colocalization arrays.
         cell_colocalization_path = output_path / "cell_colocalization.npy"
         if self.cell_colocalization is None and cell_colocalization_path.exists():
-            self.cell_colocalization = np.load(cell_colocalization_path, mmap_mode="r+")
+            self.cell_colocalization = np.load(cell_colocalization_path, mmap_mode="r")
 
         corrected_structural_mean_image_path = output_path / "corrected_structural_mean_image.npy"
         if self.corrected_structural_mean_image is None and corrected_structural_mean_image_path.exists():
-            self.corrected_structural_mean_image = np.load(corrected_structural_mean_image_path, mmap_mode="r+")
+            self.corrected_structural_mean_image = np.load(corrected_structural_mean_image_path, mmap_mode="r")
 
 
 @dataclass(slots=True)

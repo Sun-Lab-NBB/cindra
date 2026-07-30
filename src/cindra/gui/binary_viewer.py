@@ -521,7 +521,9 @@ class BinaryPlayer(QMainWindow):
         self._channel_2_button.setStyleSheet(
             STYLE.button_pressed if self._channel_2_visible else STYLE.button_unpressed
         )
-        self._next_frame()
+
+        # Redraws the frame already on screen so the overlay change is visible without advancing playback.
+        self._render_frame()
 
     def _zoom_image(self) -> None:
         """Resets the main view zoom to fit the full image extent."""

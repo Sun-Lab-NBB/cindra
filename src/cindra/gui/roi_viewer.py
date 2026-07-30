@@ -105,7 +105,7 @@ class ROIViewer(QMainWindow):
         _selected_roi_indices: List of currently selected ROI indices.
         _temporal_bin_size: Number of frames per temporal bin for activity correlation.
         _recording_loaded: Determines whether a recording has been fully loaded and initialized.
-        _colocalization_threshold: Probability threshold for channel 2 colocalization display.
+        _colocalization_threshold: Colocalization probability threshold included in the reported viewer state.
         _classify_mode: Determines whether classifier mode is active (clicks flip ROI labels instead of selecting).
         _pre_classify_color_mode: Stores the color mode before classify was toggled on, for restoration on toggle off.
         _saved_opacity: Mask opacity restored when the spacebar toggles opacity back on after setting it to zero.
@@ -117,8 +117,11 @@ class ROIViewer(QMainWindow):
         _colorbar_image: Rendered colorbar image array, or None.
         _views: Precomputed background view image stack, or None.
         _roi_statistics: List of ROIStatistics instances for the current recording.
-        _cell_classification: Cell classification probability array with shape (roi_count, 2).
-        _cell_colocalization: Channel 2 colocalization probability array with shape (roi_count, 2), or an empty array.
+        _cell_classification: Cell classification probability array with shape (roi_count, 2). This is an in-memory
+            copy of the recording's labels, so Classify mode edits it without rewriting the stored array.
+        _cell_colocalization: Channel 2 colocalization array with shape (roi_count, 2), or an empty array. Column 0
+            holds the is-colocalized flag under intensity colocalization and the matched channel 2 ROI index under
+            spatial colocalization.
         _two_channels: Determines whether the current recording has channel 2 data.
         _cell_fluorescence: Raw cell fluorescence traces array, or an empty array.
         _neuropil_fluorescence: Neuropil fluorescence traces array, or an empty array.
@@ -259,9 +262,6 @@ class ROIViewer(QMainWindow):
             self._trace_controls.maximum_trace_count_edit,
         ):
             edit_field.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
-
-        # Accepts drag-and-drop of directories.
-        self.setAcceptDrops(True)
 
         # Populates the UI with the startup data provided by the caller.
         self.load_data(data=data)
@@ -946,10 +946,7 @@ class ROIViewer(QMainWindow):
                 if roi_count > 0
                 else np.empty((0, 2), dtype=np.float32)
             )
-            colocalization = recording.cell_colocalization
-            self._cell_colocalization = (
-                colocalization if colocalization.size > 0 else np.zeros((roi_count, 2), dtype=np.float32)
-            )
+            self._cell_colocalization = recording.cell_colocalization
             self._two_channels = recording.has_channel_2
             self._cell_fluorescence = recording.cell_fluorescence
             self._neuropil_fluorescence = recording.neuropil_fluorescence
@@ -959,7 +956,10 @@ class ROIViewer(QMainWindow):
             self._roi_count = roi_count
         else:
             self._roi_statistics = single_recording.roi_statistics
-            self._cell_classification = single_recording.cell_classification
+            # Copies the classification labels into memory. The pipeline arrays are memory-mapped read-only, and
+            # Classify mode edits this copy so that label flips stay in the viewer until the user exports them as a
+            # classifier training dataset. The recording's own cell_classification.npy is never rewritten.
+            self._cell_classification = np.array(single_recording.cell_classification, dtype=np.float32)
             self._cell_colocalization = single_recording.cell_colocalization
             self._two_channels = single_recording.two_channels
             self._cell_fluorescence = single_recording.cell_fluorescence
@@ -1028,6 +1028,11 @@ class ROIViewer(QMainWindow):
             channel_2_maximum_projection=single_recording.maximum_projection_channel_2,
         )
 
+        # Resolves the cell colocalization column layout. Only the single-recording structural channel path computes
+        # intensity colocalization, and that path is the sole producer of the corrected structural mean image. Every
+        # other two-channel view carries the spatial layout, where column 0 holds the matched channel 2 ROI index.
+        intensity_colocalization = not is_multi_recording and single_recording.corrected_structural_mean_image.size > 0
+
         # Computes color statistics and builds ROI index maps.
         self._color_arrays = compute_colors(
             roi_statistics=self._roi_statistics,
@@ -1036,9 +1041,9 @@ class ROIViewer(QMainWindow):
             cell_classification=self._cell_classification,
             cell_colocalization=self._cell_colocalization,
             roi_colormap=self._roi_colormap,
-            colocalization_threshold=self._colocalization_threshold,
             classifier_threshold=float(self._color_controls.threshold_edit.text() or "0.5"),
             two_channels=self._two_channels,
+            intensity_colocalization=intensity_colocalization,
         )
         self._roi_maps = initialize_roi_maps(
             roi_statistics=self._roi_statistics,

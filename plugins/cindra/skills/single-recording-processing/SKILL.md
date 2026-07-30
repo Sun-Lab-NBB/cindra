@@ -277,8 +277,9 @@ behind. `repeat_binarization` remains necessary only to force a rebuild of binar
 
 ## Resource management
 
-Each single-recording phase runs under its own resource class with a measured per-job worker count. Setting
-`workers_per_job` and `max_parallel_jobs` to `-1` accepts those measured defaults. The session CPU budget is
+Each single-recording phase runs under its own resource class with a measured per-job worker count. Leaving
+`workers_per_job` and `max_parallel_jobs` as None accepts those measured defaults, a positive value is used exactly,
+and -1 requests every available core. The session CPU budget is
 `cpu_count - 2`, with 2 cores reserved for system operations, and the dispatcher holds the sum of the cores
 committed by every class inside that budget.
 

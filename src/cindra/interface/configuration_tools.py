@@ -18,6 +18,7 @@ from dataclasses import (
 )
 
 import yaml  # type: ignore[import-untyped]
+from natsort import natsorted
 
 from ..io import resolve_recording_roots
 from ..dataclasses import (
@@ -92,16 +93,21 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
     Searches recursively for cindra_parameters.json files (marking raw recordings ready for single-recording
     processing) and combined_metadata.npz files (marking completed single-recording outputs ready for
     multi-recording processing). Returns recording root directories (not raw data or output subdirectories) so
-    that downstream tools receive meaningful session-level paths. Recording roots are resolved by stripping shared
-    structural subdirectories via ``resolve_recording_roots``.
+    that downstream tools receive meaningful session-level paths. Recording roots are resolved via
+    ``resolve_recording_roots``, which maps a pipeline output directory to its parent and strips the trailing
+    components a raw-data directory shares with its peers.
+
+    Notes:
+        Directories the process cannot read are skipped silently by the underlying recursive search, so an unreadable
+        subtree lowers the candidate counts without surfacing a distinct diagnostic.
 
     Args:
         root_directory: The absolute path to the root directory to search.
 
     Returns:
         On success, contains 'single_recording_candidates' and 'multi_recording_candidates' lists of recording root
-        paths with their respective counts, and any permission 'errors' encountered during the search. On failure,
-        contains an 'error' describing the issue. Both cases include a 'success' flag.
+        paths with their respective counts. On failure, contains an 'error' describing the issue. Both cases include
+        a 'success' flag.
     """
     root_path = Path(root_directory)
 
@@ -117,46 +123,33 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
             "error": f"Unable to discover recordings. The path is not a directory: {root_directory}",
         }
 
-    errors: list[str] = []
-
     # Discovers single-recording candidates via cindra_parameters.json marker files.
-    single_marker_parents: list[Path] = []
-    try:
-        single_marker_parents.extend(marker_file.parent for marker_file in root_path.rglob("cindra_parameters.json"))
-    except PermissionError as error:
-        errors.append(f"Access denied during single-recording search: {error}")
+    single_marker_parents: list[Path] = [
+        marker_file.parent for marker_file in root_path.rglob("cindra_parameters.json")
+    ]
 
     single_recording_paths = (
-        sorted(str(root) for root in resolve_recording_roots(paths=single_marker_parents))
+        natsorted(str(root) for root in resolve_recording_roots(paths=single_marker_parents))
         if single_marker_parents
         else []
     )
 
     # Discovers multi-recording candidates via combined_metadata.npz marker files.
-    multi_marker_parents: list[Path] = []
-    try:
-        multi_marker_parents.extend(marker_file.parent for marker_file in root_path.rglob("combined_metadata.npz"))
-    except PermissionError as error:
-        errors.append(f"Access denied during multi-recording search: {error}")
+    multi_marker_parents: list[Path] = [marker_file.parent for marker_file in root_path.rglob("combined_metadata.npz")]
 
     multi_recording_paths = (
-        sorted(str(root) for root in resolve_recording_roots(paths=multi_marker_parents))
+        natsorted(str(root) for root in resolve_recording_roots(paths=multi_marker_parents))
         if multi_marker_parents
         else []
     )
 
-    result: dict[str, object] = {
+    return {
         "success": True,
         "single_recording_candidates": single_recording_paths,
         "single_recording_count": len(single_recording_paths),
         "multi_recording_candidates": multi_recording_paths,
         "multi_recording_count": len(multi_recording_paths),
     }
-
-    if errors:
-        result["errors"] = errors
-
-    return result
 
 
 @mcp.tool()

@@ -178,6 +178,12 @@ pipeline outputs.
   subclasses). The CLI writes overrides to the config file before execution rather than passing arguments. Worker
   counts are the exception: they are explicit API parameters resolved through `cindra.allocation`, which keeps the
   configuration file immutable and safe to share between concurrently dispatched jobs.
+- **Worker sentinel contract**: One convention governs every worker and concurrency argument in the repository. `None`
+  accepts the measured default for that stage or resource class, `-1` (`ALL_CORES_REQUEST`) requests every available
+  core, and a positive integer is used exactly. Any other non-positive value is rejected. This holds for
+  `resolve_stage_workers`, the `cindra run` worker options, the pipeline entry points, and the `workers_per_job` and
+  `max_parallel_jobs` arguments of the execute MCP tools. For `max_parallel_jobs`, `-1` lifts the derived cap so that
+  only the job count bounds concurrency. Keep the source, the skills, and the README stating this identically.
 - **ProcessingTracker**: File-based YAML pipeline state tracking with FileLock for multi-process coordination. Manages
   job states (SCHEDULED, RUNNING, SUCCEEDED, FAILED) for resumable batch processing.
 - **Subprocess GUI isolation**: GUI viewers launch as separate subprocesses with state file exchange via temporary

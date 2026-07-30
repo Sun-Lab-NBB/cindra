@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from cindra.detection.denoise import pca_denoise, _fit_and_reconstruct_block
 
@@ -97,6 +98,13 @@ class TestPcaDenoise:
         frames = generator.standard_normal((20, 32, 32)).astype(np.float32)
         pca_denoise(frames=frames, block_size=(32, 32), component_fraction=0.5, parallel_workers=-1)
         assert np.isfinite(frames).all()
+
+    @pytest.mark.parametrize("parallel_workers", [0, -2, -100])
+    def test_invalid_worker_count_is_rejected(self, parallel_workers: int) -> None:
+        """Verifies that zero and every negative count other than the all-cores request raise an error."""
+        frames = np.ones((20, 32, 32), dtype=np.float32)
+        with pytest.raises(ValueError, match=r"must be a positive\s+integer"):
+            pca_denoise(frames=frames, block_size=(32, 32), component_fraction=0.5, parallel_workers=parallel_workers)
 
     def test_sequential_and_parallel_consistent(self) -> None:
         """Verifies that sequential and parallel execution produce identical results."""

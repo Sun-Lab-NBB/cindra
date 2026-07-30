@@ -48,12 +48,18 @@ format, float32 dtype, with shape `(height, width)`.
 
 **Channel 2 (two-channel only, same shape and dtype):**
 
-| File                                | Description                            |
-|-------------------------------------|----------------------------------------|
-| `mean_image_channel_2.npy`          | Channel 2 temporal mean image          |
-| `enhanced_mean_image_channel_2.npy` | Channel 2 high-pass filtered mean      |
-| `maximum_projection_channel_2.npy`  | Channel 2 maximum intensity projection |
-| `correlation_map_channel_2.npy`     | Channel 2 correlation map              |
+| File                                | Description                            | Presence condition          |
+|-------------------------------------|----------------------------------------|-----------------------------|
+| `mean_image_channel_2.npy`          | Channel 2 temporal mean image          | Every two-channel recording |
+| `enhanced_mean_image_channel_2.npy` | Channel 2 high-pass filtered mean      | Both channels functional    |
+| `maximum_projection_channel_2.npy`  | Channel 2 maximum intensity projection | Both channels functional    |
+| `correlation_map_channel_2.npy`     | Channel 2 correlation map              | Both channels functional    |
+
+`mean_image_channel_2.npy` appears at both levels for every two-channel recording, because the register phase writes a
+mean image for each channel it rewrites without testing whether either channel is functional. The other three come from
+channel 2 detection, which runs only when both `main.first_channel_functional` and `main.second_channel_functional`
+are True. The combined `maximum_projection_channel_2.npy` additionally requires at least one plane to hold a channel 1
+maximum projection, which every plane that completed detection does.
 
 ---
 
@@ -147,11 +153,16 @@ all-zero spike or corrected trace can mean deconvolution was disabled rather tha
 | `spikes_channel_2.npy`                  | Channel 2 deconvolved spikes       |
 | `cell_classification_channel_2.npy`     | Channel 2 classification results   |
 
-Only `cell_fluorescence_channel_2.npy` and `neuropil_fluorescence_channel_2.npy` are written for every two-channel
-recording. The other three files require both channels to be functional: a structural (non-functional) channel 2
-reuses the channel 1 masks for extraction and skips classification and spike deconvolution entirely, so
-`subtracted_fluorescence_channel_2.npy`, `spikes_channel_2.npy`, and `cell_classification_channel_2.npy` are absent
-for that recording.
+`cell_fluorescence_channel_2.npy` and `neuropil_fluorescence_channel_2.npy` are written in every `plane_N/` directory
+for every two-channel recording. A structural (non-functional) channel 2 reuses the channel 1 masks for extraction, so
+those two traces carry one row per channel 1 ROI. It also skips classification and spike deconvolution entirely,
+leaving `subtracted_fluorescence_channel_2.npy`, `spikes_channel_2.npy`, and `cell_classification_channel_2.npy`
+absent at both levels.
+
+The combined root holds no channel 2 trace or classification file at all when channel 2 is structural. Combination
+gates the whole channel 2 aggregation, including `roi_masks_channel_2.npz` and `roi_statistics_channel_2.npz`, on both
+channels being functional, so the root lacks even the two trace files every plane directory carries. Read structural
+channel 2 traces from `plane_N/` rather than from the root.
 
 **Optional colocalization files (combined root and per-plane):**
 
