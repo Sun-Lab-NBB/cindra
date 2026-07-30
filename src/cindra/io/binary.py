@@ -20,6 +20,53 @@ _INT16_MAX_VALUE: int = 2**15 - 2
 _DEFAULT_BIN_BATCH_SIZE: int = 500
 """The default maximum batch size for frame binning operations."""
 
+_REGISTRATION_MARKER_CONTENTS: str = (
+    "The registration stage was writing motion-corrected frames into the binary this marker sits beside when it was "
+    "interrupted. The binary therefore holds corrected frames up to some unknown point and raw frames after it. "
+    "Re-run the binarization stage for this recording to rebuild the binary from its source TIFF files.\n"
+)
+"""The text written into a registration marker, so that the marker explains itself to whoever finds it on disk."""
+
+
+def resolve_registration_marker_path(binary_path: Path) -> Path:
+    """Returns the path of the marker that flags a binary as being mid-registration.
+
+    Notes:
+        The registration stage rewrites a plane binary in place, so an interrupted run leaves the binary holding a
+        mixture of corrected and raw frames with nothing in the registration outputs recording that. The marker exists
+        for the duration of the rewrite and names the binary it guards, which lets a later run refuse to consume a
+        binary whose contents are indeterminate.
+
+    Args:
+        binary_path: The path to the binary the marker guards.
+
+    Returns:
+        The marker path, which sits beside the binary it guards.
+    """
+    return binary_path.with_name(f"{binary_path.name}.registering")
+
+
+def create_registration_marker(binary_path: Path) -> None:
+    """Marks a binary as being mid-registration.
+
+    Args:
+        binary_path: The path to the binary whose rewrite is about to begin.
+    """
+    resolve_registration_marker_path(binary_path=binary_path).write_text(_REGISTRATION_MARKER_CONTENTS)
+
+
+def clear_registration_marker(binary_path: Path) -> None:
+    """Clears the mid-registration mark from a binary, which declares its contents consistent again.
+
+    Notes:
+        Clearing a marker that does not exist is not an error, so the binarization stage can call this for every
+        binary it writes without first checking whether an interrupted registration left one behind.
+
+    Args:
+        binary_path: The path to the binary to clear the mark from.
+    """
+    resolve_registration_marker_path(binary_path=binary_path).unlink(missing_ok=True)
+
 
 class BinaryFile:
     """Creates or opens a cindra binary (.bin) for reading and/or writing image data.

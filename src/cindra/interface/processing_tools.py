@@ -31,11 +31,20 @@ from ..pipelines import (
     run_single_recording_pipeline,
 )
 from ..allocation import (
+    DISCOVERY_WORKERS,
+    EXTRACTION_WORKERS,
     PROCESSING_WORKERS,
     BINARIZATION_WORKERS,
     REGISTRATION_WORKERS,
+    MULTI_RECORDING_PHASES,
+    SINGLE_RECORDING_PHASES,
+    PrerequisiteScope,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
+    resolve_pipeline_jobs,
+    resolve_downstream_phases,
+    resolve_multi_recording_jobs,
+    resolve_single_recording_jobs,
 )
 from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
 from .mcp_instance import mcp
@@ -159,22 +168,33 @@ _COMBINATION_RESOURCES: _ResourceClass = _ResourceClass(
 """The resource class of the combination jobs. Combination merges per-plane result files with serial input and output,
 so each job holds one core and the concurrency cap is the fixed I/O limit."""
 
-_MULTI_RECORDING_RESOURCES: _ResourceClass = _ResourceClass(
-    name="multi_recording",
-    workers_per_job=None,
+_DISCOVERY_RESOURCES: _ResourceClass = _ResourceClass(
+    name="discovery",
+    workers_per_job=DISCOVERY_WORKERS,
     fixed_parallel_jobs=None,
     memory_gigabytes_per_job=0.0,
 )
-"""The resource class of the multi-recording discovery and extraction jobs. Neither stage has a measured scaling knee,
-so this class keeps the saturating allocation that distributes the CPU budget across the queued jobs."""
+"""The resource class of the multi-recording discovery jobs. Discovery registers every recording of one animal against
+the others, so each job holds the stage's saturating allocation and its concurrency is bounded by the shared CPU budget
+alone."""
+
+_EXTRACTION_RESOURCES: _ResourceClass = _ResourceClass(
+    name="extraction",
+    workers_per_job=EXTRACTION_WORKERS,
+    fixed_parallel_jobs=None,
+    memory_gigabytes_per_job=0.0,
+)
+"""The resource class of the multi-recording extraction jobs. Extraction reads each frame batch serially before the
+kernel consumes it, so the stage plateaus at its measured worker count and the remaining budget is better spent on
+running more recordings concurrently."""
 
 _RESOURCE_CLASS_BY_JOB_NAME: dict[str, _ResourceClass] = {
     SingleRecordingJobNames.BINARIZE: _BINARIZATION_RESOURCES,
     SingleRecordingJobNames.REGISTER: _REGISTRATION_RESOURCES,
     SingleRecordingJobNames.PROCESS: _PROCESSING_RESOURCES,
     SingleRecordingJobNames.COMBINE: _COMBINATION_RESOURCES,
-    MultiRecordingJobNames.DISCOVER: _MULTI_RECORDING_RESOURCES,
-    MultiRecordingJobNames.EXTRACT: _MULTI_RECORDING_RESOURCES,
+    MultiRecordingJobNames.DISCOVER: _DISCOVERY_RESOURCES,
+    MultiRecordingJobNames.EXTRACT: _EXTRACTION_RESOURCES,
 }
 """Maps every pipeline job name to the resource class that governs its worker count and its concurrency cap."""
 
@@ -536,12 +556,11 @@ def prepare_single_recording_batch_tool(
             # immediately.
             if process_jobs and not register_jobs:
                 plane_specifiers = natsorted({specifier for _, specifier in process_jobs.values()})
-                migrated_jobs: list[tuple[str, str]] = [
-                    (SingleRecordingJobNames.BINARIZE, ""),
-                    *((SingleRecordingJobNames.REGISTER, specifier) for specifier in plane_specifiers),
-                    *((SingleRecordingJobNames.PROCESS, specifier) for specifier in plane_specifiers),
-                    (SingleRecordingJobNames.COMBINE, ""),
-                ]
+                # Rebuilds the universe over the tracker's existing plane specifiers, so that a migrated tracker keeps
+                # the specifiers its processing jobs already carry.
+                migrated_jobs: list[tuple[str, str]] = resolve_pipeline_jobs(
+                    phases=SINGLE_RECORDING_PHASES, specifiers=plane_specifiers
+                )
                 tracker.align_jobs(jobs=migrated_jobs, universe=migrated_jobs)
                 registry = tracker.snapshot()
                 register_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.REGISTER)
@@ -625,13 +644,9 @@ def prepare_single_recording_batch_tool(
             # job as a dispatch argument, so this one file serves every job dispatched against it.
             recording_configuration.save(file_path=recording_configuration_path)
 
-            # Builds the job list in execution order: binarize, all register planes, all process planes, combine.
-            jobs: list[tuple[str, str]] = [(SingleRecordingJobNames.BINARIZE, "")]
-            jobs.extend(
-                (SingleRecordingJobNames.REGISTER, f"plane_{plane_index}") for plane_index in range(plane_count)
-            )
-            jobs.extend((SingleRecordingJobNames.PROCESS, f"plane_{plane_index}") for plane_index in range(plane_count))
-            jobs.append((SingleRecordingJobNames.COMBINE, ""))
+            # Builds the recording's job universe from the exported phase model, which orders the phases and expands
+            # the per-plane ones.
+            jobs: list[tuple[str, str]] = resolve_single_recording_jobs(plane_count=plane_count)
 
             tracker = ProcessingTracker(file_path=tracker_path)
             job_ids = tracker.initialize_jobs(jobs=jobs)
@@ -858,9 +873,8 @@ def prepare_multi_recording_batch_tool(
             # New dataset: saves configuration and initializes tracker.
             configuration.save(file_path=configuration_file_path)
 
-            # Builds the job list: discover, then extract per recording.
-            jobs: list[tuple[str, str]] = [(MultiRecordingJobNames.DISCOVER, "")]
-            jobs.extend((MultiRecordingJobNames.EXTRACT, recording_id) for recording_id in recording_ids)
+            # Builds the dataset's job universe from the exported phase model.
+            jobs: list[tuple[str, str]] = resolve_multi_recording_jobs(recording_ids=recording_ids)
 
             tracker = ProcessingTracker(file_path=tracker_path)
             job_ids = tracker.initialize_jobs(jobs=jobs)
@@ -968,14 +982,7 @@ def reset_processing_phases_tool(
     # Expands the requested phases to include all downstream dependents. Resetting an upstream phase invalidates
     # all phases that depend on its output, so they must be reset too.
     requested_phases = list(phases)
-    if pipeline_type == "single-recording":
-        phases = sorted(_expand_single_recording_phases(phases=phases))
-    else:
-        # Dependency chain: discovery → extraction.
-        expanded = set(phases)
-        if MultiRecordingJobNames.DISCOVER.value in expanded:
-            expanded.add(MultiRecordingJobNames.EXTRACT.value)
-        phases = sorted(expanded)
+    phases = sorted(resolve_downstream_phases(phase_names=phases, single_recording=pipeline_type == "single-recording"))
 
     tracker = ProcessingTracker(file_path=path)
 
@@ -1089,13 +1096,9 @@ def clean_processing_output_tool(
 
     # Expands the requested phases to include all downstream dependents.
     requested_phases = list(phases)
-    if pipeline_type == "single-recording":
-        effective_phases = sorted(_expand_single_recording_phases(phases=phases))
-    else:
-        expanded = set(phases)
-        if MultiRecordingJobNames.DISCOVER.value in expanded:
-            expanded.add(MultiRecordingJobNames.EXTRACT.value)
-        effective_phases = sorted(expanded)
+    effective_phases = sorted(
+        resolve_downstream_phases(phase_names=phases, single_recording=pipeline_type == "single-recording")
+    )
 
     deleted_files: list[str] = []
     deleted_dirs: list[str] = []
@@ -1872,7 +1875,7 @@ def execute_full_pipeline_tool(
                             tracker_path=tracker_path,
                             job_id=discover["job_id"],
                             single_recording=False,
-                            resource_class=_MULTI_RECORDING_RESOURCES,
+                            resource_class=_DISCOVERY_RESOURCES,
                         )
                     )
 
@@ -1882,7 +1885,7 @@ def execute_full_pipeline_tool(
                         tracker_path=tracker_path,
                         job_id=extract["job_id"],
                         single_recording=False,
-                        resource_class=_MULTI_RECORDING_RESOURCES,
+                        resource_class=_EXTRACTION_RESOURCES,
                     )
                     for extract in manifest_dict.get("extract_jobs", [])
                     if extract.get("status") != "succeeded"
@@ -2228,29 +2231,6 @@ def _resolve_saturating_allocation(budget: int, total_jobs: int) -> tuple[int, i
     return workers, max_parallel
 
 
-def _expand_single_recording_phases(phases: list[str]) -> set[str]:
-    """Expands the requested single-recording phases to include every downstream dependent phase.
-
-    Notes:
-        The dependency chain runs binarization to registration to processing to combination, so resetting or cleaning
-        an upstream phase invalidates every phase below it.
-
-    Args:
-        phases: The phase names the caller requested.
-
-    Returns:
-        The set of phase names to act on, containing the requested phases and all of their downstream dependents.
-    """
-    expanded = set(phases)
-    if SingleRecordingJobNames.BINARIZE.value in expanded:
-        expanded.add(SingleRecordingJobNames.REGISTER.value)
-    if SingleRecordingJobNames.REGISTER.value in expanded:
-        expanded.add(SingleRecordingJobNames.PROCESS.value)
-    if SingleRecordingJobNames.PROCESS.value in expanded:
-        expanded.add(SingleRecordingJobNames.COMBINE.value)
-    return expanded
-
-
 def _resolve_prerequisite_job_ids(
     registry: dict[str, JobState], job_id: str, *, single_recording: bool
 ) -> tuple[list[str], str | None]:
@@ -2282,37 +2262,20 @@ def _resolve_prerequisite_job_ids(
         )
         return [], message
 
-    if single_recording:
-        if job_state.job_name == SingleRecordingJobNames.REGISTER:
-            return _collect_phase_job_ids(
-                registry=registry,
-                job_name=SingleRecordingJobNames.BINARIZE,
-                specifier=None,
-                dependent_job_id=job_id,
-            )
-        if job_state.job_name == SingleRecordingJobNames.PROCESS:
-            return _collect_phase_job_ids(
-                registry=registry,
-                job_name=SingleRecordingJobNames.REGISTER,
-                specifier=job_state.specifier,
-                dependent_job_id=job_id,
-            )
-        if job_state.job_name == SingleRecordingJobNames.COMBINE:
-            return _collect_phase_job_ids(
-                registry=registry,
-                job_name=SingleRecordingJobNames.PROCESS,
-                specifier=None,
-                dependent_job_id=job_id,
-            )
-    elif job_state.job_name == MultiRecordingJobNames.EXTRACT:
-        return _collect_phase_job_ids(
-            registry=registry,
-            job_name=MultiRecordingJobNames.DISCOVER,
-            specifier=None,
-            dependent_job_id=job_id,
-        )
+    # Reads the dependency from the exported phase model, so the rule the interface layer enforces and the rule the
+    # phase model publishes to external schedulers cannot drift apart.
+    phases = SINGLE_RECORDING_PHASES if single_recording else MULTI_RECORDING_PHASES
+    phase = {str(entry.job_name): entry for entry in phases}.get(job_state.job_name)
+    if phase is None or phase.prerequisite is None:
+        return [], None
 
-    return [], None
+    specifier = job_state.specifier if phase.prerequisite_scope == PrerequisiteScope.MATCHING_SPECIFIER else None
+    return _collect_phase_job_ids(
+        registry=registry,
+        job_name=phase.prerequisite,
+        specifier=specifier,
+        dependent_job_id=job_id,
+    )
 
 
 def _collect_phase_job_ids(

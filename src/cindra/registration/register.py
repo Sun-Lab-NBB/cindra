@@ -11,7 +11,12 @@ from scipy.signal import medfilt
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
-from ..io import BinaryFile
+from ..io import (
+    BinaryFile,
+    clear_registration_marker,
+    create_registration_marker,
+    resolve_registration_marker_path,
+)
 from .rigid import (
     translate_frame,
     apply_edge_taper,
@@ -52,7 +57,7 @@ x_blocks, block_counts, actual_block_size, and smoothing_kernel."""
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from ..dataclasses import RuntimeContext
+    from ..dataclasses import IOData, RuntimeContext
 
 
 def register_plane(context: RuntimeContext, *, workers: int) -> None:
@@ -83,6 +88,11 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
     io_data = context.runtime.io
     registration_data = context.runtime.registration
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
+
+    # Refuses to consume a binary that an interrupted registration left in an indeterminate state. This check precedes
+    # the skip and re-registration branches below, because neither the registration outputs nor their absence reveal
+    # that the binary itself holds a mixture of corrected and raw frames.
+    _validate_binaries_are_not_mid_registration(io_data=io_data, plane_index=plane_index)
 
     # Checks if registration should be skipped (already registered and not forcing re-registration).
     if registration_data.is_registered(output_path=io_data.output_path) and not config.registration.repeat_registration:
@@ -727,6 +737,38 @@ def _apply_precomputed_offsets_batch(
     return frames
 
 
+def _validate_binaries_are_not_mid_registration(io_data: IOData, plane_index: int) -> None:
+    """Verifies that no interrupted registration left the plane's binaries in an indeterminate state.
+
+    Notes:
+        The registration stage rewrites its input binary in place, so a run that dies partway leaves corrected frames
+        up to some unknown point and raw frames after it. Re-registering such a binary computes its offsets and its
+        valid crop region from a movie whose frames disagree about whether motion has already been removed, and both
+        the resulting traces and the reported registration quality look ordinary. Failing here converts that silent
+        corruption into an actionable error.
+
+    Args:
+        io_data: The plane's IOData, which holds the paths of the binaries the registration stage rewrites.
+        plane_index: The index of the plane, used to identify the plane in the error message.
+
+    Raises:
+        RuntimeError: If a marker shows that a previous registration of one of the plane's binaries was interrupted.
+    """
+    for binary_path in (io_data.registered_binary_path, io_data.registered_binary_path_channel_2):
+        if binary_path is None:
+            continue
+
+        marker_path = resolve_registration_marker_path(binary_path=binary_path)
+        if marker_path.exists():
+            message = (
+                f"Unable to register plane {plane_index}. A previous registration of the binary file "
+                f"'{binary_path}' was interrupted, so the file holds motion-corrected frames up to an unknown point "
+                f"and raw frames after it. Re-run the binarization stage with 'repeat_binarization' enabled to "
+                f"rebuild the binary from its source TIFF files, which also clears the marker at '{marker_path}'."
+            )
+            console.error(message=message, error=RuntimeError)
+
+
 def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> None:
     """Computes registration offsets from the alignment channel and applies them to that channel's frames.
 
@@ -892,6 +934,10 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
             level=LogLevel.INFO,
         )
 
+        # Marks the binary for the duration of the in-place rewrite below. Until the loop completes, the file holds a
+        # mixture of corrected and raw frames that nothing else on disk would reveal.
+        create_registration_marker(binary_path=binary_path)
+
         for batch_start_np in console.track(
             np.arange(0, num_frames, batch_size),
             description=f"Registering batches of {batch_size} frames",
@@ -943,6 +989,11 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
             # Converts back to int16 for BinaryFile storage and writes in-place.
             frames_int16 = np.clip(batch_result.frames, -32768, 32767).astype(np.int16)
             frames_file[batch_start:batch_end] = frames_int16
+
+        # Flushes the rewritten frames and clears the marker. Every frame now carries the same correction, so the
+        # binary is internally consistent again even though the registration outputs are not yet saved.
+        frames_file.file.flush()
+        clear_registration_marker(binary_path=binary_path)
 
         # Normalizes accumulated sum to get mean image.
         mean_image /= num_frames
@@ -1066,6 +1117,9 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
         )
         timer.reset()
 
+        # Marks the binary for the duration of the in-place rewrite below, matching the alignment channel.
+        create_registration_marker(binary_path=binary_path)
+
         # Prepares nonrigid offset arrays outside the loop. Fallback to empty arrays is for type narrowing only;
         # offsets are always present when nonrigid_enabled is True.
         if nonrigid_enabled:
@@ -1115,6 +1169,10 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
             # Converts back to int16 for BinaryFile storage and writes in-place.
             frames_int16 = np.clip(frames, -32768, 32767).astype(np.int16)
             frames_file[batch_start:batch_end] = frames_int16
+
+        # Flushes the rewritten frames and clears the marker, which declares the binary internally consistent again.
+        frames_file.file.flush()
+        clear_registration_marker(binary_path=binary_path)
 
         # Normalizes accumulated sum to get mean image.
         mean_image /= num_frames

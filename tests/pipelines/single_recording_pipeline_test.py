@@ -11,7 +11,11 @@ from tifffile import TiffWriter
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
-from cindra.io import resolve_single_recording_contexts
+from cindra.io import (
+    create_registration_marker,
+    resolve_single_recording_contexts,
+    resolve_registration_marker_path,
+)
 from cindra.allocation import SingleRecordingJobNames
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import RuntimeContext, SingleRecordingConfiguration
@@ -328,6 +332,47 @@ class TestBinarizeRecording:
         binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
 
         assert binary_path.exists()
+
+    def test_recreates_truncated_binaries(self, tmp_path: Path) -> None:
+        """Verifies that binarization rebuilds a binary whose size disagrees with its recorded frame geometry."""
+        configuration = _binarize_to_disk(tmp_path)
+        binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
+        full_size = binary_path.stat().st_size
+
+        # Simulates a conversion that died partway, which leaves a binary holding fewer frames than the plane's
+        # runtime data records.
+        with binary_path.open(mode="r+b") as binary_file:
+            binary_file.truncate(full_size // 2)
+
+        binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        assert binary_path.stat().st_size == full_size
+
+    def test_recreates_binaries_left_mid_registration(self, tmp_path: Path) -> None:
+        """Verifies that binarization rebuilds a marked binary and clears its marker without a caller request."""
+        configuration = _binarize_to_disk(tmp_path)
+        binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
+        create_registration_marker(binary_path=binary_path)
+
+        binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        assert binary_path.exists()
+        assert not resolve_registration_marker_path(binary_path=binary_path).exists()
+
+    def test_skips_a_registered_binary(self, tmp_path: Path) -> None:
+        """Verifies that a binary whose contents registration rewrote in place is not mistaken for a damaged one."""
+        configuration = _binarize_to_disk(tmp_path)
+        binary_path = tmp_path / "output" / "cindra" / "plane_0" / "channel_1_data.bin"
+
+        # Registration rewrites a binary in place, so it changes the contents while preserving the size. Overwriting
+        # every byte here reproduces that, and binarization must still treat the file as valid.
+        original_bytes = binary_path.read_bytes()
+        binary_path.write_bytes(bytes(len(original_bytes)))
+
+        binarize_recording(configuration=configuration, workers=_TEST_WORKERS)
+
+        assert binary_path.stat().st_size == len(original_bytes)
+        assert binary_path.read_bytes() == bytes(len(original_bytes))
 
 
 class TestRegisterRecordingPlane:

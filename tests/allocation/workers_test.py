@@ -7,9 +7,12 @@ from ataraxis_base_utilities import resolve_worker_count
 
 from cindra.allocation import (
     ALL_CORES_REQUEST,
+    DISCOVERY_WORKERS,
+    EXTRACTION_WORKERS,
     PROCESSING_WORKERS,
     BINARIZATION_WORKERS,
     REGISTRATION_WORKERS,
+    MultiRecordingJobNames,
     SingleRecordingJobNames,
     resolve_stage_workers,
 )
@@ -24,10 +27,12 @@ class TestStageDefaults:
             (SingleRecordingJobNames.BINARIZE, BINARIZATION_WORKERS),
             (SingleRecordingJobNames.REGISTER, REGISTRATION_WORKERS),
             (SingleRecordingJobNames.PROCESS, PROCESSING_WORKERS),
+            (MultiRecordingJobNames.DISCOVER, DISCOVERY_WORKERS),
+            (MultiRecordingJobNames.EXTRACT, EXTRACTION_WORKERS),
         ],
     )
     def test_unspecified_request_resolves_to_the_stage_default(
-        self, job_name: SingleRecordingJobNames, expected_workers: int
+        self, job_name: SingleRecordingJobNames | MultiRecordingJobNames, expected_workers: int
     ) -> None:
         """Verifies that omitting the requested count resolves to the measured default of the target stage."""
         assert resolve_stage_workers(job_name=job_name) == expected_workers
@@ -38,6 +43,8 @@ class TestStageDefaults:
         assert BINARIZATION_WORKERS > 0
         assert REGISTRATION_WORKERS > 0
         assert PROCESSING_WORKERS > 0
+        assert DISCOVERY_WORKERS > 0
+        assert EXTRACTION_WORKERS > 0
 
 
 class TestExplicitRequests:
@@ -71,12 +78,12 @@ class TestRejectedRequests:
 
     def test_combination_stage_is_rejected(self) -> None:
         """Verifies that the combination stage, which takes no allocation, raises rather than returning a count."""
-        with pytest.raises(ValueError, match=r"does not name a\s+single-recording stage"):
+        with pytest.raises(ValueError, match=r"does not name a\s+pipeline\s+stage"):
             resolve_stage_workers(job_name=SingleRecordingJobNames.COMBINE)
 
     def test_combination_stage_is_rejected_before_the_requested_count_is_read(self) -> None:
         """Verifies that the stage check precedes the requested-count check, so a valid count cannot mask it."""
-        with pytest.raises(ValueError, match=r"does not name a\s+single-recording stage"):
+        with pytest.raises(ValueError, match=r"does not name a\s+pipeline\s+stage"):
             resolve_stage_workers(job_name=SingleRecordingJobNames.COMBINE, requested_workers=8)
 
     @pytest.mark.parametrize("requested_workers", [0, -2, -3, -100])

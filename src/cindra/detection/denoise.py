@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
+from threadpoolctl import threadpool_limits  # type: ignore[import-untyped]
 from sklearn.decomposition import PCA  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
@@ -72,17 +73,20 @@ def pca_denoise(
 
     # Fits PCA and reconstructs each block. When multiple workers are available, the fitting runs in parallel across
     # blocks since each block's SVD is independent. LAPACK releases the GIL during SVD computation.
-    if effective_workers is not None and effective_workers <= 1:
-        reconstructed_blocks = [
-            _fit_and_reconstruct_block(block=block, num_components=num_components) for block in centered_blocks
-        ]
-    else:
-        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-            futures = [
-                executor.submit(_fit_and_reconstruct_block, block=block, num_components=num_components)
-                for block in centered_blocks
+    # Limits each block fit to a single BLAS thread. The worker budget is already spent on the block pool below, so
+    # leaving the BLAS thread count unconstrained would multiply the two and oversubscribe the host.
+    with threadpool_limits(limits=1):
+        if effective_workers is not None and effective_workers <= 1:
+            reconstructed_blocks = [
+                _fit_and_reconstruct_block(block=block, num_components=num_components) for block in centered_blocks
             ]
-            reconstructed_blocks = [future.result() for future in futures]
+        else:
+            with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                futures = [
+                    executor.submit(_fit_and_reconstruct_block, block=block, num_components=num_components)
+                    for block in centered_blocks
+                ]
+                reconstructed_blocks = [future.result() for future in futures]
 
     # Accumulates the tapered reconstructions sequentially to avoid write conflicts on overlapping block regions.
     for (y_slice, x_slice), block_reconstruction in zip(block_slices, reconstructed_blocks, strict=True):

@@ -24,6 +24,8 @@ from .pipelines import (  # noqa: E402
     run_single_recording_pipeline,
 )
 from .allocation import (  # noqa: E402
+    DISCOVERY_WORKERS,
+    EXTRACTION_WORKERS,
     PROCESSING_WORKERS,
     TIFF_DECODE_CEILING,
     BINARIZATION_WORKERS,
@@ -45,6 +47,8 @@ if not console.enabled:  # pragma: no branch — the console-enabled state is on
 
 __all__ = [
     "BINARIZATION_WORKERS",
+    "DISCOVERY_WORKERS",
+    "EXTRACTION_WORKERS",
     "PROCESSING_WORKERS",
     "REGISTRATION_WORKERS",
     "TIFF_DECODE_CEILING",

@@ -1265,6 +1265,36 @@ class TestMultiRecordingRuntimeDataSaveLoad:
         assert data.registration.deform_field_y is None
 
 
+def _make_marker_ordering_data(root_path: Path) -> CombinedData:
+    """Builds a minimal CombinedData instance for the completion-marker ordering tests.
+
+    Args:
+        root_path: The root directory the instance saves into. The referenced binary file is created inside it, so
+            that the relative path conversion performed by the save method succeeds.
+
+    Returns:
+        A CombinedData instance describing one plane.
+    """
+    binary_path = root_path / "plane0" / "registered.bin"
+    binary_path.parent.mkdir(parents=True, exist_ok=True)
+    binary_path.touch()
+
+    return CombinedData(
+        detection=_populate_detection_data(),
+        extraction=_populate_extraction_data(),
+        plane_count=1,
+        combined_height=32,
+        combined_width=64,
+        tau=1.5,
+        sampling_rate=15.0,
+        plane_heights=np.array([32], dtype=np.uint16),
+        plane_widths=np.array([64], dtype=np.uint16),
+        plane_y_offsets=np.array([0], dtype=np.int32),
+        plane_x_offsets=np.array([0], dtype=np.int32),
+        registered_binary_paths=(binary_path,),
+    )
+
+
 class TestCombinedDataSaveLoad:
     """Tests CombinedData save and load round-trips."""
 
@@ -1314,6 +1344,33 @@ class TestCombinedDataSaveLoad:
         # Arrays should be None after metadata-only load.
         assert loaded.detection.mean_image is None
         assert loaded.extraction.roi_statistics is None
+
+    def test_save_leaves_no_staged_metadata_file(self, tmp_path: Path) -> None:
+        """Verifies that the staged metadata file is moved into place rather than left beside the final marker."""
+        combined = _make_marker_ordering_data(root_path=tmp_path)
+
+        combined.save(root_path=tmp_path)
+
+        assert (tmp_path / "combined_metadata.npz").exists()
+        assert not (tmp_path / "combined_metadata.tmp.npz").exists()
+
+    def test_failed_payload_write_leaves_no_marker(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a payload write which fails partway through leaves no completion marker behind."""
+        combined = _make_marker_ordering_data(root_path=tmp_path)
+
+        def _fail_to_save(*_args: object, **_kwargs: object) -> None:
+            """Raises to simulate an extraction array write that fails partway through the combination stage."""
+            message = "Unable to save the extraction arrays. Simulated payload write failure."
+            raise RuntimeError(message)
+
+        monkeypatch.setattr(ExtractionData, "save_arrays", _fail_to_save)
+
+        with pytest.raises(RuntimeError, match="Simulated payload write failure"):
+            combined.save(root_path=tmp_path)
+
+        # Consumers treat combined_metadata.npz as proof that the pipeline completed, so it must not exist when the
+        # payload it describes was never written.
+        assert not (tmp_path / "combined_metadata.npz").exists()
 
     def test_save_load_with_channel_2_binary_paths(self, tmp_path: Path) -> None:
         """Verifies that channel 2 binary paths survive a save/load round-trip."""
