@@ -79,7 +79,7 @@ def extend_roi(
     return y_pixels, x_pixels
 
 
-def detect(
+def detect_rois_in_frames(
     frames: NDArray[np.float32],
     temporal_highpass_window: int,
     spatial_highpass_window: int,
@@ -90,8 +90,9 @@ def detect(
     """Detects ROIs in the input frames using an iterative multiscale sparse detection algorithm.
 
     Notes:
-        The algorithm first preprocesses the frames by applying a temporal high-pass filter and subtracting neuropil
-        contamination. It then builds a multiscale representation by repeatedly convolving and downsampling the frames.
+        The algorithm first preprocesses the frames by applying a temporal high-pass filter, dividing each pixel by its
+        temporal standard deviation, and subtracting neuropil contamination. It then builds a multiscale representation
+        by repeatedly convolving and downsampling the frames.
         Peaks are iteratively detected in the variance maps across scales, and each detected peak is grown into an
         ROI by correlating neighboring pixel activity. ROIs may be split if a two-component model explains
         significantly more variance. Detected ROIs are subtracted from the residual frames before continuing to the
@@ -116,7 +117,6 @@ def detect(
     split_variance_threshold = 1.25
     reference_frame_count = 1200
 
-    # Preprocesses the frames by removing temporal drift and normalizing spatial variability.
     # Removes slow temporal drift so that transient calcium events dominate the signal.
     apply_temporal_high_pass_filter(frames=frames, kernel_size=int(temporal_highpass_window))
 
@@ -132,7 +132,6 @@ def detect(
 
     _, height, width = frames.shape
 
-    # Constructs the multiscale pyramid by alternating convolution and downsampling.
     # Builds the finest-resolution coordinate grid in float32 to avoid an int64 intermediate and copy. The grid
     # tracks each scale's pixel positions for mapping detected peaks back to the finest resolution.
     coordinate_grid = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
@@ -193,7 +192,6 @@ def detect(
     )
     console.echo(message=message, level=LogLevel.INFO)
 
-    # Sets up the detection loop with variance maps and flattened frame data.
     # Initializes variance maps as activity heatmaps from which peaks are drawn. Updates after each ROI subtraction
     # ensure that already-explained activity no longer contributes to future detections.
     variance_maps = [
@@ -210,7 +208,6 @@ def detect(
     exhausted_activity = False
     roi_statistics: list[ROIStatistics] = []
     for _ in range(maximum_iterations):
-        # Selects the globally strongest peak across all spatial scales.
         # Selects the globally strongest peak across all spatial scales, then maps it back to the finest grid so that
         # the ROI is grown in full-resolution coordinates.
         scale_maxima = np.array([variance_maps[scale_index].max() for scale_index in range(scale_count)])
@@ -234,7 +231,6 @@ def detect(
             break
         filter_size = filter_sizes[best_scale_index]
 
-        # Seeds the ROI as a square patch at the peak location.
         # Seeds the ROI as a square patch at the peak location. The patch size matches the spatial scale's filter size
         # so that the initial footprint is proportional to the expected ROI diameter at this scale.
         y_pixels, x_pixels, pixel_weights = _create_initial_square(
@@ -250,7 +246,6 @@ def detect(
         time_projection = frames[:, flat_indices] @ pixel_weights
         active_frame_indices = np.nonzero(time_projection > peak_threshold)[0]
 
-        # Grows the ROI by iteratively extending the boundary and re-estimating weights.
         # Repeatedly extends the ROI boundary and re-estimates weights from the residual. Multiple passes allow the
         # mask to converge to the ROI's true spatial extent by incorporating increasingly distant correlated pixels.
         for _extension_pass in range(extension_iterations):
@@ -270,7 +265,6 @@ def detect(
         if active_frame_indices.size == 0:
             continue
 
-        # Tests whether splitting into two components improves explained variance.
         # Tests whether a two-component model explains significantly more variance than the single-component model. If
         # so, the ROI likely contains two overlapping ROIs and the dominant component is retained.
         split_ratio, component_pack = _check_split_components(
@@ -294,7 +288,6 @@ def detect(
             centroid = (int(y_pixels[closest_pixel_index]), int(x_pixels[closest_pixel_index]))
             flat_indices = y_pixels * width + x_pixels
 
-        # Subtracts the detected ROI's contribution from the residual frames.
         # Removes the detected ROI's contribution from the residual frames so that subsequent iterations detect new
         # ROIs rather than re-detecting the same activity.
         frames[np.ix_(active_frame_indices, flat_indices)] -= (
@@ -368,11 +361,13 @@ def _subtract_neuropil(frames: NDArray[np.float32], filter_size: int) -> None:
 
     # Precomputes the reciprocal of the boundary normalization factor. The uniform filter on a constant image with
     # zero-padded boundaries produces values < 1 near edges, so dividing by it corrects for the reduced kernel overlap.
-    boundary_response = uniform_filter(np.ones((height, width), dtype=np.float32), size=filter_size, mode="constant")
+    boundary_response = uniform_filter(
+        input=np.ones((height, width), dtype=np.float32), size=filter_size, mode="constant"
+    )
     inverse_normalization = np.float32(1.0) / boundary_response
 
     # Applies the uniform filter to all frames simultaneously using a 3D kernel with size 1 along the temporal axis.
-    smoothed = uniform_filter(frames, size=(1, filter_size, filter_size), mode="constant")
+    smoothed = uniform_filter(input=frames, size=(1, filter_size, filter_size), mode="constant")
     smoothed *= inverse_normalization
     frames -= smoothed
 
@@ -381,8 +376,8 @@ def _convolve_square_2d(frames: NDArray[np.float32], filter_size: int) -> NDArra
     """Convolves each frame with a square uniform kernel.
 
     Notes:
-        The uniform filter computes a local mean, so the result is scaled by filter_size to approximate a box sum
-        rather than a box average.
+        The uniform filter computes a local mean, so the result is scaled by filter_size. This yields filter_size
+        times the box mean rather than the full box sum, which would require scaling by filter_size squared.
 
     Args:
         frames: The frame data with shape (num_frames, height, width).
@@ -392,7 +387,7 @@ def _convolve_square_2d(frames: NDArray[np.float32], filter_size: int) -> NDArra
         The spatially convolved frames with the same shape as the input.
     """
     # Applies the uniform filter to all frames simultaneously using a 3D kernel with size 1 along the temporal axis.
-    convolved_frames = uniform_filter(frames, size=(1, filter_size, filter_size), mode="constant")
+    convolved_frames = uniform_filter(input=frames, size=(1, filter_size, filter_size), mode="constant")
     convolved_frames *= filter_size
     return convolved_frames
 
@@ -548,9 +543,8 @@ def _extend_mask(
     """Extends a pixel mask into all 8 surrounding neighbors, distributing weights proportionally.
 
     Notes:
-        Uses a dense bounding-box accumulator instead of coordinate tiling and sorting. Each of the 9 directional
-        offsets (center plus 8 neighbors) is scatter-added into a small local grid, avoiding the 9x coordinate
-        replication and the O(n log n) np.unique deduplication step.
+        Uses a dense bounding-box accumulator. Each of the 9 directional offsets (center plus 8 neighbors) is
+        scatter-added into a small local grid, which keeps the working set proportional to the ROI bounding box.
 
     Args:
         y_pixels: The y-coordinates of the mask pixels.
@@ -571,8 +565,9 @@ def _extend_mask(
     box_height = max_y - min_y + 1
     box_width = max_x - min_x + 1
 
-    # Shifts coordinates into the local bounding-box frame and divides weights by 3 (each pixel distributes its
-    # weight across 3 columns: left, center, right). Uses a copy to avoid mutating the caller's array.
+    # Shifts coordinates into the local bounding-box frame and divides weights by 3. Each pixel is scattered into all
+    # 9 offsets below (center plus 8 neighbors), so the extended mask carries three times the original total weight,
+    # apart from offsets clipped at the frame border. Uses a copy to avoid mutating the caller's array.
     local_y = y_pixels - min_y
     local_x = x_pixels - min_x
     weights = (weights / 3).astype(np.float32)
@@ -616,7 +611,7 @@ def _estimate_spatial_scale(scale_images: NDArray[np.float32]) -> int:
 
     # Restricts scale voting to local maxima so that broad bright regions do not dominate the vote count.
     flat_projection = max_projection.ravel()
-    neighborhood_max = maximum_filter(max_projection, size=peak_detection_window).ravel()
+    neighborhood_max = maximum_filter(input=max_projection, size=peak_detection_window).ravel()
     is_peak = np.abs(flat_projection - neighborhood_max) < peak_tolerance
     peak_values = flat_projection[is_peak]
     peak_scales = scale_map[is_peak]
@@ -718,7 +713,7 @@ def _extend_iteratively(
     max_pixel_count = 10000
     previous_count = 0
 
-    # Initializes weights as a placeholder for static analysis; always overwritten since the loop runs at least once.
+    # Initializes weights as a placeholder for static analysis. The loop runs at least once, so it is overwritten.
     weights = np.empty(y_pixels.size, dtype=np.float32)
 
     while previous_count < max_pixel_count:
@@ -739,7 +734,7 @@ def _extend_iteratively(
         weights = frames[np.ix_(active_frame_indices, flat_indices)].mean(axis=0)
         active_mask = weights > max(0, weights.max() * _MINIMUM_WEIGHT_FRACTION)
         active_count = active_mask.sum()
-        if active_count == 0:  # pragma: no cover — degenerate: all extension weights are zero
+        if active_count == 0:  # pragma: no cover, degenerate case where all extension weights are zero
             break
         y_pixels, x_pixels, weights = y_pixels[active_mask], x_pixels[active_mask], weights[active_mask]
 

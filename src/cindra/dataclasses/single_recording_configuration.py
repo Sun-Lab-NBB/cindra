@@ -35,7 +35,7 @@ class BaselineMethod(StrEnum):
     """Uses a low percentile of the trace as a robust constant baseline, ignoring outliers."""
 
 
-def detect_pipeline_type(file_path: Path) -> PipelineType:
+def detect_pipeline_type(file_path: Path) -> PipelineType:  # noqa: RET503 - console.error is typed NoReturn.
     """Detects the pipeline type stored in the specified configuration YAML file.
 
     Reads the ``pipeline_type`` discriminator field from the configuration file without loading the full configuration
@@ -72,30 +72,11 @@ def detect_pipeline_type(file_path: Path) -> PipelineType:
         f"field is missing or has an unrecognized value '{raw_type}'. Expected one of: {expected}."
     )
     console.error(message=message, error=ValueError)
-    # Unreachable fallback to work around faulty ruff error checking.
-    raise ValueError(message)  # pragma: no cover
 
 
-@dataclass
-class _PipelineHeader(YamlConfig):
-    """Minimal dataclass for detecting the pipeline type from a configuration YAML file.
-
-    Declares only the ``pipeline_type`` field as a raw string. Extra keys present in the YAML are silently discarded by
-    dacite during deserialization, making this class safe to load against any cindra configuration file. The field
-    defaults to None so that a missing key is distinguishable from a valid value.
-    """
-
-    pipeline_type: str | None = None
-    """The raw pipeline type string read from the YAML file, or None if the key is absent."""
-
-
-@dataclass
+@dataclass(slots=True)
 class RuntimeSettings:
-    """Stores runtime behavior settings shared between single-recording and multi-recording processing pipelines.
-
-    This dataclass holds the parameters that control execution behavior. Both pipelines use these settings to
-    configure progress reporting.
-    """
+    """Stores runtime behavior settings shared between single-recording and multi-recording processing pipelines."""
 
     display_progress_bars: bool = False
     """Determines whether to display progress bars for certain processing steps. Only enable this option when running
@@ -161,13 +142,13 @@ class AcquisitionParameters(YamlConfig):
         return self.roi_number * self.plane_number
 
 
-@dataclass
+@dataclass(slots=True)
 class Main:
     """Stores the parameters that broadly affect the single-recording pipeline processing behavior.
 
     Notes:
-        For runtime behavior settings shared with the multi-recording pipeline (parallel workers, progress bars), see
-        RuntimeSettings.
+        For runtime behavior settings shared with the multi-recording pipeline (progress bars), see RuntimeSettings.
+        Worker counts are explicit API parameters resolved through ``cindra.allocation``.
     """
 
     two_channels: bool = False
@@ -200,13 +181,14 @@ class Main:
     signal extraction. Leave as None to use the built-in classifier bundled with cindra."""
 
 
-@dataclass
+@dataclass(slots=True)
 class FileIO:
     """Stores the parameters that specify input data location, format, and output directories."""
 
     data_path: Path | None = None
     """The path to the root data directory containing the input TIFF files. The pipeline recursively searches this
-    directory and all subdirectories for .tiff/.tif files to process."""
+    directory and all subdirectories for the cindra_parameters.json file, then loads the .tiff/.tif files from the
+    single directory that holds it. TIFF discovery inside that directory is not recursive."""
 
     output_path: Path | None = None
     """The path to the root output directory where processing results are saved. This field is required for pipeline
@@ -214,9 +196,9 @@ class FileIO:
     subdirectory under this path to store all output files."""
 
     ignored_file_names: tuple[str, ...] = ()
-    """The tuple of file names to ignore when searching for and loading raw data. Any file whose name exactly matches
-    one of the names in this tuple is excluded from processing even if it has the correct extension and is located 
-    inside the input data directory."""
+    """The tuple of file names, given without their extension, to ignore when searching for and loading raw data. Any
+    file whose stem (the name with the extension stripped) exactly matches one of the entries in this tuple is excluded
+    from processing even if it has the correct extension and is located inside the input data directory."""
 
     repeat_binarization: bool = False
     """Determines whether to repeat the binarization step when processing. When True, the pipeline re-runs TIFF to
@@ -225,7 +207,7 @@ class FileIO:
     binary files are used if present."""
 
 
-@dataclass
+@dataclass(slots=True)
 class Registration:
     """Stores parameters for rigid registration, which is used to correct motion artifacts between frames by
     counter-shifting the entire frame.
@@ -306,7 +288,7 @@ class Registration:
     reference frames."""
 
 
-@dataclass
+@dataclass(slots=True)
 class OnePhotonRegistration:
     """Stores parameters for additional pre-registration processing used to improve the registration of 1-photon
     datasets.
@@ -323,17 +305,19 @@ class OnePhotonRegistration:
     features useful for registration."""
 
     pre_smoothing_sigma: float = 0.0
-    """The standard deviation, in pixels, for Gaussian smoothing applied before spatial high-pass filtering. This
+    """The window size, in pixels, of the uniform (box) filter applied before spatial high-pass filtering. The value
+    is cast to an integer window and must be even, because odd windows are rejected by apply_spatial_smoothing(). This
     reduces high-frequency noise that would otherwise be amplified by the high-pass filter. Setting this to 0.0
     disables pre-smoothing."""
 
     edge_taper_pixels: float = 40.0
-    """The width, in pixels, of the tapering region at image edges. Pixel values are gradually reduced to zero
-    within this border region to prevent edge artifacts during FFT-based phase correlation. Larger values provide
-    smoother transitions but reduce the usable image area."""
+    """The sigmoid falloff scale, in pixels, of the edge taper applied at image borders. The taper begins roughly
+    2 * this value inward from each edge and fades border pixels toward the image mean (not to zero) to prevent edge
+    artifacts during FFT-based phase correlation. Larger values provide smoother transitions but reduce the usable
+    image area."""
 
 
-@dataclass
+@dataclass(slots=True)
 class NonrigidRegistration:
     """Stores parameters for nonrigid registration, which is used to improve motion registration in complex
     datasets by dividing frames into subregions and shifting each subregion independently of other subregions.
@@ -346,18 +330,20 @@ class NonrigidRegistration:
     block_size: tuple[int, int] = (128, 128)
     """The block size, in pixels, for nonrigid registration, defining the dimensions of subregions used in
     the correction. It is recommended to keep this size a power of 2 and/or 3 for more efficient FFT computation.
-    During processing, each frame is split into sub-regions with these dimensions and the registration is applied
-    to each region independently."""
+    During processing, each frame is tiled with blocks of these dimensions that overlap by approximately 50%, and the
+    registration is applied to each block independently. A dimension that matches or exceeds the corresponding frame
+    dimension collapses to a single block spanning the whole frame."""
 
     signal_to_noise_threshold: float = 1.2
-    """The signal-to-noise ratio threshold. The phase correlation peak must be this many times higher than the
-    noise level for the algorithm to accept the block offset and apply it to the output dataset."""
+    """The signal-to-noise ratio threshold below which the block's phase correlation surface receives additional
+    smoothing from its neighboring blocks before the block offset is estimated. Block offsets are never rejected by
+    this threshold. Higher values simply apply more smoothing. Typical values range from 1.0 to 1.5."""
 
     maximum_block_offset: float = 5.0
     """The maximum allowed offset, in pixels, for each block relative to the rigid registration offset."""
 
 
-@dataclass
+@dataclass(slots=True)
 class ROIDetection:
     """Stores parameters for Region of Interest (ROI) detection."""
 
@@ -370,9 +356,11 @@ class ROIDetection:
     to 0.0 keeps all detected ROIs."""
 
     threshold_scaling: float = 2.0
-    """The scaling factor for the ROI detection threshold. The final threshold is computed as this value multiplied
-    by the spatial scale factor. Higher values require ROIs to stand out more distinctly from background noise,
-    resulting in fewer but more confident detections. Lower values detect more ROIs but may include false positives."""
+    """The scaling factor for the ROI detection threshold. The final threshold multiplies this value by a fixed base
+    multiplier of 5.0 and by the selected pyramid scale index, which is clamped to a minimum of 1. The product is then
+    multiplied by a recording-length factor, the binned frame count divided by 1200, also clamped to a minimum of 1.
+    Higher values require ROIs to stand out more distinctly from background noise, resulting in fewer but more
+    confident detections. Lower values detect more ROIs but may include false positives."""
 
     spatial_highpass_window: int = 25
     """The window size, in pixels, for spatial high-pass filtering used during neuropil subtraction. The algorithm
@@ -380,9 +368,10 @@ class ROIDetection:
     fluorescence and isolate cell bodies."""
 
     maximum_overlap: float = 0.75
-    """The maximum allowed fraction of overlapping pixels between two ROIs. When two ROIs share more than this
-    fraction of pixels, the ROI with lower signal quality is discarded. Lower values enforce stricter separation
-    between detected ROIs."""
+    """The maximum allowed fraction of an ROI's pixels that may be shared with any other ROI. ROIs are evaluated in
+    reverse detection order, so when the fraction is exceeded the later-detected ROI is discarded, biasing retention
+    toward earlier-detected (typically higher-quality) ROIs. Lower values enforce stricter separation between detected
+    ROIs."""
 
     temporal_highpass_window: int = 100
     """The window size, in frames, for temporal high-pass filtering applied before ROI detection. This removes
@@ -411,7 +400,7 @@ class ROIDetection:
     on the cell body, improving accuracy for neurons with extensive dendritic arbors."""
 
 
-@dataclass
+@dataclass(slots=True)
 class SignalExtraction:
     """Stores parameters for extracting fluorescence signals from ROIs and surrounding neuropil regions."""
 
@@ -458,14 +447,14 @@ class SignalExtraction:
     matched if their pixel overlap fraction exceeds this value."""
 
 
-@dataclass
+@dataclass(slots=True)
 class SpikeDeconvolution:
     """Stores parameters for deconvolving fluorescence signals to infer spike trains."""
 
     extract_spikes: bool = True
     """Determines whether to deconvolve spike activity from the extracted fluorescence traces. When disabled, the
-    pipeline still computes neuropil-corrected fluorescence (F - coefficient * F_neuropil) but skips the deconvolution
-    step that estimates spike timing."""
+    pipeline still extracts the raw cell and neuropil fluorescence, but both the neuropil-corrected
+    (baseline-subtracted) traces and the spike traces are filled with zeros instead of being computed."""
 
     neuropil_coefficient: float = 0.7
     """The scaling factor applied to neuropil fluorescence before subtracting it from cell fluorescence. The corrected
@@ -498,8 +487,7 @@ class SpikeDeconvolution:
 class SingleRecordingConfiguration(YamlConfig):
     """Aggregates the user-defined configuration parameters for the single-recording cindra pipeline.
 
-    This class stores all user-configurable parameters that control how the pipeline processes data.
-    These parameters are immutable during processing - the pipeline reads them but does not modify them.
+    The pipeline reads these parameters and treats them as immutable for the duration of processing.
 
     Notes:
         This class is based on the 'default_ops' dictionary from the original suite2p package. The default parameters
@@ -511,11 +499,12 @@ class SingleRecordingConfiguration(YamlConfig):
     pipeline_type: PipelineType = field(default=PipelineType.SINGLE_RECORDING, init=False)
     """Identifies this configuration as a single-recording pipeline configuration."""
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
-    """Stores runtime behavior settings shared with the multi-recording pipeline (parallel workers, progress bars)."""
+    """Stores runtime behavior settings shared with the multi-recording pipeline (progress bar display)."""
     main: Main = field(default_factory=Main)
     """Stores global parameters that broadly define the cindra single-recording processing configuration."""
     file_io: FileIO = field(default_factory=FileIO)
-    """Stores general I/O parameters that specify input data location, format, and working and output directories."""
+    """Stores general I/O parameters that specify the input data location, the ignored input file names, and the
+    output directory."""
     registration: Registration = field(default_factory=Registration)
     """Stores parameters for rigid registration, which is used to correct motion artifacts between frames by
     counter-shifting the entire frame."""
@@ -536,9 +525,9 @@ class SingleRecordingConfiguration(YamlConfig):
         """Saves the configuration to a YAML file.
 
         Args:
-            file_path: The path to the .yaml file where to save the configuration data.
+            file_path: The path to the .yaml file in which to save the configuration data.
         """
-        ensure_directory_exists(file_path)
+        ensure_directory_exists(path=file_path)
         self.to_yaml(file_path=file_path)
 
     @classmethod
@@ -552,3 +541,16 @@ class SingleRecordingConfiguration(YamlConfig):
             A SingleRecordingConfiguration instance populated with the loaded data.
         """
         return cls.from_yaml(file_path=file_path)
+
+
+@dataclass
+class _PipelineHeader(YamlConfig):
+    """Stores the raw pipeline type discriminator read from a configuration YAML file.
+
+    Declares only the ``pipeline_type`` field as a raw string. Extra keys present in the YAML are silently discarded by
+    dacite during deserialization, making this class safe to load against any cindra configuration file. The field
+    defaults to None so that a missing key is distinguishable from a valid value.
+    """
+
+    pipeline_type: str | None = None
+    """The raw pipeline type string read from the YAML file, or None if the key is absent."""

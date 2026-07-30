@@ -56,9 +56,7 @@ class TestWarpMaskPixels:
 
         new_y, _new_x, new_weights, new_centroid = _warp_mask_pixels(mask=mask, deformation=deformation)
 
-        # Verifies that the pixel count is approximately preserved.
         assert abs(len(new_y) - len(mask.y_pixels)) <= 2
-        # Verifies that the centroid is approximately preserved.
         assert abs(new_centroid[0] - 50) <= 2
         assert abs(new_centroid[1] - 50) <= 2
         assert new_weights.dtype == np.float32
@@ -76,9 +74,8 @@ class TestWarpMaskPixels:
 
         new_y, new_x, new_weights, _new_centroid = _warp_mask_pixels(mask=mask, deformation=deformation)
 
-        # Verifies that pixels survive the deformation.
-        assert len(new_y) > 0
-        assert len(new_x) > 0
+        assert new_y.size
+        assert new_x.size
         assert new_weights.dtype == np.float32
 
 
@@ -101,10 +98,9 @@ class TestForwardDeformMasks:
         result = _forward_deform_masks(masks=masks, deformation=deformation, frame_width=width)
 
         assert len(result) == 2
-        # Verifies that each transformed mask has pixel data.
         for transformed_mask in result:
-            assert len(transformed_mask.y_pixels) > 0
-            assert len(transformed_mask.x_pixels) > 0
+            assert transformed_mask.y_pixels.size
+            assert transformed_mask.x_pixels.size
             assert transformed_mask.frame_width == width
 
     def test_output_masks_have_valid_radius(self) -> None:
@@ -148,16 +144,14 @@ class TestBackwardDeformMasks:
         assert len(result) == 1
         roi_statistics = result[0]
 
-        # Verifies that ROIStatistics was created with spatial data.
-        assert len(roi_statistics.mask.y_pixels) > 0
+        assert roi_statistics.mask.y_pixels.size
         assert roi_statistics.mask.frame_width == width
         assert roi_statistics.mask.cluster_id == 1
         assert roi_statistics.mask.recording_count == 3
 
-        # Verifies that compute_roi_statistics populated shape fields.
         assert roi_statistics.pixel_count > 0
 
-        # Verifies that footprint is zeroed for tracked ROIs.
+        # Tracked ROIs bypass multi-scale detection, so the backward projection zeroes their footprint.
         assert roi_statistics.footprint == 0
 
     def test_multiple_masks_produce_matching_statistics_count(self) -> None:

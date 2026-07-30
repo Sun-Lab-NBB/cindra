@@ -1,4 +1,5 @@
-"""Provides the measured CPU worker defaults for the single-recording pipeline stages and the worker count resolver.
+"""Provides the measured CPU worker defaults for the single and multi-recording pipeline stages and the worker count
+resolver.
 
 The defaults encode the knee of each stage's measured scaling curve, so a caller that expresses no preference gets the
 allocation that maximizes batch throughput rather than the allocation that minimizes the wall time of one job.
@@ -6,7 +7,7 @@ allocation that maximizes batch throughput rather than the allocation that minim
 
 from ataraxis_base_utilities import console, resolve_worker_count
 
-from .job_names import SingleRecordingJobNames
+from .job_names import MultiRecordingJobNames, SingleRecordingJobNames
 
 BINARIZATION_WORKERS: int = 4
 """The number of workers allocated to the binarization stage by default, measured as the point where the allocated
@@ -23,6 +24,16 @@ held at 114.0, 113.9, and 113.8 seconds for 10, 20, and 30 workers, bound by mov
 loop. Extraction scaled from 61.8 to 44.1 to 38.6 seconds over the same sweep, but running more planes concurrently
 outweighs that gain, which places the default at 10."""
 
+DISCOVERY_WORKERS: int = 30
+"""The number of workers allocated to the multi-recording discovery stage by default, which is the saturating
+allocation the stage is admitted at. The stage registers every recording of one animal against the others, so its cost
+grows with the square of the recording count."""
+
+EXTRACTION_WORKERS: int = 16
+"""The number of workers allocated to the multi-recording extraction stage by default, measured as the point where the
+stage stops shortening. Every frame batch the extraction kernel consumes is read serially before the kernel runs, so
+the stage plateaus below the width it is given and further cores are spent waiting on batch reads."""
+
 TIFF_DECODE_CEILING: int = 4
 """The maximum number of TIFF decode threads, measured as the point where added decode threads stop shortening the
 conversion. The decode pool never exceeds this value regardless of how many cores the surrounding job holds."""
@@ -30,17 +41,22 @@ conversion. The decode pool never exceeds this value regardless of how many core
 ALL_CORES_REQUEST: int = -1
 """The requested worker count that asks for every available CPU core."""
 
-_STAGE_WORKER_DEFAULTS: dict[SingleRecordingJobNames, int] = {
+_STAGE_WORKER_DEFAULTS: dict[SingleRecordingJobNames | MultiRecordingJobNames, int] = {
     SingleRecordingJobNames.BINARIZE: BINARIZATION_WORKERS,
     SingleRecordingJobNames.REGISTER: REGISTRATION_WORKERS,
     SingleRecordingJobNames.PROCESS: PROCESSING_WORKERS,
+    MultiRecordingJobNames.DISCOVER: DISCOVERY_WORKERS,
+    MultiRecordingJobNames.EXTRACT: EXTRACTION_WORKERS,
 }
-"""Maps every single-recording pipeline stage that consumes a worker allocation to its measured default worker
-count."""
+"""Maps every single and multi-recording pipeline stage that consumes a worker allocation to its measured default
+worker count."""
 
 
-def resolve_stage_workers(job_name: SingleRecordingJobNames, requested_workers: int | None = None) -> int:
-    """Resolves the number of workers to allocate to the target single-recording pipeline stage.
+def resolve_stage_workers(
+    job_name: SingleRecordingJobNames | MultiRecordingJobNames,
+    requested_workers: int | None = None,
+) -> int:
+    """Resolves the number of workers to allocate to the target pipeline stage.
 
     Notes:
         A requested count of None resolves to the measured default for the stage, which is the knee of that stage's
@@ -48,11 +64,12 @@ def resolve_stage_workers(job_name: SingleRecordingJobNames, requested_workers: 
         worker resolver holds back for system use. A positive requested count is honored exactly. A requested count of
         zero, or any negative count other than -1, is rejected.
 
-        The binarization, registration, and processing stages resolve through this function. Passing the combination
-        stage's job name raises an error, because that stage takes no worker allocation.
+        The single-recording binarization, registration, and processing stages resolve through this function, as do the
+        multi-recording discovery and extraction stages. Passing the single-recording combination stage's job name
+        raises an error, because that stage takes no worker allocation.
 
     Args:
-        job_name: The single-recording pipeline stage to allocate workers for.
+        job_name: The single or multi-recording pipeline stage to allocate workers for.
         requested_workers: The number of workers the caller asks for. Use None to accept the measured default for the
             stage and -1 to request every available core.
 
@@ -67,7 +84,7 @@ def resolve_stage_workers(job_name: SingleRecordingJobNames, requested_workers: 
     if default_workers is None:
         message = (
             f"Unable to resolve the worker count for the '{job_name}' processing stage. The input job name does not "
-            f"name a single-recording stage that consumes a worker allocation. Use one of the valid stage names: "
+            f"name a pipeline stage that consumes a worker allocation. Use one of the valid stage names: "
             f"{[stage.value for stage in _STAGE_WORKER_DEFAULTS]}."
         )
         console.error(message=message, error=ValueError)

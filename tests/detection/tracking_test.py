@@ -31,14 +31,14 @@ def _make_mask(
     cluster_id: int = 0,
 ) -> ROIMask:
     """Creates a minimal ROIMask instance for testing."""
-    y = np.array(y_pixels, dtype=np.int32)
-    x = np.array(x_pixels, dtype=np.int32)
+    y_array = np.array(y_pixels, dtype=np.int32)
+    x_array = np.array(x_pixels, dtype=np.int32)
     weight_array = np.array(weights, dtype=np.float32)
     if centroid is None:
-        centroid = (int(np.median(y)), int(np.median(x)))
+        centroid = (int(np.median(y_array)), int(np.median(x_array)))
     return ROIMask(
-        y_pixels=y,
-        x_pixels=x,
+        y_pixels=y_array,
+        x_pixels=x_array,
         pixel_weights=weight_array,
         centroid=centroid,
         frame_width=frame_width,
@@ -72,8 +72,8 @@ class TestComputeOverlap:
         roi2 = _make_mask(y_pixels=[5, 5], x_pixels=[6, 7], weights=[1.0, 1.0], frame_width=20)
         _compute_overlap(rois=[roi1, roi2])
         # roi1 pixel (5,6) overlaps, pixel (5,5) does not.
-        assert roi1.overlap_mask[1]  # (5,6) is overlapping.
-        assert not roi1.overlap_mask[0]  # (5,5) is not.
+        assert roi1.overlap_mask[1]
+        assert not roi1.overlap_mask[0]
 
     def test_empty_list(self) -> None:
         """Verifies that an empty list is handled without error."""
@@ -86,13 +86,9 @@ class TestComputeCondensedIndex:
     def test_known_values(self) -> None:
         """Verifies correct condensed indices for known square matrix positions."""
         # For a 4x4 matrix, condensed form has 6 elements.
-        # Position (1,0) -> condensed index 0
         assert _compute_condensed_index(row_index=1, column_index=0, matrix_size=4) == 0
-        # Position (2,0) -> condensed index 1
         assert _compute_condensed_index(row_index=2, column_index=0, matrix_size=4) == 1
-        # Position (3,0) -> condensed index 2
         assert _compute_condensed_index(row_index=3, column_index=0, matrix_size=4) == 2
-        # Position (2,1) -> condensed index 3
         assert _compute_condensed_index(row_index=2, column_index=1, matrix_size=4) == 3
 
     def test_symmetric(self) -> None:
@@ -188,7 +184,7 @@ class TestClusterRoisInBin:
         roi1 = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
         roi2 = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
         result = _cluster_rois_in_bin(rois=[roi1, roi2], roi_recordings=[0, 1], threshold=0.5, maximum_distance=50)
-        assert len(result) > 0
+        assert result
         # The two ROIs should be in the same cluster.
         total_rois = sum(len(rois) for rois, _ in result)
         assert total_rois == 2
@@ -225,7 +221,7 @@ class TestFilterTemplates:
         mask = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
         mask.overlap_mask = np.array([True, True, True, False], dtype=np.bool_)
         result = _filter_templates(template_masks=[mask], minimum_size=2)
-        assert len(result) == 0
+        assert not result
 
     def test_none_overlap_mask_kept(self) -> None:
         """Verifies that masks without overlap information are always kept."""

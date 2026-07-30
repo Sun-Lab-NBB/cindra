@@ -12,11 +12,11 @@ if TYPE_CHECKING:
 
 _package_metadata: PackageMetadata | None = _metadata("cindra")
 
-if _package_metadata is None:  # pragma: no cover — unreachable when package is installed
-    version: str = "unknown"
+if _package_metadata is None:  # pragma: no cover - unreachable when the package is installed
+    VERSION: str = "unknown"
 else:
-    version = _package_metadata["version"]
+    VERSION = _package_metadata["version"]
 """The cindra library version string, resolved from package metadata at import time."""
 
-python_version: str = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+PYTHON_VERSION: str = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 """The Python interpreter version string in major.minor.micro format."""

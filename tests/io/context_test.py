@@ -9,6 +9,7 @@ import pytest
 
 from cindra.io.context import (
     PARAMETERS_FILENAME,
+    OUTPUT_DIRECTORY_NAME,
     find_data_directory,
     _find_cindra_directory,
     resolve_recording_roots,
@@ -234,7 +235,7 @@ class TestResolveRecordingRoots:
     """Tests resolve_recording_roots."""
 
     def test_resolves_roots_from_nested_paths(self) -> None:
-        """Verifies that recording roots are resolved by walking up to the unique component ancestor."""
+        """Verifies that recording roots are resolved by stripping the trailing components shared by every path."""
         paths = [
             Path("/data/day1/recording/cindra/plane_0"),
             Path("/data/day2/recording/cindra/plane_0"),
@@ -265,6 +266,102 @@ class TestResolveRecordingRoots:
         result = resolve_recording_roots(paths=paths)
 
         assert result == (Path("/data/session_a"),)
+
+    def test_resolves_single_output_directory_to_its_parent(self) -> None:
+        """Verifies that a lone output directory resolves to the recording root that contains it."""
+        paths = [Path(f"/data/rec1/{OUTPUT_DIRECTORY_NAME}")]
+
+        result = resolve_recording_roots(paths=paths)
+
+        assert result == (Path("/data/rec1"),)
+
+    def test_preserves_single_path_outside_the_output_directory(self) -> None:
+        """Verifies that a lone raw-data directory is returned unchanged, because it has no peer to compare with."""
+        paths = [Path("/data/rec1/raw_data")]
+
+        result = resolve_recording_roots(paths=paths)
+
+        assert result == (Path("/data/rec1/raw_data"),)
+
+    def test_resolves_multiple_output_directories_to_their_parents(self) -> None:
+        """Verifies that every output directory in a batch resolves to its own recording root."""
+        paths = [
+            Path(f"/data/rec1/{OUTPUT_DIRECTORY_NAME}"),
+            Path(f"/data/rec2/{OUTPUT_DIRECTORY_NAME}"),
+        ]
+
+        result = resolve_recording_roots(paths=paths)
+
+        assert result == (Path("/data/rec1"), Path("/data/rec2"))
+
+    def test_retains_shared_parent_of_output_directories(self) -> None:
+        """Verifies that output directories nested under a shared subdirectory keep that subdirectory in the root."""
+        paths = [
+            Path(f"/data/rec1/processed/{OUTPUT_DIRECTORY_NAME}"),
+            Path(f"/data/rec2/processed/{OUTPUT_DIRECTORY_NAME}"),
+        ]
+
+        result = resolve_recording_roots(paths=paths)
+
+        assert result == (Path("/data/rec1/processed"), Path("/data/rec2/processed"))
+
+    def test_deduplicates_identical_output_directories(self) -> None:
+        """Verifies that two identical output directories collapse into a single recording root."""
+        paths = [
+            Path(f"/data/rec1/{OUTPUT_DIRECTORY_NAME}"),
+            Path(f"/data/rec1/{OUTPUT_DIRECTORY_NAME}"),
+        ]
+
+        result = resolve_recording_roots(paths=paths)
+
+        assert result == (Path("/data/rec1"),)
+
+    def test_resolves_mixed_output_and_raw_directories(self) -> None:
+        """Verifies that an output directory resolves to its parent while a raw-data peer is left untouched."""
+        paths = [
+            Path(f"/data/rec1/{OUTPUT_DIRECTORY_NAME}"),
+            Path("/data/rec2/raw_data"),
+        ]
+
+        result = resolve_recording_roots(paths=paths)
+
+        assert result == (Path("/data/rec1"), Path("/data/rec2/raw_data"))
+
+    def test_strips_shared_leaf_when_parents_differ(self) -> None:
+        """Verifies that a leaf name shared by every raw-data directory is stripped to expose the differing parents."""
+        paths = [
+            Path("/data/mouse_1/raw_data"),
+            Path("/data/mouse_2/raw_data"),
+        ]
+
+        result = resolve_recording_roots(paths=paths)
+
+        assert result == (Path("/data/mouse_1"), Path("/data/mouse_2"))
+
+    def test_retains_recordings_stored_under_a_cindra_named_ancestor(self) -> None:
+        """Verifies that recordings kept under a directory named after the output directory stay distinct."""
+        paths = [
+            Path(f"/home/user/{OUTPUT_DIRECTORY_NAME}/data/rec1"),
+            Path(f"/home/user/{OUTPUT_DIRECTORY_NAME}/data/rec2"),
+        ]
+
+        result = resolve_recording_roots(paths=paths)
+
+        assert result == (
+            Path(f"/home/user/{OUTPUT_DIRECTORY_NAME}/data/rec1"),
+            Path(f"/home/user/{OUTPUT_DIRECTORY_NAME}/data/rec2"),
+        )
+
+    def test_resolves_paths_that_share_every_component(self) -> None:
+        """Verifies that paths built from the same component names in different orders are returned unchanged."""
+        paths = [
+            Path("/data/a/b"),
+            Path("/data/b/a"),
+        ]
+
+        result = resolve_recording_roots(paths=paths)
+
+        assert result == (Path("/data/a/b"), Path("/data/b/a"))
 
 
 class TestFindCindraDirectory:

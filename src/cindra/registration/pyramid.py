@@ -6,16 +6,16 @@ from typing import TYPE_CHECKING
 
 from .deformation import zoom, diffuse
 
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
+
 _DOWNSAMPLE_ZOOM_THRESHOLD: float = 0.9
 """The maximum zoom factor threshold below which downsampling is applied. A factor of 0.9 means downsampling occurs
 when resolution would be reduced by more than 10%."""
 
 _MINIMUM_DOWNSAMPLE_DIMENSION: int = 8
-"""The minimum image dimension (in either axis) required before pyramid downsampling is applied."""
-
-if TYPE_CHECKING:
-    import numpy as np
-    from numpy.typing import NDArray
+"""The value that the image's smallest dimension must exceed for a new pyramid level to be downsampled."""
 
 
 class ScaleSpacePyramid:
@@ -26,7 +26,7 @@ class ScaleSpacePyramid:
 
     Args:
         data: The input 2D image array for which to generate the scale space pyramid.
-        min_scale: The minimum (finest) scale for the pyramid. The input image is smoothed to this scale before
+        minimum_scale: The minimum (finest) scale for the pyramid. The input image is smoothed to this scale before
             creating the base level. If the scale is large enough, the data is also downsampled for efficiency.
 
     Attributes:
@@ -37,38 +37,19 @@ class ScaleSpacePyramid:
     """
 
     _LEVEL_FACTOR: float = 2.0
-    """The factor by which the scale doubles between successive pyramid levels; each level is downsampled by its
-    reciprocal (0.5)."""
+    """The factor by which the scale doubles between successive pyramid levels. Each level is downsampled by the
+    reciprocal of this factor (0.5)."""
 
-    def __init__(self, data: NDArray[np.float32], min_scale: float) -> None:
-        min_scale = float(min_scale)
+    def __init__(self, data: NDArray[np.float32], minimum_scale: float) -> None:
+        minimum_scale = float(minimum_scale)
         self._levels: list[NDArray[np.float32]] = []
         self._level_scales: list[float] = []
         self._level_downsample_factors: list[float] = []
-        self._initialize_base_level(data=data, min_scale=min_scale)
+        self._initialize_base_level(data=data, minimum_scale=minimum_scale)
 
-    def _initialize_base_level(self, data: NDArray[np.float32], min_scale: float) -> None:
-        """Initializes the base pyramid level by smoothing and optionally downsampling the image data.
-
-        Args:
-            data: The input image array.
-            min_scale: The target scale for the base level.
-        """
-        downsample_factor = 1.0
-
-        # Smooths to target scale if min_scale > 0.
-        if min_scale > 0:
-            data = diffuse(data=data, sigma=min_scale)
-
-            # Downsamples if scale is large enough (reduces resolution by more than 10%).
-            zoom_factor = 1.0 / min_scale
-            if zoom_factor < _DOWNSAMPLE_ZOOM_THRESHOLD:
-                data = zoom(data=data, factor=zoom_factor, order=3)
-                downsample_factor = zoom_factor
-
-        self._levels.append(data)
-        self._level_scales.append(min_scale)
-        self._level_downsample_factors.append(downsample_factor)
+    def __repr__(self) -> str:
+        """Returns a string representation of the ScaleSpacePyramid instance."""
+        return f"ScaleSpacePyramid(level_count={len(self._levels)}, level_scales={self._level_scales})"
 
     def get_scale(self, scale: float) -> NDArray[np.float32]:
         """Returns the image at the specified scale.
@@ -77,7 +58,7 @@ class ScaleSpacePyramid:
         exact target scale. New pyramid levels are created on demand if needed.
 
         Args:
-            scale: The target scale in world coordinates. Must be >= min_scale.
+            scale: The target scale in world coordinates. Must be >= minimum_scale.
 
         Returns:
             The image smoothed to the requested scale.
@@ -93,7 +74,6 @@ class ScaleSpacePyramid:
             if self._level_scales[-1] <= scale:
                 level = len(self._levels) - 1
 
-        # Gets the base data from the selected level.
         data = self._levels[level]
         current_scale = self._level_scales[level]
 
@@ -106,6 +86,29 @@ class ScaleSpacePyramid:
 
         return data
 
+    def _initialize_base_level(self, data: NDArray[np.float32], minimum_scale: float) -> None:
+        """Initializes the base pyramid level by smoothing and optionally downsampling the image data.
+
+        Args:
+            data: The input image array.
+            minimum_scale: The target scale for the base level.
+        """
+        downsample_factor = 1.0
+
+        # Smooths to target scale if minimum_scale > 0.
+        if minimum_scale > 0:
+            data = diffuse(data=data, sigma=minimum_scale)
+
+            # Downsamples if scale is large enough (reduces resolution by more than 10%).
+            zoom_factor = 1.0 / minimum_scale
+            if zoom_factor < _DOWNSAMPLE_ZOOM_THRESHOLD:
+                data = zoom(data=data, factor=zoom_factor, order=3)
+                downsample_factor = zoom_factor
+
+        self._levels.append(data)
+        self._level_scales.append(minimum_scale)
+        self._level_downsample_factors.append(downsample_factor)
+
     def _add_level(self) -> None:
         """Adds a new coarser level to the pyramid by smoothing and downsampling the underlying image's data."""
         data = self._levels[-1]
@@ -113,7 +116,7 @@ class ScaleSpacePyramid:
         current_factor = self._level_downsample_factors[-1]
 
         # Computes the target scale for the new level.
-        target_scale = max(self._LEVEL_FACTOR, current_scale * 2.0)
+        target_scale = max(self._LEVEL_FACTOR, current_scale * self._LEVEL_FACTOR)
 
         # Computes additional smoothing needed. Scales sigma by the current downsample factor to convert from
         # original-pixel units to the current level's pixel units.

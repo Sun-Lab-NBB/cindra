@@ -1,5 +1,7 @@
 """Provides ROI classification functionality for distinguishing cells from artifacts."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 from pathlib import Path
 from operator import attrgetter
@@ -14,7 +16,6 @@ if TYPE_CHECKING:
 
     from ..dataclasses import ROIStatistics
 
-
 _BUILTIN_CLASSIFIER_PATH: Path = Path(__file__).parent / "classifier.npz"
 """The path to the built-in classifier bundled with cindra."""
 
@@ -24,7 +25,7 @@ the feature matrix."""
 
 _PRECLASSIFICATION_FEATURES: tuple[str, ...] = ("normalized_pixel_count", "compactness")
 """The names of the ROI features used for preclassification (during detection, before signal extraction). This subset
-excludes skewness which requires extracted fluorescence traces to compute."""
+excludes skewness, which requires extracted fluorescence traces to compute."""
 
 _GRID_NODE_COUNT: int = 100
 """The number of grid nodes used for probability estimation during model fitting."""
@@ -41,7 +42,7 @@ class Classifier:
 
     Notes:
         The classifier file format uses pickle-free npz serialization containing training_labels and feature arrays
-        (normalized_pixel_count, compactness, skewness). The model is fitted on load, which takes approximately 10ms
+        (normalized_pixel_count, compactness, skewness). The model is fitted on load, which takes approximately 10 ms
         for the default training set.
 
     Args:
@@ -75,7 +76,7 @@ class Classifier:
 
         try:
             # Loads the training data.
-            data = np.load(classifier_path, allow_pickle=False)
+            data = np.load(file=classifier_path, allow_pickle=False)
 
             if "training_labels" not in data:
                 message = (
@@ -101,7 +102,7 @@ class Classifier:
             for feature_name in target_features:
                 if feature_name in data:
                     feature_array = data[feature_name].astype(np.float32)
-                    if len(feature_array) == sample_count and not np.all(np.isnan(feature_array)):
+                    if len(feature_array) == sample_count and not np.all(a=np.isnan(feature_array)):
                         training_features[feature_name] = feature_array
                         available_features.append(feature_name)
 
@@ -128,119 +129,12 @@ class Classifier:
             )
             console.error(message=message, error=ValueError)
 
-    def _extract_features(self, roi_statistics: list[ROIStatistics]) -> NDArray[np.float32]:
-        """Extracts classification features supported by the model from ROIStatistics instances.
-
-        Args:
-            roi_statistics: The list of ROIStatistics instances to extract features from.
-
-        Returns:
-            An array of shape (n_rois, n_features) containing the extracted features.
-        """
-        roi_count = len(roi_statistics)
-        feature_count = len(self._available_features)
-        features = np.zeros((roi_count, feature_count), dtype=np.float32)
-
-        # Pre-creates attribute accessors to avoid repeated string lookups.
-        getters = [attrgetter(name) for name in self._available_features]
-
-        # Extracts feature values, using NaN for missing values.
-        for roi_index, roi in enumerate(roi_statistics):
-            for feature_index, getter in enumerate(getters):
-                value = getter(roi)
-                features[roi_index, feature_index] = np.nan if value is None else value
-
-        return features
-
-    def _get_training_features(self) -> NDArray[np.float32]:
-        """Assembles the training feature matrix from individual feature arrays.
-
-        Returns:
-            An array of shape (n_samples, n_features) containing the training features.
-        """
-        feature_arrays = [self._training_features[name] for name in self._available_features]
-        return np.column_stack(feature_arrays)
-
-    def _compute_log_probabilities(self, features: NDArray[np.float32]) -> NDArray[np.float32]:
-        """Computes log probability ratios for the given features.
-
-        Args:
-            features: An array of shape (n_samples, n_features) containing the feature values.
-
-        Returns:
-            An array of shape (n_samples, n_features) containing the log probability ratios.
-        """
-        log_probabilities = np.zeros(features.shape, dtype=np.float32)
-
-        for feature_index in range(features.shape[1]):
-            feature_values = features[:, feature_index].copy()
-
-            # Clips feature values to the grid bounds and replaces NaN with the minimum grid value.
-            grid_min = self._probability_grid[0, feature_index]
-            grid_max = self._probability_grid[-1, feature_index]
-            feature_values = np.clip(feature_values, a_min=grid_min, a_max=grid_max)
-            feature_values[np.isnan(feature_values)] = grid_min
-
-            # Maps each feature value to its corresponding grid bin index.
-            bin_indices = np.digitize(feature_values, bins=self._probability_grid[:, feature_index], right=True) - 1
-            bin_indices = np.clip(bin_indices, a_min=0, a_max=self._grid_cell_probabilities.shape[0] - 1)
-
-            # Looks up the pre-computed cell probability for each bin and converts to log-odds.
-            probabilities = self._grid_cell_probabilities[bin_indices, feature_index]
-            log_probabilities[:, feature_index] = np.log(probabilities + _LOG_EPSILON) - np.log(
-                1 - probabilities + _LOG_EPSILON
-            )
-
-        return log_probabilities
-
-    def _predict_probabilities(self, roi_statistics: list[ROIStatistics]) -> NDArray[np.float32]:
-        """Predicts the probability that each ROI in the input list is a cell.
-
-        Args:
-            roi_statistics: The list of ROIStatistics instances that define the ROIs to predict probabilities for.
-
-        Returns:
-            An array of shape (n_rois,) containing the probability that each ROI is a cell.
-        """
-        features = self._extract_features(roi_statistics=roi_statistics)
-        log_probabilities = self._compute_log_probabilities(features=features)
-        predictions = self._model.predict_proba(log_probabilities)[:, 1]
-
-        return predictions.astype(np.float32)
-
-    def _fit_model(self) -> None:
-        """Fits the logistic regression model using the loaded training data."""
-        training_features = self._get_training_features()
-        sample_count, feature_count = training_features.shape
-
-        # Sorts features and creates evenly-spaced grid boundaries for probability estimation.
-        sorted_features = np.sort(training_features, axis=0)
-        sort_indices = np.argsort(training_features, axis=0)
-        grid_indices = np.linspace(start=0, stop=sample_count - 1, num=_GRID_NODE_COUNT).astype(np.intp)
-        self._probability_grid = sorted_features[grid_indices, :]
-
-        # Computes the fraction of cells (vs artifacts) in each grid bin for each feature.
-        self._grid_cell_probabilities = np.zeros((_GRID_NODE_COUNT - 1, feature_count), dtype=np.float32)
-        bin_sizes = grid_indices[1:] - grid_indices[:-1]
-
-        for feature_index in range(feature_count):
-            # Reorders labels by sorted feature values and computes cumulative sum.
-            sorted_labels = self._training_labels[sort_indices[:, feature_index]].astype(np.float32)
-            cumulative_sum = np.concatenate([np.array([0], dtype=np.float32), np.cumsum(sorted_labels)])
-
-            # Computes bin sums using cumulative sum differences, then converts to means.
-            bin_sums = cumulative_sum[grid_indices[1:]] - cumulative_sum[grid_indices[:-1]]
-            self._grid_cell_probabilities[:, feature_index] = bin_sums / bin_sizes
-
-        # Smooths the probability estimates across bins to reduce noise.
-        self._grid_cell_probabilities = gaussian_filter(self._grid_cell_probabilities, sigma=(2.0, 0)).astype(
-            np.float32
+    def __repr__(self) -> str:
+        """Returns a string representation of the Classifier instance."""
+        return (
+            f"Classifier(classifier_path={self._classifier_path}, features={self._available_features}, "
+            f"training_samples={len(self._training_labels)})"
         )
-
-        # Fits the logistic regression model using log-odds transformed features.
-        log_probabilities = self._compute_log_probabilities(features=training_features)
-        self._model = LogisticRegression(C=100.0, solver="liblinear")
-        self._model.fit(X=log_probabilities, y=self._training_labels)
 
     @staticmethod
     def create_training_dataset(
@@ -312,7 +206,123 @@ class Classifier:
         probabilities = self._predict_probabilities(roi_statistics=roi_statistics)
         is_cell = (probabilities > probability_threshold).astype(np.float32)
 
-        return np.stack([is_cell, probabilities], axis=1)
+        return np.stack(arrays=[is_cell, probabilities], axis=1)
+
+    def _extract_features(self, roi_statistics: list[ROIStatistics]) -> NDArray[np.float32]:
+        """Extracts classification features supported by the model from ROIStatistics instances.
+
+        Args:
+            roi_statistics: The list of ROIStatistics instances to extract features from.
+
+        Returns:
+            An array of shape (n_rois, n_features) containing the extracted features.
+        """
+        roi_count = len(roi_statistics)
+        feature_count = len(self._available_features)
+        features = np.zeros((roi_count, feature_count), dtype=np.float32)
+
+        # Pre-creates attribute accessors to avoid repeated string lookups.
+        getters = [attrgetter(name) for name in self._available_features]
+
+        # Extracts feature values, using NaN for missing values.
+        for roi_index, roi in enumerate(roi_statistics):
+            for feature_index, getter in enumerate(getters):
+                value = getter(roi)
+                features[roi_index, feature_index] = np.nan if value is None else value
+
+        return features
+
+    def _get_training_features(self) -> NDArray[np.float32]:
+        """Assembles the training feature matrix from individual feature arrays.
+
+        Returns:
+            An array of shape (n_samples, n_features) containing the training features.
+        """
+        feature_arrays = [self._training_features[name] for name in self._available_features]
+        return np.column_stack(tup=feature_arrays)
+
+    def _compute_log_probabilities(self, features: NDArray[np.float32]) -> NDArray[np.float32]:
+        """Computes log probability ratios for the given features.
+
+        Args:
+            features: An array of shape (n_samples, n_features) containing the feature values.
+
+        Returns:
+            An array of shape (n_samples, n_features) containing the log probability ratios.
+        """
+        log_probabilities = np.zeros(features.shape, dtype=np.float32)
+
+        for feature_index in range(features.shape[1]):
+            feature_values = features[:, feature_index].copy()
+
+            # Clips feature values to the grid bounds and replaces NaN with the minimum grid value.
+            grid_min = self._probability_grid[0, feature_index]
+            grid_max = self._probability_grid[-1, feature_index]
+            feature_values = np.clip(a=feature_values, a_min=grid_min, a_max=grid_max)
+            feature_values[np.isnan(feature_values)] = grid_min
+
+            # Maps each feature value to its corresponding grid bin index.
+            bin_indices = np.digitize(x=feature_values, bins=self._probability_grid[:, feature_index], right=True) - 1
+            bin_indices = np.clip(a=bin_indices, a_min=0, a_max=self._grid_cell_probabilities.shape[0] - 1)
+
+            # Looks up the pre-computed cell probability for each bin and converts to log-odds.
+            probabilities = self._grid_cell_probabilities[bin_indices, feature_index]
+            log_probabilities[:, feature_index] = np.log(probabilities + _LOG_EPSILON) - np.log(
+                1 - probabilities + _LOG_EPSILON
+            )
+
+        return log_probabilities
+
+    def _predict_probabilities(self, roi_statistics: list[ROIStatistics]) -> NDArray[np.float32]:
+        """Predicts the probability that each ROI in the input list is a cell.
+
+        Args:
+            roi_statistics: The list of ROIStatistics instances that define the ROIs to predict probabilities for.
+
+        Returns:
+            An array of shape (n_rois,) containing the probability that each ROI is a cell.
+        """
+        features = self._extract_features(roi_statistics=roi_statistics)
+        log_probabilities = self._compute_log_probabilities(features=features)
+        predictions = self._model.predict_proba(X=log_probabilities)[:, 1]
+
+        return predictions.astype(np.float32)
+
+    def _fit_model(self) -> None:
+        """Fits the logistic regression model using the loaded training data."""
+        training_features = self._get_training_features()
+        sample_count, feature_count = training_features.shape
+
+        # Sorts features and creates evenly-spaced grid boundaries for probability estimation.
+        sorted_features = np.sort(a=training_features, axis=0)
+        sort_indices = np.argsort(a=training_features, axis=0)
+        grid_indices = np.linspace(start=0, stop=sample_count - 1, num=_GRID_NODE_COUNT).astype(np.intp)
+        self._probability_grid: NDArray[np.float32] = sorted_features[grid_indices, :]
+
+        # Computes the fraction of cells (vs artifacts) in each grid bin for each feature.
+        self._grid_cell_probabilities: NDArray[np.float32] = np.zeros(
+            (_GRID_NODE_COUNT - 1, feature_count), dtype=np.float32
+        )
+        bin_sizes = grid_indices[1:] - grid_indices[:-1]
+
+        for feature_index in range(feature_count):
+            # Reorders labels by sorted feature values and computes cumulative sum.
+            sorted_labels = self._training_labels[sort_indices[:, feature_index]].astype(np.float32)
+            cumulative_sum = np.concatenate([np.array([0], dtype=np.float32), np.cumsum(a=sorted_labels)])
+
+            # Computes bin sums using cumulative sum differences, then converts to means.
+            bin_sums = cumulative_sum[grid_indices[1:]] - cumulative_sum[grid_indices[:-1]]
+            self._grid_cell_probabilities[:, feature_index] = bin_sums / bin_sizes
+
+        # Smooths the probability estimates across bins to reduce noise.
+        self._grid_cell_probabilities = gaussian_filter(input=self._grid_cell_probabilities, sigma=(2.0, 0)).astype(
+            np.float32
+        )
+
+        # Fits the logistic regression model using log-odds transformed features.
+        log_probabilities = self._compute_log_probabilities(features=training_features)
+        self._model: LogisticRegression = LogisticRegression(C=100.0, solver="liblinear")
+        self._model.fit(X=log_probabilities, y=self._training_labels)
 
 
 def classify(

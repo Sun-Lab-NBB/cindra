@@ -79,8 +79,8 @@ class TestComputeNonrigidOffsets:
 
     def test_consistent_offsets_for_identical_frames(self) -> None:
         """Verifies consistent offsets and correct shapes when frames match the reference."""
-        rng = np.random.default_rng(42)
-        reference = rng.standard_normal((64, 64)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((64, 64)).astype(np.float32)
         y_blocks, x_blocks, _block_counts, _, smoothing_kernel = compute_registration_blocks(
             height=64, width=64, block_size=(32, 32)
         )
@@ -93,7 +93,7 @@ class TestComputeNonrigidOffsets:
             x_blocks=x_blocks,
         )
 
-        frames = np.tile(reference, (2, 1, 1))
+        frames = np.tile(A=reference, reps=(2, 1, 1))
         y_offsets, x_offsets, _correlation = compute_nonrigid_offsets(
             frames=frames,
             taper_mask=taper,
@@ -110,17 +110,17 @@ class TestComputeNonrigidOffsets:
         block_count = len(y_blocks)
         assert y_offsets.shape == (2, block_count)
         assert x_offsets.shape == (2, block_count)
-        # Identical frames should produce consistent offsets across frames.
+        # Expects identical frames to produce consistent offsets across frames.
         np.testing.assert_allclose(y_offsets[0], y_offsets[1], atol=1e-4)
         np.testing.assert_allclose(x_offsets[0], x_offsets[1], atol=1e-4)
-        # Offsets should be small (within 1 pixel) for identical frames.
+        # Expects offsets within one pixel for identical frames.
         assert np.max(np.abs(y_offsets)) < 1.0
         assert np.max(np.abs(x_offsets)) < 1.0
 
     def test_output_dtypes(self) -> None:
         """Verifies the output dtypes are correct."""
-        rng = np.random.default_rng(42)
-        reference = rng.standard_normal((64, 64)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((64, 64)).astype(np.float32)
         y_blocks, x_blocks, _, _, smoothing_kernel = compute_registration_blocks(
             height=64, width=64, block_size=(32, 32)
         )
@@ -133,7 +133,7 @@ class TestComputeNonrigidOffsets:
             x_blocks=x_blocks,
         )
 
-        frames = np.tile(reference, (1, 1, 1))
+        frames = np.tile(A=reference, reps=(1, 1, 1))
         y_offsets, x_offsets, correlation = compute_nonrigid_offsets(
             frames=frames,
             taper_mask=taper,
@@ -153,8 +153,8 @@ class TestComputeNonrigidOffsets:
 
     def test_high_snr_threshold_runs_all_smoothing_levels(self) -> None:
         """Verifies offsets stay valid when the SNR threshold forces all smoothing levels to run."""
-        rng = np.random.default_rng(seed=42)
-        reference = rng.standard_normal((64, 64)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((64, 64)).astype(np.float32)
         y_blocks, x_blocks, _block_counts, _, smoothing_kernel = compute_registration_blocks(
             height=64, width=64, block_size=(32, 32)
         )
@@ -167,7 +167,7 @@ class TestComputeNonrigidOffsets:
             x_blocks=x_blocks,
         )
 
-        frames = np.tile(reference, (2, 1, 1))
+        frames = np.tile(A=reference, reps=(2, 1, 1))
         # A threshold above any achievable SNR keeps low_snr_mask fully True, so the inner loop exhausts all levels.
         y_offsets, x_offsets, _correlation = compute_nonrigid_offsets(
             frames=frames,
@@ -185,7 +185,7 @@ class TestComputeNonrigidOffsets:
         block_count = len(y_blocks)
         assert y_offsets.shape == (2, block_count)
         assert x_offsets.shape == (2, block_count)
-        # Frames identical to the reference must still produce sub-pixel offsets despite the extra smoothing.
+        # Expects frames identical to the reference to still produce sub-pixel offsets despite the extra smoothing.
         assert np.max(np.abs(y_offsets)) < 1.0
         assert np.max(np.abs(x_offsets)) < 1.0
 
@@ -195,8 +195,8 @@ class TestApplyNonrigidCorrection:
 
     def test_zero_offsets_preserve_frames(self) -> None:
         """Verifies that zero offsets preserve the original frames."""
-        rng = np.random.default_rng(42)
-        frames = rng.standard_normal((2, 64, 64)).astype(np.float32)
+        generator = np.random.default_rng(seed=42)
+        frames = generator.standard_normal((2, 64, 64)).astype(np.float32)
         y_blocks, x_blocks, block_counts, _, _ = compute_registration_blocks(height=64, width=64, block_size=(32, 32))
         block_count = len(y_blocks)
         y_offsets = np.zeros((2, block_count), dtype=np.float32)
@@ -233,7 +233,7 @@ class TestApplyNonrigidCorrection:
 
         assert result.shape == (3, 64, 64)
         assert result.dtype == np.float32
-        # Warping a constant (all-ones) image by any offset must yield a constant image.
+        # Expects warping a constant (all-ones) image by any offset to yield a constant image.
         np.testing.assert_allclose(result, 1.0, atol=1e-4)
 
 

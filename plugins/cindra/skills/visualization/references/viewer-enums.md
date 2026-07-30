@@ -2,7 +2,7 @@
 
 State fields report the lowercase enum value (e.g. `maximum_projection`), while the on-screen dropdowns show a
 display label that is not always the title-cased value (e.g. `maximum_projection` shows as "Maximum Projection",
-`rois_only` shows as "ROIs"). When telling the user which control to operate, read the exact string from the
+`rois_only` shows as "ROIs"). When telling the user which control to operate, read the exact label from the
 Dropdown label column of the matching table below. This applies to `background_view`, `roi_color_mode`,
 `mask_layer`, and `coordinate_space`. This reference is loaded on demand by `/visualization`.
 
@@ -11,18 +11,19 @@ Dropdown label column of the matching table below. This applies to `background_v
 ## Background views
 
 Reported in `background_view` state field. Values correspond to the background image behind ROI overlays. The ROI
-viewer offers all six values and hides `corrected_structural` when the recording carries no colocalization data.
-The tracking viewer offers `rois_only`, `mean_image`, `enhanced_mean_image`, `maximum_projection`, and
-`correlation_map`.
+viewer offers all six values and hides `corrected_structural` unless the recording wrote a corrected structural mean
+image, which only the structural channel 2 extraction path produces, so a recording whose second channel is also
+functional never has it. The tracking viewer offers `rois_only`, `mean_image`, `enhanced_mean_image`,
+`maximum_projection`, and `correlation_map`.
 
-| Value                  | Dropdown label        | Description                                               |
-|------------------------|-----------------------|-----------------------------------------------------------|
-| `rois_only`            | ROIs                  | Blank background with ROI overlays only                   |
-| `mean_image`           | Mean Image            | Temporal mean image (channel 1 or 2 based on toggle)      |
-| `enhanced_mean_image`  | Mean Image (Enhanced) | High-pass filtered mean image                             |
-| `correlation_map`      | Correlation Map       | Pixel-wise activity correlation map                       |
-| `maximum_projection`   | Maximum Projection    | Maximum intensity projection                              |
-| `corrected_structural` | Corrected Structural  | Bleed-through-corrected structural channel (dual-channel) |
+| Value                  | Dropdown label        | Description                                           |
+|------------------------|-----------------------|-------------------------------------------------------|
+| `rois_only`            | ROIs                  | Blank background with ROI overlays only               |
+| `mean_image`           | Mean Image            | Temporal mean image (channel 1 or 2 based on toggle)  |
+| `enhanced_mean_image`  | Mean Image (Enhanced) | High-pass filtered mean image                         |
+| `correlation_map`      | Correlation Map       | Pixel-wise activity correlation map                   |
+| `maximum_projection`   | Maximum Projection    | Maximum intensity projection                          |
+| `corrected_structural` | Corrected Structural  | Bleed-through-corrected structural channel mean image |
 
 ---
 
@@ -34,7 +35,7 @@ tracked ROIs.
 
 | Value                        | Dropdown label       | Description                                                 |
 |------------------------------|----------------------|-------------------------------------------------------------|
-| `random`                     | Random               | Random color per ROI from active colormap                   |
+| `random`                     | Random               | Random hue per ROI, independent of the active colormap      |
 | `skewness`                   | Skewness             | Fluorescence skewness                                       |
 | `compactness`                | Compactness          | Circularity of spatial footprint                            |
 | `footprint`                  | Footprint            | Spatial detection scale (hop size) used in sparse detection |

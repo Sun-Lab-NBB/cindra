@@ -1,5 +1,7 @@
 """Provides assets for importing, converting, and saving TIFF imaging data."""
 
+from __future__ import annotations
+
 import math
 from typing import TYPE_CHECKING
 
@@ -8,7 +10,7 @@ from natsort import natsorted
 from tifffile import TiffFile
 from ataraxis_base_utilities import LogLevel, console
 
-from .binary import BinaryFile
+from .binary import BinaryFile, clear_registration_marker
 from .context import find_data_directory
 from ..allocation import TIFF_DECODE_CEILING
 from ..dataclasses import RuntimeContext, AcquisitionParameters  # noqa: TC001
@@ -24,18 +26,21 @@ TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
 _MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
 """The minimum number of image dimensions considered 'multidimensional'."""
 
+_MISMATCH_REPORT_LIMIT: int = 5
+"""The maximum number of differently shaped TIFF files named individually in the frame-shape mismatch error."""
+
 
 def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> None:
     """Converts TIFF files to cindra binary format for all planes.
 
-    This function performs TIFF to binary conversion using pre-initialized RuntimeContext instances. It discovers TIFF
+    Performs TIFF to binary conversion using pre-initialized RuntimeContext instances. It discovers TIFF
     files in the data directory, reads them in batches, and writes the converted frames to binary files. The function
     handles both standard TIFF data and MROI (Multi-ROI) data automatically based on the acquisition parameters stored
     in the contexts.
 
     Notes:
-        This function modifies the provided contexts in place, populating frame dimensions, frame counts, and mean
-        images in each context's runtime data.
+        Modifies the provided contexts in place, populating frame dimensions, frame counts, and mean
+        images in each context's runtime data, and initializing each plane's valid pixel ranges to the full frame.
 
         The allocated workers become the TIFF image decode threads, capped at TIFF_DECODE_CEILING.
 
@@ -47,8 +52,10 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> 
             the caller resolves before invoking this function.
 
     Raises:
-        ValueError: If contexts is empty or data_path is not configured.
+        ValueError: If contexts is empty, if data_path is not configured, or if the discovered TIFF files do not all
+            hold frames of the same shape.
         FileNotFoundError: If no TIFF files are found in the data directory.
+        RuntimeError: If a plane receives a different number of frames than its binary file was sized for.
     """
     if not contexts:
         message = "Unable to convert TIFFs to binary. At least one RuntimeContext must be provided."
@@ -57,11 +64,11 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> 
     decode_workers = min(workers, TIFF_DECODE_CEILING)
 
     # Extracts configuration and acquisition from the first context (shared across all contexts).
-    config = contexts[0].configuration
+    configuration = contexts[0].configuration
     acquisition = contexts[0].acquisition
 
     # Finds the data directory from the configuration's data_path.
-    data_path = config.file_io.data_path
+    data_path = configuration.file_io.data_path
     if data_path is None:
         message = (
             "Unable to convert TIFFs to binary. The data_path must be configured in the FileIO section of the "
@@ -69,12 +76,11 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> 
         )
         console.error(message=message, error=ValueError)
 
-    data_directory = find_data_directory(data_path)
+    data_directory = find_data_directory(data_path=data_path)
 
-    # Discovers TIFF files in the data directory.
     tiff_files = _discover_tiff_files(
         data_directory=data_directory,
-        ignored_file_names=config.file_io.ignored_file_names,
+        ignored_file_names=configuration.file_io.ignored_file_names,
     )
 
     # Extracts processing parameters.
@@ -83,12 +89,12 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> 
     is_mroi = acquisition.is_mroi
 
     # Determines which channel is functional (used for ROI detection).
-    functional_channel_index = 0 if config.main.first_channel_functional else 1
+    functional_channel_index = 0 if configuration.main.first_channel_functional else 1
     if channel_number == 1:
         functional_channel_index = 0
 
     # Computes batch size adjusted for planes and channels.
-    batch_size = config.registration.batch_size
+    batch_size = configuration.registration.batch_size
     batch_size = plane_number * channel_number * math.ceil(batch_size / (plane_number * channel_number))
 
     # Counts total frames for progress bar and calculates frames per plane.
@@ -97,8 +103,33 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> 
         with TiffFile(tiff_file) as tiff:
             total_frames += len(tiff.pages)
 
-    # Calculates the number of frames per plane (accounting for interleaved planes and channels).
-    frames_per_plane = total_frames // (plane_number * channel_number)
+    # Resolves the interleave geometry and the exact number of frames each plane receives on each channel. Sizing
+    # every binary by its own count preserves the frames of a partial final volume, whose leading interleave positions
+    # receive one frame more than the trailing ones.
+    interleave_stride: int = plane_number * channel_number
+    second_channel_index = 1 - functional_channel_index
+    channel_1_frame_counts: list[int] = []
+    channel_2_frame_counts: list[int] = []
+    for context_index, context in enumerate(contexts):
+        context_plane_index = context.runtime.io.plane_index
+        if is_mroi:
+            physical_plane_index = context_plane_index if context_plane_index is not None else 0
+        else:
+            physical_plane_index = context_index % plane_number
+        channel_1_frame_counts.append(
+            _resolve_interleave_frame_count(
+                total_frames=total_frames,
+                interleave_stride=interleave_stride,
+                position=physical_plane_index * channel_number + functional_channel_index,
+            )
+        )
+        channel_2_frame_counts.append(
+            _resolve_interleave_frame_count(
+                total_frames=total_frames,
+                interleave_stride=interleave_stride,
+                position=physical_plane_index * channel_number + second_channel_index,
+            )
+        )
 
     # Pre-scans TIFF files to determine frame dimensions for each plane.
     frame_heights, frame_widths = _get_frame_dimensions(
@@ -108,15 +139,14 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> 
         decode_workers=decode_workers,
     )
 
-    # Creates BinaryFile instances for writing.
     channel_1_binaries, channel_2_binaries = _create_binary_files(
         contexts=contexts,
         frame_heights=frame_heights,
         frame_widths=frame_widths,
-        frames_per_plane=frames_per_plane,
+        channel_1_frame_counts=channel_1_frame_counts,
+        channel_2_frame_counts=channel_2_frame_counts,
     )
 
-    # Creates progress bar.
     description = "Converting MROI frames to binary" if is_mroi else "Converting frames to binary"
 
     # Initializes mean image accumulators, frame counters, and write indices for each context.
@@ -124,119 +154,139 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> 
     mean_images_channel_2: list[NDArray[np.float32] | None] = [None] * len(contexts)
     frame_counts: list[int] = [0] * len(contexts)
     write_indices: list[int] = [0] * len(contexts)
+    write_indices_channel_2: list[int] = [0] * len(contexts)
 
     # Tracks the position within the plane/channel interleave cycle across file boundaries. When a TIFF file ends
     # mid-cycle, the next file must continue from the correct interleave position rather than resetting to zero.
-    interleave_stride: int = plane_number * channel_number
     interleave_offset: int = 0
 
     # Processes each TIFF file.
     with console.progress(total=total_frames, description=description, unit="frames") as progress_bar:
         for tiff_file in tiff_files:
-            tiff = TiffFile(tiff_file)
             start_index = 0
 
-            while True:
-                frames = _read_tiff(
-                    tiff=tiff,
-                    start_index=start_index,
-                    batch_size=batch_size,
-                    decode_workers=decode_workers,
-                )
-                if frames is None:
-                    break
+            # Opens the file through a context manager. tifffile's TiffFile forms reference cycles with its pages, so
+            # leaving the handle to garbage collection holds the file descriptor open until the next collection and
+            # emits spurious ResourceWarnings for the unclosed file.
+            with TiffFile(tiff_file) as tiff:
+                while True:
+                    frames = _read_tiff(
+                        tiff=tiff,
+                        start_index=start_index,
+                        batch_size=batch_size,
+                        decode_workers=decode_workers,
+                    )
+                    if frames is None:
+                        break
 
-                frame_count = frames.shape[0]
-                progress_bar.update(frame_count)
+                    frame_count = frames.shape[0]
+                    progress_bar.update(frame_count)
 
-                # Processes each context (plane or virtual plane).
-                for context_index, context in enumerate(contexts):
-                    io_data = context.runtime.io
+                    # Processes each context (plane or virtual plane).
+                    for context_index, context in enumerate(contexts):
+                        io_data = context.runtime.io
 
-                    # Determines the physical plane index for frame extraction.
-                    if is_mroi:
-                        physical_plane_index = io_data.plane_index if io_data.plane_index is not None else 0
-                        roi_lines = io_data.mroi_lines
-                    else:
-                        physical_plane_index = context_index % plane_number
-                        roi_lines = ()
+                        # Determines the physical plane index for frame extraction.
+                        if is_mroi:
+                            physical_plane_index = io_data.plane_index if io_data.plane_index is not None else 0
+                            roi_lines = io_data.mroi_lines
+                        else:
+                            physical_plane_index = context_index % plane_number
+                            roi_lines = ()
 
-                    # Generates frame indices for this plane's functional channel, accounting for the interleave
-                    # offset from previous files.
-                    target_position = physical_plane_index * channel_number + functional_channel_index
-                    first_frame_index = (target_position - interleave_offset) % interleave_stride
-                    frame_indices = list(range(first_frame_index, frame_count, interleave_stride))
+                        # Generates frame indices for this plane's functional channel, accounting for the interleave
+                        # offset from previous files.
+                        target_position = physical_plane_index * channel_number + functional_channel_index
+                        first_frame_index = (target_position - interleave_offset) % interleave_stride
+                        frame_indices = list(range(first_frame_index, frame_count, interleave_stride))
 
-                    if not frame_indices:
-                        continue
+                        if not frame_indices:
+                            continue
 
-                    plane_frames = frames[frame_indices]
+                        plane_frames = frames[frame_indices]
 
-                    # For MROI data, slices frames to extract only the ROI lines.
-                    if is_mroi and roi_lines:
-                        line_start = roi_lines[0]
-                        line_end = roi_lines[-1] + 1
-                        plane_frames = plane_frames[:, line_start:line_end, :]
+                        # For MROI data, slices frames to extract only the ROI lines.
+                        if is_mroi and roi_lines:
+                            line_start = roi_lines[0]
+                            line_end = roi_lines[-1] + 1
+                            plane_frames = plane_frames[:, line_start:line_end, :]
 
-                    # Initializes mean image accumulator on first batch.
-                    if mean_images[context_index] is None:
-                        mean_images[context_index] = np.zeros(
-                            (plane_frames.shape[1], plane_frames.shape[2]), dtype=np.float32
-                        )
+                        # Initializes mean image accumulator on first batch.
+                        if mean_images[context_index] is None:
+                            mean_images[context_index] = np.zeros(
+                                (plane_frames.shape[1], plane_frames.shape[2]), dtype=np.float32
+                            )
 
-                    # Writes frames to binary file using indexed assignment.
-                    batch_frame_count = plane_frames.shape[0]
-                    write_start = write_indices[context_index]
-                    channel_1_binaries[context_index][write_start : write_start + batch_frame_count] = plane_frames
-                    write_indices[context_index] += batch_frame_count
+                        # Writes frames to binary file using indexed assignment.
+                        batch_frame_count = plane_frames.shape[0]
+                        write_start = write_indices[context_index]
+                        channel_1_binaries[context_index][write_start : write_start + batch_frame_count] = plane_frames
+                        write_indices[context_index] += batch_frame_count
 
-                    mean_images[context_index] += plane_frames.sum(axis=0, dtype=np.float32)
-                    frame_counts[context_index] += batch_frame_count
+                        mean_images[context_index] += plane_frames.sum(axis=0, dtype=np.float32)
+                        frame_counts[context_index] += batch_frame_count
 
-                    # Processes channel 2 if applicable.
-                    if channel_number > 1:
-                        second_channel_index = 1 - functional_channel_index
-                        target_position_channel_2 = physical_plane_index * channel_number + second_channel_index
-                        first_frame_index_channel_2 = (
-                            target_position_channel_2 - interleave_offset
-                        ) % interleave_stride
-                        channel_2_frame_indices = list(
-                            range(first_frame_index_channel_2, frame_count, interleave_stride)
-                        )
+                        # Processes channel 2 if applicable.
+                        if channel_number > 1:
+                            second_channel_index = 1 - functional_channel_index
+                            target_position_channel_2 = physical_plane_index * channel_number + second_channel_index
+                            first_frame_index_channel_2 = (
+                                target_position_channel_2 - interleave_offset
+                            ) % interleave_stride
+                            channel_2_frame_indices = list(
+                                range(first_frame_index_channel_2, frame_count, interleave_stride)
+                            )
 
-                        # For balanced two-channel data, the channel 2 indices mirror the already non-empty channel 1
-                        # indices, so the empty case cannot be reached here.
-                        if channel_2_frame_indices:  # pragma: no branch
-                            channel_2_frames = frames[channel_2_frame_indices]
+                            # For balanced two-channel data, the channel 2 indices mirror the already non-empty
+                            # channel 1 indices, so the empty case cannot be reached here.
+                            if channel_2_frame_indices:  # pragma: no branch
+                                channel_2_frames = frames[channel_2_frame_indices]
 
-                            if is_mroi and roi_lines:
-                                line_start = roi_lines[0]
-                                line_end = roi_lines[-1] + 1
-                                channel_2_frames = channel_2_frames[:, line_start:line_end, :]
+                                if is_mroi and roi_lines:
+                                    line_start = roi_lines[0]
+                                    line_end = roi_lines[-1] + 1
+                                    channel_2_frames = channel_2_frames[:, line_start:line_end, :]
 
-                            if mean_images_channel_2[context_index] is None:
-                                mean_images_channel_2[context_index] = np.zeros(
-                                    (channel_2_frames.shape[1], channel_2_frames.shape[2]), dtype=np.float32
-                                )
+                                if mean_images_channel_2[context_index] is None:
+                                    mean_images_channel_2[context_index] = np.zeros(
+                                        (channel_2_frames.shape[1], channel_2_frames.shape[2]), dtype=np.float32
+                                    )
 
-                            # Writes channel 2 frames to binary file using indexed assignment.
-                            # Note: write_indices is shared between channels since they have the same frame count.
-                            channel_2_batch_count = channel_2_frames.shape[0]
-                            channel_2_write_start = write_indices[context_index] - batch_frame_count
-                            channel_2_binaries[context_index][
-                                channel_2_write_start : channel_2_write_start + channel_2_batch_count
-                            ] = channel_2_frames
-                            mean_images_channel_2[context_index] += channel_2_frames.sum(axis=0, dtype=np.float32)
+                                # Writes channel 2 frames to binary file using indexed assignment. Channel 2 tracks
+                                # its own write index, because a partial final volume can deliver a different
+                                # number of frames to the two channels of the same plane.
+                                channel_2_batch_count = channel_2_frames.shape[0]
+                                channel_2_write_start = write_indices_channel_2[context_index]
+                                channel_2_binaries[context_index][
+                                    channel_2_write_start : channel_2_write_start + channel_2_batch_count
+                                ] = channel_2_frames
+                                write_indices_channel_2[context_index] += channel_2_batch_count
+                                mean_images_channel_2[context_index] += channel_2_frames.sum(axis=0, dtype=np.float32)
 
-                start_index += frame_count
+                    start_index += frame_count
 
             # Updates the interleave offset for the next file based on the total frames in this file.
             interleave_offset = (interleave_offset + start_index) % interleave_stride
 
-            # Closes the TIFF file handle deterministically. tifffile's TiffFile forms reference cycles with its
-            # pages, so leaving it to garbage collection holds the file descriptor open until the next collection
-            # and emits spurious ResourceWarnings for the unclosed file.
-            tiff.close()
+    # Verifies that every plane received exactly the number of frames its binary was sized for. A mismatch means the
+    # interleave accounting disagrees with the frames the source files delivered, which would otherwise surface as a
+    # silently truncated binary or an opaque broadcasting error from the assignment above.
+    for context_index, context in enumerate(contexts):
+        expected_counts: list[tuple[str, int, int]] = [
+            ("channel 1", write_indices[context_index], channel_1_frame_counts[context_index])
+        ]
+        if channel_number > 1:
+            expected_counts.append(
+                ("channel 2", write_indices_channel_2[context_index], channel_2_frame_counts[context_index])
+            )
+        for channel_name, written_frames, allocated_frames in expected_counts:
+            if written_frames != allocated_frames:
+                message = (
+                    f"Unable to convert the recording's TIFF files to binary format. Plane "
+                    f"{context.runtime.io.plane_index} received {written_frames} {channel_name} frames, but its "
+                    f"binary file was sized for {allocated_frames} frames."
+                )
+                console.error(message=message, error=RuntimeError)
 
     # Closes binary files and updates runtime data in each context.
     for context_index, context in enumerate(contexts):
@@ -282,7 +332,7 @@ def _discover_tiff_files(
     """Discovers TIFF files in the specified directory.
 
     Notes:
-        This function performs a non-recursive scan of the data_directory for files with valid TIFF extension aliases.
+        Performs a non-recursive scan of the data_directory for files with valid TIFF extension aliases.
 
     Args:
         data_directory: The directory to scan for TIFF files. This should be the same directory that contains the
@@ -315,7 +365,6 @@ def _discover_tiff_files(
         message = f"Unable to find any TIFF files in the data directory: {data_directory}."
         console.error(message=message, error=FileNotFoundError)
 
-    # Sorts files naturally by filename.
     file_paths = natsorted(discovered_paths)
 
     message = f"Found {len(file_paths)} valid TIFF files."
@@ -326,8 +375,6 @@ def _discover_tiff_files(
 
 def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int, decode_workers: int) -> NDArray[np.int16] | None:
     """Reads a batch (subset) of frames stored inside the TIFF file wrapped by the input TiffFile instance.
-
-    This function loads the requested subset of data into memory.
 
     Args:
         tiff: The TiffFile instance that wraps the .tiff file from which to read the data.
@@ -360,7 +407,7 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int, decode_workers
     if frames.dtype.type in {np.uint16, np.int32}:
         halved = frames // 2
         frames = np.clip(halved, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max).astype(dtype=np.int16)
-    elif frames.dtype.type != np.int16:  # pragma: no cover — rare: non-standard TIFF dtype (e.g. float)
+    elif frames.dtype.type != np.int16:  # pragma: no cover, rare non-standard TIFF dtype such as float
         frames = frames.astype(dtype=np.int16)
 
     return frames
@@ -372,10 +419,11 @@ def _get_frame_dimensions(
     acquisition: AcquisitionParameters,
     decode_workers: int,
 ) -> tuple[list[int], list[int]]:
-    """Pre-scans the first TIFF file to determine frame dimensions for each plane.
+    """Pre-scans the discovered TIFF files to determine frame dimensions for each plane.
 
-    This function reads the first frame from the first TIFF file to get base frame dimensions, then calculates
-    per-plane dimensions accounting for MROI slicing if applicable.
+    Reads the first frame from the first TIFF file to get base frame dimensions, verifies that every
+    other discovered file holds frames of the same shape, then calculates per-plane dimensions accounting for MROI
+    slicing if applicable.
 
     Args:
         tiff_files: The list of TIFF file paths to process.
@@ -387,7 +435,8 @@ def _get_frame_dimensions(
         A tuple of two lists: (heights, widths) where each list has one entry per plane/context.
 
     Raises:
-        ValueError: If the first TIFF file is empty.
+        ValueError: If the first TIFF file is empty, or if the discovered files do not all hold frames of the same
+            shape.
     """
     # Opens the first TIFF and reads the first frame to get base dimensions.
     with TiffFile(tiff_files[0]) as tiff:
@@ -403,6 +452,8 @@ def _get_frame_dimensions(
             else tiff.asarray(maxworkers=decode_workers)
         )
     base_height, base_width = first_frame.shape[-2], first_frame.shape[-1]
+
+    _validate_uniform_frame_shape(tiff_files=tiff_files, base_height=base_height, base_width=base_width)
 
     # Calculates dimensions for each plane/context.
     heights: list[int] = []
@@ -425,11 +476,75 @@ def _get_frame_dimensions(
     return heights, widths
 
 
+def _validate_uniform_frame_shape(tiff_files: list[Path], base_height: int, base_width: int) -> None:
+    """Verifies that every discovered TIFF file holds frames of the same shape.
+
+    Notes:
+        The conversion sizes every plane binary from the first file's frame shape and assumes the remaining files
+        match it. A data directory can also hold TIFF files that are not part of the recording, such as an anatomical
+        z-stack, and those are usually shaped differently. Such a file otherwise reaches the conversion loop, where
+        its frames fail to broadcast into a binary sized for the recording and report a shape error that names
+        neither the file nor the reason.
+
+        The check reads one page header per file rather than walking each file's full page chain, which costs
+        milliseconds even for a recording spanning tens of files.
+
+    Args:
+        tiff_files: The discovered TIFF files, in conversion order.
+        base_height: The frame height read from the first file.
+        base_width: The frame width read from the first file.
+
+    Raises:
+        ValueError: If any file holds frames of a different shape than the first file.
+    """
+    mismatched: list[str] = []
+    for tiff_path in tiff_files[1:]:
+        with TiffFile(tiff_path) as tiff:
+            page_shape = tiff.pages[0].shape
+
+        if (page_shape[-2], page_shape[-1]) != (base_height, base_width):
+            mismatched.append(f"'{tiff_path.name}' {(page_shape[-2], page_shape[-1])}")
+
+    if mismatched:
+        reported = ", ".join(mismatched[:_MISMATCH_REPORT_LIMIT])
+        remainder = len(mismatched) - _MISMATCH_REPORT_LIMIT
+        if remainder > 0:
+            reported = f"{reported}, and {remainder} more"
+        message = (
+            f"Unable to determine frame dimensions. Every TIFF file in the data directory must hold frames of the "
+            f"same shape, but {len(mismatched)} file(s) differ from the ({base_height}, {base_width}) frames of "
+            f"'{tiff_files[0].name}': {reported}. Exclude any file that is not part of the recording, such as an "
+            f"anatomical z-stack, through the 'file_io.ignored_file_names' configuration parameter."
+        )
+        console.error(message=message, error=ValueError)
+
+
+def _resolve_interleave_frame_count(total_frames: int, interleave_stride: int, position: int) -> int:
+    """Returns the number of frames the recording delivers to a single plane and channel interleave position.
+
+    Notes:
+        Frames cycle through the plane and channel positions in a fixed order. A recording whose frame count is not a
+        whole multiple of the cycle length therefore delivers one extra frame to every position below the remainder,
+        which happens whenever an acquisition stops partway through a volume. Sizing each binary by this count keeps
+        the conversion from discarding the frames of that final partial cycle.
+
+    Args:
+        total_frames: The total number of frames across every source TIFF file.
+        interleave_stride: The length of the plane and channel interleave cycle.
+        position: The position within the interleave cycle to count the frames of.
+
+    Returns:
+        The number of frames delivered to the requested interleave position.
+    """
+    return total_frames // interleave_stride + (1 if position < total_frames % interleave_stride else 0)
+
+
 def _create_binary_files(
     contexts: list[RuntimeContext],
     frame_heights: list[int],
     frame_widths: list[int],
-    frames_per_plane: int,
+    channel_1_frame_counts: list[int],
+    channel_2_frame_counts: list[int],
 ) -> tuple[list[BinaryFile], list[BinaryFile]]:
     """Creates BinaryFile instances for writing converted TIFF data for each plane.
 
@@ -438,7 +553,9 @@ def _create_binary_files(
             paths configured.
         frame_heights: The height of each frame for each plane.
         frame_widths: The width of each frame for each plane.
-        frames_per_plane: The total number of frames to be written per plane.
+        channel_1_frame_counts: The number of channel 1 frames to be written for each plane.
+        channel_2_frame_counts: The number of channel 2 frames to be written for each plane. Ignored for
+            single-channel recordings.
 
     Returns:
         A tuple of two lists. The first list contains BinaryFile instances for channel 1 (one per plane). The second
@@ -457,7 +574,6 @@ def _create_binary_files(
     # Determines whether the recording uses two channels.
     has_two_channels = acquisition.channel_number > 1
 
-    # Initializes lists to store the BinaryFile instances.
     channel_1_binary_files: list[BinaryFile] = []
     channel_2_binary_files: list[BinaryFile] = []
 
@@ -475,8 +591,23 @@ def _create_binary_files(
                 f"configured in IOData."
             )
             console.error(message=message, error=ValueError)
+        # Clears any marker an interrupted registration left behind. The binary written below is freshly converted
+        # from its source TIFF files, so it is not mid-registration whatever state the previous one was left in. This
+        # makes re-running binarization the recovery path for an interrupted registration.
+        clear_registration_marker(binary_path=registered_path)
+
+        # Removes the previous binary so that the new one is sized by the frame count resolved above. BinaryFile reads
+        # the frame count out of the file whenever the file already exists, so converting over a damaged binary would
+        # otherwise inherit its wrong length instead of replacing it.
+        registered_path.unlink(missing_ok=True)
+
         channel_1_binary_files.append(
-            BinaryFile(height=height, width=width, file_path=registered_path, frame_number=frames_per_plane)
+            BinaryFile(
+                height=height,
+                width=width,
+                file_path=registered_path,
+                frame_number=channel_1_frame_counts[context_index],
+            )
         )
 
         # Creates channel 2 binary file if applicable.
@@ -488,9 +619,15 @@ def _create_binary_files(
                     f"registered_binary_path_channel_2 is not configured in IOData."
                 )
                 console.error(message=message, error=ValueError)
+            clear_registration_marker(binary_path=registered_path_channel_2)
+            registered_path_channel_2.unlink(missing_ok=True)
+
             channel_2_binary_files.append(
                 BinaryFile(
-                    height=height, width=width, file_path=registered_path_channel_2, frame_number=frames_per_plane
+                    height=height,
+                    width=width,
+                    file_path=registered_path_channel_2,
+                    frame_number=channel_2_frame_counts[context_index],
                 )
             )
 

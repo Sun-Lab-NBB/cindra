@@ -13,13 +13,13 @@ class TestCheckSplitComponents:
 
     def test_two_component_signal_yields_high_variance_ratio(self) -> None:
         """Verifies that data with two distinct spatial components produces a variance ratio above 1."""
-        rng = np.random.default_rng(seed=42)
+        generator = np.random.default_rng(seed=42)
         pixel_count = 20
         frame_count = 100
 
         # Creates two distinct temporal signals assigned to different pixel subsets.
-        component_1_temporal = np.abs(rng.standard_normal(frame_count).astype(np.float32)) * 5
-        component_2_temporal = np.abs(rng.standard_normal(frame_count).astype(np.float32)) * 5
+        component_1_temporal = np.abs(generator.standard_normal(frame_count).astype(np.float32)) * 5
+        component_2_temporal = np.abs(generator.standard_normal(frame_count).astype(np.float32)) * 5
 
         pixel_frames = np.zeros((frame_count, pixel_count), dtype=np.float32)
         pixel_frames[:, :10] = component_1_temporal[:, np.newaxis]
@@ -41,12 +41,12 @@ class TestCheckSplitComponents:
 
     def test_single_component_signal_yields_ratio_near_one(self) -> None:
         """Verifies that data with a single spatial component produces a variance ratio near 1."""
-        rng = np.random.default_rng(seed=99)
+        generator = np.random.default_rng(seed=99)
         pixel_count = 15
         frame_count = 80
 
         # Creates a single-component signal where all pixels share the same temporal trace.
-        temporal_signal = np.abs(rng.standard_normal(frame_count).astype(np.float32)) * 10
+        temporal_signal = np.abs(generator.standard_normal(frame_count).astype(np.float32)) * 10
         pixel_frames = temporal_signal[:, np.newaxis] * np.ones((1, pixel_count), dtype=np.float32)
 
         weights = np.ones(pixel_count, dtype=np.float32)
@@ -64,11 +64,11 @@ class TestCheckSplitComponents:
 
     def test_returns_valid_active_mask_and_projections(self) -> None:
         """Verifies that the returned active mask and temporal projections have consistent shapes."""
-        rng = np.random.default_rng(seed=7)
+        generator = np.random.default_rng(seed=7)
         pixel_count = 12
         frame_count = 60
 
-        pixel_frames = np.abs(rng.standard_normal((frame_count, pixel_count)).astype(np.float32)) * 3
+        pixel_frames = np.abs(generator.standard_normal((frame_count, pixel_count)).astype(np.float32)) * 3
         weights = np.ones(pixel_count, dtype=np.float32)
         weights /= norm(weights)
 
@@ -135,10 +135,10 @@ class TestExtendIteratively:
         width = 12
         frame_count = 15
 
-        rng = np.random.default_rng(seed=55)
+        generator = np.random.default_rng(seed=55)
         frames_2d = np.zeros((frame_count, height, width), dtype=np.float32)
         # Creates a small bright region in the center.
-        frames_2d[:, 4:8, 4:8] = rng.uniform(low=3.0, high=10.0, size=(frame_count, 4, 4)).astype(np.float32)
+        frames_2d[:, 4:8, 4:8] = generator.uniform(low=3.0, high=10.0, size=(frame_count, 4, 4)).astype(np.float32)
         frames = frames_2d.reshape(frame_count, height * width)
 
         y_pixels = np.array([6], dtype=np.int32)
@@ -195,13 +195,13 @@ class TestFindBestScale:
 
     def test_returns_positive_scale_for_structured_images(self) -> None:
         """Verifies that structured scale images produce a positive scale index."""
-        rng = np.random.default_rng(seed=123)
+        generator = np.random.default_rng(seed=123)
         scale_count = 5
         height = 64
         width = 64
 
         # Creates scale images where one scale has the strongest signal.
-        scale_images = rng.standard_normal((scale_count, height, width)).astype(np.float32)
+        scale_images = generator.standard_normal((scale_count, height, width)).astype(np.float32)
         # Makes scale 2 dominant by adding a strong signal.
         scale_images[2] += 10.0
 

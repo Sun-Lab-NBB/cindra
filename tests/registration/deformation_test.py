@@ -40,7 +40,7 @@ class TestCreateDiffusionKernel:
         assert kernel.dtype == np.float32
 
     def test_large_sigma_produces_wide_kernel(self) -> None:
-        """Verifies that sigma above threshold produces a multi-element kernel, not a delta."""
+        """Verifies that sigma above threshold produces a multi-element kernel."""
         kernel = _create_diffusion_kernel(sigma=2.0)
         assert kernel.size > 1
 
@@ -54,7 +54,6 @@ class TestCreateDiffusionKernel:
         kernel = _create_diffusion_kernel(sigma=2.0)
         center = kernel.size // 2
         right_half = kernel[center:]
-        # Confirms kernel values are monotonically non-increasing toward the tail.
         assert np.all(np.diff(right_half) <= 0)
 
 
@@ -63,23 +62,23 @@ class TestDiffuse:
 
     def test_small_sigma_identity(self) -> None:
         """Verifies that a very small sigma produces no smoothing."""
-        rng = np.random.default_rng(42)
-        data = rng.standard_normal((16, 16)).astype(np.float32)
+        generator = np.random.default_rng(42)
+        data = generator.standard_normal((16, 16)).astype(np.float32)
         result = diffuse(data=data, sigma=0.01)
         np.testing.assert_array_equal(result, data)
 
     def test_output_shape_and_dtype(self) -> None:
         """Verifies that diffuse returns data with correct shape and dtype."""
-        rng = np.random.default_rng(42)
-        data = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(42)
+        data = generator.standard_normal((32, 32)).astype(np.float32)
         result = diffuse(data=data, sigma=3.0)
         assert result.shape == data.shape
         assert result.dtype == np.float32
 
     def test_per_dimension_sigma(self) -> None:
         """Verifies that per-dimension sigma list is accepted."""
-        rng = np.random.default_rng(42)
-        data = rng.standard_normal((32, 32)).astype(np.float32)
+        generator = np.random.default_rng(42)
+        data = generator.standard_normal((32, 32)).astype(np.float32)
         result = diffuse(data=data, sigma=[2.0, 0.01])
         assert result.dtype == np.float32
         assert result.shape == (32, 32)
@@ -162,8 +161,8 @@ class TestResize:
 
     def test_same_size_preserves_values(self) -> None:
         """Verifies that resizing to the same dimensions preserves values."""
-        rng = np.random.default_rng(42)
-        data = rng.standard_normal((10, 10)).astype(np.float32)
+        generator = np.random.default_rng(42)
+        data = generator.standard_normal((10, 10)).astype(np.float32)
         result = _resize(data=data, new_height=10, new_width=10)
         np.testing.assert_allclose(result, data, atol=1e-4)
 
@@ -182,7 +181,7 @@ class TestDeformationIdentity:
         deformation = Deformation.identity(height=10, width=20)
         assert deformation.is_identity
         assert deformation.field_shape == (10, 20)
-        assert deformation.ndim == 2
+        assert deformation.dimension_count == 2
         assert len(deformation) == 0
 
     def test_identity_repr(self) -> None:
@@ -221,7 +220,7 @@ class TestDeformationConstructor:
         deformation = Deformation(field_y=field_y, field_x=field_x)
         assert not deformation.is_identity
         assert deformation.field_shape == (10, 20)
-        assert deformation.ndim == 2
+        assert deformation.dimension_count == 2
         assert len(deformation) == 2
 
     def test_repr_includes_shape(self) -> None:
@@ -298,13 +297,13 @@ class TestDeformationAdd:
 
     def test_add_two_deformations(self) -> None:
         """Verifies element-wise addition of two deformations."""
-        field_y_1 = np.ones((5, 5), dtype=np.float32) * 1.0
-        field_x_1 = np.ones((5, 5), dtype=np.float32) * 2.0
-        field_y_2 = np.ones((5, 5), dtype=np.float32) * 3.0
-        field_x_2 = np.ones((5, 5), dtype=np.float32) * 4.0
-        deformation_1 = Deformation(field_y=field_y_1, field_x=field_x_1)
-        deformation_2 = Deformation(field_y=field_y_2, field_x=field_x_2)
-        result = deformation_1 + deformation_2
+        first_field_y = np.ones((5, 5), dtype=np.float32) * 1.0
+        first_field_x = np.ones((5, 5), dtype=np.float32) * 2.0
+        second_field_y = np.ones((5, 5), dtype=np.float32) * 3.0
+        second_field_x = np.ones((5, 5), dtype=np.float32) * 4.0
+        first_deformation = Deformation(field_y=first_field_y, field_x=first_field_x)
+        second_deformation = Deformation(field_y=second_field_y, field_x=second_field_x)
+        result = first_deformation + second_deformation
         np.testing.assert_allclose(result[0], 4.0)
         np.testing.assert_allclose(result[1], 6.0)
 
@@ -313,7 +312,7 @@ class TestDeformationCompose:
     """Tests Deformation.compose."""
 
     def test_compose_with_identity_left(self) -> None:
-        """Verifies that identity.compose(d) returns a copy of d."""
+        """Verifies that identity.compose(deformation) returns a copy of the deformation."""
         identity = Deformation.identity(height=10, width=10)
         field_y = np.ones((10, 10), dtype=np.float32) * 0.5
         field_x = np.ones((10, 10), dtype=np.float32) * -0.5
@@ -323,7 +322,7 @@ class TestDeformationCompose:
         np.testing.assert_allclose(result[1], -0.5, atol=1e-5)
 
     def test_compose_with_identity_right(self) -> None:
-        """Verifies that d.compose(identity) returns a copy of d."""
+        """Verifies that deformation.compose(identity) returns a copy of the deformation."""
         identity = Deformation.identity(height=10, width=10)
         field_y = np.ones((10, 10), dtype=np.float32) * 0.5
         field_x = np.ones((10, 10), dtype=np.float32) * -0.5
@@ -335,9 +334,9 @@ class TestDeformationCompose:
         """Verifies composition of two small uniform displacements."""
         field_y = np.ones((20, 20), dtype=np.float32) * 0.3
         field_x = np.ones((20, 20), dtype=np.float32) * 0.2
-        deformation_1 = Deformation(field_y=field_y, field_x=field_x)
-        deformation_2 = Deformation(field_y=field_y.copy(), field_x=field_x.copy())
-        result = deformation_1.compose(other=deformation_2)
+        first_deformation = Deformation(field_y=field_y, field_x=field_x)
+        second_deformation = Deformation(field_y=field_y.copy(), field_x=field_x.copy())
+        result = first_deformation.compose(other=second_deformation)
         # For small uniform displacements, composition ≈ addition at interior pixels.
         np.testing.assert_allclose(result[0][5:-5, 5:-5], 0.6, atol=0.05)
         np.testing.assert_allclose(result[1][5:-5, 5:-5], 0.4, atol=0.05)
@@ -375,8 +374,8 @@ class TestDeformationApply:
 
     def test_zero_displacement_preserves_image(self) -> None:
         """Verifies that zero displacement fields preserve the image."""
-        rng = np.random.default_rng(42)
-        data = rng.standard_normal((20, 20)).astype(np.float32)
+        generator = np.random.default_rng(42)
+        data = generator.standard_normal((20, 20)).astype(np.float32)
         field_y = np.zeros((20, 20), dtype=np.float32)
         field_x = np.zeros((20, 20), dtype=np.float32)
         deformation = Deformation(field_y=field_y, field_x=field_x)

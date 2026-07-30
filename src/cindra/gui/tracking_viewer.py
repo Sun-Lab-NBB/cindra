@@ -61,7 +61,7 @@ class TrackingViewer(QMainWindow):
         data: The preloaded tracking data to display on startup.
 
     Attributes:
-        data: The ViewerData instance that stores the visualized dataset's data.
+        _data: The ViewerData instance that stores the visualized dataset's data.
         _auto_cycle_timer: Timer driving automatic recording cycling.
         _cached_background: Normalized background image cache, or None.
         _cached_mask_y: Cached Y pixel coordinates for all valid mask pixels, or None.
@@ -88,8 +88,9 @@ class TrackingViewer(QMainWindow):
         _space_combo: Dropdown for selecting the coordinate space.
         _mask_combo: Dropdown for selecting the mask layer.
         _opacity_slider: Slider for adjusting mask overlay opacity.
+        _channel_group: Group box for the channel 2 overlay toggle, shown only when channel 2 data exists.
         _channel_2_checkbox: Toggle button for channel 2 overlay display.
-        _roi_edit: Read-only input field displaying the index of the last clicked ROI.
+        _roi_edit: Input field for selecting an ROI by index, which also shows the index of the last clicked ROI.
     """
 
     def __init__(self, data: ViewerData) -> None:
@@ -97,7 +98,7 @@ class TrackingViewer(QMainWindow):
         self.setWindowTitle("Multi-Recording ROI Tracking")
         self.setGeometry(*TRACKING_STYLE.window_geometry)
 
-        self.data: ViewerData = data
+        self._data: ViewerData = data
         self._auto_cycle_timer: QtCore.QTimer = QtCore.QTimer(self)
         self._auto_cycle_timer.timeout.connect(self._advance_recording)
 
@@ -149,10 +150,10 @@ class TrackingViewer(QMainWindow):
         # Main content row: image panel + control panel sidebar.
         main_layout = QHBoxLayout()
 
-        # Image + trace display panel (pyqtgraph).
+        # Image display panel.
         self._graphics_widget = pg.GraphicsLayoutWidget()
         self._view_box: pg.ViewBox = self._graphics_widget.addViewBox(row=0, col=0)
-        self._view_box.setAspectLocked(True)
+        self._view_box.setAspectLocked(lock=True)
         self._view_box.invertY(True)
         self._image_item: pg.ImageItem = pg.ImageItem()
         self._view_box.addItem(self._image_item)
@@ -178,7 +179,7 @@ class TrackingViewer(QMainWindow):
         Args:
             data: The ViewerData instance that stores the visualized dataset's data.
         """
-        self.data = data
+        self._data = data
 
         # Populates the dataset selector.
         self._dataset_combo.blockSignals(True)
@@ -215,7 +216,7 @@ class TrackingViewer(QMainWindow):
         Returns:
             A dictionary containing the viewer type, active display settings, and selection state.
         """
-        if not self.data.is_multi_recording:
+        if not self._data.is_multi_recording:
             return {"viewer_type": "tracking", "loaded": False}
 
         roi_text = self._roi_edit.text().strip()
@@ -225,9 +226,9 @@ class TrackingViewer(QMainWindow):
             "viewer_type": "tracking",
             "loaded": True,
             "active_dataset": self._dataset_combo.currentText(),
-            "available_datasets": list(self.data.available_datasets),
+            "available_datasets": list(self._data.available_datasets),
             "current_recording_index": self._recording_combo.currentIndex(),
-            "current_recording_id": self.data.current_recording_id,
+            "current_recording_id": self._data.current_recording_id,
             "recording_count": self._recording_combo.count(),
             "background_view": BackgroundView(self._background_combo.currentData()).name.lower(),
             "coordinate_space": CoordinateSpace(self._space_combo.currentData()).name.lower(),
@@ -241,7 +242,7 @@ class TrackingViewer(QMainWindow):
         }
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802
-        """Handles keyboard navigation for recording stepping, opacity controls, and auto-cycle toggling.
+        """Handles keyboard navigation for recording stepping, mask layer cycling, and auto-cycle toggling.
 
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
@@ -276,7 +277,7 @@ class TrackingViewer(QMainWindow):
         Notes:
             Overrides the Qt virtual method. The camelCase name is required to match the parent signature.
         """
-        if escape_returns_focus(self, event):
+        if escape_returns_focus(window=self, event=event):
             return True
         return super().eventFilter(source, event)
 
@@ -285,7 +286,7 @@ class TrackingViewer(QMainWindow):
         # Defaults the file dialog to the parent of the currently loaded recording's output
         # directory, so the user can easily navigate to a sibling recording.
         start_directory = ""
-        output = self.data.single_recording.output_path
+        output = self._data.single_recording.output_path
         parent = output.parent
         if parent.is_dir():
             start_directory = str(parent)
@@ -358,7 +359,7 @@ class TrackingViewer(QMainWindow):
         self._skip_backward_button.clicked.connect(self._previous_recording)
 
         playback = create_play_pause_group(
-            self,
+            parent=self,
             play_tooltip="Start automatic recording cycling.",
             pause_tooltip="Stop automatic recording cycling.",
         )
@@ -523,12 +524,17 @@ class TrackingViewer(QMainWindow):
         channel_2 = self._channel_2_checkbox.isChecked()
 
         # Retrieves and normalizes the background image into the cache.
-        recording = self.data.current_recording
-        background = self._resolve_background(recording, background_type, coordinate_space, channel_2)
+        recording = self._data.current_recording
+        background = self._resolve_background(
+            recording=recording,
+            image_type=background_type,
+            coordinate_space=coordinate_space,
+            channel_2=channel_2,
+        )
         self._cached_background = self._normalize_image(image=background)
 
         # Pre-collects all valid mask pixel coordinates and per-ROI colors into the cache.
-        masks = self._resolve_masks(recording, mask_layer, channel_2)
+        masks = self._resolve_masks(recording=recording, layer=mask_layer, channel_2=channel_2)
         self._cached_mask_count = len(masks) if masks else 0
         self._roi_edit.setValidator(QtGui.QIntValidator(0, max(0, self._cached_mask_count - 1)))
         self._cached_mask_y = None
@@ -542,7 +548,7 @@ class TrackingViewer(QMainWindow):
         # switches and Template/Tracked toggles. Original and Deformed share a separate identity set (single-recording
         # extraction) so the selection persists only within the same recording.
         current_is_template_group = mask_layer in (MaskLayer.TEMPLATE, MaskLayer.TRACKED)
-        recording_index = self.data.current_recording_index
+        recording_index = self._data.current_recording_index
         layer_group_changed = current_is_template_group != self._selection_was_template
         recording_changed = not current_is_template_group and recording_index != self._selection_recording_index
         if layer_group_changed or recording_changed:
@@ -557,25 +563,23 @@ class TrackingViewer(QMainWindow):
         self._selection_recording_index = recording_index
 
         if masks:
-            frame_height = self.data.single_recording.frame_height
-            frame_width = self.data.single_recording.frame_width
+            frame_height = self._data.single_recording.frame_height
+            frame_width = self._data.single_recording.frame_width
 
             # Generates deterministic per-ROI colors using random HSV hues with full saturation and value.
             # Original and Deformed layers use the Original mask count as the palette reference so both layers
             # share identical colors within a recording (they represent the same ROIs in different coordinate
             # spaces). Template layers use their own count directly, which is identical across all recordings,
             # ensuring consistent colors when switching recordings.
-            # Template and Tracked layers share a color palette (same ROI identity set). Original and Deformed
-            # layers share a separate palette (same single-recording ROIs in different coordinate spaces).
             if mask_layer in (MaskLayer.TEMPLATE, MaskLayer.TRACKED):
-                template_masks = self._resolve_masks(recording, MaskLayer.TEMPLATE, channel_2)
+                template_masks = self._resolve_masks(recording=recording, layer=MaskLayer.TEMPLATE, channel_2=channel_2)
                 color_count = len(template_masks) if template_masks else len(masks)
             else:
-                original_masks = self._resolve_masks(recording, MaskLayer.ORIGINAL, channel_2)
+                original_masks = self._resolve_masks(recording=recording, layer=MaskLayer.ORIGINAL, channel_2=channel_2)
                 color_count = len(original_masks) if original_masks else len(masks)
 
-            rng = np.random.default_rng(seed=ROI_CONFIG.random_color_seed)
-            hues = rng.random(color_count).astype(np.float32)
+            random_generator = np.random.default_rng(seed=ROI_CONFIG.random_color_seed)
+            hues = random_generator.random(color_count).astype(np.float32)
             hsv = np.stack([hues, np.ones_like(hues), np.ones_like(hues)], axis=-1)
             roi_colors = (255.0 * hsv_to_rgb(hsv)).astype(np.uint8)
 
@@ -625,7 +629,7 @@ class TrackingViewer(QMainWindow):
         opacity = self._opacity_slider.value()
         display_image = self._cached_background.copy()
 
-        # Vectorized alpha-blend of all mask pixels in a single operation using per-ROI colors.
+        # Alpha-blends every mask pixel in a single vectorized operation using the per-ROI colors.
         if (
             self._cached_mask_y is not None
             and self._cached_mask_x is not None
@@ -653,14 +657,14 @@ class TrackingViewer(QMainWindow):
         self._image_item.setImage(display_image)
 
         # Updates the status bar with selection info when a subset is active.
-        recording_id = self.data.current_recording_id
+        recording_id = self._data.current_recording_id
         if self._selected_rois is not None:
             selection_text = f"Selected: {len(self._selected_rois)} / {self._cached_mask_count}"
         else:
             selection_text = f"Masks: {self._cached_mask_count}"
         self._status_bar.showMessage(
             f"Recording: {recording_id}  |  {selection_text}  |  "
-            f"Size: {self.data.single_recording.frame_height} x {self.data.single_recording.frame_width}"
+            f"Size: {self._data.single_recording.frame_height} x {self._data.single_recording.frame_width}"
         )
 
     def _on_recording_selected(self, index: int) -> None:
@@ -671,7 +675,7 @@ class TrackingViewer(QMainWindow):
         """
         if index < 0:
             return
-        self.data.switch_recording(recording_index=index)
+        self._data.switch_recording(recording_index=index)
         self._refresh_display()
 
     def _on_dataset_selected(self, index: int) -> None:
@@ -683,9 +687,9 @@ class TrackingViewer(QMainWindow):
         if index < 0:
             return
         dataset_name = self._dataset_combo.itemData(index)
-        if dataset_name and dataset_name != self.data.active_dataset_name:
-            self.data.load_dataset(dataset_name=dataset_name)
-            self.load_data(data=self.data)
+        if dataset_name and dataset_name != self._data.active_dataset_name:
+            self._data.load_dataset(dataset_name=dataset_name)
+            self.load_data(data=self._data)
 
     def _on_channel_2_toggled(self, checked: bool) -> None:
         """Updates the channel 2 button style and refreshes the display.
@@ -723,7 +727,7 @@ class TrackingViewer(QMainWindow):
         click_y = int(view_position.y())
 
         # Bounds-checks against frame dimensions.
-        single_recording = self.data.single_recording
+        single_recording = self._data.single_recording
         if (
             click_y < 0
             or click_y >= single_recording.frame_height
@@ -784,12 +788,12 @@ class TrackingViewer(QMainWindow):
 
     def _previous_recording(self) -> None:
         """Navigates to the previous recording, wrapping around to the last."""
-        new_index = (self.data.current_recording_index - 1) % self.data.recording_count
+        new_index = (self._data.current_recording_index - 1) % self._data.recording_count
         self._recording_combo.setCurrentIndex(new_index)
 
     def _next_recording(self) -> None:
         """Navigates to the next recording, wrapping around to the first."""
-        new_index = (self.data.current_recording_index + 1) % self.data.recording_count
+        new_index = (self._data.current_recording_index + 1) % self._data.recording_count
         self._recording_combo.setCurrentIndex(new_index)
 
     def _advance_recording(self) -> None:
@@ -813,18 +817,18 @@ class TrackingViewer(QMainWindow):
         self._skip_forward_button.setEnabled(True)
 
     def _normalize_image(self, image: NDArray[np.float32]) -> NDArray[np.uint8]:
-        """Normalizes a float32 image to an uint8 RGB array using percentile clipping.
+        """Normalizes an image to an RGB array using percentile clipping.
 
         Args:
-            image: The input float32 image. A size-0 array produces a black fallback.
+            image: The image to normalize. A size-0 array produces a black fallback.
 
         Returns:
-            Normalized RGB image of shape (height, width, 3) with uint8 values.
+            Normalized RGB image of shape (height, width, 3).
         """
         normalized = normalize_percentile(
             image=image,
-            frame_height=self.data.single_recording.frame_height,
-            frame_width=self.data.single_recording.frame_width,
+            frame_height=self._data.single_recording.frame_height,
+            frame_width=self._data.single_recording.frame_width,
         )
         grayscale = (normalized * 255).astype(np.uint8)
         return np.stack([grayscale, grayscale, grayscale], axis=-1)
@@ -834,6 +838,7 @@ class TrackingViewer(QMainWindow):
         recording: MultiRecordingData,
         image_type: BackgroundView,
         coordinate_space: CoordinateSpace,
+        *,
         channel_2: bool,
     ) -> NDArray[np.float32]:
         """Resolves the background image from a recording based on the active view settings.
@@ -881,6 +886,7 @@ class TrackingViewer(QMainWindow):
     def _resolve_masks(
         recording: MultiRecordingData,
         layer: MaskLayer,
+        *,
         channel_2: bool,
     ) -> Sequence[ROIMask | ROIStatistics]:
         """Resolves the mask list from a recording based on the active mask layer and channel.

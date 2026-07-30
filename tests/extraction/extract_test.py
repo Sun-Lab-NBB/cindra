@@ -10,14 +10,7 @@ from cindra.dataclasses.single_recording_data import ROIMask, ROIStatistics
 
 
 def _make_roi_statistics(count: int) -> list[ROIStatistics]:
-    """Creates a list of minimal ROIStatistics instances for testing.
-
-    Args:
-        count: The number of ROIStatistics instances to create.
-
-    Returns:
-        A list of ROIStatistics instances with default fields and minimal ROIMask data.
-    """
+    """Creates a list of minimal ROIStatistics instances backed by single-pixel ROIMask data."""
     roi_list: list[ROIStatistics] = []
     for index in range(count):
         mask = ROIMask(
@@ -38,10 +31,10 @@ class TestUpdateRoiExtractionStatistics:
         """Verifies that skewness is set on every ROIStatistics instance."""
         roi_count = 4
         frame_count = 200
-        rng = np.random.default_rng(42)
+        generator = np.random.default_rng(seed=42)
         roi_statistics = _make_roi_statistics(count=roi_count)
-        cell_fluorescence = rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 100.0
-        neuropil_fluorescence = rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 80.0
+        cell_fluorescence = generator.standard_normal((roi_count, frame_count)).astype(np.float32) + 100.0
+        neuropil_fluorescence = generator.standard_normal((roi_count, frame_count)).astype(np.float32) + 80.0
 
         _update_roi_extraction_statistics(
             roi_statistics=roi_statistics,
@@ -59,9 +52,9 @@ class TestUpdateRoiExtractionStatistics:
         """Verifies that zero neuropil fluorescence produces skewness equal to the plain cell trace skewness."""
         roi_count = 3
         frame_count = 300
-        rng = np.random.default_rng(42)
+        generator = np.random.default_rng(seed=42)
         roi_statistics = _make_roi_statistics(count=roi_count)
-        cell_fluorescence = rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 50.0
+        cell_fluorescence = generator.standard_normal((roi_count, frame_count)).astype(np.float32) + 50.0
         neuropil_fluorescence = np.zeros((roi_count, frame_count), dtype=np.float32)
 
         _update_roi_extraction_statistics(
@@ -81,11 +74,11 @@ class TestUpdateRoiExtractionStatistics:
         """Verifies that a non-zero neuropil coefficient produces different skewness than the raw cell trace."""
         roi_count = 3
         frame_count = 300
-        rng = np.random.default_rng(42)
+        generator = np.random.default_rng(seed=42)
         roi_statistics_corrected = _make_roi_statistics(count=roi_count)
         roi_statistics_uncorrected = _make_roi_statistics(count=roi_count)
-        cell_fluorescence = rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 100.0
-        neuropil_fluorescence = rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 80.0
+        cell_fluorescence = generator.standard_normal((roi_count, frame_count)).astype(np.float32) + 100.0
+        neuropil_fluorescence = generator.standard_normal((roi_count, frame_count)).astype(np.float32) + 80.0
 
         _update_roi_extraction_statistics(
             roi_statistics=roi_statistics_corrected,
@@ -111,10 +104,10 @@ class TestUpdateRoiExtractionStatistics:
         assert differences_found
 
     def test_updates_in_place(self) -> None:
-        """Verifies that skewness values are written to the existing ROIStatistics instances, not copies."""
+        """Verifies that skewness values are written in place onto the ROIStatistics instances passed in."""
         roi_count = 2
         frame_count = 100
-        rng = np.random.default_rng(42)
+        generator = np.random.default_rng(seed=42)
         roi_statistics = _make_roi_statistics(count=roi_count)
 
         for roi in roi_statistics:
@@ -122,8 +115,8 @@ class TestUpdateRoiExtractionStatistics:
 
         _update_roi_extraction_statistics(
             roi_statistics=roi_statistics,
-            cell_fluorescence=rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 50.0,
-            neuropil_fluorescence=rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 30.0,
+            cell_fluorescence=generator.standard_normal((roi_count, frame_count)).astype(np.float32) + 50.0,
+            neuropil_fluorescence=generator.standard_normal((roi_count, frame_count)).astype(np.float32) + 30.0,
             neuropil_coefficient=0.5,
         )
 
@@ -151,9 +144,9 @@ class TestUpdateRoiExtractionStatistics:
         """Verifies that the neuropil coefficient correctly scales the neuropil subtraction."""
         roi_count = 2
         frame_count = 200
-        rng = np.random.default_rng(42)
-        cell_fluorescence = rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 100.0
-        neuropil_fluorescence = rng.standard_normal((roi_count, frame_count)).astype(np.float32) + 80.0
+        generator = np.random.default_rng(seed=42)
+        cell_fluorescence = generator.standard_normal((roi_count, frame_count)).astype(np.float32) + 100.0
+        neuropil_fluorescence = generator.standard_normal((roi_count, frame_count)).astype(np.float32) + 80.0
 
         neuropil_coefficient = 0.7
         expected_corrected = cell_fluorescence - np.float32(neuropil_coefficient) * neuropil_fluorescence

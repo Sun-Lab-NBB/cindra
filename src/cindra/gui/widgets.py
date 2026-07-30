@@ -1,4 +1,4 @@
-"""Provides custom Qt widgets, trace plotting helpers, and quadrant zoom for all GUI applications."""
+"""Provides custom Qt widgets, plot configuration helpers, and trace plotting for all GUI applications."""
 
 from __future__ import annotations
 
@@ -31,6 +31,20 @@ type _ZoomHandler = Callable[[], None]
 """The callback type for double-click zoom-to-fit events dispatched by a ViewBox to the orchestrator."""
 
 
+@dataclass(frozen=True, slots=True)
+class PlayPauseGroup:
+    """Stores a play/pause button pair and their exclusive button group."""
+
+    play_button: QToolButton
+    """The play button."""
+
+    pause_button: QToolButton
+    """The pause button."""
+
+    button_group: QButtonGroup
+    """The exclusive button group containing both buttons."""
+
+
 def escape_returns_focus(window: QWidget, event: QtCore.QEvent) -> bool:
     """Returns True and shifts focus to the window if the event is an Escape keypress.
 
@@ -49,20 +63,6 @@ def escape_returns_focus(window: QWidget, event: QtCore.QEvent) -> bool:
         window.setFocus()
         return True
     return False
-
-
-@dataclass(frozen=True)
-class PlayPauseGroup:
-    """Stores a play/pause button pair and their exclusive button group."""
-
-    play_button: QToolButton
-    """The play button."""
-
-    pause_button: QToolButton
-    """The pause button."""
-
-    button_group: QButtonGroup
-    """The exclusive button group containing both buttons."""
 
 
 def configure_plot(
@@ -133,7 +133,7 @@ class TraceBox(pg.PlotItem):
     def __init__(self) -> None:
         super().__init__()
         configure_plot(
-            self,
+            plot=self,
             title="Fluorescence Traces",
             left_label="Intensity (a.u.)",
             bottom_label="Frame",
@@ -169,10 +169,11 @@ class TraceBox(pg.PlotItem):
 class ViewBox(pg.ViewBox):
     """Displays field-of-view images with support for custom keyboard and mouse interactions.
 
-    Extends pyqtgraph's ViewBox class with left-click ROI selection, right-click ROI
-    reclassification (cell / non-cell), shift/ctrl-click multi-ROI merge selection, and
-    double-click zoom-to-fit functionality. All click logic is delegated to the orchestrator via
-    installed callback handlers.
+    Extends pyqtgraph's ViewBox class with left-click ROI selection, shift/ctrl-click multi-ROI
+    merge selection, and double-click zoom-to-fit functionality. Right-clicks are forwarded to the
+    installed handler as well and fall through to the default context menu whenever the handler
+    leaves them unconsumed and the menu is enabled. All click logic is delegated to the orchestrator
+    via installed callback handlers.
 
     Args:
         border: The panel border frame pen specification forwarded to ``mkPen``.
@@ -237,8 +238,8 @@ class ViewBox(pg.ViewBox):
         """Dispatches mouse click events to the installed click handler.
 
         Left-click selects the targeted ROI. Shift/ctrl-click toggles multi-ROI merge selection.
-        Right-click reclassifies the ROI between the cell and non-cell panels. Unhandled
-        right-clicks raise the default context menu.
+        Right-clicks are dispatched to the handler too. When the handler leaves them unconsumed and
+        the context menu is enabled, they raise the default context menu.
 
         Notes:
             Overrides the pyqtgraph/Qt virtual method. The camelCase name is required to match
@@ -335,7 +336,7 @@ def plot_trace(
         )
     else:
         trace_box.setLabel("left", "ROI", **{"font-size": FONTS.label_size})
-        add_plot_legend(trace_box, column_count=1)
+        add_plot_legend(plot=trace_box, column_count=1)
         y_minimum, y_maximum = _plot_multi_trace(
             trace_box=trace_box,
             axis=axis,
@@ -371,8 +372,8 @@ def create_play_pause_group(
 ) -> PlayPauseGroup:
     """Creates a play/pause button pair with an exclusive button group.
 
-    Both buttons start disabled with pause pre-selected. Signal connections are not wired by this factory — each
-    viewer connects its own callbacks after construction.
+    Both buttons start disabled with pause pre-selected. Each viewer connects its own callbacks after
+    construction.
 
     Args:
         parent: The parent widget that provides the icon style and owns the button group.

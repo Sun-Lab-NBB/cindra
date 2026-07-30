@@ -11,7 +11,12 @@ from scipy.signal import medfilt
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
-from ..io import BinaryFile
+from ..io import (
+    BinaryFile,
+    clear_registration_marker,
+    create_registration_marker,
+    resolve_registration_marker_path,
+)
 from .rigid import (
     translate_frame,
     apply_edge_taper,
@@ -34,6 +39,11 @@ from .nonrigid import (
 from ..detection import compute_registration_blocks
 from .bidiphase_correction import compute_bidirectional_phase_offset, apply_bidirectional_phase_correction
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+    from ..dataclasses import IOData, RuntimeContext
+
 _MINIMUM_REGISTRATION_METRIC_FRAMES: int = 1500
 """The minimum number of frames required to compute registration quality metrics."""
 
@@ -43,16 +53,17 @@ _BAD_FRAME_FRACTION_THRESHOLD: float = 0.5
 _MAXIMUM_MEDIAN_FILTER_WINDOW: int = 101
 """The maximum median filter window size for offset time series smoothing."""
 
-type RegistrationBlocks = tuple[
+_OFFSET_MARGIN_FRACTION: float = 0.95
+"""The fraction of the maximum allowed offset above which a frame is flagged as bad."""
+
+_OUTLIER_METRIC_SCALE: int = 100
+"""The scaling factor applied to the bad frame threshold before it is compared against the outlier metric."""
+
+type _RegistrationBlocks = tuple[
     list[NDArray[np.int32]], list[NDArray[np.int32]], tuple[int, int], tuple[int, int], NDArray[np.float32]
 ]
 """The type alias for the registration block structure returned by compute_registration_blocks. Contains y_blocks,
 x_blocks, block_counts, actual_block_size, and smoothing_kernel."""
-
-if TYPE_CHECKING:
-    from numpy.typing import NDArray
-
-    from ..dataclasses import RuntimeContext
 
 
 def register_plane(context: RuntimeContext, *, workers: int) -> None:
@@ -64,7 +75,10 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
     reference.
 
     All configuration is read from context.configuration, file paths from context.runtime.io, and results are stored in
-    context.runtime.registration, context.runtime.detection, and context.runtime.timing.
+    context.runtime.registration, context.runtime.detection, and context.runtime.timing. The registered frames are
+    written back into the plane's channel binaries in place, guarded by a '<binary>.registering' marker. The runtime
+    data is persisted with context.save_runtime() before returning, after which the registration arrays are released
+    from memory, so consumers re-acquire them with memory_map_arrays() or load_arrays().
 
     Notes:
         The worker count drives both the FFT thread pool used by phase correlation and the Numba thread mask used by
@@ -83,6 +97,11 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
     io_data = context.runtime.io
     registration_data = context.runtime.registration
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
+
+    # Refuses to consume a binary that an interrupted registration left in an indeterminate state. This check precedes
+    # the skip and re-registration branches below, because neither the registration outputs nor their absence reveal
+    # that the binary itself holds a mixture of corrected and raw frames.
+    _validate_binaries_are_not_mid_registration(io_data=io_data, plane_index=plane_index)
 
     # Checks if registration should be skipped (already registered and not forcing re-registration).
     if registration_data.is_registered(output_path=io_data.output_path) and not config.registration.repeat_registration:
@@ -143,7 +162,7 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
 
         # Re-applies offsets to the secondary channel if present.
         if has_second_channel:
-            _register_secondary_channel(context=context)  # pragma: no cover — duplicates the step-1 secondary path
+            _register_secondary_channel(context=context)  # pragma: no cover, duplicates the step-1 secondary path
 
         context.runtime.timing.two_step_registration_time = int(timer.elapsed)
         console.echo(
@@ -152,8 +171,8 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
         )
 
     # Loads bad frames from file if present.
-    num_frames = io_data.frame_count
-    bad_frames = np.zeros(num_frames, dtype=np.bool_)
+    frame_count = io_data.frame_count
+    bad_frames = np.zeros(frame_count, dtype=np.bool_)
     data_path = config.file_io.data_path
     if data_path is not None:
         bad_frames_file = data_path / "bad_frames.npy"
@@ -174,8 +193,8 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
     registration_data = context.runtime.registration
     height, width = io_data.frame_height, io_data.frame_width
 
-    # Extracts offsets for crop computation. Fallback assignments are for type checker only; these are always present
-    # after _register_alignment_channel. Uses np.empty to avoid initialization overhead.
+    # Extracts offsets for crop computation. Fallback assignments are for the type checker only. These are always
+    # present after _register_alignment_channel. Uses np.empty to avoid initialization overhead.
     y_offsets = (
         registration_data.rigid_y_offsets
         if registration_data.rigid_y_offsets is not None
@@ -213,9 +232,9 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
     context.save_runtime()
 
     # Computes registration quality metrics if enabled and recording has enough frames.
-    num_principal_components = config.registration.registration_metric_principal_components
-    if num_principal_components > 0 and num_frames >= _MINIMUM_REGISTRATION_METRIC_FRAMES:  # pragma: no cover — the
-        # >=1500-frame metrics path is impractical on synthetic data; compute_pc_metrics is covered directly.
+    principal_component_count = config.registration.registration_metric_principal_components
+    # The >=1500-frame metrics path is impractical on synthetic data, and compute_pc_metrics is covered directly.
+    if principal_component_count > 0 and frame_count >= _MINIMUM_REGISTRATION_METRIC_FRAMES:  # pragma: no cover
         timer.reset()
         compute_pc_metrics(context=context, workers=workers)
         context.runtime.timing.registration_metrics_time = int(timer.elapsed)
@@ -225,10 +244,10 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
             ),
             level=LogLevel.SUCCESS,
         )
-    elif num_principal_components > 0:
+    elif principal_component_count > 0:
         console.echo(
             message=(
-                f"Skipping plane {plane_index} registration quality metrics computation. Recording has {num_frames} "
+                f"Skipping plane {plane_index} registration quality metrics computation. Recording has {frame_count} "
                 f"frames, but at least {_MINIMUM_REGISTRATION_METRIC_FRAMES} are required."
             ),
             level=LogLevel.INFO,
@@ -261,7 +280,7 @@ class _ReferenceData:
     """Per-block mean offsets with shape (num_blocks, block_height, block_width), or None if nonrigid is disabled."""
     reference_kernel_nonrigid: NDArray[np.complex64] | None
     """Per-block FFT kernels with shape (num_blocks, block_height, rfft_width), or None if nonrigid is disabled."""
-    blocks: RegistrationBlocks | None
+    blocks: _RegistrationBlocks | None
     """The registration block structure from compute_registration_blocks, or None if nonrigid is disabled."""
 
 
@@ -309,8 +328,8 @@ def _compute_crop(
         bad_frame_threshold: The threshold multiplier for identifying outlier frames based on offset deviation
             relative to correlation quality.
         bad_frames: A boolean array with shape (num_frames,) of frames already marked as bad from external sources.
-        maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension. Frames
-            exceeding this threshold are flagged as bad.
+        maximum_offset_fraction: The maximum allowed offset as a fraction of the frame size. Frames whose x or y
+            offset exceeds 95% of this fraction of the matching frame dimension are flagged as bad.
         frame_height: The height of each frame in pixels.
         frame_width: The width of each frame in pixels.
 
@@ -318,7 +337,7 @@ def _compute_crop(
         A tuple containing the updated bad_frames boolean array with outliers marked, the valid y-range as
         (y_min, y_max) defining usable rows, and the valid x-range as (x_min, x_max) defining usable columns.
     """
-    # Computes median filter window: largest odd number up to array length, capped at maximum.
+    # Computes median filter window: largest odd number below the array length, capped at maximum.
     # This extracts a smooth baseline trend from the offset time series.
     filter_window = min((len(y_offsets) // 2) * 2 - 1, _MAXIMUM_MEDIAN_FILTER_WINDOW)
 
@@ -338,11 +357,11 @@ def _compute_crop(
 
     # Combines deviation and correlation metrics: bad frames have large offsets AND/OR poor correlation.
     outlier_metric = delta_xy / np.maximum(0, correlation_normalized)
-    x_threshold = maximum_offset_fraction * frame_width * 0.95
-    y_threshold = maximum_offset_fraction * frame_height * 0.95
+    x_threshold = maximum_offset_fraction * frame_width * _OFFSET_MARGIN_FRACTION
+    y_threshold = maximum_offset_fraction * frame_height * _OFFSET_MARGIN_FRACTION
     bad_frames = (
         bad_frames
-        | (outlier_metric > bad_frame_threshold * 100)
+        | (outlier_metric > bad_frame_threshold * _OUTLIER_METRIC_SCALE)
         | (np.abs(x_offsets) > x_threshold)
         | (np.abs(y_offsets) > y_threshold)
     )
@@ -352,7 +371,7 @@ def _compute_crop(
     if bad_frames.mean() < _BAD_FRAME_FRACTION_THRESHOLD:
         y_min = np.ceil(np.abs(y_offsets[~bad_frames]).max())
         x_min = np.ceil(np.abs(x_offsets[~bad_frames]).max())
-    else:  # pragma: no cover — catastrophic registration failure with >50% bad frames
+    else:  # pragma: no cover, catastrophic registration failure with >50% bad frames
         console.echo(
             message=(
                 "WARNING: >50% of frames have large movements, suggesting that registration has failed to correct "
@@ -375,21 +394,28 @@ def _compute_crop(
 def _pick_initial_reference(frames: NDArray[np.float32], top_correlations: int = 20) -> NDArray[np.float32]:
     """Computes the initial reference image from a set of frames.
 
-    Identifies the seed frame as the frame with the largest correlations with other frames, then averages the seed
-    frame with its top k correlated pairs to produce the initial reference.
+    Identifies the seed frame as the frame with the highest mean correlation against its most-correlated partners,
+    then averages the top_correlations most-correlated frames to produce the initial reference.
 
     Args:
-        frames: The processed recording's frames with shape (num_frames, height, width).
+        frames: The processed recording's frames with shape (num_frames, height, width). The mean subtraction used by
+            the correlation computation is applied to an internal working copy, so the input array retains its
+            original intensity scale.
         top_correlations: The number of top frame correlations to average.
 
     Returns:
-        The initial reference image with shape (height, width).
+        The initial reference image with shape (height, width), on a mean-subtracted intensity scale. The first
+        refinement iteration in _compute_reference recomputes the reference as a mean of the frames it aligns, so the
+        final reference carries the intensity scale of those frames.
     """
-    num_frames, height, width = frames.shape
+    frame_count, height, width = frames.shape
 
-    # Flattens frames and subtracts mean for correlation computation.
-    frames_flat = frames.reshape(num_frames, -1)
-    frames_flat -= frames_flat.mean(axis=1, keepdims=True)
+    # Flattens frames and subtracts the per-frame mean for correlation computation. The subtraction allocates a
+    # working copy, so the caller's frames stay on their original intensity scale. _compute_reference refines the
+    # reference from those same frames, and register_plane derives the percentile clip bounds used during frame
+    # registration from the resulting reference.
+    frames_flat = frames.reshape(frame_count, -1)
+    frames_flat = frames_flat - frames_flat.mean(axis=1, keepdims=True)
 
     # Normalizes frames and computes correlation matrix.
     frame_norms = np.linalg.norm(frames_flat, axis=1, keepdims=True)
@@ -403,8 +429,9 @@ def _pick_initial_reference(frames: NDArray[np.float32], top_correlations: int =
     mean_top_correlations = np.mean(top_correlations_per_frame, axis=1)
     seed_index = np.argmax(mean_top_correlations)
 
-    # Averages the seed frame with its top correlated frames. Uses mean-subtracted frames intentionally—this initial
-    # reference only bootstraps iterative refinement in _compute_reference, which replaces it with original frames.
+    # Averages the seed frame with its top correlated frames. The mean-subtracted working copy is used here, because
+    # the first refinement iteration in _compute_reference recomputes the reference as a mean of the frames it aligns,
+    # which carry their own intensity scale.
     top_indices = np.argpartition(correlation_matrix[seed_index, :], kth=-top_correlations)[-top_correlations:]
     reference_image = np.mean(frames_flat[top_indices, :], axis=0)
 
@@ -413,7 +440,6 @@ def _pick_initial_reference(frames: NDArray[np.float32], top_correlations: int =
 
 def _compute_reference(
     frames: NDArray[np.float32],
-    one_photon_enabled: bool,
     pre_smoothing_sigma: float,
     spatial_highpass_window: int,
     edge_taper_pixels: float,
@@ -421,6 +447,8 @@ def _compute_reference(
     maximum_offset_fraction: float,
     temporal_smoothing_sigma: float,
     workers: int,
+    *,
+    one_photon_enabled: bool,
 ) -> NDArray[np.float32]:
     """Computes the reference image through iterative alignment.
 
@@ -430,10 +458,11 @@ def _compute_reference(
     refinement produces a sharp, low-noise reference that represents the stable structure across frames.
 
     Args:
-        frames: The frames to use for reference computation with shape (num_frames, height, width).
-        one_photon_enabled: Determines whether to apply one-photon preprocessing, which includes spatial smoothing
-            followed by high-pass filtering.
-        pre_smoothing_sigma: The standard deviation of Gaussian smoothing applied before high-pass filtering.
+        frames: The frames to use for reference computation with shape (num_frames, height, width). Modified in-place
+            by the iterative refinement, which overwrites each frame with its aligned version, unless one-photon
+            preprocessing replaces the working array with a filtered copy.
+        pre_smoothing_sigma: The sliding-window (box) smoothing size, in pixels, applied before high-pass
+            filtering. Cast to an integer and passed to apply_spatial_smoothing, which requires an even window.
         spatial_highpass_window: The window size for the spatial high-pass filter that removes low-frequency background.
         edge_taper_pixels: Controls the steepness of the edge taper falloff. Larger values produce a more gradual
             taper that suppresses border artifacts during phase correlation.
@@ -443,6 +472,8 @@ def _compute_reference(
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation maps.
             If 0, no smoothing is applied.
         workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        one_photon_enabled: Determines whether to apply one-photon preprocessing, which includes spatial smoothing
+            followed by high-pass filtering.
 
     Returns:
         The computed reference image with shape (height, width).
@@ -461,10 +492,11 @@ def _compute_reference(
     # Computes taper slope based on registration mode.
     taper_slope = edge_taper_pixels if one_photon_enabled else 3 * spatial_smoothing_sigma
 
-    # Iteratively refines the reference image. 8 iterations is empirically tuned from original suite2p;
-    # each iteration includes progressively more frames, converging to ~50% of frames by the final iteration.
-    num_iterations = 8
-    for iteration in range(num_iterations):
+    # Iteratively refines the reference image. The iteration count of 8 is empirically tuned from the original suite2p
+    # implementation. Each iteration includes progressively more frames, converging to ~50% of frames by the final
+    # iteration.
+    iteration_count = 8
+    for iteration in range(iteration_count):
         # Prepares edge taper mask and phase correlation kernel for current reference.
         taper_mask, mean_offset = compute_edge_taper(
             reference_image=reference_image,
@@ -490,8 +522,8 @@ def _compute_reference(
         # Selects top-correlated frames for next reference, excluding rank 0 (the frame most correlated with the
         # current reference) to prevent self-reinforcing bias in the iterative refinement.
         # Number of frames increases each iteration: ~6% at iter 0, ~31% at iter 4, ~50% at iter 7.
-        num_frames_for_reference = max(2, int(frames.shape[0] * (1.0 + iteration) / (2 * num_iterations)))
-        sorted_indices = np.argsort(-correlations)[1:num_frames_for_reference]
+        selected_frame_count = max(2, int(frames.shape[0] * (1.0 + iteration) / (2 * iteration_count)))
+        sorted_indices = np.argsort(-correlations)[1:selected_frame_count]
 
         # Updates reference as the mean of the best-aligned frames. Input frames are float32, mean preserves dtype.
         reference_image = frames[sorted_indices].mean(axis=0)
@@ -512,15 +544,16 @@ def _register_frames_batch(
     normalization_minimum: float,
     normalization_maximum: float,
     bidirectional_phase_offset: int,
-    one_photon_enabled: bool,
     pre_smoothing_sigma: float,
     spatial_highpass_window: int,
     temporal_smoothing_sigma: float,
     maximum_offset_fraction: float,
-    nonrigid_enabled: bool,
     signal_to_noise_threshold: float,
     maximum_block_offset: float,
     workers: int,
+    *,
+    one_photon_enabled: bool,
+    nonrigid_enabled: bool,
 ) -> _BatchRegistrationResult:
     """Registers the input batch of frames to the reference image using rigid and optionally nonrigid phase correlation.
 
@@ -531,30 +564,31 @@ def _register_frames_batch(
         normalization_minimum: The minimum intensity value for clipping frames before correlation.
         normalization_maximum: The maximum intensity value for clipping frames before correlation.
         bidirectional_phase_offset: The pixel offset to correct bidirectional scanning artifacts.
-        one_photon_enabled: Determines whether to apply one-photon preprocessing, which includes spatial smoothing
-            followed by high-pass filtering.
-        pre_smoothing_sigma: The standard deviation of Gaussian smoothing applied before high-pass filtering.
+        pre_smoothing_sigma: The sliding-window (box) smoothing size, in pixels, applied before high-pass
+            filtering. Cast to an integer and passed to apply_spatial_smoothing, which requires an even window.
         spatial_highpass_window: The window size for the spatial high-pass filter that removes low-frequency background.
         temporal_smoothing_sigma: The standard deviation for temporal Gaussian smoothing of correlation maps.
             If 0, no smoothing is applied.
         maximum_offset_fraction: The maximum allowed offset as a fraction of the minimum spatial dimension.
             The search window is limited to min(height, width) * maximum_offset_fraction pixels.
-        nonrigid_enabled: Determines whether to apply nonrigid (piecewise) registration after rigid alignment.
         signal_to_noise_threshold: The SNR threshold below which additional smoothing is applied to correlation
-            peaks. Higher values apply more smoothing; typical values range from 1.0 to 1.5.
+            peaks. Higher values apply more smoothing. Typical values range from 1.0 to 1.5.
         maximum_block_offset: The maximum allowed offset for nonrigid blocks in pixels.
         workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
+        one_photon_enabled: Determines whether to apply one-photon preprocessing, which includes spatial smoothing
+            followed by high-pass filtering.
+        nonrigid_enabled: Determines whether to apply nonrigid (piecewise) registration after rigid alignment.
 
     Returns:
-        A _BatchRegistrationResult containing registered frames and computed offsets. Nonrigid arrays are None if
-        nonrigid registration is disabled.
+        The registered frames together with the per-frame rigid offsets and phase correlation peaks. The nonrigid
+        offsets and correlations are None when nonrigid registration is disabled.
     """
     # Corrects bidirectional scanning artifacts if offset is non-zero.
     if bidirectional_phase_offset != 0:
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=bidirectional_phase_offset)
 
-    # Creates a working copy for correlation computation; original frames are shifted separately. Temporal smoothing
-    # is only applied to the correlation maps inside compute_rigid_offsets, not to the raw frames here.
+    # Creates a working copy for correlation computation. The original frames are shifted separately. Temporal
+    # smoothing is only applied to the correlation maps inside compute_rigid_offsets, not to the raw frames here.
     frames_smooth = frames.copy()
 
     # Applies one-photon preprocessing: spatial smoothing followed by high-pass filtering.
@@ -589,8 +623,8 @@ def _register_frames_batch(
 
     # Phase 2: Nonrigid registration - computes per-block subpixel offsets to correct local deformations.
     if nonrigid_enabled:
-        # Extracts nonrigid reference data. Fallback assignments are for type checker only; these are guaranteed to be
-        # present when nonrigid_enabled is True.
+        # Extracts nonrigid reference data. Fallback assignments are for the type checker only. These are guaranteed
+        # to be present when nonrigid_enabled is True.
         blocks = (
             reference_data.blocks
             if reference_data.blocks is not None
@@ -669,8 +703,9 @@ def _apply_precomputed_offsets_batch(
     x_offsets: NDArray[np.int32],
     y_offsets_nonrigid: NDArray[np.float32] | None,
     x_offsets_nonrigid: NDArray[np.float32] | None,
-    blocks: RegistrationBlocks | None,
+    blocks: _RegistrationBlocks | None,
     bidirectional_phase_offset: int,
+    *,
     bidirectional_phase_corrected: bool,
     nonrigid_enabled: bool,
 ) -> NDArray[np.float32]:
@@ -705,7 +740,7 @@ def _apply_precomputed_offsets_batch(
     for frame, y_offset, x_offset in zip(frames, y_offsets, x_offsets, strict=False):
         frame[:] = translate_frame(frame=frame, y_offset=y_offset, x_offset=x_offset)
 
-    # Applies nonrigid (per-block) warping if enabled. Fallback assignments are for type checker only; these are
+    # Applies nonrigid (per-block) warping if enabled. Fallback assignments are for the type checker only. These are
     # guaranteed to be present when nonrigid_enabled is True.
     if nonrigid_enabled:
         _blocks = blocks if blocks is not None else ([], [], (0, 0), (0, 0), np.empty(0, dtype=np.float32))
@@ -727,11 +762,44 @@ def _apply_precomputed_offsets_batch(
     return frames
 
 
+def _validate_binaries_are_not_mid_registration(io_data: IOData, plane_index: int) -> None:
+    """Verifies that no interrupted registration left the plane's binaries in an indeterminate state.
+
+    Notes:
+        The registration stage rewrites its input binary in place, so a run that dies partway leaves corrected frames
+        up to some unknown point and raw frames after it. Re-registering such a binary computes its offsets and its
+        valid crop region from a movie whose frames disagree about whether motion has already been removed, and both
+        the resulting traces and the reported registration quality look ordinary. Failing here converts that silent
+        corruption into an actionable error.
+
+    Args:
+        io_data: The plane's IOData, which holds the paths of the binaries the registration stage rewrites.
+        plane_index: The index of the plane, used to identify the plane in the error message.
+
+    Raises:
+        RuntimeError: If a marker shows that a previous registration of one of the plane's binaries was interrupted.
+    """
+    for binary_path in (io_data.registered_binary_path, io_data.registered_binary_path_channel_2):
+        if binary_path is None:
+            continue
+
+        marker_path = resolve_registration_marker_path(binary_path=binary_path)
+        if marker_path.exists():
+            message = (
+                f"Unable to register plane {plane_index}. A previous registration of the binary file "
+                f"'{binary_path}' was interrupted, so the file holds motion-corrected frames up to an unknown point "
+                f"and raw frames after it. Re-run the binarization stage to rebuild the binary from its source TIFF "
+                f"files, which also clears the marker at '{marker_path}'. Binarization rebuilds a marked binary on "
+                f"its own, so enabling 'repeat_binarization' is not required."
+            )
+            console.error(message=message, error=RuntimeError)
+
+
 def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> None:
     """Computes registration offsets from the alignment channel and applies them to that channel's frames.
 
-    The alignment channel is determined by config.registration.align_by_first_channel. If True, channel 1 is used;
-    if False, channel 2 is used. This function computes the reference image, calculates rigid and optionally nonrigid
+    The alignment channel is determined by config.registration.align_by_first_channel. If True, channel 1 is used.
+    If False, channel 2 is used. This function computes the reference image, calculates rigid and optionally nonrigid
     registration offsets, and applies them to all frames. Results are stored in context.runtime.registration and the
     mean image is stored in the appropriate detection field.
 
@@ -756,13 +824,13 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
     block_size = config.nonrigid_registration.block_size
     signal_to_noise_threshold = config.nonrigid_registration.signal_to_noise_threshold
     maximum_block_offset = config.nonrigid_registration.maximum_block_offset
-    enable_bidiphase_computation = config.registration.compute_bidirectional_phase_offset
+    enable_bidirectional_phase_computation = config.registration.compute_bidirectional_phase_offset
     initial_bidirectional_phase_offset = config.registration.bidirectional_phase_offset_override
 
     # Extracts runtime IO data.
     io_data = context.runtime.io
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
-    height, width, num_frames = io_data.frame_height, io_data.frame_width, io_data.frame_count
+    height, width, frame_count = io_data.frame_height, io_data.frame_width, io_data.frame_count
     bidirectional_phase_corrected = context.runtime.registration.bidirectional_phase_corrected
 
     # Selects channel paths based on alignment configuration.
@@ -774,27 +842,29 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
         channel_label = "channel 2"
 
     if binary_path is None:
-        console.error(
-            message=(
-                f"Unable to register {channel_label} frames for plane {plane_index}. The plane's RuntimeContext "
-                f"instance does not contain the path to the plane's {channel_label} binary file."
-            ),
-            error=ValueError,
+        message = (
+            f"Unable to register {channel_label} frames for plane {plane_index}. The plane's RuntimeContext "
+            f"instance does not contain the path to the plane's {channel_label} binary file."
         )
+        console.error(message=message, error=ValueError)
 
     # Opens BinaryFile and performs registration in-place.
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
-    with BinaryFile(height=height, width=width, file_path=binary_path, frame_number=num_frames) as frames_file:
+    with BinaryFile(height=height, width=width, file_path=binary_path, frame_number=frame_count) as frames_file:
         # Tracks the bidirectional phase offset (may be updated from data).
         bidirectional_phase_offset = initial_bidirectional_phase_offset
 
         # Samples frames evenly across the recording and converts to float32 for processing.
-        sample_indices = np.linspace(0, num_frames, 1 + np.minimum(reference_frame_count, num_frames), dtype=int)[:-1]
+        sample_indices = np.linspace(0, frame_count, 1 + np.minimum(reference_frame_count, frame_count), dtype=int)[:-1]
         frames = frames_file[sample_indices].astype(np.float32)
 
-        # Computes bidiphase offset if enabled and not already set.
-        if enable_bidiphase_computation and bidirectional_phase_offset == 0 and not bidirectional_phase_corrected:
+        # Computes the bidirectional phase offset if enabled and not already set.
+        if (
+            enable_bidirectional_phase_computation
+            and bidirectional_phase_offset == 0
+            and not bidirectional_phase_corrected
+        ):
             bidirectional_phase_offset = compute_bidirectional_phase_offset(frames=frames)
             console.echo(
                 message=(
@@ -837,11 +907,11 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
         else:
             normalization_minimum, normalization_maximum = -np.inf, np.inf
 
-        # Determines bidiphase for frame registration.
+        # Determines the bidirectional phase offset used for frame registration.
         if bidirectional_phase_offset != 0 and not bidirectional_phase_corrected:
-            bidiphase_for_registration = bidirectional_phase_offset
+            bidirectional_phase_for_registration = bidirectional_phase_offset
         else:
-            bidiphase_for_registration = 0
+            bidirectional_phase_for_registration = 0
 
         # Computes registration masks for the reference image.
         taper_slope = edge_taper_pixels if one_photon_enabled else 3 * spatial_smoothing_sigma
@@ -892,13 +962,17 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
             level=LogLevel.INFO,
         )
 
+        # Marks the binary for the duration of the in-place rewrite below. Until the loop completes, the file holds a
+        # mixture of corrected and raw frames that nothing else on disk would reveal.
+        create_registration_marker(binary_path=binary_path)
+
         for batch_start_np in console.track(
-            np.arange(0, num_frames, batch_size),
+            np.arange(0, frame_count, batch_size),
             description=f"Registering batches of {batch_size} frames",
             unit="batch",
         ):
             batch_start = int(batch_start_np)
-            batch_end = min(batch_start + batch_size, num_frames)
+            batch_end = min(batch_start + batch_size, frame_count)
             frames = frames_file[batch_start:batch_end].astype(np.float32)
 
             batch_result = _register_frames_batch(
@@ -906,7 +980,7 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
                 frames=frames,
                 normalization_minimum=normalization_minimum,
                 normalization_maximum=normalization_maximum,
-                bidirectional_phase_offset=bidiphase_for_registration,
+                bidirectional_phase_offset=bidirectional_phase_for_registration,
                 one_photon_enabled=one_photon_enabled,
                 pre_smoothing_sigma=pre_smoothing_sigma,
                 spatial_highpass_window=spatial_highpass_window,
@@ -920,7 +994,8 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
 
             rigid_offsets_batches.append((batch_result.y_offsets, batch_result.x_offsets, batch_result.correlations))
             if nonrigid_enabled:
-                # Fallback assignments are for type checker only; guaranteed present when nonrigid_enabled is True.
+                # Fallback assignments are for the type checker only. They are guaranteed present when
+                # nonrigid_enabled is True.
                 y_offsets_nonrigid = (
                     batch_result.y_offsets_nonrigid
                     if batch_result.y_offsets_nonrigid is not None
@@ -941,11 +1016,18 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
             mean_image += batch_result.frames.sum(axis=0)
 
             # Converts back to int16 for BinaryFile storage and writes in-place.
-            frames_int16 = np.clip(batch_result.frames, -32768, 32767).astype(np.int16)
+            frames_int16 = np.clip(
+                batch_result.frames, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max
+            ).astype(dtype=np.int16)
             frames_file[batch_start:batch_end] = frames_int16
 
+        # Flushes the rewritten frames and clears the marker. Every frame now carries the same correction, so the
+        # binary is internally consistent again even though the registration outputs are not yet saved.
+        frames_file.file.flush()
+        clear_registration_marker(binary_path=binary_path)
+
         # Normalizes accumulated sum to get mean image.
-        mean_image /= num_frames
+        mean_image /= frame_count
 
         console.echo(
             message=(
@@ -956,10 +1038,10 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
         )
 
     # Combines batch results into full arrays.
-    rigid_y_offsets, rigid_x_offsets, rigid_correlations = combine_rigid_offsets(rigid_offsets_batches)
+    rigid_y_offsets, rigid_x_offsets, rigid_correlations = combine_rigid_offsets(offset_list=rigid_offsets_batches)
     if nonrigid_enabled:
         nonrigid_y_offsets, nonrigid_x_offsets, nonrigid_correlations = combine_nonrigid_offsets(
-            nonrigid_offsets_batches
+            offset_list=nonrigid_offsets_batches
         )
     else:
         nonrigid_y_offsets, nonrigid_x_offsets, nonrigid_correlations = None, None, None
@@ -990,8 +1072,10 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
     """Applies precomputed registration offsets to the secondary (non-alignment) channel's frames.
 
     The secondary channel is the opposite of the alignment channel. If align_by_first_channel is True, this function
-    processes channel 2; if False, it processes channel 1. Registration offsets are read from
-    context.runtime.registration (computed by _register_alignment_channel) and applied to all frames.
+    processes channel 2. If False, it processes channel 1. Registration offsets are read from
+    context.runtime.registration (computed by _register_alignment_channel) and applied to all frames, which are
+    rewritten in place in the channel's binary under a '<binary>.registering' marker. The resulting mean image is
+    stored in the matching detection field.
 
     Args:
         context: The RuntimeContext containing configuration, acquisition parameters, and runtime data.
@@ -1006,7 +1090,7 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
     # Extracts runtime IO data.
     io_data = context.runtime.io
     plane_index = io_data.plane_index if io_data.plane_index is not None else 0
-    height, width, num_frames = io_data.frame_height, io_data.frame_width, io_data.frame_count
+    height, width, frame_count = io_data.frame_height, io_data.frame_width, io_data.frame_count
 
     # Extracts registration data (offsets computed from alignment channel).
     registration_data = context.runtime.registration
@@ -1014,7 +1098,7 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
     bidirectional_phase_corrected = registration_data.bidirectional_phase_corrected
 
     # Extracts rigid offsets and converts to int32 for translation operations. Fallback to empty arrays is for type
-    # narrowing only; offsets are always present since _register_alignment_channel populates them before this is called.
+    # narrowing only. Offsets are always present since _register_alignment_channel populates them before this is called.
     y_offsets = (
         registration_data.rigid_y_offsets
         if registration_data.rigid_y_offsets is not None
@@ -1040,14 +1124,12 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
         binary_path = io_data.registered_binary_path
         channel_label = "channel 1"
 
-    if binary_path is None:  # pragma: no cover — unreachable; the opposite-channel path is always set when this runs
-        console.error(
-            message=(
-                f"Unable to register {channel_label} frames for plane {plane_index}. The plane's RuntimeContext "
-                f"instance does not contain the path to the plane's {channel_label} binary file."
-            ),
-            error=ValueError,
+    if binary_path is None:  # pragma: no cover, unreachable because the opposite-channel path is always set here
+        message = (
+            f"Unable to register {channel_label} frames for plane {plane_index}. The plane's RuntimeContext "
+            f"instance does not contain the path to the plane's {channel_label} binary file."
         )
+        console.error(message=message, error=ValueError)
 
     # Computes block structure if nonrigid is enabled.
     blocks = None
@@ -1059,15 +1141,18 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
     timer.reset()
     mean_image = np.zeros((height, width), dtype=np.float32)
 
-    with BinaryFile(height=height, width=width, file_path=binary_path, frame_number=num_frames) as frames_file:
+    with BinaryFile(height=height, width=width, file_path=binary_path, frame_number=frame_count) as frames_file:
         console.echo(
             message=f"Applying plane {plane_index} registration offsets to {channel_label}...",
             level=LogLevel.INFO,
         )
         timer.reset()
 
-        # Prepares nonrigid offset arrays outside the loop. Fallback to empty arrays is for type narrowing only;
-        # offsets are always present when nonrigid_enabled is True.
+        # Marks the binary for the duration of the in-place rewrite below, matching the alignment channel.
+        create_registration_marker(binary_path=binary_path)
+
+        # Prepares nonrigid offset arrays outside the loop. Fallback to empty arrays is for type narrowing only.
+        # Offsets are always present when nonrigid_enabled is True.
         if nonrigid_enabled:
             nonrigid_y_offsets_full = (
                 y_offsets_nonrigid if y_offsets_nonrigid is not None else np.empty((0, 0), dtype=np.float32)
@@ -1078,12 +1163,12 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
 
         # Processes frames in batches to limit memory usage.
         for batch_start_np in console.track(
-            np.arange(0, num_frames, batch_size),
+            np.arange(0, frame_count, batch_size),
             description=f"Registering batches of {batch_size} frames",
             unit="batch",
         ):
             batch_start = int(batch_start_np)
-            batch_end = min(batch_start + batch_size, num_frames)
+            batch_end = min(batch_start + batch_size, frame_count)
 
             # Loads batch and extracts corresponding offsets.
             frames = frames_file[batch_start:batch_end].astype(np.float32)
@@ -1113,11 +1198,17 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
             mean_image += frames.sum(axis=0)
 
             # Converts back to int16 for BinaryFile storage and writes in-place.
-            frames_int16 = np.clip(frames, -32768, 32767).astype(np.int16)
+            frames_int16 = np.clip(frames, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max).astype(
+                dtype=np.int16
+            )
             frames_file[batch_start:batch_end] = frames_int16
 
+        # Flushes the rewritten frames and clears the marker, which declares the binary internally consistent again.
+        frames_file.file.flush()
+        clear_registration_marker(binary_path=binary_path)
+
         # Normalizes accumulated sum to get mean image.
-        mean_image /= num_frames
+        mean_image /= frame_count
 
         console.echo(
             message=(

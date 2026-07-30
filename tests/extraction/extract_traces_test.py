@@ -98,7 +98,7 @@ class TestExtractTracesSingleRecording:
         frame_height = frame_width = 48
         frame_count = 12
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -107,23 +107,23 @@ class TestExtractTracesSingleRecording:
             configuration.spike_deconvolution.extract_spikes = False
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=frame_height,
             frame_width=frame_width,
             frame_count=frame_count,
             movie=movie,
             configure=configure,
         )
-        rois = _make_roi_statistics(((12, 12), (30, 30)), frame_height=frame_height, frame_width=frame_width)
+        rois = _make_roi_statistics(centers=((12, 12), (30, 30)), frame_height=frame_height, frame_width=frame_width)
         context.runtime.extraction.roi_statistics = rois
 
         extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
-        cell_fluorescence = _load_result(plane_directory, "cell_fluorescence")
-        neuropil_fluorescence = _load_result(plane_directory, "neuropil_fluorescence")
-        subtracted_fluorescence = _load_result(plane_directory, "subtracted_fluorescence")
-        spikes = _load_result(plane_directory, "spikes")
+        cell_fluorescence = _load_result(plane_directory=plane_directory, name="cell_fluorescence")
+        neuropil_fluorescence = _load_result(plane_directory=plane_directory, name="neuropil_fluorescence")
+        subtracted_fluorescence = _load_result(plane_directory=plane_directory, name="subtracted_fluorescence")
+        spikes = _load_result(plane_directory=plane_directory, name="spikes")
 
         assert cell_fluorescence.shape == (len(rois), frame_count)
         np.testing.assert_allclose(cell_fluorescence, float(_CONSTANT_PIXEL_VALUE), rtol=1e-4)
@@ -142,7 +142,7 @@ class TestExtractTracesSingleRecording:
         frame_height = frame_width = 48
         frame_count = 10
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -151,7 +151,7 @@ class TestExtractTracesSingleRecording:
             configuration.spike_deconvolution.extract_spikes = False
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=frame_height,
             frame_width=frame_width,
             frame_count=frame_count,
@@ -159,14 +159,14 @@ class TestExtractTracesSingleRecording:
             configure=configure,
         )
         context.runtime.extraction.roi_statistics = _make_roi_statistics(
-            ((14, 14),), frame_height=frame_height, frame_width=frame_width
+            centers=((14, 14),), frame_height=frame_height, frame_width=frame_width
         )
 
         extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
-        cell_fluorescence = _load_result(plane_directory, "cell_fluorescence")
-        neuropil_fluorescence = _load_result(plane_directory, "neuropil_fluorescence")
+        cell_fluorescence = _load_result(plane_directory=plane_directory, name="cell_fluorescence")
+        neuropil_fluorescence = _load_result(plane_directory=plane_directory, name="neuropil_fluorescence")
 
         np.testing.assert_allclose(cell_fluorescence, float(_CONSTANT_PIXEL_VALUE), rtol=1e-4)
         # The neuropil region averages a constant movie, recovering the same constant intensity.
@@ -179,7 +179,7 @@ class TestExtractTracesSingleRecording:
         frame_height = frame_width = 48
         frame_count = 40
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -188,7 +188,7 @@ class TestExtractTracesSingleRecording:
             configuration.spike_deconvolution.baseline_window = 1.0
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=frame_height,
             frame_width=frame_width,
             frame_count=frame_count,
@@ -196,14 +196,14 @@ class TestExtractTracesSingleRecording:
             configure=configure,
         )
         context.runtime.extraction.roi_statistics = _make_roi_statistics(
-            ((20, 20),), frame_height=frame_height, frame_width=frame_width
+            centers=((20, 20),), frame_height=frame_height, frame_width=frame_width
         )
 
         extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
-        subtracted_fluorescence = _load_result(plane_directory, "subtracted_fluorescence")
-        spikes = _load_result(plane_directory, "spikes")
+        subtracted_fluorescence = _load_result(plane_directory=plane_directory, name="subtracted_fluorescence")
+        spikes = _load_result(plane_directory=plane_directory, name="spikes")
 
         assert subtracted_fluorescence.shape == (1, frame_count)
         assert spikes.shape == (1, frame_count)
@@ -218,7 +218,7 @@ class TestExtractTracesSingleRecording:
         frame_height = frame_width = 48
         frame_count = 8
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -226,14 +226,14 @@ class TestExtractTracesSingleRecording:
             configuration.spike_deconvolution.extract_spikes = False
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=frame_height,
             frame_width=frame_width,
             frame_count=frame_count,
             movie=movie,
             configure=configure,
         )
-        rois = _make_roi_statistics(((16, 16),), frame_height=frame_height, frame_width=frame_width)
+        rois = _make_roi_statistics(centers=((16, 16),), frame_height=frame_height, frame_width=frame_width)
 
         plane_directory = context.runtime.io.output_path
         context.runtime.extraction.roi_statistics = rois
@@ -244,14 +244,14 @@ class TestExtractTracesSingleRecording:
 
         extract_traces(context=context, workers=1)
 
-        cell_fluorescence = _load_result(plane_directory, "cell_fluorescence")
+        cell_fluorescence = _load_result(plane_directory=plane_directory, name="cell_fluorescence")
         assert cell_fluorescence.shape == (len(rois), frame_count)
 
     def test_missing_roi_statistics_raises(
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
     ) -> None:
         """Verifies that extraction raises RuntimeError when no ROI statistics are available in memory or on disk."""
-        context = single_recording_context(tmp_path, frame_height=48, frame_width=48, frame_count=8)
+        context = single_recording_context(tmp_path=tmp_path, frame_height=48, frame_width=48, frame_count=8)
         context.runtime.extraction.roi_statistics = None
 
         with pytest.raises(RuntimeError):
@@ -261,8 +261,10 @@ class TestExtractTracesSingleRecording:
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
     ) -> None:
         """Verifies that extraction raises RuntimeError when the channel 1 registered binary path is unset."""
-        context = single_recording_context(tmp_path, frame_height=48, frame_width=48, frame_count=8)
-        context.runtime.extraction.roi_statistics = _make_roi_statistics(((16, 16),), frame_height=48, frame_width=48)
+        context = single_recording_context(tmp_path=tmp_path, frame_height=48, frame_width=48, frame_count=8)
+        context.runtime.extraction.roi_statistics = _make_roi_statistics(
+            centers=((16, 16),), frame_height=48, frame_width=48
+        )
         context.runtime.io.registered_binary_path = None
 
         with pytest.raises(RuntimeError):
@@ -279,10 +281,10 @@ class TestExtractTracesChannel2:
         frame_height = frame_width = 48
         frame_count = 10
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
         movie_channel_2 = _constant_movie(
-            300, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=300, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -290,7 +292,7 @@ class TestExtractTracesChannel2:
             configuration.spike_deconvolution.extract_spikes = False
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=frame_height,
             frame_width=frame_width,
             frame_count=frame_count,
@@ -299,17 +301,21 @@ class TestExtractTracesChannel2:
             configure=configure,
         )
         context.runtime.extraction.roi_statistics = _make_roi_statistics(
-            ((14, 14), (30, 30)), frame_height=frame_height, frame_width=frame_width
+            centers=((14, 14), (30, 30)), frame_height=frame_height, frame_width=frame_width
         )
-        context.runtime.detection.mean_image = np.full((frame_height, frame_width), 100.0, dtype=np.float32)
-        context.runtime.detection.mean_image_channel_2 = np.full((frame_height, frame_width), 80.0, dtype=np.float32)
+        context.runtime.detection.mean_image = np.full((frame_height, frame_width), fill_value=100.0, dtype=np.float32)
+        context.runtime.detection.mean_image_channel_2 = np.full(
+            (frame_height, frame_width), fill_value=80.0, dtype=np.float32
+        )
 
         extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
-        cell_fluorescence_channel_2 = _load_result(plane_directory, "cell_fluorescence_channel_2")
-        cell_colocalization = _load_result(plane_directory, "cell_colocalization")
-        corrected_structural_mean_image = _load_result(plane_directory, "corrected_structural_mean_image")
+        cell_fluorescence_channel_2 = _load_result(plane_directory=plane_directory, name="cell_fluorescence_channel_2")
+        cell_colocalization = _load_result(plane_directory=plane_directory, name="cell_colocalization")
+        corrected_structural_mean_image = _load_result(
+            plane_directory=plane_directory, name="corrected_structural_mean_image"
+        )
 
         assert cell_fluorescence_channel_2.shape == (2, frame_count)
         assert cell_colocalization.shape == (2, 2)
@@ -322,10 +328,10 @@ class TestExtractTracesChannel2:
         frame_height = frame_width = 48
         frame_count = 8
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
         movie_channel_2 = _constant_movie(
-            300, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=300, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -333,7 +339,7 @@ class TestExtractTracesChannel2:
             configuration.spike_deconvolution.extract_spikes = False
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=frame_height,
             frame_width=frame_width,
             frame_count=frame_count,
@@ -342,13 +348,13 @@ class TestExtractTracesChannel2:
             configure=configure,
         )
         context.runtime.extraction.roi_statistics = _make_roi_statistics(
-            ((20, 20),), frame_height=frame_height, frame_width=frame_width
+            centers=((20, 20),), frame_height=frame_height, frame_width=frame_width
         )
 
         extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
-        cell_fluorescence_channel_2 = _load_result(plane_directory, "cell_fluorescence_channel_2")
+        cell_fluorescence_channel_2 = _load_result(plane_directory=plane_directory, name="cell_fluorescence_channel_2")
         assert cell_fluorescence_channel_2.shape == (1, frame_count)
         # The colocalization step is skipped without both mean images, so its output file is never written.
         assert not (plane_directory / "cell_colocalization.npy").exists()
@@ -360,10 +366,10 @@ class TestExtractTracesChannel2:
         frame_height = frame_width = 48
         frame_count = 40
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
         movie_channel_2 = _constant_movie(
-            400, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=400, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -373,7 +379,7 @@ class TestExtractTracesChannel2:
             configuration.spike_deconvolution.baseline_window = 1.0
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=frame_height,
             frame_width=frame_width,
             frame_count=frame_count,
@@ -382,19 +388,21 @@ class TestExtractTracesChannel2:
             configure=configure,
         )
         context.runtime.extraction.roi_statistics = _make_roi_statistics(
-            ((14, 14),), frame_height=frame_height, frame_width=frame_width
+            centers=((14, 14),), frame_height=frame_height, frame_width=frame_width
         )
         context.runtime.extraction.roi_statistics_channel_2 = _make_roi_statistics(
-            ((30, 30),), frame_height=frame_height, frame_width=frame_width
+            centers=((30, 30),), frame_height=frame_height, frame_width=frame_width
         )
 
         extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
-        cell_fluorescence_channel_2 = _load_result(plane_directory, "cell_fluorescence_channel_2")
-        cell_classification_channel_2 = _load_result(plane_directory, "cell_classification_channel_2")
-        spikes_channel_2 = _load_result(plane_directory, "spikes_channel_2")
-        cell_colocalization = _load_result(plane_directory, "cell_colocalization")
+        cell_fluorescence_channel_2 = _load_result(plane_directory=plane_directory, name="cell_fluorescence_channel_2")
+        cell_classification_channel_2 = _load_result(
+            plane_directory=plane_directory, name="cell_classification_channel_2"
+        )
+        spikes_channel_2 = _load_result(plane_directory=plane_directory, name="spikes_channel_2")
+        cell_colocalization = _load_result(plane_directory=plane_directory, name="cell_colocalization")
 
         assert cell_fluorescence_channel_2.shape == (1, frame_count)
         assert cell_classification_channel_2.shape == (1, 2)
@@ -408,10 +416,10 @@ class TestExtractTracesChannel2:
         frame_height = frame_width = 48
         frame_count = 10
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
         movie_channel_2 = _constant_movie(
-            400, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=400, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -420,7 +428,7 @@ class TestExtractTracesChannel2:
             configuration.spike_deconvolution.extract_spikes = False
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=frame_height,
             frame_width=frame_width,
             frame_count=frame_count,
@@ -429,17 +437,19 @@ class TestExtractTracesChannel2:
             configure=configure,
         )
         context.runtime.extraction.roi_statistics = _make_roi_statistics(
-            ((14, 14),), frame_height=frame_height, frame_width=frame_width
+            centers=((14, 14),), frame_height=frame_height, frame_width=frame_width
         )
         context.runtime.extraction.roi_statistics_channel_2 = _make_roi_statistics(
-            ((30, 30),), frame_height=frame_height, frame_width=frame_width
+            centers=((30, 30),), frame_height=frame_height, frame_width=frame_width
         )
 
         extract_traces(context=context, workers=1)
 
         plane_directory = context.runtime.io.output_path
-        spikes_channel_2 = _load_result(plane_directory, "spikes_channel_2")
-        subtracted_fluorescence_channel_2 = _load_result(plane_directory, "subtracted_fluorescence_channel_2")
+        spikes_channel_2 = _load_result(plane_directory=plane_directory, name="spikes_channel_2")
+        subtracted_fluorescence_channel_2 = _load_result(
+            plane_directory=plane_directory, name="subtracted_fluorescence_channel_2"
+        )
         assert np.all(spikes_channel_2 == 0.0)
         assert np.all(subtracted_fluorescence_channel_2 == 0.0)
 
@@ -450,10 +460,10 @@ class TestExtractTracesChannel2:
         frame_height = frame_width = 48
         frame_count = 8
         movie = _constant_movie(
-            _CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=_CONSTANT_PIXEL_VALUE, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
         movie_channel_2 = _constant_movie(
-            400, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
+            value=400, frame_count=frame_count, frame_height=frame_height, frame_width=frame_width
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -462,7 +472,7 @@ class TestExtractTracesChannel2:
             configuration.spike_deconvolution.extract_spikes = False
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_height=frame_height,
             frame_width=frame_width,
             frame_count=frame_count,
@@ -471,7 +481,7 @@ class TestExtractTracesChannel2:
             configure=configure,
         )
         context.runtime.extraction.roi_statistics = _make_roi_statistics(
-            ((14, 14),), frame_height=frame_height, frame_width=frame_width
+            centers=((14, 14),), frame_height=frame_height, frame_width=frame_width
         )
         context.runtime.extraction.roi_statistics_channel_2 = None
 
@@ -486,7 +496,7 @@ class TestExtractTracesChannel2Guards:
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
     ) -> None:
         """Verifies that the structural helper raises RuntimeError when the channel 2 binary path is unset."""
-        context = single_recording_context(tmp_path, frame_height=48, frame_width=48, frame_count=8)
+        context = single_recording_context(tmp_path=tmp_path, frame_height=48, frame_width=48, frame_count=8)
         context.runtime.io.registered_binary_path_channel_2 = None
         roi_masks = ((np.array([0], dtype=np.int32), np.array([1.0], dtype=np.float32)),)
 
@@ -497,7 +507,7 @@ class TestExtractTracesChannel2Guards:
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
     ) -> None:
         """Verifies that the functional helper raises RuntimeError when the channel 2 binary path is unset."""
-        context = single_recording_context(tmp_path, frame_height=48, frame_width=48, frame_count=8)
+        context = single_recording_context(tmp_path=tmp_path, frame_height=48, frame_width=48, frame_count=8)
         context.runtime.io.registered_binary_path_channel_2 = None
 
         with pytest.raises(RuntimeError):

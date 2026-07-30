@@ -137,20 +137,48 @@ class TestWriteTiff:
 class TestBinaryFileCombined:
     """Tests the BinaryFileCombined class."""
 
+    def test_caps_the_combined_view_at_the_shortest_plane(self, tmp_path: Path) -> None:
+        """Verifies that planes of unequal length combine into a view spanning the shortest plane's frames."""
+        plane_extent = 4
+
+        # Reproduces a recording whose acquisition stopped partway through a volume, which gives the leading plane one
+        # frame more than the trailing plane.
+        long_path = tmp_path / "plane0.bin"
+        short_path = tmp_path / "plane1.bin"
+        _create_test_binary(file_path=long_path, frame_count=11, height=plane_extent, width=plane_extent)
+        _create_test_binary(file_path=short_path, frame_count=10, height=plane_extent, width=plane_extent)
+
+        combined = BinaryFileCombined(
+            height=plane_extent * 2,
+            width=plane_extent,
+            plane_heights=np.array([plane_extent, plane_extent], dtype=np.uint16),
+            plane_widths=np.array([plane_extent, plane_extent], dtype=np.uint16),
+            plane_y_coordinates=np.array([0, plane_extent], dtype=np.int32),
+            plane_x_coordinates=np.array([0, 0], dtype=np.int32),
+            file_paths=[long_path, short_path],
+        )
+
+        # Every combined frame must be backed by real data on every plane, so the view spans the shorter plane and a
+        # read across its full range stays inside both files.
+        assert combined.frame_number == 10
+        assert combined.shape[0] == 10
+        assert combined[slice(0, combined.frame_number)].shape == (10, plane_extent * 2, plane_extent)
+
+        combined.close()
+
     def test_reads_combined_frames_from_two_planes(self, tmp_path: Path) -> None:
         """Verifies that frames from two planes are correctly assembled into a combined array."""
         plane_height = 4
         plane_width = 4
         frame_count = 3
 
-        # Creates two binary files representing two imaging planes.
-        path_1 = tmp_path / "plane0.bin"
-        data_1 = np.ones((frame_count, plane_height, plane_width), dtype=np.int16) * 10
-        data_1.tofile(path_1)
+        plane_0_path = tmp_path / "plane0.bin"
+        plane_0_data = np.ones((frame_count, plane_height, plane_width), dtype=np.int16) * 10
+        plane_0_data.tofile(plane_0_path)
 
-        path_2 = tmp_path / "plane1.bin"
-        data_2 = np.ones((frame_count, plane_height, plane_width), dtype=np.int16) * 20
-        data_2.tofile(path_2)
+        plane_1_path = tmp_path / "plane1.bin"
+        plane_1_data = np.ones((frame_count, plane_height, plane_width), dtype=np.int16) * 20
+        plane_1_data.tofile(plane_1_path)
 
         combined_height = plane_height * 2
         combined_width = plane_width
@@ -162,16 +190,16 @@ class TestBinaryFileCombined:
             plane_widths=np.array([plane_width, plane_width], dtype=np.uint16),
             plane_y_coordinates=np.array([0, plane_height], dtype=np.int32),
             plane_x_coordinates=np.array([0, 0], dtype=np.int32),
-            file_paths=[path_1, path_2],
+            file_paths=[plane_0_path, plane_1_path],
         )
 
         result = combined[slice(0, frame_count)]
         combined.close()
 
         assert result.shape == (frame_count, combined_height, combined_width)
-        # The top half should contain plane 1 data (10s).
+        # The top half holds plane 0 data (10s).
         np.testing.assert_array_equal(result[:, :plane_height, :], 10)
-        # The bottom half should contain plane 2 data (20s).
+        # The bottom half holds plane 1 data (20s).
         np.testing.assert_array_equal(result[:, plane_height:, :], 20)
 
     def test_context_manager_opens_and_closes(self, tmp_path: Path) -> None:
@@ -180,8 +208,8 @@ class TestBinaryFileCombined:
         plane_width = 4
         frame_count = 2
 
-        path_1 = tmp_path / "plane0.bin"
-        np.ones((frame_count, plane_height, plane_width), dtype=np.int16).tofile(path_1)
+        plane_0_path = tmp_path / "plane0.bin"
+        np.ones((frame_count, plane_height, plane_width), dtype=np.int16).tofile(plane_0_path)
 
         with BinaryFileCombined(
             height=plane_height,
@@ -190,10 +218,10 @@ class TestBinaryFileCombined:
             plane_widths=np.array([plane_width], dtype=np.uint16),
             plane_y_coordinates=np.array([0], dtype=np.int32),
             plane_x_coordinates=np.array([0], dtype=np.int32),
-            file_paths=[path_1],
+            file_paths=[plane_0_path],
         ) as combined:
-            # Verifies it can read data while context manager is active. The __getitem__ with a slice
-            # always returns a 3D array (frames, height, width).
+            # Slice indexing always returns a 3D (frames, height, width) array, so the shape check confirms the
+            # plane handles are still open.
             data = combined[slice(0, 1)]
             assert data.shape == (1, plane_height, plane_width)
 
@@ -203,8 +231,8 @@ class TestBinaryFileCombined:
         plane_width = 4
         frame_count = 7
 
-        path_1 = tmp_path / "plane0.bin"
-        np.ones((frame_count, plane_height, plane_width), dtype=np.int16).tofile(path_1)
+        plane_0_path = tmp_path / "plane0.bin"
+        np.ones((frame_count, plane_height, plane_width), dtype=np.int16).tofile(plane_0_path)
 
         with BinaryFileCombined(
             height=plane_height,
@@ -213,7 +241,7 @@ class TestBinaryFileCombined:
             plane_widths=np.array([plane_width], dtype=np.uint16),
             plane_y_coordinates=np.array([0], dtype=np.int32),
             plane_x_coordinates=np.array([0], dtype=np.int32),
-            file_paths=[path_1],
+            file_paths=[plane_0_path],
         ) as combined:
             assert combined.frame_number == frame_count
 
@@ -223,8 +251,8 @@ class TestBinaryFileCombined:
         plane_width = 8
         frame_count = 5
 
-        path_1 = tmp_path / "plane0.bin"
-        np.ones((frame_count, plane_height, plane_width), dtype=np.int16).tofile(path_1)
+        plane_0_path = tmp_path / "plane0.bin"
+        np.ones((frame_count, plane_height, plane_width), dtype=np.int16).tofile(plane_0_path)
 
         plane_heights = np.array([plane_height], dtype=np.uint16)
         plane_widths = np.array([plane_width], dtype=np.uint16)
@@ -236,46 +264,23 @@ class TestBinaryFileCombined:
             plane_widths=plane_widths,
             plane_y_coordinates=np.array([0], dtype=np.int32),
             plane_x_coordinates=np.array([0], dtype=np.int32),
-            file_paths=[path_1],
+            file_paths=[plane_0_path],
         ) as combined:
             frame_number, heights, widths = combined.shape
             assert frame_number == frame_count
             np.testing.assert_array_equal(heights, plane_heights)
             np.testing.assert_array_equal(widths, plane_widths)
 
-    def test_raises_error_for_mismatched_frame_counts(self, tmp_path: Path) -> None:
-        """Verifies that a ValueError is raised when plane binary files have different frame counts."""
+    def test_mismatched_frame_counts_resolve_to_the_shortest_plane(self, tmp_path: Path) -> None:
+        """Verifies that widely differing plane frame counts resolve to the shortest plane rather than raising."""
         plane_height = 4
         plane_width = 4
 
-        path_1 = tmp_path / "plane0.bin"
-        np.ones((5, plane_height, plane_width), dtype=np.int16).tofile(path_1)
+        plane_0_path = tmp_path / "plane0.bin"
+        np.ones((5, plane_height, plane_width), dtype=np.int16).tofile(plane_0_path)
 
-        path_2 = tmp_path / "plane1.bin"
-        np.ones((7, plane_height, plane_width), dtype=np.int16).tofile(path_2)
-
-        with pytest.raises(ValueError, match="Unable to create a new BinaryFileCombined"):
-            BinaryFileCombined(
-                height=plane_height * 2,
-                width=plane_width,
-                plane_heights=np.array([plane_height, plane_height], dtype=np.uint16),
-                plane_widths=np.array([plane_width, plane_width], dtype=np.uint16),
-                plane_y_coordinates=np.array([0, plane_height], dtype=np.int32),
-                plane_x_coordinates=np.array([0, 0], dtype=np.int32),
-                file_paths=[path_1, path_2],
-            )
-
-    def test_byte_number_property(self, tmp_path: Path) -> None:
-        """Verifies that the byte_number property returns correct sizes for each managed file."""
-        plane_height = 4
-        plane_width = 4
-        frame_count = 3
-
-        path_1 = tmp_path / "plane0.bin"
-        np.ones((frame_count, plane_height, plane_width), dtype=np.int16).tofile(path_1)
-
-        path_2 = tmp_path / "plane1.bin"
-        np.ones((frame_count, plane_height, plane_width), dtype=np.int16).tofile(path_2)
+        plane_1_path = tmp_path / "plane1.bin"
+        np.ones((7, plane_height, plane_width), dtype=np.int16).tofile(plane_1_path)
 
         combined = BinaryFileCombined(
             height=plane_height * 2,
@@ -284,7 +289,33 @@ class TestBinaryFileCombined:
             plane_widths=np.array([plane_width, plane_width], dtype=np.uint16),
             plane_y_coordinates=np.array([0, plane_height], dtype=np.int32),
             plane_x_coordinates=np.array([0, 0], dtype=np.int32),
-            file_paths=[path_1, path_2],
+            file_paths=[plane_0_path, plane_1_path],
+        )
+
+        assert combined.frame_number == 5
+
+        combined.close()
+
+    def test_byte_number_property(self, tmp_path: Path) -> None:
+        """Verifies that the byte_number property returns correct sizes for each managed file."""
+        plane_height = 4
+        plane_width = 4
+        frame_count = 3
+
+        plane_0_path = tmp_path / "plane0.bin"
+        np.ones((frame_count, plane_height, plane_width), dtype=np.int16).tofile(plane_0_path)
+
+        plane_1_path = tmp_path / "plane1.bin"
+        np.ones((frame_count, plane_height, plane_width), dtype=np.int16).tofile(plane_1_path)
+
+        combined = BinaryFileCombined(
+            height=plane_height * 2,
+            width=plane_width,
+            plane_heights=np.array([plane_height, plane_height], dtype=np.uint16),
+            plane_widths=np.array([plane_width, plane_width], dtype=np.uint16),
+            plane_y_coordinates=np.array([0, plane_height], dtype=np.int32),
+            plane_x_coordinates=np.array([0, 0], dtype=np.int32),
+            file_paths=[plane_0_path, plane_1_path],
         )
 
         byte_numbers = combined.byte_number

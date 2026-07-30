@@ -30,14 +30,14 @@ def _make_mask(
     centroid: tuple[int, int] | None = None,
 ) -> ROIMask:
     """Creates a minimal ROIMask for testing."""
-    y = np.array(y_pixels, dtype=np.int32)
-    x = np.array(x_pixels, dtype=np.int32)
+    y_array = np.array(y_pixels, dtype=np.int32)
+    x_array = np.array(x_pixels, dtype=np.int32)
     weight_array = np.array(weights, dtype=np.float32)
     if centroid is None:
-        centroid = (int(np.median(y)), int(np.median(x)))
+        centroid = (int(np.median(y_array)), int(np.median(x_array)))
     return ROIMask(
-        y_pixels=y,
-        x_pixels=x,
+        y_pixels=y_array,
+        x_pixels=x_array,
         pixel_weights=weight_array,
         centroid=centroid,
         frame_width=frame_width,
@@ -45,7 +45,7 @@ def _make_mask(
     )
 
 
-def _make_circular_roi_stats(
+def _make_circular_roi(
     center_y: int,
     center_x: int,
     radius: int,
@@ -82,12 +82,12 @@ class TestEstimateDiameterFromRois:
         """Verifies the estimated diameter for a single ROI with known pixel count."""
         mask = _make_mask(
             y_pixels=list(range(10)) * 10,
-            x_pixels=[i for i in range(10) for _ in range(10)],
+            x_pixels=[column for column in range(10) for _ in range(10)],
             weights=[1.0] * 100,
             frame_width=20,
         )
         result = estimate_diameter_from_rois(rois=[mask])
-        # 100 pixels -> diameter = 2 * sqrt(100 / pi) ≈ 11.28 -> int = 11
+        # 100 pixels yield diameter = 2 * sqrt(100 / pi), which is about 11.28 and truncates to 11.
         expected = int(2 * np.sqrt(100 / np.pi))
         assert result == expected
 
@@ -95,12 +95,12 @@ class TestEstimateDiameterFromRois:
         """Verifies that the median pixel count is used when multiple ROIs are given."""
         masks = []
         for count in [50, 100, 200]:
-            y = np.arange(count, dtype=np.int32) % 20
-            x = np.arange(count, dtype=np.int32) // 20
+            y_pixels = np.arange(count, dtype=np.int32) % 20
+            x_pixels = np.arange(count, dtype=np.int32) // 20
             masks.append(
                 ROIMask(
-                    y_pixels=y,
-                    x_pixels=x,
+                    y_pixels=y_pixels,
+                    x_pixels=x_pixels,
                     pixel_weights=np.ones(count, dtype=np.float32),
                     centroid=(10, 5),
                     frame_width=20,
@@ -116,31 +116,37 @@ class TestEstimateDiameterFromRois:
         result = estimate_diameter_from_rois(rois=[mask])
         assert result >= 1
 
+    def test_zero_pixel_rois_return_default(self) -> None:
+        """Verifies that ROIs with zero pixels return the default diameter."""
+        mask = _make_mask(y_pixels=[], x_pixels=[], weights=[], frame_width=64, radius=0.0, centroid=(0, 0))
+        result = estimate_diameter_from_rois(rois=[mask], default_diameter=12)
+        assert result == 12
+
 
 class TestComputeMedianPixelPosition:
     """Tests compute_median_pixel_position."""
 
     def test_single_pixel(self) -> None:
         """Verifies that a single pixel returns itself."""
-        y = np.array([5], dtype=np.int32)
-        x = np.array([10], dtype=np.int32)
-        result = compute_median_pixel_position(y_pixels=y, x_pixels=x)
+        y_pixels = np.array([5], dtype=np.int32)
+        x_pixels = np.array([10], dtype=np.int32)
+        result = compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
         assert result == (5, 10)
 
     def test_symmetric_pixels(self) -> None:
         """Verifies that the center pixel is returned for a symmetric layout."""
-        y = np.array([0, 1, 2], dtype=np.int32)
-        x = np.array([0, 1, 2], dtype=np.int32)
-        result = compute_median_pixel_position(y_pixels=y, x_pixels=x)
+        y_pixels = np.array([0, 1, 2], dtype=np.int32)
+        x_pixels = np.array([0, 1, 2], dtype=np.int32)
+        result = compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
         assert result == (1, 1)
 
     def test_returns_actual_pixel(self) -> None:
         """Verifies that the result is an actual pixel from the input arrays."""
-        y = np.array([0, 5, 10], dtype=np.int32)
-        x = np.array([0, 3, 8], dtype=np.int32)
-        result_y, result_x = compute_median_pixel_position(y_pixels=y, x_pixels=x)
-        assert result_y in y
-        assert result_x in x
+        y_pixels = np.array([0, 5, 10], dtype=np.int32)
+        x_pixels = np.array([0, 3, 8], dtype=np.int32)
+        result_y, result_x = compute_median_pixel_position(y_pixels=y_pixels, x_pixels=x_pixels)
+        assert result_y in y_pixels
+        assert result_x in x_pixels
 
 
 class TestComputeDistanceKernel:
@@ -197,29 +203,29 @@ class TestROI:
 
     def test_no_crop_returns_all_true(self) -> None:
         """Verifies that crop=False returns an all-True soma mask."""
-        roi_statistics = _make_circular_roi_stats(center_y=25, center_x=25, radius=8, frame_height=50, frame_width=50)
+        roi_statistics = _make_circular_roi(center_y=25, center_x=25, radius=8, frame_height=50, frame_width=50)
         roi = _ROI(data=roi_statistics, diameter=10, crop=False)
         assert roi.soma_mask.all()
 
     def test_compactness_for_compact_roi(self) -> None:
         """Verifies that a compact circular ROI has a compactness near 1.0."""
-        roi_statistics = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
+        roi_statistics = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         roi = _ROI(data=roi_statistics, diameter=10)
-        # A near-perfect disk has perimeter^2 / (4 * pi * area) close to 1; an elongated or fragmented shape
+        # A near-perfect disk has perimeter^2 / (4 * pi * area) close to 1. An elongated or fragmented shape
         # would exceed this tight band.
         assert roi.compactness == pytest.approx(1.0, abs=0.3)
 
     def test_mean_radius_positive(self) -> None:
         """Verifies that mean_radius falls in the band expected for a radius-5 disk."""
-        roi_statistics = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
+        roi_statistics = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         roi = _ROI(data=roi_statistics, diameter=10)
-        # mean_radius is the diameter-normalized mean pixel-to-center distance; a radius-5 disk normalized by
+        # mean_radius is the diameter-normalized mean pixel-to-center distance. A radius-5 disk normalized by
         # diameter 10 yields a fraction well below 1, so an off-by-a-large-factor computation would fall outside.
         assert 0.15 < roi.mean_radius < 0.5
 
     def test_baseline_mean_radius_cached(self) -> None:
         """Verifies that the baseline cache is populated after first access."""
-        roi_statistics = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
+        roi_statistics = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         roi = _ROI(data=roi_statistics, diameter=10)
         _ = roi.baseline_mean_radius
         assert 10 in _ROI._baseline_cache
@@ -246,14 +252,14 @@ class TestROI:
 
     def test_solidity_large_roi(self) -> None:
         """Verifies that a large circular ROI has solidity close to 1."""
-        roi_statistics = _make_circular_roi_stats(center_y=25, center_x=25, radius=8, frame_height=50, frame_width=50)
+        roi_statistics = _make_circular_roi(center_y=25, center_x=25, radius=8, frame_height=50, frame_width=50)
         roi = _ROI(data=roi_statistics, diameter=16)
         # A disk has solidity ~1.0 (all pixels inside the convex hull).
         assert roi.solidity > 0.8
 
     def test_fit_ellipse_returns_ellipse_data(self) -> None:
         """Verifies that fit_ellipse returns a valid _EllipseData instance."""
-        roi_statistics = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
+        roi_statistics = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         roi = _ROI(data=roi_statistics, diameter=10)
         ellipse = roi.fit_ellipse(y_scale=10, x_scale=10)
         assert isinstance(ellipse, _EllipseData)
@@ -269,29 +275,29 @@ class TestROI:
         overlap_image = np.ones((20, 20), dtype=np.uint16)
         overlap_image[5, 5] = 2
         result = roi.get_overlap_mask(overlap_count_image=overlap_image)
-        assert result[0]  # pixel (5,5) overlaps.
-        assert not result[1]  # pixel (5,6) does not.
+        assert result[0]  # Pixel (5, 5) overlaps.
+        assert not result[1]  # Pixel (5, 6) does not overlap.
 
     def test_get_overlap_count_image(self) -> None:
         """Verifies that the overlap count image has correct counts."""
-        mask1 = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
-        mask2 = _make_mask(y_pixels=[5, 6], x_pixels=[6, 6], weights=[1.0, 1.0], frame_width=20)
-        roi1 = _ROI(data=ROIStatistics(mask=mask1), diameter=10)
-        roi2 = _ROI(data=ROIStatistics(mask=mask2), diameter=10)
-        overlap = _ROI.get_overlap_count_image(rois=[roi1, roi2], height=20, width=20)
+        first_mask = _make_mask(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
+        second_mask = _make_mask(y_pixels=[5, 6], x_pixels=[6, 6], weights=[1.0, 1.0], frame_width=20)
+        first_roi = _ROI(data=ROIStatistics(mask=first_mask), diameter=10)
+        second_roi = _ROI(data=ROIStatistics(mask=second_mask), diameter=10)
+        overlap = _ROI.get_overlap_count_image(rois=[first_roi, second_roi], height=20, width=20)
         assert overlap[5, 6] == 2  # Shared pixel.
-        assert overlap[5, 5] == 1  # Only roi1.
+        assert overlap[5, 5] == 1  # Only first_roi.
         assert overlap[0, 0] == 0  # No ROI.
 
     def test_remove_overlapping_rois(self) -> None:
         """Verifies that ROIs exceeding the overlap threshold are flagged for removal."""
         # Two identical ROIs: all pixels overlap with count 2.
         mask = _make_mask(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
-        roi1 = _ROI(data=ROIStatistics(mask=mask), diameter=10)
-        roi2 = _ROI(data=ROIStatistics(mask=mask), diameter=10)
-        overlap_image = _ROI.get_overlap_count_image(rois=[roi1, roi2], height=20, width=20)
+        first_roi = _ROI(data=ROIStatistics(mask=mask), diameter=10)
+        second_roi = _ROI(data=ROIStatistics(mask=mask), diameter=10)
+        overlap_image = _ROI.get_overlap_count_image(rois=[first_roi, second_roi], height=20, width=20)
         keep_flags = _ROI.remove_overlapping_rois(
-            rois=[roi1, roi2], overlap_image=overlap_image, maximum_overlap_fraction=0.5
+            rois=[first_roi, second_roi], overlap_image=overlap_image, maximum_overlap_fraction=0.5
         )
         # At least one should be removed since all pixels overlap.
         assert not all(keep_flags)
@@ -344,28 +350,28 @@ class TestComputeRoiStatistics:
 
     def test_updates_compactness_in_place(self) -> None:
         """Verifies that compute_roi_statistics sets compactness on each ROI."""
-        roi = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
+        roi = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         rois = [roi]
         compute_roi_statistics(rois=rois, frame_height=50, frame_width=50, diameter=10)
         assert roi.compactness > 0
 
     def test_updates_pixel_count(self) -> None:
         """Verifies that compute_roi_statistics sets pixel_count on each ROI."""
-        roi = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
+        roi = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         rois = [roi]
         compute_roi_statistics(rois=rois, frame_height=50, frame_width=50, diameter=10)
         assert roi.pixel_count > 0
 
     def test_lightweight_skips_solidity(self) -> None:
         """Verifies that lightweight mode leaves solidity at the default value."""
-        roi = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
+        roi = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         rois = [roi]
         compute_roi_statistics(rois=rois, frame_height=50, frame_width=50, diameter=10, lightweight=True)
         assert roi.solidity == 0.0  # Default, not computed.
 
     def test_full_mode_sets_solidity(self) -> None:
         """Verifies that full mode computes solidity."""
-        roi = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
+        roi = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         rois = [roi]
         compute_roi_statistics(rois=rois, frame_height=50, frame_width=50, diameter=10)
         assert roi.solidity > 0
@@ -386,23 +392,23 @@ class TestComputeRoiStatistics:
 
     def test_normalized_pixel_count_set(self) -> None:
         """Verifies that normalized_pixel_count is set after computation."""
-        roi = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
+        roi = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
         rois = [roi]
         compute_roi_statistics(rois=rois, frame_height=50, frame_width=50, diameter=10, lightweight=True)
         assert roi.normalized_pixel_count > 0
 
     def test_overlap_removal(self) -> None:
         """Verifies that overlapping ROIs are removed when maximum_overlap_fraction is set."""
-        roi1 = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
-        roi2 = _make_circular_roi_stats(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
-        rois = [roi1, roi2]
+        first_roi = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
+        second_roi = _make_circular_roi(center_y=25, center_x=25, radius=5, frame_height=50, frame_width=50)
+        rois = [first_roi, second_roi]
         compute_roi_statistics(rois=rois, frame_height=50, frame_width=50, diameter=10, maximum_overlap_fraction=0.5)
         # At least one ROI should be removed due to complete overlap.
         assert len(rois) < 2
 
     def test_aspect_ratio_scales_ellipse_fitting(self) -> None:
         """Verifies that providing an aspect ratio triggers the asymmetric ellipse fitting branch."""
-        roi = _make_circular_roi_stats(center_y=30, center_x=30, radius=8, frame_height=64, frame_width=64)
+        roi = _make_circular_roi(center_y=30, center_x=30, radius=8, frame_height=64, frame_width=64)
         rois = [roi]
         compute_roi_statistics(rois=rois, frame_height=64, frame_width=64, diameter=16, aspect=1.5)
         assert roi.aspect_ratio > 0
@@ -426,13 +432,3 @@ class TestComputeRoiStatistics:
         compute_roi_statistics(rois=rois, frame_height=64, frame_width=64, diameter=10)
         # The aspect ratio should differ from 1.0 because the pixels are elongated along the diagonal.
         assert roi.aspect_ratio != 1.0
-
-
-class TestEstimateDiameterFromRoisZeroPixels:
-    """Tests estimate_diameter_from_rois edge case with zero-pixel ROIs."""
-
-    def test_zero_pixel_rois_return_default(self) -> None:
-        """Verifies that ROIs with zero pixels return the default diameter."""
-        mask = _make_mask(y_pixels=[], x_pixels=[], weights=[], frame_width=64, radius=0.0, centroid=(0, 0))
-        result = estimate_diameter_from_rois(rois=[mask], default_diameter=12)
-        assert result == 12

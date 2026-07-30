@@ -18,13 +18,15 @@ if TYPE_CHECKING:
 
     from cindra.dataclasses import RuntimeContext, SingleRecordingConfiguration
 
-type _RoiSpecs = tuple[tuple[tuple[int, ...], tuple[int, ...]], ...]
-
 _FRAME_HEIGHT: int = 16
 """The synthetic plane height in pixels used by the combine integration tests."""
 
 _FRAME_WIDTH: int = 16
 """The synthetic plane width in pixels used by the combine integration tests."""
+
+type _ROISpecifications = tuple[tuple[tuple[int, ...], tuple[int, ...]], ...]
+"""The type alias for the per-ROI pixel specifications, where each entry pairs the y-pixel coordinates with the
+x-pixel coordinates of one synthetic ROI."""
 
 
 def _make_roi_statistics(*, frame_width: int, y_pixels: tuple[int, ...], x_pixels: tuple[int, ...]) -> ROIStatistics:
@@ -62,7 +64,7 @@ def _configure_two_channels(*, second_functional: bool) -> Callable[[SingleRecor
 def _populate_channel_1(
     context: RuntimeContext,
     *,
-    roi_specs: _RoiSpecs,
+    roi_specifications: _ROISpecifications,
     frame_count: int,
     fill: float,
     seed: int,
@@ -82,7 +84,7 @@ def _populate_channel_1(
         detection.maximum_projection = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
 
     width = context.runtime.io.frame_width
-    rois = [_make_roi_statistics(frame_width=width, y_pixels=ys, x_pixels=xs) for ys, xs in roi_specs]
+    rois = [_make_roi_statistics(frame_width=width, y_pixels=ys, x_pixels=xs) for ys, xs in roi_specifications]
     roi_count = len(rois)
     extraction = context.runtime.extraction
     extraction.roi_statistics = rois
@@ -102,7 +104,7 @@ def _populate_channel_1(
 def _populate_channel_2(
     context: RuntimeContext,
     *,
-    roi_specs: _RoiSpecs,
+    roi_specifications: _ROISpecifications,
     frame_count: int,
     seed: int,
     with_traces: bool = True,
@@ -118,7 +120,7 @@ def _populate_channel_2(
         detection.maximum_projection_channel_2 = generator.random(size=(_FRAME_HEIGHT, _FRAME_WIDTH)).astype(np.float32)
 
     width = context.runtime.io.frame_width
-    rois = [_make_roi_statistics(frame_width=width, y_pixels=ys, x_pixels=xs) for ys, xs in roi_specs]
+    rois = [_make_roi_statistics(frame_width=width, y_pixels=ys, x_pixels=xs) for ys, xs in roi_specifications]
     roi_count = len(rois)
     extraction = context.runtime.extraction
     extraction.roi_statistics_channel_2 = rois
@@ -144,11 +146,11 @@ class TestCombinePlanes:
     ) -> None:
         """Verifies that a single-plane single-channel recording produces a combined dataset matching the plane."""
         context = single_recording_context(
-            tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
+            tmp_path=tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
         )
         _populate_channel_1(
-            context,
-            roi_specs=(((1, 2), (1, 2)), ((4, 5), (6, 7))),
+            context=context,
+            roi_specifications=(((1, 2), (1, 2)), ((4, 5), (6, 7))),
             frame_count=8,
             fill=1.0,
             seed=1,
@@ -175,18 +177,18 @@ class TestCombinePlanes:
         assert combined.extraction.cell_fluorescence_channel_2 is None
         assert combined.registered_binary_paths_channel_2 is None
 
-    def test_two_planes_grid_layout_with_padding(
+    def test_two_planes_grid_layout_with_trimming(
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
     ) -> None:
-        """Verifies grid placement, ROI offsetting, and zero-padding when planes have different frame counts."""
+        """Verifies grid placement, ROI offsetting, and trimming to the shortest plane's frame count."""
         plane_0 = single_recording_context(
-            tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
+            tmp_path=tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
         )
         plane_1 = single_recording_context(
-            tmp_path / "plane_1", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=4
+            tmp_path=tmp_path / "plane_1", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=4
         )
-        _populate_channel_1(plane_0, roi_specs=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=2)
-        _populate_channel_1(plane_1, roi_specs=(((3, 4), (5, 6)),), frame_count=4, fill=2.0, seed=3)
+        _populate_channel_1(context=plane_0, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=2)
+        _populate_channel_1(context=plane_1, roi_specifications=(((3, 4), (5, 6)),), frame_count=4, fill=2.0, seed=3)
 
         combined = combine_planes(plane_contexts=[plane_0, plane_1])
 
@@ -204,12 +206,18 @@ class TestCombinePlanes:
         np.testing.assert_array_equal(rois[1].mask.x_pixels, np.array([5, 6]) + _FRAME_WIDTH)
         np.testing.assert_array_equal(rois[1].mask.y_pixels, np.array([3, 4]))
 
+        # The combined traces span the shortest plane's frames, so every column holds real data from both planes
+        # instead of zeros substituted for the frames the shorter plane never recorded.
         fluorescence = combined.extraction.cell_fluorescence
         assert fluorescence is not None
-        assert fluorescence.shape == (2, 8)
-        np.testing.assert_allclose(fluorescence[0], np.full(shape=8, fill_value=1.0, dtype=np.float32))
-        np.testing.assert_allclose(fluorescence[1, :4], np.full(shape=4, fill_value=2.0, dtype=np.float32))
-        np.testing.assert_allclose(fluorescence[1, 4:], np.zeros(shape=4, dtype=np.float32))
+        assert fluorescence.shape == (2, 4)
+        np.testing.assert_allclose(fluorescence[0], np.full(shape=4, fill_value=1.0, dtype=np.float32))
+        np.testing.assert_allclose(fluorescence[1], np.full(shape=4, fill_value=2.0, dtype=np.float32))
+
+        # The metadata records both the trimmed combined count and the untrimmed per-plane counts, so a consumer can
+        # tell that trimming happened.
+        assert combined.frame_count == 4
+        np.testing.assert_array_equal(combined.plane_frame_counts, np.array([8, 4], dtype=np.uint32))
 
         assert combined.extraction.cell_colocalization is None
 
@@ -219,7 +227,7 @@ class TestCombinePlanes:
         """Verifies that two fully functional channels populate both channel datasets in the combined output."""
         configure = _configure_two_channels(second_functional=True)
         plane_0 = single_recording_context(
-            tmp_path / "plane_0",
+            tmp_path=tmp_path / "plane_0",
             frame_height=_FRAME_HEIGHT,
             frame_width=_FRAME_WIDTH,
             frame_count=8,
@@ -227,7 +235,7 @@ class TestCombinePlanes:
             configure=configure,
         )
         plane_1 = single_recording_context(
-            tmp_path / "plane_1",
+            tmp_path=tmp_path / "plane_1",
             frame_height=_FRAME_HEIGHT,
             frame_width=_FRAME_WIDTH,
             frame_count=4,
@@ -235,13 +243,27 @@ class TestCombinePlanes:
             configure=configure,
         )
         _populate_channel_1(
-            plane_0, roi_specs=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=4, with_max_projection=True
+            context=plane_0,
+            roi_specifications=(((1, 2), (1, 2)),),
+            frame_count=8,
+            fill=1.0,
+            seed=4,
+            with_max_projection=True,
         )
         _populate_channel_1(
-            plane_1, roi_specs=(((3, 4), (5, 6)),), frame_count=4, fill=2.0, seed=5, with_max_projection=True
+            context=plane_1,
+            roi_specifications=(((3, 4), (5, 6)),),
+            frame_count=4,
+            fill=2.0,
+            seed=5,
+            with_max_projection=True,
         )
-        _populate_channel_2(plane_0, roi_specs=(((1, 2), (1, 2)),), frame_count=8, seed=6, with_max_projection=True)
-        _populate_channel_2(plane_1, roi_specs=(((3, 4), (5, 6)),), frame_count=4, seed=7, with_max_projection=True)
+        _populate_channel_2(
+            context=plane_0, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, seed=6, with_max_projection=True
+        )
+        _populate_channel_2(
+            context=plane_1, roi_specifications=(((3, 4), (5, 6)),), frame_count=4, seed=7, with_max_projection=True
+        )
 
         combined = combine_planes(plane_contexts=[plane_0, plane_1])
 
@@ -253,8 +275,7 @@ class TestCombinePlanes:
         assert len(combined.extraction.roi_statistics_channel_2) == 2
         channel_2_fluorescence = combined.extraction.cell_fluorescence_channel_2
         assert channel_2_fluorescence is not None
-        assert channel_2_fluorescence.shape == (2, 8)
-        np.testing.assert_allclose(channel_2_fluorescence[1, 4:], np.zeros(shape=4, dtype=np.float32))
+        assert channel_2_fluorescence.shape == (2, 4)
         assert combined.registered_binary_paths_channel_2 is not None
         assert len(combined.registered_binary_paths_channel_2) == 2
 
@@ -264,14 +285,19 @@ class TestCombinePlanes:
         """Verifies that a structural second channel copies its mean image but skips functional channel 2 outputs."""
         configure = _configure_two_channels(second_functional=False)
         context = single_recording_context(
-            tmp_path / "plane_0",
+            tmp_path=tmp_path / "plane_0",
             frame_height=_FRAME_HEIGHT,
             frame_width=_FRAME_WIDTH,
             frame_count=8,
             configure=configure,
         )
         _populate_channel_1(
-            context, roi_specs=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=8, with_corrected_structural=True
+            context=context,
+            roi_specifications=(((1, 2), (1, 2)),),
+            frame_count=8,
+            fill=1.0,
+            seed=8,
+            with_corrected_structural=True,
         )
         context.runtime.detection.mean_image_channel_2 = np.zeros(shape=(_FRAME_HEIGHT, _FRAME_WIDTH), dtype=np.float32)
 
@@ -289,9 +315,11 @@ class TestCombinePlanes:
     ) -> None:
         """Verifies that a plane lacking detection images still contributes ROIs with zeroed combined images."""
         context = single_recording_context(
-            tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
+            tmp_path=tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
         )
-        _populate_channel_1(context, roi_specs=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=9, with_images=False)
+        _populate_channel_1(
+            context=context, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=9, with_images=False
+        )
 
         combined = combine_planes(plane_contexts=[context])
 
@@ -311,12 +339,12 @@ class TestCombinePlanes:
     ) -> None:
         """Verifies that a plane with ROI statistics but no fluorescence traces is excluded from the output."""
         plane_0 = single_recording_context(
-            tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
+            tmp_path=tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
         )
         plane_1 = single_recording_context(
-            tmp_path / "plane_1", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
+            tmp_path=tmp_path / "plane_1", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
         )
-        _populate_channel_1(plane_0, roi_specs=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=12)
+        _populate_channel_1(context=plane_0, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=12)
         # Plane 1 carries ROI statistics but no fluorescence traces, so combination skips it.
         width = plane_1.runtime.io.frame_width
         plane_1.runtime.extraction.roi_statistics = [
@@ -334,10 +362,10 @@ class TestCombinePlanes:
     ) -> None:
         """Verifies that combination fails when no plane provides ROI statistics."""
         plane_0 = single_recording_context(
-            tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
+            tmp_path=tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
         )
         plane_1 = single_recording_context(
-            tmp_path / "plane_1", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
+            tmp_path=tmp_path / "plane_1", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
         )
         # A None output_path on one plane exercises the directory-name filter during logging.
         plane_1.runtime.io.output_path = None
@@ -350,9 +378,9 @@ class TestCombinePlanes:
     ) -> None:
         """Verifies that a missing channel 1 registered binary path aborts combination."""
         context = single_recording_context(
-            tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
+            tmp_path=tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
         )
-        _populate_channel_1(context, roi_specs=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=13)
+        _populate_channel_1(context=context, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=13)
         context.runtime.io.registered_binary_path = None
 
         with pytest.raises(RuntimeError, match="registered binary path is not set"):
@@ -364,15 +392,15 @@ class TestCombinePlanes:
         """Verifies that a missing channel 2 registered binary path aborts combination when channel 2 is functional."""
         configure = _configure_two_channels(second_functional=True)
         context = single_recording_context(
-            tmp_path / "plane_0",
+            tmp_path=tmp_path / "plane_0",
             frame_height=_FRAME_HEIGHT,
             frame_width=_FRAME_WIDTH,
             frame_count=8,
             movie_channel_2=_make_channel_2_movie(frame_count=8, seed=14),
             configure=configure,
         )
-        _populate_channel_1(context, roi_specs=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=15)
-        _populate_channel_2(context, roi_specs=(((1, 2), (1, 2)),), frame_count=8, seed=16)
+        _populate_channel_1(context=context, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=15)
+        _populate_channel_2(context=context, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, seed=16)
         context.runtime.io.registered_binary_path_channel_2 = None
 
         with pytest.raises(RuntimeError, match="registered binary path for channel 2 is not set"):
@@ -384,15 +412,17 @@ class TestCombinePlanes:
         """Verifies that channel 2 ROI statistics without traces yield no combined channel 2 fluorescence."""
         configure = _configure_two_channels(second_functional=True)
         context = single_recording_context(
-            tmp_path / "plane_0",
+            tmp_path=tmp_path / "plane_0",
             frame_height=_FRAME_HEIGHT,
             frame_width=_FRAME_WIDTH,
             frame_count=8,
             movie_channel_2=_make_channel_2_movie(frame_count=8, seed=17),
             configure=configure,
         )
-        _populate_channel_1(context, roi_specs=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=18)
-        _populate_channel_2(context, roi_specs=(((1, 2), (1, 2)),), frame_count=8, seed=19, with_traces=False)
+        _populate_channel_1(context=context, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=18)
+        _populate_channel_2(
+            context=context, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, seed=19, with_traces=False
+        )
 
         combined = combine_planes(plane_contexts=[context])
 
@@ -402,17 +432,17 @@ class TestCombinePlanes:
     def test_mroi_single_z_plane(self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path) -> None:
         """Verifies that MROI offsets directly position planes and shift ROI coordinates accordingly."""
         plane_0 = single_recording_context(
-            tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
+            tmp_path=tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
         )
         plane_1 = single_recording_context(
-            tmp_path / "plane_1", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
+            tmp_path=tmp_path / "plane_1", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
         )
         plane_0.runtime.io.mroi_y_offset = 0
         plane_0.runtime.io.mroi_x_offset = 0
         plane_1.runtime.io.mroi_y_offset = 0
         plane_1.runtime.io.mroi_x_offset = _FRAME_WIDTH
-        _populate_channel_1(plane_0, roi_specs=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=20)
-        _populate_channel_1(plane_1, roi_specs=(((3, 4), (5, 6)),), frame_count=8, fill=2.0, seed=21)
+        _populate_channel_1(context=plane_0, roi_specifications=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=20)
+        _populate_channel_1(context=plane_1, roi_specifications=(((3, 4), (5, 6)),), frame_count=8, fill=2.0, seed=21)
 
         combined = combine_planes(plane_contexts=[plane_0, plane_1])
 
@@ -427,23 +457,36 @@ class TestCombinePlanes:
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
     ) -> None:
         """Verifies that MROI recordings with repeated positions tile z-planes into a combined grid."""
-        positions = ((0, 0), (0, _FRAME_WIDTH), (0, 0), (0, _FRAME_WIDTH))
+        # Two ROIs with two z-planes each, ordered the way the context resolver emits virtual planes: ROI-major, so
+        # both planes of ROI 0 precede both planes of ROI 1.
+        positions = ((0, 0), (0, 0), (0, _FRAME_WIDTH), (0, _FRAME_WIDTH))
         contexts: list[RuntimeContext] = []
         for index, (y_offset, x_offset) in enumerate(positions):
             context = single_recording_context(
-                tmp_path / f"plane_{index}", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
+                tmp_path=tmp_path / f"plane_{index}",
+                frame_height=_FRAME_HEIGHT,
+                frame_width=_FRAME_WIDTH,
+                frame_count=8,
             )
             context.runtime.io.mroi_y_offset = y_offset
             context.runtime.io.mroi_x_offset = x_offset
             contexts.append(context)
-        # Only the first plane carries ROIs; the remaining planes are skipped during combination.
-        _populate_channel_1(contexts[0], roi_specs=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=22)
+        # Only the first plane carries ROIs, so the remaining planes are skipped during combination.
+        _populate_channel_1(
+            context=contexts[0], roi_specifications=(((1, 2), (1, 2)),), frame_count=8, fill=1.0, seed=22
+        )
 
         combined = combine_planes(plane_contexts=contexts)
 
         assert combined.plane_count == 4
         assert combined.combined_height == _FRAME_HEIGHT * 2
         assert combined.combined_width == _FRAME_WIDTH * 2
+
+        # Each of the four virtual planes lands on its own rectangle, so no plane overwrites another in the combined
+        # images or the stitched movie.
+        np.testing.assert_array_equal(combined.plane_x_offsets, [0, 0, _FRAME_WIDTH, _FRAME_WIDTH])
+        np.testing.assert_array_equal(combined.plane_y_offsets, [0, _FRAME_HEIGHT, 0, _FRAME_HEIGHT])
+
         rois = combined.extraction.roi_statistics
         assert rois is not None
         assert len(rois) == 1

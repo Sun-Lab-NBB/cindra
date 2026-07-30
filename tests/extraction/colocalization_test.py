@@ -58,7 +58,11 @@ def _make_circular_roi(
     x_pixels = x_coordinates[inside].astype(np.int32)
     weights = np.maximum(0, 1.0 - distance[inside] / radius).astype(np.float32)
     return _make_roi(
-        y_pixels=y_pixels, x_pixels=x_pixels, weights=weights, frame_width=frame_width, radius=float(radius)
+        y_pixels=y_pixels,
+        x_pixels=x_pixels,
+        weights=weights,
+        frame_width=frame_width,
+        radius=float(radius),
     )
 
 
@@ -67,9 +71,9 @@ class TestCorrectBleedthrough:
 
     def test_output_non_negative(self) -> None:
         """Verifies that the corrected image has no negative values."""
-        rng = np.random.default_rng(42)
-        functional = rng.standard_normal((30, 30)).astype(np.float32) + 100.0
-        structural = rng.standard_normal((30, 30)).astype(np.float32) + 50.0
+        generator = np.random.default_rng(seed=42)
+        functional = generator.standard_normal((30, 30)).astype(np.float32) + 100.0
+        structural = generator.standard_normal((30, 30)).astype(np.float32) + 50.0
         corrected = _correct_bleedthrough(
             functional_mean_image=functional,
             structural_mean_image=structural,
@@ -105,7 +109,7 @@ class TestBuildSparseRoiMasks:
     """Tests _build_sparse_roi_masks."""
 
     def test_shape(self) -> None:
-        """Verifies the sparse matrix has correct shape."""
+        """Verifies that the sparse matrix has the correct shape."""
         roi_1 = _make_roi(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
         roi_2 = _make_roi(y_pixels=[10, 10], x_pixels=[10, 11], weights=[1.0, 1.0], frame_width=20)
         sparse = _build_sparse_roi_masks(rois=[roi_1, roi_2], frame_height=20, frame_width=20)
@@ -226,7 +230,7 @@ class TestComputeSpatialColocalization:
 
     def test_mutual_best_match_enforced(self) -> None:
         """Verifies that mutual best-match constraint is enforced."""
-        # Two channel 1 ROIs both closest to one channel 2 ROI—only one should match.
+        # Two channel 1 ROIs are both closest to one channel 2 ROI, so only one of them should match.
         roi_1a = _make_roi(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
         roi_1b = _make_roi(y_pixels=[5, 5], x_pixels=[5, 6], weights=[1.0, 1.0], frame_width=20)
         roi_2 = _make_roi(y_pixels=[5, 5, 6, 6], x_pixels=[5, 6, 5, 6], weights=[1.0] * 4, frame_width=20)
@@ -246,7 +250,7 @@ class TestComputeIntensityColocalization:
     """Tests compute_intensity_colocalization."""
 
     def test_empty_rois(self) -> None:
-        """Verifies correct handling of empty ROI list."""
+        """Verifies correct handling of an empty ROI list."""
         functional = np.ones((30, 30), dtype=np.float32) * 100.0
         structural = np.ones((30, 30), dtype=np.float32) * 50.0
         result, corrected = compute_intensity_colocalization(

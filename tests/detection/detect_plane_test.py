@@ -60,7 +60,7 @@ def _build_flickering_movie(
         is switched on in a random subset of frames to plant localized, temporally coherent signal.
     """
     generator = np.random.default_rng(seed=seed)
-    movie = np.full((frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), _BACKGROUND_LEVEL, dtype=np.float64)
+    movie = np.full((frame_count, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=_BACKGROUND_LEVEL, dtype=np.float64)
     for center in centers:
         blob = blob_builder(
             height=_FRAME_HEIGHT,
@@ -99,9 +99,11 @@ class TestDetectPlaneRois:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies detection recovers one ROI per planted blob and writes the detection projections to disk."""
-        movie = _build_flickering_movie(gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7)
+        movie = _build_flickering_movie(
+            blob_builder=gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7
+        )
         context = single_recording_context(
-            tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=_permissive_detection
+            tmp_path=tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=_permissive_detection
         )
         context.runtime.registration.valid_y_range = (0, _FRAME_HEIGHT)
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
@@ -115,12 +117,12 @@ class TestDetectPlaneRois:
 
         # Every detected ROI lands on a planted blob, so detection produced no spurious centroids.
         for roi in roi_statistics:
-            assert _minimum_centroid_distance(roi.mask.centroid, _BLOB_CENTERS) <= _CENTROID_TOLERANCE
+            assert _minimum_centroid_distance(centroid=roi.mask.centroid, centers=_BLOB_CENTERS) <= _CENTROID_TOLERANCE
 
         # Every planted blob is recovered by at least one detected ROI.
         centroids = tuple(roi.mask.centroid for roi in roi_statistics)
         for center in _BLOB_CENTERS:
-            assert _minimum_centroid_distance(center, centroids) <= _CENTROID_TOLERANCE
+            assert _minimum_centroid_distance(centroid=center, centers=centroids) <= _CENTROID_TOLERANCE
 
         assert context.runtime.detection.roi_diameter > 0
         detection_directory = tmp_path / "output" / "cindra" / "plane_0" / "detection_data"
@@ -136,9 +138,11 @@ class TestDetectPlaneRois:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies detection memory-maps bad_frames from disk when the in-memory array is absent."""
-        movie = _build_flickering_movie(gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7)
+        movie = _build_flickering_movie(
+            blob_builder=gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7
+        )
         context = single_recording_context(
-            tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=_permissive_detection
+            tmp_path=tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=_permissive_detection
         )
         context.runtime.registration.valid_y_range = (0, _FRAME_HEIGHT)
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
@@ -152,7 +156,7 @@ class TestDetectPlaneRois:
         detect_plane_rois(context=context, workers=1)
 
         assert context.runtime.extraction.roi_statistics is not None
-        assert len(context.runtime.extraction.roi_statistics) >= 1
+        assert context.runtime.extraction.roi_statistics
 
     def test_detects_second_channel(
         self,
@@ -161,9 +165,11 @@ class TestDetectPlaneRois:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies detection runs independently on the second channel when both channels are functional."""
-        movie = _build_flickering_movie(gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7)
+        movie = _build_flickering_movie(
+            blob_builder=gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7
+        )
         movie_channel_2 = _build_flickering_movie(
-            gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=21
+            blob_builder=gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=21
         )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
@@ -172,7 +178,7 @@ class TestDetectPlaneRois:
             configuration.main.second_channel_functional = True
 
         context = single_recording_context(
-            tmp_path,
+            tmp_path=tmp_path,
             frame_count=_FRAME_COUNT,
             movie=movie,
             movie_channel_2=movie_channel_2,
@@ -185,9 +191,9 @@ class TestDetectPlaneRois:
         detect_plane_rois(context=context, workers=1)
 
         assert context.runtime.extraction.roi_statistics is not None
-        assert len(context.runtime.extraction.roi_statistics) >= 1
+        assert context.runtime.extraction.roi_statistics
         assert context.runtime.extraction.roi_statistics_channel_2 is not None
-        assert len(context.runtime.extraction.roi_statistics_channel_2) >= 1
+        assert context.runtime.extraction.roi_statistics_channel_2
 
         detection_directory = tmp_path / "output" / "cindra" / "plane_0" / "detection_data"
         assert (detection_directory / "mean_image_channel_2.npy").exists()
@@ -199,13 +205,17 @@ class TestDetectPlaneRois:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies detection still recovers ROIs when PCA denoising of the binned movie is enabled."""
-        movie = _build_flickering_movie(gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7)
+        movie = _build_flickering_movie(
+            blob_builder=gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7
+        )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             _permissive_detection(configuration)
             configuration.roi_detection.denoise = True
 
-        context = single_recording_context(tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=configure)
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=configure
+        )
         context.runtime.registration.valid_y_range = (0, _FRAME_HEIGHT)
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
         context.runtime.registration.bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
@@ -213,7 +223,7 @@ class TestDetectPlaneRois:
         detect_plane_rois(context=context, workers=1)
 
         assert context.runtime.extraction.roi_statistics is not None
-        assert len(context.runtime.extraction.roi_statistics) >= 1
+        assert context.runtime.extraction.roi_statistics
 
     def test_preclassification_path(
         self,
@@ -222,13 +232,17 @@ class TestDetectPlaneRois:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies detection applies the preclassification filter when its threshold is above zero."""
-        movie = _build_flickering_movie(gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7)
+        movie = _build_flickering_movie(
+            blob_builder=gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7
+        )
 
         def configure(configuration: SingleRecordingConfiguration) -> None:
             _permissive_detection(configuration)
             configuration.roi_detection.preclassification_threshold = 0.5
 
-        context = single_recording_context(tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=configure)
+        context = single_recording_context(
+            tmp_path=tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=configure
+        )
         context.runtime.registration.valid_y_range = (0, _FRAME_HEIGHT)
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
         context.runtime.registration.bad_frames = np.zeros(_FRAME_COUNT, dtype=np.bool_)
@@ -236,7 +250,7 @@ class TestDetectPlaneRois:
         detect_plane_rois(context=context, workers=1)
 
         assert context.runtime.extraction.roi_statistics is not None
-        assert len(context.runtime.extraction.roi_statistics) >= 1
+        assert context.runtime.extraction.roi_statistics
 
     def test_no_rois_raises(
         self,
@@ -244,9 +258,9 @@ class TestDetectPlaneRois:
         single_recording_context: Callable[..., RuntimeContext],
     ) -> None:
         """Verifies detection raises ValueError when the binned movie contains no detectable activity."""
-        movie = np.full((_FRAME_COUNT, _FRAME_HEIGHT, _FRAME_WIDTH), int(_BACKGROUND_LEVEL), dtype=np.int16)
+        movie = np.full((_FRAME_COUNT, _FRAME_HEIGHT, _FRAME_WIDTH), fill_value=int(_BACKGROUND_LEVEL), dtype=np.int16)
         context = single_recording_context(
-            tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=_permissive_detection
+            tmp_path=tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=_permissive_detection
         )
         context.runtime.registration.valid_y_range = (0, _FRAME_HEIGHT)
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)
@@ -262,9 +276,11 @@ class TestDetectPlaneRois:
         gaussian_blob_image: Callable[..., NDArray[np.float64]],
     ) -> None:
         """Verifies detection raises RuntimeError when the channel 1 registered binary path is unset."""
-        movie = _build_flickering_movie(gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7)
+        movie = _build_flickering_movie(
+            blob_builder=gaussian_blob_image, centers=_BLOB_CENTERS, frame_count=_FRAME_COUNT, seed=7
+        )
         context = single_recording_context(
-            tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=_permissive_detection
+            tmp_path=tmp_path, frame_count=_FRAME_COUNT, movie=movie, configure=_permissive_detection
         )
         context.runtime.registration.valid_y_range = (0, _FRAME_HEIGHT)
         context.runtime.registration.valid_x_range = (0, _FRAME_WIDTH)

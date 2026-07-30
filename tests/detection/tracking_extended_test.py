@@ -71,8 +71,8 @@ class TestCollectBinRois:
             grid_roi_size=grid_roi_size,
         )
 
-        assert len(collected_rois) == 0
-        assert len(collected_recordings) == 0
+        assert not collected_rois
+        assert not collected_recordings
 
     def test_overlap_margin_extends_search_region(self) -> None:
         """Verifies that the overlap margin extends the search region beyond the bin boundaries."""
@@ -94,7 +94,7 @@ class TestCollectBinRois:
             overlap_margin=0,
             grid_roi_size=grid_roi_size,
         )
-        assert len(collected_rois_no_margin) == 0
+        assert not collected_rois_no_margin
 
         # With overlap margin of 10, the search region becomes [10, 70) x [10, 70), capturing the ROI.
         collected_rois_with_margin, collected_recordings = _collect_bin_rois(

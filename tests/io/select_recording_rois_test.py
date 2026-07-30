@@ -23,6 +23,8 @@ from cindra.dataclasses import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from numpy.typing import NDArray
+
 
 def _make_roi(centroid: tuple[int, int] = (10, 10), pixel_count: int = 50) -> ROIStatistics:
     """Creates a minimal ROIStatistics instance with the given centroid and pixel count."""
@@ -40,7 +42,7 @@ def _make_roi(centroid: tuple[int, int] = (10, 10), pixel_count: int = 50) -> RO
     return roi
 
 
-def _classification(probabilities: list[float]) -> np.ndarray:
+def _make_classification(probabilities: list[float]) -> NDArray[np.float32]:
     """Builds a (cells, 2) classification array placing each probability in the second column."""
     return np.array([[1.0, probability] for probability in probabilities], dtype=np.float32)
 
@@ -50,9 +52,9 @@ def _make_context(
     recording_id: str,
     *,
     rois: list[ROIStatistics],
-    classification: np.ndarray,
+    classification: NDArray[np.float32],
     rois_channel_2: list[ROIStatistics] | None = None,
-    classification_channel_2: np.ndarray | None = None,
+    classification_channel_2: NDArray[np.float32] | None = None,
     persist: bool = True,
     data_path_none: bool = False,
     combined_data_none: bool = False,
@@ -73,12 +75,12 @@ def _make_context(
         classification: The channel 1 classification array stored in the combined data.
         rois_channel_2: The optional channel 2 ROIStatistics list to enable two-channel selection.
         classification_channel_2: The optional channel 2 classification array.
-        persist: When True, saves the combined data to disk and attaches a metadata-only copy that
+        persist: Determines whether to save the combined data to disk and attach a metadata-only copy that
             forces on-demand memory mapping during selection.
-        data_path_none: When True (with persist False), leaves the runtime data path unset so the
-            memory-mapping branch is skipped and selection runs on the in-memory combined data.
-        combined_data_none: When True, attaches no combined data to exercise the missing-data guard.
-        repeat_selection: The value assigned to the configuration repeat_selection flag.
+        data_path_none: Determines whether to leave the runtime data path unset when persist is False, which
+            skips the memory-mapping branch and runs selection on the in-memory combined data.
+        combined_data_none: Determines whether to omit the combined data, exercising the missing-data guard.
+        repeat_selection: Determines whether to re-run selection for a recording that already stores a selection.
         probability_threshold: The minimum classifier probability required for selection.
         maximum_size: The maximum allowed ROI pixel count.
         mroi_region_margin: The minimum distance between an ROI centroid and an MROI border.
@@ -143,8 +145,10 @@ class TestSelectRecordingRois:
     def test_probability_filter_selects_expected_subset(self, tmp_path: Path) -> None:
         """Verifies that channel 1 ROIs below the probability threshold are excluded from selection."""
         rois = [_make_roi() for _ in range(4)]
-        classification = _classification([0.9, 0.4, 0.95, 0.2])
-        context = _make_context(tmp_path, "rec0", rois=rois, classification=classification, probability_threshold=0.5)
+        classification = _make_classification([0.9, 0.4, 0.95, 0.2])
+        context = _make_context(
+            tmp_path=tmp_path, recording_id="rec0", rois=rois, classification=classification, probability_threshold=0.5
+        )
 
         select_recording_rois(contexts=[context])
 
@@ -156,9 +160,14 @@ class TestSelectRecordingRois:
     def test_size_filter_excludes_large_rois(self, tmp_path: Path) -> None:
         """Verifies that ROIs exceeding the maximum pixel count are excluded from selection."""
         rois = [_make_roi(pixel_count=10), _make_roi(pixel_count=100), _make_roi(pixel_count=150)]
-        classification = _classification([0.9, 0.9, 0.9])
+        classification = _make_classification([0.9, 0.9, 0.9])
         context = _make_context(
-            tmp_path, "rec0", rois=rois, classification=classification, probability_threshold=0.0, maximum_size=100
+            tmp_path=tmp_path,
+            recording_id="rec0",
+            rois=rois,
+            classification=classification,
+            probability_threshold=0.0,
+            maximum_size=100,
         )
 
         select_recording_rois(contexts=[context])
@@ -169,10 +178,10 @@ class TestSelectRecordingRois:
     def test_mroi_border_filter_excludes_near_border(self, tmp_path: Path) -> None:
         """Verifies that ROIs whose centroid is within the margin of an MROI border are excluded."""
         rois = [_make_roi(centroid=(10, 50)), _make_roi(centroid=(10, 100))]
-        classification = _classification([0.9, 0.9])
+        classification = _make_classification([0.9, 0.9])
         context = _make_context(
-            tmp_path,
-            "rec0",
+            tmp_path=tmp_path,
+            recording_id="rec0",
             rois=rois,
             classification=classification,
             probability_threshold=0.0,
@@ -188,12 +197,12 @@ class TestSelectRecordingRois:
     def test_channel_2_selection_runs_independently(self, tmp_path: Path) -> None:
         """Verifies that channel 2 ROIs are selected independently when channel 2 data is present."""
         rois = [_make_roi() for _ in range(3)]
-        classification = _classification([0.9, 0.4, 0.95])
+        classification = _make_classification([0.9, 0.4, 0.95])
         rois_channel_2 = [_make_roi() for _ in range(3)]
-        classification_channel_2 = _classification([0.9, 0.2, 0.8])
+        classification_channel_2 = _make_classification([0.9, 0.2, 0.8])
         context = _make_context(
-            tmp_path,
-            "rec0",
+            tmp_path=tmp_path,
+            recording_id="rec0",
             rois=rois,
             classification=classification,
             rois_channel_2=rois_channel_2,
@@ -209,10 +218,10 @@ class TestSelectRecordingRois:
     def test_in_memory_combined_data_skips_memory_mapping(self, tmp_path: Path) -> None:
         """Verifies that selection runs on in-memory combined data when the runtime data path is unset."""
         rois = [_make_roi() for _ in range(3)]
-        classification = _classification([0.9, 0.3, 0.8])
+        classification = _make_classification([0.9, 0.3, 0.8])
         context = _make_context(
-            tmp_path,
-            "rec0",
+            tmp_path=tmp_path,
+            recording_id="rec0",
             rois=rois,
             classification=classification,
             persist=False,
@@ -227,10 +236,10 @@ class TestSelectRecordingRois:
     def test_skips_recording_with_existing_channel_1_selection(self, tmp_path: Path) -> None:
         """Verifies that a recording with an existing channel 1 selection is skipped when repeat is disabled."""
         rois = [_make_roi() for _ in range(3)]
-        classification = _classification([0.9, 0.9, 0.9])
+        classification = _make_classification([0.9, 0.9, 0.9])
         context = _make_context(
-            tmp_path,
-            "rec0",
+            tmp_path=tmp_path,
+            recording_id="rec0",
             rois=rois,
             classification=classification,
             persist=False,
@@ -248,12 +257,12 @@ class TestSelectRecordingRois:
     def test_skips_recording_with_existing_channel_2_selection(self, tmp_path: Path) -> None:
         """Verifies that a two-channel recording with existing selections for both channels is skipped."""
         rois = [_make_roi() for _ in range(3)]
-        classification = _classification([0.9, 0.9, 0.9])
+        classification = _make_classification([0.9, 0.9, 0.9])
         rois_channel_2 = [_make_roi() for _ in range(3)]
-        classification_channel_2 = _classification([0.9, 0.9, 0.9])
+        classification_channel_2 = _make_classification([0.9, 0.9, 0.9])
         context = _make_context(
-            tmp_path,
-            "rec0",
+            tmp_path=tmp_path,
+            recording_id="rec0",
             rois=rois,
             classification=classification,
             rois_channel_2=rois_channel_2,
@@ -272,10 +281,10 @@ class TestSelectRecordingRois:
     def test_repeat_selection_reruns_existing_selection(self, tmp_path: Path) -> None:
         """Verifies that repeat_selection re-runs filtering and overwrites an existing selection."""
         rois = [_make_roi() for _ in range(4)]
-        classification = _classification([0.9, 0.4, 0.95, 0.2])
+        classification = _make_classification([0.9, 0.4, 0.95, 0.2])
         context = _make_context(
-            tmp_path,
-            "rec0",
+            tmp_path=tmp_path,
+            recording_id="rec0",
             rois=rois,
             classification=classification,
             repeat_selection=True,
@@ -291,7 +300,11 @@ class TestSelectRecordingRois:
     def test_raises_when_combined_data_missing(self, tmp_path: Path) -> None:
         """Verifies that a recording without combined data raises a ValueError during selection."""
         context = _make_context(
-            tmp_path, "rec0", rois=[_make_roi()], classification=_classification([0.9]), combined_data_none=True
+            tmp_path=tmp_path,
+            recording_id="rec0",
+            rois=[_make_roi()],
+            classification=_make_classification([0.9]),
+            combined_data_none=True,
         )
 
         with pytest.raises(ValueError, match="Unable to select ROIs"):
@@ -300,10 +313,16 @@ class TestSelectRecordingRois:
     def test_processes_multiple_contexts(self, tmp_path: Path) -> None:
         """Verifies that every context in the list is processed with independent selections."""
         context_one = _make_context(
-            tmp_path, "rec0", rois=[_make_roi() for _ in range(3)], classification=_classification([0.9, 0.4, 0.95])
+            tmp_path=tmp_path,
+            recording_id="rec0",
+            rois=[_make_roi() for _ in range(3)],
+            classification=_make_classification([0.9, 0.4, 0.95]),
         )
         context_two = _make_context(
-            tmp_path, "rec1", rois=[_make_roi() for _ in range(3)], classification=_classification([0.2, 0.9, 0.95])
+            tmp_path=tmp_path,
+            recording_id="rec1",
+            rois=[_make_roi() for _ in range(3)],
+            classification=_make_classification([0.2, 0.9, 0.95]),
         )
 
         select_recording_rois(contexts=[context_one, context_two])

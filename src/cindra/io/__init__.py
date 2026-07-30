@@ -1,12 +1,19 @@
 """Provides assets for importing, converting, and combining multi-plane imaging data."""
 
 from .tiff import TIFF_EXTENSIONS, convert_tiffs_to_binary
-from .binary import BinaryFile, BinaryFileCombined
+from .binary import (
+    BinaryFile,
+    BinaryFileCombined,
+    clear_registration_marker,
+    create_registration_marker,
+    resolve_registration_marker_path,
+)
 from .select import select_recording_rois
 from .combine import combine_planes, compute_plane_offsets
 from .context import (
     PARAMETERS_FILENAME,
     MAXIMUM_CHANNEL_COUNT,
+    OUTPUT_DIRECTORY_NAME,
     resolve_recording_roots,
     extract_unique_components,
     resolve_multi_recording_contexts,
@@ -15,16 +22,20 @@ from .context import (
 
 __all__ = [
     "MAXIMUM_CHANNEL_COUNT",
+    "OUTPUT_DIRECTORY_NAME",
     "PARAMETERS_FILENAME",
     "TIFF_EXTENSIONS",
     "BinaryFile",
     "BinaryFileCombined",
+    "clear_registration_marker",
     "combine_planes",
     "compute_plane_offsets",
     "convert_tiffs_to_binary",
+    "create_registration_marker",
     "extract_unique_components",
     "resolve_multi_recording_contexts",
     "resolve_recording_roots",
+    "resolve_registration_marker_path",
     "resolve_single_recording_contexts",
     "select_recording_rois",
 ]

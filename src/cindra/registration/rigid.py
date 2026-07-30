@@ -1,5 +1,7 @@
 """Provides rigid (translation-only) registration algorithm for motion correction."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -153,13 +155,13 @@ def compute_rigid_offsets(
         correlation_window = apply_temporal_smoothing(frames=correlation_window, sigma=temporal_smoothing_sigma)
 
     # Finds peak location for each frame using vectorized argmax.
-    num_frames = frames.shape[0]
+    frame_count = frames.shape[0]
     window_size = 2 * correlation_radius + 1
-    flat_indices = np.argmax(correlation_window.reshape(num_frames, -1), axis=1)
+    flat_indices = np.argmax(correlation_window.reshape(frame_count, -1), axis=1)
     y_offsets = (flat_indices // window_size - correlation_radius).astype(np.int32)
     x_offsets = (flat_indices % window_size - correlation_radius).astype(np.int32)
 
-    correlation_maxima = correlation_window.reshape(num_frames, -1)[np.arange(num_frames), flat_indices]
+    correlation_maxima = correlation_window.reshape(frame_count, -1)[np.arange(frame_count), flat_indices]
 
     return y_offsets, x_offsets, correlation_maxima.astype(np.float32)
 
@@ -168,7 +170,7 @@ def translate_frame(frame: NDArray[np.float32], y_offset: int, x_offset: int) ->
     """Applies a rigid translation to a single frame using circular shifting.
 
     Translates the frame by the specified pixel amounts using numpy roll. Positive offset values move the
-    image content in the negative direction (i.e., a positive y_shift moves content upward).
+    image content in the negative direction (i.e., a positive y_offset moves content upward).
 
     Args:
         frame: The frame with shape (height, width) to translate.

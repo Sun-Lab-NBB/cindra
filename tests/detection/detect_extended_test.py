@@ -80,7 +80,7 @@ class TestApplyPreclassification:
             diameter=10,
         )
 
-        assert len(result) == 0
+        assert not result
 
     def test_returns_subset_of_original_rois(self) -> None:
         """Verifies that the result is a subset of the original ROI list."""

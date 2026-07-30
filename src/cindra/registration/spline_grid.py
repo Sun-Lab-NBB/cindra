@@ -22,9 +22,10 @@ def compute_cardinal_coefficients(  # pragma: no cover
 ) -> None:
     """Computes Catmull-Rom spline coefficients for image interpolation.
 
-    Catmull-Rom splines are Cardinal splines with tension=0. They are interpolating splines that pass exactly
-    through their control points, making them suitable for image interpolation where pixel values must be preserved
-    at grid locations.
+    Notes:
+        Catmull-Rom splines are Cardinal splines with tension=0. They are interpolating splines that pass exactly
+        through their control points, making them suitable for image interpolation where pixel values must be
+        preserved at grid locations.
 
     Args:
         interpolation_factor: The position between the central lattice points, in range [0, 1].
@@ -45,40 +46,6 @@ def compute_cardinal_coefficients(  # pragma: no cover
 
     # Coefficient for p2 (right-center point).
     coefficients[2] = -2.0 * factor_cubed + 3.0 * factor_squared - coefficients[0]
-
-
-@numba.njit(cache=True, inline="always")
-def compute_basis_coefficients(  # pragma: no cover
-    interpolation_factor: float,
-    coefficients: NDArray[np.float32],
-) -> None:
-    """Computes uniform cubic B-spline coefficients.
-
-    Notes:
-        B-splines (basis splines) are approximating splines that do not pass through their control points but
-        instead produce curves that smoothly approximate them. They provide C2 continuity and minimize bending
-        energy, making them ideal for representing smooth deformation fields.
-
-    Args:
-        interpolation_factor: The position between the central lattice points, in range [0, 1].
-        coefficients: The output array where to store the computed coefficients.
-    """
-    factor = interpolation_factor
-    factor_squared = factor * factor
-    factor_cubed = factor_squared * factor
-    one_minus_factor = 1.0 - factor
-
-    # Coefficient for p0 (leftmost control point).
-    coefficients[0] = (one_minus_factor * one_minus_factor * one_minus_factor) / 6.0
-
-    # Coefficient for p1 (left-center control point).
-    coefficients[1] = (3.0 * factor_cubed - 6.0 * factor_squared + 4.0) / 6.0
-
-    # Coefficient for p2 (right-center control point).
-    coefficients[2] = (-3.0 * factor_cubed + 3.0 * factor_squared + 3.0 * factor + 1.0) / 6.0
-
-    # Coefficient for p3 (rightmost control point).
-    coefficients[3] = factor_cubed / 6.0
 
 
 class SplineGrid:
@@ -124,8 +91,15 @@ class SplineGrid:
             np.zeros(self._grid_shape, dtype=np.float32),
         )
 
+    def __repr__(self) -> str:
+        """Returns a string representation of the SplineGrid instance."""
+        return (
+            f"SplineGrid(field_shape={self._field_shape}, grid_shape={self._grid_shape}, "
+            f"grid_sampling={self._grid_sampling})"
+        )
+
     @property
-    def ndim(self) -> int:
+    def dimension_count(self) -> int:
         """Returns the number of grid dimensions, which is fixed to 2 in the current SplineGrid
         implementation.
         """
@@ -145,6 +119,15 @@ class SplineGrid:
     def grid_sampling(self) -> float:
         """Returns the spacing between grid knots in pixels."""
         return self._grid_sampling
+
+    @property
+    def deformation_fields(self) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
+        """Returns two arrays (Y, X), representing the deformation fields for each dimension of the underlying image."""
+        field_y: NDArray[np.float32] = np.zeros(self.field_shape, dtype=np.float32)
+        field_x: NDArray[np.float32] = np.zeros(self.field_shape, dtype=np.float32)
+        _sample_grid(result=field_y, grid_sampling=self._grid_sampling, knots=self._get_knots(dimension=0))
+        _sample_grid(result=field_x, grid_sampling=self._grid_sampling, knots=self._get_knots(dimension=1))
+        return field_y, field_x
 
     @staticmethod
     def compute_grid_shape(field_height: int, field_width: int, grid_sampling: float) -> tuple[int, int]:
@@ -168,15 +151,6 @@ class SplineGrid:
         grid_width = int((field_width - 1) / grid_sampling) + 4
         return grid_height, grid_width
 
-    @property
-    def deformation_fields(self) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
-        """Returns two arrays (Y, X), representing the deformation fields for each dimension of the underlying image."""
-        field_y: NDArray[np.float32] = np.zeros(self.field_shape, dtype=np.float32)
-        field_x: NDArray[np.float32] = np.zeros(self.field_shape, dtype=np.float32)
-        _sample_grid(result=field_y, grid_sampling=self._grid_sampling, knots=self._get_knots(dimension=0))
-        _sample_grid(result=field_x, grid_sampling=self._grid_sampling, knots=self._get_knots(dimension=1))
-        return field_y, field_x
-
     def set_from_fields(
         self,
         field_y: NDArray[np.float32],
@@ -198,7 +172,6 @@ class SplineGrid:
         Returns:
             True if all constraints were successfully applied, False if the grid is too small for frozen edges.
         """
-        # Fits B-spline knots to the deformation fields using least-squares (Lee et al.).
         _fit_knots_to_field(
             grid_sampling=self._grid_sampling,
             knots=self._get_knots(dimension=0),
@@ -234,22 +207,22 @@ class SplineGrid:
     def _unfold(self, factor: float = 0.9) -> None:
         """Prevents folds in the grid by limiting the B-spline control values (knots) to ensure injectivity.
 
+        Notes:
+            Based on Choi & Lee (2000), "Injectivity conditions of 2D and 3D uniform cubic B-spline functions".
+
         Args:
             factor: The scaling factor for the injectivity limit (0 < factor <= 1). Values closer to 1.0 allow larger
                 deformations, while smaller values are more conservative.
-
-        Notes:
-            Based on Choi & Lee (2000), "Injectivity conditions of 2D and 3D uniform cubic B-spline functions".
         """
         # Computes the maximum allowed B-spline knot displacement to prevent grid folding. The constant 2.046392675 is
-        # the theoretical injectivity bound for 2D cubic B-splines - knot values exceeding 1/K of the grid spacing can
-        # cause the deformation to become non-injective (folded). The factor scales this limit conservatively.
+        # the theoretical injectivity bound for 2D cubic B-splines. Knot values exceeding the grid spacing divided by
+        # that bound can make the deformation non-injective (folded). The factor scales this limit conservatively.
         limit = (1.0 / 2.046392675) * self._grid_sampling * factor
 
         # Applies smooth exponential limiting to each knot array. The formula maps the knot values to the range (-limit,
         # +limit) using a soft saturation curve: small values pass through nearly unchanged, while large values are
         # smoothly compressed toward the limit without hard clipping discontinuities.
-        for dimension in range(self.ndim):
+        for dimension in range(self.dimension_count):
             knots = self._get_knots(dimension=dimension).ravel()
             knots[:] = limit * (np.exp(-np.abs(knots) / limit) - 1) * -np.sign(knots)
 
@@ -259,7 +232,7 @@ class SplineGrid:
         Returns:
             True if edges were successfully frozen, False if the grid is too small.
         """
-        for dimension in range(self.ndim):
+        for dimension in range(self.dimension_count):
             knots = self._get_knots(dimension=dimension)
 
             if knots.shape[dimension] < _MINIMUM_KNOTS_FOR_FROZEN_EDGES:
@@ -273,11 +246,11 @@ class SplineGrid:
 
             # Computes the B-spline coefficients at the field edge position.
             coefficients: NDArray[np.float32] = np.zeros((4,), dtype=np.float32)
-            compute_basis_coefficients(interpolation_factor=edge_interpolation_factor, coefficients=coefficients)
+            _compute_basis_coefficients(interpolation_factor=edge_interpolation_factor, coefficients=coefficients)
 
             # Freezes knots for Y dimension (operates on rows).
             if dimension == 0:
-                # Leading edge: zero boundary knots.
+                # Leading edge: zeros the outermost knot and offsets the next one to cancel edge deformation.
                 knots[0] = 0
                 knots[1] = -0.25 * knots[2]
                 # Trailing edge: adjusts knots to produce zero deformation at field edge.
@@ -294,6 +267,40 @@ class SplineGrid:
                 knots[:, -2] = -(knots[:, -3] * coefficients[2] + knots[:, -4] * coefficients[3]) / coefficients[1]
 
         return True
+
+
+@numba.njit(cache=True, inline="always")
+def _compute_basis_coefficients(  # pragma: no cover
+    interpolation_factor: float,
+    coefficients: NDArray[np.float32],
+) -> None:
+    """Computes uniform cubic B-spline coefficients.
+
+    Notes:
+        B-splines (basis splines) are approximating splines that do not pass through their control points but
+        instead produce curves that smoothly approximate them. They provide C2 continuity and minimize bending
+        energy, making them ideal for representing smooth deformation fields.
+
+    Args:
+        interpolation_factor: The position between the central lattice points, in range [0, 1].
+        coefficients: The output array where to store the computed coefficients.
+    """
+    factor = interpolation_factor
+    factor_squared = factor * factor
+    factor_cubed = factor_squared * factor
+    one_minus_factor = 1.0 - factor
+
+    # Coefficient for p0 (leftmost control point).
+    coefficients[0] = (one_minus_factor * one_minus_factor * one_minus_factor) / 6.0
+
+    # Coefficient for p1 (left-center control point).
+    coefficients[1] = (3.0 * factor_cubed - 6.0 * factor_squared + 4.0) / 6.0
+
+    # Coefficient for p2 (right-center control point).
+    coefficients[2] = (-3.0 * factor_cubed + 3.0 * factor_squared + 3.0 * factor + 1.0) / 6.0
+
+    # Coefficient for p3 (rightmost control point).
+    coefficients[3] = factor_cubed / 6.0
 
 
 @numba.njit(cache=True, parallel=True)
@@ -329,8 +336,8 @@ def _sample_grid(  # pragma: no cover
             interpolation_factor_x = grid_position_x - knot_index_x
 
             # Computes B-spline basis coefficients at this pixel position.
-            compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
-            compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
+            _compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
+            _compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
 
             # Accumulates weighted contributions from the 4x4 knot neighborhood.
             sampled_value = 0.0
@@ -382,8 +389,8 @@ def _fit_knots_to_field(  # pragma: no cover
             interpolation_factor_x = grid_position_x - knot_index_x
 
             # Computes B-spline basis coefficients at this pixel position.
-            compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
-            compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
+            _compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
+            _compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
 
             # Pre-normalizes the value by the sum of squared basis coefficients.
             coefficient_sum_squared = 0.0
@@ -403,7 +410,6 @@ def _fit_knots_to_field(  # pragma: no cover
                     numerator[knot_y, knot_x] += coefficient_squared * (normalized_value * basis_coefficient)
                     denominator[knot_y, knot_x] += coefficient_squared
 
-    # Finalizes the knot values by dividing numerator by denominator.
     for flat_index in range(knots.size):
         if denominator.flat[flat_index] > 0.0:
             knots.flat[flat_index] = numerator.flat[flat_index] / denominator.flat[flat_index]

@@ -64,6 +64,9 @@ self-documented via MCP introspection.
 - `generate_acquisition_parameters_file_tool` and `validate_acquisition_parameters_file_tool` do not inspect TIFF files.
   Acquisition metadata must come from the user, experiment logs, microscope software output, or other external
   sources. Use `validate_recording_readiness_tool` for combined parameter + TIFF validation.
+- `validate_acquisition_parameters_file_tool` and `validate_recording_readiness_tool` return a `success` flag that only
+  reports whether the tool ran. Gate every downstream step on the separate `valid` field, which is False whenever the
+  tool collects any validation errors and can be False while `success` is True.
 
 ---
 
@@ -89,8 +92,9 @@ TIFF files must be in the same directory as the JSON file (non-recursive TIFF sc
 ### Supported formats
 
 The pipeline reads standard multipage TIFF files (`.tif` or `.tiff` extension). All data is automatically converted
-to int16 for processing. uint16 and int32 data is divided by 2 before conversion to fit the int16 range. All other
-data types are cast directly to int16 without scaling.
+to int16 for processing. uint16 and int32 data is halved by floor division and then clipped to the int16 range, so
+int32 magnitudes that still exceed that range after halving saturate at -32768 or 32767 instead of wrapping. All
+other data types are cast directly to int16 without scaling.
 
 ### Non-TIFF source data
 
@@ -126,8 +130,11 @@ Single plane, single channel:
 ```
 
 The total frame count across all TIFF files should be evenly divisible by `plane_number * channel_number`.
-If not, the pipeline silently drops the trailing frames that do not complete a full stride. This is not a
-runtime error, but warn the user that incomplete final volumes will be discarded.
+If it is not, typically because the recording stopped partway through a volume, binarization does not discard the
+trailing frames. Each plane binary is sized to the frames that plane actually receives, so the leading planes hold one
+frame more than the trailing ones and per-plane outputs have slightly different lengths. The combination phase then
+trims the combined traces to the shortest contributing plane and logs a warning naming the range. Per-plane results
+keep every frame, so only the combined dataset is trimmed.
 
 For MROI data, all ROIs share the same raw frames. Each ROI is extracted as a horizontal slice using `roi_lines`.
 
@@ -137,17 +144,31 @@ The pipeline loads all TIFF files in the data directory in natural sort order an
 all files are treated as one continuous sequence following the interleave pattern. Use
 `file_io.ignored_file_names` (see `/single-recording-configuration` Section 3) to exclude specific files.
 
+### Excluding files that are not part of the recording
+
+A raw mesoscope directory commonly holds an anatomical z-stack, for example `zstack.tiff`, alongside the imaging files.
+Its frames are shaped differently, and binarization requires every discovered TIFF to hold frames of the same shape, so
+it must be excluded through `file_io.ignored_file_names`. Match on the file stem without the extension, so `zstack`
+rather than `zstack.tiff`.
+
+`validate_recording_readiness_tool` does not read the pipeline configuration, so it inspects the z-stack too and reports
+its shape as a warning rather than an error. The recording is still ready. Confirm the excluded stems are listed in the
+configuration and proceed, and do not ask the user to delete or reshape the file.
+
 ---
 
 ## Acquisition parameters reference
 
 ### Required fields (all recordings)
 
-| Field            | Type  | Description                                                                                                                                                                               |
-|------------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `frame_rate`     | float | Volume acquisition rate in Hz. For multi-plane recordings, this is the rate at which complete volumes are acquired, not the per-plane rate. Per-plane rate = `frame_rate / plane_number`. |
-| `plane_number`   | int   | Number of Z-planes acquired per volume. 1 for single-plane imaging.                                                                                                                       |
-| `channel_number` | int   | Number of channels per plane. Must be 1 or 2.                                                                                                                                             |
+| Field            | Type  | Description                                                         |
+|------------------|-------|---------------------------------------------------------------------|
+| `frame_rate`     | float | Volume acquisition rate in Hz.                                      |
+| `plane_number`   | int   | Number of Z-planes acquired per volume. 1 for single-plane imaging. |
+| `channel_number` | int   | Number of channels per plane. Must be 1 or 2.                       |
+
+For multi-plane recordings, `frame_rate` is the rate at which complete volumes are acquired, and the
+per-plane rate is `frame_rate / plane_number`.
 
 ### MROI fields (required when roi_number > 1)
 
@@ -345,27 +366,37 @@ For dual-channel recordings, cindra routes the functional channel into `channel_
 channel into `channel_2_data.bin` per plane. When adopting binaries directly, place the functional-channel data
 in `channel_1_data.bin`, since the rest of the pipeline assumes channel 1 holds the functional channel.
 
-**Step 5: Verify file sizes.**
+**Step 5: Verify file sizes and record the frame geometry.**
 
 For each binary file, confirm that the file size matches the expected value:
 `frame_count * height * width * 2` bytes. A mismatch indicates incorrect dimensions, frame count, or data
 type. Ask the user to re-check their metadata.
 
+Then write the confirmed geometry into the `io:` section of each plane's
+`recording/cindra/plane_N/runtime_data.yaml`, setting `frame_height`, `frame_width`, and `frame_count`. The
+bootstrap from Step 3 leaves all three at 0, because only TIFF conversion populates them and binarization returns
+early without touching them once it finds valid binaries. Every later stage reads the geometry from this file, so
+a plane left at 0 fails registration with "Unable to register plane {index}. A plane must contain at least 50
+frames to be processed, but the input plane contains only 0 frames."
+
 **Step 6: Run binarization.**
 
 With the bootstrap (Step 3) and valid binaries (Step 4) in place, run binarization normally. Cindra loads the
-existing plane contexts, confirms each `registered_binary_path` exists, and skips TIFF conversion. If
-binarization instead attempts conversion or reports missing binaries, the bootstrap or file placement is
-incorrect, so re-check Steps 3-4 and the format requirements above.
+existing plane contexts and skips TIFF conversion only when three checks pass for every plane: each
+`registered_binary_path` exists, no `<binary>.registering` marker sits beside it, and the binary's size matches the
+frame geometry recorded for its plane in Step 5. Any check failing, or `file_io.repeat_binarization` being True,
+makes cindra rebuild every plane's binary from the source TIFFs instead, which cannot succeed for adopted data
+because no raw TIFFs exist, so re-check Steps 3-5 and the format requirements above.
 
 **Step 7: Run registration for every plane.**
 
 Adopted data follows the standard phase order of binarization, registration, processing, and combination. Run
 the registration phase for every plane before dispatching any processing job. Registration writes the reference
-image, the motion offsets, the valid pixel ranges, and the bad-frame mask into each plane's `registration_data/`
-directory, and processing reads all of them back before detecting ROIs. A plane that carries no
-`registration_data/` fails at the start of processing with "Unable to process plane {index}. The plane must be
-registered before ROI detection...", so a binarize-then-process dispatch stops at the first processing job.
+image, the motion offsets, and the bad-frame mask into each plane's `registration_data/` directory and the valid
+pixel ranges into the plane's `runtime_data.yaml`, and processing reads all of them back before detecting ROIs. A
+plane that carries no `registration_data/` fails at the start of processing with "Unable to process plane {index}.
+The plane must be registered before ROI detection...", so a binarize-then-process dispatch stops at the first
+processing job.
 
 ---
 
@@ -374,13 +405,25 @@ registered before ROI detection...", so a binarize-then-process dispatch stops a
 ### Frame count not divisible by plane_number * channel_number
 
 **Causes and fixes:**
-- **Incomplete final volume:** The recording was stopped mid-volume. Remove trailing incomplete frames from the
-  last TIFF, or exclude the last TIFF via `file_io.ignored_file_names` in the pipeline configuration
-  (see `/single-recording-configuration` Section 3).
+- **Incomplete final volume:** The recording was stopped mid-volume. This is not an error and needs no fix.
+  Binarization keeps those frames per-plane, and only the combined traces are trimmed to the shortest plane.
 - **Flyback frames included:** Some microscopes include flyback plane frames. Add these to
   `main.ignored_flyback_planes` in the pipeline configuration (the flyback planes are still part of the
   interleave pattern but are discarded during processing).
 - **Wrong plane/channel count:** Re-examine the experiment metadata to confirm the actual values.
+
+### Frame shape differs between TIFF files
+
+Binarization fails with `Unable to determine frame dimensions. Every TIFF file in the data directory must hold frames of
+the same shape...`, naming the offending files and both shapes.
+
+**Causes and fixes:**
+- **Anatomical z-stack in the data directory:** the usual cause. Add the file's stem to `file_io.ignored_file_names`
+  and re-run binarization. Do not delete the z-stack.
+- **Mixed acquisitions in one directory:** two recordings with different fields of view were written to the same
+  folder. Separate them into one directory per recording.
+- **Genuinely ragged recording:** re-check the acquisition, because cindra cannot combine differently shaped frames
+  into one plane binary.
 
 ### MROI line index determination
 
@@ -419,7 +462,8 @@ Acquisition Data Preparation Compliance:
 - [ ] For MROI data: roi_lines, roi_x_coordinates, roi_y_coordinates are set correctly
 - [ ] Review any warnings from validation (unrecognized fields, unused MROI fields)
 - [ ] `validate_recording_readiness_tool` reports no errors (final readiness gate)
-- [ ] Review readiness warnings (interleave remainder, low frame count, dtype cast, dimension mismatches)
+- [ ] Review readiness warnings (interleave remainder, low frame count, dtype cast, differing frame shapes)
+- [ ] Any differing-frame-shape warning names a file already listed in `file_io.ignored_file_names`
 ```
 
 **End point**: Data preparation is complete once all recordings pass the checklist above. If this skill was

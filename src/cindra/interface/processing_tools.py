@@ -12,15 +12,23 @@ from __future__ import annotations
 import os
 from enum import StrEnum
 import shutil
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from threading import Lock, Thread
 from dataclasses import field, dataclass
 
 import yaml  # type: ignore[import-untyped]
 from natsort import natsorted
-from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, TimestampPrecisions, get_timestamp
-from ataraxis_base_utilities import resolve_worker_count, resolve_parallel_job_capacity
+from ataraxis_time import (
+    TimeUnits,
+    PrecisionTimer,
+    TimerPrecisions,
+    TimestampFormats,
+    TimestampPrecisions,
+    convert_time,
+    get_timestamp,
+)
+from ataraxis_base_utilities import resolve_worker_count
 from ataraxis_data_structures import JobState, ProcessingStatus, ProcessingTracker
 
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
@@ -31,13 +39,26 @@ from ..pipelines import (
     run_single_recording_pipeline,
 )
 from ..allocation import (
+    ALL_CORES_REQUEST,
+    DISCOVERY_WORKERS,
+    EXTRACTION_WORKERS,
     PROCESSING_WORKERS,
     BINARIZATION_WORKERS,
     REGISTRATION_WORKERS,
+    MULTI_RECORDING_PHASES,
+    SINGLE_RECORDING_PHASES,
+    PrerequisiteScope,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
+    resolve_pipeline_jobs,
+    resolve_downstream_phases,
+    resolve_multi_recording_jobs,
+    resolve_single_recording_jobs,
 )
 from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 from .mcp_instance import mcp
 
 _RESERVED_CORES: int = 2
@@ -53,14 +74,6 @@ _COMBINATION_WORKERS: int = 1
 """The number of CPU cores one combination job holds. The combination stage merges the per-plane result files with
 serial input and output and takes no worker argument, so each of its jobs occupies exactly one core."""
 
-_PREFERRED_WORKERS_PER_JOB: int = 30
-"""The preferred number of CPU cores per parallel processing job for optimal throughput."""
-
-_MINIMUM_WORKERS_PER_JOB: int = 10
-"""The minimum number of CPU cores required per job when running multiple jobs in parallel."""
-
-_WORKER_MULTIPLE: int = 5
-"""Worker counts are rounded down to the nearest multiple of this value for clean allocation."""
 
 _PROCESSING_MEMORY_GIGABYTES_PER_JOB: float = 15.0
 """The peak resident memory, in gigabytes, that one processing job holds. Measured on a real nine-plane run where
@@ -111,9 +124,9 @@ class _ResourceClass:
 
     name: str
     """The name of the resource class, used as the key of the per-class queues and of the reported allocation."""
-    workers_per_job: int | None
-    """The number of CPU cores each job of this class holds, or None when the class has no measured knee and resolves
-    its allocation by saturating the CPU budget across the queued jobs."""
+    workers_per_job: int
+    """The number of CPU cores each job of this class holds, taken from the measured stage defaults in
+    cindra.allocation, except for the combination class, whose single core is defined by _COMBINATION_WORKERS."""
     fixed_parallel_jobs: int | None
     """The machine-independent concurrency cap of this class, or None when the cap is derived from the CPU budget and,
     for memory-bound classes, from the available system memory. A per-class cap bounds one class in isolation, so the
@@ -159,22 +172,33 @@ _COMBINATION_RESOURCES: _ResourceClass = _ResourceClass(
 """The resource class of the combination jobs. Combination merges per-plane result files with serial input and output,
 so each job holds one core and the concurrency cap is the fixed I/O limit."""
 
-_MULTI_RECORDING_RESOURCES: _ResourceClass = _ResourceClass(
-    name="multi_recording",
-    workers_per_job=None,
+_DISCOVERY_RESOURCES: _ResourceClass = _ResourceClass(
+    name="discovery",
+    workers_per_job=DISCOVERY_WORKERS,
     fixed_parallel_jobs=None,
     memory_gigabytes_per_job=0.0,
 )
-"""The resource class of the multi-recording discovery and extraction jobs. Neither stage has a measured scaling knee,
-so this class keeps the saturating allocation that distributes the CPU budget across the queued jobs."""
+"""The resource class of the multi-recording discovery jobs. Discovery registers every recording of one animal against
+the others, so each job holds the stage's saturating allocation and its concurrency is bounded by the shared CPU budget
+alone."""
+
+_EXTRACTION_RESOURCES: _ResourceClass = _ResourceClass(
+    name="extraction",
+    workers_per_job=EXTRACTION_WORKERS,
+    fixed_parallel_jobs=None,
+    memory_gigabytes_per_job=0.0,
+)
+"""The resource class of the multi-recording extraction jobs. Extraction reads each frame batch serially before the
+kernel consumes it, so the stage plateaus at its measured worker count and the remaining budget is better spent on
+running more recordings concurrently."""
 
 _RESOURCE_CLASS_BY_JOB_NAME: dict[str, _ResourceClass] = {
     SingleRecordingJobNames.BINARIZE: _BINARIZATION_RESOURCES,
     SingleRecordingJobNames.REGISTER: _REGISTRATION_RESOURCES,
     SingleRecordingJobNames.PROCESS: _PROCESSING_RESOURCES,
     SingleRecordingJobNames.COMBINE: _COMBINATION_RESOURCES,
-    MultiRecordingJobNames.DISCOVER: _MULTI_RECORDING_RESOURCES,
-    MultiRecordingJobNames.EXTRACT: _MULTI_RECORDING_RESOURCES,
+    MultiRecordingJobNames.DISCOVER: _DISCOVERY_RESOURCES,
+    MultiRecordingJobNames.EXTRACT: _EXTRACTION_RESOURCES,
 }
 """Maps every pipeline job name to the resource class that governs its worker count and its concurrency cap."""
 
@@ -273,7 +297,6 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
             "error": f"Unable to get recording status. Recording directory not found: {recording_path}.",
         }
 
-    # Reads single-recording tracker status.
     single_tracker_path = recording / "cindra" / SINGLE_RECORDING_TRACKER_NAME
     if single_tracker_path.exists():
         single_recording_status = _read_single_recording_tracker(
@@ -282,7 +305,6 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
     else:
         single_recording_status = {"status": "not_started"}
 
-    # Reads multi-recording tracker status from all datasets.
     multi_recording_status: dict[str, object]
     multi_recording_base = recording / "cindra" / "multi_recording"
     if multi_recording_base.exists():
@@ -318,15 +340,16 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
         root_directory: The absolute path to the root directory to search.
 
     Returns:
-        On success, contains 'single_recordings' and 'multi_recordings' lists with per-tracker status, and a
-        'summary' with aggregate counts for completed, failed, in_progress, and not_started pipelines. On failure,
-        contains an 'error' describing the issue. Both cases include a 'success' flag. Each per-tracker entry carries a
-        synthesized status string: single-recording entries use completed, failed, scheduled, binarizing, registering,
-        processing, or combining, and multi-recording entries use completed, failed, scheduled, discovering, or
-        extracting. The summary roll-up counts completed as completed, failed as failed, scheduled as not_started, and
-        buckets every other status (the *-ing phases) as in_progress. These differ from the
-        get_processing_jobs_status_tool summary vocabulary of pending, running, succeeded, and failed, which describes
-        the same jobs (pending equals scheduled, and running spans the *-ing phases).
+        On success, contains the 'root_directory', 'single_recordings' and 'multi_recordings' lists with per-tracker
+        status, and a 'summary' with 'total_single_recordings', 'total_multi_recording_datasets', and aggregate counts
+        for completed, failed, in_progress, and not_started pipelines, plus 'permission_errors' when a search was
+        denied access. On failure, contains an 'error' describing the issue. Both cases include a 'success' flag. Each
+        per-tracker entry carries a synthesized status string: single-recording entries use completed, failed,
+        scheduled, binarizing, registering, processing, or combining, and multi-recording entries use completed,
+        failed, scheduled, discovering, or extracting. The summary roll-up counts completed as completed, failed as
+        failed, scheduled as not_started, and buckets every other status (the *-ing phases) as in_progress. These
+        differ from the get_processing_jobs_status_tool summary vocabulary of pending, running, succeeded, and failed,
+        which describes the same jobs (pending equals scheduled, and running spans the *-ing phases).
     """
     root = Path(root_directory)
 
@@ -344,14 +367,12 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
 
     permission_errors: list[str] = []
 
-    # Discovers single-recording tracker files.
     single_tracker_paths: list[Path] = []
     try:
         single_tracker_paths.extend(root.rglob(SINGLE_RECORDING_TRACKER_NAME))
     except PermissionError as error:
         permission_errors.append(f"Access denied during single-recording search: {error}")
 
-    # Discovers multi-recording tracker files.
     multi_tracker_paths: list[Path] = []
     try:
         multi_tracker_paths.extend(root.rglob(MULTI_RECORDING_TRACKER_NAME))
@@ -446,7 +467,7 @@ def prepare_single_recording_batch_tool(
 
     Args:
         recording_paths: List of absolute paths to recording root directories (used as file_io.data_path per
-            recording). These should be session-level roots, not sub-paths to raw data; the pipeline resolves
+            recording). These should be session-level roots, not sub-paths to raw data. The pipeline resolves
             raw data locations internally via recursive search.
         configuration_path: The absolute path to the template configuration YAML file.
         recording_output_paths: List of absolute paths for per-recording output directories (used as
@@ -458,8 +479,9 @@ def prepare_single_recording_batch_tool(
         register_jobs, process_jobs, combine_job) including job_id, name, specifier, and current status. The output_path
         is the absolute output directory and the parent of the cindra/ directory, where configuration_path equals
         <output_path>/cindra/configuration.yaml, so downstream verify, status, and clean tools need no re-derivation.
-        Also includes 'total_recordings' and 'total_jobs' counts, plus 'migrated_recordings' listing any recording whose
-        tracker gained the missing register jobs. On failure, contains an 'error' describing the issue.
+        Also includes 'total_recordings' and 'total_jobs' counts, plus 'migrated_recordings' listing any recording
+        whose tracker gained the missing register jobs and 'invalid_paths' listing any provided path that is not an
+        existing directory. On failure, contains an 'error' describing the issue.
     """
     if not recording_paths:
         return {"success": False, "error": "Unable to prepare batch. At least one recording path is required."}
@@ -536,12 +558,11 @@ def prepare_single_recording_batch_tool(
             # immediately.
             if process_jobs and not register_jobs:
                 plane_specifiers = natsorted({specifier for _, specifier in process_jobs.values()})
-                migrated_jobs: list[tuple[str, str]] = [
-                    (SingleRecordingJobNames.BINARIZE, ""),
-                    *((SingleRecordingJobNames.REGISTER, specifier) for specifier in plane_specifiers),
-                    *((SingleRecordingJobNames.PROCESS, specifier) for specifier in plane_specifiers),
-                    (SingleRecordingJobNames.COMBINE, ""),
-                ]
+                # Rebuilds the universe over the tracker's existing plane specifiers, so that a migrated tracker keeps
+                # the specifiers its processing jobs already carry.
+                migrated_jobs: list[tuple[str, str]] = resolve_pipeline_jobs(
+                    phases=SINGLE_RECORDING_PHASES, specifiers=plane_specifiers
+                )
                 tracker.align_jobs(jobs=migrated_jobs, universe=migrated_jobs)
                 registry = tracker.snapshot()
                 register_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.REGISTER)
@@ -558,31 +579,27 @@ def prepare_single_recording_batch_tool(
                     "executor_id": job_info.executor_id,
                 }
 
-            register_entries: list[dict[str, object]] = []
-            for job_id, (name, specifier) in register_jobs.items():
-                job_info = registry[job_id]
-                register_entries.append(
-                    {
-                        "job_id": job_id,
-                        "name": name,
-                        "specifier": specifier,
-                        "status": job_info.status.name.lower(),
-                        "executor_id": job_info.executor_id,
-                    }
-                )
+            register_entries: list[dict[str, object]] = [
+                {
+                    "job_id": job_id,
+                    "name": name,
+                    "specifier": specifier,
+                    "status": registry[job_id].status.name.lower(),
+                    "executor_id": registry[job_id].executor_id,
+                }
+                for job_id, (name, specifier) in register_jobs.items()
+            ]
 
-            process_entries: list[dict[str, object]] = []
-            for job_id, (name, specifier) in process_jobs.items():
-                job_info = registry[job_id]
-                process_entries.append(
-                    {
-                        "job_id": job_id,
-                        "name": name,
-                        "specifier": specifier,
-                        "status": job_info.status.name.lower(),
-                        "executor_id": job_info.executor_id,
-                    }
-                )
+            process_entries: list[dict[str, object]] = [
+                {
+                    "job_id": job_id,
+                    "name": name,
+                    "specifier": specifier,
+                    "status": registry[job_id].status.name.lower(),
+                    "executor_id": registry[job_id].executor_id,
+                }
+                for job_id, (name, specifier) in process_jobs.items()
+            ]
 
             combine_entry: dict[str, object] = {}
             for job_id, (name, specifier) in combine_jobs.items():
@@ -625,13 +642,9 @@ def prepare_single_recording_batch_tool(
             # job as a dispatch argument, so this one file serves every job dispatched against it.
             recording_configuration.save(file_path=recording_configuration_path)
 
-            # Builds the job list in execution order: binarize, all register planes, all process planes, combine.
-            jobs: list[tuple[str, str]] = [(SingleRecordingJobNames.BINARIZE, "")]
-            jobs.extend(
-                (SingleRecordingJobNames.REGISTER, f"plane_{plane_index}") for plane_index in range(plane_count)
-            )
-            jobs.extend((SingleRecordingJobNames.PROCESS, f"plane_{plane_index}") for plane_index in range(plane_count))
-            jobs.append((SingleRecordingJobNames.COMBINE, ""))
+            # Builds the recording's job universe from the exported phase model, which orders the phases and expands
+            # the per-plane ones.
+            jobs: list[tuple[str, str]] = resolve_single_recording_jobs(plane_count=plane_count)
 
             tracker = ProcessingTracker(file_path=tracker_path)
             job_ids = tracker.initialize_jobs(jobs=jobs)
@@ -729,8 +742,9 @@ def prepare_multi_recording_batch_tool(
         (discover_job, extract_jobs) including job_id, name, specifier, and current status. The dataset_name field is
         the resolved lowercased dataset name. To verify a dataset, call verify_multi_recording_output_tool with the
         dataset_name plus any recording_path belonging to the dataset (one of the input recording_paths, whose cindra/
-        subdirectory is resolved automatically). Also includes 'total_datasets' and 'total_jobs' counts. On failure,
-        contains an 'error' describing the issue.
+        subdirectory is resolved automatically). Also includes 'total_datasets' and 'total_jobs' counts, plus
+        'invalid_configurations' listing every rejected dataset entry with its reason. On failure, contains an 'error'
+        describing the issue.
     """
     if not dataset_configurations:
         return {
@@ -831,18 +845,16 @@ def prepare_multi_recording_batch_tool(
                     "executor_id": job_info.executor_id,
                 }
 
-            extract_entries: list[dict[str, object]] = []
-            for job_id, (name, specifier) in extract_jobs.items():
-                job_info = registry[job_id]
-                extract_entries.append(
-                    {
-                        "job_id": job_id,
-                        "name": name,
-                        "specifier": specifier,
-                        "status": job_info.status.name.lower(),
-                        "executor_id": job_info.executor_id,
-                    }
-                )
+            extract_entries: list[dict[str, object]] = [
+                {
+                    "job_id": job_id,
+                    "name": name,
+                    "specifier": specifier,
+                    "status": registry[job_id].status.name.lower(),
+                    "executor_id": registry[job_id].executor_id,
+                }
+                for job_id, (name, specifier) in extract_jobs.items()
+            ]
 
             total_jobs += len(discover_jobs) + len(extract_jobs)
 
@@ -858,9 +870,8 @@ def prepare_multi_recording_batch_tool(
             # New dataset: saves configuration and initializes tracker.
             configuration.save(file_path=configuration_file_path)
 
-            # Builds the job list: discover, then extract per recording.
-            jobs: list[tuple[str, str]] = [(MultiRecordingJobNames.DISCOVER, "")]
-            jobs.extend((MultiRecordingJobNames.EXTRACT, recording_id) for recording_id in recording_ids)
+            # Builds the dataset's job universe from the exported phase model.
+            jobs: list[tuple[str, str]] = resolve_multi_recording_jobs(recording_ids=recording_ids)
 
             tracker = ProcessingTracker(file_path=tracker_path)
             job_ids = tracker.initialize_jobs(jobs=jobs)
@@ -913,7 +924,7 @@ def reset_processing_phases_tool(
 ) -> dict[str, object]:
     """Selectively resets specific phases in an existing tracker for re-runs while preserving upstream phases.
 
-    This is the only way to reset completed phases; prepare tools never reinitialize existing trackers. For each phase
+    This is the only way to reset completed phases. Prepare tools never reinitialize existing trackers. For each phase
     listed in ``phases``, all matching jobs are reset to SCHEDULED status. Downstream dependent phases are
     automatically included in the reset to maintain consistency (e.g., resetting 'binarization' also resets
     'registration', 'processing', and 'combination'). Jobs belonging to phases not in the expanded reset set retain
@@ -968,14 +979,11 @@ def reset_processing_phases_tool(
     # Expands the requested phases to include all downstream dependents. Resetting an upstream phase invalidates
     # all phases that depend on its output, so they must be reset too.
     requested_phases = list(phases)
-    if pipeline_type == "single-recording":
-        phases = sorted(_expand_single_recording_phases(phases=phases))
-    else:
-        # Dependency chain: discovery → extraction.
-        expanded = set(phases)
-        if MultiRecordingJobNames.DISCOVER.value in expanded:
-            expanded.add(MultiRecordingJobNames.EXTRACT.value)
-        phases = sorted(expanded)
+    single_recording = pipeline_type == "single-recording"
+    phases = _order_phases_by_execution(
+        resolve_downstream_phases(phase_names=phases, single_recording=single_recording),
+        single_recording=single_recording,
+    )
 
     tracker = ProcessingTracker(file_path=path)
 
@@ -1050,9 +1058,9 @@ def clean_processing_output_tool(
             cindra/multi_recording/<dataset>, and the match is case-sensitive.
 
     Returns:
-        On success, contains 'deleted_files', 'deleted_dirs', 'total_deleted', the 'requested_phases' and
-        'effective_phases' after dependency expansion. On failure, contains an 'error' describing the issue.
-        Both cases include a 'success' flag.
+        On success, contains a 'cleaned' flag, the 'recording_path', 'deleted_files', 'deleted_dirs', 'total_deleted',
+        and the 'requested_phases' and 'effective_phases' after dependency expansion, plus 'errors' when a deletion
+        failed. On failure, contains an 'error' describing the issue. Both cases include a 'success' flag.
     """
     recording = Path(recording_path)
 
@@ -1089,13 +1097,11 @@ def clean_processing_output_tool(
 
     # Expands the requested phases to include all downstream dependents.
     requested_phases = list(phases)
-    if pipeline_type == "single-recording":
-        effective_phases = sorted(_expand_single_recording_phases(phases=phases))
-    else:
-        expanded = set(phases)
-        if MultiRecordingJobNames.DISCOVER.value in expanded:
-            expanded.add(MultiRecordingJobNames.EXTRACT.value)
-        effective_phases = sorted(expanded)
+    single_recording = pipeline_type == "single-recording"
+    effective_phases = _order_phases_by_execution(
+        resolve_downstream_phases(phase_names=phases, single_recording=single_recording),
+        single_recording=single_recording,
+    )
 
     deleted_files: list[str] = []
     deleted_dirs: list[str] = []
@@ -1112,23 +1118,25 @@ def clean_processing_output_tool(
         effective_set = set(effective_phases)
 
         # Cleans per-plane files, partitioning the shared detection_data directory by the phase that owns each array.
-        plane_dirs = sorted(d for d in cindra_root.iterdir() if d.is_dir() and d.name.startswith("plane_"))
-        for plane_dir in plane_dirs:
-            plane_detection_dir = plane_dir / "detection_data"
+        plane_directories = natsorted(
+            entry for entry in cindra_root.iterdir() if entry.is_dir() and entry.name.startswith("plane_")
+        )
+        for plane_directory in plane_directories:
+            plane_detection_directory = plane_directory / "detection_data"
 
             if SingleRecordingJobNames.BINARIZE in effective_set:
                 for name in ("channel_1_data.bin", "channel_2_data.bin"):
-                    _delete_file(path=plane_dir / name, deleted=deleted_files, errors=errors)
+                    _delete_file(path=plane_directory / name, deleted=deleted_files, errors=errors)
                 # The mean images are created by binarization and later rewritten by both registration and processing,
                 # so binarization, the phase that creates them, owns their removal. Deleting them under a downstream
                 # phase would discard the output of the phases between it and binarization.
                 for name in ("mean_image.npy", "mean_image_channel_2.npy"):
-                    _delete_file(path=plane_detection_dir / name, deleted=deleted_files, errors=errors)
+                    _delete_file(path=plane_detection_directory / name, deleted=deleted_files, errors=errors)
 
             if SingleRecordingJobNames.REGISTER in effective_set:
                 # The registration directory holds bad_frames.npy, which detection reads, so it is removed only when
                 # the registration phase itself is cleaned.
-                _delete_directory(path=plane_dir / "registration_data", deleted=deleted_dirs, errors=errors)
+                _delete_directory(path=plane_directory / "registration_data", deleted=deleted_dirs, errors=errors)
 
             if SingleRecordingJobNames.PROCESS in effective_set:
                 for name in (
@@ -1139,7 +1147,7 @@ def clean_processing_output_tool(
                     "maximum_projection_channel_2.npy",
                     "correlation_map_channel_2.npy",
                 ):
-                    _delete_file(path=plane_detection_dir / name, deleted=deleted_files, errors=errors)
+                    _delete_file(path=plane_detection_directory / name, deleted=deleted_files, errors=errors)
                 for name in (
                     "roi_masks.npz",
                     "roi_masks_channel_2.npz",
@@ -1158,9 +1166,8 @@ def clean_processing_output_tool(
                     "cell_colocalization.npy",
                     "corrected_structural_mean_image.npy",
                 ):
-                    _delete_file(path=plane_dir / name, deleted=deleted_files, errors=errors)
+                    _delete_file(path=plane_directory / name, deleted=deleted_files, errors=errors)
 
-        # Cleans combined files.
         if SingleRecordingJobNames.COMBINE in effective_set:
             _delete_directory(path=cindra_root / "detection_data", deleted=deleted_dirs, errors=errors)
             for name in (
@@ -1268,8 +1275,8 @@ def clean_processing_output_tool(
 def execute_processing_jobs_tool(
     jobs: list[dict[str, str]],
     *,
-    workers_per_job: int = -1,
-    max_parallel_jobs: int = -1,
+    workers_per_job: int | None = None,
+    max_parallel_jobs: int | None = None,
 ) -> dict[str, object]:
     """Dispatches pipeline jobs for background execution with prerequisite validation and resource allocation.
 
@@ -1286,35 +1293,35 @@ def execute_processing_jobs_tool(
         for multi-recording work.
 
         Each job runs under the resource class of its phase. Binarization holds 4 cores per job at a fixed concurrency
-        of 4, combination holds 1 core per job at the same fixed concurrency because it merges result files serially,
-        registration holds 8 cores per job with a concurrency bounded by the CPU budget, and processing holds 10 cores
-        per job with a concurrency bounded by both the CPU budget and the available system memory. The binarization and
+        of 4. Combination holds 1 core per job at the same fixed concurrency, because it merges result files serially.
+        Registration holds 8 cores per job with a concurrency bounded by the CPU budget. Processing holds 10 cores per
+        job with a concurrency bounded by both the CPU budget and the available system memory. The binarization and
         combination classes ignore both parameters below.
 
         Every class dispatches during the same cycle, so the dispatcher additionally holds the sum of the cores
-        committed by the running jobs of every class inside the session CPU budget reported as 'cpu_budget', which is
-        the machine's core count minus the cores reserved for the system.
+        committed by the running jobs of every class inside the session CPU budget reported as 'cpu_budget'. That
+        budget is the machine's core count minus the cores reserved for the system.
 
     Args:
         jobs: List of job descriptors, each a dictionary with 'configuration_path' (absolute path to the pipeline
             configuration file), 'tracker_path' (absolute path to the ProcessingTracker file), 'job_id' (the
             hexadecimal job identifier from the prepare manifest), and 'pipeline_type' ('single-recording' or
             'multi-recording').
-        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Set to
-            -1 to accept the measured defaults. The multi-recording class has no measured default and keeps the four
-            saturating-allocation override combinations: both parameters at -1 prefer ~30 cores per job with a minimum
-            of 10 rounded to multiples of 5, this parameter alone derives the parallel capacity from it, the other
-            parameter alone makes workers budget // max_parallel_jobs rounded down to a multiple of 5 with no 10-worker
-            floor, and both together are used as-is.
+        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Leave
+            as None to accept the measured defaults, which are 4 cores for binarization, 8 for registration, 10 for
+            processing, 1 for combination, 30 for multi-recording discovery, and 16 for multi-recording extraction.
+            Set to -1 to give every job the whole session core budget. The override is a single scalar applied to
+            every non-fixed class alike.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
-            non-fixed resource class. Set to -1 to accept the derived caps.
+            non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
+            the job count bounds concurrency.
 
     Returns:
         Always contains a 'success' flag indicating the tool ran. On a started session, also contains a 'started' flag,
-        'total_jobs' dispatched, the session 'cpu_budget' that bounds the classes in aggregate, a 'resource_classes'
-        mapping that reports the resolved workers_per_job, max_parallel_jobs, and job_count of every class present in
-        the session, and 'invalid_jobs' listing any jobs that failed validation with reasons. On failure, contains
-        success:False and an 'error' describing the issue.
+        'total_jobs' dispatched, and the session 'cpu_budget' that bounds the classes in aggregate. A started session
+        further reports a 'resource_classes' mapping with the resolved workers_per_job, max_parallel_jobs, and
+        job_count of every class present in the session, and 'invalid_jobs' listing any jobs that failed validation
+        with reasons. On failure, contains success:False and an 'error' describing the issue.
     """
     if not jobs:
         return {"success": False, "error": "Unable to execute jobs. At least one job descriptor is required."}
@@ -1330,7 +1337,6 @@ def execute_processing_jobs_tool(
     invalid_jobs: list[dict[str, str]] = []
 
     for job_entry in jobs:
-        # Validates required keys.
         missing_keys = required_keys - set(job_entry)
         if missing_keys:
             invalid_jobs.append({"job": str(job_entry), "reason": f"Missing required keys: {missing_keys}"})
@@ -1411,18 +1417,20 @@ def execute_processing_jobs_tool(
 def get_processing_jobs_status_tool() -> dict[str, object]:
     """Returns the current status of the active job execution session.
 
-    Reads ProcessingTracker files from disk for each job in the execution session to report per-job progress. All
-    status information is derived from the on-disk tracker files rather than in-memory state.
+    Reads ProcessingTracker files from disk for each job in the execution session to report per-job progress. Per-job
+    status comes from the on-disk tracker files rather than in-memory state, while the session-level 'active',
+    'awaiting_prerequisites', and 'resource_classes' fields come from the in-memory execution state.
 
     Returns:
         Always contains a 'success' flag indicating the tool ran. On an active session, also contains an 'active' flag,
-        per-job status entries in 'jobs', a 'summary' with counts for pending, running, succeeded, and failed jobs, an
-        'awaiting_prerequisites' count of jobs still in the admission pool, and a 'resource_classes' mapping that
-        reports the pending and active job counts of every class in the session. The 'active' flag reflects
-        manager-thread liveness, not whether jobs ever ran. The execution manager clears session state once the session
-        drains, so afterwards this tool reports active:False with empty 'jobs' and a zero 'summary' plus a 'note'. Final
-        per-job outcomes must then be re-read via get_recording_status_tool, get_batch_status_overview_tool, or
-        verify_*_output_tool.
+        per-job status entries in 'jobs', a 'summary' with counts for pending, running, succeeded, and failed jobs, and
+        an 'awaiting_prerequisites' count of jobs still in the admission pool. An active session further reports a
+        'resource_classes' mapping with the resolved 'workers_per_job' and 'max_parallel_jobs' of every class in the
+        session, together with its 'pending' job count and the list of 'active' dispatch keys. The 'active' flag
+        reflects manager-thread liveness, not whether jobs ever ran. The execution manager clears session state once
+        the session drains, so afterwards this tool reports active:False with empty 'jobs' and a zero 'summary' plus a
+        'note'. Final per-job outcomes must then be re-read via get_recording_status_tool,
+        get_batch_status_overview_tool, or verify_*_output_tool.
     """
     if _job_execution_state is None:
         return {
@@ -1462,7 +1470,6 @@ def get_processing_jobs_status_tool() -> dict[str, object]:
         job_info = tracker.get_job_info(job_id=pending_job.job_id)
         status_name = status.name.lower()
 
-        # Counts by status category.
         if status == ProcessingStatus.SCHEDULED:
             summary_counts["pending"] += 1
         elif status == ProcessingStatus.RUNNING:
@@ -1487,7 +1494,6 @@ def get_processing_jobs_status_tool() -> dict[str, object]:
 
         jobs_status.append(job_entry)
 
-    # Determines if the manager thread is still alive.
     manager_alive = state.manager_thread is not None and state.manager_thread.is_alive()
 
     return {
@@ -1510,8 +1516,8 @@ def get_active_execution_timing_tool() -> dict[str, object]:
 
     Returns:
         Always contains a 'success' flag indicating the tool ran. Also contains an 'active' flag, per-job timing in
-        'jobs', and a 'session' summary with total_elapsed_seconds, completed, failed, running, and pending counts, and
-        throughput_jobs_per_hour when applicable.
+        'jobs', and a 'session' summary with total_elapsed_seconds, completed_count, failed_count, running_count, and
+        pending_count, plus throughput_jobs_per_hour when applicable.
     """
     if _job_execution_state is None:
         return {
@@ -1531,7 +1537,9 @@ def get_active_execution_timing_tool() -> dict[str, object]:
     # the session drains and this tool must keep reporting on the session it started with.
     state = _job_execution_state
 
-    current_us = int(get_timestamp(output_format=TimestampFormats.INTEGER, precision=TimestampPrecisions.MICROSECOND))
+    current_microseconds = int(
+        get_timestamp(output_format=TimestampFormats.INTEGER, precision=TimestampPrecisions.MICROSECOND)
+    )
 
     jobs_timing: list[dict[str, object]] = []
     earliest_start: int | None = None
@@ -1552,27 +1560,47 @@ def get_active_execution_timing_tool() -> dict[str, object]:
         }
 
         if job_info.started_at is not None:
-            started_at_us = int(job_info.started_at)
-            entry["started_at"] = started_at_us
-            if earliest_start is None or started_at_us < earliest_start:
-                earliest_start = started_at_us
+            started_at_microseconds = int(job_info.started_at)
+            entry["started_at"] = started_at_microseconds
+            if earliest_start is None or started_at_microseconds < earliest_start:
+                earliest_start = started_at_microseconds
 
         if job_info.completed_at is not None:
             entry["completed_at"] = job_info.completed_at
 
         if job_info.status == ProcessingStatus.RUNNING and job_info.started_at is not None:
-            entry["elapsed_seconds"] = round((current_us - int(job_info.started_at)) / 1_000_000, 2)
+            entry["elapsed_seconds"] = round(
+                convert_time(
+                    time=current_microseconds - int(job_info.started_at),
+                    from_units=TimeUnits.MICROSECOND,
+                    to_units=TimeUnits.SECOND,
+                    as_float=True,
+                ),
+                ndigits=2,
+            )
             running_count += 1
         elif job_info.status == ProcessingStatus.SUCCEEDED:
             if job_info.started_at is not None and job_info.completed_at is not None:
                 entry["duration_seconds"] = round(
-                    (int(job_info.completed_at) - int(job_info.started_at)) / 1_000_000, 2
+                    convert_time(
+                        time=int(job_info.completed_at) - int(job_info.started_at),
+                        from_units=TimeUnits.MICROSECOND,
+                        to_units=TimeUnits.SECOND,
+                        as_float=True,
+                    ),
+                    ndigits=2,
                 )
             completed_count += 1
         elif job_info.status == ProcessingStatus.FAILED:
             if job_info.started_at is not None and job_info.completed_at is not None:
                 entry["duration_seconds"] = round(
-                    (int(job_info.completed_at) - int(job_info.started_at)) / 1_000_000, 2
+                    convert_time(
+                        time=int(job_info.completed_at) - int(job_info.started_at),
+                        from_units=TimeUnits.MICROSECOND,
+                        to_units=TimeUnits.SECOND,
+                        as_float=True,
+                    ),
+                    ndigits=2,
                 )
             failed_count += 1
         else:
@@ -1580,8 +1608,19 @@ def get_active_execution_timing_tool() -> dict[str, object]:
 
         jobs_timing.append(entry)
 
-    # Computes session-level timing.
-    total_elapsed = round((current_us - earliest_start) / 1_000_000, 2) if earliest_start is not None else 0.0
+    total_elapsed = (
+        round(
+            convert_time(
+                time=current_microseconds - earliest_start,
+                from_units=TimeUnits.MICROSECOND,
+                to_units=TimeUnits.SECOND,
+                as_float=True,
+            ),
+            ndigits=2,
+        )
+        if earliest_start is not None
+        else 0.0
+    )
 
     session: dict[str, object] = {
         "total_elapsed_seconds": total_elapsed,
@@ -1592,7 +1631,11 @@ def get_active_execution_timing_tool() -> dict[str, object]:
     }
 
     if total_elapsed > 0 and completed_count > 0:
-        session["throughput_jobs_per_hour"] = round(completed_count / (total_elapsed / 3600), 2)
+        session["throughput_jobs_per_hour"] = round(
+            completed_count
+            / convert_time(time=total_elapsed, from_units=TimeUnits.SECOND, to_units=TimeUnits.HOUR, as_float=True),
+            ndigits=2,
+        )
 
     manager_alive = state.manager_thread is not None and state.manager_thread.is_alive()
 
@@ -1646,7 +1689,6 @@ def cancel_processing_jobs_tool() -> dict[str, object]:
         for pending_queue in state.pending_queues.values():
             pending_queue.clear()
 
-        # Reads final state from trackers.
         total_succeeded = 0
         total_failed = 0
         seen_trackers: set[Path] = set()
@@ -1687,8 +1729,8 @@ def execute_full_pipeline_tool(
     configuration_path: str | None = None,
     recording_output_paths: list[str] | None = None,
     dataset_configurations: list[dict[str, object]] | None = None,
-    workers_per_job: int = -1,
-    max_parallel_jobs: int = -1,
+    workers_per_job: int | None = None,
+    max_parallel_jobs: int | None = None,
 ) -> dict[str, object]:
     """Executes a complete pipeline from preparation through all phases with automatic dependency sequencing.
 
@@ -1708,12 +1750,13 @@ def execute_full_pipeline_tool(
             single-recording pipelines and must match the length of recording_paths.
         dataset_configurations: List of dataset configuration dictionaries. Required for multi-recording pipelines.
             Each must contain 'configuration_path', 'recording_paths', and 'dataset_name'.
-        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Set to
-            -1 to accept the measured defaults of 4 cores for binarization, 1 for combination, 8 for registration, and
-            10 for processing. The multi-recording class has no measured default and keeps the four
-            saturating-allocation override combinations described by execute_processing_jobs_tool.
+        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Leave
+            as None to accept the measured defaults of 4 cores for binarization, 1 for combination, 8 for
+            registration, 10 for processing, 30 for multi-recording discovery, and 16 for multi-recording extraction.
+            Set to -1 to give every job the whole session core budget.
         max_parallel_jobs: Maximum concurrent jobs per resource class, overriding the derived concurrency cap of every
-            non-fixed resource class. Set to -1 to accept the derived caps.
+            non-fixed resource class. Leave as None to accept the derived caps, or set to -1 to lift them so that only
+            the job count bounds concurrency.
 
     Returns:
         Always contains a 'success' flag indicating the tool ran, and callers MUST also check the 'started' flag rather
@@ -1793,14 +1836,14 @@ def execute_full_pipeline_tool(
         if isinstance(raw_recordings, dict):
             for recording_manifest in raw_recordings.values():
                 manifest_dict: dict[str, Any] = recording_manifest
-                config_path = Path(str(manifest_dict["configuration_path"]))
+                job_configuration_path = Path(str(manifest_dict["configuration_path"]))
                 tracker_path = Path(str(manifest_dict["tracker_path"]))
 
                 binarize = manifest_dict.get("binarize_job", {})
                 if binarize and binarize.get("status") != "succeeded":
                     binarize_phase_jobs.append(
                         _PendingJob(
-                            configuration_path=config_path,
+                            configuration_path=job_configuration_path,
                             tracker_path=tracker_path,
                             job_id=binarize["job_id"],
                             single_recording=True,
@@ -1810,7 +1853,7 @@ def execute_full_pipeline_tool(
 
                 register_phase_jobs.extend(
                     _PendingJob(
-                        configuration_path=config_path,
+                        configuration_path=job_configuration_path,
                         tracker_path=tracker_path,
                         job_id=register["job_id"],
                         single_recording=True,
@@ -1822,7 +1865,7 @@ def execute_full_pipeline_tool(
 
                 process_phase_jobs.extend(
                     _PendingJob(
-                        configuration_path=config_path,
+                        configuration_path=job_configuration_path,
                         tracker_path=tracker_path,
                         job_id=process["job_id"],
                         single_recording=True,
@@ -1836,7 +1879,7 @@ def execute_full_pipeline_tool(
                 if combine and combine.get("status") != "succeeded":
                     combine_phase_jobs.append(
                         _PendingJob(
-                            configuration_path=config_path,
+                            configuration_path=job_configuration_path,
                             tracker_path=tracker_path,
                             job_id=combine["job_id"],
                             single_recording=True,
@@ -1861,28 +1904,28 @@ def execute_full_pipeline_tool(
         if isinstance(raw_datasets, dict):
             for dataset_manifest in raw_datasets.values():
                 manifest_dict = dataset_manifest
-                config_path = Path(str(manifest_dict["configuration_path"]))
+                job_configuration_path = Path(str(manifest_dict["configuration_path"]))
                 tracker_path = Path(str(manifest_dict["tracker_path"]))
 
                 discover = manifest_dict.get("discover_job", {})
                 if discover and discover.get("status") != "succeeded":
                     discover_phase_jobs.append(
                         _PendingJob(
-                            configuration_path=config_path,
+                            configuration_path=job_configuration_path,
                             tracker_path=tracker_path,
                             job_id=discover["job_id"],
                             single_recording=False,
-                            resource_class=_MULTI_RECORDING_RESOURCES,
+                            resource_class=_DISCOVERY_RESOURCES,
                         )
                     )
 
                 extract_phase_jobs.extend(
                     _PendingJob(
-                        configuration_path=config_path,
+                        configuration_path=job_configuration_path,
                         tracker_path=tracker_path,
                         job_id=extract["job_id"],
                         single_recording=False,
-                        resource_class=_MULTI_RECORDING_RESOURCES,
+                        resource_class=_EXTRACTION_RESOURCES,
                     )
                     for extract in manifest_dict.get("extract_jobs", [])
                     if extract.get("status") != "succeeded"
@@ -1924,7 +1967,6 @@ def execute_full_pipeline_tool(
         for phase_name, phase_job_list in phase_groups
     ]
 
-    # Delegates to the shared execution session setup.
     extra_fields: dict[str, object] = {
         "pipeline_type": pipeline_type,
         "phase_count": len(phase_groups),
@@ -1974,8 +2016,8 @@ def _check_active_session(action: str) -> dict[str, object] | None:
 
 def _start_execution_session(
     all_jobs: dict[tuple[str, str], _PendingJob],
-    workers_per_job: int,
-    max_parallel_jobs: int,
+    workers_per_job: int | None,
+    max_parallel_jobs: int | None,
     extra_result_fields: dict[str, object],
 ) -> dict[str, object]:
     """Resolves per-class resource allocation, stamps it onto the queued jobs, and starts the execution manager.
@@ -1997,8 +2039,10 @@ def _start_execution_session(
 
     Args:
         all_jobs: All submitted jobs keyed by dispatch key, in the order the manager should consider them.
-        workers_per_job: Requested CPU cores per job (-1 to accept each resource class default).
-        max_parallel_jobs: Requested maximum concurrent jobs per resource class (-1 to accept the derived caps).
+        workers_per_job: Requested CPU cores per job, -1 for every available core, or None to accept each resource
+            class default.
+        max_parallel_jobs: Requested maximum concurrent jobs per resource class, -1 to lift the caps, or None to
+            accept the derived caps.
         extra_result_fields: Additional key-value pairs to include in the result dictionary.
 
     Returns:
@@ -2006,6 +2050,23 @@ def _start_execution_session(
         details, and any extra fields.
     """
     global _job_execution_state
+
+    # Rejects a non-positive override rather than letting it fall through as a negative core count. None is the only
+    # way to ask for a default, so a caller passing 0 or a negative value has confused the two.
+    for override_name, override_value in (
+        ("workers_per_job", workers_per_job),
+        ("max_parallel_jobs", max_parallel_jobs),
+    ):
+        if override_value is not None and override_value <= 0 and override_value != ALL_CORES_REQUEST:
+            return {
+                "success": False,
+                "started": False,
+                "error": (
+                    f"Unable to start the execution session. The '{override_name}' override must be a positive "
+                    f"integer, -1 to request every available core, or None to accept the measured default, but "
+                    f"encountered {override_value}."
+                ),
+            }
 
     budget = resolve_worker_count(requested_workers=-1, reserved_cores=_RESERVED_CORES)
     available_memory = _resolve_available_memory_gigabytes()
@@ -2036,7 +2097,6 @@ def _start_execution_session(
     for pending_job in all_jobs.values():
         pending_job.resolved_workers = class_workers[pending_job.resource_class.name]
 
-    # Creates the execution state and starts the manager thread.
     execution_state = _JobExecutionState(
         all_jobs=all_jobs,
         admission_pool=list(all_jobs.values()),
@@ -2074,23 +2134,44 @@ def _start_execution_session(
     return result
 
 
+def _order_phases_by_execution(phase_names: Iterable[str], *, single_recording: bool) -> list[str]:
+    """Orders phase job names by the order the pipeline executes them.
+
+    Notes:
+        Callers report the resulting list to the user, who reads a phase list as a sequence. Alphabetical order would
+        render the single-recording chain as binarization, combination, processing, registration, which inverts the
+        two middle phases relative to the order they run in.
+
+    Args:
+        phase_names: The phase job names to order.
+        single_recording: Determines whether to apply the single-recording or the multi-recording phase chain.
+
+    Returns:
+        The phase job names in pipeline execution order. Names outside the phase model are appended alphabetically.
+    """
+    phases = SINGLE_RECORDING_PHASES if single_recording else MULTI_RECORDING_PHASES
+    execution_order = {str(phase.job_name): index for index, phase in enumerate(phases)}
+    known = [name for name in phase_names if name in execution_order]
+    unknown = [name for name in phase_names if name not in execution_order]
+    return sorted(known, key=lambda name: execution_order[name]) + sorted(unknown)
+
+
 def _resolve_class_allocation(
     resource_class: _ResourceClass,
     *,
     budget: int,
     available_memory: float | None,
     job_count: int,
-    workers_per_job: int,
-    max_parallel_jobs: int,
+    workers_per_job: int | None,
+    max_parallel_jobs: int | None,
 ) -> tuple[int, int]:
     """Resolves the per-job worker count and the concurrency cap of one resource class.
 
     Notes:
         A class with a fixed concurrency cap describes I/O-bound work whose throughput does not follow the core count,
-        so it keeps its measured allocation and ignores both overrides. A class with no measured worker count keeps the
-        saturating allocation, which spreads the CPU budget across the queued jobs. Every other class takes its
-        measured worker count, bounds its concurrency by the CPU budget, and bounds it further by the available system
-        memory when the class declares a per-job memory footprint.
+        so it keeps its measured allocation and ignores both overrides. Every other class takes its measured worker
+        count, bounds its concurrency by the CPU budget, and bounds it further by the available system memory when the
+        class declares a per-job memory footprint.
 
         Every cap resolved here bounds one class in isolation, because a class cannot know which other classes will be
         dispatching alongside it. The dispatcher therefore holds the sum of the cores committed by every class inside
@@ -2101,33 +2182,29 @@ def _resolve_class_allocation(
         budget: The number of CPU cores available to the session after reserving system cores.
         available_memory: The available system memory in gigabytes, or None when the platform does not report it.
         job_count: The number of jobs of this class in the session, which caps the useful concurrency.
-        workers_per_job: The requested CPU cores per job (-1 to accept the class default).
-        max_parallel_jobs: The requested concurrency cap (-1 to accept the derived cap).
+        workers_per_job: The requested CPU cores per job, -1 to request every available core, or None to accept
+            the class default.
+        max_parallel_jobs: The requested concurrency cap, -1 to lift the cap, or None to accept the derived cap.
 
     Returns:
         A (workers_per_job, max_parallel_jobs) tuple for this resource class.
     """
     if resource_class.fixed_parallel_jobs is not None:
-        # Both fixed classes declare a measured worker count, so the fallback below only satisfies type narrowing.
-        workers = resource_class.workers_per_job if resource_class.workers_per_job is not None else 1
+        workers = resource_class.workers_per_job
         return workers, min(resource_class.fixed_parallel_jobs, max(1, job_count))
 
-    if resource_class.workers_per_job is None:
-        # Applies the four saturating-allocation override combinations to a class with no per-job worker count.
-        if workers_per_job <= 0 and max_parallel_jobs <= 0:
-            return _resolve_saturating_allocation(budget=budget, total_jobs=max(1, job_count))
-        if workers_per_job > 0 >= max_parallel_jobs:
-            workers = resolve_worker_count(requested_workers=workers_per_job, reserved_cores=_RESERVED_CORES)
-            return workers, resolve_parallel_job_capacity(workers_per_job=workers)
-        if workers_per_job <= 0 < max_parallel_jobs:
-            raw_workers = budget // max_parallel_jobs
-            return max(1, (raw_workers // _WORKER_MULTIPLE) * _WORKER_MULTIPLE), max_parallel_jobs
-        workers = resolve_worker_count(requested_workers=workers_per_job, reserved_cores=_RESERVED_CORES)
-        return workers, max_parallel_jobs
+    if workers_per_job is None:
+        workers = resource_class.workers_per_job
+    elif workers_per_job == ALL_CORES_REQUEST:
+        workers = budget
+    else:
+        workers = workers_per_job
 
-    workers = workers_per_job if workers_per_job > 0 else resource_class.workers_per_job
+    # An all-cores concurrency request lifts the derived cap, leaving the job count as the only bound.
+    if max_parallel_jobs == ALL_CORES_REQUEST:
+        return workers, max(1, job_count)
 
-    if max_parallel_jobs > 0:
+    if max_parallel_jobs is not None:
         return workers, max_parallel_jobs
 
     capacity = max(1, budget // workers)
@@ -2200,57 +2277,6 @@ def _read_linux_available_memory_gigabytes() -> float | None:
     return None
 
 
-def _resolve_saturating_allocation(budget: int, total_jobs: int) -> tuple[int, int]:
-    """Resolves worker and parallelism counts to saturate available cores across multiple jobs.
-
-    Prefers ~30 workers per job and distributes the CPU budget across as many concurrent jobs as possible, subject to
-    a minimum of 10 workers per job when running in parallel. Worker counts are rounded down to the nearest multiple
-    of 5 for clean allocation.
-
-    Args:
-        budget: The total number of available CPU cores (after reserving system cores).
-        total_jobs: The total number of jobs to execute.
-
-    Returns:
-        A (workers_per_job, max_parallel_jobs) tuple.
-    """
-    max_at_preferred = max(1, budget // _PREFERRED_WORKERS_PER_JOB)
-    max_parallel = min(total_jobs, max_at_preferred)
-    raw_workers = budget // max_parallel
-    workers = max(1, (raw_workers // _WORKER_MULTIPLE) * _WORKER_MULTIPLE)
-
-    # Reduces parallelism until each job has at least the minimum worker count.
-    while workers < _MINIMUM_WORKERS_PER_JOB and max_parallel > 1:
-        max_parallel -= 1
-        raw_workers = budget // max_parallel
-        workers = max(1, (raw_workers // _WORKER_MULTIPLE) * _WORKER_MULTIPLE)
-
-    return workers, max_parallel
-
-
-def _expand_single_recording_phases(phases: list[str]) -> set[str]:
-    """Expands the requested single-recording phases to include every downstream dependent phase.
-
-    Notes:
-        The dependency chain runs binarization to registration to processing to combination, so resetting or cleaning
-        an upstream phase invalidates every phase below it.
-
-    Args:
-        phases: The phase names the caller requested.
-
-    Returns:
-        The set of phase names to act on, containing the requested phases and all of their downstream dependents.
-    """
-    expanded = set(phases)
-    if SingleRecordingJobNames.BINARIZE.value in expanded:
-        expanded.add(SingleRecordingJobNames.REGISTER.value)
-    if SingleRecordingJobNames.REGISTER.value in expanded:
-        expanded.add(SingleRecordingJobNames.PROCESS.value)
-    if SingleRecordingJobNames.PROCESS.value in expanded:
-        expanded.add(SingleRecordingJobNames.COMBINE.value)
-    return expanded
-
-
 def _resolve_prerequisite_job_ids(
     registry: dict[str, JobState], job_id: str, *, single_recording: bool
 ) -> tuple[list[str], str | None]:
@@ -2271,8 +2297,8 @@ def _resolve_prerequisite_job_ids(
         single_recording: Determines whether to apply single-recording or multi-recording prerequisite rules.
 
     Returns:
-        A tuple of the prerequisite job IDs and an error message, where the message is None unless the prerequisite
-        phase is absent from the tracker.
+        A tuple of the prerequisite job IDs and an error message. The message is None unless the target job itself is
+        not registered in the tracker or its prerequisite phase is absent from the tracker.
     """
     job_state = registry.get(job_id)
     if job_state is None:
@@ -2282,37 +2308,20 @@ def _resolve_prerequisite_job_ids(
         )
         return [], message
 
-    if single_recording:
-        if job_state.job_name == SingleRecordingJobNames.REGISTER:
-            return _collect_phase_job_ids(
-                registry=registry,
-                job_name=SingleRecordingJobNames.BINARIZE,
-                specifier=None,
-                dependent_job_id=job_id,
-            )
-        if job_state.job_name == SingleRecordingJobNames.PROCESS:
-            return _collect_phase_job_ids(
-                registry=registry,
-                job_name=SingleRecordingJobNames.REGISTER,
-                specifier=job_state.specifier,
-                dependent_job_id=job_id,
-            )
-        if job_state.job_name == SingleRecordingJobNames.COMBINE:
-            return _collect_phase_job_ids(
-                registry=registry,
-                job_name=SingleRecordingJobNames.PROCESS,
-                specifier=None,
-                dependent_job_id=job_id,
-            )
-    elif job_state.job_name == MultiRecordingJobNames.EXTRACT:
-        return _collect_phase_job_ids(
-            registry=registry,
-            job_name=MultiRecordingJobNames.DISCOVER,
-            specifier=None,
-            dependent_job_id=job_id,
-        )
+    # Reads the dependency from the exported phase model, so the rule the interface layer enforces and the rule the
+    # phase model publishes to external schedulers cannot drift apart.
+    phases = SINGLE_RECORDING_PHASES if single_recording else MULTI_RECORDING_PHASES
+    phase = {str(entry.job_name): entry for entry in phases}.get(job_state.job_name)
+    if phase is None or phase.prerequisite is None:
+        return [], None
 
-    return [], None
+    specifier = job_state.specifier if phase.prerequisite_scope == PrerequisiteScope.MATCHING_SPECIFIER else None
+    return _collect_phase_job_ids(
+        registry=registry,
+        job_name=phase.prerequisite,
+        specifier=specifier,
+        dependent_job_id=job_id,
+    )
 
 
 def _collect_phase_job_ids(
@@ -2485,7 +2494,6 @@ def _job_execution_manager() -> None:
                 _job_execution_state = None
                 return
 
-        # Polls at 1-second intervals before checking again.
         timer.delay(delay=1000, allow_sleep=True)
 
 
@@ -2656,20 +2664,18 @@ def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> 
         recording_path: The path to the recording directory (for display purposes).
 
     Returns:
-        A dictionary containing the recording path, tracker path, per-phase job status, summary counts, and an
-        overall synthesized status string.
+        A dictionary containing a success flag, the recording path, tracker path, per-phase job status, summary
+        counts, and an overall synthesized status string.
     """
     tracker = ProcessingTracker(file_path=tracker_path)
     summary = tracker.get_summary()
     registry = tracker.snapshot()
 
-    # Groups jobs by pipeline phase using find_jobs.
     binarize_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.BINARIZE)
     register_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.REGISTER)
     process_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.PROCESS)
     combine_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.COMBINE)
 
-    # Reads binarize status.
     binarize_status: dict[str, object] = {}
     for job_id in binarize_jobs:
         job_info = registry[job_id]
@@ -2677,17 +2683,14 @@ def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> 
         if job_info.error_message:
             binarize_status["error"] = job_info.error_message
 
-    # Reads per-plane register status.
-    register_status: dict[str, object] = {}
-    for job_id, (_, specifier) in register_jobs.items():
-        register_status[specifier] = registry[job_id].status.name.lower()
+    register_status: dict[str, object] = {
+        specifier: registry[job_id].status.name.lower() for job_id, (_, specifier) in register_jobs.items()
+    }
 
-    # Reads per-plane process status.
-    process_status: dict[str, object] = {}
-    for job_id, (_, specifier) in process_jobs.items():
-        process_status[specifier] = registry[job_id].status.name.lower()
+    process_status: dict[str, object] = {
+        specifier: registry[job_id].status.name.lower() for job_id, (_, specifier) in process_jobs.items()
+    }
 
-    # Reads combine status.
     combine_status: dict[str, object] = {}
     for job_id in combine_jobs:
         job_info = registry[job_id]
@@ -2717,7 +2720,6 @@ def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> 
     else:
         overall_status = "scheduled"
 
-    # Formats summary counts using ProcessingStatus enum names.
     summary_counts: dict[str, int] = {status.name.lower(): count for status, count in summary.items()}
 
     return {
@@ -2749,11 +2751,9 @@ def _read_multi_recording_tracker(tracker_path: Path) -> dict[str, object]:
     summary = tracker.get_summary()
     registry = tracker.snapshot()
 
-    # Groups jobs by pipeline phase using find_jobs.
     discover_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.DISCOVER)
     extract_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.EXTRACT)
 
-    # Reads discover status.
     discover_status: dict[str, object] = {}
     for job_id in discover_jobs:
         job_info = registry[job_id]
@@ -2761,10 +2761,9 @@ def _read_multi_recording_tracker(tracker_path: Path) -> dict[str, object]:
         if job_info.error_message:
             discover_status["error"] = job_info.error_message
 
-    # Reads per-recording extract status.
-    extract_status: dict[str, object] = {}
-    for job_id, (_, specifier) in extract_jobs.items():
-        extract_status[specifier] = registry[job_id].status.name.lower()
+    extract_status: dict[str, object] = {
+        specifier: registry[job_id].status.name.lower() for job_id, (_, specifier) in extract_jobs.items()
+    }
 
     # Synthesizes overall status from tracker state.
     if tracker.complete:
@@ -2782,7 +2781,6 @@ def _read_multi_recording_tracker(tracker_path: Path) -> dict[str, object]:
     else:
         overall_status = "scheduled"
 
-    # Formats summary counts using ProcessingStatus enum names.
     summary_counts: dict[str, int] = {status.name.lower(): count for status, count in summary.items()}
 
     return {
@@ -2831,7 +2829,7 @@ def _delete_directory(path: Path, deleted: list[str], errors: list[str]) -> None
 
 
 def _load_runtime_yaml(path: Path) -> dict[str, Any] | None:
-    """Loads a runtime YAML file and returns the parsed dictionary, or None if loading fails.
+    """Loads and parses the runtime YAML file at the given path.
 
     Args:
         path: The filesystem path to the YAML file to load.
