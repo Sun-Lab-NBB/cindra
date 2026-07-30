@@ -184,8 +184,25 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         level=LogLevel.INFO,
     )
 
-    # Finds the maximum number of frames across all planes.
-    max_frame_count = max(context.runtime.io.frame_count for context in plane_contexts)
+    # Resolves the frame count of the combined product. Planes that did not complete extraction contribute nothing, and
+    # the product is trimmed to the shortest plane that did. A recording whose acquisition stopped partway through a
+    # volume delivers one extra frame to its leading planes, so trimming keeps every combined column backed by real
+    # data on every plane rather than padding the shorter planes with fabricated zeros.
+    contributing_frame_counts = [
+        frame_count
+        for frame_count in (_resolve_plane_frame_count(context=context) for context in plane_contexts)
+        if frame_count is not None
+    ]
+    combined_frame_count = min(contributing_frame_counts) if contributing_frame_counts else 0
+    if contributing_frame_counts and max(contributing_frame_counts) > combined_frame_count:
+        console.echo(
+            message=(
+                f"Trimming the combined traces to {combined_frame_count} frames. The recording's planes hold between "
+                f"{combined_frame_count} and {max(contributing_frame_counts)} frames, which happens when its "
+                f"acquisition stopped partway through a volume."
+            ),
+            level=LogLevel.WARNING,
+        )
 
     # Initializes lists to accumulate combined data across planes.
     combined_roi_statistics: list[ROIStatistics] = []
@@ -320,14 +337,11 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
         plane_spikes = context.runtime.extraction.spikes
         plane_cell_classification = context.runtime.extraction.cell_classification
 
-        # Pads fluorescence data if this plane has fewer frames than the maximum.
-        roi_count, frame_count = plane_cell_fluorescence.shape
-        if frame_count < max_frame_count:
-            padding = np.zeros((roi_count, max_frame_count - frame_count), dtype=np.float32)
-            plane_cell_fluorescence = np.concatenate((plane_cell_fluorescence, padding), axis=1)
-            plane_neuropil_fluorescence = np.concatenate((plane_neuropil_fluorescence, padding), axis=1)
-            plane_subtracted_fluorescence = np.concatenate((plane_subtracted_fluorescence, padding), axis=1)
-            plane_spikes = np.concatenate((plane_spikes, padding), axis=1)
+        # Trims fluorescence data to the combined frame count, so that every plane contributes the same frames.
+        plane_cell_fluorescence = plane_cell_fluorescence[:, :combined_frame_count]
+        plane_neuropil_fluorescence = plane_neuropil_fluorescence[:, :combined_frame_count]
+        plane_subtracted_fluorescence = plane_subtracted_fluorescence[:, :combined_frame_count]
+        plane_spikes = plane_spikes[:, :combined_frame_count]
 
         # Appends channel 1 data to combined lists.
         combined_cell_fluorescence_list.append(plane_cell_fluorescence)
@@ -355,21 +369,12 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
                 and plane_spikes_channel_2 is not None
                 and plane_cell_classification_channel_2 is not None
             ):
-                roi_count_channel_2, frame_count_channel_2 = plane_cell_fluorescence_channel_2.shape
-                if frame_count_channel_2 < max_frame_count:
-                    padding_channel_2 = np.zeros(
-                        (roi_count_channel_2, max_frame_count - frame_count_channel_2), dtype=np.float32
-                    )
-                    plane_cell_fluorescence_channel_2 = np.concatenate(
-                        (plane_cell_fluorescence_channel_2, padding_channel_2), axis=1
-                    )
-                    plane_neuropil_fluorescence_channel_2 = np.concatenate(
-                        (plane_neuropil_fluorescence_channel_2, padding_channel_2), axis=1
-                    )
-                    plane_subtracted_fluorescence_channel_2 = np.concatenate(
-                        (plane_subtracted_fluorescence_channel_2, padding_channel_2), axis=1
-                    )
-                    plane_spikes_channel_2 = np.concatenate((plane_spikes_channel_2, padding_channel_2), axis=1)
+                plane_cell_fluorescence_channel_2 = plane_cell_fluorescence_channel_2[:, :combined_frame_count]
+                plane_neuropil_fluorescence_channel_2 = plane_neuropil_fluorescence_channel_2[:, :combined_frame_count]
+                plane_subtracted_fluorescence_channel_2 = plane_subtracted_fluorescence_channel_2[
+                    :, :combined_frame_count
+                ]
+                plane_spikes_channel_2 = plane_spikes_channel_2[:, :combined_frame_count]
 
                 combined_cell_fluorescence_channel_2_list.append(plane_cell_fluorescence_channel_2)
                 combined_neuropil_fluorescence_channel_2_list.append(plane_neuropil_fluorescence_channel_2)
@@ -479,10 +484,16 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
     # Builds and returns the CombinedData instance. Caches per-plane geometry, binary paths, tau, and sampling_rate
     # from the single-recording contexts so that the multi-recording extraction pipeline can access them directly.
+    # Records the per-plane frame counts alongside the combined count, so that a consumer can tell whether the combined
+    # traces were trimmed instead of having to infer the frame count from an array shape.
+    plane_frame_counts = np.array([context.runtime.io.frame_count for context in plane_contexts], dtype=np.uint32)
+
     combined_data = CombinedData(
         detection=detection,
         extraction=extraction,
         plane_count=len(plane_contexts),
+        frame_count=combined_frame_count,
+        plane_frame_counts=plane_frame_counts,
         combined_height=combined_height,
         combined_width=combined_width,
         tau=plane_contexts[0].configuration.main.tau,
@@ -497,3 +508,29 @@ def combine_planes(plane_contexts: list[RuntimeContext]) -> CombinedData:
 
     console.echo(message="Combined data prepared successfully.", level=LogLevel.SUCCESS)
     return combined_data
+
+
+def _resolve_plane_frame_count(context: RuntimeContext) -> int | None:
+    """Returns the number of frames the plane's fluorescence traces span, or None when the plane cannot contribute.
+
+    Notes:
+        A plane contributes to the combined product only when it holds ROI statistics and a full set of fluorescence
+        traces. A plane whose processing stage did not complete holds neither, and contributes nothing.
+
+    Args:
+        context: The plane's runtime context.
+
+    Returns:
+        The frame count of the plane's cell fluorescence traces, or None when the plane did not complete extraction.
+    """
+    extraction = context.runtime.extraction
+    if (
+        extraction.roi_statistics is None
+        or extraction.cell_fluorescence is None
+        or extraction.neuropil_fluorescence is None
+        or extraction.subtracted_fluorescence is None
+        or extraction.spikes is None
+        or extraction.cell_classification is None
+    ):
+        return None
+    return int(extraction.cell_fluorescence.shape[1])

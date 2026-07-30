@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ataraxis_base_utilities import LogLevel, console, resolve_worker_count
+from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import ProcessingTracker
 
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
 from ..allocation import (
-    ALL_CORES_REQUEST,
+    SINGLE_RECORDING_PHASES,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
     resolve_stage_workers,
+    resolve_plane_specifier,
+    resolve_multi_recording_jobs,
+    resolve_single_recording_jobs,
 )
 from ..dataclasses import RuntimeContext, MultiRecordingConfiguration, SingleRecordingConfiguration
 from .multi_recording import discover_multi_recording_cells, extract_multi_recording_fluorescence
@@ -27,9 +30,11 @@ SINGLE_RECORDING_TRACKER_NAME: str = "single_recording_tracker.yaml"
 MULTI_RECORDING_TRACKER_NAME: str = "multi_recording_tracker.yaml"
 """The tracker file name for the multi-recording processing pipeline."""
 
-_PER_PLANE_JOB_NAMES: frozenset[str] = frozenset({SingleRecordingJobNames.REGISTER, SingleRecordingJobNames.PROCESS})
+_PER_PLANE_JOB_NAMES: frozenset[str] = frozenset(
+    str(phase.job_name) for phase in SINGLE_RECORDING_PHASES if phase.per_specifier
+)
 """The single-recording job names that expand into one job per imaging plane, each carrying a 'plane_{index}'
-specifier."""
+specifier. Derived from the exported phase model, so that adding a per-plane phase updates it automatically."""
 
 
 def run_single_recording_pipeline(
@@ -118,12 +123,7 @@ def run_single_recording_pipeline(
     # Builds the universe of every valid job the pipeline could execute for this configuration. REGISTER and PROCESS
     # always expand to every available plane regardless of ``target_plane`` so that foreign-entry detection treats
     # the universe as a configuration fingerprint, not an invocation fingerprint.
-    universe: list[tuple[str, str]] = [
-        (SingleRecordingJobNames.BINARIZE, ""),
-        *((SingleRecordingJobNames.REGISTER, f"plane_{plane_index}") for plane_index in range(plane_count)),
-        *((SingleRecordingJobNames.PROCESS, f"plane_{plane_index}") for plane_index in range(plane_count)),
-        (SingleRecordingJobNames.COMBINE, ""),
-    ]
+    universe: list[tuple[str, str]] = resolve_single_recording_jobs(plane_count=plane_count)
 
     tracker = ProcessingTracker(file_path=tracker_path)
 
@@ -162,9 +162,12 @@ def run_single_recording_pipeline(
         for base_job_name in jobs_to_run:
             if base_job_name in _PER_PLANE_JOB_NAMES:
                 if target_plane == -1:
-                    jobs.extend((base_job_name, f"plane_{p}") for p in range(plane_count))
+                    jobs.extend(
+                        (base_job_name, resolve_plane_specifier(plane_index=plane_index))
+                        for plane_index in range(plane_count)
+                    )
                 else:
-                    jobs.append((base_job_name, f"plane_{target_plane}"))
+                    jobs.append((base_job_name, resolve_plane_specifier(plane_index=target_plane)))
             else:
                 jobs.append((base_job_name, ""))
 
@@ -275,10 +278,10 @@ def run_multi_recording_pipeline(
         extract: Determines whether to extract fluorescence from the ROIs tracked across multiple recordings (step 2).
         target_recording: The unique identifier of the recording to process when running the 'extract' job. If None,
             processes all recordings.
-        discovery_workers: The number of parallel workers to allocate to the discovery stage. Use None or -1 to request
-            every available core.
-        extraction_workers: The number of parallel workers to allocate to each per-recording extraction job. Use None or
-            -1 to request every available core.
+        discovery_workers: The number of parallel workers to allocate to the discovery stage. Use None to accept the
+            measured default for the stage and -1 to request every available core.
+        extraction_workers: The number of parallel workers to allocate to each per-recording extraction job. Use None
+            to accept the measured default for the stage and -1 to request every available core.
 
     Raises:
         FileNotFoundError: If the multi-recording configuration data cannot be loaded from the specified file.
@@ -328,10 +331,7 @@ def run_multi_recording_pipeline(
     # Builds the universe of every valid job the pipeline could execute for this configuration. EXTRACT always
     # expands to every resolved recording ID regardless of ``target_recording`` so that foreign-entry detection
     # treats the universe as a configuration fingerprint, not an invocation fingerprint.
-    universe: list[tuple[str, str]] = [
-        (MultiRecordingJobNames.DISCOVER, ""),
-        *((MultiRecordingJobNames.EXTRACT, recording_id) for recording_id in recording_ids),
-    ]
+    universe: list[tuple[str, str]] = resolve_multi_recording_jobs(recording_ids=recording_ids)
 
     tracker = ProcessingTracker(file_path=main_recording_path.joinpath(MULTI_RECORDING_TRACKER_NAME))
 
@@ -425,7 +425,8 @@ def execute_multi_recording_job(
         tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
         persist_bootstrap: Determines whether to write the shared multi-recording bootstrap to disk before running the
             job. Enable it only for the single-threaded discovery job that precedes extraction.
-        workers: The number of parallel workers to allocate to this job. Use None or -1 to request every available core.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for the
+            job's stage and -1 to request every available core.
 
     Raises:
         FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid multi-recording
@@ -684,7 +685,8 @@ def _execute_multi_recording_job(
             empty string.
         job_id: The unique hexadecimal identifier for this processing job.
         tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
-        workers: The number of parallel workers to allocate to this job. Use None or -1 to request every available core.
+        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for the
+            job's stage and -1 to request every available core.
 
     Raises:
         ValueError: If the job_name is not recognized.
@@ -693,18 +695,20 @@ def _execute_multi_recording_job(
     tracker.start_job(job_id=job_id)
 
     try:
-        # Resolves the job's worker budget inside the tracked block so that an invalid request is recorded as a job
-        # failure instead of escaping as an untracked error. The multi-recording stages have no measured per-stage
-        # default, so an unspecified request resolves to every available core.
-        requested_workers = ALL_CORES_REQUEST if workers is None else workers
-        resolved_workers = resolve_worker_count(requested_workers=requested_workers)
-
+        # Resolves each stage's worker budget inside its own dispatch branch, matching the single-recording executor.
+        # An unrecognized job name therefore reports the job-name error below rather than a worker-resolution error,
+        # and an invalid worker request is still recorded as a job failure instead of escaping untracked.
         if job_name == MultiRecordingJobNames.DISCOVER:
-            discover_multi_recording_cells(configuration=configuration, workers=resolved_workers)
+            discover_multi_recording_cells(
+                configuration=configuration,
+                workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
+            )
 
         elif job_name == MultiRecordingJobNames.EXTRACT:
             extract_multi_recording_fluorescence(
-                configuration=configuration, recording_id=specifier, workers=resolved_workers
+                configuration=configuration,
+                recording_id=specifier,
+                workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
             )
 
         else:

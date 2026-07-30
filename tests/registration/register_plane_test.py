@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+from cindra.io import resolve_registration_marker_path
 from cindra.registration import register_plane
+from cindra.registration.register import _register_frames_batch
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,6 +34,49 @@ def _static_blob_movie(
     """Builds a motion-free structured movie that registers trivially, exercising the registration code paths."""
     base = gaussian_blob_image(height=128, width=128, centers=centers, sigma=4.0, amplitude=2000.0).astype(np.int16)
     return np.broadcast_to(base, (frame_count, 128, 128)).copy()
+
+
+def _make_interrupted_registration_context(
+    tmp_path: Path,
+    single_recording_context: Callable[..., RuntimeContext],
+    gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> RuntimeContext:
+    """Builds a context whose registration fails after its first batch, leaving a partially rewritten binary.
+
+    Args:
+        tmp_path: The temporary directory the context writes its binary into.
+        single_recording_context: The context factory fixture.
+        gaussian_blob_image: The synthetic image builder fixture.
+        monkeypatch: The patcher used to inject the batch failure.
+
+    Returns:
+        The prepared context. Calling register_plane on it raises RuntimeError partway through the batch loop.
+    """
+    movie = _static_blob_movie(gaussian_blob_image)
+
+    def configure(configuration: SingleRecordingConfiguration) -> None:
+        # Splits the movie across several batches, so the injected failure lands after at least one batch has already
+        # been written into the binary.
+        configuration.registration.batch_size = 10
+
+    context = single_recording_context(
+        tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie, configure=configure
+    )
+
+    completed_batches = 0
+
+    def fail_after_first_batch(**kwargs: object) -> object:
+        """Runs the first batch normally and raises on every batch after it."""
+        nonlocal completed_batches
+        completed_batches += 1
+        if completed_batches > 1:
+            message = "Unable to register the frame batch. Simulated mid-loop failure."
+            raise RuntimeError(message)
+        return _register_frames_batch(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("cindra.registration.register._register_frames_batch", fail_after_first_batch)
+    return context
 
 
 class TestRegisterPlane:
@@ -405,3 +450,66 @@ class TestRegisterPlane:
         # The artifact-free movie yields no offset, leaving the bidirectional correction untriggered.
         assert context.runtime.registration.bidirectional_phase_offset == 0
         assert not context.runtime.registration.bidirectional_phase_corrected
+
+    def test_leaves_no_registration_marker(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+    ) -> None:
+        """Verifies that a completed registration clears the marker that guards its in-place rewrite."""
+        movie = _static_blob_movie(gaussian_blob_image)
+        context = single_recording_context(tmp_path, frame_height=128, frame_width=128, frame_count=30, movie=movie)
+        binary_path = context.runtime.io.registered_binary_path
+
+        register_plane(context=context, workers=1)
+
+        assert binary_path.exists()
+        assert not resolve_registration_marker_path(binary_path=binary_path).exists()
+
+    def test_interrupted_registration_leaves_a_marker(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verifies that a failure partway through the batch loop leaves the binary marked as mid-registration."""
+        context = _make_interrupted_registration_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+            monkeypatch=monkeypatch,
+        )
+        binary_path = context.runtime.io.registered_binary_path
+
+        with pytest.raises(RuntimeError, match="Simulated mid-loop failure"):
+            register_plane(context=context, workers=1)
+
+        # The binary now holds corrected frames up to the failure point and raw frames after it, which only the
+        # marker records.
+        assert resolve_registration_marker_path(binary_path=binary_path).exists()
+
+    def test_marker_blocks_a_later_registration(
+        self,
+        tmp_path: Path,
+        single_recording_context: Callable[..., RuntimeContext],
+        gaussian_blob_image: Callable[..., NDArray[np.float64]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verifies that registering a binary an interrupted run left behind raises instead of silently proceeding."""
+        context = _make_interrupted_registration_context(
+            tmp_path=tmp_path,
+            single_recording_context=single_recording_context,
+            gaussian_blob_image=gaussian_blob_image,
+            monkeypatch=monkeypatch,
+        )
+
+        with pytest.raises(RuntimeError, match="Simulated mid-loop failure"):
+            register_plane(context=context, workers=1)
+
+        # Restores the real batch function, so the retry fails on the marker rather than on the injected error.
+        monkeypatch.setattr("cindra.registration.register._register_frames_batch", _register_frames_batch)
+
+        with pytest.raises(RuntimeError, match=r"was\s+interrupted"):
+            register_plane(context=context, workers=1)

@@ -1406,6 +1406,15 @@ class CombinedData:
     plane_count: int = 0
     """The number of planes that were combined."""
 
+    frame_count: int = 0
+    """The number of frames the combined traces span, which is the frame count of the shortest plane that contributed
+    to them."""
+
+    plane_frame_counts: NDArray[np.uint32] = field(default_factory=lambda: np.array([], dtype=np.uint32))
+    """Per-plane frame counts as recorded during binarization. A count above frame_count marks a plane whose trailing
+    frames were trimmed out of the combined traces, which happens when an acquisition stops partway through a
+    volume."""
+
     combined_height: int = 0
     """The height of the combined field of view in pixels."""
 
@@ -1444,6 +1453,12 @@ class CombinedData:
         This method saves all combined detection and extraction arrays to the root cindra directory. Metadata
         (plane count, dimensions) is saved to combined_metadata.npz.
 
+        Notes:
+            The combined_metadata.npz file doubles as the marker consumers check to decide whether the
+            single-recording pipeline completed. It is therefore written after the arrays it describes, and it is
+            moved into place from a temporary name so that it appears atomically. An interrupted run never leaves a
+            marker that describes a payload which is not on disk.
+
         Args:
             root_path: The root cindra output directory containing configuration.yaml.
         """
@@ -1465,6 +1480,8 @@ class CombinedData:
             | NDArray[np.str_],
         ] = {
             "plane_count": np.array([self.plane_count], dtype=np.uint8),
+            "frame_count": np.array([self.frame_count], dtype=np.uint32),
+            "plane_frame_counts": self.plane_frame_counts,
             "combined_height": np.array([self.combined_height], dtype=np.uint32),
             "combined_width": np.array([self.combined_width], dtype=np.uint32),
             "tau": np.array([self.tau], dtype=np.float32),
@@ -1481,11 +1498,17 @@ class CombinedData:
                 [str(p.relative_to(root_path)) for p in self.registered_binary_paths_channel_2], dtype=str
             )
 
-        np.savez(root_path / "combined_metadata.npz", allow_pickle=False, **save_kwargs)
-
-        # Saves combined detection and extraction arrays using existing methods.
+        # Saves combined detection and extraction arrays before the metadata file, so that the marker consumers rely
+        # on can never describe a payload that is still being written.
         self.detection.save_arrays(root_path)
         self.extraction.save_arrays(root_path)
+
+        # Stages the marker under a temporary name and moves it into place. Writing it directly would truncate the
+        # destination first, so an interrupted write would also destroy an already complete marker from an earlier run.
+        # The staged name ends with the .npz suffix, because np.savez appends that suffix to any path that lacks it.
+        staged_metadata_path = root_path / "combined_metadata.tmp.npz"
+        np.savez(staged_metadata_path, allow_pickle=False, **save_kwargs)
+        staged_metadata_path.replace(root_path / "combined_metadata.npz")
 
     @classmethod
     def load(cls, root_path: Path) -> CombinedData:
@@ -1534,6 +1557,8 @@ class CombinedData:
 
         kwargs: dict[str, Any] = {
             "plane_count": int(metadata["plane_count"][0]),
+            "frame_count": 0,
+            "plane_frame_counts": np.array([], dtype=np.uint32),
             "combined_height": int(metadata["combined_height"][0]),
             "combined_width": int(metadata["combined_width"][0]),
             "tau": float(metadata["tau"][0]),
@@ -1545,6 +1570,12 @@ class CombinedData:
             "registered_binary_paths": (),
             "registered_binary_paths_channel_2": None,
         }
+
+        # The frame counts are absent in metadata files saved before these fields were added, where they load as zero
+        # and an empty array. A consumer therefore reads a zero frame_count as "this metadata does not record it".
+        if "frame_count" in metadata:
+            kwargs["frame_count"] = int(metadata["frame_count"][0])
+            kwargs["plane_frame_counts"] = metadata["plane_frame_counts"].astype(np.uint32)
 
         # Per-plane geometry and binary paths may be absent in metadata files saved before these fields were added.
         if "plane_heights" in metadata:

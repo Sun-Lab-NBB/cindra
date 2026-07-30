@@ -175,10 +175,10 @@ class TestCombinePlanes:
         assert combined.extraction.cell_fluorescence_channel_2 is None
         assert combined.registered_binary_paths_channel_2 is None
 
-    def test_two_planes_grid_layout_with_padding(
+    def test_two_planes_grid_layout_with_trimming(
         self, single_recording_context: Callable[..., RuntimeContext], tmp_path: Path
     ) -> None:
-        """Verifies grid placement, ROI offsetting, and zero-padding when planes have different frame counts."""
+        """Verifies grid placement, ROI offsetting, and trimming to the shortest plane's frame count."""
         plane_0 = single_recording_context(
             tmp_path / "plane_0", frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH, frame_count=8
         )
@@ -204,12 +204,18 @@ class TestCombinePlanes:
         np.testing.assert_array_equal(rois[1].mask.x_pixels, np.array([5, 6]) + _FRAME_WIDTH)
         np.testing.assert_array_equal(rois[1].mask.y_pixels, np.array([3, 4]))
 
+        # The combined traces span the shortest plane's frames, so every column holds real data from both planes
+        # instead of zeros substituted for the frames the shorter plane never recorded.
         fluorescence = combined.extraction.cell_fluorescence
         assert fluorescence is not None
-        assert fluorescence.shape == (2, 8)
-        np.testing.assert_allclose(fluorescence[0], np.full(shape=8, fill_value=1.0, dtype=np.float32))
-        np.testing.assert_allclose(fluorescence[1, :4], np.full(shape=4, fill_value=2.0, dtype=np.float32))
-        np.testing.assert_allclose(fluorescence[1, 4:], np.zeros(shape=4, dtype=np.float32))
+        assert fluorescence.shape == (2, 4)
+        np.testing.assert_allclose(fluorescence[0], np.full(shape=4, fill_value=1.0, dtype=np.float32))
+        np.testing.assert_allclose(fluorescence[1], np.full(shape=4, fill_value=2.0, dtype=np.float32))
+
+        # The metadata records both the trimmed combined count and the untrimmed per-plane counts, so a consumer can
+        # tell that trimming happened.
+        assert combined.frame_count == 4
+        np.testing.assert_array_equal(combined.plane_frame_counts, np.array([8, 4], dtype=np.uint32))
 
         assert combined.extraction.cell_colocalization is None
 
@@ -253,8 +259,7 @@ class TestCombinePlanes:
         assert len(combined.extraction.roi_statistics_channel_2) == 2
         channel_2_fluorescence = combined.extraction.cell_fluorescence_channel_2
         assert channel_2_fluorescence is not None
-        assert channel_2_fluorescence.shape == (2, 8)
-        np.testing.assert_allclose(channel_2_fluorescence[1, 4:], np.zeros(shape=4, dtype=np.float32))
+        assert channel_2_fluorescence.shape == (2, 4)
         assert combined.registered_binary_paths_channel_2 is not None
         assert len(combined.registered_binary_paths_channel_2) == 2
 

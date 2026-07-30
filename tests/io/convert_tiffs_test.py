@@ -14,6 +14,7 @@ from cindra.io.tiff import (
     _get_frame_dimensions,
     convert_tiffs_to_binary,
 )
+from cindra.io.binary import create_registration_marker, resolve_registration_marker_path
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import (
     IOData,
@@ -404,7 +405,34 @@ class TestCreateBinaryFiles:
     def test_empty_contexts_raises(self) -> None:
         """Verifies that providing no contexts raises a ValueError."""
         with pytest.raises(ValueError, match="At least one RuntimeContext"):
-            _create_binary_files(contexts=[], frame_heights=[], frame_widths=[], frames_per_plane=1)
+            _create_binary_files(
+                contexts=[], frame_heights=[], frame_widths=[], channel_1_frame_counts=[], channel_2_frame_counts=[]
+            )
+
+    def test_clears_a_stale_registration_marker(self, tmp_path: Path) -> None:
+        """Verifies that rebuilding a binary clears the marker an interrupted registration left beside it."""
+        output_path = tmp_path / "output"
+        configuration = _build_configuration(data_path=tmp_path / "data", output_path=output_path)
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=1, channel_number=1)
+        context = _build_context(
+            output_path=output_path, configuration=configuration, acquisition=acquisition, plane_index=0
+        )
+        binary_path = context.runtime.io.registered_binary_path
+        create_registration_marker(binary_path=binary_path)
+        assert resolve_registration_marker_path(binary_path=binary_path).exists()
+
+        binaries, _ = _create_binary_files(
+            contexts=[context],
+            frame_heights=[_FRAME_HEIGHT],
+            frame_widths=[_FRAME_WIDTH],
+            channel_1_frame_counts=[1],
+            channel_2_frame_counts=[1],
+        )
+        binaries[0].close()
+
+        # Re-running binarization is the documented recovery path for an interrupted registration, so it must leave
+        # the rebuilt binary usable rather than permanently marked.
+        assert not resolve_registration_marker_path(binary_path=binary_path).exists()
 
     def test_missing_channel_1_path_raises(self, tmp_path: Path) -> None:
         """Verifies that a missing channel 1 binary path raises a ValueError."""
@@ -418,7 +446,11 @@ class TestCreateBinaryFiles:
 
         with pytest.raises(ValueError, match="registered_binary_path is not"):
             _create_binary_files(
-                contexts=[context], frame_heights=[_FRAME_HEIGHT], frame_widths=[_FRAME_WIDTH], frames_per_plane=1
+                contexts=[context],
+                frame_heights=[_FRAME_HEIGHT],
+                frame_widths=[_FRAME_WIDTH],
+                channel_1_frame_counts=[1],
+                channel_2_frame_counts=[1],
             )
 
     def test_missing_channel_2_path_raises(self, tmp_path: Path) -> None:
@@ -438,5 +470,9 @@ class TestCreateBinaryFiles:
 
         with pytest.raises(ValueError, match="registered_binary_path_channel_2 is not"):
             _create_binary_files(
-                contexts=[context], frame_heights=[_FRAME_HEIGHT], frame_widths=[_FRAME_WIDTH], frames_per_plane=1
+                contexts=[context],
+                frame_heights=[_FRAME_HEIGHT],
+                frame_widths=[_FRAME_WIDTH],
+                channel_1_frame_counts=[1],
+                channel_2_frame_counts=[1],
             )
