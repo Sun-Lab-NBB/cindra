@@ -9,14 +9,15 @@ from ataraxis_base_utilities import console, resolve_worker_count
 
 from .job_names import MultiRecordingJobNames, SingleRecordingJobNames
 
-BINARIZATION_WORKERS: int = 4
-"""The number of workers allocated to the binarization stage by default, measured as the point where the allocated
-cores become the TIFF image decode threads and further cores stop shortening the conversion."""
+BINARIZATION_WORKERS: int = 3
+"""The number of workers allocated to the binarization stage by default, measured as the processors the stage occupies
+while many recordings convert at once. The conversion waits on each batch reaching it rather than on the threads that
+consume the batch, so the stage settles below the decode ceiling it is permitted."""
 
-REGISTRATION_WORKERS: int = 8
-"""The number of workers allocated to the registration stage by default, measured on a one-plane worker sweep that
-took 477 seconds with 8 workers, 454 seconds with 16, and 447 seconds with 30. Widening 8 to 16 buys 2.9 seconds per
-added core and widening 16 to 30 buys 0.5 seconds per added core, placing the knee at 8."""
+REGISTRATION_WORKERS: int = 12
+"""The number of workers allocated to the registration stage by default, measured as the processors the stage occupies
+while many planes register at once. The compiled kernels and the linear-algebra routines the phase correlation
+dispatches run concurrently rather than taking turns, so the stage occupies more than the kernels alone suggest."""
 
 PROCESSING_WORKERS: int = 10
 """The number of workers allocated to the processing stage by default, measured on a one-plane worker sweep. Detection
