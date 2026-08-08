@@ -20,7 +20,7 @@ class TestComputeBidirectionalPhaseOffset:
         sample_positions = np.linspace(start=0, stop=4 * np.pi, num=128, dtype=np.float32)
         pattern = np.sin(sample_positions)
         frames = np.tile(A=pattern, reps=(20, 64, 1))
-        offset = compute_bidirectional_phase_offset(frames=frames)
+        offset = compute_bidirectional_phase_offset(frames=frames, workers=1)
         assert offset == 0
 
     @pytest.mark.parametrize("shift", [3, 5, -3, -5])
@@ -36,7 +36,7 @@ class TestComputeBidirectionalPhaseOffset:
         frames[:, ::2, :] = base_pattern
         # np.roll applies a circular shift so the correlation has no edge artifacts.
         frames[:, 1::2, :] = np.roll(a=base_pattern, shift=shift)
-        offset = compute_bidirectional_phase_offset(frames=frames)
+        offset = compute_bidirectional_phase_offset(frames=frames, workers=1)
         # Compares against the negative applied shift, which is the returned correction offset.
         assert abs(offset - (-shift)) <= 1
 
@@ -44,14 +44,14 @@ class TestComputeBidirectionalPhaseOffset:
         """Verifies the return type is a Python int."""
         generator = np.random.default_rng(seed=42)
         frames = generator.standard_normal((5, 32, 32)).astype(np.float32)
-        offset = compute_bidirectional_phase_offset(frames=frames)
+        offset = compute_bidirectional_phase_offset(frames=frames, workers=1)
         assert isinstance(offset, int)
 
     def test_odd_height_frames(self) -> None:
         """Verifies the function handles frames with odd height."""
         generator = np.random.default_rng(seed=42)
         frames = generator.standard_normal((5, 33, 64)).astype(np.float32)
-        offset = compute_bidirectional_phase_offset(frames=frames)
+        offset = compute_bidirectional_phase_offset(frames=frames, workers=1)
         assert isinstance(offset, int)
 
 
