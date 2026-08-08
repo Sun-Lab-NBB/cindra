@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-def compute_bidirectional_phase_offset(frames: NDArray[np.float32]) -> int:
+def compute_bidirectional_phase_offset(frames: NDArray[np.float32], workers: int) -> int:
     """Computes the bidirectional phase offset from a sample of imaging frames.
 
     Bidirectional scanning microscopes acquire alternating lines in opposite directions, which can introduce a
@@ -23,6 +23,7 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.float32]) -> int:
     Args:
         frames: A 3D array of imaging frames with shape (frame_count, height, width). The frames should be a
             representative sample from the recording, typically selected at regular intervals throughout the recording.
+        workers: The number of parallel workers for FFT computation. Use -1 for all available cores.
 
     Returns:
         The estimated bidirectional phase offset in pixels. Positive values indicate that odd lines should be shifted
@@ -32,11 +33,11 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.float32]) -> int:
 
     # Computes the real FFT of odd lines (1, 3, 5, ...) along the x-axis. Uses rfft since input is real-valued,
     # which is ~2x faster than fft and uses half the memory. Casts to complex64 to prevent complex128 promotion.
-    odd_lines_fft = fft.rfft(x=frames[:, 1::2, :], axis=2, workers=-1).astype(np.complex64)
+    odd_lines_fft = fft.rfft(x=frames[:, 1::2, :], axis=2, workers=workers).astype(np.complex64)
     odd_lines_fft /= np.abs(odd_lines_fft) + np.float32(NORMALIZATION_EPSILON)
 
     # Computes the conjugate FFT of even lines (0, 2, 4, ...) along the x-axis.
-    even_lines_fft = fft.rfft(x=frames[:, ::2, :], axis=2, workers=-1).astype(np.complex64)
+    even_lines_fft = fft.rfft(x=frames[:, ::2, :], axis=2, workers=workers).astype(np.complex64)
     np.conj(even_lines_fft, out=even_lines_fft)
     even_lines_fft /= np.abs(even_lines_fft) + np.float32(NORMALIZATION_EPSILON)
 
@@ -44,7 +45,7 @@ def compute_bidirectional_phase_offset(frames: NDArray[np.float32]) -> int:
     even_lines_fft = even_lines_fft[:, : odd_lines_fft.shape[1], :]
 
     # Computes the cross-correlation via inverse FFT of the product and averages across all frames and lines.
-    cross_correlation = fft.irfft(x=odd_lines_fft * even_lines_fft, n=width, axis=2, workers=-1).astype(np.float32)
+    cross_correlation = fft.irfft(x=odd_lines_fft * even_lines_fft, n=width, axis=2, workers=workers).astype(np.float32)
     cross_correlation = cross_correlation.mean(axis=(0, 1))
     cross_correlation = fft.fftshift(x=cross_correlation)
 
