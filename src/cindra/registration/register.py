@@ -115,10 +115,11 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
         )
         return
 
-    # Holds the native thread pools to the stage's own worker budget for the rest of the registration. The FFT
-    # and linear-algebra routines the phase correlation dispatches otherwise open one thread per core through
-    # the underlying BLAS and OpenMP libraries, which oversubscribes the host when several planes register at
-    # once. The Numba mask above bounds only the kernels Numba compiles, so it does not reach these.
+    # Holds the native thread pools to the stage's own worker budget for the rest of the registration. The
+    # linear-algebra routines the phase correlation dispatches otherwise open one thread per core through the
+    # underlying BLAS and OpenMP libraries, which oversubscribes the host when several planes register at once.
+    # The Numba mask above bounds only the kernels Numba compiles, so it does not reach these. The scipy FFT pool
+    # is reached by neither, so every transform names the stage budget through its own 'workers' argument.
     with threadpool_limits(limits=workers):
         # Clears existing registration data if re-registering.
         if registration_data.is_registered(output_path=io_data.output_path):
@@ -877,7 +878,7 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
             and bidirectional_phase_offset == 0
             and not bidirectional_phase_corrected
         ):
-            bidirectional_phase_offset = compute_bidirectional_phase_offset(frames=frames)
+            bidirectional_phase_offset = compute_bidirectional_phase_offset(frames=frames, workers=workers)
             console.echo(
                 message=(
                     f"Plane {plane_index} estimated bidirectional phase offset: {bidirectional_phase_offset} pixels."
