@@ -34,16 +34,16 @@ Complete parameter reference for the multi-recording (cross-recording) cindra RO
 
 ## Agent requirements
 
-You MUST use the cindra MCP tools for all configuration operations. Do not hand-edit configuration files
-or import cindra Python functions directly when an MCP tool exists for the task. If MCP tools are not
-available, invoke `/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+You MUST use the cindra MCP tools for all configuration operations. Do not hand-edit configuration files or import
+cindra Python functions directly when an MCP tool exists for the task. If MCP tools are not available, invoke
+`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
 
 ---
 
 ## Available tools
 
-These tools are registered on the `cindra-mcp` server. Tool parameters and return values are
-self-documented via MCP introspection.
+These tools are registered on the `cindra-mcp` server. Tool parameters and return values are self-documented via MCP
+introspection.
 
 | Tool                        | Purpose                                                                   |
 |-----------------------------|---------------------------------------------------------------------------|
@@ -57,9 +57,8 @@ self-documented via MCP introspection.
 
 ## Configuration overview
 
-The multi-recording pipeline uses `MultiRecordingConfiguration`, a dataclass with 7 nested sections. This
-pipeline tracks ROIs across multiple recordings and extracts consistent fluorescence traces using consensus
-template masks.
+The multi-recording pipeline uses `MultiRecordingConfiguration`, a dataclass with 7 nested sections. This pipeline
+tracks ROIs across multiple recordings and extracts consistent fluorescence traces using consensus template masks.
 
 All parameters are specified in the `MultiRecordingConfiguration` YAML file. The pipeline loads the fully resolved
 configuration directly from the file without any runtime overrides.
@@ -72,10 +71,10 @@ worker count as an invocation argument, supplied by the `cindra run` options `-d
 
 ## Prerequisites from single-recording processing
 
-Before multi-recording processing, all recordings must have completed single-recording processing through
-all four phases (binarization, registration, processing, combination). The multi-recording pipeline locates
-single-recording output by recursively searching each recording directory for a `combined_metadata.npz` file. The
-parent directory of this file becomes the cindra root for that recording.
+Before multi-recording processing, all recordings must have completed single-recording processing through all four
+phases (binarization, registration, processing, combination). The multi-recording pipeline locates single-recording
+output by recursively searching each recording directory for a `combined_metadata.npz` file. The parent directory of
+this file becomes the cindra root for that recording.
 
 **Required single-recording outputs per recording:**
 
@@ -118,20 +117,20 @@ Runtime behavior settings shared with the single-recording pipeline.
 | `display_progress_bars` | bool | False   | Show progress bars. Disable for parallel processing. |
 
 Worker allocation reaches the discovery and extraction stages as an invocation argument, as described in the
-Configuration overview section. Omitting a worker option applies the measured default of 30 workers for discovery
-and 16 for extraction, published as `DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.allocation`. Setting a
-worker option to -1 requests every available core.
+Configuration overview section. Omitting a worker option applies the measured default of 30 workers for discovery and 16
+for extraction, published as `DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.allocation`. Setting a worker
+option to -1 requests every available core.
 
 ---
 
 ## Section 2: recording_io
 
-Controls input recording paths, output dataset naming, and ROI selection caching. The pipeline receives a list
-of recording directories (populated by the MCP batch tool) and natural-sorts them to determine the main recording.
-Each recording stores its own multi-recording output under its own `cindra/multi_recording/{dataset_name}/`
-directory. The main (first natural-sorted) recording additionally holds the shared resolved configuration and the
-processing tracker. ROI selection results are cached per dataset so that re-running the pipeline skips selection
-unless `repeat_selection` is enabled.
+Controls input recording paths, output dataset naming, and ROI selection caching. The pipeline receives a list of
+recording directories (populated by the MCP batch tool) and natural-sorts them to determine the main recording. Each
+recording stores its own multi-recording output under its own `cindra/multi_recording/{dataset_name}/` directory. The
+main (first natural-sorted) recording additionally holds the shared resolved configuration and the processing tracker.
+ROI selection results are cached per dataset so that re-running the pipeline skips selection unless `repeat_selection`
+is enabled.
 
 | Parameter               | Type        | Default | Description                                                                                                  |
 |-------------------------|-------------|---------|--------------------------------------------------------------------------------------------------------------|
@@ -143,18 +142,18 @@ unless `repeat_selection` is enabled.
 
 - `recording_directories` is populated by the MCP batch tool from its `recording_paths` argument, or by
   `cindra run -rp/--recording-path`.
-- `dataset_name` **must be set by the user**. It identifies the output and must be unique per dataset in a batch.
-  Use `resolve_dataset_name_tool` to construct qualified names from a shared base name and a batch-specific specifier.
-- When `repeat_selection` is True, ROI selection is re-run using current criteria even if selections already exist.
-  This allows updated single-recording results or modified selection criteria to be integrated.
+- `dataset_name` **must be set by the user**. It identifies the output and must be unique per dataset in a batch. Use
+  `resolve_dataset_name_tool` to construct qualified names from a shared base name and a batch-specific specifier.
+- When `repeat_selection` is True, ROI selection is re-run using current criteria even if selections already exist. This
+  allows updated single-recording results or modified selection criteria to be integrated.
 
 ---
 
 ## Section 3: roi_selection
 
-Filters single-recording ROIs before cross-recording tracking. Each recording's detected ROIs are filtered by
-classifier probability, spatial size, and distance from MROI region borders. Only ROIs passing all criteria
-enter the tracking pipeline. This pre-filtering controls the quality/quantity tradeoff for the tracked population.
+Filters single-recording ROIs before cross-recording tracking. Each recording's detected ROIs are filtered by classifier
+probability, spatial size, and distance from MROI region borders. Only ROIs passing all criteria enter the tracking
+pipeline. This pre-filtering controls the quality/quantity tradeoff for the tracked population.
 
 | Parameter                         | Type         | Default | Description                                                               |
 |-----------------------------------|--------------|---------|---------------------------------------------------------------------------|
@@ -165,31 +164,31 @@ enter the tracking pipeline. This pre-filtering controls the quality/quantity tr
 | `maximum_size_channel_2`          | int / None   | None    | Channel 2 max size. None = use channel 1 value.                           |
 | `mroi_region_margin_channel_2`    | int / None   | None    | Channel 2 MROI margin. None = use channel 1 value.                        |
 
-Channel 2 parameters default to None, which causes the pipeline to fall back to the corresponding channel 1 value.
-Set these independently when channel 2 ROIs have different classification or size characteristics.
+Channel 2 parameters default to None, which causes the pipeline to fall back to the corresponding channel 1 value. Set
+these independently when channel 2 ROIs have different classification or size characteristics.
 
 ### Tuning guidance
 
-- **More tracked ROIs**: Lower `probability_threshold` (0.7–0.8) to include lower-confidence ROIs from
-  single-recording detection. This feeds more candidates into tracking but may include noisier ROIs.
+- **More tracked ROIs**: Lower `probability_threshold` (0.7-0.8) to include lower-confidence ROIs from single-recording
+  detection. This feeds more candidates into tracking but may include noisier ROIs.
 - **Fewer false positives**: Raise `probability_threshold` (0.9+) to only track high-confidence cells.
-- **Large ROIs excluded**: Increase `maximum_size` (1500–2000) if legitimate cells exceed the default limit.
-- **MROI edge artifacts**: Increase `mroi_region_margin` (40–60) to exclude more ROIs near region borders
-  where registration distortion is highest. The parameter applies to MROI recordings, which are the only ones for
-  which region borders are computed.
-- **After re-running single-recording processing**: Set `repeat_selection=True` to re-apply selection criteria
-  against updated single-recording results, then set back to False.
+- **Large ROIs excluded**: Increase `maximum_size` (1500-2000) if legitimate cells exceed the default limit.
+- **MROI edge artifacts**: Increase `mroi_region_margin` (40-60) to exclude more ROIs near region borders where
+  registration distortion is highest. The parameter applies to MROI recordings, which are the only ones for which region
+  borders are computed.
+- **After re-running single-recording processing**: Set `repeat_selection=True` to re-apply selection criteria against
+  updated single-recording results, then set back to False.
 
 ---
 
 ## Section 4: diffeomorphic_registration
 
-Aligns recordings to a common coordinate space using groupwise diffeomorphic Demons registration. At each scale
-level of a coarse-to-fine pyramid, symmetric Demons forces are computed from every recording to all others and
-averaged, producing a displacement field that is regularized via cubic B-spline fitting with injectivity constraints
-to guarantee invertibility. Deformations are composed across scales to produce smooth, invertible forward and inverse
-maps per recording. Forward maps warp ROI masks into the shared space for tracking. Inverse maps transform tracked
-template masks back to each recording's native space for signal extraction.
+Aligns recordings to a common coordinate space using groupwise diffeomorphic Demons registration. At each scale level of
+a coarse-to-fine pyramid, symmetric Demons forces are computed from every recording to all others and averaged,
+producing a displacement field that is regularized via cubic B-spline fitting with injectivity constraints to guarantee
+invertibility. Deformations are composed across scales to produce smooth, invertible forward and inverse maps per
+recording. Forward maps warp ROI masks into the shared space for tracking. Inverse maps transform tracked template masks
+back to each recording's native space for signal extraction.
 
 | Parameter              | Type  | Default         | Description                                                                   |
 |------------------------|-------|-----------------|-------------------------------------------------------------------------------|
@@ -203,26 +202,26 @@ template masks back to each recording's native space for signal extraction.
 
 - **Minimal drift** (stable chronic windows): Lower `speed_factor` (1.5) and `scale_sampling` (20) for faster
   convergence when tissue displacement between recordings is small.
-- **Moderate drift** (typical use case): Default `speed_factor` (3.0) and `scale_sampling` (30) work well for
-  most longitudinal imaging preparations.
-- **Significant drift** (challenging cases): Increase `speed_factor` (4.5) and `scale_sampling` (40) to allow
-  larger deformations and more iterations per scale level.
+- **Moderate drift** (typical use case): Default `speed_factor` (3.0) and `scale_sampling` (30) work well for most
+  longitudinal imaging preparations.
+- **Significant drift** (challenging cases): Increase `speed_factor` (4.5) and `scale_sampling` (40) to allow larger
+  deformations and more iterations per scale level.
 - **Different reference image**: Change `image_type` to "mean" if enhanced mean images introduce artifacts, or
   "maximum_projection" for sparse labeling where bright pixels are more informative.
-- **Finer spatial control**: Lower `grid_sampling_factor` (0.5–0.8) to use a denser B-spline grid at coarse
-  scales, improving accuracy for spatially complex deformations at the cost of speed.
+- **Finer spatial control**: Lower `grid_sampling_factor` (0.5-0.8) to use a denser B-spline grid at coarse scales,
+  improving accuracy for spatially complex deformations at the cost of speed.
 
 ---
 
 ## Section 5: roi_tracking
 
 Clusters ROI masks across registered recordings to identify cells tracked over time. After forward-deforming all
-single-recording masks into the shared coordinate space, the field of view is partitioned into spatial bins with
-overlap margins. Within each bin, ROI pairs from different recordings within `maximum_distance` are compared by
-Jaccard distance and grouped via hierarchical clustering. For each cluster passing `mask_prevalence`, a consensus
-template mask is built by retaining only pixels present in at least `pixel_prevalence` percent of member masks.
-Templates with fewer than `minimum_size` non-overlapping pixels are discarded. Final templates are inverse-deformed
-back to each recording's native coordinates for fluorescence extraction.
+single-recording masks into the shared coordinate space, the field of view is partitioned into spatial bins with overlap
+margins. Within each bin, ROI pairs from different recordings within `maximum_distance` are compared by Jaccard distance
+and grouped via hierarchical clustering. For each cluster passing `mask_prevalence`, a consensus template mask is built
+by retaining only pixels present in at least `pixel_prevalence` percent of member masks. Templates with fewer than
+`minimum_size` non-overlapping pixels are discarded. Final templates are inverse-deformed back to each recording's
+native coordinates for fluorescence extraction.
 
 | Parameter          | Type            | Default    | Description                                                              |
 |--------------------|-----------------|------------|--------------------------------------------------------------------------|
@@ -236,15 +235,15 @@ back to each recording's native coordinates for fluorescence extraction.
 
 ### Tuning guidance
 
-- **Strict tracking** (fewer, highly reliable ROIs): Lower `threshold` (0.65) for stricter Jaccard matching,
-  raise `mask_prevalence` (70) and `pixel_prevalence` (60) to require more cross-recording consistency, and
-  decrease `maximum_distance` (15) to tighten centroid proximity.
-- **Lenient tracking** (more ROIs, some less reliable): Raise `threshold` (0.85) for more permissive matching,
-  lower `mask_prevalence` (30) and `pixel_prevalence` (40) to accept ROIs present in fewer recordings, and
-  increase `maximum_distance` (25) to tolerate larger centroid shifts.
-- **Small ROIs lost**: Lower `minimum_size` (15–20) to retain templates with fewer non-overlapping pixels.
-- **Dense labeling**: Decrease `step_sizes` (e.g., (150, 150)) and increase `bin_size` (60–80) to improve
-  clustering accuracy in crowded fields by using smaller spatial bins with wider overlap margins.
+- **Strict tracking** (fewer, highly reliable ROIs): Lower `threshold` (0.65) for stricter Jaccard matching, raise
+  `mask_prevalence` (70) and `pixel_prevalence` (60) to require more cross-recording consistency, and decrease
+  `maximum_distance` (15) to tighten centroid proximity.
+- **Lenient tracking** (more ROIs, some less reliable): Raise `threshold` (0.85) for more permissive matching, lower
+  `mask_prevalence` (30) and `pixel_prevalence` (40) to accept ROIs present in fewer recordings, and increase
+  `maximum_distance` (25) to tolerate larger centroid shifts.
+- **Small ROIs lost**: Lower `minimum_size` (15-20) to retain templates with fewer non-overlapping pixels.
+- **Dense labeling**: Decrease `step_sizes` (e.g., (150, 150)) and increase `bin_size` (60-80) to improve clustering
+  accuracy in crowded fields by using smaller spatial bins with wider overlap margins.
 
 ---
 
@@ -269,9 +268,9 @@ ROIs are already known cells, so `classification_threshold` is not used during m
 
 ### Tuning guidance
 
-See `/single-recording-configuration` Section 8 for full tuning guidance. The same recommendations apply here,
-with two exceptions: `allow_overlap` is always True internally, and `classification_threshold` has no effect since
-tracked ROIs skip reclassification.
+See `/single-recording-configuration` Section 8 for full tuning guidance. The same recommendations apply here, with two
+exceptions: `allow_overlap` is always True internally, and `classification_threshold` has no effect since tracked ROIs
+skip reclassification.
 
 ---
 
@@ -405,45 +404,42 @@ spike_deconvolution:
 
 Configuration files follow a two-tier lifecycle:
 
-1. **Template configs**: De-novo configurations generated via `generate_config_file_tool` or manually created.
-   Templates can live anywhere (e.g., `/Data/CA1_GCaMP6f_MD.yaml`) and are reusable across datasets.
-   Templates are never modified by the pipeline. One template can serve multiple datasets that share the
-   same processing parameters (only `dataset_name` differs, and this is handled by the batch tool).
+1. **Template configs**: De-novo configurations generated via `generate_config_file_tool` or manually created. Templates
+   can live anywhere (e.g., `/Data/CA1_GCaMP6f_MD.yaml`) and are reusable across datasets. Templates are never modified
+   by the pipeline. One template can serve multiple datasets that share the same processing parameters (only
+   `dataset_name` differs, and this is handled by the batch tool).
 
-2. **Resolved copies**: When `prepare_multi_recording_batch_tool` runs, it loads the template,
-   applies runtime-specific overrides (`recording_io.dataset_name` lowercased to a filesystem-safe key,
-   `recording_io.recording_directories` natural-sorted from the supplied `recording_paths`, and
-   `runtime.display_progress_bars=False`), and saves the resolved copy as
-   `multi_recording_configuration.yaml` inside the main recording's dataset output directory
+2. **Resolved copies**: When `prepare_multi_recording_batch_tool` runs, it loads the template, applies runtime-specific
+   overrides (`recording_io.dataset_name` lowercased to a filesystem-safe key, `recording_io.recording_directories`
+   natural-sorted from the supplied `recording_paths`, and `runtime.display_progress_bars=False`), and saves the
+   resolved copy as `multi_recording_configuration.yaml` inside the main recording's dataset output directory
    (`cindra/multi_recording/{dataset_name}/`). The resolved copy stays immutable after the prepare step, because
    `execute_processing_jobs_tool` resolves the worker allocation at dispatch time and passes it to each job as an
    invocation argument. These resolved copies are what the pipeline actually executes against.
 
-**Do NOT** create per-dataset configuration files manually. Pass a single template path to the batch tool
-and let it handle per-dataset fine-tuning automatically.
+**Do NOT** create per-dataset configuration files manually. Pass a single template path to the batch tool and let it
+handle per-dataset fine-tuning automatically.
 
 ---
 
 ## Configuration workflow
 
-1. **Discover candidates** using `discover_recordings_tool` to find recordings with completed single-recording
-   output (check the `multi_recording_candidates` list in the response).
-2. **Verify prerequisites**: Confirm all discovered recordings have completed single-recording processing
-   (all four phases). If any recording is incomplete, invoke `/single-recording-processing` (or
-   `/acquisition-data-preparation` if raw data is not yet prepared) to complete the prerequisite chain before
-   continuing.
-3. **Generate a template configuration** using `generate_config_file_tool` with `pipeline_type="multi-recording"`.
-   Save it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). Alternatively, use `read_config_file_tool`
-   to inspect an existing or legacy configuration for conversion.
-4. **Set `dataset_name`**: Use `resolve_dataset_name_tool` to construct a qualified name from a shared
-   base name and a batch-specific specifier derived from recording paths. This is the only required user
-   parameter.
+1. **Discover candidates** using `discover_recordings_tool` to find recordings with completed single-recording output
+   (check the `multi_recording_candidates` list in the response).
+2. **Verify prerequisites**: Confirm all discovered recordings have completed single-recording processing (all four
+   phases). If any recording is incomplete, invoke `/single-recording-processing` (or `/acquisition-data-preparation` if
+   raw data is not yet prepared) to complete the prerequisite chain before continuing.
+3. **Generate a template configuration** using `generate_config_file_tool` with `pipeline_type="multi-recording"`. Save
+   it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_MD.yaml`). Alternatively, use `read_config_file_tool` to
+   inspect an existing or legacy configuration for conversion.
+4. **Set `dataset_name`**: Use `resolve_dataset_name_tool` to construct a qualified name from a shared base name and a
+   batch-specific specifier derived from recording paths. This is the only required user parameter.
 5. **Review and tune** registration and tracking parameters based on expected tissue drift.
 6. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
-7. **Configuration complete**: The validated template file is ready for use. This skill does not start
-   processing. If invoked standalone, the configuration is ready. To run it, proceed to
-   `/multi-recording-processing`. If invoked from another skill, return control to the caller.
+7. **Configuration complete**: The validated template file is ready for use. This skill does not start processing. If
+   invoked standalone, the configuration is ready. To run it, proceed to `/multi-recording-processing`. If invoked from
+   another skill, return control to the caller.
 
 ---
 
@@ -465,8 +461,8 @@ and let it handle per-dataset fine-tuning automatically.
 
 ## Verification checklist
 
-You MUST verify configuration files against this checklist before starting multi-recording processing.
-Use `validate_config_file_tool` for automated validation of YAML structure, parameter constraints, and pipeline-set
+You MUST verify configuration files against this checklist before starting multi-recording processing. Use
+`validate_config_file_tool` for automated validation of YAML structure, parameter constraints, and pipeline-set
 parameter detection.
 
 ```text
