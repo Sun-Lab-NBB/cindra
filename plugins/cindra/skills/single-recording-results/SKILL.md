@@ -33,16 +33,16 @@ Complete output data format documentation for the single-recording (within-recor
 
 ## Agent requirements
 
-You MUST use the cindra MCP query and verification tools to inspect output data rather than reading output
-files directly when a tool exists for the task. If MCP tools are not available, invoke
-`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+You MUST use the cindra MCP query and verification tools to inspect output data rather than reading output files
+directly when a tool exists for the task. If MCP tools are not available, invoke `/cindra-mcp-environment-setup` to
+diagnose and resolve connectivity issues.
 
 ---
 
 ## Available tools
 
-Use these cindra MCP tools to query and verify single-recording output data programmatically. Prefer these over
-manual file reads whenever possible.
+Use these cindra MCP tools to query and verify single-recording output data programmatically. Prefer these over manual
+file reads whenever possible.
 
 ### Verification tool
 
@@ -70,39 +70,38 @@ manual file reads whenever possible.
 
 ### Query tool argument semantics
 
-The `recording_path` argument for the verify and query tools must be the recording output directory, the parent of
-the `cindra/` folder. This equals the `recording_output_paths` entries passed to and returned by the prepare tool
-when the output root differs from the raw-data root, not the raw-data path itself. The tools resolve the `cindra/`
-subdirectory automatically.
+The `recording_path` argument for the verify and query tools must be the recording output directory, the parent of the
+`cindra/` folder. This equals the `recording_output_paths` entries passed to and returned by the prepare tool when the
+output root differs from the raw-data root, not the raw-data path itself. The tools resolve the `cindra/` subdirectory
+automatically.
 
 `query_single_recording_metadata_tool` reports the top-level `frame_count` from the combined traces and each
 `plane_timing` entry's `frame_count` from that plane's `runtime_data.yaml`. A plane count above the top-level count is
 expected rather than corruption: it marks a plane whose trailing frames were trimmed out of the combined traces.
 
-The ROI indices accepted by `query_traces_tool` and `query_roi_statistics_tool` are 0-based positional row indices
-into the per-recording arrays, not a tracking identity. Both tools silently drop individual out-of-range indices, so
-always compare the returned `roi_index` values against what you requested. When every requested index is out of
-range, `query_roi_statistics_tool` returns an empty `rois` list with `success=true`, while `query_traces_tool` fails
-with "No valid ROI indices provided", so a confidently "successful" empty result can only come from the statistics
-tool.
+The ROI indices accepted by `query_traces_tool` and `query_roi_statistics_tool` are 0-based positional row indices into
+the per-recording arrays, not a tracking identity. Both tools silently drop individual out-of-range indices, so always
+compare the returned `roi_index` values against what you requested. When every requested index is out of range,
+`query_roi_statistics_tool` returns an empty `rois` list with `success=true`, while `query_traces_tool` fails with "No
+valid ROI indices provided", so a confidently "successful" empty result can only come from the statistics tool.
 
 ---
 
 ## Output data reference
 
-All results are saved under `{output_path}/cindra/`. The pipeline produces combined (multi-plane merged) data at
-the root level and per-plane data in numbered subdirectories. Channel 2 output depends on whether the second channel is
+All results are saved under `{output_path}/cindra/`. The pipeline produces combined (multi-plane merged) data at the
+root level and per-plane data in numbered subdirectories. Channel 2 output depends on whether the second channel is
 functional, meaning both `main.first_channel_functional` and `main.second_channel_functional` are True. Every
 two-channel recording produces, in each `plane_N/` directory, `channel_2_data.bin`,
-`detection_data/mean_image_channel_2.npy`, `cell_fluorescence_channel_2.npy`, and
-`neuropil_fluorescence_channel_2.npy`, plus the combined `detection_data/mean_image_channel_2.npy` at the root. A
-structural (non-functional) channel 2 still gets a full fluorescence extraction pass, but it borrows the channel 1 ROI
-masks instead of detecting its own ROIs, so its traces carry one row per channel 1 ROI and come with no independent
-detection, classification, or deconvolution. Every other channel 2 file requires both channels to be functional: the
-other three detection images at both levels, the ROI `.npz` files, `subtracted_fluorescence_channel_2.npy`,
-`spikes_channel_2.npy`, `cell_classification_channel_2.npy`, and the root-level combined
-`cell_fluorescence_channel_2.npy` and `neuropil_fluorescence_channel_2.npy`. Those last two are the asymmetry to
-watch, because combination omits them for a structural channel 2 even though every plane directory holds its own copy.
+`detection_data/mean_image_channel_2.npy`, `cell_fluorescence_channel_2.npy`, and `neuropil_fluorescence_channel_2.npy`,
+plus the combined `detection_data/mean_image_channel_2.npy` at the root. A structural (non-functional) channel 2 still
+gets a full fluorescence extraction pass, but it borrows the channel 1 ROI masks instead of detecting its own ROIs, so
+its traces carry one row per channel 1 ROI and come with no independent detection, classification, or deconvolution.
+Every other channel 2 file requires both channels to be functional: the other three detection images at both levels, the
+ROI `.npz` files, `subtracted_fluorescence_channel_2.npy`, `spikes_channel_2.npy`, `cell_classification_channel_2.npy`,
+and the root-level combined `cell_fluorescence_channel_2.npy` and `neuropil_fluorescence_channel_2.npy`. Those last two
+are the asymmetry to watch, because combination omits them for a structural channel 2 even though every plane directory
+holds its own copy.
 
 ### Directory structure
 
@@ -160,13 +159,13 @@ cindra/
 **Phase 1 (binarization):** `configuration.yaml`, `acquisition_parameters.yaml`, and the initial per-plane
 `runtime_data.yaml` are already on disk before this phase runs, because `prepare_single_recording_batch_tool` (or the
 `cindra run` entry point) writes them while resolving the plane contexts, so their presence does not indicate that
-binarization ran. Phase 1 itself creates the per-plane `channel_1_data.bin` (and `channel_2_data.bin` if
-two-channel) and per-plane `detection_data/mean_image.npy` (plus `mean_image_channel_2.npy` if two-channel), then
-records `binarization_time` into each plane's `runtime_data.yaml`. Each plane binary is sized
-by that plane's own interleave frame count, so a recording whose acquisition stopped partway through a volume gives its
-leading planes one frame more than its trailing planes, and channel 2 may hold one frame more or fewer than channel 1 of
-the same plane. Binarization also rebuilds an existing binary whose size disagrees with its recorded plane geometry, or
-that an interrupted registration left marked, without requiring `repeat_binarization`.
+binarization ran. Phase 1 itself creates the per-plane `channel_1_data.bin` (and `channel_2_data.bin` if two-channel)
+and per-plane `detection_data/mean_image.npy` (plus `mean_image_channel_2.npy` if two-channel), then records
+`binarization_time` into each plane's `runtime_data.yaml`. Each plane binary is sized by that plane's own interleave
+frame count, so a recording whose acquisition stopped partway through a volume gives its leading planes one frame more
+than its trailing planes, and channel 2 may hold one frame more or fewer than channel 1 of the same plane. Binarization
+also rebuilds an existing binary whose size disagrees with its recorded plane geometry, or that an interrupted
+registration left marked, without requiring `repeat_binarization`.
 
 **Phase 2 (registration, per-plane):** Creates `registration_data/`, rewrites the plane binary in place, refreshes
 `detection_data/mean_image.npy`, and updates `runtime_data.yaml` with the registration section,
@@ -177,10 +176,10 @@ marked binary, and re-running binarization rebuilds the binary and clears the ma
 
 **Phase 3 (processing, per-plane):** Creates the remaining `detection_data/` images (`enhanced_mean_image.npy`,
 `maximum_projection.npy`, `correlation_map.npy`), the ROI `.npz` files, the fluorescence `.npy` traces, and updates
-`runtime_data.yaml` with `total_processing_time`, `processing_workers`, and `date_processed`. Detection also
-overwrites `detection_data/mean_image.npy` with the mean of the temporally binned frames, which drop the bad frames
-and are cropped to the registration valid range before being embedded into a full-frame array that is zero outside
-that range, so the surviving file is not the whole-movie temporal mean registration wrote.
+`runtime_data.yaml` with `total_processing_time`, `processing_workers`, and `date_processed`. Detection also overwrites
+`detection_data/mean_image.npy` with the mean of the temporally binned frames, which drop the bad frames and are cropped
+to the registration valid range before being embedded into a full-frame array that is zero outside that range, so the
+surviving file is not the whole-movie temporal mean registration wrote.
 
 **Phase 4 (combination):** Creates combined `detection_data/` and the combined ROI and trace files at the root level by
 merging all per-plane results, then writes `combined_metadata.npz` last, staging it as `combined_metadata.tmp.npz` and
@@ -194,10 +193,10 @@ For every file, array shape, dtype, NPZ key, and data type convention the pipeli
 
 ## Multi-recording compatibility requirements
 
-For recordings intended for multi-recording processing, single-recording processing must complete all four
-phases (binarization, registration, processing, combination). No special configuration is required. For the
-authoritative list of the single-recording outputs the multi-recording pipeline consumes, see
-`/multi-recording-configuration` (Prerequisites from single-recording processing).
+For recordings intended for multi-recording processing, single-recording processing must complete all four phases
+(binarization, registration, processing, combination). No special configuration is required. For the authoritative list
+of the single-recording outputs the multi-recording pipeline consumes, see `/multi-recording-configuration`
+(Prerequisites from single-recording processing).
 
 ---
 
@@ -218,9 +217,9 @@ authoritative list of the single-recording outputs the multi-recording pipeline 
 
 ## Verification checklist
 
-Use `verify_single_recording_output_tool` to automate this verification. The tool checks all expected files and NPZ
-keys and returns a completeness verdict with any missing items listed. Fall back to the manual checklist below only
-if the MCP tool is unavailable. Replace N with the expected plane count from the acquisition parameters.
+Use `verify_single_recording_output_tool` to automate this verification. The tool checks all expected files and NPZ keys
+and returns a completeness verdict with any missing items listed. Fall back to the manual checklist below only if the
+MCP tool is unavailable. Replace N with the expected plane count from the acquisition parameters.
 
 ```text
 Single-Recording Output Completeness:

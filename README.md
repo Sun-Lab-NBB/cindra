@@ -111,9 +111,8 @@ or carried inside an installed Python package. Install one with `brew install li
 Without a loadable runtime, processing fails once it reaches a parallelized stage. Linux and Windows run the TBB
 threading layer, which needs no additional steps, so `cindra omp` errors when run on them.
 
-For users, all other library dependencies are installed automatically by all supported installation
-methods. For developers, see the [Developers](#developers) section for information on installing
-additional development dependencies.
+For users, all other library dependencies are installed automatically by all supported installation methods. For
+developers, see the [Developers](#developers) section for information on installing additional development dependencies.
 
 ___
 
@@ -121,21 +120,19 @@ ___
 
 ### Source
 
-***Note,*** installation from source is ***highly discouraged*** for anyone who is not an active
-project developer.
+***Note,*** installation from source is ***highly discouraged*** for anyone who is not an active project developer.
 
-1. Download this repository to the local machine using the preferred method, such as git-cloning.
-   Use one of the [stable releases](https://github.com/Sun-Lab-NBB/cindra/tags) that
-   include precompiled binary and source code distribution (sdist) wheels.
-2. If the downloaded distribution is stored as a compressed archive, unpack it using the
-   appropriate decompression tool.
+1. Download this repository to the local machine using the preferred method, such as git-cloning. Use one of the
+   [stable releases](https://github.com/Sun-Lab-NBB/cindra/tags) that include precompiled binary and source code
+   distribution (sdist) wheels.
+2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
 3. `cd` to the root directory of the prepared project distribution.
 4. Run `pip install .` to install the project and its dependencies.
 
 ### pip
 
-Use the following command to install the library and all of its dependencies via
-[pip](https://pip.pypa.io/en/stable/): `pip install cindra`
+Use the following command to install the library and all of its dependencies via [pip](https://pip.pypa.io/en/stable/):
+`pip install cindra`
 
 ___
 
@@ -155,9 +152,9 @@ file with the `file_io.ignored_file_names` configuration parameter, which matche
 extension.
 
 The pipeline expects a flat directory containing one or more `.tif` / `.tiff` files. For multi-plane or multichannel
-acquisitions, frames must be interleaved in the following order within each TIFF file:
-plane0_channel1, plane0_channel2, plane1_channel1, plane1_channel2, and so on, repeating for each time point. This
-interleaving pattern continues seamlessly across TIFF file boundaries when a recording spans multiple files.
+acquisitions, frames must be interleaved in the following order within each TIFF file: plane0_channel1, plane0_channel2,
+plane1_channel1, plane1_channel2, and so on, repeating for each time point. This interleaving pattern continues
+seamlessly across TIFF file boundaries when a recording spans multiple files.
 
 For MROI (multi-region of interest) line-scanning acquisitions, each raw TIFF frame must contain the full imaging strip
 with all ROI regions arranged vertically. The interleaving order across planes and channels is the same as standard
@@ -441,8 +438,7 @@ When the `registration_metric_principal_components` configuration parameter is s
 at least 1500 frames, the registration step computes principal component projections of the registered movie. These
 projections capture the dominant spatial patterns of residual variance after motion correction. A well-registered
 recording should show principal components dominated by neural activity rather than motion artifacts. The projections
-are saved as
-`principal_component_projections.npy`, `principal_component_extreme_images.npy`, and
+are saved as `principal_component_projections.npy`, `principal_component_extreme_images.npy`, and
 `principal_component_shift_metrics.npy` under `registration_data/`, and can be inspected interactively using the
 registration quality GUI viewer (`cindra-gui registration`).
 
@@ -629,7 +625,7 @@ that ROIs from different days can be compared by their pixel overlap.
 
 The algorithm uses diffeomorphic demons registration, a nonlinear image registration method that iteratively computes a
 smooth, invertible deformation field for each recording. It operates on a multiscale image pyramid, starting from coarse
-alignment and progressively refining at finer scales. B-spline regularization ensures the deformation remains smooth 
+alignment and progressively refining at finer scales. B-spline regularization ensures the deformation remains smooth
 and diffeomorphic (no folding or tearing).
 
 Reads:
@@ -657,8 +653,8 @@ drop in and out of the active population.
 
 The algorithm divides the shared coordinate space into spatial bins and performs hierarchical clustering within each bin
 using the Jaccard distance between ROI pixel masks (1 minus the intersection-over-union). Only cross-recording pairs
-within a maximum centroid distance are considered as candidates. Clusters that appear in a sufficient fraction of 
-recordings (controlled by `mask_prevalence`) are accepted as tracked templates. Template masks are constructed from 
+within a maximum centroid distance are considered as candidates. Clusters that appear in a sufficient fraction of
+recordings (controlled by `mask_prevalence`) are accepted as tracked templates. Template masks are constructed from
 the consensus pixels that appear in at least `pixel_prevalence` percent of cluster members.
 
 Reads:
@@ -676,9 +672,9 @@ Produces:
 ##### Template Projection
 
 The fourth step projects the tracked template masks from the shared coordinate space back into each recording's native
-coordinates by inverting the diffeomorphic deformation field. Fluorescence extraction must operate on the original 
-registered binary data, which is in each recording's native coordinate space. The inverse projection ensures that 
-template masks align precisely with the recorded pixel data. Full ROI statistics (shape metrics, spatial properties) 
+coordinates by inverting the diffeomorphic deformation field. Fluorescence extraction must operate on the original
+registered binary data, which is in each recording's native coordinate space. The inverse projection ensures that
+template masks align precisely with the recorded pixel data. Full ROI statistics (shape metrics, spatial properties)
 are recomputed for each projected template in native coordinates.
 
 Reads:
@@ -905,67 +901,63 @@ ___
 
 ## API Documentation
 
-See the [API documentation](https://cindra-api-docs.netlify.app/) for the detailed
-description of the methods and classes exposed by components of this library.
+See the [API documentation](https://cindra-api-docs.netlify.app/) for the detailed description of the methods and
+classes exposed by components of this library.
 
 ___
 
 ## Developers
 
-This section provides installation, dependency, and build-system instructions for the developers
-that want to modify the source code of this library.
+This section provides installation, dependency, and build-system instructions for the developers that want to modify
+the source code of this library.
 
 ### Installing the Project
 
-***Note,*** this installation method requires **mamba version 2.3.2 or above**. Currently, all
-cindra automation pipelines require that mamba is installed through the
-[miniforge3](https://github.com/conda-forge/miniforge) installer.
+***Note,*** this installation method requires **mamba version 2.3.2 or above**. Currently, all cindra automation
+pipelines require that mamba is installed through the [miniforge3](https://github.com/conda-forge/miniforge) installer.
 
 1. Download this repository to the local machine using the preferred method, such as git-cloning.
-2. If the downloaded distribution is stored as a compressed archive, unpack it using the
-   appropriate decompression tool.
+2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
 3. `cd` to the root directory of the prepared project distribution.
 4. Install the core cindra development dependencies into the ***base*** mamba environment via the
    `mamba install tox uv tox-uv` command.
-5. Use the `tox -e create` command to create the project-specific development environment followed
-   by `tox -e install` command to install the project into that environment as a library.
+5. Use the `tox -e create` command to create the project-specific development environment followed by `tox -e install`
+   command to install the project into that environment as a library.
 
 ### Additional Dependencies
 
-In addition to installing the project and all user dependencies, install the following
-dependencies:
+In addition to installing the project and all user dependencies, install the following dependencies:
 
-1. [Python](https://www.python.org/downloads/) distributions, one for each version supported by
-   the developed project. Currently, this library supports Python 3.14 only. It is recommended to
-   use a tool like [pyenv](https://github.com/pyenv/pyenv) to install and manage the required
-   versions.
+1. [Python](https://www.python.org/downloads/) distributions, one for each version supported by the developed project.
+   Currently, this library supports Python 3.14 only. It is recommended to use a tool like
+   [pyenv](https://github.com/pyenv/pyenv) to install and manage the required versions.
 
 ### Development Automation
 
 This project uses `tox` for development automation. The following tox environments are available:
 
-| Environment  | Description                                                |
-|--------------|------------------------------------------------------------|
-| `lint`       | Runs ruff formatting, ruff linting, and mypy type checking |
-| `stubs`      | Generates py.typed marker and .pyi stub files              |
-| `py314-test` | Runs the test suite via pytest for Python 3.14             |
-| `coverage`   | Aggregates test coverage into an HTML report               |
-| `docs`       | Builds the API documentation via Sphinx                    |
-| `build`      | Builds sdist and wheel distributions                       |
-| `upload`     | Uploads distributions to PyPI via twine                    |
-| `install`    | Builds and installs the project into its mamba environment |
-| `uninstall`  | Uninstalls the project from its mamba environment          |
-| `create`     | Creates the project's mamba development environment        |
-| `remove`     | Removes the project's mamba development environment        |
-| `provision`  | Recreates the mamba environment from scratch               |
-| `export`     | Exports the mamba environment as .yml and spec.txt files   |
-| `import`     | Creates or updates the mamba environment from a .yml file  |
+| Environment  | Description                                                 |
+|--------------|-------------------------------------------------------------|
+| `lint`       | Runs ruff formatting, ruff linting, and mypy type checking  |
+| `stubs`      | Generates py.typed marker and .pyi stub files               |
+| `py314-test` | Runs the test suite via pytest for Python 3.14              |
+| `coverage`   | Aggregates test coverage and applies the 100% coverage gate |
+| `docs`       | Builds the API documentation via Sphinx                     |
+| `build`      | Builds sdist and wheel distributions                        |
+| `upload`     | Uploads distributions to PyPI via twine                     |
+| `deploy`     | Uploads the built documentation to the Netlify site         |
+| `install`    | Builds and installs the project into its mamba environment  |
+| `uninstall`  | Uninstalls the project from its mamba environment           |
+| `create`     | Creates the project's mamba development environment         |
+| `remove`     | Removes the project's mamba development environment         |
+| `provision`  | Recreates the mamba environment from scratch                |
+| `export`     | Exports the mamba environment as a .yml file                |
+| `import`     | Creates or updates the mamba environment from a .yml file   |
 
 Run any environment using `tox -e ENVIRONMENT`. For example, `tox -e lint`.
 
-***Note,*** all pull requests for this project have to successfully complete the `tox` task before
-being merged. To expedite the task's runtime, use the `tox --parallel` command to run some tasks
-in parallel.
+***Note,*** all pull requests for this project have to successfully complete the `tox` task before being merged. To
+expedite the task's runtime, use the `tox --parallel` command to run some tasks in parallel.
 
 ### AI-Assisted Development
 
@@ -983,19 +975,17 @@ Install both marketplaces to make all associated skills and development tools av
 
 ### Automation Troubleshooting
 
-Many packages used in `tox` automation pipelines (uv, mypy, ruff) and `tox` itself may experience
-runtime failures. In most cases, this is related to their caching behavior. If an unintelligible
-error is encountered with any of the automation components, deleting the corresponding cache
-directories (`.tox`, `.ruff_cache`, `.mypy_cache`, etc.) manually or via a CLI command typically
-resolves the issue.
+Many packages used in `tox` automation pipelines (uv, mypy, ruff) and `tox` itself may experience runtime failures. In
+most cases, this is related to their caching behavior. If an unintelligible error is encountered with any of the
+automation components, deleting the corresponding cache directories (`.tox`, `.ruff_cache`, `.mypy_cache`, etc.)
+manually or via a CLI command typically resolves the issue.
 
 ___
 
 ## Versioning
 
 This project uses [semantic versioning](https://semver.org/). See the
-[tags on this repository](https://github.com/Sun-Lab-NBB/cindra/tags) for the available project
-releases.
+[tags on this repository](https://github.com/Sun-Lab-NBB/cindra/tags) for the available project releases.
 
 ___
 

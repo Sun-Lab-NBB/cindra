@@ -88,14 +88,15 @@ dependencies = [
     "intel-cmplr-lib-rt>=2026,<2027; sys_platform != 'darwin'",
 ]
 
+# Project repository and hosted documentation URLs.
 [project.urls]
 Homepage = "https://github.com/Sun-Lab-NBB/cindra"
 Documentation = "https://cindra-api-docs.netlify.app/"
 
-# Exposes the headless 'cindra' CLI (configuration, pipeline execution, MCP server) and the separate 'cindra-gui' CLI.
+# CLI interfaces. The GUI launcher is a separate entry point, so headless 'cindra' runs never load Qt.
 [project.scripts]
-cindra = "cindra.interface.cli:cindra_cli"          # Top-level CLI group
-cindra-gui = "cindra.interface.gui_cli:cindra_gui"  # GUI launcher (separate to avoid loading Qt during headless runs)
+cindra = "cindra.interface.cli:cindra_cli"
+cindra-gui = "cindra.interface.gui_cli:cindra_gui"
 
 # Development dependencies (PEP 735). Not published to PyPI.
 [dependency-groups]
@@ -106,7 +107,7 @@ dev = [
     "tox-uv>=1,<2",
 
     # Development Automation
-    "ataraxis-automation>=8,<9",
+    "ataraxis-automation>=9,<10",
 
     # Types
     "scipy-stubs>=1,<2",
@@ -123,9 +124,9 @@ packages = ["src/cindra"]
 # Ruff Configuration.
 [tool.ruff]
 line-length = 120         # Deviates from the commonly used '80' standard.
-indent-width = 4          # Same as black, indents are 4 spaces
+indent-width = 4
 target-version = "py314"  # Targets the lowest supported version of python
-src = ["src"]             # The name of the root source code directory
+src = ["src"]
 
 # Excludes 'service' .py files, such as the sphinx configuration file, from linting.
 extend-exclude = ["conf.py"]
@@ -135,34 +136,37 @@ lint.select = ["ALL"]
 
 # General ignore directives
 lint.ignore = [
+    # Universal lint.ignore corpus. Present in every Ataraxis framework and Sollertia platform project.
     "W291",    # Conflicts with docstring formatting
-    "W293",    # Conflicts with UI style formatting
+    "ANN401",  # While suboptimal, ANY is a helpful type when used with caution
+    "BLE001",  # Broad exception handling is necessary at library boundaries
     "C901",    # Sometimes complex functions are necessary
-    "PLR0913", # Sometimes complex functions are necessary
-    "PLR0912", # Sometimes complex functions are necessary
-    "PLR0915", # Sometimes complex type definitions are necessary
     "PLR0911", # Sometimes complex return graphs are necessary
-    "FBT001",  # UI elements require the use of positional boolean values
-    "FBT002",  # UI elements require the use of positional boolean values
-    "FBT003",  # UI elements require the use of positional boolean values
-    "TID252",  # Conflicts with the cindra import strategy
-    "SLF001",  # Sometimes accessing private members is necessary
-    "SIM115",  # Sometimes it is necessary to open and close files without the context manager
-    "BLE001",  # Catching blind exceptions is necessary for the functioning of this library
+    "PLR0912", # Sometimes complex functions are necessary
+    "PLR0913", # Sometimes complex functions are necessary
+    "PLR0915", # Sometimes functions with many statements are necessary
+    "PLR0917", # PLR0913 already covers argument counts, and call sites pass keyword arguments
     "COM812",  # Conflicts with the formatter
     "ISC001",  # Conflicts with the formatter
-    "PT001",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-182590771
+    "PT001",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
     "PT023",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
     "D107",    # __init__ is documented inside the main class docstring where applicable
     "D205",    # Bugs out for file descriptions
     "PLW0603", # While global statement usage is not ideal, it streamlines certain development patterns
+    "TID252",  # Conflicts with the library import management strategy, which requires parent-relative imports
+    "CPY001",  # The license is declared in the LICENSE file and the license and license-files metadata fields
+
+    # Project-specific
+    "FBT001",  # Qt toggle slots and mouse handlers receive their boolean state as a positional argument
+    "FBT003",  # Qt and PyQtGraph setters take their boolean state as a positional argument
+    "SLF001",  # Alternative constructors and the memory map teardown read private attributes of another object
 ]
 
 # Additional formatting configurations
 [tool.ruff.format]
-quote-style = "double"             # Uses double quotes for strings
-indent-style = "space"             # Uses space for indents
-skip-magic-trailing-comma = false  # Like black, ignores trailing commas
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false  # Like black, honors magic trailing commas
 line-ending = "auto"               # Automatically detects and standardizes line-ending character
 
 # Docstrings and comments' line length
@@ -179,22 +183,30 @@ convention = "google"
     "F401", # Imported but unused
     "F403", # Wildcard imports
 ]
-"**/tests/**/*.py" = [
-    "ANN",     # Type annotations not required in tests
-    "D",       # Docstring enforcement relaxed in tests
-    "INP001",  # Tests use implicit namespace packages
-    "PLR2004", # Magic values common in test assertions
-    "PT006",   # Parametrize argument name style
-    "S101",    # Assert statements standard in tests
-    "SLF001",  # Private member access for testing internals
-    "T201",    # Print statements allowed in tests
+"tests/**/*.py" = [
+    # Shared test corpus. These entries are present in every Ataraxis framework and Sollertia platform project.
+    "S101",    # Tests assert by design
+    "PLR2004", # Expected values are clearer inline than as named constants
+    "INP001",  # The test directory is not an importable package
+    "SLF001",  # Tests exercise private module members directly
+    "PT006",   # Parametrize argument names are declared as a single comma-separated string
+    "ARG001",  # Pytest injects fixtures that individual tests may not reference
+    "T201",    # Diagnostic prints are how a test reports intermediate state
+    "D",       # Test names and inline comments carry the intent that docstrings carry in library code
+    "ANN",     # Test functions and mock helpers do not need annotations
+
+    # Project-specific
+    "ARG005",  # Monkeypatch lambdas mirror the signatures of the callables they replace
+    "EM101",   # Mock failure messages are clearer inline than as named variables
+    "TRY003",  # Mock failure messages are defined at the raise site by design
 ]
 
+# Import sorting (isort) configuration.
 [tool.ruff.lint.isort]
-case-sensitive = true              # Takes case into account when sorting imports
+case-sensitive = true
 combine-as-imports = true          # Combines multiple "as" imports for the same package
 force-wrap-aliases = true          # Wraps "as" imports so that each uses a separate line
-force-sort-within-sections = true  # Forces "as" and "from" imports to be close together
+force-sort-within-sections = true  # Forces "as" and "from" imports for the same package to be close
 length-sort = true                 # Places shorter imports first
 
 # MyPy configuration section.
@@ -203,14 +215,14 @@ disallow_untyped_defs = true # Enforces function annotation
 warn_unused_ignores = true   # Warns against using 'type: ignore' for packages with type stubs
 
 exclude = [
-    "cindra-\\d+",         # Ignores temporary folder created by setuptools when building the sdist
-    "venv.*/",             # Ignores virtual environments
-    "build/",              # Ignores the sdist directory
-    "dist/",               # Ignores the wheel directory
-    "docs/",               # Ignores the sphinx / doxygen directory
-    "stubs/",              # Ignores stubs directory (stubgen output target)
-    "recipe/",             # Ignores recipe directory (grayskull output target)
-    "tests/",              # Ignores the test directory.
+    "cindra-\\d+",  # The temporary folder created when building the sdist
+    "venv.*/",
+    "build/",
+    "dist/",
+    "docs/",
+    "stubs/",       # stubgen output target
+    "recipe/",      # grayskull output target
+    "tests/",
 ]
 
 # Numba ships a py.typed marker, but its bundled annotations do not model prange as an iterable or expose runtime
@@ -221,7 +233,8 @@ module = ["numba", "numba.*"]
 follow_imports = "skip"        # Treats all symbols imported from numba as untyped (Any)
 ignore_missing_imports = true  # Suppresses missing-stub errors for the skipped package
 
-# Pytest configuration section.
+# Pytest configuration. The import mode is declared here so that a bare 'pytest' invocation resolves test modules the
+# same way the '{py314}-test' tox task does.
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
 
@@ -232,41 +245,43 @@ filterwarnings = [
     "ignore:Precision loss occurred in moment calculation:RuntimeWarning",
 ]
 
-# Coverage measurement section. Configures branch coverage and excludes untestable modules from measurement.
+# Configures branch coverage and lists the source files excluded from coverage measurement in full.
 [tool.coverage.run]
 
 # Measures branch coverage in addition to statement coverage, so that partial branches (one side of a conditional or
 # loop that no test exercises) are reported as gaps rather than hidden behind full line coverage.
 branch = true
 
-# Excludes GUI and interface modules from coverage measurement. GUI modules require PySide6/PyQtGraph runtime and
-# cannot be meaningfully unit tested. Interface modules (CLI, MCP servers, MCP tools) require external infrastructure.
+# The GUI modules need a PySide6 and PyQtGraph runtime to execute, and the interface modules (the two CLIs, the MCP
+# servers, and the MCP tool modules) wrap library functions the suite already covers. Each pattern opens with a wildcard
+# so that it matches both the src tree and the site-packages copy the test environment measures.
 omit = [
-    "src/cindra/gui/*",
-    "src/cindra/interface/*",
     "*/cindra/gui/*",
     "*/cindra/interface/*",
 ]
 
-# This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
+# Used by the 'coverage' tox task to merge the coverage data files the '{py314}-test' task produces.
 [tool.coverage.paths]
 
-# Maps coverage measured in any environment's site-packages (the tox test venv or the conda dev environment) back to
-# the source files in src, so data combined from either install location resolves to a single canonical path
-source = ["src/", "*/site-packages/"]
+# Maps coverage measured in site-packages to source files in src. The second pattern matches the POSIX virtual
+# environment layout and the third matches the Windows layout, which omits the 'python*' path component. Both are
+# required for the 'coverage' task to merge the data measured on either host into a single record per source file.
+source = [
+    "src/",
+    ".tox/*/lib/python*/site-packages/",
+    ".tox/*/Lib/site-packages/",
+]
 
 # Same as above, specifies the output directory for the coverage .html report
 [tool.coverage.html]
 directory = "reports/coverage_html"
 
-# Specifies additional ignore directives
+# Specifies the coverage gate and additional ignore directives. The GUI and interface modules are omitted from
+# measurement above. The lines carrying a 'pragma: no cover' comment, such as the Numba JIT bodies and the defensive
+# branches guarding degenerate geometry, do not count against the gate.
 [tool.coverage.report]
-omit = ["src/cindra/gui/*", "src/cindra/interface/*"]
-
-# Fails the coverage report if combined statement and branch coverage drops below 100%, locking in full coverage of all
-# measured modules and preventing regressions. GUI and interface modules are omitted above. Pragma-excluded lines
-# (Numba JIT bodies and pipeline orchestration entry points) do not count against this threshold.
-fail_under = 100
+fail_under = 100     # Requires the test suite to cover every measured statement
+show_missing = true  # Lists the statements missed by the test suite, so a failed check names the lines to cover
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
