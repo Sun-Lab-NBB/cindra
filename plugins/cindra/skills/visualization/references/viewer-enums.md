@@ -1,20 +1,20 @@
 # Viewer enum value reference
 
-State fields report the lowercase enum value (e.g. `maximum_projection`), while the on-screen dropdowns show a
-display label that is not always the title-cased value (e.g. `maximum_projection` shows as "Maximum Projection",
-`rois_only` shows as "ROIs"). When telling the user which control to operate, read the exact label from the
-Dropdown label column of the matching table below. This applies to `background_view`, `roi_color_mode`,
-`mask_layer`, and `coordinate_space`. This reference is loaded on demand by `/visualization`.
+State fields report the lowercase enum value (e.g. `maximum_projection`), while the on-screen dropdowns show a display
+label that is not always the title-cased value (e.g. `maximum_projection` shows as "Maximum Projection", `rois_only`
+shows as "ROIs"). When telling the user which control to operate, read the exact label from the Dropdown label column of
+the matching table below. This applies to `background_view`, `roi_color_mode`, `mask_layer`, and `coordinate_space`.
+This reference is loaded on demand by `/visualization`.
 
 ---
 
 ## Background views
 
-Reported in `background_view` state field. Values correspond to the background image behind ROI overlays. The ROI
-viewer offers all six values and hides `corrected_structural` unless the recording wrote a corrected structural mean
-image, which only the structural channel 2 extraction path produces, so a recording whose second channel is also
-functional never has it. The tracking viewer offers `rois_only`, `mean_image`, `enhanced_mean_image`,
-`maximum_projection`, and `correlation_map`.
+Reported in `background_view` state field. Values correspond to the background image behind ROI overlays. The ROI viewer
+offers all six values and hides `corrected_structural` unless the recording wrote a corrected structural mean image,
+which only the structural channel 2 extraction path produces, so a recording whose second channel is also functional
+never has it. The tracking viewer offers `rois_only`, `mean_image`, `enhanced_mean_image`, `maximum_projection`, and
+`correlation_map`.
 
 | Value                  | Dropdown label        | Description                                           |
 |------------------------|-----------------------|-------------------------------------------------------|
@@ -29,9 +29,8 @@ functional never has it. The tracking viewer offers `rois_only`, `mean_image`, `
 
 ## ROI color modes
 
-Reported in `roi_color_mode` state field. Values correspond to the statistic used to color ROI overlays. The ROI
-viewer shows `colocalization_probability` for dual-channel recordings and `recording_count` for multi-recording
-tracked ROIs.
+Reported in `roi_color_mode` state field. Values correspond to the statistic used to color ROI overlays. The ROI viewer
+shows `colocalization_probability` for dual-channel recordings and `recording_count` for multi-recording tracked ROIs.
 
 | Value                        | Dropdown label       | Description                                                 |
 |------------------------------|----------------------|-------------------------------------------------------------|

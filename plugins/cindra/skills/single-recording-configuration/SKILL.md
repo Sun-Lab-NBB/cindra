@@ -34,16 +34,16 @@ Complete parameter reference for the single-recording (within-recording) cindra 
 
 ## Agent requirements
 
-You MUST use the cindra MCP tools for all configuration operations. Do not hand-edit configuration files
-or import cindra Python functions directly when an MCP tool exists for the task. If MCP tools are not
-available, invoke `/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+You MUST use the cindra MCP tools for all configuration operations. Do not hand-edit configuration files or import
+cindra Python functions directly when an MCP tool exists for the task. If MCP tools are not available, invoke
+`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
 
 ---
 
 ## Available tools
 
-These tools are registered on the `cindra-mcp` server. Tool parameters and return values are
-self-documented via MCP introspection.
+These tools are registered on the `cindra-mcp` server. Tool parameters and return values are self-documented via MCP
+introspection.
 
 | Tool                                | Purpose                                                                   |
 |-------------------------------------|---------------------------------------------------------------------------|
@@ -57,19 +57,19 @@ self-documented via MCP introspection.
 
 ## Configuration overview
 
-The single-recording pipeline uses `SingleRecordingConfiguration`, a dataclass with 9 nested sections.
-Default values are optimized for GCaMP6f data from 2-Photon Random Access Mesoscope (2P-RAM).
+The single-recording pipeline uses `SingleRecordingConfiguration`, a dataclass with 9 nested sections. Default values
+are optimized for GCaMP6f data from 2-Photon Random Access Mesoscope (2P-RAM).
 
 All parameters are specified in the `SingleRecordingConfiguration` YAML file. The pipeline loads the fully resolved
 configuration directly from the file without any runtime overrides.
 
 CPU worker allocation lives outside the configuration file. Each processing stage receives its worker count as an
 invocation argument, supplied by the `cindra run` options `-bw/--binarize-workers`, `-rw/--register-workers` and
-`-pw/--process-workers`, or by `execute_processing_jobs_tool` and `execute_full_pipeline_tool` at dispatch time.
-Both interfaces share one convention. Omitting a `cindra run` worker option, or leaving the MCP `workers_per_job`
-as None, applies the measured default of 4 workers for binarization, 8 for registration and 10 for processing.
-Setting either to -1 requests every available core. Any positive value is used exactly, and on the MCP tools it
-overrides every non-fixed resource class alike.
+`-pw/--process-workers`, or by `execute_processing_jobs_tool` and `execute_full_pipeline_tool` at dispatch time. Both
+interfaces share one convention. Omitting a `cindra run` worker option, or leaving the MCP `workers_per_job` as None,
+applies the measured default of 4 workers for binarization, 8 for registration and 10 for processing. Setting either to
+-1 requests every available core. Any positive value is used exactly, and on the MCP tools it overrides every non-fixed
+resource class alike.
 
 ---
 
@@ -93,9 +93,9 @@ Runtime behavior settings shared between single-recording and multi-recording pi
 |-------------------------|------|---------|------------------------------------------------------|
 | `display_progress_bars` | bool | False   | Show progress bars. Disable for parallel processing. |
 
-Worker allocation is not a configuration parameter. Each stage receives its worker count as an invocation argument,
-with measured defaults of 4 workers for binarization, 8 for registration and 10 for processing. Those defaults are
-published as `BINARIZATION_WORKERS`, `REGISTRATION_WORKERS` and `PROCESSING_WORKERS` in `cindra.allocation`.
+Worker allocation is not a configuration parameter. Each stage receives its worker count as an invocation argument, with
+measured defaults of 4 workers for binarization, 8 for registration and 10 for processing. Those defaults are published
+as `BINARIZATION_WORKERS`, `REGISTRATION_WORKERS` and `PROCESSING_WORKERS` in `cindra.allocation`.
 
 ---
 
@@ -117,23 +117,22 @@ independent ROI detection on both channels.
 
 ### Tuning guidance
 
-- **Different calcium indicator**: Set `tau` to the sensor's decay time constant. GCaMP6f ≈ 0.4, GCaMP6s ≈ 1.5,
-  GCaMP7f ≈ 0.4, GCaMP8f ≈ 0.2. Incorrect `tau` degrades spike deconvolution and ROI detection.
-- **Structural channel**: Set `two_channels=True`, keep only `first_channel_functional=True`. The second channel
-  is stored for colocalization analysis but not used for ROI detection.
-- **Custom classifier**: Provide `custom_classifier_path` when imaging non-standard cell types or preparations
-  where the built-in classifier performs poorly. The `.npz` file must contain `training_labels`.
+- **Different calcium indicator**: Set `tau` to the sensor's decay time constant. GCaMP6f ≈ 0.4, GCaMP6s ≈ 1.5, GCaMP7f
+  ≈ 0.4, GCaMP8f ≈ 0.2. Incorrect `tau` degrades spike deconvolution and ROI detection.
+- **Structural channel**: Set `two_channels=True`, keep only `first_channel_functional=True`. The second channel is
+  stored for colocalization analysis but not used for ROI detection.
+- **Custom classifier**: Provide `custom_classifier_path` when imaging non-standard cell types or preparations where the
+  built-in classifier performs poorly. The `.npz` file must contain `training_labels`.
 
 ---
 
 ## Section 3: file_io
 
-Controls input data ingestion and output directory paths. During binarization (the first processing step), the
-pipeline reads raw multipage TIFF files from the data directory, splits them by imaging plane, and writes each
-plane's frames into a contiguous binary file optimized for fast random access during processing.
-This TIFF-to-binary conversion is skipped on subsequent runs unless `repeat_binarization` is enabled or the existing
-binaries are invalid (missing, sized inconsistently with the recorded plane geometry, or left marked by an interrupted
-registration).
+Controls input data ingestion and output directory paths. During binarization (the first processing step), the pipeline
+reads raw multipage TIFF files from the data directory, splits them by imaging plane, and writes each plane's frames
+into a contiguous binary file optimized for fast random access during processing. This TIFF-to-binary conversion is
+skipped on subsequent runs unless `repeat_binarization` is enabled or the existing binaries are invalid (missing, sized
+inconsistently with the recorded plane geometry, or left marked by an interrupted registration).
 
 | Parameter             | Type         | Default | Description                                                 |
 |-----------------------|--------------|---------|-------------------------------------------------------------|
@@ -154,16 +153,16 @@ registration left marked, on its own.
 
 ## Section 4: registration
 
-Corrects whole-frame translational motion by computing per-frame X/Y offsets via phase correlation against a
-reference image built from frames sampled across the recording. Each frame is shifted to align with the reference.
-Offsets are computed in batches and optionally smoothed temporally. Frames with outlier offsets are flagged as bad
-and excluded from downstream ROI detection.
+Corrects whole-frame translational motion by computing per-frame X/Y offsets via phase correlation against a reference
+image built from frames sampled across the recording. Each frame is shifted to align with the reference. Offsets are
+computed in batches and optionally smoothed temporally. Frames with outlier offsets are flagged as bad and excluded from
+downstream ROI detection.
 
-This section controls the rigid (global) component of motion correction. The recommended approach is to always
-use both rigid registration (this section) and nonrigid registration (Section 6) together. Rigid registration
-removes bulk translational motion, while nonrigid registration corrects the spatially non-uniform residual
-deformations that a single global offset cannot capture. Disabling nonrigid registration is only appropriate when
-processing speed is critical and the preparation is exceptionally stable.
+This section controls the rigid (global) component of motion correction. The recommended approach is to always use both
+rigid registration (this section) and nonrigid registration (Section 6) together. Rigid registration removes bulk
+translational motion, while nonrigid registration corrects the spatially non-uniform residual deformations that a single
+global offset cannot capture. Disabling nonrigid registration is only appropriate when processing speed is critical and
+the preparation is exceptionally stable.
 
 | Parameter                                  | Type  | Default | Description                                                         |
 |--------------------------------------------|-------|---------|---------------------------------------------------------------------|
@@ -183,23 +182,23 @@ processing speed is critical and the preparation is exceptionally stable.
 
 ### Tuning guidance
 
-- **High motion artifacts**: Increase `maximum_offset_fraction` (0.15–0.2) and enable `two_step_registration`
-  for recordings with large, rapid animal movement. Always keep nonrigid registration enabled (Section 6) as
-  large movements typically produce non-uniform deformations.
-- **Noisy or low-SNR data**: Increase `spatial_smoothing_sigma` (1.5–2.0) to stabilize phase correlation.
-- **Residual jitter after registration**: Enable `temporal_smoothing_sigma` (1.0–2.0 frames) for sub-pixel
-  smoothing of offset traces.
+- **High motion artifacts**: Increase `maximum_offset_fraction` (0.15-0.2) and enable `two_step_registration` for
+  recordings with large, rapid animal movement. Always keep nonrigid registration enabled (Section 6) as large movements
+  typically produce non-uniform deformations.
+- **Noisy or low-SNR data**: Increase `spatial_smoothing_sigma` (1.5-2.0) to stabilize phase correlation.
+- **Residual jitter after registration**: Enable `temporal_smoothing_sigma` (1.0-2.0 frames) for sub-pixel smoothing of
+  offset traces.
 - **Bidirectional scanning artifacts**: Enable `compute_bidirectional_phase_offset` for resonant scanners. Use
   `bidirectional_phase_offset_override` if auto-detection fails.
-- **Too many frames excluded**: Increase `bad_frame_threshold` (1.5–2.0) to retain more frames.
+- **Too many frames excluded**: Increase `bad_frame_threshold` (1.5-2.0) to retain more frames.
 
 ---
 
 ## Section 5: one_photon_registration
 
-Preprocessing applied before registration for 1-photon (widefield/miniscope) data. Applies spatial high-pass
-filtering to remove diffuse background fluorescence and edge tapering to suppress border artifacts, both of which
-degrade phase-correlation accuracy in 1P recordings.
+Preprocessing applied before registration for 1-photon (widefield/miniscope) data. Applies spatial high-pass filtering
+to remove diffuse background fluorescence and edge tapering to suppress border artifacts, both of which degrade
+phase-correlation accuracy in 1P recordings.
 
 | Parameter                 | Type  | Default | Description                                                            |
 |---------------------------|-------|---------|------------------------------------------------------------------------|
@@ -208,16 +207,16 @@ degrade phase-correlation accuracy in 1P recordings.
 | `pre_smoothing_sigma`     | float | 0.0     | Gaussian smoothing sigma before high-pass. 0 = disabled.               |
 | `edge_taper_pixels`       | float | 40.0    | Edge pixels to taper during registration.                              |
 
-Enable this section only for widefield or miniscope (1-photon) data. The preprocessing removes
-background fluorescence that interferes with phase-correlation registration. Never enable for 2P data.
+Enable this section only for widefield or miniscope (1-photon) data. The preprocessing removes background fluorescence
+that interferes with phase-correlation registration. Never enable for 2P data.
 
 ---
 
 ## Section 6: nonrigid_registration
 
-Corrects spatially non-uniform motion by subdividing each frame into overlapping blocks, computing independent
-X/Y offsets per block via phase correlation, and applying smooth local warping. Runs after rigid registration to
-correct residual local deformations that a single global offset cannot capture.
+Corrects spatially non-uniform motion by subdividing each frame into overlapping blocks, computing independent X/Y
+offsets per block via phase correlation, and applying smooth local warping. Runs after rigid registration to correct
+residual local deformations that a single global offset cannot capture.
 
 | Parameter                   | Type            | Default    | Description                                          |
 |-----------------------------|-----------------|------------|------------------------------------------------------|
@@ -226,30 +225,29 @@ correct residual local deformations that a single global offset cannot capture.
 | `signal_to_noise_threshold` | float           | 1.2        | SNR threshold for accepting block offsets.           |
 | `maximum_block_offset`      | float           | 5.0        | Max block offset (pixels) relative to rigid offset.  |
 
-The recommended approach is to always keep nonrigid registration enabled alongside rigid registration (Section 4).
-Rigid registration removes bulk translational motion, while nonrigid registration corrects spatially varying
-residual deformations. In practice, nearly all in vivo recordings benefit from both.
+The recommended approach is to always keep nonrigid registration enabled alongside rigid registration (Section 4). Rigid
+registration removes bulk translational motion, while nonrigid registration corrects spatially varying residual
+deformations. In practice, nearly all in vivo recordings benefit from both.
 
 ### Tuning guidance
 
-- **Default (recommended)**: Keep `enabled=True`. The combination of rigid + nonrigid registration produces the
-  best motion correction for virtually all in vivo neural imaging data.
-- **Localized motion** (e.g., brain pulsation): Decrease `block_size` to (64, 64) for finer correction. Uses
-  more memory.
-- **Severe local motion**: Increase `maximum_block_offset` (8–10) to allow larger block displacements.
-- **Speed-critical batch processing**: Disable nonrigid (`enabled=False`) only when processing speed is critical
-  and the preparation is exceptionally stable with minimal tissue deformation.
+- **Default (recommended)**: Keep `enabled=True`. The combination of rigid + nonrigid registration produces the best
+  motion correction for virtually all in vivo neural imaging data.
+- **Localized motion** (e.g., brain pulsation): Decrease `block_size` to (64, 64) for finer correction. Uses more
+  memory.
+- **Severe local motion**: Increase `maximum_block_offset` (8-10) to allow larger block displacements.
+- **Speed-critical batch processing**: Disable nonrigid (`enabled=False`) only when processing speed is critical and the
+  preparation is exceptionally stable with minimal tissue deformation.
 
 ---
 
 ## Section 7: roi_detection
 
-Detects individual neurons (ROIs) from the registered movie. The movie is temporally binned, high-pass filtered
-to remove neuropil background, then decomposed via iterative source extraction to identify spatial components
-(cell masks) and their temporal activity. When `preclassification_threshold` is above zero, each candidate ROI is
-preclassified as cell or non-cell using a pre-trained two-feature classifier (normalized pixel count and
-compactness). Skewness requires extracted fluorescence traces, so it only joins the feature set during the final
-classification in Section 8.
+Detects individual neurons (ROIs) from the registered movie. The movie is temporally binned, high-pass filtered to
+remove neuropil background, then decomposed via iterative source extraction to identify spatial components (cell masks)
+and their temporal activity. When `preclassification_threshold` is above zero, each candidate ROI is preclassified as
+cell or non-cell using a pre-trained two-feature classifier (normalized pixel count and compactness). Skewness requires
+extracted fluorescence traces, so it only joins the feature set during the final classification in Section 8.
 
 | Parameter                     | Type  | Default | Description                                                        |
 |-------------------------------|-------|---------|--------------------------------------------------------------------|
@@ -268,26 +266,26 @@ classification in Section 8.
 
 This is the most impactful section for controlling ROI yield.
 
-- **Need more cells detected**: Lower `threshold_scaling` (1.0–1.5) to accept weaker ROI signals. Lower
-  `preclassification_threshold` (0.0–0.3) to retain more candidates for final classification. Increase
-  `maximum_iterations` (80–100) for more extraction passes. Increase `maximum_binned_frames` (8000–10000)
-  to capture more temporal structure, at the cost of speed.
-- **Too many false positives**: Raise `threshold_scaling` (2.5–3.0) to require more distinct signals. Raise
-  `preclassification_threshold` (0.6–0.8) to filter weak candidates early.
+- **Need more cells detected**: Lower `threshold_scaling` (1.0-1.5) to accept weaker ROI signals. Lower
+  `preclassification_threshold` (0.0-0.3) to retain more candidates for final classification. Increase
+  `maximum_iterations` (80-100) for more extraction passes. Increase `maximum_binned_frames` (8000-10000) to capture
+  more temporal structure, at the cost of speed.
+- **Too many false positives**: Raise `threshold_scaling` (2.5-3.0) to require more distinct signals. Raise
+  `preclassification_threshold` (0.6-0.8) to filter weak candidates early.
 - **Noisy or low-SNR data**: Enable `denoise=True` for PCA denoising before detection. Consider lowering
   `threshold_scaling` (1.5) to compensate for reduced signal clarity.
 - **Densely labeled tissue**: Raise `maximum_overlap` (0.85) to tolerate more spatial overlap between ROIs.
-- **Dendrite contamination in classification**: Keep `crop_to_soma=True` (default). Set to False only if
-  imaging dendrites as the target structure.
+- **Dendrite contamination in classification**: Keep `crop_to_soma=True` (default). Set to False only if imaging
+  dendrites as the target structure.
 
 ---
 
 ## Section 8: signal_extraction
 
-Extracts fluorescence time series from detected ROIs. For each ROI, the raw signal is computed by averaging
-pixel intensities within the cell mask across all frames. A neuropil signal is estimated from a surrounding
-annular region (excluding other cells), and ROIs are given a final cell/non-cell classification using the full
-feature set (compactness, skewness, pixel count).
+Extracts fluorescence time series from detected ROIs. For each ROI, the raw signal is computed by averaging pixel
+intensities within the cell mask across all frames. A neuropil signal is estimated from a surrounding annular region
+(excluding other cells), and ROIs are given a final cell/non-cell classification using the full feature set
+(compactness, skewness, pixel count).
 
 | Parameter                      | Type  | Default | Description                                                     |
 |--------------------------------|-------|---------|-----------------------------------------------------------------|
@@ -302,20 +300,20 @@ feature set (compactness, skewness, pixel count).
 
 ### Tuning guidance
 
-- **Neuropil contamination**: Increase `inner_neuropil_border_radius` (3–5) to widen the gap between cell and
-  neuropil regions. Useful in densely labeled tissue.
+- **Neuropil contamination**: Increase `inner_neuropil_border_radius` (3-5) to widen the gap between cell and neuropil
+  regions. Useful in densely labeled tissue.
 - **Sparse labeling**: Lower `minimum_neuropil_pixels` (200) if few ROIs leave insufficient surround pixels.
 - **Overlapping ROIs**: Set `allow_overlap=True` for densely packed cells where shared pixels are acceptable.
-- **Final cell/non-cell split**: Adjust `classification_threshold` (0.3–0.7) to shift the cell/non-cell
-  boundary. Lower values label more ROIs as cells.
+- **Final cell/non-cell split**: Adjust `classification_threshold` (0.3-0.7) to shift the cell/non-cell boundary. Lower
+  values label more ROIs as cells.
 
 ---
 
 ## Section 9: spike_deconvolution
 
-Infers neural spiking activity from fluorescence traces. Subtracts a scaled neuropil signal from the raw
-fluorescence, estimates a slowly varying baseline using a sliding window or percentile method, computes ΔF/F,
-and deconvolves the result to produce an estimated spike rate trace per ROI.
+Infers neural spiking activity from fluorescence traces. Subtracts a scaled neuropil signal from the raw fluorescence,
+estimates a slowly varying baseline using a sliding window or percentile method, computes ΔF/F, and deconvolves the
+result to produce an estimated spike rate trace per ROI.
 
 | Parameter              | Type  | Default   | Description                                                       |
 |------------------------|-------|-----------|-------------------------------------------------------------------|
@@ -330,9 +328,9 @@ and deconvolves the result to produce an estimated spike rate trace per ROI.
 
 - **Slow baseline drift** (long recordings): Use `baseline_method="constant_percentile"` with default
   `baseline_percentile=8.0` for stable baseline estimation across hours-long recordings.
-- **Fast transients dominate**: Lower `baseline_window` (30–45 seconds) to track baseline more closely.
-- **High neuropil contamination**: Increase `neuropil_coefficient` (0.8–0.9) for more aggressive subtraction.
-  Decrease (0.5–0.6) if traces appear over-corrected (negative dips after transients).
+- **Fast transients dominate**: Lower `baseline_window` (30-45 seconds) to track baseline more closely.
+- **High neuropil contamination**: Increase `neuropil_coefficient` (0.8-0.9) for more aggressive subtraction. Decrease
+  (0.5-0.6) if traces appear over-corrected (negative dips after transients).
 
 ---
 
@@ -384,20 +382,20 @@ authored file that omits it is rejected by both `validate_config_file_tool` and 
 
 Configuration files follow a two-tier lifecycle:
 
-1. **Template configs**: de-novo configurations generated via `generate_config_file_tool` or manually created.
-   Templates can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings.
-   Templates are never modified by the pipeline.
+1. **Template configs**: de-novo configurations generated via `generate_config_file_tool` or manually created. Templates
+   can live anywhere (e.g., `/Data/CA1_GCaMP6f_SD.yaml`) and are reusable across recordings. Templates are never
+   modified by the pipeline.
 
 2. **Resolved copies**: when `prepare_single_recording_batch_tool` runs, it loads the template, applies
-   recording-specific overrides (`file_io.data_path` from `recording_paths`, `file_io.output_path` from the
-   required `recording_output_paths` parameter, `runtime.display_progress_bars=False`), and saves the
-   resolved copy as `cindra/configuration.yaml` inside each recording's output directory. The per-recording copy is
-   immutable once written. `execute_processing_jobs_tool` resolves worker allocation at dispatch time and passes it
-   to each job as a dispatch argument, so one configuration file serves every job dispatched against it. These
-   resolved copies are what the pipeline actually executes against.
+   recording-specific overrides (`file_io.data_path` from `recording_paths`, `file_io.output_path` from the required
+   `recording_output_paths` parameter, `runtime.display_progress_bars=False`), and saves the resolved copy as
+   `cindra/configuration.yaml` inside each recording's output directory. The per-recording copy is immutable once
+   written. `execute_processing_jobs_tool` resolves worker allocation at dispatch time and passes it to each job as a
+   dispatch argument, so one configuration file serves every job dispatched against it. These resolved copies are what
+   the pipeline actually executes against.
 
-**Do NOT** create per-recording configuration files manually. Pass a single template path to the batch tool
-and let it handle per-recording fine-tuning automatically.
+**Do NOT** create per-recording configuration files manually. Pass a single template path to the batch tool and let it
+handle per-recording fine-tuning automatically.
 
 ---
 
@@ -405,18 +403,18 @@ and let it handle per-recording fine-tuning automatically.
 
 1. **Discover recordings** using `discover_recordings_tool` (check the `single_recording_candidates` list) to find
    directories with raw data.
-2. **Verify data readiness**: use `validate_recording_readiness_tool` on each discovered recording to confirm that
-   raw data and acquisition parameters are ready. If any recording fails validation, invoke
-   `/acquisition-data-preparation` to resolve before continuing.
-3. **Generate a template configuration** using `generate_config_file_tool` with `pipeline_type="single-recording"`.
-   Save it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_SD.yaml`). Alternatively, use `read_config_file_tool`
-   to inspect an existing or legacy configuration for conversion.
+2. **Verify data readiness**: use `validate_recording_readiness_tool` on each discovered recording to confirm that raw
+   data and acquisition parameters are ready. If any recording fails validation, invoke `/acquisition-data-preparation`
+   to resolve before continuing.
+3. **Generate a template configuration** using `generate_config_file_tool` with `pipeline_type="single-recording"`. Save
+   it at a user-chosen location (e.g., `/Data/CA1_GCaMP6f_SD.yaml`). Alternatively, use `read_config_file_tool` to
+   inspect an existing or legacy configuration for conversion.
 4. **Review and modify** the template YAML file, setting at minimum `main.tau` and `main.two_channels`.
 5. **Validate** the configuration using `validate_config_file_tool` to check for errors, warnings, and non-default
    parameters.
-6. **Configuration complete**: the validated template file is ready for use. This skill does not start
-   processing. If invoked standalone, the configuration is ready. To run it, proceed to
-   `/single-recording-processing`. If invoked from another skill, return control to the caller.
+6. **Configuration complete**: the validated template file is ready for use. This skill does not start processing. If
+   invoked standalone, the configuration is ready. To run it, proceed to `/single-recording-processing`. If invoked from
+   another skill, return control to the caller.
 
 ---
 
@@ -437,8 +435,8 @@ and let it handle per-recording fine-tuning automatically.
 
 ## Verification checklist
 
-You MUST verify configuration files against this checklist before starting single-recording processing.
-Use `validate_config_file_tool` for automated validation of YAML structure, parameter constraints, and pipeline-set
+You MUST verify configuration files against this checklist before starting single-recording processing. Use
+`validate_config_file_tool` for automated validation of YAML structure, parameter constraints, and pipeline-set
 parameter detection.
 
 ```text

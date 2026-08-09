@@ -437,7 +437,7 @@ class TestConvertTiffsToBinary:
 
         # Inflates the interleave accounting by one frame, so each binary is sized for a frame the TIFF never delivers.
         # This reproduces an accounting disagreement that would otherwise leave a silently truncated binary behind.
-        def _inflated_frame_count(total_frames: int, interleave_stride: int, position: int) -> int:  # noqa: ARG001
+        def _inflated_frame_count(total_frames: int, interleave_stride: int, position: int) -> int:
             """Returns an inflated per-position frame count that exceeds what the source TIFF files deliver."""
             return (total_frames // interleave_stride) + 1
 

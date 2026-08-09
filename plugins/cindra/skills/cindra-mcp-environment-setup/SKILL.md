@@ -1,11 +1,10 @@
 ---
 name: cindra-mcp-environment-setup
 description: >-
-  Diagnoses and resolves cindra and cindra-gui MCP server connectivity issues. Covers environment
-  verification, command availability, Python version checks, dependency validation, and conda/pip/uv
-  environment configuration. Use when the cindra or cindra-gui MCP tools are unavailable, when either MCP
-  server fails to start, when the user reports cindra connection issues, or when starting a session that
-  requires the cindra MCP tools.
+  Diagnoses and resolves cindra and cindra-gui MCP server connectivity issues. Covers environment verification, command
+  availability, Python version checks, dependency validation, and conda/pip/uv environment configuration. Use when the
+  cindra or cindra-gui MCP tools are unavailable, when either MCP server fails to start, when the user reports cindra
+  connection issues, or when starting a session that requires the cindra MCP tools.
 user-invocable: true
 ---
 
@@ -36,17 +35,16 @@ Diagnoses and resolves cindra and cindra-gui MCP server connectivity and environ
 
 ## Agent requirements
 
-You MUST use shell and CLI diagnostics (for example `which cindra`, `python --version`, `pip check cindra`) while
-this skill is active, because it runs precisely when the cindra MCP tools are unavailable. This skill is the
-deliberate exception to the MCP-first rule the other cindra skills follow. Once connectivity is restored, the other
-cindra skills resume using the MCP tools.
+You MUST use shell and CLI diagnostics (for example `which cindra`, `python --version`, `pip check cindra`) while this
+skill is active, because it runs precisely when the cindra MCP tools are unavailable. This skill is the deliberate
+exception to the MCP-first rule the other cindra skills follow. Once connectivity is restored, the other cindra skills
+resume using the MCP tools.
 
 ---
 
 ## Architecture
 
-cindra provides two separate MCP servers, each accessed through its own CLI entry point defined in
-`pyproject.toml`:
+cindra provides two separate MCP servers, each accessed through its own CLI entry point defined in `pyproject.toml`:
 
 ```toml
 [project.scripts]
@@ -59,8 +57,8 @@ cindra-gui = "cindra.interface.gui_cli:cindra_gui"
 | `cindra-mcp` | `cindra mcp`     | Headless processing: discovery, configuration, results querying, batch jobs |
 | `cindra-gui` | `cindra-gui mcp` | GUI viewer lifecycle management and live display-state queries              |
 
-Both servers accept a `--transport` option (defaults to `stdio`). The cindra Claude Code plugin
-registers both servers in its `plugin.json`:
+Both servers accept a `--transport` option (defaults to `stdio`). The cindra Claude Code plugin registers both servers
+in its `plugin.json`:
 
 ```json
 {
@@ -77,9 +75,9 @@ registers both servers in its `plugin.json`:
 }
 ```
 
-When the plugin is installed, Claude Code automatically discovers and starts both servers. The
-`cindra` and `cindra-gui` commands must be on PATH when Claude Code starts. This means the Python
-environment where cindra is installed must be active before launching Claude Code.
+When the plugin is installed, Claude Code automatically discovers and starts both servers. The `cindra` and `cindra-gui`
+commands must be on PATH when Claude Code starts. This means the Python environment where cindra is installed must be
+active before launching Claude Code.
 
 ### Dual-distribution model
 
@@ -91,36 +89,34 @@ cindra's Claude Code integration is split across two distribution channels:
 | MCP server registrations                         | cindra Claude Code plugin | `plugin.json` mcpServers entries that register servers with Claude Code |
 | MCP server code (`cindra mcp`, `cindra-gui mcp`) | cindra pip package        | The actual CLI commands and server implementations                      |
 
-Installing the plugin alone registers the MCP servers and makes skills available, but the servers
-will fail to start because the `cindra` and `cindra-gui` CLI commands are not present. The pip
-package must also be installed in the active Python environment for the MCP servers to function.
+Installing the plugin alone registers the MCP servers and makes skills available, but the servers will fail to start
+because the `cindra` and `cindra-gui` CLI commands are not present. The pip package must also be installed in the active
+Python environment for the MCP servers to function.
 
-This is the most common cause of MCP failures after initial setup: the plugin is installed but the
-pip package is not, or the pip package is installed in a different Python environment than the one
-active when Claude Code launches.
+This is the most common cause of MCP failures after initial setup: the plugin is installed but the pip package is not,
+or the pip package is installed in a different Python environment than the one active when Claude Code launches.
 
 ### Package version requirement
 
-cindra is distributed as a pre-release build, so every install, upgrade, and reinstall command MUST carry pip's
-`--pre` flag. The MCP tool surface these skills document (the four single-recording phases, the `workers_per_job` and
+cindra is distributed as a pre-release build, so every install, upgrade, and reinstall command MUST carry pip's `--pre`
+flag. The MCP tool surface these skills document (the four single-recording phases, the `workers_per_job` and
 `max_parallel_jobs` arguments of the execute tools, and the measured worker defaults in `cindra.allocation`, including
-the multi-recording discovery and extraction defaults) ships in cindra 2.0.0+.
-Without `--pre`, pip resolves an older build whose MCP tools do not match the documented surface, which presents as
-tools that reject a documented phase name or argument while the server itself reports as connected.
+the multi-recording discovery and extraction defaults) ships in cindra 2.0.0+. Without `--pre`, pip resolves an older
+build whose MCP tools do not match the documented surface, which presents as tools that reject a documented phase name
+or argument while the server itself reports as connected.
 
 ---
 
 ## Diagnostic workflow
 
-You MUST follow these steps in order when MCP tools are unavailable or a server fails to start.
-Apply these steps to whichever server is affected (`cindra` for the headless server, `cindra-gui`
-for the GUI server). If both are affected, diagnose them in sequence.
+You MUST follow these steps in order when MCP tools are unavailable or a server fails to start. Apply these steps to
+whichever server is affected (`cindra` for the headless server, `cindra-gui` for the GUI server). If both are affected,
+diagnose them in sequence.
 
 ### Step 1: Check MCP server status
 
-Use the `/mcp` slash command or inspect available tools to determine whether the affected MCP
-server is connected. If connected, the issue is not environmental, so investigate tool-specific
-errors instead.
+Use the `/mcp` slash command or inspect available tools to determine whether the affected MCP server is connected. If
+connected, the issue is not environmental, so investigate tool-specific errors instead.
 
 ### Step 2: Verify command availability
 
@@ -146,8 +142,8 @@ Based on the output, guide the user through the appropriate resolution:
 
 **Conda environment (CONDA_PREFIX is set but cindra is missing):**
 
-The user has an active conda environment but cindra is not installed in it. Instruct the user to
-install cindra into the active environment:
+The user has an active conda environment but cindra is not installed in it. Instruct the user to install cindra into the
+active environment:
 
 ```bash
 pip install --pre cindra
@@ -161,17 +157,16 @@ uv pip install --pre cindra
 
 **Conda environment not activated (CONDA_PREFIX is not set, but conda is available):**
 
-The user needs to activate their cindra environment before launching Claude Code. Instruct the
-user to exit Claude Code and run:
+The user needs to activate their cindra environment before launching Claude Code. Instruct the user to exit Claude Code
+and run:
 
 ```bash
 mamba activate <environment-name>
 claude
 ```
 
-You MUST explain that Claude Code inherits the shell environment at launch time. Activating a
-conda environment after Claude Code has started does not make the `cindra` command available to
-MCP server subprocesses.
+You MUST explain that Claude Code inherits the shell environment at launch time. Activating a conda environment after
+Claude Code has started does not make the `cindra` command available to MCP server subprocesses.
 
 **Virtual environment (VIRTUAL_ENV is set but cindra is missing):**
 
@@ -181,9 +176,8 @@ pip install --pre cindra
 
 **No environment active (both CONDA_PREFIX and VIRTUAL_ENV are unset):**
 
-The user is running in the system Python. If cindra is installed globally, `which cindra` would
-have succeeded. Instruct the user to either activate their cindra environment or install cindra
-into an accessible location.
+The user is running in the system Python. If cindra is installed globally, `which cindra` would have succeeded. Instruct
+the user to either activate their cindra environment or install cindra into an accessible location.
 
 ### Step 4: Verify Python version compatibility
 
@@ -191,9 +185,8 @@ into an accessible location.
 python --version
 ```
 
-cindra requires Python `>=3.14,<3.15`. If the Python version does not match, inform the user that
-their environment has an incompatible Python version, and they need to create or activate an
-environment with the correct version.
+cindra requires Python `>=3.14,<3.15`. If the Python version does not match, inform the user that their environment has
+an incompatible Python version, and they need to create or activate an environment with the correct version.
 
 ### Step 5: Verify package integrity and version
 
@@ -208,9 +201,8 @@ If either command fails with an import error, a dependency is missing or broken.
 pip check cindra 2>&1 | head -20
 ```
 
-Report any missing or incompatible dependencies to the user. Note that `cindra-gui --help` loads
-GUI dependencies (PySide6) at import time, so it may fail even when `cindra --help` succeeds if
-Qt dependencies are missing.
+Report any missing or incompatible dependencies to the user. Note that `cindra-gui --help` loads GUI dependencies
+(PySide6) at import time, so it may fail even when `cindra --help` succeeds if Qt dependencies are missing.
 
 Then confirm the resolved package version:
 
@@ -218,10 +210,9 @@ Then confirm the resolved package version:
 python -c "from importlib.metadata import version; print(version('cindra'))"
 ```
 
-The version MUST be 2.0.0+. Any pre-release build of the 2.0.0 line satisfies this, because cindra is distributed as
-a pre-release, so treat a version that starts with `2.0.0` as passing. A version from an earlier release line means
-pip resolved a build whose MCP tools predate the documented tool surface, and the fix is to upgrade with the
-`--pre` flag:
+The version MUST be 2.0.0+. Any pre-release build of the 2.0.0 line satisfies this, because cindra is distributed as a
+pre-release, so treat a version that starts with `2.0.0` as passing. A version from an earlier release line means pip
+resolved a build whose MCP tools predate the documented tool surface, and the fix is to upgrade with the `--pre` flag:
 
 ```bash
 pip install --upgrade --pre cindra
@@ -230,13 +221,13 @@ pip install --upgrade --pre cindra
 You MUST report a version from a release line below 2.0.0 as a failed diagnostic even when every earlier step passed,
 because the servers start and connect while their tools reject the arguments the other cindra skills send.
 
-### Step 6: Verify OpenMP runtime on macOS
+### Step 6: Verify the OpenMP runtime on macOS
 
-On macOS, cindra selects Numba's OpenMP threading layer because `tbb4py` has no Apple Silicon
-wheel. Numba's `omppool.cpython-314-darwin.so` dynamically loads `libomp.dylib` at import time.
-This library is not part of macOS or Apple's clang toolchain and must be provided by the active
-Python environment. When `libomp.dylib` is not resolvable, `import cindra` (and therefore
-`cindra --help` and `cindra mcp`) fails with:
+On macOS, cindra selects Numba's OpenMP threading layer because the Numba macOS wheel ships no tbbpool extension, which
+leaves the TBB layer unavailable there whatever runtime is installed. That layer loads `libomp.dylib` from the dynamic
+loader's default search path, and the file ships with neither Numba nor macOS. When it is missing, `import cindra` emits
+a warning naming the remedy, `cindra --help` and `cindra mcp` still succeed, and processing fails once it reaches a
+parallelized stage with:
 
 ```text
 ValueError: No threading layer could be loaded.
@@ -245,67 +236,55 @@ Intel OpenMP is required, try:
 $ conda/pip install intel-openmp
 ```
 
-Numba emits this hint whenever the requested `omp` layer fails to load on macOS. The supported resolution is the
-LLVM OpenMP runtime (`libomp.dylib`) installed below, rather than the `intel-openmp` package the hint names. First
-confirm the cause with:
+Numba emits this hint whenever the requested `omp` layer fails to load on macOS. The supported resolution is the LLVM
+OpenMP runtime (`libomp.dylib`) linked below, rather than the `intel-openmp` package the hint names. Report what the
+host carries with:
 
 ```bash
-python -c "from numba.np.ufunc import omppool"
+cindra omp
 ```
 
-If this command fails with `Library not loaded: @rpath/libomp.dylib`, guide the user through the
-resolution that matches their environment:
+The command searches the Homebrew and MacPorts library directories, the active conda environment, and the runtimes
+vendored inside the installed Python distributions, then reports the runtime it would link and the link it would create.
+It changes nothing without `--yes`.
 
-**Conda environment (recommended):**
+**The report found a runtime:**
 
 ```bash
-conda install -c conda-forge llvm-openmp
+sudo cindra omp --yes
 ```
 
-or
+The link goes into `/usr/local/lib`, which the loader searches by default, so writing it needs permission to modify that
+directory. The command then loads the runtime from a fresh interpreter and reports whether it now resolves.
+
+**The report found no runtime:**
+
+```bash
+brew install libomp
+sudo cindra omp --yes
+```
+
+A conda environment can take the runtime from conda-forge instead, which `cindra omp` discovers through `CONDA_PREFIX`:
 
 ```bash
 mamba install -c conda-forge llvm-openmp
 ```
 
-This installs `libomp.dylib` into `$CONDA_PREFIX/lib/`, where Numba's compiled omppool extension
-locates it via its build-time rpath.
-
-**pip-only virtual environment:**
-
-Install libomp via Homebrew, then make it visible to the venv's Python. Either symlink:
-
-```bash
-brew install libomp
-ln -s "$(brew --prefix libomp)/lib/libomp.dylib" "${VIRTUAL_ENV}/lib/libomp.dylib"
-```
-
-or export `DYLD_LIBRARY_PATH` before launching Claude Code:
-
-```bash
-export DYLD_LIBRARY_PATH="$(brew --prefix libomp)/lib:${DYLD_LIBRARY_PATH}"
-```
-
-You MUST skip this step on Linux and Windows, where cindra selects Numba's TBB threading layer instead
-(`tbb4py` and `intel-cmplr-lib-rt` are declared as `sys_platform != 'darwin'` dependencies), so Numba never
-loads `omppool` and this diagnostic does not apply.
+You MUST skip this step on Linux and Windows, where cindra selects Numba's TBB threading layer instead (`tbb4py` and
+`intel-cmplr-lib-rt` are declared as `sys_platform != 'darwin'` dependencies), so Numba never loads `omppool` and
+`cindra omp` errors when run there.
 
 ### Step 7: Restart the MCP server
 
-After the user resolves the environment issue, they must restart Claude Code for the MCP servers
-to pick up the changes. The plugin's server registrations will automatically configure the
-servers on the next session.
-
-On macOS, if the resolution was a `DYLD_LIBRARY_PATH` export, the export MUST be in effect in the
-shell that launches Claude Code, because activating it from within Claude Code does not
-propagate to already-spawned MCP server subprocesses.
+After the user resolves the environment issue, they must restart Claude Code for the MCP servers to pick up the changes.
+The plugin's server registrations will automatically configure the servers on the next session.
 
 ### Step 8: Resume the intended work
 
 After connectivity is restored, return to the work that required the MCP tools. If no restart was needed (the
-environment was already healthy), return control to the invoking skill, or proceed to `/acquisition-data-preparation`
-to begin the single-recording pipeline when invoked standalone. If a restart was required, resume the work that
-required the MCP tools on the next session, since the current session's MCP subprocesses predate the fix.
+environment was already healthy), return control to the invoking skill, or proceed to `/acquisition-data-preparation` to
+begin the single-recording pipeline when invoked standalone. If a restart was required, resume the work that required
+the MCP tools on the next session, since the current session's MCP subprocesses predate the fix.
 
 ---
 
@@ -324,7 +303,7 @@ required the MCP tools on the next session, since the current session's MCP subp
 | MCP server connected but tools fail                       | Not an environment issue                                    | Check tool-specific error messages                                                                                   |
 | cindra-gui tools unavailable                              | Plugin not installed or outdated                            | Reinstall the cindra Claude Code plugin                                                                              |
 | Skills available but MCP tools missing                    | Plugin installed without pip package                        | `pip install --pre cindra` in the active environment                                                                 |
-| `ValueError: No threading layer could be loaded` on macOS | `libomp.dylib` not on rpath (Apple ships no OpenMP runtime) | `conda install -c conda-forge llvm-openmp` (conda) or `brew install libomp` + symlink/`DYLD_LIBRARY_PATH` (pip-only) |
+| `ValueError: No threading layer could be loaded` on macOS | `libomp.dylib` is not on the loader's search path           | `sudo cindra omp --yes`, after `brew install libomp` when `cindra omp` reports no runtime                            |
 
 ---
 
@@ -364,7 +343,7 @@ MCP Environment Setup:
 - [ ] Confirmed the installed cindra version is 2.0.0+ (any pre-release build of the 2.0.0 line qualifies)
 - [ ] Identified environment type (conda, venv, system)
 - [ ] Provided environment-specific resolution steps (install commands carry the --pre flag)
-- [ ] On macOS, verified 'libomp.dylib' is resolvable (python -c "from numba.np.ufunc import omppool")
+- [ ] On macOS, reported the OpenMP runtime state with 'cindra omp' and linked one with 'sudo cindra omp --yes'
 - [ ] Verified cindra plugin is installed (provides both server registrations)
 - [ ] Informed user that Claude Code must be restarted after environment changes
 ```

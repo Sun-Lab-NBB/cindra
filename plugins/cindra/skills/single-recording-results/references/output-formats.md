@@ -1,7 +1,7 @@
 # Single-recording output formats
 
-Documents every file, array shape, dtype, and NPZ key the single-recording pipeline writes. This reference is
-loaded on demand by `/single-recording-results`.
+Documents every file, array shape, dtype, and NPZ key the single-recording pipeline writes. This reference is loaded on
+demand by `/single-recording-results`.
 
 ---
 
@@ -34,8 +34,8 @@ archive predates these fields rather than that the recording holds no frames.
 
 ## Detection images
 
-Saved in `detection_data/` subdirectories at both the combined root and per-plane levels. All files are `.npy`
-format, float32 dtype, with shape `(height, width)`.
+Saved in `detection_data/` subdirectories at both the combined root and per-plane levels. All files are `.npy` format,
+float32 dtype, with shape `(height, width)`.
 
 **Channel 1 (always present):**
 
@@ -57,8 +57,8 @@ format, float32 dtype, with shape `(height, width)`.
 
 `mean_image_channel_2.npy` appears at both levels for every two-channel recording, because the register phase writes a
 mean image for each channel it rewrites without testing whether either channel is functional. The other three come from
-channel 2 detection, which runs only when both `main.first_channel_functional` and `main.second_channel_functional`
-are True. The combined `maximum_projection_channel_2.npy` additionally requires at least one plane to hold a channel 1
+channel 2 detection, which runs only when both `main.first_channel_functional` and `main.second_channel_functional` are
+True. The combined `maximum_projection_channel_2.npy` additionally requires at least one plane to hold a channel 1
 maximum projection, which every plane that completed detection does.
 
 ---
@@ -79,8 +79,8 @@ Saved at both the combined root and per-plane levels. Uses the `ROIMask` seriali
 | `recording_count` | uint16  | (num_rois,)     | Number of recordings ROI appears in                   |
 | `frame_width`     | uint32  | (1,)            | Frame width in pixels                                 |
 
-To reconstruct per-ROI pixel arrays, split the concatenated `y_pixels`, `x_pixels`, and `pixel_weights` arrays
-using cumulative sums of `pixel_counts`.
+To reconstruct per-ROI pixel arrays, split the concatenated `y_pixels`, `x_pixels`, and `pixel_weights` arrays using
+cumulative sums of `pixel_counts`.
 
 Channel 2 data uses identical keys in `roi_masks_channel_2.npz`.
 
@@ -155,12 +155,12 @@ all-zero spike or corrected trace can mean deconvolution was disabled rather tha
 
 `cell_fluorescence_channel_2.npy` and `neuropil_fluorescence_channel_2.npy` are written in every `plane_N/` directory
 for every two-channel recording. A structural (non-functional) channel 2 reuses the channel 1 masks for extraction, so
-those two traces carry one row per channel 1 ROI. It also skips classification and spike deconvolution entirely,
-leaving `subtracted_fluorescence_channel_2.npy`, `spikes_channel_2.npy`, and `cell_classification_channel_2.npy`
-absent at both levels.
+those two traces carry one row per channel 1 ROI. It also skips classification and spike deconvolution entirely, leaving
+`subtracted_fluorescence_channel_2.npy`, `spikes_channel_2.npy`, and `cell_classification_channel_2.npy` absent at both
+levels.
 
-The combined root holds no channel 2 trace or classification file at all when channel 2 is structural. Combination
-gates the whole channel 2 aggregation, including `roi_masks_channel_2.npz` and `roi_statistics_channel_2.npz`, on both
+The combined root holds no channel 2 trace or classification file at all when channel 2 is structural. Combination gates
+the whole channel 2 aggregation, including `roi_masks_channel_2.npz` and `roi_statistics_channel_2.npz`, on both
 channels being functional, so the root lacks even the two trace files every plane directory carries. Read structural
 channel 2 traces from `plane_N/` rather than from the root.
 
@@ -174,14 +174,14 @@ channel 2 traces from `plane_N/` rather than from the root.
 The `cell_colocalization.npy` column semantics depend on the extraction path. When one channel is structural,
 intensity-based colocalization runs (and also writes `corrected_structural_mean_image.npy`): column 0 is the
 is_colocalized label (1.0 or 0.0) and column 1 the probability. When both channels are functional, spatial
-colocalization runs instead: column 0 is the matched channel-2 ROI index (-1 if unmatched) and column 1 the
-overlap score. `query_roi_statistics_tool` surfaces this as a per-ROI `colocalization` pair plus top-level
-`colocalization_mode` and `colocalization_columns`.
+colocalization runs instead: column 0 is the matched channel-2 ROI index (-1 if unmatched) and column 1 the overlap
+score. `query_roi_statistics_tool` surfaces this as a per-ROI `colocalization` pair plus top-level `colocalization_mode`
+and `colocalization_columns`.
 
-The metadata tool's `two_channels` flag means channel 2 is present AND functional, not merely that the recording
-is two-channel. A recording with a structural (non-functional) channel 2 reports `two_channels=False` yet still
-writes `cell_colocalization.npy`. Use the presence of `cell_colocalization.npy` (not `two_channels`) as the signal
-that channel-2 colocalization was computed.
+The metadata tool's `two_channels` flag means channel 2 is present AND functional, not merely that the recording is
+two-channel. A recording with a structural (non-functional) channel 2 reports `two_channels=False` yet still writes
+`cell_colocalization.npy`. Use the presence of `cell_colocalization.npy` (not `two_channels`) as the signal that
+channel-2 colocalization was computed.
 
 ---
 
@@ -204,9 +204,9 @@ Saved in `plane_N/registration_data/`. All files are `.npy` format.
 | `principal_component_shift_metrics.npy`  | float32 | (num_components, 3)                | Columns: rigid magnitude, mean nonrigid shift, max nonrigid shift |
 
 The principal-component arrays come from a cropped subsample of the registered movie, not from every frame.
-`num_samples` is `min(frame_count, 2000)` when the plane holds fewer than 5000 frames or either frame dimension
-exceeds 700 pixels, and 5000 otherwise. The `height` and `width` of `principal_component_extreme_images.npy`
-likewise span the registration valid range rather than the full frame.
+`num_samples` is `min(frame_count, 2000)` when the plane holds fewer than 5000 frames or either frame dimension exceeds
+700 pixels, and 5000 otherwise. The `height` and `width` of `principal_component_extreme_images.npy` likewise span the
+registration valid range rather than the full frame.
 
 ---
 
@@ -237,21 +237,20 @@ A YAML file containing scalar metadata from all processing stages. Key sections:
 
 The `timing` section stores every duration as an integer number of seconds:
 
-- Stage durations: `binarization_time`, `registration_time`, `two_step_registration_time`,
-  `registration_metrics_time`, `detection_time`, `extraction_time`, `classification_time`, `deconvolution_time`.
-- Channel 2 stage durations: `detection_time_channel_2`, `extraction_time_channel_2`,
-  `classification_time_channel_2`, `deconvolution_time_channel_2`.
-- Phase totals: `total_registration_time` covers motion correction and the registration quality metrics
-  computation. `total_processing_time` covers ROI detection, trace extraction, classification, and spike
-  deconvolution.
+- Stage durations: `binarization_time`, `registration_time`, `two_step_registration_time`, `registration_metrics_time`,
+  `detection_time`, `extraction_time`, `classification_time`, `deconvolution_time`.
+- Channel 2 stage durations: `detection_time_channel_2`, `extraction_time_channel_2`, `classification_time_channel_2`,
+  `deconvolution_time_channel_2`.
+- Phase totals: `total_registration_time` covers motion correction and the registration quality metrics computation.
+  `total_processing_time` covers ROI detection, trace extraction, classification, and spike deconvolution.
 - Worker counts: `registration_workers` and `processing_workers` record the allocation each stage used.
 - Version stamps: `date_processed`, `python_version`, `cindra_version`.
 
-`query_single_recording_metadata_tool` surfaces the phase totals and both worker counts in its `plane_timing`
-entries, so the per-plane worker allocation is readable without opening `runtime_data.yaml`.
+`query_single_recording_metadata_tool` surfaces the phase totals and both worker counts in its `plane_timing` entries,
+so the per-plane worker allocation is readable without opening `runtime_data.yaml`.
 
-Array fields from registration, detection, and extraction are saved as separate `.npy` files (documented above)
-and set to None in the YAML.
+Array fields from registration, detection, and extraction are saved as separate `.npy` files (documented above) and set
+to None in the YAML.
 
 ---
 
@@ -268,6 +267,6 @@ and set to None in the YAML.
 | Plane counts        | uint8   | plane_count                                    |
 
 Extraction trace, classification, and colocalization `.npy` files and all `.npz` archives are saved with
-`allow_pickle=False`. Detection and registration `.npy` files use NumPy save defaults but contain only numeric
-arrays that load safely with `allow_pickle=False`. Arrays support memory-mapped loading via
-`np.load(path, mmap_mode='r+')` for efficient access to large datasets.
+`allow_pickle=False`. Detection and registration `.npy` files use NumPy save defaults but contain only numeric arrays
+that load safely with `allow_pickle=False`. Arrays support memory-mapped loading via `np.load(path, mmap_mode='r+')` for
+efficient access to large datasets.

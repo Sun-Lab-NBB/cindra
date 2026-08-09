@@ -8,8 +8,9 @@ a ground-up reimplementation of the `suite2p <https://github.com/MouseLand/suite
 multi-recording ROI tracking pipeline, optimized algorithms, expanded documentation, and an agentic interface based on
 Claude.
 
-This website only contains the API documentation for the classes and methods offered by this library. See the project
-GitHub repository for installation instructions and library usage examples:
+This website contains the API documentation for the classes and methods offered by this library, together with the
+reference for every command exposed by the 'cindra' and 'cindra-gui' command-line interfaces. See the project GitHub
+repository for installation instructions and library usage examples:
 `cindra GitHub repository <https://github.com/Sun-Lab-NBB/cindra>`_.
 
 .. _`cindra GitHub repository`: https://github.com/Sun-Lab-NBB/cindra

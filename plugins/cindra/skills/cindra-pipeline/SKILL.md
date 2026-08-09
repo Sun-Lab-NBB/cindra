@@ -30,9 +30,9 @@ single-recording and multi-recording pipelines, their stage ordering, handoff co
 - Output data formats (see `/single-recording-results`, `/multi-recording-results`)
 - MCP server connectivity (see `/cindra-mcp-environment-setup`)
 
-**Handoff rules:** This skill dispatches to a stage-specific skill at each stage. You MUST invoke the relevant
-skill for detailed tool usage, parameter reference, and troubleshooting. This skill owns the cross-stage map and
-the single-vs-multi decision. The work performed within a single stage belongs to that stage's skill.
+**Handoff rules:** This skill dispatches to a stage-specific skill at each stage. You MUST invoke the relevant skill for
+detailed tool usage, parameter reference, and troubleshooting. This skill owns the cross-stage map and the
+single-vs-multi decision. The work performed within a single stage belongs to that stage's skill.
 
 ---
 
@@ -47,9 +47,9 @@ Does the goal require tracking the SAME ROIs across multiple recordings (e.g. cr
         ALREADY be fully single-recording processed first.
 ```
 
-The multi-recording pipeline is not a replacement for the single-recording pipeline. It is a downstream pipeline
-that consumes single-recording outputs. Every recording in a multi-recording dataset must complete all four
-single-recording phases before multi-recording processing can run.
+The multi-recording pipeline is not a replacement for the single-recording pipeline. It is a downstream pipeline that
+consumes single-recording outputs. Every recording in a multi-recording dataset must complete all four single-recording
+phases before multi-recording processing can run.
 
 ---
 
@@ -89,8 +89,8 @@ Setup       →  Data Prep   →               →             →            �
 ### Stage 4: Processing
 
 - **Skill:** `/single-recording-processing`
-- **Actions:** Prepare and execute the four-phase pipeline (binarize, register, process, combine) via the MCP
-  execution tools
+- **Actions:** Prepare and execute the four-phase pipeline (binarize, register, process, combine) via the MCP execution
+  tools
 - **Handoff condition:** All recordings report `completed`. `verify_single_recording_output_tool` returns
   `complete: true`
 
@@ -124,35 +124,33 @@ Complete (all)   →                →               →               →  Ins
 ### Stage 1: Configuration
 
 - **Skill:** `/multi-recording-configuration`
-- **Actions:** Generate a multi-recording template configuration, set `recording_io.dataset_name` to a non-empty
-  name (`resolve_dataset_name_tool` builds a qualified one), set ROI selection and registration/tracking parameters,
-  validate it
+- **Actions:** Generate a multi-recording template configuration, set `recording_io.dataset_name` to a non-empty name
+  (`resolve_dataset_name_tool` builds a qualified one), set ROI selection and registration/tracking parameters, validate
+  it
 - **Handoff condition:** A validated multi-recording template configuration file exists. A freshly generated
   multi-recording template leaves `recording_io.dataset_name` empty, which `validate_config_file_tool` reports as an
-  error, so set it before validating. `prepare_multi_recording_batch_tool` later writes the lowercased dataset name
-  into the per-dataset configuration copy it saves beside the tracker, leaving the template untouched
+  error, so set it before validating. `prepare_multi_recording_batch_tool` later writes the lowercased dataset name into
+  the per-dataset configuration copy it saves beside the tracker, leaving the template untouched
 
 ### Stage 2: Processing
 
 - **Skill:** `/multi-recording-processing`
-- **Actions:** Confirm all recordings are single-recording complete, group recordings into datasets, resolve
-  dataset names with `resolve_dataset_name_tool`, then prepare and execute the two-phase pipeline (discover,
-  extract)
-- **Handoff condition:** All datasets report `completed`. `verify_multi_recording_output_tool` returns
-  `complete: true`
+- **Actions:** Confirm all recordings are single-recording complete, group recordings into datasets, resolve dataset
+  names with `resolve_dataset_name_tool`, then prepare and execute the two-phase pipeline (discover, extract)
+- **Handoff condition:** All datasets report `completed`. `verify_multi_recording_output_tool` returns `complete: true`
 
 ### Stage 3: Results
 
 - **Skill:** `/multi-recording-results`
-- **Actions:** Verify output completeness and query dataset overview, cross-recording registration quality,
-  tracking summary, and cross-recording traces
+- **Actions:** Verify output completeness and query dataset overview, cross-recording registration quality, tracking
+  summary, and cross-recording traces
 - **Handoff condition:** Outputs verified and tracking reviewed
 
 ### Stage 4: Visual inspection
 
 - **Skill:** `/visualization`
-- **Actions:** Launch the tracking and ROI viewers to confirm backward-deformed templates overlap the same
-  structures across recordings (the only reliable cross-day registration-quality check)
+- **Actions:** Launch the tracking and ROI viewers to confirm backward-deformed templates overlap the same structures
+  across recordings (the only reliable cross-day registration-quality check)
 
 ---
 
@@ -162,21 +160,20 @@ A dataset is a named group of recordings tracked together. Plan datasets before 
 
 - **Prerequisite chain:** If any recording is not single-recording complete, route to the earliest missing step:
   `/acquisition-data-preparation` → `/single-recording-configuration` → `/single-recording-processing`.
-- **Grouping:** Group recordings by common parent directory, explicit user grouping, or semantic analysis of
-  recording paths. Each group becomes one dataset.
-- **Dataset names:** Call `resolve_dataset_name_tool` once per group to construct a unique qualified name from a
-  shared base name and a per-batch specifier. See `/multi-recording-processing` for the full workflow.
+- **Grouping:** Group recordings by common parent directory, explicit user grouping, or semantic analysis of recording
+  paths. Each group becomes one dataset.
+- **Dataset names:** Call `resolve_dataset_name_tool` once per group to construct a unique qualified name from a shared
+  base name and a per-batch specifier. See `/multi-recording-processing` for the full workflow.
 
-There is no separate multi-recording data-preparation skill: multi-recording input preparation is simply
-"single-recording processing complete," so raw-data preparation is handled entirely by the single-recording
-pipeline. This asymmetry is intentional.
+Multi-recording input preparation is "single-recording processing complete", so the single-recording pipeline handles
+raw-data preparation for both pipelines and there is no separate multi-recording preparation skill.
 
 ---
 
 ## Execution interface
 
-Cindra is MCP-first for agentic work. Every stage skill mandates the cindra MCP tools for its operations and routes
-to `/cindra-mcp-environment-setup` when they are unavailable.
+Cindra is MCP-first for agentic work. Every stage skill mandates the cindra MCP tools for its operations and routes to
+`/cindra-mcp-environment-setup` when they are unavailable.
 
 | Operation                                | Use                                                             |
 |------------------------------------------|-----------------------------------------------------------------|
@@ -184,9 +181,9 @@ to `/cindra-mcp-environment-setup` when they are unavailable.
 | Results querying and output verification | cindra MCP tools (`cindra-mcp` server) via the results skills   |
 | Viewer lifecycle and live display state  | cindra-gui MCP tools (`cindra-gui` server) via `/visualization` |
 
-The `cindra` and `cindra-gui` CLIs (`cindra run`, `cindra-gui roi`, etc.) exist for manual, non-agentic execution.
-You MUST NOT drive the pipeline through the CLI or direct Python imports during agentic work. Use the MCP tools
-so resource management, prerequisite validation, and phase sequencing are handled consistently.
+The `cindra` and `cindra-gui` CLIs (`cindra run`, `cindra-gui roi`, etc.) exist for manual, non-agentic execution. You
+MUST NOT drive the pipeline through the CLI or direct Python imports during agentic work. Use the MCP tools so resource
+management, prerequisite validation, and phase sequencing are handled consistently.
 
 ---
 
@@ -194,27 +191,27 @@ so resource management, prerequisite validation, and phase sequencing are handle
 
 ### Single recording, first run
 
-1. `/cindra-mcp-environment-setup` — verify MCP connectivity (if first session)
-2. `/acquisition-data-preparation` — create and validate `cindra_parameters.json`
-3. `/single-recording-configuration` — generate and validate a template configuration
-4. `/single-recording-processing` — run binarize, register, process, combine
-5. `/single-recording-results` — verify and review outputs
-6. `/visualization` — inspect ROIs and registration
+1. `/cindra-mcp-environment-setup`, to verify MCP connectivity (if first session)
+2. `/acquisition-data-preparation`, to create and validate `cindra_parameters.json`
+3. `/single-recording-configuration`, to generate and validate a template configuration
+4. `/single-recording-processing`, to run binarize, register, process, combine
+5. `/single-recording-results`, to verify and review outputs
+6. `/visualization`, to inspect ROIs and registration
 
 ### Batch of recordings sharing parameters
 
-1. `/single-recording-configuration` — create one reusable template configuration
-2. `/single-recording-processing` — pass the same template path for all recordings in one batch
-3. `/single-recording-results` — verify each recording's outputs
-4. `/visualization` — spot-check representative recordings
+1. `/single-recording-configuration`, to create one reusable template configuration
+2. `/single-recording-processing`, to pass the same template path for all recordings in one batch
+3. `/single-recording-results`, to verify each recording's outputs
+4. `/visualization`, to spot-check representative recordings
 
 ### Cross-day ROI tracking
 
 1. Confirm every recording is single-recording complete (run the single-recording pipeline first if not)
-2. `/multi-recording-configuration` — create the multi-recording template configuration
-3. `/multi-recording-processing` — group into datasets, resolve dataset names, run discover and extract
-4. `/multi-recording-results` — verify tracking outputs
-5. `/visualization` — confirm tracking quality across recordings
+2. `/multi-recording-configuration`, to create the multi-recording template configuration
+3. `/multi-recording-processing`, to group into datasets, resolve dataset names, run discover and extract
+4. `/multi-recording-results`, to verify tracking outputs
+5. `/visualization`, to confirm tracking quality across recordings
 
 ---
 
