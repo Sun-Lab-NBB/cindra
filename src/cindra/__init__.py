@@ -7,8 +7,9 @@ Authors: Ivan Kondratyev, Natalie Yeung
 """
 
 # Configures numba threading layer for parallel execution across all modules. This must be set before any numba
-# functions are compiled, hence it appears before other imports. macOS uses OpenMP (libomp via llvm-openmp) because
-# tbb4py publishes no Apple Silicon wheel. All other platforms use TBB for lower overhead on flat prange loops.
+# functions are compiled, hence it appears before other imports. macOS uses OpenMP because the numba macOS wheel ships
+# no tbbpool extension, which leaves the TBB layer unavailable there whatever runtime is installed. All other
+# platforms use TBB for lower overhead on flat prange loops.
 import sys
 
 from numba import config
@@ -33,6 +34,7 @@ from .allocation import (  # noqa: E402
     MultiRecordingJobNames,
     SingleRecordingJobNames,
     resolve_stage_workers,
+    warn_missing_openmp_runtime,
 )
 from .dataclasses import (  # noqa: E402
     MultiRecordingConfiguration,
@@ -44,6 +46,10 @@ from .dataclasses import (  # noqa: E402
 # outputs instead of or in addition to sending them to the terminal.
 if not console.enabled:  # pragma: no branch - the console-enabled state is only reachable as False on first import.
     console.enable()
+
+# Reports a macOS host that carries no loadable OpenMP runtime for the threading layer configured above. The check
+# runs below the console initialization, because the warning reaches the terminal only once the console is enabled.
+warn_missing_openmp_runtime()
 
 __all__ = [
     "BINARIZATION_WORKERS",

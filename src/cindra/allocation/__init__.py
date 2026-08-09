@@ -1,5 +1,6 @@
 """Provides the pipeline job name enumerations, the phase model, and the measured CPU worker allocation defaults."""
 
+from .openmp import OpenMpStatus, resolve_openmp_runtime, warn_missing_openmp_runtime
 from .phases import (
     MULTI_RECORDING_PHASES,
     PLANE_SPECIFIER_PREFIX,
@@ -38,15 +39,18 @@ __all__ = [
     "SINGLE_RECORDING_PHASES",
     "TIFF_DECODE_CEILING",
     "MultiRecordingJobNames",
+    "OpenMpStatus",
     "PipelinePhase",
     "PrerequisiteScope",
     "SingleRecordingJobNames",
     "resolve_downstream_phases",
     "resolve_multi_recording_jobs",
     "resolve_multi_recording_prerequisites",
+    "resolve_openmp_runtime",
     "resolve_pipeline_jobs",
     "resolve_plane_specifier",
     "resolve_single_recording_jobs",
     "resolve_single_recording_prerequisites",
     "resolve_stage_workers",
+    "warn_missing_openmp_runtime",
 ]
