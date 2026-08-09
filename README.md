@@ -102,17 +102,14 @@ ___
 
 ## Dependencies
 
-On macOS, cindra uses Numba's OpenMP threading layer for parallel execution because `tbb4py` is not published for
-Apple Silicon. The OpenMP runtime (`libomp.dylib`) is not shipped with macOS or Apple's clang toolchain and must be
-provided separately. The recommended path is a conda environment with `llvm-openmp` from conda-forge:
+On macOS, cindra uses Numba's OpenMP threading layer, because the Numba macOS wheel carries no TBB support. The
+OpenMP runtime (`libomp.dylib`) ships with neither Numba nor macOS itself, so it is installed separately.
 
-`conda install -c conda-forge llvm-openmp` (or `mamba install -c conda-forge llvm-openmp`)
-
-For `pip`-only installs, install libomp via [Homebrew](https://brew.sh/) (`brew install libomp`) and either symlink
-`$(brew --prefix libomp)/lib/libomp.dylib` into the active virtual environment's `lib/` directory or set
-`DYLD_LIBRARY_PATH` to include that path before importing cindra. Without a loadable `libomp.dylib`, importing
-cindra fails with `ValueError: No threading layer could be loaded`. Linux and Windows installations require no
-additional steps.
+Run `cindra omp` to report the runtimes present on the host, and `sudo cindra omp --yes` to make one loadable. The
+command finds runtimes installed by [Homebrew](https://brew.sh/) or MacPorts, present in the active conda environment,
+or carried inside an installed Python package. Install one with `brew install libomp` when the command finds none.
+Without a loadable runtime, processing fails once it reaches a parallelized stage. Linux and Windows run the TBB
+threading layer, which needs no additional steps, so `cindra omp` errors when run on them.
 
 For users, all other library dependencies are installed automatically by all supported installation
 methods. For developers, see the [Developers](#developers) section for information on installing
@@ -798,6 +795,7 @@ This library provides the `cindra` and `cindra-gui` CLIs that expose the followi
 | `configure` | Generates default YAML configuration files for single or multi-recording pipelines |
 | `run`       | Executes a pipeline using a YAML configuration file with optional CLI overrides    |
 | `mcp`       | Starts the data processing MCP server for AI agent integration                     |
+| `omp`       | Links the OpenMP runtime Numba loads on macOS, erroring on every other platform    |
 
 The `run` command supports executing individual pipeline phases (`--binarize`, `--register`, `--process`, `--combine`
 for single-recording, `--discover` and `--extract` for multi-recording), targeting specific planes (`--target-plane`) or
