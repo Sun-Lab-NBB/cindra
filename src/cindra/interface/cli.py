@@ -9,6 +9,7 @@ from ataraxis_base_utilities import LogLevel, console
 
 from ..pipelines import run_multi_recording_pipeline, run_single_recording_pipeline
 from .mcp_server import run_server
+from ..allocation import OpenMpStatus, resolve_openmp_runtime
 from ..dataclasses import PipelineType, MultiRecordingConfiguration, SingleRecordingConfiguration, detect_pipeline_type
 
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
@@ -36,6 +37,59 @@ def cindra_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
     monitor processing status, and manage batch operations for both single-recording and multi-recording workflows.
     """
     run_server(transport=transport)
+
+
+@cindra_cli.command("omp")
+@click.option(
+    "-s",
+    "--source",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+    required=False,
+    default=None,
+    help="The path to the OpenMP runtime to link. Omit to search the Homebrew library directories for it.",
+)
+@click.option(
+    "-t",
+    "--target",
+    type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path),
+    required=False,
+    default=None,
+    help="The path to write the link to. Omit to derive it from the directory the dynamic loader searches by default.",
+)
+@click.option(
+    "-f",
+    "--force",
+    is_flag=True,
+    help="Determines whether to link a runtime on a host whose OpenMP runtime already loads.",
+)
+@click.option(
+    "-y",
+    "--yes",
+    is_flag=True,
+    help="Actually creates the resolved link. Without this flag the command reports what it would do and changes "
+    "nothing.",
+)
+def cindra_omp(source: Path | None, target: Path | None, *, force: bool, yes: bool) -> None:
+    """Links the OpenMP runtime that the Numba threading layer loads on macOS into a directory the loader searches.
+
+    The Numba macOS wheel names its OpenMP dependency through an rpath that carries no entries, so the runtime
+    resolves from the dynamic loader's default search path alone. This command finds an installed runtime and links it
+    into that path. Writing the link usually requires running the command through sudo. Running the command on any
+    other platform errors, because those platforms run the TBB threading layer instead.
+    """
+    try:
+        summary = resolve_openmp_runtime(runtime_path=source, link_path=target, execute=yes, force=force)
+    except RuntimeError as error:
+        raise click.ClickException(message=str(error)) from error
+
+    if summary.searched_paths:
+        console.echo(message=f"searched: {', '.join(str(path) for path in summary.searched_paths)}")
+    if summary.runtime_path is not None:
+        console.echo(message=f"runtime:  {summary.runtime_path}")
+        console.echo(message=f"link:     {summary.link_path}")
+    console.echo(message=summary.describe())
+    if summary.status == OpenMpStatus.UNRESOLVED:
+        raise SystemExit(1)
 
 
 @cindra_cli.command("configure")
