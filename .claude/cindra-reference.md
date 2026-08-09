@@ -15,6 +15,7 @@
 | `register_plane`                  | `registration/register.py`                      | Per-plane motion correction (rigid + optional nonrigid) |
 | `resolve_stage_workers`           | `allocation/workers.py`                         | Measured per-stage worker defaults and worker resolver  |
 | `SINGLE_RECORDING_PHASES`         | `allocation/phases.py`                          | Phase model: job universe and prerequisite graph        |
+| `resolve_openmp_runtime`          | `allocation/openmp.py`                          | macOS OpenMP runtime discovery, linking, verification   |
 | `DiffeomorphicDemonsRegistration` | `registration/diffeomorphic.py`                 | Cross-day diffeomorphic alignment algorithm             |
 | `Deformation`                     | `registration/deformation.py`                   | Deformation field application and inversion             |
 | `detect_plane_rois`               | `detection/detect.py`                           | ROI detection via sparse detection with PCA denoising   |
@@ -45,6 +46,7 @@
 | `cindra configure` | Generate default config files for single or multi-recording pipeline |
 | `cindra run`       | Execute pipeline with CLI overrides for config parameters            |
 | `cindra mcp`       | Start MCP server (stdio, sse, or streamable-http transport)          |
+| `cindra omp`       | Link the macOS OpenMP runtime Numba loads, erroring on other systems |
 
 **`cindra-gui` commands:**
 
@@ -90,8 +92,8 @@
 2. Review `src/cindra/pipelines/single_recording.py` for the four-phase single-recording workflow
 3. Review `src/cindra/pipelines/multi_recording.py` for the two-phase multi-recording workflow
 4. Job universes and prerequisite edges derive from the phase model in `src/cindra/allocation/phases.py`
-   (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`). Add, remove, or reorder a phase there rather than at each
-   call site, and both the pipelines and the MCP layer follow automatically
+   (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`). Add, remove, or reorder a phase there rather than at each call
+   site, and both the pipelines and the MCP layer follow automatically
 5. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
 
 **Modifying registration:**
@@ -100,8 +102,8 @@
 2. Understand the two-step registration refinement when enabled
 3. Rigid registration uses phase correlation (`rigid.py`), and nonrigid uses block-based deformation (`nonrigid.py`)
 4. Cross-recording registration uses diffeomorphic demons (`diffeomorphic.py`) with multiscale pyramid (`pyramid.py`)
-5. Registration rewrites its input binary in place under a `<binary>.registering` marker. Keep the create and clear
-   pair around any new rewrite loop, and confine BLAS fits with `threadpool_limits` as `metrics.py` does
+5. Registration rewrites its input binary in place under a `<binary>.registering` marker. Keep the create and clear pair
+   around any new rewrite loop, and confine BLAS fits with `threadpool_limits` as `metrics.py` does
 
 **Modifying detection:**
 
@@ -142,7 +144,14 @@
 
 - The `console` is enabled in `src/cindra/__init__.py`. Do not re-enable it elsewhere
 - The Numba threading layer is configured in `__init__.py` (TBB on non-Mac, OpenMP on macOS) after importing
-  `numba.config` and before importing modules that compile `@njit` functions. Do not move this
+  `numba.config` and before importing modules that compile `@njit` functions. Do not move this. macOS runs OpenMP
+  because the Numba macOS wheel ships no tbbpool extension, so the TBB layer is unavailable there whatever runtime is
+  installed
+- The macOS OpenMP layer loads `libomp.dylib` from the dynamic loader's default search path, and
+  `cindra.allocation.openmp` owns the discovery and linking that put it there. `__init__.py` calls
+  `warn_missing_openmp_runtime()` below the console initialization, so the warning reaches the terminal, while
+  `cindra omp` reports the runtimes found on the host and `cindra omp --yes` links one. Numba raises its
+  threading-layer error at the first parallelized call rather than at import, which is what the warning stands in for
 - The `# type: ignore[import-untyped]` comments on the scikit-learn, threadpoolctl, PyQtGraph, and yaml imports are
   expected (Numba is excluded via the `pyproject.toml` mypy override, and tifffile imports carry no such comment)
 - The `# pragma: no cover` annotations on `@njit` function bodies are intentional

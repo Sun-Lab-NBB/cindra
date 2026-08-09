@@ -1,11 +1,10 @@
 ---
 name: visualization
 description: >-
-  Launches and manages cindra GUI viewers for visual inspection of processing results, queries live
-  viewer display state, and guides users through viewer interactions. Covers ROI, tracking, and
-  registration viewers via the cindra-gui MCP server. Use when the user asks to visualize results,
-  inspect ROIs, review registration quality, examine tracking, launch a viewer, or when a processing
-  workflow completes and visual inspection is needed.
+  Launches and manages cindra GUI viewers for visual inspection of processing results, queries live viewer display
+  state, and guides users through viewer interactions. Covers ROI, tracking, and registration viewers via the cindra-gui
+  MCP server. Use when the user asks to visualize results, inspect ROIs, review registration quality, examine tracking,
+  launch a viewer, or when a processing workflow completes and visual inspection is needed.
 user-invocable: true
 ---
 
@@ -26,31 +25,27 @@ Launches, manages, and assists with cindra GUI viewers for visual inspection of 
 - Combining GUI viewer state with headless query tools for data-driven assistance
 
 **Does not cover:**
-- Processing workflow orchestration (see `/single-recording-processing`,
-  `/multi-recording-processing`)
-- Output data formats, array shapes, or file references (see `/single-recording-results`,
-  `/multi-recording-results`)
-- Configuration parameters or tuning guidance (see `/single-recording-configuration`,
-  `/multi-recording-configuration`)
+- Processing workflow orchestration (see `/single-recording-processing`, `/multi-recording-processing`)
+- Output data formats, array shapes, or file references (see `/single-recording-results`, `/multi-recording-results`)
+- Configuration parameters or tuning guidance (see `/single-recording-configuration`, `/multi-recording-configuration`)
 - MCP server connectivity or environment issues (see `/cindra-mcp-environment-setup`)
 
-**Handoff rules:** If the user asks about processing status or batch jobs, invoke
-`/single-recording-processing` or `/multi-recording-processing`. If the user asks about output
-file formats or data interpretation without a viewer, invoke `/single-recording-results` or
-`/multi-recording-results`. If cindra-gui MCP tools are unavailable, invoke
+**Handoff rules:** If the user asks about processing status or batch jobs, invoke `/single-recording-processing` or
+`/multi-recording-processing`. If the user asks about output file formats or data interpretation without a viewer,
+invoke `/single-recording-results` or `/multi-recording-results`. If cindra-gui MCP tools are unavailable, invoke
 `/cindra-mcp-environment-setup`.
 
 ---
 
 ## Agent requirements
 
-You MUST use the cindra-gui MCP tools for all viewer operations. Do not launch viewer windows via
-CLI commands, scripts, or Python imports. If cindra-gui MCP tools are not available, invoke
-`/cindra-mcp-environment-setup` to diagnose and resolve connectivity issues.
+You MUST use the cindra-gui MCP tools for all viewer operations. Do not launch viewer windows via CLI commands, scripts,
+or Python imports. If cindra-gui MCP tools are not available, invoke `/cindra-mcp-environment-setup` to diagnose and
+resolve connectivity issues.
 
-When assisting the user with data interpretation in a viewer, combine `query_viewer_state_tool`
-from the cindra-gui MCP server with the headless query tools from the cindra MCP server. The GUI
-tools manage the viewer window, and the headless query tools provide the underlying data.
+When assisting the user with data interpretation in a viewer, combine `query_viewer_state_tool` from the cindra-gui MCP
+server with the headless query tools from the cindra MCP server. The GUI tools manage the viewer window, and the
+headless query tools provide the underlying data.
 
 ---
 
@@ -67,10 +62,9 @@ tools manage the viewer window, and the headless query tools provide the underly
 
 ### Headless query tools (cindra MCP server)
 
-Use these headless query tools alongside viewer state to provide data-driven assistance. These
-tools are documented in detail by `/single-recording-results` and `/multi-recording-results`. The
-`get_recording_status_tool` (cindra MCP server) is also used to confirm processing is complete before
-launching a viewer (see the launch-and-inspect workflow).
+Use these headless query tools alongside viewer state to provide data-driven assistance. These tools are documented in
+detail by `/single-recording-results` and `/multi-recording-results`. The `get_recording_status_tool` (cindra MCP
+server) is also used to confirm processing is complete before launching a viewer (see the launch-and-inspect workflow).
 
 | Tool                                              | Use with viewer       |
 |---------------------------------------------------|-----------------------|
@@ -88,8 +82,8 @@ launching a viewer (see the launch-and-inspect workflow).
 
 ## Viewer types
 
-All three viewers load the recording's combined dataset (`combined_metadata.npz`) on startup, so the
-single-recording combination phase must have succeeded for the target recording before any viewer is launched.
+All three viewers load the recording's combined dataset (`combined_metadata.npz`) on startup, so the single-recording
+combination phase must have succeeded for the target recording before any viewer is launched.
 
 ### ROI viewer
 
@@ -111,10 +105,10 @@ launch_viewer_tool(viewer_type="roi", recording_path="<path>", dataset="<name>")
 - `dataset`: Optional multi-recording dataset name, which enables tracked ROI mode when provided
 
 **Capabilities:**
-- View ROI spatial masks overlaid on detection images (mean, enhanced mean, correlation map,
-  maximum projection, corrected structural)
-- Color ROIs by statistics (random, skewness, compactness, footprint, aspect ratio, solidity,
-  colocalization probability, recording count, cell probability, correlations, classification)
+- View ROI spatial masks overlaid on detection images (mean, enhanced mean, correlation map, maximum projection,
+  corrected structural)
+- Color ROIs by statistics (random, skewness, compactness, footprint, aspect ratio, solidity, colocalization
+  probability, recording count, cell probability, correlations, classification)
 - Inspect fluorescence traces (raw, neuropil, corrected, spikes) for selected ROIs
 - Toggle channel 2 overlay for dual-channel recordings
 - Reclassify ROIs by toggling cell/non-cell labels in classify mode (a click flips the clicked ROI's label)
@@ -148,8 +142,8 @@ launch_viewer_tool(viewer_type="tracking", recording_path="<path>", dataset="<na
 
 ### Registration viewer
 
-Inspects motion correction (registration) quality for a single recording. Launches two windows:
-a binary player for frame-by-frame playback and a PC viewer for principal component metrics.
+Inspects motion correction (registration) quality for a single recording. Launches two windows: a binary player for
+frame-by-frame playback and a PC viewer for principal component metrics.
 
 **Launch:**
 
@@ -165,17 +159,17 @@ launch_viewer_tool(viewer_type="registration", recording_path="<path>")
 - `dataset`: Ignored, because the registration viewer reads a single recording's own registration output
 
 **Capabilities:**
-- **Binary player**: Play back registered frames at 5x speed, step through frames with arrow
-  keys, toggle channel 2 overlay
-- **PC viewer**: Animate principal component extreme images per plane, cycle through PCs to
-  identify residual motion artifacts
+- **Binary player**: Play back registered frames at 5x speed, step through frames with arrow keys, toggle channel 2
+  overlay
+- **PC viewer**: Animate principal component extreme images per plane, cycle through PCs to identify residual motion
+  artifacts
 
 ---
 
 ## Viewer state reference
 
-Use `query_viewer_state_tool` to read the live display state of any active viewer. The returned
-dictionary structure depends on the viewer type.
+Use `query_viewer_state_tool` to read the live display state of any active viewer. The returned dictionary structure
+depends on the viewer type.
 
 ### ROI viewer state
 
@@ -271,10 +265,9 @@ Returns a nested dictionary with two sub-viewers:
 
 ## Enum value reference
 
-Enum-valued state fields report a lowercase value whose on-screen dropdown label can differ from the title-cased
-form. Read the exact label from the Dropdown label column in
-[references/viewer-enums.md](references/viewer-enums.md), which holds the full value lists for `background_view`,
-`roi_color_mode`, `mask_layer`, and `coordinate_space`.
+Enum-valued state fields report a lowercase value whose on-screen dropdown label can differ from the title-cased form.
+Read the exact label from the Dropdown label column in [references/viewer-enums.md](references/viewer-enums.md), which
+holds the full value lists for `background_view`, `roi_color_mode`, `mask_layer`, and `coordinate_space`.
 
 ---
 
@@ -282,72 +275,68 @@ form. Read the exact label from the Dropdown label column in
 
 ### Launch and inspect workflow
 
-1. **Check prerequisites**. Verify processing is complete for the recording with `get_recording_status_tool`
-   from the cindra MCP server, and require `single_recording.status` to equal `completed`. The values
-   `binarizing`, `registering`, `processing`, and `combining` report a run that is still in flight, and
-   `not_started`, `scheduled`, and `failed` report a recording with no viewable output.
+1. **Check prerequisites**. Verify processing is complete for the recording with `get_recording_status_tool` from the
+   cindra MCP server, and require `single_recording.status` to equal `completed`. The values `binarizing`,
+   `registering`, `processing`, and `combining` report a run that is still in flight, and `not_started`, `scheduled`,
+   and `failed` report a recording with no viewable output.
 
-2. **Launch viewer**. Call `launch_viewer_tool` with the appropriate `viewer_type`,
-   `recording_path`, and optional `dataset`. Store the returned `viewer_id`.
+2. **Launch viewer**. Call `launch_viewer_tool` with the appropriate `viewer_type`, `recording_path`, and optional
+   `dataset`. Store the returned `viewer_id`.
 
-3. **Wait for loading**. Query state with `query_viewer_state_tool` until `loaded` is `true`. The viewer
-   subprocess needs time to read data from disk. The registration viewer reports its readiness through
-   `pc_viewer.loaded`, so poll that field, or treat the presence of the `binary_player` and `pc_viewer`
-   sub-states as the loaded signal. If `loaded` remains `false` after 10-15 seconds, check for errors by
-   verifying the viewer is still alive via `list_viewers_tool`.
+3. **Wait for loading**. Query state with `query_viewer_state_tool` until `loaded` is `true`. The viewer subprocess
+   needs time to read data from disk. The registration viewer reports its readiness through `pc_viewer.loaded`, so poll
+   that field, or treat the presence of the `binary_player` and `pc_viewer` sub-states as the loaded signal. If `loaded`
+   remains `false` after 10-15 seconds, check for errors by verifying the viewer is still alive via `list_viewers_tool`.
 
-4. **Assist the user**. Respond to user questions by combining viewer state with headless query
-   tools. For example, if the user asks about a specific ROI, query its statistics via
-   `query_roi_statistics_tool` while referencing the viewer state to understand
-   what the user is currently seeing.
+4. **Assist the user**. Respond to user questions by combining viewer state with headless query tools. For example, if
+   the user asks about a specific ROI, query its statistics via `query_roi_statistics_tool` while referencing the viewer
+   state to understand what the user is currently seeing.
 
-5. **Clean up**. When the user is done, close the viewer with `close_viewer_tool`. If the user
-   closes the viewer window directly, the next `list_viewers_tool` or `query_viewer_state_tool`
-   call will detect the dead process and clean up automatically.
+5. **Clean up**. When the user is done, close the viewer with `close_viewer_tool`. If the user closes the viewer window
+   directly, the next `list_viewers_tool` or `query_viewer_state_tool` call will detect the dead process and clean up
+   automatically.
 
 ### State-driven assistance workflow
 
 When the user asks questions about what they see in a viewer:
 
-1. **Query viewer state**. Call `query_viewer_state_tool` to understand the current display
-   configuration (which background, which color mode, which ROIs are selected).
+1. **Query viewer state**. Call `query_viewer_state_tool` to understand the current display configuration (which
+   background, which color mode, which ROIs are selected).
 
-2. **Query underlying data**. Use the appropriate headless query tool to retrieve the actual
-   data values. For example:
-   - User sees colored ROIs → query `roi_color_mode` from state, then use
-     `query_roi_statistics_tool` to get the statistic values
-   - User asks about a trace → check `trace_visibility` and `selected_roi_indices` from state,
-     then use `query_traces_tool` for the actual trace data
-   - User asks about registration quality → check `binary_player.current_frame` from state,
-     then use `query_registration_quality_tool` for offset statistics
+2. **Query underlying data**. Use the appropriate headless query tool to retrieve the actual data values. For example:
+   - User sees colored ROIs → query `roi_color_mode` from state, then use `query_roi_statistics_tool` to get the
+     statistic values
+   - User asks about a trace → check `trace_visibility` and `selected_roi_indices` from state, then use
+     `query_traces_tool` for the actual trace data
+   - User asks about registration quality → check `binary_player.current_frame` from state, then use
+     `query_registration_quality_tool` for offset statistics
 
-3. **Explain in context**. Combine the viewer state with the queried data to give the user a
-   contextual answer about what they are seeing.
+3. **Explain in context**. Combine the viewer state with the queried data to give the user a contextual answer about
+   what they are seeing.
 
 ### Runtime state awareness
 
-Viewers are interactive, so the user can switch datasets, change display settings, and navigate
-recordings at any time via the GUI controls. The launch-time parameters passed to
-`launch_viewer_tool` may not reflect the current viewer state.
+Viewers are interactive, so the user can switch datasets, change display settings, and navigate recordings at any time
+via the GUI controls. The launch-time parameters passed to `launch_viewer_tool` may not reflect the current viewer
+state.
 
-**Always re-query before answering.** Before responding to any user question about a viewer,
-call `query_viewer_state_tool` to read the live display state. Do not rely on cached state from
-previous queries or launch-time parameters.
+**Always re-query before answering.** Before responding to any user question about a viewer, call
+`query_viewer_state_tool` to read the live display state. Do not rely on cached state from previous queries or
+launch-time parameters.
 
-**Allow for write latency.** The viewer writes its state at most every 250 ms, and only when it
-changes. After prompting the user to change a setting, allow a brief moment or re-query once before
-trusting the result, since a query issued immediately after the change may still return the prior state.
+**Allow for write latency.** The viewer writes its state at most every 250 ms, and only when it changes. After prompting
+the user to change a setting, allow a brief moment or re-query once before trusting the result, since a query issued
+immediately after the change may still return the prior state.
 
-**Dataset tracking.** Both `list_viewers_tool` and `query_viewer_state_tool` report the
-`active_dataset` field, which reflects the dataset currently displayed by the viewer. This may
-differ from the `dataset` parameter provided at launch if the user switched datasets via the
-viewer's dropdown controls. Use `active_dataset` (not `dataset`) when determining what the
-viewer is currently showing.
+**Dataset tracking.** Both `list_viewers_tool` and `query_viewer_state_tool` report the `active_dataset` field, which
+reflects the dataset currently displayed by the viewer. This may differ from the `dataset` parameter provided at launch
+if the user switched datasets via the viewer's dropdown controls. Use `active_dataset` (not `dataset`) when determining
+what the viewer is currently showing.
 
 ### Multi-viewer workflow
 
-Multiple viewers can run simultaneously for the same or different recordings. Each viewer gets a
-unique `viewer_id`. Use `list_viewers_tool` to track all active instances.
+Multiple viewers can run simultaneously for the same or different recordings. Each viewer gets a unique `viewer_id`. Use
+`list_viewers_tool` to track all active instances.
 
 Common multi-viewer patterns:
 - Registration viewer + ROI viewer for the same recording (verify registration then inspect ROIs)
@@ -360,62 +349,56 @@ Common multi-viewer patterns:
 
 ### ROI viewer assistance
 
-**"What am I looking at?"**. Query viewer state. Report the background view, ROI color mode,
-number of ROIs, whether classify mode is active, and which traces are visible.
+**"What am I looking at?"**. Query viewer state. Report the background view, ROI color mode, number of ROIs, whether
+classify mode is active, and which traces are visible.
 
-**"Are these good ROIs?"**. Query `roi_color_mode` from state. If it is not `cell_classification`
-or `cell_probability`, suggest switching to one of those color modes to see classifier output. Use
-`query_roi_statistics_tool` to retrieve compactness, solidity,
-and skewness statistics for the visible ROIs. Explain what each statistic means:
+**"Are these good ROIs?"**. Query `roi_color_mode` from state. If it is not `cell_classification` or `cell_probability`,
+suggest switching to one of those color modes to see classifier output. Use `query_roi_statistics_tool` to retrieve
+compactness, solidity, and skewness statistics for the visible ROIs. Explain what each statistic means:
 - **Compactness** near 1.0 indicates circular footprints (typical neurons)
 - **Solidity** near 1.0 indicates filled footprints without holes
 - **Skewness** > 0 indicates right-skewed fluorescence (active cells tend to have positive skew)
 
-**"Show me the most active cells"**. Suggest coloring by `skewness` (high skewness correlates
-with activity) or by `cell_probability` to see classifier confidence. Use
-`query_roi_statistics_tool` sorted by skewness descending to identify the top
-ROIs.
+**"Show me the most active cells"**. Suggest coloring by `skewness` (high skewness correlates with activity) or by
+`cell_probability` to see classifier confidence. Use `query_roi_statistics_tool` sorted by skewness descending to
+identify the top ROIs.
 
-**"What do the traces look like?"**. Check `trace_visibility` and `selected_roi_indices` from
-state. If no ROIs are selected, tell the user they can select one by clicking it in the image panel
-or by typing its index into the ROI index field (the "Enter an ROI index to select it" box). Use
-`query_traces_tool` for the selected ROI indices to provide quantitative trace information.
+**"What do the traces look like?"**. Check `trace_visibility` and `selected_roi_indices` from state. If no ROIs are
+selected, tell the user they can select one by clicking it in the image panel or by typing its index into the ROI index
+field (the "Enter an ROI index to select it" box). Use `query_traces_tool` for the selected ROI indices to provide
+quantitative trace information.
 
-**"Select or highlight a specific ROI (e.g. ROI 20)?"**. These tools observe only and cannot drive
-the viewer, so ask the user to type the index into the ROI index field. ROI indices are 0-based and
-match `selected_roi_indices` / `primary_roi_index` in the state, so resolve any "cell N" wording to a
-0-based index against `roi_count` before instructing. Confirm by re-querying state and checking that
-`primary_roi_index` matches.
+**"Select or highlight a specific ROI (e.g. ROI 20)?"**. These tools observe only and cannot drive the viewer, so ask
+the user to type the index into the ROI index field. ROI indices are 0-based and match `selected_roi_indices` /
+`primary_roi_index` in the state, so resolve any "cell N" wording to a 0-based index against `roi_count` before
+instructing. Confirm by re-querying state and checking that `primary_roi_index` matches.
 
 ### Tracking viewer assistance
 
-**"Is the tracking good?"**. Query tracking viewer state to see the current `mask_layer` and
-`coordinate_space`. Suggest cycling through mask layers (original → deformed → template →
-tracked) to verify spatial consistency. Use `query_multi_recording_tracking_summary_tool` for
-recording count distribution statistics. Recording count reflects how many sessions an ROI was
-detected in, not tracking reliability, because ROIs can be active in some sessions and inactive in
-others.
+**"Is the tracking good?"**. Query tracking viewer state to see the current `mask_layer` and `coordinate_space`. Suggest
+cycling through mask layers (original → deformed → template → tracked) to verify spatial consistency. Use
+`query_multi_recording_tracking_summary_tool` for recording count distribution statistics. Recording count reflects how
+many sessions an ROI was detected in, not tracking reliability, because ROIs can be active in some sessions and inactive
+in others.
 
-**"Why are some ROIs missing in this recording?"**. Check `current_recording_id` from state.
-Explain that not all ROIs are active in every recording session. Use
-`query_multi_recording_overview_tool` to show per-recording mask counts at each processing stage.
+**"Why are some ROIs missing in this recording?"**. Check `current_recording_id` from state. Explain that not all ROIs
+are active in every recording session. Use `query_multi_recording_overview_tool` to show per-recording mask counts at
+each processing stage.
 
 ### Registration viewer assistance
 
-**"Is the registration good?"**. Query registration viewer state. Check if `binary_player` is
-playing, and suggest playing the video to look for residual jitter. Use
-`query_registration_quality_tool` for the current plane to report offset statistics and bad frame
-counts. Key indicators:
+**"Is the registration good?"**. Query registration viewer state. Check if `binary_player` is playing, and suggest
+playing the video to look for residual jitter. Use `query_registration_quality_tool` for the current plane to report
+offset statistics and bad frame counts. Key indicators:
 - **Rigid offset standard deviation** < 2 pixels indicates stable registration
 - **Bad frame percentage** < 5% indicates few motion artifacts
-- **PC shift metrics** close to zero indicate no systematic drift (a qualitative cue, with no
-  fixed threshold). `pc_viewer.current_pc` in the state is 1-based, while the PC component indices in
-  `query_registration_quality_tool`'s shift metrics are 0-based, so subtract 1 when looking up the
-  metric for the PC the user is viewing.
+- **PC shift metrics** close to zero indicate no systematic drift (a qualitative cue, with no fixed threshold).
+  `pc_viewer.current_pc` in the state is 1-based, while the PC component indices in `query_registration_quality_tool`'s
+  shift metrics are 0-based, so subtract 1 when looking up the metric for the PC the user is viewing.
 
-**"What are these PC images?"**. Explain that PC extreme images show the average frame
-appearance at the extremes of each principal component. Large visible differences between low and
-high extremes indicate residual motion or optical artifacts not captured by registration.
+**"What are these PC images?"**. Explain that PC extreme images show the average frame appearance at the extremes of
+each principal component. Large visible differences between low and high extremes indicate residual motion or optical
+artifacts not captured by registration.
 
 ---
 

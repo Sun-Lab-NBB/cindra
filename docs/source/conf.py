@@ -1,12 +1,12 @@
 # Configuration file for the Sphinx documentation builder.
-import importlib_metadata
+import importlib.metadata
 
 # -- Project information -----------------------------------------------------
 project = 'cindra'
 copyright = '2026, Sun (NeuroAI) lab'
-authors = ['Ivan Kondratyev', 'Natalie Yeung']
-# Reads the project version from the installed package's distribution metadata.
-release = importlib_metadata.version("cindra")
+author = 'Ivan Kondratyev, Natalie Yeung'
+# Extracts the project version from the metadata .toml file.
+release = importlib.metadata.version("cindra")
 
 # -- General configuration ---------------------------------------------------
 extensions = [
@@ -33,7 +33,6 @@ napoleon_use_param = True
 napoleon_use_rtype = True
 
 # Additional sphinx-typehints configuration
-sphinx_autodoc_typehints = True
 always_document_param_types = False
 typehints_document_rtype = True
 typehints_use_rtype = True

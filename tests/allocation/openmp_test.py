@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+import subprocess
 
 import pytest
 
-from cindra.allocation import OpenMpStatus, resolve_openmp_runtime, warn_missing_openmp_runtime
-from cindra.allocation import openmp as openmp_module
+from cindra.allocation import (
+    OpenMpStatus,
+    openmp as openmp_module,
+    resolve_openmp_runtime,
+    warn_missing_openmp_runtime,
+)
 from cindra.allocation.openmp import (
     OpenMpSummary,
     _link_openmp_runtime,
     _discover_openmp_runtime,
+    _openmp_runtime_loadable,
     _resolve_candidate_paths,
     _verify_runtime_loadable,
-    _openmp_runtime_loadable,
 )
 
 
