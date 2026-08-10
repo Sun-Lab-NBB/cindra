@@ -16,23 +16,18 @@ from .jobs import (
     resolve_single_recording_jobs,
 )
 from .openmp import verify_openmp_runtime
+from .worker import (
+    dispatch_multi_recording_job,
+    dispatch_single_recording_job,
+    load_multi_recording_configuration,
+    load_single_recording_configuration,
+)
 from ..layout import (
     OUTPUT_DIRECTORY_NAME,
-    PLANE_SPECIFIER_PREFIX,
     MULTI_RECORDING_TRACKER_FILENAME,
     SINGLE_RECORDING_TRACKER_FILENAME,
     resolve_plane_specifier,
 )
-from ..pipelines import (
-    process_plane,
-    binarize_recording,
-    save_combined_data,
-    register_recording_plane,
-    discover_multi_recording_cells,
-    extract_multi_recording_fluorescence,
-)
-from .allocation import resolve_stage_workers
-from ..dataclasses import RuntimeContext, MultiRecordingConfiguration, SingleRecordingConfiguration
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -87,7 +82,7 @@ def run_single_recording_pipeline(
     # here rather than partway through a recording.
     verify_openmp_runtime()
 
-    configuration, output_path = _load_single_recording_configuration(configuration_path=configuration_path)
+    configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
 
     # Maps each worker-consuming stage to its requested allocation so that every job reads the count intended for its
     # own stage. The lookups below resolve a combination job to None.
@@ -141,7 +136,7 @@ def run_single_recording_pipeline(
 
         tracker.align_jobs(jobs=universe, universe=universe)
 
-        _execute_single_recording_job(
+        dispatch_single_recording_job(
             configuration=configuration,
             job_name=SingleRecordingJobNames(resolved_name),
             specifier=resolved_specifier,
@@ -181,7 +176,7 @@ def run_single_recording_pipeline(
         tracker.align_jobs(jobs=jobs, universe=universe)
 
         for name, specifier in jobs:
-            _execute_single_recording_job(
+            dispatch_single_recording_job(
                 configuration=configuration,
                 job_name=SingleRecordingJobNames(name),
                 specifier=specifier,
@@ -191,71 +186,6 @@ def run_single_recording_pipeline(
             )
 
     console.echo(message="Single-recording processing: Complete.", level=LogLevel.SUCCESS)
-
-
-def execute_single_recording_job(
-    configuration_path: Path,
-    job_name: SingleRecordingJobNames,
-    specifier: str,
-    job_id: str,
-    tracker: ProcessingTracker,
-    *,
-    persist_bootstrap: bool = False,
-    workers: int | None = None,
-) -> None:
-    """Executes one single-recording job and records its state on a caller-provided tracker.
-
-    Notes:
-        This is the tracker-injection entry point. Unlike run_single_recording_pipeline, it neither constructs its own
-        tracker nor aligns the tracker's job universe. The caller owns the tracker, aligns it with a universe that
-        contains job_id, and passes both in, so cindra stages this job into a foreign tracker whose job names and
-        granularity the caller controls. The job's start, completion, and failure are recorded onto the provided
-        tracker under job_id.
-
-        The binarization, plane-registration, and plane-processing stages re-load the shared bootstrap with persistence
-        disabled, so it must already exist on disk. Enable persist_bootstrap for the first job dispatched against a
-        configuration, the binarization job, which runs single-threaded and writes the bootstrap for every plane. Leave
-        it disabled for the later per-plane jobs, which may run concurrently and read the bootstrap the binarization job
-        already wrote.
-
-        The worker count travels through this parameter, so a batch dispatcher can give every job a different
-        allocation while every job shares one immutable configuration file.
-
-    Args:
-        configuration_path: The path to the single-recording configuration YAML file.
-        job_name: The single-recording job to run, a member of the SingleRecordingJobNames enumeration.
-        specifier: The job specifier. For a REGISTER or PROCESS job this encodes the plane index as 'plane_{index}',
-            and for a BINARIZE or COMBINE job it is an empty string.
-        job_id: The unique hexadecimal identifier under which the job's state is recorded on the provided tracker. It
-            must already be present in the tracker's aligned job set.
-        tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
-        persist_bootstrap: Determines whether to write the shared single-recording bootstrap to disk before running the
-            job. Enable it only for the single-threaded binarization job that precedes plane processing.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for
-            the job's stage and -1 to request every available core. The combination job ignores this parameter.
-
-    Raises:
-        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid single-recording
-            configuration.
-        ValueError: If the configuration does not configure an output path, or if job_name is not a recognized
-            single-recording job.
-    """
-    configuration, _ = _load_single_recording_configuration(configuration_path=configuration_path)
-
-    # The binarization, plane-registration, and plane-processing stages re-load the shared bootstrap with persistence
-    # disabled, so it must exist before they run. The single-threaded binarization job opts in to write it, and later
-    # jobs rely on it.
-    if persist_bootstrap:
-        resolve_single_recording_contexts(configuration=configuration, persist=True)
-
-    _execute_single_recording_job(
-        configuration=configuration,
-        job_name=SingleRecordingJobNames(job_name),
-        specifier=specifier,
-        job_id=job_id,
-        tracker=tracker,
-        workers=workers,
-    )
 
 
 def run_multi_recording_pipeline(
@@ -302,7 +232,7 @@ def run_multi_recording_pipeline(
     # here rather than partway through a dataset.
     verify_openmp_runtime()
 
-    configuration = _load_multi_recording_configuration(configuration_path=configuration_path)
+    configuration = load_multi_recording_configuration(configuration_path=configuration_path)
 
     # Maps each stage to its requested allocation so that every job reads the count intended for its own stage.
     stage_workers: dict[str, int | None] = {
@@ -357,7 +287,7 @@ def run_multi_recording_pipeline(
 
         tracker.align_jobs(jobs=universe, universe=universe)
 
-        _execute_multi_recording_job(
+        dispatch_multi_recording_job(
             configuration=configuration,
             job_name=MultiRecordingJobNames(resolved_name),
             specifier=resolved_specifier,
@@ -393,7 +323,7 @@ def run_multi_recording_pipeline(
         tracker.align_jobs(jobs=jobs, universe=universe)
 
         for name, specifier in jobs:
-            _execute_multi_recording_job(
+            dispatch_multi_recording_job(
                 configuration=configuration,
                 job_name=MultiRecordingJobNames(name),
                 specifier=specifier,
@@ -403,327 +333,3 @@ def run_multi_recording_pipeline(
             )
 
     console.echo(message="Multi-recording processing: Complete.", level=LogLevel.SUCCESS)
-
-
-def execute_multi_recording_job(
-    configuration_path: Path,
-    job_name: MultiRecordingJobNames,
-    specifier: str,
-    job_id: str,
-    tracker: ProcessingTracker,
-    *,
-    persist_bootstrap: bool = False,
-    workers: int | None = None,
-) -> None:
-    """Executes one multi-recording job and records its state on a caller-provided tracker.
-
-    Notes:
-        This is the tracker-injection entry point. Unlike run_multi_recording_pipeline, it neither constructs its own
-        tracker nor aligns the tracker's job universe. The caller owns the tracker, aligns it with a universe that
-        contains job_id, and passes both in, so cindra stages this job into a foreign tracker whose job names and
-        granularity the caller controls. The job's start, completion, and failure are recorded onto the provided
-        tracker under job_id.
-
-        The discovery and extraction stages re-load the shared bootstrap with persistence disabled, so it must already
-        exist on disk. Enable persist_bootstrap for the first job dispatched against a configuration, the discovery
-        job, which runs single-threaded and writes the bootstrap for every recording. Leave it disabled for the later
-        per-recording extraction jobs, which may run concurrently and read the bootstrap the discovery job already
-        wrote.
-
-    Args:
-        configuration_path: The path to the multi-recording configuration YAML file.
-        job_name: The multi-recording job to run, a member of the MultiRecordingJobNames enumeration.
-        specifier: The job specifier. For an EXTRACT job this is the recording identifier, and for a DISCOVER job it is
-            an empty string.
-        job_id: The unique hexadecimal identifier under which the job's state is recorded on the provided tracker. It
-            must already be present in the tracker's aligned job set.
-        tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
-        persist_bootstrap: Determines whether to write the shared multi-recording bootstrap to disk before running the
-            job. Enable it only for the single-threaded discovery job that precedes extraction.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for the
-            job's stage and -1 to request every available core.
-
-    Raises:
-        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid multi-recording
-            configuration.
-        ValueError: If the configuration specifies no recording directories or no dataset name, or if job_name is not a
-            recognized multi-recording job.
-    """
-    configuration = _load_multi_recording_configuration(configuration_path=configuration_path)
-
-    # The discovery and extraction stages re-load the shared bootstrap with persistence disabled, so it must exist
-    # before they run. The single-threaded discovery job opts in to write it, and later extraction jobs rely on it.
-    if persist_bootstrap:
-        resolve_multi_recording_contexts(configuration=configuration, persist=True)
-
-    _execute_multi_recording_job(
-        configuration=configuration,
-        job_name=MultiRecordingJobNames(job_name),
-        specifier=specifier,
-        job_id=job_id,
-        tracker=tracker,
-        workers=workers,
-    )
-
-
-def _load_single_recording_configuration(configuration_path: Path) -> tuple[SingleRecordingConfiguration, Path]:
-    """Loads, validates, and runtime-configures a single-recording configuration from a YAML file.
-
-    Notes:
-        Shared by the whole-pipeline entry point and the single-job executor so both apply identical path validation,
-        dataclass loading, progress configuration, and output-path checks.
-
-    Args:
-        configuration_path: The path to the single-recording configuration YAML file.
-
-    Returns:
-        A tuple of the loaded SingleRecordingConfiguration, with its progress display state applied, and its validated
-        output path.
-
-    Raises:
-        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid single-recording
-            configuration.
-        ValueError: If the configuration does not configure an output path.
-    """
-    # Ensures the input configuration file is valid.
-    if not configuration_path.exists() or configuration_path.suffix != ".yaml":
-        message = (
-            f"Unable to run the single-recording cindra processing pipeline. Expected the configuration file to "
-            f"end with a '.yaml' extension and exist at the specified path, but encountered: {configuration_path}."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Loads configuration data from the provided file.
-    try:
-        configuration: SingleRecordingConfiguration = SingleRecordingConfiguration.from_yaml(
-            file_path=configuration_path,
-        )
-    except Exception:
-        message = (
-            "Unable to run the single-recording cindra processing pipeline, as the input configuration file is not a "
-            "valid single-recording pipeline configuration file. Specifically, failed to load the file's data as a "
-            "SingleRecordingConfiguration dataclass instance. Ensure that the 'configuration_path' argument "
-            "points to a valid single-recording configuration .yaml file."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Configures the console's progress bar display state based on the configuration flag.
-    if configuration.runtime.display_progress_bars:
-        console.enable_progress()
-    else:
-        console.disable_progress()
-
-    # Validates that the output_path is configured.
-    if configuration.file_io.output_path is None:
-        message = (
-            "Unable to run the single-recording cindra processing pipeline. The output_path must be configured in the "
-            "FileIO section of the configuration, but it is currently None."
-        )
-        console.error(message=message, error=ValueError)
-
-    return configuration, configuration.file_io.output_path
-
-
-def _load_multi_recording_configuration(configuration_path: Path) -> MultiRecordingConfiguration:
-    """Loads, validates, and runtime-configures a multi-recording configuration from a YAML file.
-
-    Notes:
-        Shared by the whole-pipeline entry point and the single-job executor so both apply identical path validation,
-        dataclass loading, progress configuration, and required-field checks.
-
-    Args:
-        configuration_path: The path to the multi-recording configuration YAML file.
-
-    Returns:
-        The loaded MultiRecordingConfiguration with its progress display state applied.
-
-    Raises:
-        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid multi-recording
-            configuration.
-        ValueError: If the configuration specifies no recording directories or no dataset name.
-    """
-    # Ensures the input configuration file is valid.
-    if not configuration_path.exists() or configuration_path.suffix != ".yaml":
-        message = (
-            f"Unable to run the multi-recording cindra processing pipeline. "
-            f"Expected the configuration file to end with a '.yaml' extension and "
-            f"exist at the specified path, but encountered: {configuration_path}."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Loads configuration data from the provided file.
-    try:
-        configuration: MultiRecordingConfiguration = MultiRecordingConfiguration.from_yaml(file_path=configuration_path)
-    except Exception:
-        message = (
-            "Unable to run the multi-recording cindra processing pipeline, as the input configuration file is not a "
-            "valid multi-recording pipeline configuration file. Specifically, failed to load the file's data as a "
-            "MultiRecordingConfiguration dataclass instance. Ensure that the 'configuration_path' argument points to a "
-            "valid multi-recording configuration .yaml file."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Validates that the configuration contains the required recording directories.
-    if not configuration.recording_io.recording_directories:
-        message = (
-            "Unable to run the multi-recording cindra processing pipeline. The "
-            "configuration file must specify at least two recording directories "
-            "under 'recording_io.recording_directories'. The provided configuration "
-            "has no recording directories specified."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Validates that the configuration contains a dataset name.
-    if not configuration.recording_io.dataset_name:
-        message = (
-            "Unable to run the multi-recording cindra processing pipeline. The "
-            "configuration file must specify a dataset name under "
-            "'recording_io.dataset_name'. The provided configuration has no "
-            "dataset name specified."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Configures the console's progress bar display state based on the configuration flag.
-    if configuration.runtime.display_progress_bars:
-        console.enable_progress()
-    else:
-        console.disable_progress()
-
-    return configuration
-
-
-def _execute_single_recording_job(
-    configuration: SingleRecordingConfiguration,
-    job_name: SingleRecordingJobNames,
-    specifier: str,
-    job_id: str,
-    tracker: ProcessingTracker,
-    workers: int | None,
-) -> None:
-    """Executes a single processing job of the single-recording pipeline.
-
-    Args:
-        configuration: The SingleRecordingConfiguration instance for the pipeline.
-        job_name: The job name identifying the job to run. Must be a valid member of the
-            SingleRecordingJobNames enumeration.
-        specifier: The job specifier string. For REGISTER and PROCESS jobs, this encodes the plane index as
-            'plane_{index}'. For BINARIZE and COMBINE jobs, this is an empty string.
-        job_id: The unique hexadecimal identifier for this processing job.
-        tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for
-            the job's stage and -1 to request every available core. The combination job ignores this parameter.
-
-    Raises:
-        ValueError: If the job_name is not recognized or the requested worker count is invalid.
-    """
-    console.echo(message=f"Running '{job_name}' job (specifier='{specifier}') with ID {job_id}...")
-
-    # The tracker's run_job() context owns the job's state transitions: it marks the job as running, completes it when
-    # the block returns, and records the exception's message as the failure reason before re-raising when the block
-    # raises. Every worker-consuming stage resolves its budget inside the block, so an invalid request is recorded as
-    # a job failure instead of escaping as an untracked error. The resolution happens per branch rather than ahead of
-    # the chain, so that an unrecognized job name reaches the job-name guard below.
-    with tracker.run_job(job_id=job_id):
-        if job_name == SingleRecordingJobNames.BINARIZE:
-            binarize_recording(
-                configuration=configuration,
-                workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
-            )
-
-        elif job_name == SingleRecordingJobNames.REGISTER:
-            register_recording_plane(
-                configuration=configuration,
-                plane_index=int(specifier.removeprefix(PLANE_SPECIFIER_PREFIX)),
-                workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
-            )
-
-        elif job_name == SingleRecordingJobNames.PROCESS:
-            process_plane(
-                configuration=configuration,
-                plane_index=int(specifier.removeprefix(PLANE_SPECIFIER_PREFIX)),
-                workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
-            )
-
-        elif job_name == SingleRecordingJobNames.COMBINE:
-            # Validates that output_path is configured before loading contexts.
-            if configuration.file_io.output_path is None:
-                message = (
-                    "Unable to execute the combination job. The output_path must be configured in the FileIO section "
-                    "of the configuration, but it is currently None."
-                )
-                console.error(message=message, error=ValueError)
-
-            # Loads contexts from disk and combines all processed planes into a dataset. Arrays are not
-            # loaded automatically due to their memory footprint, so they must be loaded explicitly before
-            # combining. Detection arrays provide background images. Extraction arrays provide ROI statistics
-            # and fluorescence traces.
-            root_path = configuration.file_io.output_path / OUTPUT_DIRECTORY_NAME
-            contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
-            if not isinstance(contexts, list):  # pragma: no cover - load with plane_index=-1 always returns a list
-                contexts = [contexts]
-            for context in contexts:
-                # pragma justification: resolved plane contexts always carry a configured output path.
-                if context.runtime.output_path is not None:  # pragma: no branch
-                    context.runtime.detection.memory_map_arrays(output_path=context.runtime.output_path)
-                    context.runtime.extraction.memory_map_arrays(output_path=context.runtime.output_path)
-                    context.runtime.extraction.memory_map_results(output_path=context.runtime.output_path)
-            save_combined_data(contexts=contexts)
-
-        else:
-            message = (
-                f"Unable to execute the requested job '{job_name}' with ID '{job_id}'. The input job name is not "
-                f"recognized. Use one of the valid Job names: {list(SingleRecordingJobNames)}."
-            )
-            console.error(message=message, error=ValueError)
-
-
-def _execute_multi_recording_job(
-    configuration: MultiRecordingConfiguration,
-    job_name: MultiRecordingJobNames,
-    specifier: str,
-    job_id: str,
-    tracker: ProcessingTracker,
-    workers: int | None,
-) -> None:
-    """Executes a single processing job of the multi-recording pipeline.
-
-    Args:
-        configuration: The MultiRecordingConfiguration instance for the pipeline.
-        job_name: The job name identifying the job to run. Must be a valid member of the
-            MultiRecordingJobNames enumeration.
-        specifier: The job specifier string. For EXTRACT jobs, this is the recording ID. For DISCOVER jobs, this is an
-            empty string.
-        job_id: The unique hexadecimal identifier for this processing job.
-        tracker: The ProcessingTracker instance used to track the pipeline's runtime status.
-        workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for the
-            job's stage and -1 to request every available core.
-
-    Raises:
-        ValueError: If the job_name is not recognized or the requested worker count is invalid.
-    """
-    console.echo(message=f"Running '{job_name}' job (specifier='{specifier}') with ID {job_id}...")
-
-    # The tracker's run_job() context owns the job's state transitions, matching the single-recording executor. Each
-    # stage resolves its worker budget inside its own dispatch branch, so an unrecognized job name reports the
-    # job-name error below rather than a worker-resolution error, and an invalid worker request is still recorded as a
-    # job failure instead of escaping untracked.
-    with tracker.run_job(job_id=job_id):
-        if job_name == MultiRecordingJobNames.DISCOVER:
-            discover_multi_recording_cells(
-                configuration=configuration,
-                workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
-            )
-
-        elif job_name == MultiRecordingJobNames.EXTRACT:
-            extract_multi_recording_fluorescence(
-                configuration=configuration,
-                recording_id=specifier,
-                workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
-            )
-
-        else:
-            message = (
-                f"Unable to execute the requested job '{job_name}' with ID '{job_id}'. The input job name is not "
-                f"recognized. Use one of the valid Job names: {list(MultiRecordingJobNames)}."
-            )
-            console.error(message=message, error=ValueError)
