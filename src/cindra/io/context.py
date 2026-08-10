@@ -8,6 +8,18 @@ from typing import TYPE_CHECKING
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from ataraxis_data_structures import resolve_unique_roots, discover_marker_files
 
+from ..layout import (
+    PARAMETERS_FILENAME,
+    OUTPUT_DIRECTORY_NAME,
+    CHANNEL_1_BINARY_FILENAME,
+    CHANNEL_2_BINARY_FILENAME,
+    COMBINED_METADATA_FILENAME,
+    MULTI_RECORDING_DIRECTORY_NAME,
+    ACQUISITION_PARAMETERS_FILENAME,
+    MULTI_RECORDING_RUNTIME_DATA_FILENAME,
+    SINGLE_RECORDING_RUNTIME_DATA_FILENAME,
+    resolve_plane_specifier,
+)
 from ..dataclasses import (
     IOData,
     CombinedData,
@@ -23,12 +35,6 @@ from ..dataclasses import (
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-PARAMETERS_FILENAME: str = "cindra_parameters.json"
-"""The name of the acquisition parameters JSON file expected in each recording's data directory."""
-
-OUTPUT_DIRECTORY_NAME: str = "cindra"
-"""The name of the output directory the single-recording pipeline creates under each recording's output root."""
 
 MAXIMUM_CHANNEL_COUNT: int = 2
 """The maximum number of imaging channels supported by the pipeline."""
@@ -128,7 +134,7 @@ def resolve_single_recording_contexts(
         console.error(message=message, error=ValueError)
 
     # Checks if processed data already exists with saved acquisition parameters.
-    saved_acquisition_path = output_path_root / "cindra" / "acquisition_parameters.yaml"
+    saved_acquisition_path = output_path_root / OUTPUT_DIRECTORY_NAME / ACQUISITION_PARAMETERS_FILENAME
     if saved_acquisition_path.exists():
         # Loads acquisition parameters from processed output (supports loading moved data without raw TIFFs).
         acquisition = AcquisitionParameters.from_yaml(file_path=saved_acquisition_path)
@@ -165,11 +171,13 @@ def resolve_single_recording_contexts(
     contexts: list[RuntimeContext] = []
 
     for virtual_plane_index in range(plane_count):
-        # Resolves the output directory for this plane. Always uses 'cindra' as the subdirectory.
-        plane_output_path = output_path_root / "cindra" / f"plane_{virtual_plane_index}"
+        # Resolves the output directory for this plane, which the layout contract names.
+        plane_output_path = (
+            output_path_root / OUTPUT_DIRECTORY_NAME / resolve_plane_specifier(plane_index=virtual_plane_index)
+        )
 
         # Checks if existing runtime data exists for this plane.
-        runtime_yaml_path = plane_output_path / "runtime_data.yaml"
+        runtime_yaml_path = plane_output_path / SINGLE_RECORDING_RUNTIME_DATA_FILENAME
         if runtime_yaml_path.exists():
             # Loads existing runtime data (scalars only). Arrays are loaded on demand by each pipeline function.
             runtime_data = SingleRecordingRuntimeData.load(output_path=plane_output_path)
@@ -187,14 +195,14 @@ def resolve_single_recording_contexts(
 
         io_data = IOData(
             output_path=plane_output_path,
-            registered_binary_path=plane_output_path / "channel_1_data.bin",
+            registered_binary_path=plane_output_path / CHANNEL_1_BINARY_FILENAME,
             plane_index=virtual_plane_index,
             sampling_rate=sampling_rate,
         )
 
         # Configures second channel binary paths if using two channels.
         if has_two_channels:
-            io_data.registered_binary_path_channel_2 = plane_output_path / "channel_2_data.bin"
+            io_data.registered_binary_path_channel_2 = plane_output_path / CHANNEL_2_BINARY_FILENAME
 
         # Populates MROI-specific fields if processing multi-ROI data.
         if acquisition.is_mroi:
@@ -232,7 +240,7 @@ def resolve_single_recording_contexts(
             # io.output_path is always populated during per-plane construction above, so the guard is defensive only.
             if context.runtime.io.output_path is None:  # pragma: no cover
                 continue
-            runtime_yaml = context.runtime.io.output_path / "runtime_data.yaml"
+            runtime_yaml = context.runtime.io.output_path / SINGLE_RECORDING_RUNTIME_DATA_FILENAME
             if not runtime_yaml.exists():
                 message = (
                     f"Unable to resolve single-recording contexts without bootstrap persistence. The runtime data "
@@ -317,7 +325,7 @@ def resolve_multi_recording_contexts(
     for recording_directory in recording_directories:
         data_path = _find_cindra_directory(recording_directory=recording_directory)
         data_paths.append(data_path)
-        output_paths.append(data_path / "multi_recording" / dataset_name)
+        output_paths.append(data_path / MULTI_RECORDING_DIRECTORY_NAME / dataset_name)
 
     # Validates the target recording ID before performing expensive I/O.
     if target_recording_id is not None and target_recording_id not in recording_ids:
@@ -342,7 +350,7 @@ def resolve_multi_recording_contexts(
         # Loads single-recording combined data (scalars only). Arrays are loaded on demand by each pipeline function.
         combined_data = CombinedData.load(root_path=data_path)
 
-        runtime_path = output_path / "multi_recording_runtime_data.yaml"
+        runtime_path = output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME
         if runtime_path.exists():
             # Loads existing runtime data (scalars only). Arrays are loaded on demand by each pipeline function.
             runtime = MultiRecordingRuntimeData.load(output_path=output_path)
@@ -395,7 +403,7 @@ def resolve_multi_recording_contexts(
             # output_path is always populated during per-recording construction above, so the guard is defensive only.
             if runtime_output_path is None:  # pragma: no cover
                 continue
-            runtime_yaml = runtime_output_path / "multi_recording_runtime_data.yaml"
+            runtime_yaml = runtime_output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME
             if not runtime_yaml.exists():
                 message = (
                     f"Unable to resolve multi-recording contexts without bootstrap persistence. The runtime data "
@@ -524,7 +532,7 @@ def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path,
     return tuple(unique_roots)
 
 
-def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
+def load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
     """Loads acquisition parameters from a JSON file and validates all required fields.
 
     For single-ROI data, frame_rate, plane_number, and channel_number are required. For MROI data (roi_number > 1),
@@ -637,7 +645,7 @@ def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
     message = f"Found acquisition parameters at: {parameters_path}."
     console.echo(message=message, level=LogLevel.SUCCESS)
 
-    return _load_acquisition_parameters(json_path=parameters_path)
+    return load_acquisition_parameters(json_path=parameters_path)
 
 
 def _find_cindra_directory(recording_directory: Path) -> Path:
@@ -656,7 +664,7 @@ def _find_cindra_directory(recording_directory: Path) -> Path:
         FileNotFoundError: If no combined_metadata.npz file is found under the recording directory.
         RuntimeError: If multiple combined_metadata.npz files are found under the recording directory.
     """
-    matches = discover_marker_files(directory=recording_directory, marker_name="combined_metadata.npz")
+    matches = discover_marker_files(directory=recording_directory, marker_name=COMBINED_METADATA_FILENAME)
 
     if not matches:
         message = (
@@ -691,7 +699,7 @@ def _compute_mroi_region_borders(data_path: Path) -> tuple[int, ...]:
     Returns:
         A tuple of border x-coordinates for MROI recordings, or an empty tuple for non-MROI recordings.
     """
-    acquisition_path = data_path / "acquisition_parameters.yaml"
+    acquisition_path = data_path / ACQUISITION_PARAMETERS_FILENAME
     acquisition = AcquisitionParameters.from_yaml(file_path=acquisition_path)
     if not acquisition.is_mroi:
         return ()

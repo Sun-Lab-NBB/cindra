@@ -1,10 +1,11 @@
 """Provides the local batch execution engine that admits queued pipeline jobs as their own prerequisites succeed and
-dispatches them under the per-class concurrency caps and the session CPU budget.
+dispatches them under the per-class concurrency terms and the session core and memory budgets.
 
 Every submitted job first enters the admission pool. The manager admits a job into its resource class queue as soon as
 that job's own prerequisites have succeeded on its own tracker, so each recording advances independently of the others.
-Each resource class then dispatches from its own queue under its own cap and under the session-wide CPU budget shared
-by every class.
+Dispatch then runs in two passes over every class queue. The first honors each class's reservation, and the second
+releases those reservations over the capacity the first left unused. Both passes hold the cores and the estimated
+memory of every running job inside the session budgets.
 """
 
 from __future__ import annotations
@@ -37,8 +38,8 @@ from .allocation import (
     ResourceClass,
     resolve_core_budget,
     resolve_class_allocation,
+    resolve_memory_budget_mb,
     summarize_class_allocation,
-    resolve_available_memory_gigabytes,
 )
 
 if TYPE_CHECKING:
@@ -105,6 +106,14 @@ class PendingJob:
     resolved_workers: int | None = None
     """The number of parallel workers to allocate to this job, assigned at dispatch time. A value of None makes the
     pipeline fall back to the measured default for the job's stage."""
+    memory_megabytes: int = 0
+    """The memory this job holds while it runs, as the caller's sizing pass estimated it.
+
+    Notes:
+        A value of zero states that the caller supplied no estimate, which leaves the job admitted on the core budget
+        alone. Memory is carried per job rather than per resource class, because the memory one job holds follows the
+        recording it processes rather than the stage it runs.
+    """
 
     @property
     def dispatch_key(self) -> tuple[str, str]:
@@ -135,8 +144,13 @@ class JobExecutionState:
     """The resolved maximum number of concurrent jobs for each resource class name."""
     class_workers: dict[str, int] = field(default_factory=dict)
     """The resolved number of CPU cores allocated to each job of each resource class name."""
+    class_reservations: dict[str, int] = field(default_factory=dict)
+    """The jobs of each resource class that run before the dispatcher releases that class's reservation, keyed by
+    class name. A class absent from this map competes at its full derived width in both passes."""
     cpu_budget: int = 1
     """The total number of CPU cores this session may commit across every resource class at once."""
+    memory_budget_mb: int = 0
+    """The total memory this session may commit across every running job at once, in megabytes."""
     lock: Lock = field(default_factory=Lock)
     """The lock guarding every mutation of the job queues."""
     manager_thread: Thread | None = None
@@ -208,7 +222,8 @@ def start_execution_session(
 
     Returns:
         A dictionary carrying the submitted job total under 'total_jobs', the session core budget under 'cpu_budget',
-        and the per-class worker count, concurrency cap, and job count under 'resource_classes'.
+        the session memory budget under 'memory_budget_mb', and the per-class worker count, concurrency cap, and job
+        count under 'resource_classes'.
 
     Raises:
         ValueError: If either override is zero or is a negative value other than -1.
@@ -228,7 +243,7 @@ def start_execution_session(
             raise ValueError(message)
 
     budget = resolve_core_budget()
-    available_memory = resolve_available_memory_gigabytes()
+    memory_budget = resolve_memory_budget_mb()
 
     # Counts the jobs of every resource class present in this session, which bounds each class capacity.
     class_job_counts: dict[str, int] = {}
@@ -245,7 +260,6 @@ def start_execution_session(
         workers, capacity = resolve_class_allocation(
             resource_class=resource_class,
             budget=budget,
-            available_memory=available_memory,
             job_count=class_job_counts[class_name],
             workers_per_job=workers_per_job,
             max_parallel_jobs=max_parallel_jobs,
@@ -263,7 +277,13 @@ def start_execution_session(
         active_futures={class_name: {} for class_name in classes_by_name},
         class_capacities=class_capacities,
         class_workers=class_workers,
+        class_reservations={
+            class_name: resource_class.concurrency_reservation
+            for class_name, resource_class in classes_by_name.items()
+            if resource_class.concurrency_reservation is not None
+        },
         cpu_budget=budget,
+        memory_budget_mb=memory_budget,
         lock=Lock(),
     )
 
@@ -277,8 +297,11 @@ def start_execution_session(
     return {
         "total_jobs": len(all_jobs),
         "cpu_budget": budget,
+        "memory_budget_mb": memory_budget,
         "resource_classes": summarize_class_allocation(
-            class_workers=class_workers, class_capacities=class_capacities, class_job_counts=class_job_counts
+            class_workers=class_workers,
+            class_capacities=class_capacities,
+            class_job_counts=class_job_counts,
         ),
     }
 
@@ -475,9 +498,15 @@ def _dispatch_admitted_jobs(state: JobExecutionState, pool: Executor) -> bool:
     """Submits admitted jobs to the worker pool up to each resource class cap and the session CPU budget.
 
     Notes:
-        A per-class concurrency cap bounds one class in isolation, and every class dispatches during the same cycle, so
-        the caps alone would let the classes oversubscribe the machine between them. This function therefore also holds
-        the sum of the cores committed by every running job inside the session CPU budget.
+        Dispatch runs in two passes. The first offers every class the capacity its reservation leaves free, so a class
+        holding a reservation cannot take the room the stages that wait on no other job need. The second releases
+        every reservation over whatever capacity remains, so a reserved class runs at its full derived width rather
+        than idling a host whose other queues have drained. Holding a wide compute stage to a reservation while cores
+        sit unused and its own queue is deep would waste the very capacity the reservation protects.
+
+        A per-class cap bounds one class in isolation, and every class dispatches during the same cycle, so the caps
+        alone would let the classes oversubscribe the machine between them. Both passes therefore hold the sum of the
+        cores and the memory committed by every running job inside the session budgets.
 
         A session whose classes all hold nothing dispatches one job regardless of the budget, so a job whose worker
         count exceeds the whole budget still runs instead of stalling the session forever.
@@ -498,16 +527,52 @@ def _dispatch_admitted_jobs(state: JobExecutionState, pool: Executor) -> bool:
     """
     dispatched = False
 
+    # The first pass honors every reservation, and the second releases them over the capacity the first left unused.
+    for release_reservations in (False, True):
+        dispatched |= _dispatch_pass(state=state, pool=pool, release_reservations=release_reservations)
+
+    return dispatched
+
+
+def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservations: bool) -> bool:
+    """Submits admitted jobs during one pass of the dispatcher.
+
+    Args:
+        state: The current job execution state, accessed under its lock.
+        pool: The worker pool the session dispatches its jobs into.
+        release_reservations: Determines whether a class holding a reservation dispatches at its full derived width
+            rather than at the width its reservation leaves free.
+
+    Returns:
+        True if at least one job was submitted during this pass, False otherwise.
+
+    Raises:
+        BrokenProcessPool: If a worker process died outside its job's control, leaving the pool unable to accept work.
+    """
+    dispatched = False
+
     for class_name, pending_queue in state.pending_queues.items():
         active_futures = state.active_futures[class_name]
         capacity = state.class_capacities[class_name]
+        reservation = state.class_reservations.get(class_name)
+        if not release_reservations and reservation is not None:
+            capacity = min(capacity, reservation)
         workers = state.class_workers[class_name]
         while len(active_futures) < capacity and pending_queue:
             committed = _committed_cores(state=state)
             if committed > 0 and committed + workers > state.cpu_budget:
                 break
 
-            pending_job = pending_queue.pop(0)
+            pending_job = pending_queue[0]
+            committed_memory = _committed_memory(state=state)
+            if (
+                committed_memory > 0
+                and state.memory_budget_mb > 0
+                and committed_memory + pending_job.memory_megabytes > state.memory_budget_mb
+            ):
+                break
+
+            pending_queue.pop(0)
             future: Future[None] = pool.submit(
                 _pipeline_worker,
                 configuration_path=pending_job.configuration_path,
@@ -567,6 +632,26 @@ def _resolve_pool_size(state: JobExecutionState) -> int:
         The number of worker processes the pool may hold, always at least one.
     """
     return max(1, sum(state.class_capacities.values()))
+
+
+def _committed_memory(state: JobExecutionState) -> int:
+    """Sums the memory that the currently running jobs of every resource class hold.
+
+    Notes:
+        A job the caller sized at zero contributes nothing, so a session whose jobs carry no estimates admits on the
+        core budget alone and behaves exactly as it did before any job was sized.
+
+    Args:
+        state: The current job execution state, accessed under its lock.
+
+    Returns:
+        The memory the session has committed to running jobs, in megabytes.
+    """
+    return sum(
+        state.all_jobs[dispatch_key].memory_megabytes
+        for futures in state.active_futures.values()
+        for dispatch_key in futures
+    )
 
 
 def _committed_cores(state: JobExecutionState) -> int:

@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING
 import pytest
 from ataraxis_data_structures import JobState, ProcessingStatus, ProcessingTracker
 
+from cindra.layout import PLANE_SPECIFIER_PREFIX
 from cindra.orchestration import (
     MULTI_RECORDING_PHASES,
     SINGLE_RECORDING_PHASES,
-    MULTI_RECORDING_TRACKER_NAME,
-    SINGLE_RECORDING_TRACKER_NAME,
+    MULTI_RECORDING_TRACKER_FILENAME,
+    SINGLE_RECORDING_TRACKER_FILENAME,
     PrerequisiteScope,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
@@ -27,7 +28,6 @@ from cindra.orchestration import (
 )
 from cindra.orchestration.jobs import (
     PER_PLANE_JOB_NAMES,
-    PLANE_SPECIFIER_PREFIX,
     PREREQUISITE_FAILURE_MESSAGE,
     UNREACHABLE_PREREQUISITE_MESSAGE,
     _collect_phase_job_ids,
@@ -73,8 +73,8 @@ class TestJobModelConstants:
 
     def test_tracker_file_names_identify_the_pipeline_they_track(self) -> None:
         """Verifies that each pipeline's tracker file name holds its expected .yaml document name."""
-        assert SINGLE_RECORDING_TRACKER_NAME == "single_recording_tracker.yaml"
-        assert MULTI_RECORDING_TRACKER_NAME == "multi_recording_tracker.yaml"
+        assert SINGLE_RECORDING_TRACKER_FILENAME == "single_recording_tracker.yaml"
+        assert MULTI_RECORDING_TRACKER_FILENAME == "multi_recording_tracker.yaml"
 
     def test_tracker_error_messages_hold_their_expected_text(self) -> None:
         """Verifies that both tracker error message constants hold the text the execution engine records."""

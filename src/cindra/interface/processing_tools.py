@@ -29,22 +29,43 @@ from ataraxis_data_structures import (
     discover_marker_files,
 )
 
-from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
+from ..io import resolve_multi_recording_contexts
+from ..layout import (
+    OUTPUT_DIRECTORY_NAME,
+    PLANE_SPECIFIER_PREFIX,
+    DEFORMED_MASKS_FILENAME,
+    CHANNEL_1_BINARY_FILENAME,
+    CHANNEL_2_BINARY_FILENAME,
+    COMBINED_METADATA_FILENAME,
+    DETECTION_DATA_DIRECTORY_NAME,
+    MULTI_RECORDING_DIRECTORY_NAME,
+    MULTI_RECORDING_TRACKER_FILENAME,
+    REGISTRATION_DATA_DIRECTORY_NAME,
+    TRACKING_TEMPLATE_MASKS_FILENAME,
+    SINGLE_RECORDING_TRACKER_FILENAME,
+    MULTI_RECORDING_ARRAYS_DIRECTORY_NAME,
+    MULTI_RECORDING_RUNTIME_DATA_FILENAME,
+    MULTI_RECORDING_CONFIGURATION_FILENAME,
+    SINGLE_RECORDING_CONFIGURATION_FILENAME,
+    DetectionImages,
+    RecordingArrays,
+    resolve_array_name,
+    resolve_channel_2_name,
+    resolve_plane_specifier,
+)
 from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
 from .mcp_instance import mcp
 from ..orchestration import (
     SINGLE_RECORDING_PHASES,
     RESOURCE_CLASS_BY_JOB_NAME,
-    MULTI_RECORDING_TRACKER_NAME,
-    SINGLE_RECORDING_TRACKER_NAME,
     PendingJob,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
+    prime_recording,
     get_execution_state,
     set_execution_state,
     resolve_session_load,
     resolve_pipeline_jobs,
-    resolve_plane_specifier,
     start_execution_session,
     cancel_execution_session,
     order_phases_by_execution,
@@ -52,6 +73,10 @@ from ..orchestration import (
     validate_job_prerequisites,
     resolve_multi_recording_jobs,
     resolve_single_recording_jobs,
+    load_multi_recording_configuration,
+    load_single_recording_configuration,
+    estimate_multi_recording_job_memory_mb,
+    estimate_single_recording_job_memory_mb,
 )
 
 if TYPE_CHECKING:
@@ -59,6 +84,83 @@ if TYPE_CHECKING:
 
 _MINIMUM_RECORDING_COUNT: int = 2
 """The minimum number of recordings required for multi-recording processing."""
+
+
+def _resolve_job_identifiers(tracker: ProcessingTracker, jobs: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """Initializes a tracker's jobs and keys every returned identifier by the job it belongs to.
+
+    Notes:
+        The tracker returns its identifiers in the order the job list carries them. Keying them by name and specifier
+        keeps a manifest entry bound to its own job, so inserting or reordering a pipeline phase cannot shift an
+        identifier onto a different job.
+
+    Args:
+        tracker: The tracker to initialize the jobs on.
+        jobs: The job universe, as job name and specifier pairs.
+
+    Returns:
+        The identifier of every job, keyed by its name and specifier.
+    """
+    job_ids = tracker.initialize_jobs(jobs=jobs)
+    return dict(zip(jobs, job_ids, strict=True))
+
+
+def _manifest_entry(identifiers: dict[tuple[str, str], str], job_name: str, specifier: str) -> dict[str, object]:
+    """Builds the manifest entry describing one scheduled job.
+
+    Args:
+        identifiers: The identifier of every job, keyed by its name and specifier.
+        job_name: The name of the job the entry describes.
+        specifier: The specifier of the job the entry describes.
+
+    Returns:
+        The manifest entry holding the job's identifier, name, specifier, and scheduled status.
+    """
+    return {
+        "job_id": identifiers[str(job_name), specifier],
+        "name": str(job_name),
+        "specifier": specifier,
+        "status": "scheduled",
+    }
+
+
+def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specifier: str, *, single: bool) -> int:
+    """Estimates the memory one queued job holds, from the recording or dataset it will process.
+
+    Notes:
+        A job whose recording geometry cannot be read is charged the conservative allowance its stage carries rather
+        than a floor, because a job admitted against a floor overcommits its host and is killed.
+
+    Args:
+        configuration_path: The path to the job's pipeline configuration file.
+        job_name: The name of the pipeline stage the job runs.
+        specifier: The job's tracker specifier.
+        single: Determines whether the job belongs to the single-recording or the multi-recording pipeline.
+
+    Returns:
+        The memory the job holds in megabytes, which is its stage's allowance when the recording's geometry could not
+        be read.
+    """
+    if single:
+        configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
+        memory_mb, _ = estimate_single_recording_job_memory_mb(
+            job_name=SingleRecordingJobNames(job_name),
+            specifier=specifier,
+            output_root=output_path,
+            configuration=configuration,
+            data_path=configuration.file_io.data_path,
+        )
+        return memory_mb
+
+    dataset_configuration = load_multi_recording_configuration(configuration_path=configuration_path)
+    memory_mb, _ = estimate_multi_recording_job_memory_mb(
+        job_name=MultiRecordingJobNames(job_name),
+        specifier=specifier,
+        recording_roots=dataset_configuration.recording_io.recording_directories,
+        dataset_name=dataset_configuration.recording_io.dataset_name,
+        configuration=dataset_configuration,
+    )
+    return memory_mb
 
 
 @mcp.tool()
@@ -94,7 +196,7 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
             "error": f"Unable to get recording status. Recording directory not found: {recording_path}.",
         }
 
-    single_tracker_path = recording / "cindra" / SINGLE_RECORDING_TRACKER_NAME
+    single_tracker_path = recording / OUTPUT_DIRECTORY_NAME / SINGLE_RECORDING_TRACKER_FILENAME
     if single_tracker_path.exists():
         single_recording_status = _read_single_recording_tracker(
             tracker_path=single_tracker_path, recording_path=recording
@@ -103,16 +205,16 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
         single_recording_status = {"status": "not_started"}
 
     multi_recording_status: dict[str, object]
-    multi_recording_base = recording / "cindra" / "multi_recording"
+    multi_recording_base = recording / OUTPUT_DIRECTORY_NAME / MULTI_RECORDING_DIRECTORY_NAME
     if multi_recording_base.exists():
         # Falls back to the tolerant scan when a subdirectory denies the strict one, so a single unreadable dataset
         # directory reports the datasets that are readable instead of failing the whole status query.
         try:
             tracker_files = discover_marker_files(
-                directory=multi_recording_base, marker_name=MULTI_RECORDING_TRACKER_NAME
+                directory=multi_recording_base, marker_name=MULTI_RECORDING_TRACKER_FILENAME
             )
         except OSError:
-            tracker_files = list(multi_recording_base.rglob(MULTI_RECORDING_TRACKER_NAME))
+            tracker_files = list(multi_recording_base.rglob(MULTI_RECORDING_TRACKER_FILENAME))
         if tracker_files:
             datasets: dict[str, object] = {}
             for tracker_file in natsorted(tracker_files):
@@ -128,7 +230,7 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
         "success": True,
         "recording_path": str(recording),
         "single_recording": single_recording_status,
-        "multi_recording": multi_recording_status,
+        MULTI_RECORDING_DIRECTORY_NAME: multi_recording_status,
     }
 
 
@@ -178,14 +280,14 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
     # unreadable would be the wrong answer, so the denial is recorded and the tolerant scan supplies the rest.
     try:
         tracker_index = index_marker_files(
-            directory=root, marker_names=(SINGLE_RECORDING_TRACKER_NAME, MULTI_RECORDING_TRACKER_NAME)
+            directory=root, marker_names=(SINGLE_RECORDING_TRACKER_FILENAME, MULTI_RECORDING_TRACKER_FILENAME)
         )
-        single_tracker_paths: list[Path] = list(tracker_index[SINGLE_RECORDING_TRACKER_NAME])
-        multi_tracker_paths: list[Path] = list(tracker_index[MULTI_RECORDING_TRACKER_NAME])
+        single_tracker_paths: list[Path] = list(tracker_index[SINGLE_RECORDING_TRACKER_FILENAME])
+        multi_tracker_paths: list[Path] = list(tracker_index[MULTI_RECORDING_TRACKER_FILENAME])
     except OSError as error:
         permission_errors.append(f"Access denied during the processing tracker search: {error}")
-        single_tracker_paths = list(root.rglob(SINGLE_RECORDING_TRACKER_NAME))
-        multi_tracker_paths = list(root.rglob(MULTI_RECORDING_TRACKER_NAME))
+        single_tracker_paths = list(root.rglob(SINGLE_RECORDING_TRACKER_FILENAME))
+        multi_tracker_paths = list(root.rglob(MULTI_RECORDING_TRACKER_FILENAME))
 
     # Reads single-recording trackers. Derives recording_path from tracker location.
     single_recordings: list[dict[str, object]] = []
@@ -346,14 +448,14 @@ def prepare_single_recording_batch_tool(
 
     for data_path, output_path in zip(valid_paths, resolved_output_paths, strict=True):
         recording_key = str(data_path)
-        cindra_root = output_path / "cindra"
-        tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_NAME
+        cindra_root = output_path / OUTPUT_DIRECTORY_NAME
+        tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_FILENAME
 
         if tracker_path.exists():
             # Idempotent path: tracker already exists, returns current state without reinitializing.
             tracker = ProcessingTracker(file_path=tracker_path)
             registry = tracker.snapshot()
-            configuration_file_path = cindra_root / "configuration.yaml"
+            configuration_file_path = cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME
 
             binarize_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.BINARIZE)
             register_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.REGISTER)
@@ -440,59 +542,48 @@ def prepare_single_recording_batch_tool(
             recording_configuration.runtime.display_progress_bars = False
 
             cindra_root.mkdir(parents=True, exist_ok=True)
-            recording_configuration_path = cindra_root / "configuration.yaml"
-
-            # Resolves plane count from configuration to build the complete job list.
-            contexts = resolve_single_recording_contexts(configuration=recording_configuration)
-            plane_count = len(contexts)
+            recording_configuration_path = cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME
 
             # Saves the per-recording configuration. The execute tool passes the resolved worker allocation to each
             # job as a dispatch argument, so this one file serves every job dispatched against it.
             recording_configuration.save(file_path=recording_configuration_path)
+
+            # Writes the shared bootstrap every later job reads and reports the planes the recording holds.
+            plane_count = prime_recording(configuration_path=recording_configuration_path).plane_count
 
             # Builds the recording's job universe from the exported phase model, which orders the phases and expands
             # the per-plane ones.
             jobs: list[tuple[str, str]] = resolve_single_recording_jobs(plane_count=plane_count)
 
             tracker = ProcessingTracker(file_path=tracker_path)
-            job_ids = tracker.initialize_jobs(jobs=jobs)
+            identifiers = _resolve_job_identifiers(tracker=tracker, jobs=jobs)
             total_jobs += len(jobs)
 
-            # Builds manifest entries from the freshly initialized tracker. The returned identifiers follow the job
-            # list order, so the register block starts at index 1 and the process block starts after it.
-            binarize_entry = {
-                "job_id": job_ids[0],
-                "name": SingleRecordingJobNames.BINARIZE.value,
-                "specifier": "",
-                "status": "scheduled",
-            }
+            binarize_entry = _manifest_entry(
+                identifiers=identifiers, job_name=SingleRecordingJobNames.BINARIZE, specifier=""
+            )
 
             register_entries = [
-                {
-                    "job_id": job_ids[1 + plane_index],
-                    "name": SingleRecordingJobNames.REGISTER.value,
-                    "specifier": resolve_plane_specifier(plane_index=plane_index),
-                    "status": "scheduled",
-                }
+                _manifest_entry(
+                    identifiers=identifiers,
+                    job_name=SingleRecordingJobNames.REGISTER,
+                    specifier=resolve_plane_specifier(plane_index=plane_index),
+                )
                 for plane_index in range(plane_count)
             ]
 
             process_entries = [
-                {
-                    "job_id": job_ids[1 + plane_count + plane_index],
-                    "name": SingleRecordingJobNames.PROCESS.value,
-                    "specifier": resolve_plane_specifier(plane_index=plane_index),
-                    "status": "scheduled",
-                }
+                _manifest_entry(
+                    identifiers=identifiers,
+                    job_name=SingleRecordingJobNames.PROCESS,
+                    specifier=resolve_plane_specifier(plane_index=plane_index),
+                )
                 for plane_index in range(plane_count)
             ]
 
-            combine_entry = {
-                "job_id": job_ids[-1],
-                "name": SingleRecordingJobNames.COMBINE.value,
-                "specifier": "",
-                "status": "scheduled",
-            }
+            combine_entry = _manifest_entry(
+                identifiers=identifiers, job_name=SingleRecordingJobNames.COMBINE, specifier=""
+            )
 
             recordings_manifest[recording_key] = {
                 "configuration_path": str(recording_configuration_path),
@@ -631,8 +722,8 @@ def prepare_multi_recording_batch_tool(
             invalid_configurations.append(f"Unable to resolve output path for dataset '{dataset_key}'.")
             continue
 
-        tracker_path = main_recording_path / MULTI_RECORDING_TRACKER_NAME
-        configuration_file_path = main_recording_path / "multi_recording_configuration.yaml"
+        tracker_path = main_recording_path / MULTI_RECORDING_TRACKER_FILENAME
+        configuration_file_path = main_recording_path / MULTI_RECORDING_CONFIGURATION_FILENAME
 
         if tracker_path.exists():
             # Idempotent path: tracker already exists, returns current state without reinitializing.
@@ -682,24 +773,18 @@ def prepare_multi_recording_batch_tool(
             jobs: list[tuple[str, str]] = resolve_multi_recording_jobs(recording_ids=recording_ids)
 
             tracker = ProcessingTracker(file_path=tracker_path)
-            job_ids = tracker.initialize_jobs(jobs=jobs)
+            identifiers = _resolve_job_identifiers(tracker=tracker, jobs=jobs)
             total_jobs += len(jobs)
 
-            discover_entry = {
-                "job_id": job_ids[0],
-                "name": MultiRecordingJobNames.DISCOVER.value,
-                "specifier": "",
-                "status": "scheduled",
-            }
+            discover_entry = _manifest_entry(
+                identifiers=identifiers, job_name=MultiRecordingJobNames.DISCOVER, specifier=""
+            )
 
             extract_entries = [
-                {
-                    "job_id": job_ids[1 + index],
-                    "name": MultiRecordingJobNames.EXTRACT.value,
-                    "specifier": recording_ids[index],
-                    "status": "scheduled",
-                }
-                for index in range(len(recording_ids))
+                _manifest_entry(
+                    identifiers=identifiers, job_name=MultiRecordingJobNames.EXTRACT, specifier=recording_id
+                )
+                for recording_id in recording_ids
             ]
 
             datasets_manifest[dataset_key] = {
@@ -916,7 +1001,7 @@ def clean_processing_output_tool(
     errors: list[str] = []
 
     if pipeline_type == "single-recording":
-        cindra_root = recording / "cindra"
+        cindra_root = recording / OUTPUT_DIRECTORY_NAME
         if not cindra_root.exists():
             return {
                 "success": False,
@@ -927,75 +1012,80 @@ def clean_processing_output_tool(
 
         # Cleans per-plane files, partitioning the shared detection_data directory by the phase that owns each array.
         plane_directories = natsorted(
-            entry for entry in cindra_root.iterdir() if entry.is_dir() and entry.name.startswith("plane_")
+            entry for entry in cindra_root.iterdir() if entry.is_dir() and entry.name.startswith(PLANE_SPECIFIER_PREFIX)
         )
         for plane_directory in plane_directories:
-            plane_detection_directory = plane_directory / "detection_data"
+            plane_detection_directory = plane_directory / DETECTION_DATA_DIRECTORY_NAME
 
             if SingleRecordingJobNames.BINARIZE in effective_set:
-                for name in ("channel_1_data.bin", "channel_2_data.bin"):
+                for name in (CHANNEL_1_BINARY_FILENAME, CHANNEL_2_BINARY_FILENAME):
                     _delete_file(path=plane_directory / name, deleted=deleted_files, errors=errors)
                 # The mean images are created by binarization and later rewritten by both registration and processing,
                 # so binarization, the phase that creates them, owns their removal. Deleting them under a downstream
                 # phase would discard the output of the phases between it and binarization.
-                for name in ("mean_image.npy", "mean_image_channel_2.npy"):
+                for name in (
+                    DetectionImages.MEAN_IMAGE,
+                    resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True),
+                ):
                     _delete_file(path=plane_detection_directory / name, deleted=deleted_files, errors=errors)
 
             if SingleRecordingJobNames.REGISTER in effective_set:
                 # The registration directory holds bad_frames.npy, which detection reads, so it is removed only when
                 # the registration phase itself is cleaned.
-                _delete_directory(path=plane_directory / "registration_data", deleted=deleted_dirs, errors=errors)
+                _delete_directory(
+                    path=plane_directory / REGISTRATION_DATA_DIRECTORY_NAME, deleted=deleted_dirs, errors=errors
+                )
 
             if SingleRecordingJobNames.PROCESS in effective_set:
                 for name in (
-                    "enhanced_mean_image.npy",
-                    "maximum_projection.npy",
-                    "correlation_map.npy",
-                    "enhanced_mean_image_channel_2.npy",
-                    "maximum_projection_channel_2.npy",
-                    "correlation_map_channel_2.npy",
+                    DetectionImages.ENHANCED_MEAN_IMAGE,
+                    DetectionImages.MAXIMUM_PROJECTION,
+                    DetectionImages.CORRELATION_MAP,
+                    resolve_array_name(array=DetectionImages.ENHANCED_MEAN_IMAGE, second_channel=True),
+                    resolve_array_name(array=DetectionImages.MAXIMUM_PROJECTION, second_channel=True),
+                    resolve_array_name(array=DetectionImages.CORRELATION_MAP, second_channel=True),
                 ):
                     _delete_file(path=plane_detection_directory / name, deleted=deleted_files, errors=errors)
                 for name in (
-                    "roi_masks.npz",
-                    "roi_masks_channel_2.npz",
-                    "roi_statistics.npz",
-                    "roi_statistics_channel_2.npz",
-                    "cell_fluorescence.npy",
-                    "neuropil_fluorescence.npy",
-                    "subtracted_fluorescence.npy",
-                    "spikes.npy",
-                    "cell_classification.npy",
-                    "cell_fluorescence_channel_2.npy",
-                    "neuropil_fluorescence_channel_2.npy",
-                    "subtracted_fluorescence_channel_2.npy",
-                    "spikes_channel_2.npy",
-                    "cell_classification_channel_2.npy",
-                    "cell_colocalization.npy",
-                    "corrected_structural_mean_image.npy",
+                    RecordingArrays.ROI_MASKS,
+                    resolve_array_name(array=RecordingArrays.ROI_MASKS, second_channel=True),
+                    RecordingArrays.ROI_STATISTICS,
+                    resolve_array_name(array=RecordingArrays.ROI_STATISTICS, second_channel=True),
+                    RecordingArrays.CELL_FLUORESCENCE,
+                    RecordingArrays.NEUROPIL_FLUORESCENCE,
+                    RecordingArrays.SUBTRACTED_FLUORESCENCE,
+                    RecordingArrays.SPIKES,
+                    RecordingArrays.CELL_CLASSIFICATION,
+                    resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True),
+                    RecordingArrays.CELL_COLOCALIZATION,
+                    RecordingArrays.CORRECTED_STRUCTURAL_MEAN_IMAGE,
                 ):
                     _delete_file(path=plane_directory / name, deleted=deleted_files, errors=errors)
 
         if SingleRecordingJobNames.COMBINE in effective_set:
-            _delete_directory(path=cindra_root / "detection_data", deleted=deleted_dirs, errors=errors)
+            _delete_directory(path=cindra_root / DETECTION_DATA_DIRECTORY_NAME, deleted=deleted_dirs, errors=errors)
             for name in (
-                "combined_metadata.npz",
-                "roi_masks.npz",
-                "roi_masks_channel_2.npz",
-                "roi_statistics.npz",
-                "roi_statistics_channel_2.npz",
-                "cell_fluorescence.npy",
-                "neuropil_fluorescence.npy",
-                "subtracted_fluorescence.npy",
-                "spikes.npy",
-                "cell_classification.npy",
-                "cell_fluorescence_channel_2.npy",
-                "neuropil_fluorescence_channel_2.npy",
-                "subtracted_fluorescence_channel_2.npy",
-                "spikes_channel_2.npy",
-                "cell_classification_channel_2.npy",
-                "cell_colocalization.npy",
-                "corrected_structural_mean_image.npy",
+                COMBINED_METADATA_FILENAME,
+                RecordingArrays.ROI_MASKS,
+                resolve_array_name(array=RecordingArrays.ROI_MASKS, second_channel=True),
+                RecordingArrays.ROI_STATISTICS,
+                resolve_array_name(array=RecordingArrays.ROI_STATISTICS, second_channel=True),
+                RecordingArrays.CELL_FLUORESCENCE,
+                RecordingArrays.NEUROPIL_FLUORESCENCE,
+                RecordingArrays.SUBTRACTED_FLUORESCENCE,
+                RecordingArrays.SPIKES,
+                RecordingArrays.CELL_CLASSIFICATION,
+                resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
+                resolve_array_name(array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True),
+                resolve_array_name(array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True),
+                resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True),
+                resolve_array_name(array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True),
+                RecordingArrays.CELL_COLOCALIZATION,
+                RecordingArrays.CORRECTED_STRUCTURAL_MEAN_IMAGE,
             ):
                 _delete_file(path=cindra_root / name, deleted=deleted_files, errors=errors)
 
@@ -1007,8 +1097,8 @@ def clean_processing_output_tool(
                 "error": "Unable to clean processing output. The 'dataset' parameter is required for multi-recording.",
             }
 
-        cindra_root = recording / "cindra"
-        dataset_path = cindra_root / "multi_recording" / dataset
+        cindra_root = recording / OUTPUT_DIRECTORY_NAME
+        dataset_path = cindra_root / MULTI_RECORDING_DIRECTORY_NAME / dataset
         if not dataset_path.exists():
             return {
                 "success": False,
@@ -1016,7 +1106,7 @@ def clean_processing_output_tool(
             }
 
         # Loads runtime data to discover all recording output paths.
-        runtime = _load_runtime_yaml(path=dataset_path / "multi_recording_runtime_data.yaml")
+        runtime = _load_runtime_yaml(path=dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         if runtime is None:
             return {
                 "success": False,
@@ -1032,33 +1122,35 @@ def clean_processing_output_tool(
                 continue
 
             if MultiRecordingJobNames.DISCOVER in effective_set:
-                _delete_directory(path=output_path / "registration_arrays", deleted=deleted_dirs, errors=errors)
+                _delete_directory(
+                    path=output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME, deleted=deleted_dirs, errors=errors
+                )
                 for name in (
-                    "registration_deformed_masks.npz",
-                    "registration_deformed_masks_channel_2.npz",
-                    "tracking_template_masks.npz",
-                    "tracking_template_masks_channel_2.npz",
+                    DEFORMED_MASKS_FILENAME,
+                    resolve_channel_2_name(name=DEFORMED_MASKS_FILENAME),
+                    TRACKING_TEMPLATE_MASKS_FILENAME,
+                    resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME),
                     # Backward-projected per-recording mask and statistics files are produced by the final
                     # discovery step (project_templates_to_recordings), not by extraction, and deleting them under
                     # EXTRACT strands the pipeline because extraction consumes them as inputs.
-                    "roi_masks.npz",
-                    "roi_masks_channel_2.npz",
-                    "roi_statistics.npz",
-                    "roi_statistics_channel_2.npz",
+                    RecordingArrays.ROI_MASKS,
+                    resolve_array_name(array=RecordingArrays.ROI_MASKS, second_channel=True),
+                    RecordingArrays.ROI_STATISTICS,
+                    resolve_array_name(array=RecordingArrays.ROI_STATISTICS, second_channel=True),
                 ):
                     _delete_file(path=output_path / name, deleted=deleted_files, errors=errors)
 
             if MultiRecordingJobNames.EXTRACT in effective_set:
                 for name in (
-                    "cell_fluorescence.npy",
-                    "neuropil_fluorescence.npy",
-                    "subtracted_fluorescence.npy",
-                    "spikes.npy",
-                    "cell_fluorescence_channel_2.npy",
-                    "neuropil_fluorescence_channel_2.npy",
-                    "subtracted_fluorescence_channel_2.npy",
-                    "spikes_channel_2.npy",
-                    "cell_colocalization.npy",
+                    RecordingArrays.CELL_FLUORESCENCE,
+                    RecordingArrays.NEUROPIL_FLUORESCENCE,
+                    RecordingArrays.SUBTRACTED_FLUORESCENCE,
+                    RecordingArrays.SPIKES,
+                    resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True),
+                    RecordingArrays.CELL_COLOCALIZATION,
                 ):
                     _delete_file(path=output_path / name, deleted=deleted_files, errors=errors)
 
@@ -1115,7 +1207,8 @@ def execute_processing_jobs_tool(
             configuration file), 'tracker_path' (absolute path to the ProcessingTracker file), 'job_id' (the
             hexadecimal job identifier from the prepare manifest), and 'pipeline_type' ('single-recording' or
             'multi-recording').
-        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Leave
+        workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
+        concurrency ceiling. Leave
             as None to accept the measured defaults, which are 4 cores for binarization, 8 for registration, 10 for
             processing, 1 for combination, 30 for multi-recording discovery, and 16 for multi-recording extraction.
             Set to -1 to give every job the whole session core budget. The override is a single scalar applied to
@@ -1180,13 +1273,20 @@ def execute_processing_jobs_tool(
             invalid_jobs.append({"job_id": job_id, "reason": f"Unrecognized pipeline phase: {job_info.job_name}"})
             continue
 
+        single_recording = pipeline_type == "single-recording"
         candidate_jobs.append(
             PendingJob(
                 configuration_path=configuration_file,
                 tracker_path=tracker_file,
                 job_id=job_id,
-                single_recording=pipeline_type == "single-recording",
+                single_recording=single_recording,
                 resource_class=resource_class,
+                memory_megabytes=_estimate_pending_job_memory(
+                    configuration_path=configuration_file,
+                    job_name=job_info.job_name,
+                    specifier=job_info.specifier,
+                    single=single_recording,
+                ),
             )
         )
         submitted_by_tracker.setdefault(str(tracker_file), set()).add(job_id)
@@ -1542,7 +1642,8 @@ def execute_full_pipeline_tool(
             single-recording pipelines and must match the length of recording_paths.
         dataset_configurations: List of dataset configuration dictionaries. Required for multi-recording pipelines.
             Each must contain 'configuration_path', 'recording_paths', and 'dataset_name'.
-        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Leave
+        workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
+        concurrency ceiling. Leave
             as None to accept the measured defaults of 4 cores for binarization, 1 for combination, 8 for
             registration, 10 for processing, 30 for multi-recording discovery, and 16 for multi-recording extraction.
             Set to -1 to give every job the whole session core budget.
@@ -1640,6 +1741,12 @@ def execute_full_pipeline_tool(
                             job_id=binarize["job_id"],
                             single_recording=True,
                             resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.BINARIZE],
+                            memory_megabytes=_estimate_pending_job_memory(
+                                configuration_path=job_configuration_path,
+                                job_name=str(binarize["name"]),
+                                specifier=str(binarize["specifier"]),
+                                single=True,
+                            ),
                         )
                     )
 
@@ -1650,6 +1757,12 @@ def execute_full_pipeline_tool(
                         job_id=register["job_id"],
                         single_recording=True,
                         resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.REGISTER],
+                        memory_megabytes=_estimate_pending_job_memory(
+                            configuration_path=job_configuration_path,
+                            job_name=str(register["name"]),
+                            specifier=str(register["specifier"]),
+                            single=True,
+                        ),
                     )
                     for register in manifest_dict.get("register_jobs", [])
                     if register.get("status") != "succeeded"
@@ -1662,6 +1775,12 @@ def execute_full_pipeline_tool(
                         job_id=process["job_id"],
                         single_recording=True,
                         resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.PROCESS],
+                        memory_megabytes=_estimate_pending_job_memory(
+                            configuration_path=job_configuration_path,
+                            job_name=str(process["name"]),
+                            specifier=str(process["specifier"]),
+                            single=True,
+                        ),
                     )
                     for process in manifest_dict.get("process_jobs", [])
                     if process.get("status") != "succeeded"
@@ -1676,6 +1795,12 @@ def execute_full_pipeline_tool(
                             job_id=combine["job_id"],
                             single_recording=True,
                             resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.COMBINE],
+                            memory_megabytes=_estimate_pending_job_memory(
+                                configuration_path=job_configuration_path,
+                                job_name=str(combine["name"]),
+                                specifier=str(combine["specifier"]),
+                                single=True,
+                            ),
                         )
                     )
 
@@ -1708,6 +1833,12 @@ def execute_full_pipeline_tool(
                             job_id=discover["job_id"],
                             single_recording=False,
                             resource_class=RESOURCE_CLASS_BY_JOB_NAME[MultiRecordingJobNames.DISCOVER],
+                            memory_megabytes=_estimate_pending_job_memory(
+                                configuration_path=job_configuration_path,
+                                job_name=str(discover["name"]),
+                                specifier=str(discover["specifier"]),
+                                single=False,
+                            ),
                         )
                     )
 
@@ -1718,6 +1849,12 @@ def execute_full_pipeline_tool(
                         job_id=extract["job_id"],
                         single_recording=False,
                         resource_class=RESOURCE_CLASS_BY_JOB_NAME[MultiRecordingJobNames.EXTRACT],
+                        memory_megabytes=_estimate_pending_job_memory(
+                            configuration_path=job_configuration_path,
+                            job_name=str(extract["name"]),
+                            specifier=str(extract["specifier"]),
+                            single=False,
+                        ),
                     )
                     for extract in manifest_dict.get("extract_jobs", [])
                     if extract.get("status") != "succeeded"

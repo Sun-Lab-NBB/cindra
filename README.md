@@ -780,6 +780,31 @@ themselves can read the phase model exported from `cindra.orchestration`. `SINGL
 `resolve_single_recording_prerequisites()` and `resolve_multi_recording_prerequisites()` return the jobs each job
 depends on. This keeps a scheduler's view of the pipeline in step with the library rather than restating it.
 
+A scheduler that also wants to know which of those jobs can run right now, where their inputs and outputs live, and
+how much memory each one holds reads three further groups, all exported from `cindra`.
+
+`resolve_single_recording_job_universe()` and `resolve_multi_recording_job_universe()` pair the phase model with the
+inventory on disk, returning both the jobs a recording declares and the subset whose own inputs already exist.
+`resolve_recording_planes()` and `resolve_dataset_recordings()` report the planes a recording holds and the recordings
+a dataset spans without building a runtime context or creating a directory, and `is_recording_processed()`,
+`is_plane_registered()`, and `is_dataset_discovered()` answer the same questions one at a time.
+
+`resolve_output_path()`, `resolve_plane_path()`, and `resolve_dataset_path()` build the three roots the pipelines write
+under a caller-supplied output root, and `resolve_array_path()` names a file inside one of them. The result arrays sit
+directly in those roots and are named by `RecordingArrays`, while `DetectionImages`, `RegistrationArrays`, and
+`MultiRecordingArrays` name files inside the `detection_data`, `registration_data`, and `registration_arrays`
+subdirectories, whose names the same module exports. `resolve_plane_specifier()` and
+`parse_plane_specifier()` convert between a plane index and the specifier its jobs and its directory both carry.
+
+`estimate_single_recording_job_memory_mb()` and `estimate_multi_recording_job_memory_mb()` project the memory one job
+holds from the shape of the data it will process, returning the figure in megabytes alongside a flag stating whether it
+followed from the recording's own geometry. A job whose geometry cannot be read is charged a conservative allowance for its
+stage rather than a floor, because understating is the failure that gets a job killed. Two of those allowances are
+measured peaks and four are flat figures the module documents individually.
+
+`prime_recording()` and `prime_dataset()` write the shared bootstrap every job reads and report that same inventory, so
+a scheduler primes a recording and enumerates its jobs in one step.
+
 ### CLI Commands
 
 This library provides the `cindra` and `cindra-gui` CLIs that expose the following commands:

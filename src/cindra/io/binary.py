@@ -9,6 +9,8 @@ import numpy as np
 from tifffile import TiffWriter
 from ataraxis_base_utilities import LogLevel, console
 
+from ..layout import resolve_registration_marker_name
+
 if TYPE_CHECKING:
     from types import TracebackType
 
@@ -43,7 +45,7 @@ def resolve_registration_marker_path(binary_path: Path) -> Path:
     Returns:
         The marker path, which sits beside the binary it guards.
     """
-    return binary_path.with_name(f"{binary_path.name}.registering")
+    return binary_path.with_name(resolve_registration_marker_name(binary_name=binary_path.name))
 
 
 def create_registration_marker(binary_path: Path) -> None:

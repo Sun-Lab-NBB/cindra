@@ -12,6 +12,7 @@ import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 
+from ..layout import RecordingArrays, resolve_array_name
 from ..detection import compute_roi_statistics
 from .deformation import Deformation
 from ..dataclasses import ROIMask, ROIStatistics, ReferenceImageType, MultiRecordingRuntimeContext
@@ -205,7 +206,11 @@ def project_templates_to_recordings(contexts: list[MultiRecordingRuntimeContext]
     # is produced by the tracking phase).
     first_output = contexts[0].runtime.output_path
     repeat_registration = contexts[0].configuration.diffeomorphic_registration.repeat_registration
-    if not repeat_registration and first_output is not None and (first_output / "roi_statistics.npz").exists():
+    if (
+        not repeat_registration
+        and first_output is not None
+        and (first_output / RecordingArrays.ROI_STATISTICS).exists()
+    ):
         console.echo(
             message="Template projection: skipped. Projection output already exists and re-registration is disabled.",
             level=LogLevel.INFO,
@@ -487,7 +492,7 @@ def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformatio
     selected_indices = tuple(index for index in context.runtime.io.selected_roi_indices if index is not None)
     single_recording_output = context.runtime.io.data_path
     if selected_indices and single_recording_output is not None:
-        masks_path = single_recording_output / "roi_masks.npz"
+        masks_path = single_recording_output / RecordingArrays.ROI_MASKS
         if masks_path.exists():
             all_masks = ROIMask.load_list(masks_path)
             selected_masks = [all_masks[index] for index in selected_indices]
@@ -502,7 +507,9 @@ def _apply_forward_deformation(context: MultiRecordingRuntimeContext, deformatio
         index for index in context.runtime.io.selected_roi_indices_channel_2 if index is not None
     )
     if selected_indices_channel_2 and single_recording_output is not None:
-        masks_path_channel_2 = single_recording_output / "roi_masks_channel_2.npz"
+        masks_path_channel_2 = single_recording_output / resolve_array_name(
+            array=RecordingArrays.ROI_MASKS, second_channel=True
+        )
         if masks_path_channel_2.exists():
             all_masks_channel_2 = ROIMask.load_list(masks_path_channel_2)
             selected_masks_channel_2 = [all_masks_channel_2[index] for index in selected_indices_channel_2]

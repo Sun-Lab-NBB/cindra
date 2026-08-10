@@ -9,6 +9,16 @@ from natsort import natsorted
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import discover_marker_files
 
+from ..layout import (
+    OUTPUT_DIRECTORY_NAME,
+    PLANE_SPECIFIER_PREFIX,
+    ACQUISITION_PARAMETERS_FILENAME,
+    MULTI_RECORDING_RUNTIME_DATA_FILENAME,
+    MULTI_RECORDING_CONFIGURATION_FILENAME,
+    SINGLE_RECORDING_RUNTIME_DATA_FILENAME,
+    SINGLE_RECORDING_CONFIGURATION_FILENAME,
+    resolve_plane_specifier,
+)
 from .multi_recording_data import MultiRecordingRuntimeData
 from .single_recording_data import CombinedData, SingleRecordingRuntimeData
 from .multi_recording_configuration import MultiRecordingConfiguration
@@ -228,11 +238,11 @@ class RuntimeContext:
             )
             console.error(message=message, error=ValueError)
 
-        root_path = self.configuration.file_io.output_path / "cindra"
+        root_path = self.configuration.file_io.output_path / OUTPUT_DIRECTORY_NAME
         ensure_directory_exists(path=root_path, is_file=False)
 
-        self.configuration.save(file_path=root_path / "configuration.yaml")
-        self.acquisition.to_yaml(file_path=root_path / "acquisition_parameters.yaml")
+        self.configuration.save(file_path=root_path / SINGLE_RECORDING_CONFIGURATION_FILENAME)
+        self.acquisition.to_yaml(file_path=root_path / ACQUISITION_PARAMETERS_FILENAME)
 
     def save_runtime(self) -> None:
         """Saves this plane's runtime data to its output directory.
@@ -275,7 +285,7 @@ class RuntimeContext:
             RuntimeError: If multiple configuration.yaml files are found under root_path.
         """
         # Discovers the cindra output directory within the root_path directory tree.
-        matches = discover_marker_files(directory=root_path, marker_name="configuration.yaml")
+        matches = discover_marker_files(directory=root_path, marker_name=SINGLE_RECORDING_CONFIGURATION_FILENAME)
 
         if not matches:
             message = (
@@ -293,8 +303,8 @@ class RuntimeContext:
 
         cindra_root = matches[0].parent
 
-        configuration_path = cindra_root / "configuration.yaml"
-        acquisition_path = cindra_root / "acquisition_parameters.yaml"
+        configuration_path = cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME
+        acquisition_path = cindra_root / ACQUISITION_PARAMETERS_FILENAME
 
         if not acquisition_path.exists():
             message = (
@@ -309,7 +319,7 @@ class RuntimeContext:
         if plane_index == -1:
             # Loads all planes.
             plane_directories = natsorted(
-                [directory for directory in cindra_root.glob("plane_*") if directory.is_dir()]
+                [directory for directory in cindra_root.glob(f"{PLANE_SPECIFIER_PREFIX}*") if directory.is_dir()]
             )
             contexts: list[RuntimeContext] = []
 
@@ -320,7 +330,7 @@ class RuntimeContext:
             return contexts
 
         # Loads a specific plane.
-        plane_path = cindra_root / f"plane_{plane_index}"
+        plane_path = cindra_root / resolve_plane_specifier(plane_index=plane_index)
         if not plane_path.exists():
             message = (
                 f"Unable to load RuntimeContext. Plane directory does not exist at the specified path: {plane_path}."
@@ -369,7 +379,7 @@ class MultiRecordingRuntimeContext:
         main_recording_path = self.runtime.io.dataset_output_paths[0]
         ensure_directory_exists(path=main_recording_path, is_file=False)
 
-        self.configuration.save(file_path=main_recording_path / "multi_recording_configuration.yaml")
+        self.configuration.save(file_path=main_recording_path / MULTI_RECORDING_CONFIGURATION_FILENAME)
 
     def save_runtime(self) -> None:
         """Saves this recording's runtime data to its output directory.
@@ -414,7 +424,7 @@ class MultiRecordingRuntimeContext:
             IndexError: If recording_index is out of range.
         """
         # Discovers the multi_recording_runtime_data.yaml file within the root_path directory tree.
-        matches = discover_marker_files(directory=root_path, marker_name="multi_recording_runtime_data.yaml")
+        matches = discover_marker_files(directory=root_path, marker_name=MULTI_RECORDING_RUNTIME_DATA_FILENAME)
 
         if not matches:
             message = (
@@ -460,8 +470,8 @@ class MultiRecordingRuntimeContext:
             # and persists corrected paths.
             entry_runtime.save(output_path=entry_runtime.output_path)
             if entry_runtime.io.data_path is not None:
-                for plane_directory in entry_runtime.io.data_path.glob("plane_*"):
-                    if plane_directory.is_dir() and (plane_directory / "runtime_data.yaml").exists():
+                for plane_directory in entry_runtime.io.data_path.glob(f"{PLANE_SPECIFIER_PREFIX}*"):
+                    if plane_directory.is_dir() and (plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME).exists():
                         _load_single_recording_runtime(plane_directory=plane_directory)
 
             for recording_output_path in output_paths:
@@ -482,8 +492,11 @@ class MultiRecordingRuntimeContext:
                     other_runtime.save(output_path=recording_output_path)
 
                 if other_runtime.io.data_path is not None:
-                    for plane_directory in other_runtime.io.data_path.glob("plane_*"):
-                        if plane_directory.is_dir() and (plane_directory / "runtime_data.yaml").exists():
+                    for plane_directory in other_runtime.io.data_path.glob(f"{PLANE_SPECIFIER_PREFIX}*"):
+                        if (
+                            plane_directory.is_dir()
+                            and (plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME).exists()
+                        ):
                             _load_single_recording_runtime(plane_directory=plane_directory)
 
             # Reloads the entry runtime from the corrected YAML so that paths are resolved against the new location.
@@ -491,7 +504,7 @@ class MultiRecordingRuntimeContext:
             output_paths = entry_runtime.io.dataset_output_paths
 
         # Loads configuration from the first output path (the main recording after natural sorting).
-        configuration_path = output_paths[0] / "multi_recording_configuration.yaml"
+        configuration_path = output_paths[0] / MULTI_RECORDING_CONFIGURATION_FILENAME
         if not configuration_path.exists():
             message = (
                 f"Unable to load MultiRecordingRuntimeContext. Configuration file does not exist at the expected "
