@@ -13,6 +13,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from threading import Lock, Thread
 from dataclasses import field, dataclass
+from multiprocessing import get_context
 from concurrent.futures import Executor, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 
@@ -55,6 +56,18 @@ Notes:
     thread pool to the whole host at import unless the environment says otherwise. A pool running one worker per core
     would therefore hold the square of the core count in threads while using one of them. The ceiling of one is the
     floor each job raises from, not the width it runs at, because every stage sets its own budget once it starts.
+"""
+
+_POOL_START_METHOD: str = "spawn"
+"""The multiprocessing start method every worker process of an execution session is created with.
+
+Notes:
+    Spawn is the only method available on every platform the library supports, so requesting it explicitly gives a
+    Linux session the process semantics a macOS or Windows session gets by default rather than the platform default
+    of the host it happens to run on. The alternatives are also unsound for this pipeline. A forked worker inherits
+    the parent's already-sized numeric backends, which leaves the thread pin inert and hands every concurrent job a
+    host-wide backend pool, and it inherits the parent's Numba and threading state at whatever point the fork
+    interrupted it.
 """
 
 _BROKEN_POOL_MESSAGE: str = (
@@ -519,8 +532,11 @@ def _create_job_pool(max_workers: int) -> Executor:
         the last one standing. A detection job additionally materializes the binned movie in anonymous memory, so a
         job the host kills for exhausting it takes down its own process rather than every job beside it.
 
-        Each spawned worker pins its numeric backends as it starts, which reaches the backends that read their
-        variable the first time they are asked to do work rather than while they are imported.
+        Each worker is spawned rather than forked, so it re-executes the interpreter and re-imports the numeric
+        backends under the pinned environment the manager holds. That is what makes the pin reach a backend sizing
+        itself at import, and it gives every supported platform the same worker semantics. Each worker then pins its
+        backends again as it starts, which reaches the backends that read their variable the first time they are
+        asked to do work rather than while they are imported.
 
     Args:
         max_workers: The number of worker processes the pool may hold.
@@ -530,6 +546,7 @@ def _create_job_pool(max_workers: int) -> Executor:
     """
     return ProcessPoolExecutor(
         max_workers=max_workers,
+        mp_context=get_context(method=_POOL_START_METHOD),
         initializer=initialize_worker_threads,
         initargs=(_WORKER_THREAD_CEILING,),
     )

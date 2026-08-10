@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import numba
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
-from threadpoolctl import threadpool_limits  # type: ignore[import-untyped]
 from sklearn.decomposition import PCA  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
@@ -163,15 +162,11 @@ def compute_pc_metrics(context: RuntimeContext, *, workers: int) -> None:
     # images.
     num_extreme_frames = min(300, frames.shape[0] // 2)
 
-    # Limits the BLAS thread count to match the requested worker budget. The principal component fit dispatches
-    # randomized-SVD matrix products that otherwise spawn one thread for every CPU core through the underlying BLAS
-    # library, which oversubscribes the host when several registration jobs run concurrently.
-    with threadpool_limits(limits=workers):
-        pc_low, pc_high, principal_component_projections = _compute_pc_extremes(
-            frames=frames,
-            num_extreme_frames=num_extreme_frames,
-            num_components=num_components,
-        )
+    pc_low, pc_high, principal_component_projections = _compute_pc_extremes(
+        frames=frames,
+        num_extreme_frames=num_extreme_frames,
+        num_components=num_components,
+    )
 
     console.echo(
         message=f"Plane {plane_index} Principal Component images: computed. Time taken: {timer.elapsed} seconds.",

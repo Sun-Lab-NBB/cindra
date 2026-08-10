@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ataraxis_time import PrecisionTimer, TimerPrecisions, get_timestamp
+from threadpoolctl import threadpool_limits  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
 from ..io import select_recording_rois, resolve_multi_recording_contexts
@@ -40,21 +41,26 @@ def discover_multi_recording_cells(configuration: MultiRecordingConfiguration, *
     # peer worker threads on the same YAML files.
     contexts = resolve_multi_recording_contexts(configuration=configuration, persist=False)
 
-    # Filters ROIs from each recording's single-recording outputs based on the configured selection criteria. Respects
-    # the repeat_selection flag to skip recordings with existing selections.
-    select_recording_rois(contexts=contexts)
+    # Confines the linear-algebra backends to the allocated worker budget for the whole stage. The batch engine pins
+    # every worker process to one backend thread, so the demons registration and the cross-recording clustering would
+    # otherwise run their matrix work single-threaded, while the same code invoked outside that engine would size
+    # those backends to the whole host instead of to the job.
+    with threadpool_limits(limits=workers):
+        # Filters ROIs from each recording's single-recording outputs based on the configured selection criteria.
+        # Respects the repeat_selection flag to skip recordings with existing selections.
+        select_recording_rois(contexts=contexts)
 
-    # Registers all recordings to a shared visual space using diffeomorphic demons registration and applies the
-    # deformation fields to transform reference images and ROI masks.
-    register_recordings(contexts=contexts, workers=workers)
+        # Registers all recordings to a shared visual space using diffeomorphic demons registration and applies the
+        # deformation fields to transform reference images and ROI masks.
+        register_recordings(contexts=contexts, workers=workers)
 
-    # Clusters ROIs across recordings in the shared deformed visual space and generates template masks for ROIs that
-    # can be reliably identified across recordings.
-    track_rois_across_recordings(contexts=contexts)
+        # Clusters ROIs across recordings in the shared deformed visual space and generates template masks for ROIs
+        # that can be reliably identified across recordings.
+        track_rois_across_recordings(contexts=contexts)
 
-    # Projects template masks from the shared visual space back to each recording's original coordinate system for
-    # fluorescence extraction.
-    project_templates_to_recordings(contexts=contexts, workers=workers)
+        # Projects template masks from the shared visual space back to each recording's original coordinate system for
+        # fluorescence extraction.
+        project_templates_to_recordings(contexts=contexts, workers=workers)
 
     # Records total discovery time and processing timestamp for each context.
     total_discovery_time = int(timer.elapsed)
@@ -127,5 +133,8 @@ def extract_multi_recording_fluorescence(
         console.error(message=message, error=RuntimeError)
 
     # Delegates to the unified extraction entry point, which dispatches to _extract_multi_recording internally. The
-    # extraction function handles fluorescence extraction, deconvolution, timing, and runtime saving.
-    extract_traces(context=target_context, workers=workers)
+    # extraction function handles fluorescence extraction, deconvolution, timing, and runtime saving. The
+    # linear-algebra backends are confined to the allocated worker budget for the same reason the discovery stage
+    # confines them, since the batch engine pins every worker process to one backend thread.
+    with threadpool_limits(limits=workers):
+        extract_traces(context=target_context, workers=workers)
