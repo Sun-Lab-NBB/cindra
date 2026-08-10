@@ -95,7 +95,8 @@ Runtime behavior settings shared between single-recording and multi-recording pi
 
 Worker allocation is not a configuration parameter. Each stage receives its worker count as an invocation argument, with
 measured defaults of 3 workers for binarization, 12 for registration and 10 for processing. Those defaults are published
-as `BINARIZATION_WORKERS`, `REGISTRATION_WORKERS` and `PROCESSING_WORKERS` in `cindra.orchestration`.
+as `BINARIZATION_WORKERS`, `REGISTRATION_WORKERS`, `PROCESSING_WORKERS` and `COMBINATION_WORKERS` in
+`cindra.orchestration`.
 
 ---
 

@@ -550,6 +550,93 @@ class TestDispatchAdmittedJobs:
         ]
 
     @pytest.mark.xdist_group(name="execution_state")
+    def test_reservation_holds_capacity_back_for_other_classes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a reserved class leaves room for a class that waits on no other job."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        registrations = [
+            _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.REGISTER, specifier=f"plane_{index}")
+            for index in range(8)
+        ]
+        binarize = _make_job(tracker_path=tmp_path / "other_tracker.yaml", job_name=SingleRecordingJobNames.BINARIZE)
+        state = _make_state(jobs=[*registrations, binarize], admitted=True, capacity=8, workers=1, cpu_budget=64)
+        state.class_reservations = {registrations[0].resource_class.name: 4}
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=[]))
+
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        # The conversion job dispatches in the first pass, and the second releases the reservation over the rest.
+        assert len(state.active_futures[binarize.resource_class.name]) == 1
+        assert len(state.active_futures[registrations[0].resource_class.name]) == 8
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_reservation_is_released_when_nothing_else_can_use_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a reserved class runs at its full width rather than idling a host with nothing else queued."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        jobs = [
+            _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.PROCESS, specifier=f"plane_{index}")
+            for index in range(7)
+        ]
+        state = _make_state(jobs=jobs, admitted=True, capacity=7, workers=1, cpu_budget=64)
+        state.class_reservations = {jobs[0].resource_class.name: 5}
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=[]))
+
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        assert len(state.active_futures[jobs[0].resource_class.name]) == 7
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_memory_budget_stops_the_next_dispatch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifies that a job whose estimate would exceed the session memory budget waits for a running job."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        first = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.PROCESS, specifier="plane_0")
+        second = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.PROCESS, specifier="plane_1")
+        first.memory_megabytes = 8192
+        second.memory_megabytes = 8192
+        state = _make_state(jobs=[first, second], admitted=True, capacity=4, workers=1, cpu_budget=64)
+        state.memory_budget_mb = 12288
+        observed: list[dict[str, Any]] = []
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=observed))
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            dispatched = _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        assert dispatched is True
+        assert list(state.active_futures[first.resource_class.name]) == [first.dispatch_key]
+        assert state.pending_queues[first.resource_class.name] == [second]
+
+    @pytest.mark.xdist_group(name="execution_state")
+    def test_unsized_jobs_dispatch_on_the_core_budget_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies that a session whose jobs carry no estimate is bounded by cores alone."""
+        tracker_path = tmp_path / "single_recording_tracker.yaml"
+        first = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.PROCESS, specifier="plane_0")
+        second = _make_job(tracker_path=tracker_path, job_name=SingleRecordingJobNames.PROCESS, specifier="plane_1")
+        state = _make_state(jobs=[first, second], admitted=True, capacity=4, workers=1, cpu_budget=64)
+        state.memory_budget_mb = 1
+        observed: list[dict[str, Any]] = []
+        monkeypatch.setattr(execution, "_pipeline_worker", _make_recording_worker(observed=observed))
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            _dispatch_admitted_jobs(state=state, pool=pool)
+
+        _drain_active_futures(state=state)
+
+        assert len(state.active_futures[first.resource_class.name]) == 2
+
+    @pytest.mark.xdist_group(name="execution_state")
     def test_dispatch_continues_while_the_budget_holds(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verifies that a session whose committed cores stay inside the budget drains its whole class queue."""
         tracker_path = tmp_path / "single_recording_tracker.yaml"

@@ -20,7 +20,14 @@ from .single_recording_data import (
     RegistrationData,
     SingleRecordingRuntimeData,
 )
-from .multi_recording_configuration import ReferenceImageType, MultiRecordingConfiguration
+from .multi_recording_configuration import (
+    ROITracking,
+    RecordingIO,
+    ROISelection,
+    ReferenceImageType,
+    DiffeomorphicRegistration,
+    MultiRecordingConfiguration,
+)
 from .single_recording_configuration import (
     Main,
     FileIO,
@@ -45,6 +52,7 @@ __all__ = [
     "BaselineMethod",
     "CombinedData",
     "DetectionData",
+    "DiffeomorphicRegistration",
     "ExtractionData",
     "FileIO",
     "IOData",
@@ -61,7 +69,10 @@ __all__ = [
     "PipelineType",
     "ROIDetection",
     "ROIMask",
+    "ROISelection",
     "ROIStatistics",
+    "ROITracking",
+    "RecordingIO",
     "ReferenceImageType",
     "Registration",
     "RegistrationData",

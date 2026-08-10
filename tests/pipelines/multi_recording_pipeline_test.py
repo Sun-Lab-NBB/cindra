@@ -15,12 +15,12 @@ from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
 from cindra.orchestration import MultiRecordingJobNames
-from cindra.orchestration.pipeline import (
+from cindra.orchestration.worker import (
+    prime_dataset,
     execute_multi_recording_job,
-    _execute_multi_recording_job,
-    run_multi_recording_pipeline,
-    run_single_recording_pipeline,
+    dispatch_multi_recording_job,
 )
+from cindra.orchestration.pipeline import run_multi_recording_pipeline, run_single_recording_pipeline
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -240,7 +240,7 @@ class TestRunMultiRecordingPipeline:
 
 
 class TestExecuteMultiRecordingJob:
-    """Tests _execute_multi_recording_job."""
+    """Tests dispatch_multi_recording_job."""
 
     def test_unknown_job_fails_and_reraises(self, tmp_path: Path) -> None:
         """Verifies that an unrecognized job name marks the job failed and re-raises the ValueError."""
@@ -250,7 +250,7 @@ class TestExecuteMultiRecordingJob:
         configuration = _make_multi_configuration(recording_directories=(tmp_path / "rec1",))
 
         with pytest.raises(ValueError, match="not recognized"):
-            _execute_multi_recording_job(
+            dispatch_multi_recording_job(
                 configuration=configuration,
                 job_name="unrecognized_job",  # type: ignore[arg-type]
                 specifier="",
@@ -285,13 +285,13 @@ class TestExecuteMultiRecordingJobInjection:
         first_id = ProcessingTracker.generate_job_id(job_name="multiday_extraction", specifier="rec1")
         second_id = ProcessingTracker.generate_job_id(job_name="multiday_extraction", specifier="rec2")
 
+        prime_dataset(configuration_path=configuration_path)
         execute_multi_recording_job(
             configuration_path=configuration_path,
             job_name=MultiRecordingJobNames.DISCOVER,
             specifier="",
             job_id=discovery_id,
             tracker=tracker,
-            persist_bootstrap=True,
         )
         execute_multi_recording_job(
             configuration_path=configuration_path,

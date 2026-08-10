@@ -105,22 +105,28 @@ Phase 3: PROCESS (phase name processing, per plane, 10 cores per job)
 ├── ROI detection, trace extraction, classification, spike deconvolution
 └── One job per plane, specifier plane_{plane_index}, requires that plane's registration job to succeed
 
-Phase 4: COMBINE (phase name combination, I/O bound, 1 core per job, up to 4 concurrent jobs)
+Phase 4: COMBINE (phase name combination, serial merge, 1 core per job)
 └── Merges all plane results into a unified combined_metadata.npz dataset
 ```
 
 Batch processing across multiple recordings:
 
 ```text
-BINARIZE: Up to 4 concurrent recordings, 3 cores each, fixed concurrency
-REGISTER: Concurrency bounded by the session CPU budget, 8 cores per plane job
-PROCESS:  Concurrency bounded by the CPU budget and available memory, 10 cores per plane job
-COMBINE:  Up to 4 concurrent recordings, 1 core each, fixed concurrency
+BINARIZE: Up to 4 concurrent recordings, 3 cores each, a hard ceiling spare capacity never lifts
+REGISTER: 12 cores per plane job, 4 jobs reserved, released when nothing else can use the capacity
+PROCESS:  10 cores per plane job, 5 jobs reserved, released when nothing else can use the capacity
+COMBINE:  1 core each, bounded by the session CPU budget alone
 ```
 
 Every job is admitted as soon as its own prerequisites succeed on its own tracker, so the whole dependency graph can be
 submitted in one call. One plane starts processing while its peers are still registering, and each recording advances
 independently.
+
+Dispatch runs in two passes. The first honors every reservation, so the conversion jobs at the root of the chain keep
+their share of the host while planes are still registering. The second releases the reservations over whatever capacity
+the first left unused, so a deep queue runs at its full width rather than idling the host. Memory bounds dispatch
+rather than concurrency: `execute_processing_jobs_tool` sizes every job it submits from the recording it will process,
+and a job whose geometry cannot be read is charged a conservative allowance for its stage.
 
 ---
 
@@ -270,16 +276,22 @@ Each single-recording phase runs under its own resource class with a measured pe
 -1 requests every available core. The session CPU budget is `cpu_count - 2`, with 2 cores reserved for system
 operations, and the dispatcher holds the sum of the cores committed by every class inside that budget.
 
-| Phase    | Resource class | Cores per job | Concurrency cap                      |
-|----------|----------------|---------------|--------------------------------------|
-| BINARIZE | `binarization` | 3             | Fixed at 4                           |
-| REGISTER | `registration` | 12            | Session CPU budget                   |
-| PROCESS  | `processing`   | 10            | CPU budget and memory, 15 GB per job |
-| COMBINE  | `combination`  | 1             | Fixed at 4                           |
+| Phase    | Resource class | Cores per job | Concurrency                            |
+|----------|----------------|---------------|----------------------------------------|
+| BINARIZE | `binarization` | 3             | Hard ceiling of 4                      |
+| REGISTER | `registration` | 12            | Session CPU budget, 4 jobs reserved    |
+| PROCESS  | `processing`   | 10            | Session CPU budget, 5 jobs reserved    |
+| COMBINE  | `combination`  | 1             | Session CPU budget                     |
 
-The `binarization` and `combination` classes ignore both `workers_per_job` and `max_parallel_jobs`. The `registration`
-and `processing` classes accept either parameter as an override of the measured default and of the derived concurrency
-cap, via `execute_processing_jobs_tool` or `execute_full_pipeline_tool`.
+Only the `binarization` class ignores `workers_per_job` and `max_parallel_jobs`, because its ceiling is hard. Every
+other class accepts either parameter as an override of the measured default and of the derived concurrency cap, via
+`execute_processing_jobs_tool` or `execute_full_pipeline_tool`.
+
+A reservation binds only in the dispatcher's first pass. The second pass releases it over whatever capacity the first
+left unused, so a reserved class runs at its full derived width whenever no other queue can use the room.
+
+Memory bounds dispatch separately from every class cap. Each job is estimated from the recording it will process, and
+the dispatcher holds the sum of the running jobs' estimates inside the session memory budget.
 
 The multi-recording discovery and extraction stages run under their own `discovery` and `extraction` classes, with
 measured defaults of 30 and 16 cores per job. Both accept `workers_per_job` and `max_parallel_jobs` as overrides. See
@@ -288,8 +300,9 @@ admitted at, because its cost grows with the square of the recording count.
 
 Present the measured per-phase defaults when confirming CPU allocation with the user. A `workers_per_job` value of 30
 overrides the processing default of 10 and lowers the processing concurrency to at most the CPU budget divided by 30, so
-it reduces rather than raises the memory the class holds. The override that can exhaust memory is a positive
-`max_parallel_jobs`, which replaces the derived cap outright and therefore discards the 15 GB per job memory bound.
+it reduces rather than raises the memory the class holds. A positive `max_parallel_jobs` replaces the derived cap
+outright, but it cannot exhaust memory on its own: the dispatcher still holds the running jobs' estimated memory inside
+the session memory budget whatever cap a class carries.
 
 ---
 

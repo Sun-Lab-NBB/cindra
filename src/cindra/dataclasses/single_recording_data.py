@@ -13,6 +13,16 @@ from numpy.typing import NDArray  # noqa: TC002 - needed at runtime for dacite d
 from ataraxis_base_utilities import console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig, atomic_write
 
+from ..layout import (
+    COMBINED_METADATA_FILENAME,
+    DETECTION_DATA_DIRECTORY_NAME,
+    REGISTRATION_DATA_DIRECTORY_NAME,
+    SINGLE_RECORDING_RUNTIME_DATA_FILENAME,
+    DetectionImages,
+    RecordingArrays,
+    RegistrationArrays,
+    resolve_array_name,
+)
 from .version import VERSION, PYTHON_VERSION
 
 if TYPE_CHECKING:
@@ -217,7 +227,7 @@ class RegistrationData:
         if arrays_loaded:
             return True
         if output_path is not None:
-            return (output_path / "registration_data" / "reference_image.npy").exists()
+            return (output_path / REGISTRATION_DATA_DIRECTORY_NAME / RegistrationArrays.REFERENCE_IMAGE).exists()
         return False
 
     def clear(self) -> None:
@@ -278,44 +288,44 @@ class RegistrationData:
         Args:
             output_path: The directory in which to create the ``registration_data/`` subdirectory.
         """
-        registration_directory = output_path / "registration_data"
+        registration_directory = output_path / REGISTRATION_DATA_DIRECTORY_NAME
         ensure_directory_exists(path=registration_directory, is_file=False)
 
         if self.bad_frames is not None and not is_memory_mapped(self.bad_frames):
-            np.save(registration_directory / "bad_frames.npy", arr=self.bad_frames)
+            np.save(registration_directory / RegistrationArrays.BAD_FRAMES, arr=self.bad_frames)
         if self.reference_image is not None and not is_memory_mapped(self.reference_image):
-            np.save(registration_directory / "reference_image.npy", arr=self.reference_image)
+            np.save(registration_directory / RegistrationArrays.REFERENCE_IMAGE, arr=self.reference_image)
         if self.rigid_y_offsets is not None and not is_memory_mapped(self.rigid_y_offsets):
-            np.save(registration_directory / "rigid_y_offsets.npy", arr=self.rigid_y_offsets)
+            np.save(registration_directory / RegistrationArrays.RIGID_Y_OFFSETS, arr=self.rigid_y_offsets)
         if self.rigid_x_offsets is not None and not is_memory_mapped(self.rigid_x_offsets):
-            np.save(registration_directory / "rigid_x_offsets.npy", arr=self.rigid_x_offsets)
+            np.save(registration_directory / RegistrationArrays.RIGID_X_OFFSETS, arr=self.rigid_x_offsets)
         if self.rigid_correlations is not None and not is_memory_mapped(self.rigid_correlations):
-            np.save(registration_directory / "rigid_correlations.npy", arr=self.rigid_correlations)
+            np.save(registration_directory / RegistrationArrays.RIGID_CORRELATIONS, arr=self.rigid_correlations)
         if self.nonrigid_y_offsets is not None and not is_memory_mapped(self.nonrigid_y_offsets):
-            np.save(registration_directory / "nonrigid_y_offsets.npy", arr=self.nonrigid_y_offsets)
+            np.save(registration_directory / RegistrationArrays.NONRIGID_Y_OFFSETS, arr=self.nonrigid_y_offsets)
         if self.nonrigid_x_offsets is not None and not is_memory_mapped(self.nonrigid_x_offsets):
-            np.save(registration_directory / "nonrigid_x_offsets.npy", arr=self.nonrigid_x_offsets)
+            np.save(registration_directory / RegistrationArrays.NONRIGID_X_OFFSETS, arr=self.nonrigid_x_offsets)
         if self.nonrigid_correlations is not None and not is_memory_mapped(self.nonrigid_correlations):
-            np.save(registration_directory / "nonrigid_correlations.npy", arr=self.nonrigid_correlations)
+            np.save(registration_directory / RegistrationArrays.NONRIGID_CORRELATIONS, arr=self.nonrigid_correlations)
         if self.principal_component_extreme_images is not None and not is_memory_mapped(
             self.principal_component_extreme_images
         ):
             np.save(
-                registration_directory / "principal_component_extreme_images.npy",
+                registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_EXTREME_IMAGES,
                 arr=self.principal_component_extreme_images,
             )
         if self.principal_component_projections is not None and not is_memory_mapped(
             self.principal_component_projections
         ):
             np.save(
-                registration_directory / "principal_component_projections.npy",
+                registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_PROJECTIONS,
                 arr=self.principal_component_projections,
             )
         if self.principal_component_shift_metrics is not None and not is_memory_mapped(
             self.principal_component_shift_metrics
         ):
             np.save(
-                registration_directory / "principal_component_shift_metrics.npy",
+                registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_SHIFT_METRICS,
                 arr=self.principal_component_shift_metrics,
             )
 
@@ -325,41 +335,41 @@ class RegistrationData:
         Args:
             output_path: The directory containing the ``registration_data/`` subdirectory.
         """
-        registration_directory = output_path / "registration_data"
+        registration_directory = output_path / REGISTRATION_DATA_DIRECTORY_NAME
         if not registration_directory.exists():
             return
 
-        path = registration_directory / "bad_frames.npy"
+        path = registration_directory / RegistrationArrays.BAD_FRAMES
         if path.exists():
             self.bad_frames = np.load(path, allow_pickle=False).astype(np.bool_)
-        path = registration_directory / "reference_image.npy"
+        path = registration_directory / RegistrationArrays.REFERENCE_IMAGE
         if path.exists():
             self.reference_image = np.load(path, allow_pickle=False).astype(np.float32)
-        path = registration_directory / "rigid_y_offsets.npy"
+        path = registration_directory / RegistrationArrays.RIGID_Y_OFFSETS
         if path.exists():
             self.rigid_y_offsets = np.load(path, allow_pickle=False).astype(np.int32)
-        path = registration_directory / "rigid_x_offsets.npy"
+        path = registration_directory / RegistrationArrays.RIGID_X_OFFSETS
         if path.exists():
             self.rigid_x_offsets = np.load(path, allow_pickle=False).astype(np.int32)
-        path = registration_directory / "rigid_correlations.npy"
+        path = registration_directory / RegistrationArrays.RIGID_CORRELATIONS
         if path.exists():
             self.rigid_correlations = np.load(path, allow_pickle=False).astype(np.float32)
-        path = registration_directory / "nonrigid_y_offsets.npy"
+        path = registration_directory / RegistrationArrays.NONRIGID_Y_OFFSETS
         if path.exists():
             self.nonrigid_y_offsets = np.load(path, allow_pickle=False).astype(np.float32)
-        path = registration_directory / "nonrigid_x_offsets.npy"
+        path = registration_directory / RegistrationArrays.NONRIGID_X_OFFSETS
         if path.exists():
             self.nonrigid_x_offsets = np.load(path, allow_pickle=False).astype(np.float32)
-        path = registration_directory / "nonrigid_correlations.npy"
+        path = registration_directory / RegistrationArrays.NONRIGID_CORRELATIONS
         if path.exists():
             self.nonrigid_correlations = np.load(path, allow_pickle=False).astype(np.float32)
-        path = registration_directory / "principal_component_extreme_images.npy"
+        path = registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_EXTREME_IMAGES
         if path.exists():
             self.principal_component_extreme_images = np.load(path, allow_pickle=False).astype(np.float32)
-        path = registration_directory / "principal_component_projections.npy"
+        path = registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_PROJECTIONS
         if path.exists():
             self.principal_component_projections = np.load(path, allow_pickle=False).astype(np.float32)
-        path = registration_directory / "principal_component_shift_metrics.npy"
+        path = registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_SHIFT_METRICS
         if path.exists():
             self.principal_component_shift_metrics = np.load(path, allow_pickle=False).astype(np.float32)
 
@@ -373,41 +383,41 @@ class RegistrationData:
         Args:
             output_path: The directory containing the ``registration_data/`` subdirectory.
         """
-        registration_directory = output_path / "registration_data"
+        registration_directory = output_path / REGISTRATION_DATA_DIRECTORY_NAME
         if not registration_directory.exists():
             return
 
-        path = registration_directory / "bad_frames.npy"
+        path = registration_directory / RegistrationArrays.BAD_FRAMES
         if path.exists():
             self.bad_frames = np.load(path, mmap_mode="r")
-        path = registration_directory / "reference_image.npy"
+        path = registration_directory / RegistrationArrays.REFERENCE_IMAGE
         if path.exists():
             self.reference_image = np.load(path, mmap_mode="r")
-        path = registration_directory / "rigid_y_offsets.npy"
+        path = registration_directory / RegistrationArrays.RIGID_Y_OFFSETS
         if path.exists():
             self.rigid_y_offsets = np.load(path, mmap_mode="r")
-        path = registration_directory / "rigid_x_offsets.npy"
+        path = registration_directory / RegistrationArrays.RIGID_X_OFFSETS
         if path.exists():
             self.rigid_x_offsets = np.load(path, mmap_mode="r")
-        path = registration_directory / "rigid_correlations.npy"
+        path = registration_directory / RegistrationArrays.RIGID_CORRELATIONS
         if path.exists():
             self.rigid_correlations = np.load(path, mmap_mode="r")
-        path = registration_directory / "nonrigid_y_offsets.npy"
+        path = registration_directory / RegistrationArrays.NONRIGID_Y_OFFSETS
         if path.exists():
             self.nonrigid_y_offsets = np.load(path, mmap_mode="r")
-        path = registration_directory / "nonrigid_x_offsets.npy"
+        path = registration_directory / RegistrationArrays.NONRIGID_X_OFFSETS
         if path.exists():
             self.nonrigid_x_offsets = np.load(path, mmap_mode="r")
-        path = registration_directory / "nonrigid_correlations.npy"
+        path = registration_directory / RegistrationArrays.NONRIGID_CORRELATIONS
         if path.exists():
             self.nonrigid_correlations = np.load(path, mmap_mode="r")
-        path = registration_directory / "principal_component_extreme_images.npy"
+        path = registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_EXTREME_IMAGES
         if path.exists():
             self.principal_component_extreme_images = np.load(path, mmap_mode="r")
-        path = registration_directory / "principal_component_projections.npy"
+        path = registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_PROJECTIONS
         if path.exists():
             self.principal_component_projections = np.load(path, mmap_mode="r")
-        path = registration_directory / "principal_component_shift_metrics.npy"
+        path = registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_SHIFT_METRICS
         if path.exists():
             self.principal_component_shift_metrics = np.load(path, mmap_mode="r")
 
@@ -482,28 +492,41 @@ class DetectionData:
         Args:
             output_path: The directory in which to create the ``detection_data/`` subdirectory.
         """
-        detection_directory = output_path / "detection_data"
+        detection_directory = output_path / DETECTION_DATA_DIRECTORY_NAME
         ensure_directory_exists(path=detection_directory, is_file=False)
 
         # Channel 1 arrays.
         if self.mean_image is not None and not is_memory_mapped(self.mean_image):
-            np.save(detection_directory / "mean_image.npy", arr=self.mean_image)
+            np.save(detection_directory / DetectionImages.MEAN_IMAGE, arr=self.mean_image)
         if self.enhanced_mean_image is not None and not is_memory_mapped(self.enhanced_mean_image):
-            np.save(detection_directory / "enhanced_mean_image.npy", arr=self.enhanced_mean_image)
+            np.save(detection_directory / DetectionImages.ENHANCED_MEAN_IMAGE, arr=self.enhanced_mean_image)
         if self.maximum_projection is not None and not is_memory_mapped(self.maximum_projection):
-            np.save(detection_directory / "maximum_projection.npy", arr=self.maximum_projection)
+            np.save(detection_directory / DetectionImages.MAXIMUM_PROJECTION, arr=self.maximum_projection)
         if self.correlation_map is not None and not is_memory_mapped(self.correlation_map):
-            np.save(detection_directory / "correlation_map.npy", arr=self.correlation_map)
+            np.save(detection_directory / DetectionImages.CORRELATION_MAP, arr=self.correlation_map)
 
         # Channel 2 arrays.
         if self.mean_image_channel_2 is not None and not is_memory_mapped(self.mean_image_channel_2):
-            np.save(detection_directory / "mean_image_channel_2.npy", arr=self.mean_image_channel_2)
+            np.save(
+                detection_directory / resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True),
+                arr=self.mean_image_channel_2,
+            )
         if self.enhanced_mean_image_channel_2 is not None and not is_memory_mapped(self.enhanced_mean_image_channel_2):
-            np.save(detection_directory / "enhanced_mean_image_channel_2.npy", arr=self.enhanced_mean_image_channel_2)
+            np.save(
+                detection_directory
+                / resolve_array_name(array=DetectionImages.ENHANCED_MEAN_IMAGE, second_channel=True),
+                arr=self.enhanced_mean_image_channel_2,
+            )
         if self.maximum_projection_channel_2 is not None and not is_memory_mapped(self.maximum_projection_channel_2):
-            np.save(detection_directory / "maximum_projection_channel_2.npy", arr=self.maximum_projection_channel_2)
+            np.save(
+                detection_directory / resolve_array_name(array=DetectionImages.MAXIMUM_PROJECTION, second_channel=True),
+                arr=self.maximum_projection_channel_2,
+            )
         if self.correlation_map_channel_2 is not None and not is_memory_mapped(self.correlation_map_channel_2):
-            np.save(detection_directory / "correlation_map_channel_2.npy", arr=self.correlation_map_channel_2)
+            np.save(
+                detection_directory / resolve_array_name(array=DetectionImages.CORRELATION_MAP, second_channel=True),
+                arr=self.correlation_map_channel_2,
+            )
 
     def load_arrays(self, output_path: Path) -> None:
         """Loads detection arrays from individual .npy files in the ``detection_data/`` subdirectory.
@@ -511,35 +534,35 @@ class DetectionData:
         Args:
             output_path: The directory containing the ``detection_data/`` subdirectory.
         """
-        detection_directory = output_path / "detection_data"
+        detection_directory = output_path / DETECTION_DATA_DIRECTORY_NAME
         if not detection_directory.exists():
             return
 
         # Channel 1 arrays.
-        path = detection_directory / "mean_image.npy"
+        path = detection_directory / DetectionImages.MEAN_IMAGE
         if path.exists():
             self.mean_image = np.load(path, allow_pickle=False).astype(np.float32)
-        path = detection_directory / "enhanced_mean_image.npy"
+        path = detection_directory / DetectionImages.ENHANCED_MEAN_IMAGE
         if path.exists():
             self.enhanced_mean_image = np.load(path, allow_pickle=False).astype(np.float32)
-        path = detection_directory / "maximum_projection.npy"
+        path = detection_directory / DetectionImages.MAXIMUM_PROJECTION
         if path.exists():
             self.maximum_projection = np.load(path, allow_pickle=False).astype(np.float32)
-        path = detection_directory / "correlation_map.npy"
+        path = detection_directory / DetectionImages.CORRELATION_MAP
         if path.exists():
             self.correlation_map = np.load(path, allow_pickle=False).astype(np.float32)
 
         # Channel 2 arrays.
-        path = detection_directory / "mean_image_channel_2.npy"
+        path = detection_directory / resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True)
         if path.exists():
             self.mean_image_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
-        path = detection_directory / "enhanced_mean_image_channel_2.npy"
+        path = detection_directory / resolve_array_name(array=DetectionImages.ENHANCED_MEAN_IMAGE, second_channel=True)
         if path.exists():
             self.enhanced_mean_image_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
-        path = detection_directory / "maximum_projection_channel_2.npy"
+        path = detection_directory / resolve_array_name(array=DetectionImages.MAXIMUM_PROJECTION, second_channel=True)
         if path.exists():
             self.maximum_projection_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
-        path = detection_directory / "correlation_map_channel_2.npy"
+        path = detection_directory / resolve_array_name(array=DetectionImages.CORRELATION_MAP, second_channel=True)
         if path.exists():
             self.correlation_map_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
 
@@ -553,35 +576,35 @@ class DetectionData:
         Args:
             output_path: The directory containing the ``detection_data/`` subdirectory.
         """
-        detection_directory = output_path / "detection_data"
+        detection_directory = output_path / DETECTION_DATA_DIRECTORY_NAME
         if not detection_directory.exists():
             return
 
         # Channel 1 arrays.
-        path = detection_directory / "mean_image.npy"
+        path = detection_directory / DetectionImages.MEAN_IMAGE
         if path.exists():
             self.mean_image = np.load(path, mmap_mode="r")
-        path = detection_directory / "enhanced_mean_image.npy"
+        path = detection_directory / DetectionImages.ENHANCED_MEAN_IMAGE
         if path.exists():
             self.enhanced_mean_image = np.load(path, mmap_mode="r")
-        path = detection_directory / "maximum_projection.npy"
+        path = detection_directory / DetectionImages.MAXIMUM_PROJECTION
         if path.exists():
             self.maximum_projection = np.load(path, mmap_mode="r")
-        path = detection_directory / "correlation_map.npy"
+        path = detection_directory / DetectionImages.CORRELATION_MAP
         if path.exists():
             self.correlation_map = np.load(path, mmap_mode="r")
 
         # Channel 2 arrays.
-        path = detection_directory / "mean_image_channel_2.npy"
+        path = detection_directory / resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True)
         if path.exists():
             self.mean_image_channel_2 = np.load(path, mmap_mode="r")
-        path = detection_directory / "enhanced_mean_image_channel_2.npy"
+        path = detection_directory / resolve_array_name(array=DetectionImages.ENHANCED_MEAN_IMAGE, second_channel=True)
         if path.exists():
             self.enhanced_mean_image_channel_2 = np.load(path, mmap_mode="r")
-        path = detection_directory / "maximum_projection_channel_2.npy"
+        path = detection_directory / resolve_array_name(array=DetectionImages.MAXIMUM_PROJECTION, second_channel=True)
         if path.exists():
             self.maximum_projection_channel_2 = np.load(path, mmap_mode="r")
-        path = detection_directory / "correlation_map_channel_2.npy"
+        path = detection_directory / resolve_array_name(array=DetectionImages.CORRELATION_MAP, second_channel=True)
         if path.exists():
             self.correlation_map_channel_2 = np.load(path, mmap_mode="r")
 
@@ -1009,34 +1032,41 @@ class ExtractionData:
         if self.roi_statistics is not None:
             ROIStatistics.save_list(
                 roi_list=self.roi_statistics,
-                masks_path=output_path / "roi_masks.npz",
-                statistics_path=output_path / "roi_statistics.npz",
+                masks_path=output_path / RecordingArrays.ROI_MASKS,
+                statistics_path=output_path / RecordingArrays.ROI_STATISTICS,
             )
 
         # Channel 1 trace arrays.
         if self.cell_fluorescence is not None and not is_memory_mapped(self.cell_fluorescence):
-            np.save(output_path / "cell_fluorescence.npy", arr=self.cell_fluorescence, allow_pickle=False)
+            np.save(output_path / RecordingArrays.CELL_FLUORESCENCE, arr=self.cell_fluorescence, allow_pickle=False)
         if self.neuropil_fluorescence is not None and not is_memory_mapped(self.neuropil_fluorescence):
-            np.save(output_path / "neuropil_fluorescence.npy", arr=self.neuropil_fluorescence, allow_pickle=False)
+            np.save(
+                output_path / RecordingArrays.NEUROPIL_FLUORESCENCE, arr=self.neuropil_fluorescence, allow_pickle=False
+            )
         if self.subtracted_fluorescence is not None and not is_memory_mapped(self.subtracted_fluorescence):
-            np.save(output_path / "subtracted_fluorescence.npy", arr=self.subtracted_fluorescence, allow_pickle=False)
+            np.save(
+                output_path / RecordingArrays.SUBTRACTED_FLUORESCENCE,
+                arr=self.subtracted_fluorescence,
+                allow_pickle=False,
+            )
         if self.spikes is not None and not is_memory_mapped(self.spikes):
-            np.save(output_path / "spikes.npy", arr=self.spikes, allow_pickle=False)
+            np.save(output_path / RecordingArrays.SPIKES, arr=self.spikes, allow_pickle=False)
         if self.cell_classification is not None and not is_memory_mapped(self.cell_classification):
-            np.save(output_path / "cell_classification.npy", arr=self.cell_classification, allow_pickle=False)
+            np.save(output_path / RecordingArrays.CELL_CLASSIFICATION, arr=self.cell_classification, allow_pickle=False)
 
         # Channel 2 ROI statistics (split into masks + stats files).
         if self.roi_statistics_channel_2 is not None:
             ROIStatistics.save_list(
                 roi_list=self.roi_statistics_channel_2,
-                masks_path=output_path / "roi_masks_channel_2.npz",
-                statistics_path=output_path / "roi_statistics_channel_2.npz",
+                masks_path=output_path / resolve_array_name(array=RecordingArrays.ROI_MASKS, second_channel=True),
+                statistics_path=output_path
+                / resolve_array_name(array=RecordingArrays.ROI_STATISTICS, second_channel=True),
             )
 
         # Channel 2 trace arrays.
         if self.cell_fluorescence_channel_2 is not None and not is_memory_mapped(self.cell_fluorescence_channel_2):
             np.save(
-                output_path / "cell_fluorescence_channel_2.npy",
+                output_path / resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
                 arr=self.cell_fluorescence_channel_2,
                 allow_pickle=False,
             )
@@ -1044,7 +1074,7 @@ class ExtractionData:
             self.neuropil_fluorescence_channel_2
         ):
             np.save(
-                output_path / "neuropil_fluorescence_channel_2.npy",
+                output_path / resolve_array_name(array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True),
                 arr=self.neuropil_fluorescence_channel_2,
                 allow_pickle=False,
             )
@@ -1052,27 +1082,31 @@ class ExtractionData:
             self.subtracted_fluorescence_channel_2
         ):
             np.save(
-                output_path / "subtracted_fluorescence_channel_2.npy",
+                output_path / resolve_array_name(array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True),
                 arr=self.subtracted_fluorescence_channel_2,
                 allow_pickle=False,
             )
         if self.spikes_channel_2 is not None and not is_memory_mapped(self.spikes_channel_2):
-            np.save(output_path / "spikes_channel_2.npy", arr=self.spikes_channel_2, allow_pickle=False)
+            np.save(
+                output_path / resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True),
+                arr=self.spikes_channel_2,
+                allow_pickle=False,
+            )
         if self.cell_classification_channel_2 is not None and not is_memory_mapped(self.cell_classification_channel_2):
             np.save(
-                output_path / "cell_classification_channel_2.npy",
+                output_path / resolve_array_name(array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True),
                 arr=self.cell_classification_channel_2,
                 allow_pickle=False,
             )
 
         # Colocalization arrays.
         if self.cell_colocalization is not None and not is_memory_mapped(self.cell_colocalization):
-            np.save(output_path / "cell_colocalization.npy", arr=self.cell_colocalization, allow_pickle=False)
+            np.save(output_path / RecordingArrays.CELL_COLOCALIZATION, arr=self.cell_colocalization, allow_pickle=False)
         if self.corrected_structural_mean_image is not None and not is_memory_mapped(
             self.corrected_structural_mean_image
         ):
             np.save(
-                output_path / "corrected_structural_mean_image.npy",
+                output_path / RecordingArrays.CORRECTED_STRUCTURAL_MEAN_IMAGE,
                 arr=self.corrected_structural_mean_image,
                 allow_pickle=False,
             )
@@ -1090,14 +1124,18 @@ class ExtractionData:
             output_path: The directory containing the extraction data files.
         """
         # Channel 1 ROI statistics (loaded from companion masks + stats files).
-        roi_masks_path = output_path / "roi_masks.npz"
-        roi_stats_path = output_path / "roi_statistics.npz"
+        roi_masks_path = output_path / RecordingArrays.ROI_MASKS
+        roi_stats_path = output_path / RecordingArrays.ROI_STATISTICS
         if self.roi_statistics is None and roi_masks_path.exists() and roi_stats_path.exists():
             self.roi_statistics = ROIStatistics.load_list(masks_path=roi_masks_path, statistics_path=roi_stats_path)
 
         # Channel 2 ROI statistics (loaded from companion masks + stats files).
-        roi_masks_channel_2_path = output_path / "roi_masks_channel_2.npz"
-        roi_stats_channel_2_path = output_path / "roi_statistics_channel_2.npz"
+        roi_masks_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.ROI_MASKS, second_channel=True
+        )
+        roi_stats_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.ROI_STATISTICS, second_channel=True
+        )
         if (
             self.roi_statistics_channel_2 is None
             and roi_masks_channel_2_path.exists()
@@ -1108,12 +1146,14 @@ class ExtractionData:
             )
 
         # Channel 1 classification.
-        cell_classification_path = output_path / "cell_classification.npy"
+        cell_classification_path = output_path / RecordingArrays.CELL_CLASSIFICATION
         if self.cell_classification is None and cell_classification_path.exists():
             self.cell_classification = np.load(cell_classification_path, allow_pickle=False).astype(np.float32)
 
         # Channel 2 classification.
-        cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
+        cell_classification_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True
+        )
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
             self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, allow_pickle=False).astype(
                 np.float32
@@ -1132,63 +1172,71 @@ class ExtractionData:
             output_path: The directory containing the result .npy files.
         """
         # Channel 1 traces.
-        cell_fluorescence_path = output_path / "cell_fluorescence.npy"
+        cell_fluorescence_path = output_path / RecordingArrays.CELL_FLUORESCENCE
         if self.cell_fluorescence is None and cell_fluorescence_path.exists():
             self.cell_fluorescence = np.load(cell_fluorescence_path, allow_pickle=False).astype(np.float32)
 
-        neuropil_fluorescence_path = output_path / "neuropil_fluorescence.npy"
+        neuropil_fluorescence_path = output_path / RecordingArrays.NEUROPIL_FLUORESCENCE
         if self.neuropil_fluorescence is None and neuropil_fluorescence_path.exists():
             self.neuropil_fluorescence = np.load(neuropil_fluorescence_path, allow_pickle=False).astype(np.float32)
 
-        subtracted_fluorescence_path = output_path / "subtracted_fluorescence.npy"
+        subtracted_fluorescence_path = output_path / RecordingArrays.SUBTRACTED_FLUORESCENCE
         if self.subtracted_fluorescence is None and subtracted_fluorescence_path.exists():
             self.subtracted_fluorescence = np.load(subtracted_fluorescence_path, allow_pickle=False).astype(np.float32)
 
-        spikes_path = output_path / "spikes.npy"
+        spikes_path = output_path / RecordingArrays.SPIKES
         if self.spikes is None and spikes_path.exists():
             self.spikes = np.load(spikes_path, allow_pickle=False).astype(np.float32)
 
         # Channel 1 classification.
-        cell_classification_path = output_path / "cell_classification.npy"
+        cell_classification_path = output_path / RecordingArrays.CELL_CLASSIFICATION
         if self.cell_classification is None and cell_classification_path.exists():
             self.cell_classification = np.load(cell_classification_path, allow_pickle=False).astype(np.float32)
 
         # Channel 2 traces.
-        cell_fluorescence_channel_2_path = output_path / "cell_fluorescence_channel_2.npy"
+        cell_fluorescence_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True
+        )
         if self.cell_fluorescence_channel_2 is None and cell_fluorescence_channel_2_path.exists():
             self.cell_fluorescence_channel_2 = np.load(cell_fluorescence_channel_2_path, allow_pickle=False).astype(
                 np.float32
             )
 
-        neuropil_fluorescence_channel_2_path = output_path / "neuropil_fluorescence_channel_2.npy"
+        neuropil_fluorescence_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True
+        )
         if self.neuropil_fluorescence_channel_2 is None and neuropil_fluorescence_channel_2_path.exists():
             self.neuropil_fluorescence_channel_2 = np.load(
                 neuropil_fluorescence_channel_2_path, allow_pickle=False
             ).astype(np.float32)
 
-        subtracted_fluorescence_channel_2_path = output_path / "subtracted_fluorescence_channel_2.npy"
+        subtracted_fluorescence_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True
+        )
         if self.subtracted_fluorescence_channel_2 is None and subtracted_fluorescence_channel_2_path.exists():
             self.subtracted_fluorescence_channel_2 = np.load(
                 subtracted_fluorescence_channel_2_path, allow_pickle=False
             ).astype(np.float32)
 
-        spikes_channel_2_path = output_path / "spikes_channel_2.npy"
+        spikes_channel_2_path = output_path / resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True)
         if self.spikes_channel_2 is None and spikes_channel_2_path.exists():
             self.spikes_channel_2 = np.load(spikes_channel_2_path, allow_pickle=False).astype(np.float32)
 
         # Channel 2 classification.
-        cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
+        cell_classification_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True
+        )
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
             self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, allow_pickle=False).astype(
                 np.float32
             )
 
         # Colocalization arrays.
-        cell_colocalization_path = output_path / "cell_colocalization.npy"
+        cell_colocalization_path = output_path / RecordingArrays.CELL_COLOCALIZATION
         if self.cell_colocalization is None and cell_colocalization_path.exists():
             self.cell_colocalization = np.load(cell_colocalization_path, allow_pickle=False).astype(np.float32)
 
-        corrected_structural_mean_image_path = output_path / "corrected_structural_mean_image.npy"
+        corrected_structural_mean_image_path = output_path / RecordingArrays.CORRECTED_STRUCTURAL_MEAN_IMAGE
         if self.corrected_structural_mean_image is None and corrected_structural_mean_image_path.exists():
             self.corrected_structural_mean_image = np.load(
                 corrected_structural_mean_image_path, allow_pickle=False
@@ -1204,14 +1252,18 @@ class ExtractionData:
             output_path: The directory containing the extraction data files.
         """
         # Channel 1 ROI statistics, eagerly loaded from companion masks and stats files, as .npz cannot be mapped.
-        roi_masks_path = output_path / "roi_masks.npz"
-        roi_stats_path = output_path / "roi_statistics.npz"
+        roi_masks_path = output_path / RecordingArrays.ROI_MASKS
+        roi_stats_path = output_path / RecordingArrays.ROI_STATISTICS
         if self.roi_statistics is None and roi_masks_path.exists() and roi_stats_path.exists():
             self.roi_statistics = ROIStatistics.load_list(masks_path=roi_masks_path, statistics_path=roi_stats_path)
 
         # Channel 2 ROI statistics, eagerly loaded from companion masks and stats files, as .npz cannot be mapped.
-        roi_masks_channel_2_path = output_path / "roi_masks_channel_2.npz"
-        roi_stats_channel_2_path = output_path / "roi_statistics_channel_2.npz"
+        roi_masks_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.ROI_MASKS, second_channel=True
+        )
+        roi_stats_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.ROI_STATISTICS, second_channel=True
+        )
         if (
             self.roi_statistics_channel_2 is None
             and roi_masks_channel_2_path.exists()
@@ -1222,12 +1274,14 @@ class ExtractionData:
             )
 
         # Channel 1 classification.
-        cell_classification_path = output_path / "cell_classification.npy"
+        cell_classification_path = output_path / RecordingArrays.CELL_CLASSIFICATION
         if self.cell_classification is None and cell_classification_path.exists():
             self.cell_classification = np.load(cell_classification_path, mmap_mode="r")
 
         # Channel 2 classification.
-        cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
+        cell_classification_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True
+        )
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
             self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, mmap_mode="r")
 
@@ -1242,55 +1296,63 @@ class ExtractionData:
             output_path: The directory containing the result .npy files.
         """
         # Channel 1 traces.
-        cell_fluorescence_path = output_path / "cell_fluorescence.npy"
+        cell_fluorescence_path = output_path / RecordingArrays.CELL_FLUORESCENCE
         if self.cell_fluorescence is None and cell_fluorescence_path.exists():
             self.cell_fluorescence = np.load(cell_fluorescence_path, mmap_mode="r")
 
-        neuropil_fluorescence_path = output_path / "neuropil_fluorescence.npy"
+        neuropil_fluorescence_path = output_path / RecordingArrays.NEUROPIL_FLUORESCENCE
         if self.neuropil_fluorescence is None and neuropil_fluorescence_path.exists():
             self.neuropil_fluorescence = np.load(neuropil_fluorescence_path, mmap_mode="r")
 
-        subtracted_fluorescence_path = output_path / "subtracted_fluorescence.npy"
+        subtracted_fluorescence_path = output_path / RecordingArrays.SUBTRACTED_FLUORESCENCE
         if self.subtracted_fluorescence is None and subtracted_fluorescence_path.exists():
             self.subtracted_fluorescence = np.load(subtracted_fluorescence_path, mmap_mode="r")
 
-        spikes_path = output_path / "spikes.npy"
+        spikes_path = output_path / RecordingArrays.SPIKES
         if self.spikes is None and spikes_path.exists():
             self.spikes = np.load(spikes_path, mmap_mode="r")
 
         # Channel 1 classification.
-        cell_classification_path = output_path / "cell_classification.npy"
+        cell_classification_path = output_path / RecordingArrays.CELL_CLASSIFICATION
         if self.cell_classification is None and cell_classification_path.exists():
             self.cell_classification = np.load(cell_classification_path, mmap_mode="r")
 
         # Channel 2 traces.
-        cell_fluorescence_channel_2_path = output_path / "cell_fluorescence_channel_2.npy"
+        cell_fluorescence_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True
+        )
         if self.cell_fluorescence_channel_2 is None and cell_fluorescence_channel_2_path.exists():
             self.cell_fluorescence_channel_2 = np.load(cell_fluorescence_channel_2_path, mmap_mode="r")
 
-        neuropil_fluorescence_channel_2_path = output_path / "neuropil_fluorescence_channel_2.npy"
+        neuropil_fluorescence_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True
+        )
         if self.neuropil_fluorescence_channel_2 is None and neuropil_fluorescence_channel_2_path.exists():
             self.neuropil_fluorescence_channel_2 = np.load(neuropil_fluorescence_channel_2_path, mmap_mode="r")
 
-        subtracted_fluorescence_channel_2_path = output_path / "subtracted_fluorescence_channel_2.npy"
+        subtracted_fluorescence_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True
+        )
         if self.subtracted_fluorescence_channel_2 is None and subtracted_fluorescence_channel_2_path.exists():
             self.subtracted_fluorescence_channel_2 = np.load(subtracted_fluorescence_channel_2_path, mmap_mode="r")
 
-        spikes_channel_2_path = output_path / "spikes_channel_2.npy"
+        spikes_channel_2_path = output_path / resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True)
         if self.spikes_channel_2 is None and spikes_channel_2_path.exists():
             self.spikes_channel_2 = np.load(spikes_channel_2_path, mmap_mode="r")
 
         # Channel 2 classification.
-        cell_classification_channel_2_path = output_path / "cell_classification_channel_2.npy"
+        cell_classification_channel_2_path = output_path / resolve_array_name(
+            array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True
+        )
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
             self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, mmap_mode="r")
 
         # Colocalization arrays.
-        cell_colocalization_path = output_path / "cell_colocalization.npy"
+        cell_colocalization_path = output_path / RecordingArrays.CELL_COLOCALIZATION
         if self.cell_colocalization is None and cell_colocalization_path.exists():
             self.cell_colocalization = np.load(cell_colocalization_path, mmap_mode="r")
 
-        corrected_structural_mean_image_path = output_path / "corrected_structural_mean_image.npy"
+        corrected_structural_mean_image_path = output_path / RecordingArrays.CORRECTED_STRUCTURAL_MEAN_IMAGE
         if self.corrected_structural_mean_image is None and corrected_structural_mean_image_path.exists():
             self.corrected_structural_mean_image = np.load(corrected_structural_mean_image_path, mmap_mode="r")
 
@@ -1455,7 +1517,7 @@ class SingleRecordingRuntimeData(YamlConfig):
         yaml_copy.detection.prepare_for_saving()
         yaml_copy.extraction.prepare_for_saving()
 
-        file_path = output_path / "runtime_data.yaml"
+        file_path = output_path / SINGLE_RECORDING_RUNTIME_DATA_FILENAME
         yaml_copy.to_yaml(file_path=file_path)
 
     @classmethod
@@ -1473,7 +1535,7 @@ class SingleRecordingRuntimeData(YamlConfig):
             A SingleRecordingRuntimeData instance with all scalar fields deserialized. NumPy array fields
             remain None until explicitly loaded.
         """
-        file_path = output_path / "runtime_data.yaml"
+        file_path = output_path / SINGLE_RECORDING_RUNTIME_DATA_FILENAME
         return cls.from_yaml(file_path=file_path)
 
 
@@ -1602,7 +1664,7 @@ class CombinedData:
         # Publishes the marker through the atomic writer, which writes a temporary file in the destination's own
         # directory, flushes it to disk, and renames it over the destination. Writing the destination directly would
         # truncate it first, so an interrupted write would also destroy an already complete marker from an earlier run.
-        with atomic_write(file_path=root_path / "combined_metadata.npz", binary=True) as metadata_file:
+        with atomic_write(file_path=root_path / COMBINED_METADATA_FILENAME, binary=True) as metadata_file:
             np.savez(metadata_file, allow_pickle=False, **save_dictionary)
 
     @classmethod
@@ -1639,7 +1701,7 @@ class CombinedData:
         Returns:
             A dictionary of keyword arguments for CombinedData construction (excludes detection and extraction).
         """
-        metadata_path = root_path / "combined_metadata.npz"
+        metadata_path = root_path / COMBINED_METADATA_FILENAME
         if not metadata_path.exists():
             message = (
                 f"Unable to load combined data. The combined metadata file does not exist at the specified path: "

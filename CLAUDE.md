@@ -172,21 +172,27 @@ outputs.
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap, and
   projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
   deconvolution for tracked ROI templates (parallelizable across recordings).
-- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across four modules that
-  form a one-way dependency chain. `jobs.py` is the leaf: it holds the job name enumerations, the phase model
+- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across seven modules that
+  form a one-way dependency chain. `jobs.py` is the leaf above `cindra.layout`: it holds the job name enumerations,
+  the phase model
   (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`), the resolvers that
   expand it into a recording's job universe (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`,
   `resolve_pipeline_jobs`), the prerequisite graph (`resolve_single_recording_prerequisites`,
   `resolve_multi_recording_prerequisites`, `resolve_prerequisite_job_ids`, `validate_job_prerequisites`), the phase
-  expansion (`resolve_downstream_phases`, `order_phases_by_execution`), the per-plane tracker specifier
-  (`resolve_plane_specifier`, `PLANE_SPECIFIER_PREFIX`), and the two tracker filenames. `allocation.py` adds the
-  measured stage worker defaults, the resource-class model, and the host core and memory budgets. `execution.py` holds
-  the batch engine: `PendingJob`, `JobExecutionState`, the admission scan, the pool dispatcher, and the manager
-  thread.
-  `pipeline.py` is the entry point every scheduler dispatches. Nothing below `orchestration` imports it, and no module
-  inside it imports `interface`, so the MCP layer is a thin argument-validation and JSON-shaping wrapper over calls
-  into the package. This mirrors the orchestration package of `ataraxis-video-system` and
-  `ataraxis-communication-interface`.
+  expansion (`resolve_downstream_phases`, `order_phases_by_execution`), and the prerequisite messages. The plane
+  specifier, the tracker filenames, and every other on-disk name live one layer below in `cindra.layout`, which
+  `jobs.py` reads them from. `allocation.py` adds the measured stage worker defaults, the resource-class model, and
+  the host core and memory budgets. `footprints.py` adds the per-stage memory models and the two estimators that
+  report what one job holds. `discovery.py` pairs the job model with the on-disk inventory to report both the jobs a
+  recording declares and the subset whose inputs exist. `worker.py` holds the per-job entry points every scheduler
+  dispatches, along with the two priming entry points that write the shared bootstrap. `execution.py` holds the batch
+  engine: `PendingJob`, `JobExecutionState`, the admission scan, the two-pass dispatcher, and the manager thread.
+  `pipeline.py` holds the two sequential entry points. `openmp.py` carries no module-level side effect and its check
+  runs only inside those two entry points, so importing the package writes nothing and a console message never
+  precedes the stdio MCP server's JSON-RPC stream. Nothing below `orchestration` imports it, and
+  no module inside it imports `interface`, so the MCP layer is a thin argument-validation and JSON-shaping wrapper
+  over calls into the package. This mirrors the orchestration package of `ataraxis-video-system` and
+  `ataraxis-communication-interface`, and its concurrency model follows `sollertia-forgery`.
 - **Tracker-driven job state**: The transitions of a job the pipeline runs belong to the tracker's `run_job()`
   context manager rather than to a hand-rolled `start_job`/`complete_job`/`fail_job` sequence. The engine's
   `_fail_pending_jobs` is the one exception, because it records a terminal outcome for a job that never ran and
@@ -223,11 +229,15 @@ outputs.
   resource allocation, and automatic phase sequencing. The dispatch half lives in `cindra.orchestration`, so the
   execute, monitor, and cancel tools hold only argument validation and response shaping. The prepare tools stay in
   the interface layer, because building a manifest is a user-facing operation over paths and configuration files
-  rather than part of the scheduling model. Every job class except combination carries a measured per-job
-  worker count from `cindra.orchestration`. The combination class holds the single core its serial merge needs. The
-  I/O-bound classes (binarize, combine) pair the count with a fixed concurrency cap. The compute-bound classes
-  (register, process, discover, extract) derive their concurrency from the session CPU budget, and the processing class
-  additionally from available system memory.
+  rather than part of the scheduling model. Every job class carries a measured per-job worker count from
+  `cindra.orchestration`, and the combination class holds the single core its serial merge needs. Concurrency follows
+  three separate terms. The binarization class carries a hard ceiling, because it decodes at the storage's rate rather
+  than the host's core count and a wider batch finishes the same work more slowly while holding cores other work could
+  use, so spare capacity never lifts it. The registration and processing classes carry soft reservations, which hold
+  capacity back for the stages that wait on no other job and are released once nothing else can use the room. Every
+  other class derives its concurrency from the session CPU budget alone. Memory bounds admission rather than
+  concurrency, because the memory one job holds follows the recording it processes rather than the class it belongs
+  to.
 - **Process-isolated jobs**: The batch engine dispatches every job into a `ProcessPoolExecutor` sized to the
   concurrency the per-class caps allow, so admission remains the only thing bounding how many jobs run. Isolation buys
   two things a thread pool cannot. A job's BLAS width belongs to its process, so concurrent jobs at different widths no

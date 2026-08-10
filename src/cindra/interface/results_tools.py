@@ -17,6 +17,30 @@ import numpy as np
 from natsort import natsorted
 from ataraxis_data_structures import discover_marker_files
 
+from ..layout import (
+    OUTPUT_DIRECTORY_NAME,
+    PLANE_SPECIFIER_PREFIX,
+    DEFORMED_MASKS_FILENAME,
+    CHANNEL_1_BINARY_FILENAME,
+    CHANNEL_2_BINARY_FILENAME,
+    COMBINED_METADATA_FILENAME,
+    DETECTION_DATA_DIRECTORY_NAME,
+    MULTI_RECORDING_DIRECTORY_NAME,
+    ACQUISITION_PARAMETERS_FILENAME,
+    REGISTRATION_DATA_DIRECTORY_NAME,
+    TRACKING_TEMPLATE_MASKS_FILENAME,
+    MULTI_RECORDING_ARRAYS_DIRECTORY_NAME,
+    MULTI_RECORDING_RUNTIME_DATA_FILENAME,
+    MULTI_RECORDING_CONFIGURATION_FILENAME,
+    SINGLE_RECORDING_RUNTIME_DATA_FILENAME,
+    SINGLE_RECORDING_CONFIGURATION_FILENAME,
+    DetectionImages,
+    RecordingArrays,
+    RegistrationArrays,
+    MultiRecordingArrays,
+    resolve_array_name,
+    resolve_channel_2_name,
+)
 from .mcp_instance import mcp
 
 if TYPE_CHECKING:
@@ -81,7 +105,7 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
 
     # Detects two-channel status from combined metadata if available.
     two_channels = False
-    combined_metadata_path = cindra_root / "combined_metadata.npz"
+    combined_metadata_path = cindra_root / COMBINED_METADATA_FILENAME
     if combined_metadata_path.exists():
         with contextlib.suppress(Exception):
             metadata = np.load(combined_metadata_path, allow_pickle=False)
@@ -90,13 +114,17 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
                 two_channels = len(channel_2_paths) > 0 and str(channel_2_paths[0]) != ""
 
     # Root-level files.
-    _check_file_exists(label="configuration.yaml", path=cindra_root / "configuration.yaml", state=state)
     _check_file_exists(
-        label="acquisition_parameters.yaml", path=cindra_root / "acquisition_parameters.yaml", state=state
+        label=SINGLE_RECORDING_CONFIGURATION_FILENAME,
+        path=cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME,
+        state=state,
     )
-    _check_file_exists(label="combined_metadata.npz", path=combined_metadata_path, state=state)
+    _check_file_exists(
+        label=ACQUISITION_PARAMETERS_FILENAME, path=cindra_root / ACQUISITION_PARAMETERS_FILENAME, state=state
+    )
+    _check_file_exists(label=COMBINED_METADATA_FILENAME, path=combined_metadata_path, state=state)
     _check_npz_keys(
-        label="combined_metadata.npz",
+        label=COMBINED_METADATA_FILENAME,
         path=combined_metadata_path,
         required_keys=[
             "plane_count",
@@ -110,50 +138,58 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
     )
 
     # Combined detection images.
-    detection_directory = cindra_root / "detection_data"
-    for name in ("mean_image.npy", "enhanced_mean_image.npy", "maximum_projection.npy", "correlation_map.npy"):
+    detection_directory = cindra_root / DETECTION_DATA_DIRECTORY_NAME
+    name: str
+    for name in (
+        DetectionImages.MEAN_IMAGE,
+        DetectionImages.ENHANCED_MEAN_IMAGE,
+        DetectionImages.MAXIMUM_PROJECTION,
+        DetectionImages.CORRELATION_MAP,
+    ):
         _check_file_exists(label=f"detection_data/{name}", path=detection_directory / name, state=state)
     if two_channels:
         for name in (
-            "mean_image_channel_2.npy",
-            "enhanced_mean_image_channel_2.npy",
-            "maximum_projection_channel_2.npy",
-            "correlation_map_channel_2.npy",
+            resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True),
+            resolve_array_name(array=DetectionImages.ENHANCED_MEAN_IMAGE, second_channel=True),
+            resolve_array_name(array=DetectionImages.MAXIMUM_PROJECTION, second_channel=True),
+            resolve_array_name(array=DetectionImages.CORRELATION_MAP, second_channel=True),
         ):
             _check_file_exists(
                 label=f"detection_data/{name}", path=detection_directory / name, state=state, required=False
             )
 
     # Combined extraction data.
-    _check_file_exists(label="roi_masks.npz", path=cindra_root / "roi_masks.npz", state=state)
+    _check_file_exists(label=RecordingArrays.ROI_MASKS, path=cindra_root / RecordingArrays.ROI_MASKS, state=state)
     _check_npz_keys(
-        label="roi_masks.npz",
-        path=cindra_root / "roi_masks.npz",
+        label=RecordingArrays.ROI_MASKS,
+        path=cindra_root / RecordingArrays.ROI_MASKS,
         required_keys=["pixel_counts", "y_pixels", "x_pixels", "pixel_weights", "centroids"],
         state=state,
     )
-    _check_file_exists(label="roi_statistics.npz", path=cindra_root / "roi_statistics.npz", state=state)
+    _check_file_exists(
+        label=RecordingArrays.ROI_STATISTICS, path=cindra_root / RecordingArrays.ROI_STATISTICS, state=state
+    )
     _check_npz_keys(
-        label="roi_statistics.npz",
-        path=cindra_root / "roi_statistics.npz",
+        label=RecordingArrays.ROI_STATISTICS,
+        path=cindra_root / RecordingArrays.ROI_STATISTICS,
         required_keys=["footprints", "compactness", "plane_index"],
         state=state,
     )
     for name in (
-        "cell_fluorescence.npy",
-        "neuropil_fluorescence.npy",
-        "subtracted_fluorescence.npy",
-        "spikes.npy",
-        "cell_classification.npy",
+        RecordingArrays.CELL_FLUORESCENCE,
+        RecordingArrays.NEUROPIL_FLUORESCENCE,
+        RecordingArrays.SUBTRACTED_FLUORESCENCE,
+        RecordingArrays.SPIKES,
+        RecordingArrays.CELL_CLASSIFICATION,
     ):
         _check_file_exists(label=name, path=cindra_root / name, state=state)
     if two_channels:
         for name in (
-            "cell_fluorescence_channel_2.npy",
-            "neuropil_fluorescence_channel_2.npy",
-            "subtracted_fluorescence_channel_2.npy",
-            "spikes_channel_2.npy",
-            "cell_classification_channel_2.npy",
+            resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
+            resolve_array_name(array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True),
+            resolve_array_name(array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True),
+            resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True),
+            resolve_array_name(array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True),
         ):
             _check_file_exists(label=name, path=cindra_root / name, state=state, required=False)
 
@@ -163,32 +199,38 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
     for plane_directory in planes:
         plane_name = plane_directory.name
         _check_file_exists(
-            label=f"{plane_name}/runtime_data.yaml", path=plane_directory / "runtime_data.yaml", state=state
+            label=f"{plane_name}/runtime_data.yaml",
+            path=plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME,
+            state=state,
         )
         _check_file_exists(
-            label=f"{plane_name}/channel_1_data.bin", path=plane_directory / "channel_1_data.bin", state=state
+            label=f"{plane_name}/channel_1_data.bin", path=plane_directory / CHANNEL_1_BINARY_FILENAME, state=state
         )
         if two_channels:
             _check_file_exists(
                 label=f"{plane_name}/channel_2_data.bin",
-                path=plane_directory / "channel_2_data.bin",
+                path=plane_directory / CHANNEL_2_BINARY_FILENAME,
                 state=state,
                 required=False,
             )
 
         # Per-plane registration data.
-        registration_directory = plane_directory / "registration_data"
+        registration_directory = plane_directory / REGISTRATION_DATA_DIRECTORY_NAME
         for name in (
-            "reference_image.npy",
-            "bad_frames.npy",
-            "rigid_y_offsets.npy",
-            "rigid_x_offsets.npy",
-            "rigid_correlations.npy",
+            RegistrationArrays.REFERENCE_IMAGE,
+            RegistrationArrays.BAD_FRAMES,
+            RegistrationArrays.RIGID_Y_OFFSETS,
+            RegistrationArrays.RIGID_X_OFFSETS,
+            RegistrationArrays.RIGID_CORRELATIONS,
         ):
             _check_file_exists(
                 label=f"{plane_name}/registration_data/{name}", path=registration_directory / name, state=state
             )
-        for name in ("nonrigid_y_offsets.npy", "nonrigid_x_offsets.npy", "nonrigid_correlations.npy"):
+        for name in (
+            RegistrationArrays.NONRIGID_Y_OFFSETS,
+            RegistrationArrays.NONRIGID_X_OFFSETS,
+            RegistrationArrays.NONRIGID_CORRELATIONS,
+        ):
             _check_file_exists(
                 label=f"{plane_name}/registration_data/{name}",
                 path=registration_directory / name,
@@ -196,9 +238,9 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
                 required=False,
             )
         for name in (
-            "principal_component_extreme_images.npy",
-            "principal_component_projections.npy",
-            "principal_component_shift_metrics.npy",
+            RegistrationArrays.PRINCIPAL_COMPONENT_EXTREME_IMAGES,
+            RegistrationArrays.PRINCIPAL_COMPONENT_PROJECTIONS,
+            RegistrationArrays.PRINCIPAL_COMPONENT_SHIFT_METRICS,
         ):
             _check_file_exists(
                 label=f"{plane_name}/registration_data/{name}",
@@ -208,21 +250,28 @@ def verify_single_recording_output_tool(recording_path: str) -> dict[str, object
             )
 
         # Per-plane detection and extraction data.
-        plane_detection_directory = plane_directory / "detection_data"
-        for name in ("mean_image.npy", "enhanced_mean_image.npy", "maximum_projection.npy", "correlation_map.npy"):
+        plane_detection_directory = plane_directory / DETECTION_DATA_DIRECTORY_NAME
+        for name in (
+            DetectionImages.MEAN_IMAGE,
+            DetectionImages.ENHANCED_MEAN_IMAGE,
+            DetectionImages.MAXIMUM_PROJECTION,
+            DetectionImages.CORRELATION_MAP,
+        ):
             _check_file_exists(
                 label=f"{plane_name}/detection_data/{name}", path=plane_detection_directory / name, state=state
             )
-        _check_file_exists(label=f"{plane_name}/roi_masks.npz", path=plane_directory / "roi_masks.npz", state=state)
         _check_file_exists(
-            label=f"{plane_name}/roi_statistics.npz", path=plane_directory / "roi_statistics.npz", state=state
+            label=f"{plane_name}/roi_masks.npz", path=plane_directory / RecordingArrays.ROI_MASKS, state=state
+        )
+        _check_file_exists(
+            label=f"{plane_name}/roi_statistics.npz", path=plane_directory / RecordingArrays.ROI_STATISTICS, state=state
         )
         for name in (
-            "cell_fluorescence.npy",
-            "neuropil_fluorescence.npy",
-            "subtracted_fluorescence.npy",
-            "spikes.npy",
-            "cell_classification.npy",
+            RecordingArrays.CELL_FLUORESCENCE,
+            RecordingArrays.NEUROPIL_FLUORESCENCE,
+            RecordingArrays.SUBTRACTED_FLUORESCENCE,
+            RecordingArrays.SPIKES,
+            RecordingArrays.CELL_CLASSIFICATION,
         ):
             _check_file_exists(label=f"{plane_name}/{name}", path=plane_directory / name, state=state)
 
@@ -290,7 +339,7 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
     state = _VerificationState()
 
     # Loads entry recording runtime data to discover all recordings in the dataset.
-    runtime_yaml = _load_yaml(dataset_path / "multi_recording_runtime_data.yaml")
+    runtime_yaml = _load_yaml(dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     if runtime_yaml is None:
         return {
             "success": False,
@@ -306,16 +355,16 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
     configuration_found = False
     for output_path_string in dataset_output_paths:
         output_path = Path(output_path_string)
-        if (output_path / "multi_recording_configuration.yaml").exists():
+        if (output_path / MULTI_RECORDING_CONFIGURATION_FILENAME).exists():
             _check_file_exists(
-                label="multi_recording_configuration.yaml",
-                path=output_path / "multi_recording_configuration.yaml",
+                label=MULTI_RECORDING_CONFIGURATION_FILENAME,
+                path=output_path / MULTI_RECORDING_CONFIGURATION_FILENAME,
                 state=state,
             )
             configuration_found = True
             break
     if not configuration_found:
-        state.missing.append("multi_recording_configuration.yaml")
+        state.missing.append(MULTI_RECORDING_CONFIGURATION_FILENAME)
         state.total_checks += 1
 
     # Per-recording verification.
@@ -323,7 +372,7 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
         output_path = Path(output_path_string)
         recording_prefix = f"recording_{index}"
 
-        recording_runtime = _load_yaml(output_path / "multi_recording_runtime_data.yaml")
+        recording_runtime = _load_yaml(output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         recording_id = (
             recording_runtime.get("io", {}).get("recording_id", f"unknown_{index}")
             if recording_runtime is not None
@@ -347,18 +396,19 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
 
         _check_file_exists(
             label=f"{recording_prefix}/multi_recording_runtime_data.yaml",
-            path=output_path / "multi_recording_runtime_data.yaml",
+            path=output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME,
             state=state,
         )
 
         # Registration data.
-        registration_directory = output_path / "registration_arrays"
+        registration_directory = output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME
+        name: str
         for name in (
-            "deform_field_y.npy",
-            "deform_field_x.npy",
-            "transformed_mean_image.npy",
-            "transformed_enhanced_mean_image.npy",
-            "transformed_maximum_projection.npy",
+            MultiRecordingArrays.DEFORM_FIELD_Y,
+            MultiRecordingArrays.DEFORM_FIELD_X,
+            MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE,
+            MultiRecordingArrays.TRANSFORMED_ENHANCED_MEAN_IMAGE,
+            MultiRecordingArrays.TRANSFORMED_MAXIMUM_PROJECTION,
         ):
             _check_file_exists(
                 label=f"{recording_prefix}/registration_arrays/{name}",
@@ -368,12 +418,12 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
 
         _check_file_exists(
             label=f"{recording_prefix}/registration_deformed_masks.npz",
-            path=output_path / "registration_deformed_masks.npz",
+            path=output_path / DEFORMED_MASKS_FILENAME,
             state=state,
         )
         _check_npz_keys(
             label=f"{recording_prefix}/registration_deformed_masks.npz",
-            path=output_path / "registration_deformed_masks.npz",
+            path=output_path / DEFORMED_MASKS_FILENAME,
             required_keys=["pixel_counts", "y_pixels", "x_pixels"],
             state=state,
         )
@@ -381,45 +431,49 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
         # Tracking data.
         _check_file_exists(
             label=f"{recording_prefix}/tracking_template_masks.npz",
-            path=output_path / "tracking_template_masks.npz",
+            path=output_path / TRACKING_TEMPLATE_MASKS_FILENAME,
             state=state,
         )
         _check_npz_keys(
             label=f"{recording_prefix}/tracking_template_masks.npz",
-            path=output_path / "tracking_template_masks.npz",
+            path=output_path / TRACKING_TEMPLATE_MASKS_FILENAME,
             required_keys=["pixel_counts", "cluster_id", "recording_count"],
             state=state,
         )
 
         # Extraction data.
-        _check_file_exists(label=f"{recording_prefix}/roi_masks.npz", path=output_path / "roi_masks.npz", state=state)
         _check_file_exists(
-            label=f"{recording_prefix}/roi_statistics.npz", path=output_path / "roi_statistics.npz", state=state
+            label=f"{recording_prefix}/roi_masks.npz", path=output_path / RecordingArrays.ROI_MASKS, state=state
+        )
+        _check_file_exists(
+            label=f"{recording_prefix}/roi_statistics.npz",
+            path=output_path / RecordingArrays.ROI_STATISTICS,
+            state=state,
         )
         for name in (
-            "cell_fluorescence.npy",
-            "neuropil_fluorescence.npy",
-            "subtracted_fluorescence.npy",
-            "spikes.npy",
+            RecordingArrays.CELL_FLUORESCENCE,
+            RecordingArrays.NEUROPIL_FLUORESCENCE,
+            RecordingArrays.SUBTRACTED_FLUORESCENCE,
+            RecordingArrays.SPIKES,
         ):
             _check_file_exists(label=f"{recording_prefix}/{name}", path=output_path / name, state=state)
 
         # Channel 2 files (optional).
         for name in (
-            "registration_deformed_masks_channel_2.npz",
-            "tracking_template_masks_channel_2.npz",
-            "roi_masks_channel_2.npz",
-            "roi_statistics_channel_2.npz",
-            "cell_fluorescence_channel_2.npy",
-            "neuropil_fluorescence_channel_2.npy",
-            "subtracted_fluorescence_channel_2.npy",
-            "spikes_channel_2.npy",
+            resolve_channel_2_name(name=DEFORMED_MASKS_FILENAME),
+            resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME),
+            resolve_array_name(array=RecordingArrays.ROI_MASKS, second_channel=True),
+            resolve_array_name(array=RecordingArrays.ROI_STATISTICS, second_channel=True),
+            resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
+            resolve_array_name(array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True),
+            resolve_array_name(array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True),
+            resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True),
         ):
             _check_file_exists(label=f"{recording_prefix}/{name}", path=output_path / name, state=state, required=False)
 
         _check_file_exists(
             label=f"{recording_prefix}/cell_colocalization.npy",
-            path=output_path / "cell_colocalization.npy",
+            path=output_path / RecordingArrays.CELL_COLOCALIZATION,
             state=state,
             required=False,
         )
@@ -477,7 +531,7 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
         "cindra_path": str(cindra_root),
     }
 
-    combined_metadata_path = cindra_root / "combined_metadata.npz"
+    combined_metadata_path = cindra_root / COMBINED_METADATA_FILENAME
     if combined_metadata_path.exists():
         try:
             metadata = np.load(combined_metadata_path, allow_pickle=False)
@@ -500,7 +554,7 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
         result["combined_metadata_available"] = False
 
     # ROI count and cell classification summary.
-    classification_path = cindra_root / "cell_classification.npy"
+    classification_path = cindra_root / RecordingArrays.CELL_CLASSIFICATION
     if classification_path.exists():
         with contextlib.suppress(Exception):
             classification = np.load(classification_path, mmap_mode="r")
@@ -509,7 +563,7 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
             result["non_cell_count"] = result["roi_count"] - result["cell_count"]
 
     # Frame count from fluorescence traces (memory-mapped for efficiency).
-    fluorescence_path = cindra_root / "cell_fluorescence.npy"
+    fluorescence_path = cindra_root / RecordingArrays.CELL_FLUORESCENCE
     if fluorescence_path.exists():
         with contextlib.suppress(Exception):
             fluorescence = np.load(fluorescence_path, mmap_mode="r")
@@ -519,7 +573,7 @@ def query_single_recording_metadata_tool(recording_path: str) -> dict[str, objec
     planes = _list_plane_directories(cindra_root)
     timing_entries: list[dict[str, Any]] = []
     for plane_directory in planes:
-        runtime = _load_yaml(plane_directory / "runtime_data.yaml")
+        runtime = _load_yaml(plane_directory / SINGLE_RECORDING_RUNTIME_DATA_FILENAME)
         if runtime is None:
             continue
         timing = runtime.get("timing", {})
@@ -591,7 +645,7 @@ def query_registration_quality_tool(
     if plane_path is None:
         return {"success": False, "error": f"Unable to query registration quality. {error}"}
 
-    registration_directory = plane_path / "registration_data"
+    registration_directory = plane_path / REGISTRATION_DATA_DIRECTORY_NAME
     if not registration_directory.exists():
         return {
             "success": False,
@@ -608,8 +662,8 @@ def query_registration_quality_tool(
 
     # Rigid registration offsets.
     for name, key in [
-        ("rigid_y_offsets.npy", "rigid_y_offsets"),
-        ("rigid_x_offsets.npy", "rigid_x_offsets"),
+        (RegistrationArrays.RIGID_Y_OFFSETS, "rigid_y_offsets"),
+        (RegistrationArrays.RIGID_X_OFFSETS, "rigid_x_offsets"),
     ]:
         path = registration_directory / name
         if path.exists():
@@ -622,13 +676,13 @@ def query_registration_quality_tool(
                 result[f"{key}_error"] = str(error)
 
     # Rigid correlations.
-    correlation_path = registration_directory / "rigid_correlations.npy"
+    correlation_path = registration_directory / RegistrationArrays.RIGID_CORRELATIONS
     if correlation_path.exists():
         with contextlib.suppress(Exception):
             result["rigid_correlations"] = _array_summary(np.load(correlation_path, mmap_mode="r"))
 
     # Bad frames.
-    bad_frames_path = registration_directory / "bad_frames.npy"
+    bad_frames_path = registration_directory / RegistrationArrays.BAD_FRAMES
     if bad_frames_path.exists():
         with contextlib.suppress(Exception):
             bad_frames = np.load(bad_frames_path, mmap_mode="r")
@@ -642,8 +696,8 @@ def query_registration_quality_tool(
 
     # Nonrigid registration offsets (optional).
     for name, key in [
-        ("nonrigid_y_offsets.npy", "nonrigid_y_offsets"),
-        ("nonrigid_x_offsets.npy", "nonrigid_x_offsets"),
+        (RegistrationArrays.NONRIGID_Y_OFFSETS, "nonrigid_y_offsets"),
+        (RegistrationArrays.NONRIGID_X_OFFSETS, "nonrigid_x_offsets"),
     ]:
         path = registration_directory / name
         if path.exists():
@@ -654,13 +708,13 @@ def query_registration_quality_tool(
                 summary["num_blocks"] = int(array.shape[1]) if array.ndim > 1 else 0
                 result[key] = summary
 
-    nonrigid_correlation_path = registration_directory / "nonrigid_correlations.npy"
+    nonrigid_correlation_path = registration_directory / RegistrationArrays.NONRIGID_CORRELATIONS
     if nonrigid_correlation_path.exists():
         with contextlib.suppress(Exception):
             result["nonrigid_correlations"] = _array_summary(np.load(nonrigid_correlation_path, mmap_mode="r"))
 
     # Principal component shift metrics (optional).
-    principal_component_metrics_path = registration_directory / "principal_component_shift_metrics.npy"
+    principal_component_metrics_path = registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_SHIFT_METRICS
     if principal_component_metrics_path.exists():
         with contextlib.suppress(Exception):
             principal_component_metrics = np.load(principal_component_metrics_path, mmap_mode="r")
@@ -712,7 +766,7 @@ def query_detection_summary_tool(
     if data_path is None:
         return {"success": False, "error": f"Unable to query detection summary. {error}"}
 
-    detection_directory = data_path / "detection_data"
+    detection_directory = data_path / DETECTION_DATA_DIRECTORY_NAME
     if not detection_directory.exists():
         return {
             "success": False,
@@ -728,14 +782,18 @@ def query_detection_summary_tool(
 
     # Channel 1 and channel 2 detection images.
     image_files: dict[str, str] = {
-        "mean_image": "mean_image.npy",
-        "enhanced_mean_image": "enhanced_mean_image.npy",
-        "maximum_projection": "maximum_projection.npy",
-        "correlation_map": "correlation_map.npy",
-        "mean_image_channel_2": "mean_image_channel_2.npy",
-        "enhanced_mean_image_channel_2": "enhanced_mean_image_channel_2.npy",
-        "maximum_projection_channel_2": "maximum_projection_channel_2.npy",
-        "correlation_map_channel_2": "correlation_map_channel_2.npy",
+        "mean_image": DetectionImages.MEAN_IMAGE,
+        "enhanced_mean_image": DetectionImages.ENHANCED_MEAN_IMAGE,
+        "maximum_projection": DetectionImages.MAXIMUM_PROJECTION,
+        "correlation_map": DetectionImages.CORRELATION_MAP,
+        "mean_image_channel_2": resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True),
+        "enhanced_mean_image_channel_2": resolve_array_name(
+            array=DetectionImages.ENHANCED_MEAN_IMAGE, second_channel=True
+        ),
+        "maximum_projection_channel_2": resolve_array_name(
+            array=DetectionImages.MAXIMUM_PROJECTION, second_channel=True
+        ),
+        "correlation_map_channel_2": resolve_array_name(array=DetectionImages.CORRELATION_MAP, second_channel=True),
     }
     for label, filename in image_files.items():
         path = detection_directory / filename
@@ -751,7 +809,7 @@ def query_detection_summary_tool(
     # ROI diameter and aspect ratio from per-plane runtime data.
     source_plane = _list_plane_directories(cindra_root)[0] if plane_index == -1 else data_path
     if source_plane is not None:
-        runtime = _load_yaml(source_plane / "runtime_data.yaml")
+        runtime = _load_yaml(source_plane / SINGLE_RECORDING_RUNTIME_DATA_FILENAME)
         if runtime is not None:
             detection_metadata = runtime.get("detection", {})
             if detection_metadata.get("roi_diameter") is not None:
@@ -827,8 +885,8 @@ def query_roi_statistics_tool(
             return {"success": False, "error": f"Unable to query ROI statistics. {error}"}
         recording_id = None
 
-    statistics_path = data_path / "roi_statistics.npz"
-    masks_path = data_path / "roi_masks.npz"
+    statistics_path = data_path / RecordingArrays.ROI_STATISTICS
+    masks_path = data_path / RecordingArrays.ROI_MASKS
     if not statistics_path.exists() or not masks_path.exists():
         return {
             "success": False,
@@ -851,7 +909,7 @@ def query_roi_statistics_tool(
     # Enriches entries with mode-specific metadata.
     if dataset is None:
         # Single-recording mode: adds classification data.
-        classification_path = data_path / "cell_classification.npy"
+        classification_path = data_path / RecordingArrays.CELL_CLASSIFICATION
         classification = None
         if classification_path.exists():
             with contextlib.suppress(Exception):
@@ -868,7 +926,7 @@ def query_roi_statistics_tool(
         # intensity-based colocalization (run when one channel is structural, which also writes
         # corrected_structural_mean_image.npy) stores (is_colocalized, probability), whereas spatial colocalization
         # (run when both channels are functional) stores (matched_channel_2_index, overlap_score).
-        colocalization_path = data_path / "cell_colocalization.npy"
+        colocalization_path = data_path / RecordingArrays.CELL_COLOCALIZATION
         colocalization = None
         if colocalization_path.exists():
             with contextlib.suppress(Exception):
@@ -885,7 +943,7 @@ def query_roi_statistics_tool(
     else:
         # Multi-recording mode: adds tracking template metadata.
         template_data: dict[str, Any] | None = None
-        template_path = data_path / "tracking_template_masks.npz"
+        template_path = data_path / TRACKING_TEMPLATE_MASKS_FILENAME
         with contextlib.suppress(Exception):
             if template_path.exists():
                 raw_template = np.load(template_path, allow_pickle=False)
@@ -919,7 +977,7 @@ def query_roi_statistics_tool(
             result["total_cells"] = int(np.sum(classification[:, 0] > _CELL_LABEL_THRESHOLD))
             result["total_non_cells"] = total_rois - result["total_cells"]
         if colocalization is not None:
-            intensity_based = (data_path / "corrected_structural_mean_image.npy").exists()
+            intensity_based = (data_path / RecordingArrays.CORRECTED_STRUCTURAL_MEAN_IMAGE).exists()
             result["colocalization_mode"] = "intensity" if intensity_based else "spatial"
             result["colocalization_columns"] = (
                 ["is_colocalized", "probability"] if intensity_based else ["matched_channel_2_index", "overlap_score"]
@@ -993,10 +1051,10 @@ def query_traces_tool(
         }
 
     file_map = {
-        "fluorescence": "cell_fluorescence.npy",
-        "neuropil": "neuropil_fluorescence.npy",
-        "corrected": "subtracted_fluorescence.npy",
-        "spikes": "spikes.npy",
+        "fluorescence": RecordingArrays.CELL_FLUORESCENCE,
+        "neuropil": RecordingArrays.NEUROPIL_FLUORESCENCE,
+        "corrected": RecordingArrays.SUBTRACTED_FLUORESCENCE,
+        "spikes": RecordingArrays.SPIKES,
     }
     if trace_type not in file_map:
         return {
@@ -1116,7 +1174,7 @@ def query_multi_recording_overview_tool(
     if dataset_path is None:
         return {"success": False, "error": f"Unable to query multi-recording overview. {error}"}
 
-    runtime = _load_yaml(dataset_path / "multi_recording_runtime_data.yaml")
+    runtime = _load_yaml(dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     if runtime is None:
         return {"success": False, "error": f"Unable to load runtime data from: {dataset_path}"}
 
@@ -1134,7 +1192,7 @@ def query_multi_recording_overview_tool(
             continue
 
         recording_entry["exists"] = True
-        recording_runtime = _load_yaml(output_path / "multi_recording_runtime_data.yaml")
+        recording_runtime = _load_yaml(output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         if recording_runtime is not None:
             recording_io = recording_runtime.get("io", {})
             recording_entry["recording_id"] = recording_io.get("recording_id", f"unknown_{index}")
@@ -1162,9 +1220,9 @@ def query_multi_recording_overview_tool(
 
         # Mask counts from NPZ files.
         for npz_name, key_name in [
-            ("registration_deformed_masks.npz", "deformed_mask_count"),
-            ("tracking_template_masks.npz", "template_mask_count"),
-            ("roi_masks.npz", "tracked_mask_count"),
+            (DEFORMED_MASKS_FILENAME, "deformed_mask_count"),
+            (TRACKING_TEMPLATE_MASKS_FILENAME, "template_mask_count"),
+            (RecordingArrays.ROI_MASKS, "tracked_mask_count"),
         ]:
             npz_path = output_path / npz_name
             if npz_path.exists():
@@ -1175,8 +1233,8 @@ def query_multi_recording_overview_tool(
                     if key_name == "template_mask_count" and template_roi_count is None:
                         template_roi_count = count
 
-        recording_entry["has_channel_2"] = (output_path / "registration_deformed_masks_channel_2.npz").exists()
-        recording_entry["extraction_complete"] = (output_path / "cell_fluorescence.npy").exists()
+        recording_entry["has_channel_2"] = (output_path / resolve_channel_2_name(name=DEFORMED_MASKS_FILENAME)).exists()
+        recording_entry["extraction_complete"] = (output_path / RecordingArrays.CELL_FLUORESCENCE).exists()
         recordings.append(recording_entry)
 
     return {
@@ -1221,7 +1279,7 @@ def query_multi_recording_registration_quality_tool(
     if dataset_path is None:
         return {"success": False, "error": f"Unable to query registration quality. {error}"}
 
-    runtime = _load_yaml(dataset_path / "multi_recording_runtime_data.yaml")
+    runtime = _load_yaml(dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     if runtime is None:
         return {"success": False, "error": f"Unable to load runtime data from: {dataset_path}"}
 
@@ -1232,11 +1290,11 @@ def query_multi_recording_registration_quality_tool(
         output_path = Path(output_path_string)
         recording_entry: dict[str, Any] = {"index": index}
 
-        recording_runtime = _load_yaml(output_path / "multi_recording_runtime_data.yaml")
+        recording_runtime = _load_yaml(output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         if recording_runtime is not None:
             recording_entry["recording_id"] = recording_runtime.get("io", {}).get("recording_id", f"unknown_{index}")
 
-        registration_directory = output_path / "registration_arrays"
+        registration_directory = output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME
         if not registration_directory.exists():
             recording_entry["registration_available"] = False
             recordings.append(recording_entry)
@@ -1246,8 +1304,8 @@ def query_multi_recording_registration_quality_tool(
 
         # Deformation field statistics.
         for field_name, file_name in [
-            ("deform_field_y", "deform_field_y.npy"),
-            ("deform_field_x", "deform_field_x.npy"),
+            ("deform_field_y", MultiRecordingArrays.DEFORM_FIELD_Y),
+            ("deform_field_x", MultiRecordingArrays.DEFORM_FIELD_X),
         ]:
             path = registration_directory / file_name
             if path.exists():
@@ -1260,8 +1318,8 @@ def query_multi_recording_registration_quality_tool(
                     recording_entry[field_name] = statistics
 
         # Combined displacement magnitude.
-        y_path = registration_directory / "deform_field_y.npy"
-        x_path = registration_directory / "deform_field_x.npy"
+        y_path = registration_directory / MultiRecordingArrays.DEFORM_FIELD_Y
+        x_path = registration_directory / MultiRecordingArrays.DEFORM_FIELD_X
         if y_path.exists() and x_path.exists():
             with contextlib.suppress(Exception):
                 y_field = np.load(y_path, mmap_mode="r")
@@ -1271,14 +1329,27 @@ def query_multi_recording_registration_quality_tool(
 
         # Transformed image availability.
         recording_entry["transformed_images"] = {
-            "mean_image": (registration_directory / "transformed_mean_image.npy").exists(),
-            "enhanced_mean_image": (registration_directory / "transformed_enhanced_mean_image.npy").exists(),
-            "maximum_projection": (registration_directory / "transformed_maximum_projection.npy").exists(),
+            "mean_image": (registration_directory / MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE).exists(),
+            "enhanced_mean_image": (
+                registration_directory / MultiRecordingArrays.TRANSFORMED_ENHANCED_MEAN_IMAGE
+            ).exists(),
+            "maximum_projection": (
+                registration_directory / MultiRecordingArrays.TRANSFORMED_MAXIMUM_PROJECTION
+            ).exists(),
         }
         recording_entry["channel_2_images"] = {
-            "mean_image": (registration_directory / "transformed_mean_image_channel_2.npy").exists(),
-            "enhanced_mean_image": (registration_directory / "transformed_enhanced_mean_image_channel_2.npy").exists(),
-            "maximum_projection": (registration_directory / "transformed_maximum_projection_channel_2.npy").exists(),
+            "mean_image": (
+                registration_directory
+                / resolve_array_name(array=MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE, second_channel=True)
+            ).exists(),
+            "enhanced_mean_image": (
+                registration_directory
+                / resolve_array_name(array=MultiRecordingArrays.TRANSFORMED_ENHANCED_MEAN_IMAGE, second_channel=True)
+            ).exists(),
+            "maximum_projection": (
+                registration_directory
+                / resolve_array_name(array=MultiRecordingArrays.TRANSFORMED_MAXIMUM_PROJECTION, second_channel=True)
+            ).exists(),
         }
 
         recordings.append(recording_entry)
@@ -1327,7 +1398,7 @@ def query_multi_recording_tracking_summary_tool(
     if dataset_path is None:
         return {"success": False, "error": f"Unable to query tracking summary. {error}"}
 
-    template_path = dataset_path / "tracking_template_masks.npz"
+    template_path = dataset_path / TRACKING_TEMPLATE_MASKS_FILENAME
     if not template_path.exists():
         return {
             "success": False,
@@ -1382,7 +1453,7 @@ def query_multi_recording_tracking_summary_tool(
         result["templates_shown"] = max_templates
 
     # Channel 2 template masks.
-    channel_2_path = dataset_path / "tracking_template_masks_channel_2.npz"
+    channel_2_path = dataset_path / resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME)
     if channel_2_path.exists():
         with contextlib.suppress(Exception):
             channel_2_data = np.load(channel_2_path, allow_pickle=False)
@@ -1445,10 +1516,10 @@ def query_cross_recording_traces_tool(
         }
 
     file_map = {
-        "fluorescence": "cell_fluorescence.npy",
-        "neuropil": "neuropil_fluorescence.npy",
-        "corrected": "subtracted_fluorescence.npy",
-        "spikes": "spikes.npy",
+        "fluorescence": RecordingArrays.CELL_FLUORESCENCE,
+        "neuropil": RecordingArrays.NEUROPIL_FLUORESCENCE,
+        "corrected": RecordingArrays.SUBTRACTED_FLUORESCENCE,
+        "spikes": RecordingArrays.SPIKES,
     }
     if trace_type not in file_map:
         return {
@@ -1467,7 +1538,7 @@ def query_cross_recording_traces_tool(
     if dataset_path is None:
         return {"success": False, "error": f"Unable to query cross-recording traces. {error}"}
 
-    runtime = _load_yaml(dataset_path / "multi_recording_runtime_data.yaml")
+    runtime = _load_yaml(dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     if runtime is None:
         return {
             "success": False,
@@ -1479,7 +1550,7 @@ def query_cross_recording_traces_tool(
     recording_information: list[tuple[int, str, Path]] = []
     for index, output_path_string in enumerate(dataset_output_paths):
         output_path = Path(output_path_string)
-        recording_runtime = _load_yaml(output_path / "multi_recording_runtime_data.yaml")
+        recording_runtime = _load_yaml(output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         recording_id = (
             recording_runtime.get("io", {}).get("recording_id", f"unknown_{index}")
             if recording_runtime is not None
@@ -1576,7 +1647,7 @@ def _resolve_multi_recording_data_path(
     if dataset_path is None:
         return None, None, error
 
-    runtime = _load_yaml(dataset_path / "multi_recording_runtime_data.yaml")
+    runtime = _load_yaml(dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     if runtime is None:
         return None, None, f"Unable to load runtime data from: {dataset_path / 'multi_recording_runtime_data.yaml'}"
 
@@ -1596,7 +1667,7 @@ def _resolve_multi_recording_data_path(
     output_path = Path(dataset_output_paths[effective_index])
 
     # Resolves recording ID from per-recording runtime data.
-    recording_runtime = _load_yaml(output_path / "multi_recording_runtime_data.yaml")
+    recording_runtime = _load_yaml(output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
     recording_id = (
         recording_runtime.get("io", {}).get("recording_id", f"unknown_{effective_index}")
         if recording_runtime is not None
@@ -1711,12 +1782,12 @@ def _find_cindra_root(recording_path: str) -> tuple[Path | None, str | None]:
     if not recording.exists():
         return None, f"Recording directory not found: {recording_path}"
 
-    cindra_path = recording / "cindra"
+    cindra_path = recording / OUTPUT_DIRECTORY_NAME
     if cindra_path.exists():
         return cindra_path, None
 
     # Falls back to recursive search for configuration.yaml (handles non-standard nesting).
-    matches = discover_marker_files(directory=recording, marker_name="configuration.yaml")
+    matches = discover_marker_files(directory=recording, marker_name=SINGLE_RECORDING_CONFIGURATION_FILENAME)
     if matches:
         return matches[0].parent, None
 
@@ -1733,11 +1804,11 @@ def _find_multi_recording_root(cindra_root: Path, dataset: str) -> tuple[Path | 
     Returns:
         A tuple of (dataset_path, error_message).
     """
-    dataset_path = cindra_root / "multi_recording" / dataset
+    dataset_path = cindra_root / MULTI_RECORDING_DIRECTORY_NAME / dataset
     if dataset_path.exists():
         return dataset_path, None
 
-    multi_recording_path = cindra_root / "multi_recording"
+    multi_recording_path = cindra_root / MULTI_RECORDING_DIRECTORY_NAME
     if not multi_recording_path.exists():
         return None, f"No multi_recording directory found under: {cindra_root}"
 
@@ -1764,7 +1835,9 @@ def _resolve_data_path(cindra_root: Path, plane_index: int) -> tuple[Path | None
     plane_path = cindra_root / f"plane_{plane_index}"
     if not plane_path.exists():
         available = natsorted(
-            path.name for path in cindra_root.iterdir() if path.is_dir() and path.name.startswith("plane_")
+            path.name
+            for path in cindra_root.iterdir()
+            if path.is_dir() and path.name.startswith(PLANE_SPECIFIER_PREFIX)
         )
         return None, f"Plane directory plane_{plane_index} not found. Available: {', '.join(available) or 'none'}"
 
@@ -1815,7 +1888,7 @@ def _list_plane_directories(cindra_root: Path) -> list[Path]:
         plane_10.
     """
     return natsorted(
-        (path for path in cindra_root.iterdir() if path.is_dir() and path.name.startswith("plane_")),
+        (path for path in cindra_root.iterdir() if path.is_dir() and path.name.startswith(PLANE_SPECIFIER_PREFIX)),
         key=lambda path: path.name,
     )
 
@@ -1829,7 +1902,7 @@ def _discover_available_datasets(cindra_root: Path) -> list[str]:
     Returns:
         A sorted list of dataset names found under the multi_recording subdirectory of the given cindra root.
     """
-    multi_recording_path = cindra_root / "multi_recording"
+    multi_recording_path = cindra_root / MULTI_RECORDING_DIRECTORY_NAME
     if not multi_recording_path.exists():
         return []
     return natsorted(directory.name for directory in multi_recording_path.iterdir() if directory.is_dir())

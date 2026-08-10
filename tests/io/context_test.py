@@ -14,9 +14,9 @@ from cindra.io.context import (
     _find_cindra_directory,
     resolve_recording_roots,
     extract_unique_components,
+    load_acquisition_parameters,
     _compute_mroi_region_borders,
     _find_acquisition_parameters,
-    _load_acquisition_parameters,
 )
 from cindra.dataclasses.single_recording_configuration import AcquisitionParameters
 
@@ -62,14 +62,14 @@ class TestFindDataDirectory:
 
 
 class TestLoadAcquisitionParameters:
-    """Tests _load_acquisition_parameters."""
+    """Tests load_acquisition_parameters."""
 
     def test_loads_valid_single_roi_json(self, tmp_path: Path) -> None:
         """Verifies that a valid single-ROI parameters file is loaded correctly."""
         data = {"frame_rate": 30.0, "plane_number": 2, "channel_number": 1}
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        parameters = _load_acquisition_parameters(json_path=json_path)
+        parameters = load_acquisition_parameters(json_path=json_path)
 
         assert parameters.frame_rate == 30.0
         assert parameters.plane_number == 2
@@ -90,7 +90,7 @@ class TestLoadAcquisitionParameters:
         }
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
-        parameters = _load_acquisition_parameters(json_path=json_path)
+        parameters = load_acquisition_parameters(json_path=json_path)
 
         assert parameters.frame_rate == 15.0
         assert parameters.roi_number == 3
@@ -105,14 +105,14 @@ class TestLoadAcquisitionParameters:
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
         with pytest.raises(ValueError, match="Unable to extract the required field 'channel_number'"):
-            _load_acquisition_parameters(json_path=json_path)
+            load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_nonexistent_file(self, tmp_path: Path) -> None:
         """Verifies that a FileNotFoundError is raised when the JSON file does not exist."""
         json_path = tmp_path / "nonexistent.json"
 
         with pytest.raises(FileNotFoundError, match="Unable to load acquisition parameters"):
-            _load_acquisition_parameters(json_path=json_path)
+            load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_mroi_missing_roi_lines(self, tmp_path: Path) -> None:
         """Verifies that a ValueError is raised when an MROI recording is missing the roi_lines field."""
@@ -127,7 +127,7 @@ class TestLoadAcquisitionParameters:
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
         with pytest.raises(ValueError, match="Unable to extract the required field 'roi_lines'"):
-            _load_acquisition_parameters(json_path=json_path)
+            load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_missing_frame_rate(self, tmp_path: Path) -> None:
         """Verifies that a ValueError is raised when the frame_rate field is missing."""
@@ -135,7 +135,7 @@ class TestLoadAcquisitionParameters:
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
         with pytest.raises(ValueError, match="Unable to extract the required field 'frame_rate'"):
-            _load_acquisition_parameters(json_path=json_path)
+            load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_missing_plane_number(self, tmp_path: Path) -> None:
         """Verifies that a ValueError is raised when the plane_number field is missing."""
@@ -143,7 +143,7 @@ class TestLoadAcquisitionParameters:
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
         with pytest.raises(ValueError, match="Unable to extract the required field 'plane_number'"):
-            _load_acquisition_parameters(json_path=json_path)
+            load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_mroi_missing_roi_x_coordinates(self, tmp_path: Path) -> None:
         """Verifies that a ValueError is raised when an MROI recording is missing roi_x_coordinates."""
@@ -158,7 +158,7 @@ class TestLoadAcquisitionParameters:
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
         with pytest.raises(ValueError, match="Unable to extract the required field 'roi_x_coordinates'"):
-            _load_acquisition_parameters(json_path=json_path)
+            load_acquisition_parameters(json_path=json_path)
 
     def test_raises_error_for_mroi_missing_roi_y_coordinates(self, tmp_path: Path) -> None:
         """Verifies that a ValueError is raised when an MROI recording is missing roi_y_coordinates."""
@@ -173,7 +173,7 @@ class TestLoadAcquisitionParameters:
         json_path = _write_parameters_json(directory=tmp_path, data=data)
 
         with pytest.raises(ValueError, match="Unable to extract the required field 'roi_y_coordinates'"):
-            _load_acquisition_parameters(json_path=json_path)
+            load_acquisition_parameters(json_path=json_path)
 
 
 class TestFindAcquisitionParameters:

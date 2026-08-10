@@ -9,6 +9,12 @@
 | `MultiRecordingRuntimeContext`    | `dataclasses/runtime_contexts.py`               | Multi-recording config + runtime data                   |
 | `SingleRecordingRuntimeData`      | `dataclasses/single_recording_data.py`          | IOData, RegistrationData, DetectionData, ExtractionData |
 | `MultiRecordingRuntimeData`       | `dataclasses/multi_recording_data.py`           | Multi-recording IO, registration, tracking, timing data |
+| `RecordingArrays`                 | `layout.py`                                     | On-disk contract: names, markers, and path resolvers    |
+| `resolve_recording_planes`        | `io/inventory.py`                               | Read-only recording and dataset on-disk inventory       |
+| `resolve_single_recording_job_universe` | `orchestration/discovery.py`              | Declared job set and the subset whose inputs exist      |
+| `estimate_single_recording_job_memory_mb` | `orchestration/footprints.py`           | Per-stage memory models and the two job estimators      |
+| `execute_single_recording_job`    | `orchestration/worker.py`                       | Per-job entry point against a caller-owned tracker      |
+| `prime_recording`                 | `orchestration/worker.py`                       | Writes the shared bootstrap and reports the inventory   |
 | `run_single_recording_pipeline`   | `orchestration/pipeline.py`                     | Execute single-recording four-phase workflow            |
 | `run_multi_recording_pipeline`    | `orchestration/pipeline.py`                     | Execute multi-recording two-phase workflow              |
 | `start_execution_session`         | `orchestration/execution.py`                    | Batch engine: admission, process-pool dispatch, budgets |
@@ -87,16 +93,22 @@
 
 **Modifying pipeline orchestration:**
 
-1. Review `src/cindra/orchestration/pipeline.py` for per-job execution and ProcessingTracker integration
-2. Review `src/cindra/orchestration/execution.py` for the batch engine that admits and dispatches queued jobs
+1. Review `src/cindra/orchestration/worker.py` for per-job execution and ProcessingTracker integration, and
+   `src/cindra/orchestration/pipeline.py` for the two sequential entry points
+2. Review `src/cindra/orchestration/execution.py` for the batch engine that admits and dispatches queued jobs, whose
+   two-pass dispatcher honors every reservation before releasing it over the capacity the first pass left unused
 3. Review `src/cindra/pipelines/single_recording.py` for the four-phase single-recording stage entry points
 4. Review `src/cindra/pipelines/multi_recording.py` for the two-phase multi-recording stage entry points
 5. Job universes and prerequisite edges derive from the phase model in `src/cindra/orchestration/jobs.py`
    (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`). Add, remove, or reorder a phase there rather than at each call
    site, and the pipelines, the execution engine, and the MCP layer follow automatically
 6. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
-7. Keep the dependency chain one-way. `jobs.py` imports nothing from cindra, `allocation.py` imports `jobs`,
-   `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no orchestration module imports `interface`
+7. Keep the dependency chain one-way. `jobs.py` imports `cindra.layout` alone, `allocation.py`, `footprints.py`, and
+   `discovery.py` import `jobs`, `worker.py` imports `jobs` and `allocation`, `pipeline.py` imports `worker`,
+   `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no orchestration module imports `interface`.
+   `openmp.py` carries no module-level side effect and its check runs only inside the two sequential entry points,
+   so importing the package writes nothing and a console message never precedes the stdio MCP server's JSON-RPC
+   stream
 
 **Modifying registration:**
 

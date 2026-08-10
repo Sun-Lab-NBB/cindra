@@ -15,17 +15,10 @@ from dataclasses import dataclass
 
 from ataraxis_data_structures import JobState, ProcessingStatus
 
+from ..layout import resolve_plane_specifier
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Iterable, Sequence
-
-PLANE_SPECIFIER_PREFIX: str = "plane_"
-"""The prefix of the tracker specifier that identifies which imaging plane a per-plane job processes."""
-
-SINGLE_RECORDING_TRACKER_NAME: str = "single_recording_tracker.yaml"
-"""The tracker file name for the single-recording processing pipeline."""
-
-MULTI_RECORDING_TRACKER_NAME: str = "multi_recording_tracker.yaml"
-"""The tracker file name for the multi-recording processing pipeline."""
 
 PREREQUISITE_FAILURE_MESSAGE: str = "Unable to execute job. A preceding pipeline phase failed."
 """The tracker error message recorded for a job whose prerequisite job failed."""
@@ -144,18 +137,6 @@ PER_PLANE_JOB_NAMES: frozenset[str] = frozenset(
 )
 """The single-recording job names that expand into one job per imaging plane, each carrying a 'plane_{index}'
 specifier. Derived from the phase model, so that adding a per-plane phase updates it automatically."""
-
-
-def resolve_plane_specifier(plane_index: int) -> str:
-    """Returns the tracker specifier that identifies a per-plane single-recording job.
-
-    Args:
-        plane_index: The index of the imaging plane the job processes.
-
-    Returns:
-        The specifier string the tracker stores for the plane's jobs.
-    """
-    return f"{PLANE_SPECIFIER_PREFIX}{plane_index}"
 
 
 def resolve_single_recording_jobs(plane_count: int) -> list[tuple[str, str]]:

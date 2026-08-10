@@ -31,6 +31,7 @@ from .utils import (
     apply_spatial_smoothing,
     combine_nonrigid_offsets,
 )
+from ..layout import RegistrationArrays
 from .metrics import compute_pc_metrics
 from .nonrigid import (
     compute_nonrigid_offsets,
@@ -185,7 +186,7 @@ def register_plane(context: RuntimeContext, *, workers: int) -> None:
         bad_frames = np.zeros(frame_count, dtype=np.bool_)
         data_path = config.file_io.data_path
         if data_path is not None:
-            bad_frames_file = data_path / "bad_frames.npy"
+            bad_frames_file = data_path / RegistrationArrays.BAD_FRAMES
             if bad_frames_file.exists():
                 console.echo(
                     message=f"Plane {plane_index} bad frames file: exists. Path: {bad_frames_file}.",

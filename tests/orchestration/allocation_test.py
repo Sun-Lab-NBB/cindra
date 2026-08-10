@@ -18,20 +18,21 @@ from cindra.orchestration import (
 )
 from cindra.orchestration.allocation import (
     _RESERVED_CORES,
-    _BYTES_PER_GIGABYTE,
-    _COMBINATION_WORKERS,
+    COMBINATION_WORKERS,
+    _BYTES_PER_MEGABYTE,
     _DISCOVERY_RESOURCES,
     _EXTRACTION_RESOURCES,
     _PROCESSING_RESOURCES,
     _COMBINATION_RESOURCES,
     _BINARIZATION_RESOURCES,
     _REGISTRATION_RESOURCES,
-    _MAXIMUM_PARALLEL_IO_JOBS,
-    _PROCESSING_MEMORY_GIGABYTES_PER_JOB,
+    _BINARIZATION_CONCURRENCY_LIMIT,
+    _PROCESSING_CONCURRENCY_RESERVATION,
+    _REGISTRATION_CONCURRENCY_RESERVATION,
     resolve_core_budget,
     resolve_class_allocation,
+    resolve_memory_budget_mb,
     summarize_class_allocation,
-    resolve_available_memory_gigabytes,
 )
 
 
@@ -97,18 +98,25 @@ class TestExplicitRequests:
             assert resolve_stage_workers(job_name=job_name, requested_workers=ALL_CORES_REQUEST) == expected
 
 
+class TestCombinationStage:
+    """Tests the allocation of the stage whose merge is serial."""
+
+    def test_combination_stage_resolves_to_its_single_core(self) -> None:
+        """Verifies that the combination stage resolves rather than forcing the caller to special-case it."""
+        assert resolve_stage_workers(job_name=SingleRecordingJobNames.COMBINE) == COMBINATION_WORKERS
+
+    def test_combination_stage_honors_an_explicit_count(self) -> None:
+        """Verifies that the combination stage follows the shared sentinel contract like every other stage."""
+        assert resolve_stage_workers(job_name=SingleRecordingJobNames.COMBINE, requested_workers=4) == 4
+
+
 class TestRejectedRequests:
     """Tests the requests the resolver rejects."""
 
-    def test_combination_stage_is_rejected(self) -> None:
-        """Verifies that the combination stage, which takes no allocation, raises rather than returning a count."""
+    def test_unknown_stage_is_rejected(self) -> None:
+        """Verifies that a name that is not a pipeline stage raises rather than returning a count."""
         with pytest.raises(ValueError, match=r"does not name a\s+pipeline\s+stage"):
-            resolve_stage_workers(job_name=SingleRecordingJobNames.COMBINE)
-
-    def test_combination_stage_is_rejected_before_the_requested_count_is_read(self) -> None:
-        """Verifies that the stage check precedes the requested-count check, so a valid count cannot mask it."""
-        with pytest.raises(ValueError, match=r"does not name a\s+pipeline\s+stage"):
-            resolve_stage_workers(job_name=SingleRecordingJobNames.COMBINE, requested_workers=8)
+            resolve_stage_workers(job_name="recording_denoise")  # type: ignore[arg-type]
 
     @pytest.mark.parametrize("requested_workers", [0, -2, -3, -100])
     def test_invalid_worker_count_is_rejected(self, requested_workers: int) -> None:
@@ -136,14 +144,20 @@ class TestResourceClasses:
     """Tests the resource classes that size a batch of jobs and the job name map that selects them."""
 
     @pytest.mark.parametrize(
-        ("resource_class", "name", "workers_per_job", "fixed_parallel_jobs", "memory_gigabytes_per_job"),
+        ("resource_class", "name", "workers_per_job", "concurrency_limit", "concurrency_reservation"),
         [
-            (_BINARIZATION_RESOURCES, "binarization", BINARIZATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS, 0.0),
-            (_REGISTRATION_RESOURCES, "registration", REGISTRATION_WORKERS, None, 0.0),
-            (_PROCESSING_RESOURCES, "processing", PROCESSING_WORKERS, None, _PROCESSING_MEMORY_GIGABYTES_PER_JOB),
-            (_COMBINATION_RESOURCES, "combination", _COMBINATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS, 0.0),
-            (_DISCOVERY_RESOURCES, "discovery", DISCOVERY_WORKERS, None, 0.0),
-            (_EXTRACTION_RESOURCES, "extraction", EXTRACTION_WORKERS, None, 0.0),
+            (_BINARIZATION_RESOURCES, "binarization", BINARIZATION_WORKERS, _BINARIZATION_CONCURRENCY_LIMIT, None),
+            (
+                _REGISTRATION_RESOURCES,
+                "registration",
+                REGISTRATION_WORKERS,
+                None,
+                _REGISTRATION_CONCURRENCY_RESERVATION,
+            ),
+            (_PROCESSING_RESOURCES, "processing", PROCESSING_WORKERS, None, _PROCESSING_CONCURRENCY_RESERVATION),
+            (_COMBINATION_RESOURCES, "combination", COMBINATION_WORKERS, None, None),
+            (_DISCOVERY_RESOURCES, "discovery", DISCOVERY_WORKERS, None, None),
+            (_EXTRACTION_RESOURCES, "extraction", EXTRACTION_WORKERS, None, None),
         ],
     )
     def test_class_fields_carry_the_measured_stage_budget(
@@ -151,14 +165,34 @@ class TestResourceClasses:
         resource_class: ResourceClass,
         name: str,
         workers_per_job: int,
-        fixed_parallel_jobs: int | None,
-        memory_gigabytes_per_job: float,
+        concurrency_limit: int | None,
+        concurrency_reservation: int | None,
     ) -> None:
-        """Verifies that every exported resource class declares its measured worker, concurrency, and memory budget."""
+        """Verifies that every resource class declares its measured worker count, its ceiling, and its reservation."""
         assert resource_class.name == name
         assert resource_class.workers_per_job == workers_per_job
-        assert resource_class.fixed_parallel_jobs == fixed_parallel_jobs
-        assert resource_class.memory_gigabytes_per_job == memory_gigabytes_per_job
+        assert resource_class.concurrency_limit == concurrency_limit
+        assert resource_class.concurrency_reservation == concurrency_reservation
+
+    def test_only_the_conversion_stage_carries_a_hard_ceiling(self) -> None:
+        """Verifies that the disk-bound conversion stage is the only class spare capacity cannot widen."""
+        limited = {
+            resource_class.name
+            for resource_class in RESOURCE_CLASS_BY_JOB_NAME.values()
+            if resource_class.concurrency_limit is not None
+        }
+
+        assert limited == {"binarization"}
+
+    def test_only_the_compute_stages_carry_a_reservation(self) -> None:
+        """Verifies that the two stages competing for the scarcest cores are the ones holding capacity back."""
+        reserved = {
+            resource_class.name
+            for resource_class in RESOURCE_CLASS_BY_JOB_NAME.values()
+            if resource_class.concurrency_reservation is not None
+        }
+
+        assert reserved == {"registration", "processing"}
 
     @pytest.mark.parametrize(
         ("job_name", "expected_class"),
@@ -181,14 +215,12 @@ class TestResourceClasses:
         """Verifies that the map leaves no single or multi-recording job name without a resource class."""
         assert set(RESOURCE_CLASS_BY_JOB_NAME) == set(SingleRecordingJobNames) | set(MultiRecordingJobNames)
 
-    def test_only_the_processing_class_bounds_its_concurrency_by_memory(self) -> None:
-        """Verifies that the processing class is the sole class declaring a per-job memory footprint."""
-        memory_bound = {
-            resource_class.name
+    def test_no_class_declares_a_memory_footprint(self) -> None:
+        """Verifies that memory bounds admission per job rather than concurrency per class."""
+        assert not any(
+            hasattr(resource_class, "memory_gigabytes_per_job")
             for resource_class in RESOURCE_CLASS_BY_JOB_NAME.values()
-            if resource_class.memory_gigabytes_per_job > 0
-        }
-        assert memory_bound == {"processing"}
+        )
 
 
 class TestFixedCapacityAllocation:
@@ -197,11 +229,10 @@ class TestFixedCapacityAllocation:
     @pytest.mark.parametrize(
         ("resource_class", "job_count", "expected"),
         [
-            (_BINARIZATION_RESOURCES, 10, (BINARIZATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS)),
+            (_BINARIZATION_RESOURCES, 10, (BINARIZATION_WORKERS, _BINARIZATION_CONCURRENCY_LIMIT)),
             (_BINARIZATION_RESOURCES, 2, (BINARIZATION_WORKERS, 2)),
             (_BINARIZATION_RESOURCES, 0, (BINARIZATION_WORKERS, 1)),
-            (_COMBINATION_RESOURCES, 7, (_COMBINATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS)),
-            (_COMBINATION_RESOURCES, 1, (_COMBINATION_WORKERS, 1)),
+            (_BINARIZATION_RESOURCES, 3, (BINARIZATION_WORKERS, 3)),
         ],
     )
     def test_fixed_cap_class_bounds_its_concurrency_by_the_job_count(
@@ -211,7 +242,6 @@ class TestFixedCapacityAllocation:
         allocation = resolve_class_allocation(
             resource_class=resource_class,
             budget=64,
-            available_memory=256.0,
             job_count=job_count,
             workers_per_job=None,
             max_parallel_jobs=None,
@@ -230,13 +260,12 @@ class TestFixedCapacityAllocation:
         allocation = resolve_class_allocation(
             resource_class=_BINARIZATION_RESOURCES,
             budget=64,
-            available_memory=64.0,
             job_count=8,
             workers_per_job=workers_per_job,
             max_parallel_jobs=max_parallel_jobs,
         )
 
-        assert allocation == (BINARIZATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS)
+        assert allocation == (BINARIZATION_WORKERS, _BINARIZATION_CONCURRENCY_LIMIT)
 
 
 class TestDerivedCapacityAllocation:
@@ -270,7 +299,6 @@ class TestDerivedCapacityAllocation:
         allocation = resolve_class_allocation(
             resource_class=_REGISTRATION_RESOURCES,
             budget=budget,
-            available_memory=64.0,
             job_count=job_count,
             workers_per_job=workers_per_job,
             max_parallel_jobs=max_parallel_jobs,
@@ -278,13 +306,11 @@ class TestDerivedCapacityAllocation:
 
         assert allocation == expected
 
-    @pytest.mark.parametrize("available_memory", [0.0, 0.5, 4096.0])
-    def test_class_without_a_memory_footprint_ignores_the_available_memory(self, available_memory: float) -> None:
-        """Verifies that a class declaring no per-job memory keeps its CPU-derived cap whatever memory is free."""
+    def test_discovery_class_derives_its_capacity_from_the_budget(self) -> None:
+        """Verifies that the discovery class splits the budget across its measured worker count."""
         allocation = resolve_class_allocation(
             resource_class=_DISCOVERY_RESOURCES,
             budget=DISCOVERY_WORKERS * 3,
-            available_memory=available_memory,
             job_count=8,
             workers_per_job=None,
             max_parallel_jobs=None,
@@ -297,7 +323,6 @@ class TestDerivedCapacityAllocation:
         allocation = resolve_class_allocation(
             resource_class=_EXTRACTION_RESOURCES,
             budget=EXTRACTION_WORKERS * 2,
-            available_memory=1024.0,
             job_count=6,
             workers_per_job=None,
             max_parallel_jobs=None,
@@ -306,65 +331,23 @@ class TestDerivedCapacityAllocation:
         assert allocation == (EXTRACTION_WORKERS, 2)
 
 
-class TestMemoryBoundAllocation:
-    """Tests the allocation of the processing class, whose concurrency additionally follows the available memory."""
-
-    @pytest.mark.parametrize(
-        ("budget", "available_memory", "job_count", "expected"),
-        [
-            (100, 100.0, 20, (PROCESSING_WORKERS, 6)),
-            (100, 5.0, 20, (PROCESSING_WORKERS, 1)),
-            (100, 0.0, 20, (PROCESSING_WORKERS, 1)),
-            (100, 4096.0, 20, (PROCESSING_WORKERS, 10)),
-            (100, 4096.0, 3, (PROCESSING_WORKERS, 3)),
-        ],
-    )
-    def test_capacity_takes_the_smallest_of_the_cpu_memory_and_job_bounds(
-        self, budget: int, available_memory: float, job_count: int, expected: tuple[int, int]
-    ) -> None:
-        """Verifies that the memory-bound class caps its concurrency at the tightest of its three bounds."""
-        allocation = resolve_class_allocation(
-            resource_class=_PROCESSING_RESOURCES,
-            budget=budget,
-            available_memory=available_memory,
-            job_count=job_count,
-            workers_per_job=None,
-            max_parallel_jobs=None,
-        )
-
-        assert allocation == expected
-
-    def test_explicit_concurrency_override_bypasses_the_memory_bound(self) -> None:
-        """Verifies that an explicit concurrency cap is honored even when the memory bound would be tighter."""
-        allocation = resolve_class_allocation(
-            resource_class=_PROCESSING_RESOURCES,
-            budget=100,
-            available_memory=1.0,
-            job_count=20,
-            workers_per_job=None,
-            max_parallel_jobs=8,
-        )
-
-        assert allocation == (PROCESSING_WORKERS, 8)
-
-
 @pytest.mark.xdist_group(name="allocation_system_probes")
-class TestResolveAvailableMemory:
-    """Tests the memory probe that sizes the memory-bound resource classes."""
+class TestResolveMemoryBudget:
+    """Tests the memory probe that bounds how much a session may commit to running jobs."""
 
-    @pytest.mark.parametrize("available_bytes", [0, 4096, 8 * _BYTES_PER_GIGABYTE, 1536 * _BYTES_PER_GIGABYTE])
-    def test_probe_converts_the_available_byte_counter_to_gigabytes(self, monkeypatch, available_bytes: int) -> None:
-        """Verifies that the probe divides the host's available-byte counter into a gigabyte figure."""
+    @pytest.mark.parametrize("available_bytes", [0, 4096, 8 * _BYTES_PER_MEGABYTE, 1536 * _BYTES_PER_MEGABYTE])
+    def test_probe_converts_the_available_byte_counter_to_megabytes(self, monkeypatch, available_bytes: int) -> None:
+        """Verifies that the probe reports the host counter on the scale the per-job estimates use."""
         monkeypatch.setattr(
             "cindra.orchestration.allocation.psutil.virtual_memory",
             lambda: _VirtualMemory(available=available_bytes),
         )
 
-        assert resolve_available_memory_gigabytes() == available_bytes / _BYTES_PER_GIGABYTE
+        assert resolve_memory_budget_mb() == int(available_bytes / _BYTES_PER_MEGABYTE)
 
     def test_host_probe_reports_a_non_negative_figure(self) -> None:
         """Verifies that the unpatched probe reports a usable memory figure on the test host."""
-        assert resolve_available_memory_gigabytes() >= 0
+        assert resolve_memory_budget_mb() >= 0
 
 
 class TestSummarizeClassAllocation:

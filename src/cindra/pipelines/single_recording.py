@@ -14,6 +14,11 @@ from ..io import (
     resolve_registration_marker_path,
     resolve_single_recording_contexts,
 )
+from ..layout import (
+    OUTPUT_DIRECTORY_NAME,
+    ACQUISITION_PARAMETERS_FILENAME,
+    SINGLE_RECORDING_CONFIGURATION_FILENAME,
+)
 from ..detection import detect_plane_rois
 from ..extraction import extract_traces
 from ..dataclasses import (
@@ -71,9 +76,9 @@ def binarize_recording(configuration: SingleRecordingConfiguration, *, workers: 
         console.error(message=message, error=ValueError)
 
     # Checks for existing valid binaries to allow early return.
-    root_path = configuration.file_io.output_path / "cindra"
-    config_path = root_path / "configuration.yaml"
-    acquisition_path = root_path / "acquisition_parameters.yaml"
+    root_path = configuration.file_io.output_path / OUTPUT_DIRECTORY_NAME
+    config_path = root_path / SINGLE_RECORDING_CONFIGURATION_FILENAME
+    acquisition_path = root_path / ACQUISITION_PARAMETERS_FILENAME
     if config_path.exists() and acquisition_path.exists():
         console.echo(message=f"Found existing configuration at: {config_path}.", level=LogLevel.INFO)
 
@@ -316,7 +321,7 @@ def save_combined_data(contexts: list[RuntimeContext]) -> None:
 
     combined_data = combine_planes(plane_contexts=contexts)
 
-    combined_data.save(root_path=root_path / "cindra")
+    combined_data.save(root_path=root_path / OUTPUT_DIRECTORY_NAME)
     console.echo(message=f"Combined data saved to: {root_path / 'cindra'}", level=LogLevel.SUCCESS)
 
 
@@ -416,7 +421,7 @@ def _resolve_plane_context(
         )
         console.error(message=message, error=ValueError)
 
-    root_path = configuration.file_io.output_path / "cindra"
+    root_path = configuration.file_io.output_path / OUTPUT_DIRECTORY_NAME
     context = RuntimeContext.load(root_path=root_path, plane_index=plane_index)
     if isinstance(context, list):
         message = (
