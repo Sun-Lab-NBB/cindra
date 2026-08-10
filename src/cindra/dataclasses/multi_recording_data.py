@@ -11,6 +11,15 @@ from numpy.typing import NDArray  # noqa: TC002 - needed at runtime for dacite d
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
 
+from ..layout import (
+    DEFORMED_MASKS_FILENAME,
+    TRACKING_TEMPLATE_MASKS_FILENAME,
+    MULTI_RECORDING_ARRAYS_DIRECTORY_NAME,
+    MULTI_RECORDING_RUNTIME_DATA_FILENAME,
+    MultiRecordingArrays,
+    resolve_array_name,
+    resolve_channel_2_name,
+)
 from .version import VERSION, PYTHON_VERSION
 from .single_recording_data import ROIMask, CombinedData, ExtractionData, is_memory_mapped
 
@@ -109,7 +118,7 @@ class MultiRecordingRegistrationData:
         if self.deform_field_y is not None and self.deformed_roi_masks is not None:
             return True
         if output_path is not None:
-            return (output_path / "registration_arrays" / "deform_field_y.npy").exists()
+            return (output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME / MultiRecordingArrays.DEFORM_FIELD_Y).exists()
         return False
 
     def clear(self) -> None:
@@ -146,28 +155,31 @@ class MultiRecordingRegistrationData:
         Args:
             output_path: The directory in which to create the ``registration_arrays/`` subdirectory.
         """
-        registration_directory = output_path / "registration_arrays"
+        registration_directory = output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME
         ensure_directory_exists(path=registration_directory, is_file=False)
 
         if self.deform_field_y is not None and not is_memory_mapped(self.deform_field_y):
-            np.save(file=registration_directory / "deform_field_y.npy", arr=self.deform_field_y)
+            np.save(file=registration_directory / MultiRecordingArrays.DEFORM_FIELD_Y, arr=self.deform_field_y)
         if self.deform_field_x is not None and not is_memory_mapped(self.deform_field_x):
-            np.save(file=registration_directory / "deform_field_x.npy", arr=self.deform_field_x)
+            np.save(file=registration_directory / MultiRecordingArrays.DEFORM_FIELD_X, arr=self.deform_field_x)
 
         if self.transformed_mean_image is not None and not is_memory_mapped(self.transformed_mean_image):
-            np.save(file=registration_directory / "transformed_mean_image.npy", arr=self.transformed_mean_image)
+            np.save(
+                file=registration_directory / MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE,
+                arr=self.transformed_mean_image,
+            )
         if self.transformed_enhanced_mean_image is not None and not is_memory_mapped(
             self.transformed_enhanced_mean_image
         ):
             np.save(
-                file=registration_directory / "transformed_enhanced_mean_image.npy",
+                file=registration_directory / MultiRecordingArrays.TRANSFORMED_ENHANCED_MEAN_IMAGE,
                 arr=self.transformed_enhanced_mean_image,
             )
         if self.transformed_maximum_projection is not None and not is_memory_mapped(
             self.transformed_maximum_projection
         ):
             np.save(
-                file=registration_directory / "transformed_maximum_projection.npy",
+                file=registration_directory / MultiRecordingArrays.TRANSFORMED_MAXIMUM_PROJECTION,
                 arr=self.transformed_maximum_projection,
             )
 
@@ -175,33 +187,34 @@ class MultiRecordingRegistrationData:
             self.transformed_mean_image_channel_2
         ):
             np.save(
-                file=registration_directory / "transformed_mean_image_channel_2.npy",
+                file=registration_directory
+                / resolve_array_name(array=MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE, second_channel=True),
                 arr=self.transformed_mean_image_channel_2,
             )
         if self.transformed_enhanced_mean_image_channel_2 is not None and not is_memory_mapped(
             self.transformed_enhanced_mean_image_channel_2
         ):
             np.save(
-                file=registration_directory / "transformed_enhanced_mean_image_channel_2.npy",
+                file=registration_directory
+                / resolve_array_name(array=MultiRecordingArrays.TRANSFORMED_ENHANCED_MEAN_IMAGE, second_channel=True),
                 arr=self.transformed_enhanced_mean_image_channel_2,
             )
         if self.transformed_maximum_projection_channel_2 is not None and not is_memory_mapped(
             self.transformed_maximum_projection_channel_2
         ):
             np.save(
-                file=registration_directory / "transformed_maximum_projection_channel_2.npy",
+                file=registration_directory
+                / resolve_array_name(array=MultiRecordingArrays.TRANSFORMED_MAXIMUM_PROJECTION, second_channel=True),
                 arr=self.transformed_maximum_projection_channel_2,
             )
 
         if self.deformed_roi_masks is not None:
-            ROIMask.save_list(
-                mask_list=self.deformed_roi_masks, file_path=output_path / "registration_deformed_masks.npz"
-            )
+            ROIMask.save_list(mask_list=self.deformed_roi_masks, file_path=output_path / DEFORMED_MASKS_FILENAME)
 
         if self.deformed_roi_masks_channel_2 is not None:
             ROIMask.save_list(
                 mask_list=self.deformed_roi_masks_channel_2,
-                file_path=output_path / "registration_deformed_masks_channel_2.npz",
+                file_path=output_path / resolve_channel_2_name(name=DEFORMED_MASKS_FILENAME),
             )
 
     def load_arrays(self, output_path: Path) -> None:
@@ -210,48 +223,54 @@ class MultiRecordingRegistrationData:
         Args:
             output_path: The directory containing the ``registration_arrays/`` subdirectory.
         """
-        registration_directory = output_path / "registration_arrays"
+        registration_directory = output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME
 
         if self.deform_field_y is None:
-            path = registration_directory / "deform_field_y.npy"
+            path = registration_directory / MultiRecordingArrays.DEFORM_FIELD_Y
             if path.exists():
                 self.deform_field_y = np.load(path).astype(np.float32)
         if self.deform_field_x is None:
-            path = registration_directory / "deform_field_x.npy"
+            path = registration_directory / MultiRecordingArrays.DEFORM_FIELD_X
             if path.exists():
                 self.deform_field_x = np.load(path).astype(np.float32)
 
         if self.transformed_mean_image is None:
-            path = registration_directory / "transformed_mean_image.npy"
+            path = registration_directory / MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE
             if path.exists():
                 self.transformed_mean_image = np.load(path).astype(np.float32)
         if self.transformed_enhanced_mean_image is None:
-            path = registration_directory / "transformed_enhanced_mean_image.npy"
+            path = registration_directory / MultiRecordingArrays.TRANSFORMED_ENHANCED_MEAN_IMAGE
             if path.exists():
                 self.transformed_enhanced_mean_image = np.load(path).astype(np.float32)
         if self.transformed_maximum_projection is None:
-            path = registration_directory / "transformed_maximum_projection.npy"
+            path = registration_directory / MultiRecordingArrays.TRANSFORMED_MAXIMUM_PROJECTION
             if path.exists():
                 self.transformed_maximum_projection = np.load(path).astype(np.float32)
 
         if self.transformed_mean_image_channel_2 is None:
-            path = registration_directory / "transformed_mean_image_channel_2.npy"
+            path = registration_directory / resolve_array_name(
+                array=MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE, second_channel=True
+            )
             if path.exists():
                 self.transformed_mean_image_channel_2 = np.load(path).astype(np.float32)
         if self.transformed_enhanced_mean_image_channel_2 is None:
-            path = registration_directory / "transformed_enhanced_mean_image_channel_2.npy"
+            path = registration_directory / resolve_array_name(
+                array=MultiRecordingArrays.TRANSFORMED_ENHANCED_MEAN_IMAGE, second_channel=True
+            )
             if path.exists():
                 self.transformed_enhanced_mean_image_channel_2 = np.load(path).astype(np.float32)
         if self.transformed_maximum_projection_channel_2 is None:
-            path = registration_directory / "transformed_maximum_projection_channel_2.npy"
+            path = registration_directory / resolve_array_name(
+                array=MultiRecordingArrays.TRANSFORMED_MAXIMUM_PROJECTION, second_channel=True
+            )
             if path.exists():
                 self.transformed_maximum_projection_channel_2 = np.load(path).astype(np.float32)
 
-        masks_path = output_path / "registration_deformed_masks.npz"
+        masks_path = output_path / DEFORMED_MASKS_FILENAME
         if self.deformed_roi_masks is None and masks_path.exists():
             self.deformed_roi_masks = ROIMask.load_list(file_path=masks_path)
 
-        masks_path_channel_2 = output_path / "registration_deformed_masks_channel_2.npz"
+        masks_path_channel_2 = output_path / resolve_channel_2_name(name=DEFORMED_MASKS_FILENAME)
         if self.deformed_roi_masks_channel_2 is None and masks_path_channel_2.exists():
             self.deformed_roi_masks_channel_2 = ROIMask.load_list(file_path=masks_path_channel_2)
 
@@ -264,50 +283,56 @@ class MultiRecordingRegistrationData:
         Args:
             output_path: The directory containing the ``registration_arrays/`` subdirectory.
         """
-        registration_directory = output_path / "registration_arrays"
+        registration_directory = output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME
 
         if self.deform_field_y is None:
-            path = registration_directory / "deform_field_y.npy"
+            path = registration_directory / MultiRecordingArrays.DEFORM_FIELD_Y
             if path.exists():
                 self.deform_field_y = np.load(path, mmap_mode="r")
         if self.deform_field_x is None:
-            path = registration_directory / "deform_field_x.npy"
+            path = registration_directory / MultiRecordingArrays.DEFORM_FIELD_X
             if path.exists():
                 self.deform_field_x = np.load(path, mmap_mode="r")
 
         if self.transformed_mean_image is None:
-            path = registration_directory / "transformed_mean_image.npy"
+            path = registration_directory / MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE
             if path.exists():
                 self.transformed_mean_image = np.load(path, mmap_mode="r")
         if self.transformed_enhanced_mean_image is None:
-            path = registration_directory / "transformed_enhanced_mean_image.npy"
+            path = registration_directory / MultiRecordingArrays.TRANSFORMED_ENHANCED_MEAN_IMAGE
             if path.exists():
                 self.transformed_enhanced_mean_image = np.load(path, mmap_mode="r")
         if self.transformed_maximum_projection is None:
-            path = registration_directory / "transformed_maximum_projection.npy"
+            path = registration_directory / MultiRecordingArrays.TRANSFORMED_MAXIMUM_PROJECTION
             if path.exists():
                 self.transformed_maximum_projection = np.load(path, mmap_mode="r")
 
         if self.transformed_mean_image_channel_2 is None:
-            path = registration_directory / "transformed_mean_image_channel_2.npy"
+            path = registration_directory / resolve_array_name(
+                array=MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE, second_channel=True
+            )
             if path.exists():
                 self.transformed_mean_image_channel_2 = np.load(path, mmap_mode="r")
         if self.transformed_enhanced_mean_image_channel_2 is None:
-            path = registration_directory / "transformed_enhanced_mean_image_channel_2.npy"
+            path = registration_directory / resolve_array_name(
+                array=MultiRecordingArrays.TRANSFORMED_ENHANCED_MEAN_IMAGE, second_channel=True
+            )
             if path.exists():
                 self.transformed_enhanced_mean_image_channel_2 = np.load(path, mmap_mode="r")
         if self.transformed_maximum_projection_channel_2 is None:
-            path = registration_directory / "transformed_maximum_projection_channel_2.npy"
+            path = registration_directory / resolve_array_name(
+                array=MultiRecordingArrays.TRANSFORMED_MAXIMUM_PROJECTION, second_channel=True
+            )
             if path.exists():
                 self.transformed_maximum_projection_channel_2 = np.load(path, mmap_mode="r")
 
         # Eagerly loads channel 1 deformed ROI masks, because NumPy cannot memory-map .npz archives.
-        masks_path = output_path / "registration_deformed_masks.npz"
+        masks_path = output_path / DEFORMED_MASKS_FILENAME
         if self.deformed_roi_masks is None and masks_path.exists():
             self.deformed_roi_masks = ROIMask.load_list(file_path=masks_path)
 
         # Eagerly loads channel 2 deformed ROI masks, because NumPy cannot memory-map .npz archives.
-        masks_path_channel_2 = output_path / "registration_deformed_masks_channel_2.npz"
+        masks_path_channel_2 = output_path / resolve_channel_2_name(name=DEFORMED_MASKS_FILENAME)
         if self.deformed_roi_masks_channel_2 is None and masks_path_channel_2.exists():
             self.deformed_roi_masks_channel_2 = ROIMask.load_list(file_path=masks_path_channel_2)
 
@@ -357,12 +382,12 @@ class MultiRecordingTrackingData:
             output_path: The directory in which to save the tracking data files.
         """
         if self.template_masks is not None:
-            ROIMask.save_list(mask_list=self.template_masks, file_path=output_path / "tracking_template_masks.npz")
+            ROIMask.save_list(mask_list=self.template_masks, file_path=output_path / TRACKING_TEMPLATE_MASKS_FILENAME)
 
         if self.template_masks_channel_2 is not None:
             ROIMask.save_list(
                 mask_list=self.template_masks_channel_2,
-                file_path=output_path / "tracking_template_masks_channel_2.npz",
+                file_path=output_path / resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME),
             )
 
     def load_arrays(self, output_path: Path) -> None:
@@ -371,11 +396,11 @@ class MultiRecordingTrackingData:
         Args:
             output_path: The directory containing the tracking data files.
         """
-        masks_path = output_path / "tracking_template_masks.npz"
+        masks_path = output_path / TRACKING_TEMPLATE_MASKS_FILENAME
         if self.template_masks is None and masks_path.exists():
             self.template_masks = ROIMask.load_list(file_path=masks_path)
 
-        masks_path_channel_2 = output_path / "tracking_template_masks_channel_2.npz"
+        masks_path_channel_2 = output_path / resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME)
         if self.template_masks_channel_2 is None and masks_path_channel_2.exists():
             self.template_masks_channel_2 = ROIMask.load_list(file_path=masks_path_channel_2)
 
@@ -537,7 +562,7 @@ class MultiRecordingRuntimeData(YamlConfig):
         # Excludes combined_data from YAML (it references immutable single-recording data and is reloaded on load).
         yaml_copy.combined_data = None
 
-        file_path = output_path / "multi_recording_runtime_data.yaml"
+        file_path = output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME
         yaml_copy.to_yaml(file_path=file_path)
 
     @classmethod
@@ -555,5 +580,5 @@ class MultiRecordingRuntimeData(YamlConfig):
             A MultiRecordingRuntimeData instance with all scalar fields deserialized. NumPy array fields
             and combined_data remain None until explicitly loaded.
         """
-        file_path = output_path / "multi_recording_runtime_data.yaml"
+        file_path = output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME
         return cls.from_yaml(file_path=file_path)
