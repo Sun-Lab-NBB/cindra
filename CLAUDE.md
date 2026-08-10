@@ -234,6 +234,11 @@ outputs.
   longer overwrite each other. A detection job that exhausts memory takes down its own worker rather than the whole
   batch, and the engine records a terminal outcome for every job the resulting `BrokenProcessPool` strands. The manager
   itself stays a thread of the dispatching process, since it only polls trackers and moves queue entries.
+  The pool requests the `spawn` start method through `_POOL_START_METHOD` rather than accepting the host default, which
+  is `forkserver` on Linux. Spawn is the only method available on every supported platform, so a Linux session gets the
+  process semantics a macOS or Windows session gets anyway. It is also the only sound method here, because a forked
+  worker inherits the parent's already-sized numeric backends, which leaves the thread pin inert and hands every
+  concurrent job a host-wide backend pool.
 
 ### Key patterns
 

@@ -5,6 +5,7 @@ from pathlib import Path  # noqa: TC003 - the module does not defer annotation e
 import numba
 from natsort import natsorted
 from ataraxis_time import PrecisionTimer, TimerPrecisions, get_timestamp
+from threadpoolctl import threadpool_limits  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
 from ..io import (
@@ -259,17 +260,22 @@ def process_plane(configuration: SingleRecordingConfiguration, plane_index: int,
     timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     timer.reset()
 
-    # Runs ROI detection and trace extraction when detection is enabled.
-    if configuration.roi_detection.enabled:
-        detect_plane_rois(context=context, workers=workers)
+    # Confines the linear-algebra backends to the allocated worker budget for the whole stage, matching the Numba mask
+    # the context resolver applied. The batch engine pins every worker process to one backend thread, so the classifier
+    # fits and the trace algebra outside detection's own limited block would otherwise run single-threaded, while the
+    # same code invoked outside that engine would size those backends to the whole host instead of to the job.
+    with threadpool_limits(limits=workers):
+        # Runs ROI detection and trace extraction when detection is enabled.
+        if configuration.roi_detection.enabled:
+            detect_plane_rois(context=context, workers=workers)
 
-        # Extracts fluorescence traces when ROIs were detected.
-        # pragma justification: detection always populates ROI statistics on success or raises beforehand.
-        if context.runtime.extraction.roi_statistics is not None:  # pragma: no branch
-            extract_traces(context=context, workers=workers)
-    else:
-        message = f"Skipping plane {plane_index} ROI detection (disabled via 'roi_detection.enabled' parameter)."
-        console.echo(message=message, level=LogLevel.WARNING)
+            # Extracts fluorescence traces when ROIs were detected.
+            # pragma justification: detection always populates ROI statistics on success or raises beforehand.
+            if context.runtime.extraction.roi_statistics is not None:  # pragma: no branch
+                extract_traces(context=context, workers=workers)
+        else:
+            message = f"Skipping plane {plane_index} ROI detection (disabled via 'roi_detection.enabled' parameter)."
+            console.echo(message=message, level=LogLevel.WARNING)
 
     # Records the total plane processing time, the allocation the stage actually used, and the processing timestamp.
     context.runtime.timing.total_processing_time = timer.elapsed
