@@ -128,8 +128,8 @@ def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specif
     """Estimates the memory one queued job holds, from the recording or dataset it will process.
 
     Notes:
-        A job whose inputs cannot be read yet reports zero, which leaves it admitted on the core budget alone rather
-        than blocking the session behind a figure the estimator could not derive.
+        A job whose recording geometry cannot be read is charged the conservative allowance its stage carries rather
+        than a floor, because a job admitted against a floor overcommits its host and is killed.
 
     Args:
         configuration_path: The path to the job's pipeline configuration file.
@@ -138,7 +138,8 @@ def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specif
         single: Determines whether the job belongs to the single-recording or the multi-recording pipeline.
 
     Returns:
-        The memory the job holds in megabytes, or zero when its inputs could not be read.
+        The memory the job holds in megabytes, which is its stage's allowance when the recording's geometry could not
+        be read.
     """
     if single:
         configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
@@ -1206,7 +1207,8 @@ def execute_processing_jobs_tool(
             configuration file), 'tracker_path' (absolute path to the ProcessingTracker file), 'job_id' (the
             hexadecimal job identifier from the prepare manifest), and 'pipeline_type' ('single-recording' or
             'multi-recording').
-        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Leave
+        workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
+        concurrency ceiling. Leave
             as None to accept the measured defaults, which are 4 cores for binarization, 8 for registration, 10 for
             processing, 1 for combination, 30 for multi-recording discovery, and 16 for multi-recording extraction.
             Set to -1 to give every job the whole session core budget. The override is a single scalar applied to
@@ -1640,7 +1642,8 @@ def execute_full_pipeline_tool(
             single-recording pipelines and must match the length of recording_paths.
         dataset_configurations: List of dataset configuration dictionaries. Required for multi-recording pipelines.
             Each must contain 'configuration_path', 'recording_paths', and 'dataset_name'.
-        workers_per_job: CPU cores per job, overriding the measured default of every non-fixed resource class. Leave
+        workers_per_job: CPU cores per job, overriding the measured default of every class that carries no hard
+        concurrency ceiling. Leave
             as None to accept the measured defaults of 4 cores for binarization, 1 for combination, 8 for
             registration, 10 for processing, 30 for multi-recording discovery, and 16 for multi-recording extraction.
             Set to -1 to give every job the whole session core budget.

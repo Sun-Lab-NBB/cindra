@@ -60,8 +60,8 @@ def execute_single_recording_job(
         granularity the caller controls. The job's start, completion, and failure are recorded onto the provided
         tracker under job_id.
 
-        Every stage re-loads the shared bootstrap with persistence disabled, so prime_recording must have written it
-        before any job runs. Priming is a separate call rather than a flag on this one, because a job that wrote the
+        Every stage reads the shared bootstrap rather than writing it, so prime_recording must have written it before
+        any job runs. Priming is a separate call rather than a flag on this one, because a job that wrote the
         bootstrap while its peers ran would overwrite each peer plane's runtime data with its own stale snapshot.
 
         The worker count travels through this parameter, so a batch dispatcher can give every job a different
@@ -114,8 +114,8 @@ def execute_multi_recording_job(
         granularity the caller controls. The job's start, completion, and failure are recorded onto the provided
         tracker under job_id.
 
-        Every stage re-loads the shared bootstrap with persistence disabled, so prime_dataset must have written it
-        before any job runs. Priming is a separate call rather than a flag on this one, because a job that wrote the
+        Every stage reads the shared bootstrap rather than writing it, so prime_dataset must have written it before
+        any job runs. Priming is a separate call rather than a flag on this one, because a job that wrote the
         bootstrap while its peers ran would overwrite each peer recording's runtime data with its own stale snapshot.
 
     Args:
@@ -451,8 +451,11 @@ def prime_dataset(configuration_path: Path) -> DatasetRecordings:
         The dataset's recording inventory.
 
     Raises:
-        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid
-            multi-recording configuration.
+        FileNotFoundError: If the configuration file is missing, is not a .yaml file, is not a valid multi-recording
+            configuration, or if a recording holds no combined metadata archive.
+        ValueError: If the configuration names no recording directories or no dataset name.
+        RuntimeError: If a recording directory holds several combined metadata archives, or if the recording paths
+            carry no unique identifying component.
     """
     configuration = load_multi_recording_configuration(configuration_path=configuration_path)
     contexts = resolve_multi_recording_contexts(configuration=configuration, persist=True)

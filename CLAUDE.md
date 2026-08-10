@@ -187,8 +187,9 @@ outputs.
   recording declares and the subset whose inputs exist. `worker.py` holds the per-job entry points every scheduler
   dispatches, along with the two priming entry points that write the shared bootstrap. `execution.py` holds the batch
   engine: `PendingJob`, `JobExecutionState`, the admission scan, the two-pass dispatcher, and the manager thread.
-  `pipeline.py` holds the two sequential entry points. `openmp.py` stays off every path `execution.py` reaches, so a
-  console message never precedes the stdio MCP server's JSON-RPC stream. Nothing below `orchestration` imports it, and
+  `pipeline.py` holds the two sequential entry points. `openmp.py` carries no module-level side effect and its check
+  runs only inside those two entry points, so importing the package writes nothing and a console message never
+  precedes the stdio MCP server's JSON-RPC stream. Nothing below `orchestration` imports it, and
   no module inside it imports `interface`, so the MCP layer is a thin argument-validation and JSON-shaping wrapper
   over calls into the package. This mirrors the orchestration package of `ataraxis-video-system` and
   `ataraxis-communication-interface`, and its concurrency model follows `sollertia-forgery`.

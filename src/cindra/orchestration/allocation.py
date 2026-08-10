@@ -104,13 +104,12 @@ Notes:
 
 @dataclass(frozen=True, slots=True)
 class ResourceClass:
-    """Describes the CPU and memory budget that one class of pipeline jobs holds for its entire duration."""
+    """Describes the cores one class of pipeline jobs holds and the concurrency terms that bound the class."""
 
     name: str
     """The name of the resource class, used as the key of the per-class queues and of the reported allocation."""
     workers_per_job: int
-    """The number of CPU cores each job of this class holds, taken from the measured stage defaults, except for the
-    combination class, whose single core is defined by COMBINATION_WORKERS."""
+    """The number of CPU cores each job of this class holds, taken from the measured stage defaults."""
     concurrency_limit: int | None
     """The jobs of this class that may run at once regardless of the capacity the budgets could still supply, or None
     when the class is bounded by the budgets alone.
@@ -137,7 +136,8 @@ _BINARIZATION_RESOURCES: ResourceClass = ResourceClass(
     concurrency_reservation=None,
 )
 """The resource class of the binarization jobs. The allocated cores become the TIFF image decode threads, and the
-stage streams frames to disk instead of holding them, so the concurrency cap is the fixed I/O limit."""
+stage streams frames to disk instead of holding them, so its concurrency is the hard ceiling this class alone
+carries."""
 
 _REGISTRATION_RESOURCES: ResourceClass = ResourceClass(
     name="registration",
@@ -145,8 +145,8 @@ _REGISTRATION_RESOURCES: ResourceClass = ResourceClass(
     concurrency_limit=None,
     concurrency_reservation=_REGISTRATION_CONCURRENCY_RESERVATION,
 )
-"""The resource class of the plane-registration jobs. Registration reads the plane binary through a memory map, so its
-resident growth is evictable page cache and its concurrency is bounded by the shared CPU budget alone."""
+"""The resource class of the plane-registration jobs. Its concurrency derives from the shared CPU budget, and it holds
+a reservation so the stages waiting on no other job keep a share of the host while a recording's planes register."""
 
 _PROCESSING_RESOURCES: ResourceClass = ResourceClass(
     name="processing",
@@ -154,8 +154,9 @@ _PROCESSING_RESOURCES: ResourceClass = ResourceClass(
     concurrency_limit=None,
     concurrency_reservation=_PROCESSING_CONCURRENCY_RESERVATION,
 )
-"""The resource class of the plane-processing jobs. Detection materializes the binned movie in anonymous memory, so
-this class bounds its concurrency by both the shared CPU budget and the available system memory."""
+"""The resource class of the plane-processing jobs. Detection materializes the binned movie in anonymous memory, so its
+jobs carry the largest per-job memory estimates the dispatcher admits against, and it holds a reservation so the stages
+waiting on no other job keep a share of the host."""
 
 _COMBINATION_RESOURCES: ResourceClass = ResourceClass(
     name="combination",
@@ -164,7 +165,7 @@ _COMBINATION_RESOURCES: ResourceClass = ResourceClass(
     concurrency_reservation=None,
 )
 """The resource class of the combination jobs. Combination merges per-plane result files with serial input and output,
-so each job holds one core and the concurrency cap is the fixed I/O limit."""
+so each job holds one core and its concurrency is bounded by the shared CPU budget alone."""
 
 _DISCOVERY_RESOURCES: ResourceClass = ResourceClass(
     name="discovery",
@@ -316,7 +317,7 @@ def resolve_memory_budget_mb() -> int:
     Notes:
         The counter discounts the reclaimable page cache, which matters because registration fills that cache with the
         plane binaries it memory-maps. A counter reporting free memory alone would collapse behind that cache and
-        throttle the memory-bound classes to a near-serial concurrency on a host that is not actually short of memory.
+        report a host that is not actually short of memory as full.
 
         The value is sampled once, when the execution session starts. It already discounts the page cache that the
         session itself will fill, so the sample stays representative for the lifetime of the session.

@@ -1,10 +1,11 @@
 """Provides the local batch execution engine that admits queued pipeline jobs as their own prerequisites succeed and
-dispatches them under the per-class concurrency caps and the session CPU budget.
+dispatches them under the per-class concurrency terms and the session core and memory budgets.
 
 Every submitted job first enters the admission pool. The manager admits a job into its resource class queue as soon as
 that job's own prerequisites have succeeded on its own tracker, so each recording advances independently of the others.
-Each resource class then dispatches from its own queue under its own cap and under the session-wide CPU budget shared
-by every class.
+Dispatch then runs in two passes over every class queue. The first honors each class's reservation, and the second
+releases those reservations over the capacity the first left unused. Both passes hold the cores and the estimated
+memory of every running job inside the session budgets.
 """
 
 from __future__ import annotations
@@ -221,7 +222,8 @@ def start_execution_session(
 
     Returns:
         A dictionary carrying the submitted job total under 'total_jobs', the session core budget under 'cpu_budget',
-        and the per-class worker count, concurrency cap, and job count under 'resource_classes'.
+        the session memory budget under 'memory_budget_mb', and the per-class worker count, concurrency cap, and job
+        count under 'resource_classes'.
 
     Raises:
         ValueError: If either override is zero or is a negative value other than -1.
