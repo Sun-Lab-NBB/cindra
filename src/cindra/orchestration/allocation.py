@@ -59,15 +59,8 @@ _RESERVED_CORES: int = 2
 _MAXIMUM_PARALLEL_IO_JOBS: int = 4
 """The maximum number of concurrent I/O-bound jobs (the binarization and combination resource classes)."""
 
-_PROCESSING_MEMORY_GIGABYTES_PER_JOB: float = 15.0
-"""The peak resident memory, in gigabytes, that one processing job holds. Measured on a real nine-plane run where
-detection peaked at 10.5 gigabytes on the smallest (512-line) plane, rounded up to 15 to cover the taller planes of the
-same recording. The processing resource class bounds its concurrency by this figure so that a batch plans against the
-memory its jobs actually demand. Each job runs in its own worker process, so a host that kills one for exhausting
-memory ends that job rather than the process every other job shares."""
-
-_BYTES_PER_GIGABYTE: int = 1024**3
-"""The number of bytes in one gigabyte, used to convert the host memory counter into a memory budget."""
+_BYTES_PER_MEGABYTE: int = 1024**2
+"""The number of bytes in one megabyte, used to convert the host memory counter into a memory budget."""
 
 _STAGE_WORKER_DEFAULTS: dict[SingleRecordingJobNames | MultiRecordingJobNames, int] = {
     SingleRecordingJobNames.BINARIZE: BINARIZATION_WORKERS,
@@ -98,16 +91,12 @@ class ResourceClass:
     """The machine-independent concurrency cap of this class, or None when the cap is derived from the CPU budget and,
     for memory-bound classes, from the available system memory. A per-class cap bounds one class in isolation, so the
     dispatcher additionally holds the sum of the cores committed by every class inside the session CPU budget."""
-    memory_gigabytes_per_job: float
-    """The peak resident memory one job of this class holds, or 0.0 when the class does not bound its concurrency by
-    memory."""
 
 
 _BINARIZATION_RESOURCES: ResourceClass = ResourceClass(
     name="binarization",
     workers_per_job=BINARIZATION_WORKERS,
     fixed_parallel_jobs=_MAXIMUM_PARALLEL_IO_JOBS,
-    memory_gigabytes_per_job=0.0,
 )
 """The resource class of the binarization jobs. The allocated cores become the TIFF image decode threads, and the
 stage streams frames to disk instead of holding them, so the concurrency cap is the fixed I/O limit."""
@@ -116,7 +105,6 @@ _REGISTRATION_RESOURCES: ResourceClass = ResourceClass(
     name="registration",
     workers_per_job=REGISTRATION_WORKERS,
     fixed_parallel_jobs=None,
-    memory_gigabytes_per_job=0.0,
 )
 """The resource class of the plane-registration jobs. Registration reads the plane binary through a memory map, so its
 resident growth is evictable page cache and its concurrency is bounded by the shared CPU budget alone."""
@@ -125,7 +113,6 @@ _PROCESSING_RESOURCES: ResourceClass = ResourceClass(
     name="processing",
     workers_per_job=PROCESSING_WORKERS,
     fixed_parallel_jobs=None,
-    memory_gigabytes_per_job=_PROCESSING_MEMORY_GIGABYTES_PER_JOB,
 )
 """The resource class of the plane-processing jobs. Detection materializes the binned movie in anonymous memory, so
 this class bounds its concurrency by both the shared CPU budget and the available system memory."""
@@ -134,7 +121,6 @@ _COMBINATION_RESOURCES: ResourceClass = ResourceClass(
     name="combination",
     workers_per_job=COMBINATION_WORKERS,
     fixed_parallel_jobs=_MAXIMUM_PARALLEL_IO_JOBS,
-    memory_gigabytes_per_job=0.0,
 )
 """The resource class of the combination jobs. Combination merges per-plane result files with serial input and output,
 so each job holds one core and the concurrency cap is the fixed I/O limit."""
@@ -143,7 +129,6 @@ _DISCOVERY_RESOURCES: ResourceClass = ResourceClass(
     name="discovery",
     workers_per_job=DISCOVERY_WORKERS,
     fixed_parallel_jobs=None,
-    memory_gigabytes_per_job=0.0,
 )
 """The resource class of the multi-recording discovery jobs. Discovery registers every recording of one animal against
 the others, so each job holds the stage's saturating allocation and its concurrency is bounded by the shared CPU budget
@@ -153,7 +138,6 @@ _EXTRACTION_RESOURCES: ResourceClass = ResourceClass(
     name="extraction",
     workers_per_job=EXTRACTION_WORKERS,
     fixed_parallel_jobs=None,
-    memory_gigabytes_per_job=0.0,
 )
 """The resource class of the multi-recording extraction jobs. Extraction reads each frame batch serially before the
 kernel consumes it, so the stage plateaus at its measured worker count and the remaining budget is better spent on
@@ -236,7 +220,6 @@ def resolve_class_allocation(
     resource_class: ResourceClass,
     *,
     budget: int,
-    available_memory: float,
     job_count: int,
     workers_per_job: int | None,
     max_parallel_jobs: int | None,
@@ -256,7 +239,6 @@ def resolve_class_allocation(
     Args:
         resource_class: The resource class to resolve the allocation for.
         budget: The number of CPU cores available to the session after reserving system cores.
-        available_memory: The available system memory in gigabytes.
         job_count: The number of jobs of this class in the session, which caps the useful concurrency.
         workers_per_job: The requested CPU cores per job, -1 to request every available core, or None to accept
             the class default.
@@ -283,15 +265,11 @@ def resolve_class_allocation(
     if max_parallel_jobs is not None:
         return workers, max_parallel_jobs
 
-    capacity = max(1, budget // workers)
-    if resource_class.memory_gigabytes_per_job > 0:
-        capacity = min(capacity, max(1, int(available_memory // resource_class.memory_gigabytes_per_job)))
-
-    return workers, min(capacity, max(1, job_count))
+    return workers, min(max(1, budget // workers), max(1, job_count))
 
 
-def resolve_available_memory_gigabytes() -> float:
-    """Resolves the amount of system memory that new allocations can claim, in gigabytes.
+def resolve_memory_budget_mb() -> int:
+    """Resolves the amount of system memory that new allocations can claim, in megabytes.
 
     Notes:
         The counter discounts the reclaimable page cache, which matters because registration fills that cache with the
@@ -302,9 +280,9 @@ def resolve_available_memory_gigabytes() -> float:
         session itself will fill, so the sample stays representative for the lifetime of the session.
 
     Returns:
-        The available system memory in gigabytes.
+        The available system memory in megabytes, which is the scale the per-job estimates report.
     """
-    return float(psutil.virtual_memory().available) / _BYTES_PER_GIGABYTE
+    return int(psutil.virtual_memory().available / _BYTES_PER_MEGABYTE)
 
 
 def summarize_class_allocation(
