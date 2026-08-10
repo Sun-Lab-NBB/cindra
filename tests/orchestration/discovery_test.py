@@ -7,10 +7,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from cindra.layout import (
+    CHANNEL_1_BINARY_FILENAME,
     COMBINED_METADATA_FILENAME,
     ACQUISITION_PARAMETERS_FILENAME,
     REGISTRATION_DATA_DIRECTORY_NAME,
     TRACKING_TEMPLATE_MASKS_FILENAME,
+    RecordingArrays,
     RegistrationArrays,
     resolve_plane_path,
     resolve_output_path,
@@ -38,8 +40,24 @@ def _write_parameters(output_root: Path, plane_count: int) -> None:
 
 
 def _convert_plane(output_root: Path, plane_index: int) -> None:
-    """Creates the output directory the conversion stage writes for one plane."""
-    resolve_plane_path(output_root=output_root, plane_index=plane_index).mkdir(parents=True, exist_ok=True)
+    """Writes the channel binary the conversion stage produces for one plane."""
+    plane_path = resolve_plane_path(output_root=output_root, plane_index=plane_index)
+    plane_path.mkdir(parents=True, exist_ok=True)
+    (plane_path / CHANNEL_1_BINARY_FILENAME).write_bytes(b"")
+
+
+def _process_plane(output_root: Path, plane_index: int) -> None:
+    """Writes the extracted trace that marks one plane as processed."""
+    plane_path = resolve_plane_path(output_root=output_root, plane_index=plane_index)
+    plane_path.mkdir(parents=True, exist_ok=True)
+    (plane_path / RecordingArrays.CELL_FLUORESCENCE).write_bytes(b"")
+
+
+def _project_masks(output_root: Path, dataset_name: str) -> None:
+    """Writes the projected ROI statistics one recording's extraction job reads."""
+    dataset_path = resolve_dataset_path(output_root=output_root, dataset_name=dataset_name)
+    dataset_path.mkdir(parents=True, exist_ok=True)
+    (dataset_path / RecordingArrays.ROI_STATISTICS).write_bytes(b"")
 
 
 def _register_plane(output_root: Path, plane_index: int) -> None:
@@ -96,8 +114,17 @@ class TestSingleRecordingJobUniverse:
 
         assert universe.possible == ((SingleRecordingJobNames.BINARIZE, ""),)
 
+    def test_a_plane_directory_alone_does_not_make_registration_ready(self, tmp_path: Path) -> None:
+        """Verifies that the priming step's plane directories do not by themselves report registration ready."""
+        _write_parameters(output_root=tmp_path, plane_count=2)
+        resolve_plane_path(output_root=tmp_path, plane_index=0).mkdir(parents=True, exist_ok=True)
+
+        universe = resolve_single_recording_job_universe(output_root=tmp_path)
+
+        assert (SingleRecordingJobNames.REGISTER, "plane_0") not in universe.possible
+
     def test_conversion_makes_registration_ready(self, tmp_path: Path) -> None:
-        """Verifies that a converted plane offers its registration job and not yet its processing job."""
+        """Verifies that a plane carrying its channel binary offers registration and not yet processing."""
         _write_parameters(output_root=tmp_path, plane_count=2)
         _convert_plane(output_root=tmp_path, plane_index=0)
 
@@ -117,15 +144,23 @@ class TestSingleRecordingJobUniverse:
         assert (SingleRecordingJobNames.PROCESS, "plane_1") in universe.possible
         assert (SingleRecordingJobNames.PROCESS, "plane_0") not in universe.possible
 
-    def test_combination_waits_for_every_plane(self, tmp_path: Path) -> None:
-        """Verifies that the combination job becomes ready only once every plane is registered."""
+    def test_combination_waits_for_every_plane_to_be_processed(self, tmp_path: Path) -> None:
+        """Verifies that combination waits for the traces it concatenates rather than for registration."""
         _write_parameters(output_root=tmp_path, plane_count=2)
-        _register_plane(output_root=tmp_path, plane_index=0)
+        for plane_index in range(2):
+            _register_plane(output_root=tmp_path, plane_index=plane_index)
+
+        # Every plane is registered, but none carries the traces the combination stage reads.
         assert (SingleRecordingJobNames.COMBINE, "") not in resolve_single_recording_job_universe(
             output_root=tmp_path
         ).possible
 
-        _register_plane(output_root=tmp_path, plane_index=1)
+        _process_plane(output_root=tmp_path, plane_index=0)
+        assert (SingleRecordingJobNames.COMBINE, "") not in resolve_single_recording_job_universe(
+            output_root=tmp_path
+        ).possible
+
+        _process_plane(output_root=tmp_path, plane_index=1)
 
         assert (SingleRecordingJobNames.COMBINE, "") in resolve_single_recording_job_universe(
             output_root=tmp_path
@@ -179,16 +214,23 @@ class TestMultiRecordingJobUniverse:
             MultiRecordingJobNames.DISCOVER
         }
 
-    def test_extraction_waits_for_the_template_masks(self, tmp_path: Path) -> None:
-        """Verifies that extraction becomes ready only once discovery has written the template masks."""
+    def test_extraction_waits_for_its_own_recording_projection(self, tmp_path: Path) -> None:
+        """Verifies that each extraction job waits for the masks projected into its own recording."""
         roots = [tmp_path / "day1", tmp_path / "day2"]
         for root in roots:
             root.mkdir()
             _mark_processed(output_root=root)
+
+        # The dataset-wide template archive marks the clustering step, not any recording's projection.
         dataset_path = resolve_dataset_path(output_root=roots[0], dataset_name="set")
         dataset_path.mkdir(parents=True)
         (dataset_path / TRACKING_TEMPLATE_MASKS_FILENAME).write_bytes(b"")
+        assert MultiRecordingJobNames.EXTRACT not in _names(
+            resolve_multi_recording_job_universe(recording_roots=roots, dataset_name="set").possible
+        )
 
+        _project_masks(output_root=roots[1], dataset_name="set")
         universe = resolve_multi_recording_job_universe(recording_roots=roots, dataset_name="set")
 
-        assert MultiRecordingJobNames.EXTRACT in _names(universe.possible)
+        assert (MultiRecordingJobNames.EXTRACT, "day2") in universe.possible
+        assert (MultiRecordingJobNames.EXTRACT, "day1") not in universe.possible

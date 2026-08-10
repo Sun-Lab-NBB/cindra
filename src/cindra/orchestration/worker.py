@@ -458,7 +458,7 @@ def prime_dataset(configuration_path: Path) -> DatasetRecordings:
     contexts = resolve_multi_recording_contexts(configuration=configuration, persist=True)
     return resolve_dataset_recordings(
         recording_roots=[
-            context.runtime.output_path for context in contexts if context.runtime.output_path is not None
+            context.runtime.io.data_path.parent for context in contexts if context.runtime.io.data_path is not None
         ],
         dataset_name=configuration.recording_io.dataset_name,
     )

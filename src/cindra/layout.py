@@ -76,9 +76,6 @@ completion marker."""
 DEFORMED_MASKS_FILENAME: str = "registration_deformed_masks.npz"
 """The name of the archive holding the ROI masks deformed into the shared visual space."""
 
-REFERENCE_IMAGE_FILENAME: str = "reference_image.npy"
-"""The name of the registration reference image, whose presence marks a plane as registered."""
-
 CHANNEL_1_BINARY_FILENAME: str = "channel_1_data.bin"
 """The name of the binary holding the functional channel frames of one imaging plane."""
 
@@ -317,4 +314,5 @@ def parse_plane_specifier(specifier: str) -> int | None:
     if not specifier.startswith(PLANE_SPECIFIER_PREFIX):
         return None
     digits = specifier.removeprefix(PLANE_SPECIFIER_PREFIX)
-    return int(digits) if digits.isdigit() else None
+    # str.isdigit() admits superscripts and other numeric forms int() rejects, so the check is narrowed to ASCII.
+    return int(digits) if digits.isascii() and digits.isdigit() else None

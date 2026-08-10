@@ -10,7 +10,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
-from ..io import is_recording_processed, resolve_recording_planes, resolve_dataset_recordings
+from ..io import (
+    is_plane_converted,
+    is_plane_processed,
+    is_recording_processed,
+    is_recording_extractable,
+    resolve_recording_planes,
+    resolve_dataset_recordings,
+)
 from .jobs import (
     MultiRecordingJobNames,
     SingleRecordingJobNames,
@@ -66,9 +73,9 @@ def resolve_single_recording_job_universe(output_root: Path, data_path: Path | N
 
     Notes:
         The conversion job is ready whenever the recording's parameters resolve. A registration job is ready once its
-        plane carries the runtime data the conversion writes, and a processing job once its plane carries the
-        reference image the registration writes. The combination job is ready once every plane is registered, which is
-        the earliest point its inputs can exist.
+        plane carries the channel binary the conversion writes, a processing job once its plane carries the reference
+        image the registration writes, and the combination job once every plane carries the traces the processing
+        stage writes, which are the arrays the combination stage concatenates.
 
     Args:
         output_root: The output root the recording was configured with.
@@ -82,9 +89,11 @@ def resolve_single_recording_job_universe(output_root: Path, data_path: Path | N
         return SingleRecordingJobs(output_root=output_root, plane_count=0)
 
     universe = tuple(resolve_single_recording_jobs(plane_count=inventory.plane_count))
+    planes = range(inventory.plane_count)
+    converted = {index for index in planes if is_plane_converted(output_root=output_root, plane_index=index)}
     registered = set(inventory.registered_planes)
-    converted = {plane_index for plane_index, plane_path in enumerate(inventory.plane_paths) if plane_path.is_dir()}
-    every_plane_registered = len(registered) == inventory.plane_count and inventory.plane_count > 0
+    processed = {index for index in planes if is_plane_processed(output_root=output_root, plane_index=index)}
+    every_plane_processed = len(processed) == inventory.plane_count and inventory.plane_count > 0
 
     possible = tuple(
         (job_name, specifier)
@@ -94,7 +103,7 @@ def resolve_single_recording_job_universe(output_root: Path, data_path: Path | N
             specifier=specifier,
             converted=converted,
             registered=registered,
-            every_plane_registered=every_plane_registered,
+            every_plane_processed=every_plane_processed,
         )
     )
 
@@ -128,14 +137,20 @@ def resolve_multi_recording_job_universe(recording_roots: Sequence[Path], datase
 
     universe = tuple(resolve_multi_recording_jobs(recording_ids=list(inventory.recording_ids)))
     every_recording_processed = all(is_recording_processed(output_root=root) for root in inventory.recording_roots)
+    extractable = {
+        recording_id
+        for recording_id, root in zip(inventory.recording_ids, inventory.recording_roots, strict=True)
+        if is_recording_extractable(output_root=root, dataset_name=dataset_name)
+    }
 
     possible = tuple(
         (job_name, specifier)
         for job_name, specifier in universe
         if _is_multi_recording_job_ready(
             job_name=job_name,
+            specifier=specifier,
             every_recording_processed=every_recording_processed,
-            discovered=inventory.discovered,
+            extractable=extractable,
         )
     )
 
@@ -154,16 +169,16 @@ def _is_single_recording_job_ready(
     converted: set[int],
     registered: set[int],
     *,
-    every_plane_registered: bool,
+    every_plane_processed: bool,
 ) -> bool:
     """Determines whether one single-recording job's own input exists on disk.
 
     Args:
         job_name: The pipeline stage the job runs.
         specifier: The job's tracker specifier, which names a plane for the per-plane stages.
-        converted: The indices of the planes carrying an output directory.
+        converted: The indices of the planes carrying the channel binary the conversion stage writes.
         registered: The indices of the planes carrying registration output.
-        every_plane_registered: Determines whether every plane of the recording is registered.
+        every_plane_processed: Determines whether every plane of the recording carries its extracted traces.
 
     Returns:
         True when the job's input exists.
@@ -171,23 +186,26 @@ def _is_single_recording_job_ready(
     if job_name == SingleRecordingJobNames.BINARIZE:
         return True
     if job_name == SingleRecordingJobNames.COMBINE:
-        return every_plane_registered
+        return every_plane_processed
 
     ready_planes = converted if job_name == SingleRecordingJobNames.REGISTER else registered
     return any(resolve_plane_specifier(plane_index=plane_index) == specifier for plane_index in ready_planes)
 
 
-def _is_multi_recording_job_ready(job_name: str, *, every_recording_processed: bool, discovered: bool) -> bool:
+def _is_multi_recording_job_ready(
+    job_name: str, specifier: str, *, every_recording_processed: bool, extractable: set[str]
+) -> bool:
     """Determines whether one multi-recording job's own input exists on disk.
 
     Args:
         job_name: The pipeline stage the job runs.
+        specifier: The job's tracker specifier, which names a recording for the extraction stage.
         every_recording_processed: Determines whether every recording carries its single-recording output.
-        discovered: Determines whether the dataset carries the tracked template masks.
+        extractable: The identifiers of the recordings carrying their own projected ROI statistics.
 
     Returns:
         True when the job's input exists.
     """
     if job_name == MultiRecordingJobNames.DISCOVER:
         return every_recording_processed
-    return discovered
+    return specifier in extractable
