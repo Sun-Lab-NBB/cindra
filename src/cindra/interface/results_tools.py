@@ -19,6 +19,7 @@ from ataraxis_data_structures import discover_marker_files
 
 from ..layout import (
     OUTPUT_DIRECTORY_NAME,
+    PLANE_SPECIFIER_PREFIX,
     DEFORMED_MASKS_FILENAME,
     CHANNEL_1_BINARY_FILENAME,
     CHANNEL_2_BINARY_FILENAME,
@@ -38,6 +39,7 @@ from ..layout import (
     RegistrationArrays,
     MultiRecordingArrays,
     resolve_array_name,
+    resolve_channel_2_name,
 )
 from .mcp_instance import mcp
 
@@ -458,8 +460,8 @@ def verify_multi_recording_output_tool(recording_path: str, dataset: str) -> dic
 
         # Channel 2 files (optional).
         for name in (
-            "registration_deformed_masks_channel_2.npz",
-            "tracking_template_masks_channel_2.npz",
+            resolve_channel_2_name(name=DEFORMED_MASKS_FILENAME),
+            resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME),
             resolve_array_name(array=RecordingArrays.ROI_MASKS, second_channel=True),
             resolve_array_name(array=RecordingArrays.ROI_STATISTICS, second_channel=True),
             resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
@@ -1231,7 +1233,7 @@ def query_multi_recording_overview_tool(
                     if key_name == "template_mask_count" and template_roi_count is None:
                         template_roi_count = count
 
-        recording_entry["has_channel_2"] = (output_path / "registration_deformed_masks_channel_2.npz").exists()
+        recording_entry["has_channel_2"] = (output_path / resolve_channel_2_name(name=DEFORMED_MASKS_FILENAME)).exists()
         recording_entry["extraction_complete"] = (output_path / RecordingArrays.CELL_FLUORESCENCE).exists()
         recordings.append(recording_entry)
 
@@ -1451,7 +1453,7 @@ def query_multi_recording_tracking_summary_tool(
         result["templates_shown"] = max_templates
 
     # Channel 2 template masks.
-    channel_2_path = dataset_path / "tracking_template_masks_channel_2.npz"
+    channel_2_path = dataset_path / resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME)
     if channel_2_path.exists():
         with contextlib.suppress(Exception):
             channel_2_data = np.load(channel_2_path, allow_pickle=False)
@@ -1833,7 +1835,9 @@ def _resolve_data_path(cindra_root: Path, plane_index: int) -> tuple[Path | None
     plane_path = cindra_root / f"plane_{plane_index}"
     if not plane_path.exists():
         available = natsorted(
-            path.name for path in cindra_root.iterdir() if path.is_dir() and path.name.startswith("plane_")
+            path.name
+            for path in cindra_root.iterdir()
+            if path.is_dir() and path.name.startswith(PLANE_SPECIFIER_PREFIX)
         )
         return None, f"Plane directory plane_{plane_index} not found. Available: {', '.join(available) or 'none'}"
 
@@ -1884,7 +1888,7 @@ def _list_plane_directories(cindra_root: Path) -> list[Path]:
         plane_10.
     """
     return natsorted(
-        (path for path in cindra_root.iterdir() if path.is_dir() and path.name.startswith("plane_")),
+        (path for path in cindra_root.iterdir() if path.is_dir() and path.name.startswith(PLANE_SPECIFIER_PREFIX)),
         key=lambda path: path.name,
     )
 

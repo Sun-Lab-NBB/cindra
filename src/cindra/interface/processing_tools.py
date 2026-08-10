@@ -32,6 +32,7 @@ from ataraxis_data_structures import (
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
 from ..layout import (
     OUTPUT_DIRECTORY_NAME,
+    PLANE_SPECIFIER_PREFIX,
     DEFORMED_MASKS_FILENAME,
     CHANNEL_1_BINARY_FILENAME,
     CHANNEL_2_BINARY_FILENAME,
@@ -49,6 +50,7 @@ from ..layout import (
     DetectionImages,
     RecordingArrays,
     resolve_array_name,
+    resolve_channel_2_name,
     resolve_plane_specifier,
 )
 from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
@@ -945,7 +947,7 @@ def clean_processing_output_tool(
 
         # Cleans per-plane files, partitioning the shared detection_data directory by the phase that owns each array.
         plane_directories = natsorted(
-            entry for entry in cindra_root.iterdir() if entry.is_dir() and entry.name.startswith("plane_")
+            entry for entry in cindra_root.iterdir() if entry.is_dir() and entry.name.startswith(PLANE_SPECIFIER_PREFIX)
         )
         for plane_directory in plane_directories:
             plane_detection_directory = plane_directory / DETECTION_DATA_DIRECTORY_NAME
@@ -1060,9 +1062,9 @@ def clean_processing_output_tool(
                 )
                 for name in (
                     DEFORMED_MASKS_FILENAME,
-                    "registration_deformed_masks_channel_2.npz",
+                    resolve_channel_2_name(name=DEFORMED_MASKS_FILENAME),
                     TRACKING_TEMPLATE_MASKS_FILENAME,
-                    "tracking_template_masks_channel_2.npz",
+                    resolve_channel_2_name(name=TRACKING_TEMPLATE_MASKS_FILENAME),
                     # Backward-projected per-recording mask and statistics files are produced by the final
                     # discovery step (project_templates_to_recordings), not by extraction, and deleting them under
                     # EXTRACT strands the pipeline because extraction consumes them as inputs.
