@@ -100,7 +100,7 @@ or the pip package is installed in a different Python environment than the one a
 
 cindra is distributed as a pre-release build, so every install, upgrade, and reinstall command MUST carry pip's `--pre`
 flag. The MCP tool surface these skills document (the four single-recording phases, the `workers_per_job` and
-`max_parallel_jobs` arguments of the execute tools, and the measured worker defaults in `cindra.allocation`, including
+`max_parallel_jobs` arguments of the execute tools, and the measured worker defaults in `cindra.orchestration`, including
 the multi-recording discovery and extraction defaults) ships in cindra 2.0.0+. Without `--pre`, pip resolves an older
 build whose MCP tools do not match the documented surface, which presents as tools that reject a documented phase name
 or argument while the server itself reports as connected.

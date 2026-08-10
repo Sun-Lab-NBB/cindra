@@ -12,10 +12,10 @@ from tifffile import TiffWriter
 from ataraxis_base_utilities import ensure_directory_exists
 from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 
-from cindra.allocation import MultiRecordingJobNames
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
-from cindra.pipelines.pipeline import (
+from cindra.orchestration import MultiRecordingJobNames
+from cindra.orchestration.pipeline import (
     execute_multi_recording_job,
     _execute_multi_recording_job,
     run_multi_recording_pipeline,
@@ -162,8 +162,18 @@ class TestRunMultiRecordingPipeline:
         # Bootstraps the multi-recording runtime data so that the remote resolution reaches job identifier validation.
         run_multi_recording_pipeline(configuration_path=configuration_path, discover=True)
 
-        with pytest.raises(ValueError, match="does not match"):
+        with pytest.raises(ValueError, match="must name a job the pipeline could produce"):
             run_multi_recording_pipeline(configuration_path=configuration_path, job_id="deadbeefdeadbeef")
+
+    def test_unknown_target_recording_raises(self, tmp_path: Path) -> None:
+        """Verifies that a target recording the dataset does not span raises a ValueError."""
+        configuration_path, _, _ = _prepare_dataset(tmp_path)
+
+        # Bootstraps the multi-recording runtime data so that the local resolution reaches the target validation.
+        run_multi_recording_pipeline(configuration_path=configuration_path, discover=True)
+
+        with pytest.raises(ValueError, match="The requested 'target_recording' must"):
+            run_multi_recording_pipeline(configuration_path=configuration_path, extract=True, target_recording="rec3")
 
     def test_extract_without_discovery_raises(self, tmp_path: Path) -> None:
         """Verifies that extracting before discovery completes raises a RuntimeError from the statistics guard."""
@@ -223,7 +233,7 @@ class TestRunMultiRecordingPipeline:
             """Returns a single stand-in context whose runtime output path is unset."""
             return [SimpleNamespace(runtime=SimpleNamespace(io=SimpleNamespace(recording_id="rec1"), output_path=None))]
 
-        monkeypatch.setattr("cindra.pipelines.pipeline.resolve_multi_recording_contexts", _fake_resolve)
+        monkeypatch.setattr("cindra.orchestration.pipeline.resolve_multi_recording_contexts", _fake_resolve)
 
         with pytest.raises(ValueError, match="output path is not configured"):
             run_multi_recording_pipeline(configuration_path=configuration_path, discover=True)

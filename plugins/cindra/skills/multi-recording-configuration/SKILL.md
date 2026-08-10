@@ -118,7 +118,7 @@ Runtime behavior settings shared with the single-recording pipeline.
 
 Worker allocation reaches the discovery and extraction stages as an invocation argument, as described in the
 Configuration overview section. Omitting a worker option applies the measured default of 30 workers for discovery and 16
-for extraction, published as `DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.allocation`. Setting a worker
+for extraction, published as `DISCOVERY_WORKERS` and `EXTRACTION_WORKERS` in `cindra.orchestration`. Setting a worker
 option to -1 requests every available core.
 
 ---

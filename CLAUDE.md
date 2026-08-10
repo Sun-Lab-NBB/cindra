@@ -144,7 +144,7 @@ outputs.
 | Directory                    | Purpose                                                         |
 |------------------------------|-----------------------------------------------------------------|
 | `src/cindra/`                | Main library source code                                        |
-| `src/cindra/allocation/`     | Phase model, job names, CPU worker allocation, OpenMP resolver  |
+| `src/cindra/orchestration/`  | Job model, worker allocation, batch execution engine, pipelines |
 | `src/cindra/classification/` | Cell type classification (distinguishing cells from artifacts)  |
 | `src/cindra/dataclasses/`    | Configuration and runtime data structures (YamlConfig-based)    |
 | `src/cindra/detection/`      | ROI detection, tracking, and statistics computation             |
@@ -152,7 +152,7 @@ outputs.
 | `src/cindra/gui/`            | Interactive PySide6/PyQtGraph viewers for pipeline outputs      |
 | `src/cindra/interface/`      | CLI, MCP servers, and tool modules for user-facing entry points |
 | `src/cindra/io/`             | TIFF loading, binary file management, multi-plane combination   |
-| `src/cindra/pipelines/`      | High-level pipeline orchestration for single/multi-recording    |
+| `src/cindra/pipelines/`      | Stage entry points the pipelines dispatch                       |
 | `src/cindra/registration/`   | Motion correction, diffeomorphic registration, deformation      |
 | `tests/`                     | Test suite (mirrors source module structure)                    |
 | `docs/`                      | Sphinx API documentation source                                 |
@@ -165,33 +165,52 @@ outputs.
   extraction, and requires the plane to be registered (parallelizable across planes). Phase 4 merges plane-specific
   results into a unified `combined_metadata.npz` dataset, trimming the combined traces to the shortest contributing
   plane and recording `frame_count` and `plane_frame_counts` alongside the geometry. That metadata file doubles as the
-  pipeline-completion marker, so it is written after its payload arrays and moved into place from a temporary name.
+  pipeline-completion marker, so it is written after its payload arrays and published through `atomic_write`.
   Phase 1 rejects a data directory whose TIFF files do not all hold frames of the same shape, naming
   `file_io.ignored_file_names` as the exclusion mechanism. Phases 2 and 3 carry a `plane_{index}` tracker specifier.
 - **Multi-recording pipeline**: Two-phase workflow (discover, extract). Phase 1 selects ROIs from each recording,
   performs diffeomorphic demons registration to a common space, clusters ROIs across recordings via spatial overlap, and
   projects template masks back to individual recordings. Phase 2 extracts fluorescence traces and applies OASIS
   deconvolution for tracked ROI templates (parallelizable across recordings).
-- **Phase model**: `cindra.allocation` exports the pipeline phase model (`SINGLE_RECORDING_PHASES`,
-  `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`) together with the resolvers that expand it into a
-  recording's job universe (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`, `resolve_pipeline_jobs`),
-  build the prerequisite graph (`resolve_single_recording_prerequisites`, `resolve_multi_recording_prerequisites`),
-  expand a phase to its dependents (`resolve_downstream_phases`), and format the per-plane tracker specifier
-  (`resolve_plane_specifier`, `PLANE_SPECIFIER_PREFIX`). The pipelines and the MCP layer read the model rather than
-  restating the phase order, so a phase is added or reordered there and every consumer follows.
+- **Self-driven orchestration**: `cindra.orchestration` owns the whole scheduling surface across four modules that
+  form a one-way dependency chain. `jobs.py` is the leaf: it holds the job name enumerations, the phase model
+  (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`, `PipelinePhase`, `PrerequisiteScope`), the resolvers that
+  expand it into a recording's job universe (`resolve_single_recording_jobs`, `resolve_multi_recording_jobs`,
+  `resolve_pipeline_jobs`), the prerequisite graph (`resolve_single_recording_prerequisites`,
+  `resolve_multi_recording_prerequisites`, `resolve_prerequisite_job_ids`, `validate_job_prerequisites`), the phase
+  expansion (`resolve_downstream_phases`, `order_phases_by_execution`), the per-plane tracker specifier
+  (`resolve_plane_specifier`, `PLANE_SPECIFIER_PREFIX`), and the two tracker filenames. `allocation.py` adds the
+  measured stage worker defaults, the resource-class model, and the host core and memory budgets. `execution.py` holds
+  the batch engine: `PendingJob`, `JobExecutionState`, the admission scan, the pool dispatcher, and the manager
+  thread.
+  `pipeline.py` is the entry point every scheduler dispatches. Nothing below `orchestration` imports it, and no module
+  inside it imports `interface`, so the MCP layer is a thin argument-validation and JSON-shaping wrapper over calls
+  into the package. This mirrors the orchestration package of `ataraxis-video-system` and
+  `ataraxis-communication-interface`.
+- **Tracker-driven job state**: The transitions of a job the pipeline runs belong to the tracker's `run_job()`
+  context manager rather than to a hand-rolled `start_job`/`complete_job`/`fail_job` sequence. The engine's
+  `_fail_pending_jobs` is the one exception, because it records a terminal outcome for a job that never ran and
+  therefore has no block to wrap. A remote
+  invocation recovers its job's name and specifier through `tracker.resolve_job(job_id, universe)` rather than
+  rebuilding the identifier map itself. Both pipeline entry points validate `target_plane` and `target_recording`
+  against the resolved universe before aligning the tracker, so an out-of-range request reports the argument the
+  caller passed instead of a job identifier the caller never saw.
 - **Context pattern**: `RuntimeContext` combines configuration, acquisition parameters, and runtime data into a single
   object passed through pipeline steps. `MultiRecordingRuntimeContext` follows the same pattern, but carries only
   configuration and runtime data.
 - **Configuration-driven execution**: Pipelines read all processing parameters from YAML files (YamlConfig subclasses).
   The CLI writes overrides to the config file before execution rather than passing arguments. Worker counts are the
-  exception: they are explicit API parameters resolved through `cindra.allocation`, which keeps the configuration file
+  exception: they are explicit API parameters resolved through `cindra.orchestration`, which keeps the configuration file
   immutable and safe to share between concurrently dispatched jobs.
-- **Worker sentinel contract**: One convention governs every worker and concurrency argument in the repository. `None`
-  accepts the measured default for that stage or resource class, `-1` (`ALL_CORES_REQUEST`) requests every available
-  core, and a positive integer is used exactly. Any other non-positive value is rejected. This holds for
-  `resolve_stage_workers`, the `cindra run` worker options, the pipeline entry points, and the `workers_per_job` and
-  `max_parallel_jobs` arguments of the execute MCP tools. For `max_parallel_jobs`, `-1` lifts the derived cap so that
-  only the job count bounds concurrency. Keep the source, the skills, and the README stating this identically.
+- **Worker sentinel contract**: One convention governs every argument that resolves a worker or concurrency
+  allocation. `None` accepts the measured default for that stage or resource class, `-1` (`ALL_CORES_REQUEST`)
+  requests every available core, and a positive integer is used exactly. Any other non-positive value is rejected.
+  This holds for `resolve_stage_workers`, the `cindra run` worker options, the pipeline entry points, and the
+  `workers_per_job` and `max_parallel_jobs` arguments of the execute MCP tools. For `max_parallel_jobs`, `-1` lifts
+  the derived cap so that only the job count bounds concurrency. A stage-internal parameter that receives an
+  already-resolved count, such as the `workers` argument of the stage entry points or `pca_denoise`'s
+  `parallel_workers`, takes a positive integer alone and rejects every other value. Keep the source, the skills, and
+  the README stating this identically.
 - **ProcessingTracker**: File-based YAML pipeline state tracking with FileLock for multi-process coordination. Manages
   job states (SCHEDULED, RUNNING, SUCCEEDED, FAILED) for resumable batch processing.
 - **Subprocess GUI isolation**: GUI viewers launch as separate subprocesses with state file exchange via temporary
@@ -201,11 +220,20 @@ outputs.
   `processing_tools`, `results_tools`) imported at module level to trigger `@mcp.tool()` registration. Processing uses a
   prepare-then-execute model: preparation tools create execution manifests (trackers, per-recording configurations, job
   lists) without starting computation, and execution tools dispatch jobs with prerequisite validation, per-class
-  resource allocation, and automatic phase sequencing. Every job class except combination carries a measured per-job
-  worker count from `cindra.allocation`. The combination class holds the single core its serial merge needs. The
+  resource allocation, and automatic phase sequencing. The dispatch half lives in `cindra.orchestration`, so the
+  execute, monitor, and cancel tools hold only argument validation and response shaping. The prepare tools stay in
+  the interface layer, because building a manifest is a user-facing operation over paths and configuration files
+  rather than part of the scheduling model. Every job class except combination carries a measured per-job
+  worker count from `cindra.orchestration`. The combination class holds the single core its serial merge needs. The
   I/O-bound classes (binarize, combine) pair the count with a fixed concurrency cap. The compute-bound classes
   (register, process, discover, extract) derive their concurrency from the session CPU budget, and the processing class
   additionally from available system memory.
+- **Process-isolated jobs**: The batch engine dispatches every job into a `ProcessPoolExecutor` sized to the
+  concurrency the per-class caps allow, so admission remains the only thing bounding how many jobs run. Isolation buys
+  two things a thread pool cannot. A job's BLAS width belongs to its process, so concurrent jobs at different widths no
+  longer overwrite each other. A detection job that exhausts memory takes down its own worker rather than the whole
+  batch, and the engine records a terminal outcome for every job the resulting `BrokenProcessPool` strands. The manager
+  itself stays a thread of the dispatching process, since it only polls trackers and moves queue entries.
 
 ### Key patterns
 
@@ -215,10 +243,18 @@ outputs.
   registration and ROIs in extraction. Numba is excluded from type checking via a `pyproject.toml` mypy override. The
   `# type: ignore[import-untyped]` comments apply to the scikit-learn, threadpoolctl, PyQtGraph, and yaml imports, and
   `# pragma: no cover` on JIT-compiled function bodies is expected. None of these should be removed.
-- **BLAS confinement**: Every site that dispatches a scikit-learn or LAPACK fit wraps it in `threadpool_limits`, so the
-  BLAS thread count cannot multiply against the job's worker budget. `detection/detect.py` and `registration/metrics.py`
-  limit to the job's `workers`. `detection/denoise.py` limits to 1, because its own block pool already spends the
-  budget.
+- **Thread budget confinement**: Two ataraxis assets and one third-party context manager divide the work, and each
+  covers a moment the others cannot. `limit_worker_threads` from `ataraxis-data-structures` encloses the batch
+  engine's worker pool for the session's whole lifetime, so every worker process imports its numeric backends at a
+  width of one instead of sizing each of them to the whole host. `initialize_worker_threads` runs as that pool's
+  initializer, which reaches the backends that read their variable the first time they are asked to work rather than
+  while they are imported. Neither touches `NUMBA_NUM_THREADS`, so a worker still latches the host's full ceiling and
+  each stage raises to its own budget through `numba.set_num_threads`. `threadpool_limits` then confines the
+  scikit-learn and LAPACK fits inside the running worker, which is the only one of the three that acts on an
+  already-loaded library. `detection/detect.py` and `registration/metrics.py` limit to the job's `workers`, and
+  `detection/denoise.py` limits to 1 because its own block pool already spends the budget. The BLAS width these set
+  is a property of the process rather than of the thread that asked for it, which is why the engine gives each job
+  its own process.
 - **Registration integrity**: Registration rewrites the plane binary in place and guards the rewrite with a
   `<binary>.registering` marker (`create_registration_marker`, `clear_registration_marker`,
   `resolve_registration_marker_path`, exported from `cindra.io`). `register_plane` refuses to run while a marker exists,
@@ -265,8 +301,8 @@ The `deploy` and `upload` tasks stay out of the envlist and are invoked manually
 ### Testing
 
 Tests use pytest with pytest-xdist for parallel execution (`-n logical --dist loadgroup`). Test files mirror the source
-structure under `tests/` with a `_test.py` suffix, across `allocation/`, `classification/`, `dataclasses/`,
-`detection/`, `extraction/`, `io/`, `pipelines/`, and `registration/`.
+structure under `tests/` with a `_test.py` suffix, across `classification/`, `dataclasses/`, `detection/`,
+`extraction/`, `io/`, `orchestration/`, `pipelines/`, and `registration/`.
 
 The component map, CLI command reference, dependency table, and per-area workflow guidance live in an imported reference
 file:

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from natsort import natsorted
 from ataraxis_base_utilities import console, ensure_directory_exists
+from ataraxis_data_structures import discover_marker_files
 
 from .multi_recording_data import MultiRecordingRuntimeData
 from .single_recording_data import CombinedData, SingleRecordingRuntimeData
@@ -228,7 +229,7 @@ class RuntimeContext:
             console.error(message=message, error=ValueError)
 
         root_path = self.configuration.file_io.output_path / "cindra"
-        ensure_directory_exists(path=root_path)
+        ensure_directory_exists(path=root_path, is_file=False)
 
         self.configuration.save(file_path=root_path / "configuration.yaml")
         self.acquisition.to_yaml(file_path=root_path / "acquisition_parameters.yaml")
@@ -274,7 +275,7 @@ class RuntimeContext:
             RuntimeError: If multiple configuration.yaml files are found under root_path.
         """
         # Discovers the cindra output directory within the root_path directory tree.
-        matches = list(root_path.rglob("configuration.yaml"))
+        matches = discover_marker_files(directory=root_path, marker_name="configuration.yaml")
 
         if not matches:
             message = (
@@ -366,7 +367,7 @@ class MultiRecordingRuntimeContext:
             console.error(message=message, error=ValueError)
 
         main_recording_path = self.runtime.io.dataset_output_paths[0]
-        ensure_directory_exists(path=main_recording_path)
+        ensure_directory_exists(path=main_recording_path, is_file=False)
 
         self.configuration.save(file_path=main_recording_path / "multi_recording_configuration.yaml")
 
@@ -413,7 +414,7 @@ class MultiRecordingRuntimeContext:
             IndexError: If recording_index is out of range.
         """
         # Discovers the multi_recording_runtime_data.yaml file within the root_path directory tree.
-        matches = list(root_path.rglob("multi_recording_runtime_data.yaml"))
+        matches = discover_marker_files(directory=root_path, marker_name="multi_recording_runtime_data.yaml")
 
         if not matches:
             message = (

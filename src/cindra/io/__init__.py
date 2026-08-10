@@ -1,6 +1,6 @@
 """Provides assets for importing, converting, and combining multi-plane imaging data."""
 
-from .tiff import TIFF_EXTENSIONS, convert_tiffs_to_binary
+from .tiff import TIFF_EXTENSIONS, TIFF_DECODE_CEILING, convert_tiffs_to_binary
 from .binary import (
     BinaryFile,
     BinaryFileCombined,
@@ -24,6 +24,7 @@ __all__ = [
     "MAXIMUM_CHANNEL_COUNT",
     "OUTPUT_DIRECTORY_NAME",
     "PARAMETERS_FILENAME",
+    "TIFF_DECODE_CEILING",
     "TIFF_EXTENSIONS",
     "BinaryFile",
     "BinaryFileCombined",

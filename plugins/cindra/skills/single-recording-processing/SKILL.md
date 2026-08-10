@@ -93,11 +93,11 @@ diagnose and resolve connectivity issues.
 Four-phase sequential pipeline per recording:
 
 ```text
-Phase 1: BINARIZE (phase name binarization, I/O bound, 4 cores per job, up to 4 concurrent jobs)
+Phase 1: BINARIZE (phase name binarization, I/O bound, 3 cores per job, up to 4 concurrent jobs)
 ├── Converts raw TIFFs to binary format
 └── Initializes the per-plane runtime data hierarchy, one job per recording with an empty specifier
 
-Phase 2: REGISTER (phase name registration, per plane, 8 cores per job)
+Phase 2: REGISTER (phase name registration, per plane, 12 cores per job)
 ├── Motion correction plus the registration-quality metrics computation
 └── One job per plane, specifier plane_{plane_index}
 
@@ -112,7 +112,7 @@ Phase 4: COMBINE (phase name combination, I/O bound, 1 core per job, up to 4 con
 Batch processing across multiple recordings:
 
 ```text
-BINARIZE: Up to 4 concurrent recordings, 4 cores each, fixed concurrency
+BINARIZE: Up to 4 concurrent recordings, 3 cores each, fixed concurrency
 REGISTER: Concurrency bounded by the session CPU budget, 8 cores per plane job
 PROCESS:  Concurrency bounded by the CPU budget and available memory, 10 cores per plane job
 COMBINE:  Up to 4 concurrent recordings, 1 core each, fixed concurrency
@@ -272,8 +272,8 @@ operations, and the dispatcher holds the sum of the cores committed by every cla
 
 | Phase    | Resource class | Cores per job | Concurrency cap                      |
 |----------|----------------|---------------|--------------------------------------|
-| BINARIZE | `binarization` | 4             | Fixed at 4                           |
-| REGISTER | `registration` | 8             | Session CPU budget                   |
+| BINARIZE | `binarization` | 3             | Fixed at 4                           |
+| REGISTER | `registration` | 12            | Session CPU budget                   |
 | PROCESS  | `processing`   | 10            | CPU budget and memory, 15 GB per job |
 | COMBINE  | `combination`  | 1             | Fixed at 4                           |
 
@@ -354,7 +354,7 @@ When processing fails for some recordings, read the error messages and route to 
 | MCP tools unavailable, server connection errors   | `/cindra-mcp-environment-setup`   |
 
 Wait for the current execution session to complete before starting retries. `cancel_processing_jobs_tool` clears the
-admission pool and every resource class queue but does NOT stop already-dispatched worker threads, and it clears the
+admission pool and every resource class queue but does NOT stop already-dispatched worker processes, and it clears the
 session state immediately, so a new session can start while cancelled jobs still run. After cancelling, poll
 `get_recording_status_tool` on the affected recordings until no job remains RUNNING before dispatching again.
 

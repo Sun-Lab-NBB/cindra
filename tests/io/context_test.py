@@ -218,6 +218,14 @@ class TestExtractUniqueComponents:
         with pytest.raises(RuntimeError, match="Unable to extract a unique component"):
             extract_unique_components(paths=paths)
 
+    def test_raises_error_for_component_containing_a_colon(self) -> None:
+        """Verifies that a RuntimeError is raised when the resolved unique component contains a colon."""
+        # The tracker joins a job name to its specifier with a colon, so a component carrying one is rejected here.
+        paths = [Path("/data/day:1/rec"), Path("/data/day2/rec")]
+
+        with pytest.raises(RuntimeError, match=r"contains the\s':' character"):
+            extract_unique_components(paths=paths)
+
     def test_three_paths_with_unique_components(self) -> None:
         """Verifies correct extraction when three paths each have a unique identifying component."""
         paths = [

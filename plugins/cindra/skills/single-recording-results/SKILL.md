@@ -182,7 +182,7 @@ to the registration valid range before being embedded into a full-frame array th
 surviving file is not the whole-movie temporal mean registration wrote.
 
 **Phase 4 (combination):** Creates combined `detection_data/` and the combined ROI and trace files at the root level by
-merging all per-plane results, then writes `combined_metadata.npz` last, staging it as `combined_metadata.tmp.npz` and
+merging all per-plane results, then writes `combined_metadata.npz` last, publishing it through an atomic write that
 moving it into place. The metadata file therefore doubles as an atomic completion marker: it never exists while the
 payload it describes is missing or partially written.
 
