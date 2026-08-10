@@ -69,7 +69,12 @@ class DatasetRecordings:
     extracted_recordings: tuple[str, ...] = ()
     """The identifiers of the recordings whose tracked fluorescence has already been extracted."""
     discovered: bool = False
-    """Determines whether the dataset carries the template mask archive that marks its discovery phase complete."""
+    """Determines whether the dataset carries the tracked template mask archive.
+
+    Notes:
+        The archive is written by the clustering step, which the projection back into each recording still follows, so
+        it marks the dataset as tracked rather than the discovery job as finished.
+    """
 
 
 def resolve_recording_planes(output_root: Path, data_path: Path | None = None) -> RecordingPlanes:
@@ -244,7 +249,8 @@ def is_dataset_discovered(output_root: Path, dataset_name: str) -> bool:
         dataset_name: The name of the tracked dataset, in any casing.
 
     Returns:
-        True when the dataset carries the template mask archive the discovery stage writes.
+        True when the dataset carries the tracked template mask archive, which the clustering step writes partway
+        through the discovery job.
     """
     dataset_path = resolve_dataset_path(output_root=output_root, dataset_name=dataset_name)
     return (dataset_path / TRACKING_TEMPLATE_MASKS_FILENAME).exists()

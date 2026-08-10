@@ -47,7 +47,12 @@ class SingleRecordingJobs:
         against the same set whatever subset it intends to run.
     """
     possible: tuple[tuple[str, str], ...] = ()
-    """The subset of the universe whose own input exists on disk right now."""
+    """The subset of the universe whose own input exists on disk right now.
+
+    Notes:
+        The conversion job is reported ready whenever the recording's parameters resolve, which is the weakest of the
+        five conditions, because its own input is the raw image set this record does not read.
+    """
     resolved: bool = False
     """Determines whether the universe follows from the recording's own parameters rather than from their absence."""
 
