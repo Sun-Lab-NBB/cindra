@@ -532,7 +532,7 @@ def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path,
     return tuple(unique_roots)
 
 
-def _load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
+def load_acquisition_parameters(json_path: Path) -> AcquisitionParameters:
     """Loads acquisition parameters from a JSON file and validates all required fields.
 
     For single-ROI data, frame_rate, plane_number, and channel_number are required. For MROI data (roi_number > 1),
@@ -645,7 +645,7 @@ def _find_acquisition_parameters(data_path: Path) -> AcquisitionParameters:
     message = f"Found acquisition parameters at: {parameters_path}."
     console.echo(message=message, level=LogLevel.SUCCESS)
 
-    return _load_acquisition_parameters(json_path=parameters_path)
+    return load_acquisition_parameters(json_path=parameters_path)
 
 
 def _find_cindra_directory(recording_directory: Path) -> Path:
