@@ -8,7 +8,6 @@ from itertools import compress
 import numpy as np
 from scipy.signal import medfilt2d
 from ataraxis_time import PrecisionTimer, TimerPrecisions
-from threadpoolctl import threadpool_limits  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
 from ..io import BinaryFile
@@ -62,9 +61,10 @@ def detect_plane_rois(context: RuntimeContext, *, workers: int) -> None:
         ROI populations may have different soma sizes and spatial scales. Results are written into
         context.runtime.detection, context.runtime.extraction, and context.runtime.timing.
 
-        The worker count drives the PCA denoising thread pool and the BLAS thread limit applied around the sparse
-        detection loop. Movie binning IO and the serial detection loop bound this stage, so its runtime plateaus at
-        the measured processing default.
+        The worker count drives the PCA denoising thread pool. The linear-algebra backends the detection loop calls
+        into are confined to the same budget by the processing stage entry point, which encloses this call. Movie
+        binning IO and the serial detection loop bound this stage, so its runtime plateaus at the measured processing
+        default.
 
     Args:
         context: The RuntimeContext containing configuration, file paths, and mutable runtime data structures. Modified
@@ -381,8 +381,7 @@ def _detect_channel(
         detection_config: The ROIDetection configuration dataclass containing detection parameters.
         nonrigid_block_size: The nonrigid registration block size (height, width), used to derive the PCA denoising
             block dimensions.
-        workers: The number of parallel workers to use for PCA denoising and for the BLAS thread limit applied around
-            the sparse detection loop. A value of 1 disables parallelism.
+        workers: The number of parallel workers to use for PCA denoising. A value of 1 disables parallelism.
         custom_classifier_path: The path to a custom classifier file, or None to use the built-in classifier.
         plane_index: The index of the imaging plane being processed, used for logging.
         channel_label: The channel identifier string used in log messages (e.g., "channel 1" or "channel 2").
@@ -436,23 +435,20 @@ def _detect_channel(
             parallel_workers=workers,
         )
 
-    # Runs the sparse iterative ROI detection algorithm. Limits BLAS and OpenMP thread count to match the requested
-    # parallel worker budget, since the detection loop performs many matrix operations (matmul, norm, outer) that
-    # otherwise spawn threads for all CPU cores via the underlying BLAS library.
+    # Runs the sparse iterative ROI detection algorithm.
     console.echo(
         message=f"Discovering ROIs for plane {plane_index} {channel_label}...",
         level=LogLevel.INFO,
     )
 
-    with threadpool_limits(limits=workers):
-        maximum_projection, correlation_map, spatial_scale_pixels, roi_statistics = detect_rois_in_frames(
-            frames=binned_frames,
-            temporal_highpass_window=detection_config.temporal_highpass_window,
-            spatial_highpass_window=detection_config.spatial_highpass_window,
-            threshold_scaling=detection_config.threshold_scaling,
-            maximum_iterations=_ITERATION_MULTIPLIER * detection_config.maximum_iterations,
-            plane_index=plane_index,
-        )
+    maximum_projection, correlation_map, spatial_scale_pixels, roi_statistics = detect_rois_in_frames(
+        frames=binned_frames,
+        temporal_highpass_window=detection_config.temporal_highpass_window,
+        spatial_highpass_window=detection_config.spatial_highpass_window,
+        threshold_scaling=detection_config.threshold_scaling,
+        maximum_iterations=_ITERATION_MULTIPLIER * detection_config.maximum_iterations,
+        plane_index=plane_index,
+    )
 
     message = (
         f"Plane {plane_index} {channel_label} ROIs: discovered. Detected ROIs: {len(roi_statistics)}. "

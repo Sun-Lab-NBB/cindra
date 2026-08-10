@@ -769,6 +769,15 @@ class TestJobPool:
             pool.shutdown(wait=False, cancel_futures=True)
 
     @pytest.mark.xdist_group(name="execution_state")
+    def test_pool_spawns_its_workers_on_every_platform(self) -> None:
+        """Verifies that the session pool requests the spawn start method rather than the host default."""
+        pool = execution._create_job_pool(max_workers=1)
+        try:
+            assert pool._mp_context.get_start_method() == "spawn"
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+
+    @pytest.mark.xdist_group(name="execution_state")
     @pytest.mark.parametrize(
         ("capacities", "expected_size"),
         [({}, 1), ({"registration": 3}, 3), ({"registration": 3, "processing": 2}, 5)],
