@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
 from ..layout import (
+    CHANNEL_1_BINARY_FILENAME,
     COMBINED_METADATA_FILENAME,
     ACQUISITION_PARAMETERS_FILENAME,
     REGISTRATION_DATA_DIRECTORY_NAME,
@@ -182,6 +183,57 @@ def is_plane_registered(output_root: Path, plane_index: int) -> bool:
     """
     plane_path = resolve_plane_path(output_root=output_root, plane_index=plane_index)
     return (plane_path / REGISTRATION_DATA_DIRECTORY_NAME / RegistrationArrays.REFERENCE_IMAGE).exists()
+
+
+def is_plane_converted(output_root: Path, plane_index: int) -> bool:
+    """Determines whether one virtual imaging plane carries the binary the conversion stage writes.
+
+    Args:
+        output_root: The output root the recording was configured with.
+        plane_index: The index of the virtual imaging plane.
+
+    Returns:
+        True when the plane carries its functional channel binary.
+    """
+    plane_path = resolve_plane_path(output_root=output_root, plane_index=plane_index)
+    return (plane_path / CHANNEL_1_BINARY_FILENAME).exists()
+
+
+def is_plane_processed(output_root: Path, plane_index: int) -> bool:
+    """Determines whether one virtual imaging plane carries the traces the processing stage writes.
+
+    Notes:
+        The traces are what the combination stage concatenates, so this is the condition under which a combination
+        job's own inputs exist.
+
+    Args:
+        output_root: The output root the recording was configured with.
+        plane_index: The index of the virtual imaging plane.
+
+    Returns:
+        True when the plane carries its extracted fluorescence trace.
+    """
+    plane_path = resolve_plane_path(output_root=output_root, plane_index=plane_index)
+    return (plane_path / RecordingArrays.CELL_FLUORESCENCE).exists()
+
+
+def is_recording_extractable(output_root: Path, dataset_name: str) -> bool:
+    """Determines whether one recording carries the tracked masks its own extraction job reads.
+
+    Notes:
+        The discovery stage projects a template mask set back into every recording it spans, and the extraction stage
+        refuses to run without that recording's own projected statistics. The dataset-wide template archive marks the
+        clustering step rather than the projection, so it is not the condition an extraction job waits on.
+
+    Args:
+        output_root: The output root the recording was configured with.
+        dataset_name: The name of the tracked dataset, in any casing.
+
+    Returns:
+        True when the recording carries its own projected ROI statistics.
+    """
+    dataset_path = resolve_dataset_path(output_root=output_root, dataset_name=dataset_name)
+    return (dataset_path / RecordingArrays.ROI_STATISTICS).exists()
 
 
 def is_dataset_discovered(output_root: Path, dataset_name: str) -> bool:
