@@ -19,7 +19,7 @@ from cindra.orchestration import (
 from cindra.orchestration.allocation import (
     _RESERVED_CORES,
     COMBINATION_WORKERS,
-    _BYTES_PER_GIGABYTE,
+    _BYTES_PER_MEGABYTE,
     _DISCOVERY_RESOURCES,
     _EXTRACTION_RESOURCES,
     _PROCESSING_RESOURCES,
@@ -27,11 +27,10 @@ from cindra.orchestration.allocation import (
     _BINARIZATION_RESOURCES,
     _REGISTRATION_RESOURCES,
     _MAXIMUM_PARALLEL_IO_JOBS,
-    _PROCESSING_MEMORY_GIGABYTES_PER_JOB,
     resolve_core_budget,
     resolve_class_allocation,
+    resolve_memory_budget_mb,
     summarize_class_allocation,
-    resolve_available_memory_gigabytes,
 )
 
 
@@ -143,14 +142,14 @@ class TestResourceClasses:
     """Tests the resource classes that size a batch of jobs and the job name map that selects them."""
 
     @pytest.mark.parametrize(
-        ("resource_class", "name", "workers_per_job", "fixed_parallel_jobs", "memory_gigabytes_per_job"),
+        ("resource_class", "name", "workers_per_job", "fixed_parallel_jobs"),
         [
-            (_BINARIZATION_RESOURCES, "binarization", BINARIZATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS, 0.0),
-            (_REGISTRATION_RESOURCES, "registration", REGISTRATION_WORKERS, None, 0.0),
-            (_PROCESSING_RESOURCES, "processing", PROCESSING_WORKERS, None, _PROCESSING_MEMORY_GIGABYTES_PER_JOB),
-            (_COMBINATION_RESOURCES, "combination", COMBINATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS, 0.0),
-            (_DISCOVERY_RESOURCES, "discovery", DISCOVERY_WORKERS, None, 0.0),
-            (_EXTRACTION_RESOURCES, "extraction", EXTRACTION_WORKERS, None, 0.0),
+            (_BINARIZATION_RESOURCES, "binarization", BINARIZATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS),
+            (_REGISTRATION_RESOURCES, "registration", REGISTRATION_WORKERS, None),
+            (_PROCESSING_RESOURCES, "processing", PROCESSING_WORKERS, None),
+            (_COMBINATION_RESOURCES, "combination", COMBINATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS),
+            (_DISCOVERY_RESOURCES, "discovery", DISCOVERY_WORKERS, None),
+            (_EXTRACTION_RESOURCES, "extraction", EXTRACTION_WORKERS, None),
         ],
     )
     def test_class_fields_carry_the_measured_stage_budget(
@@ -159,13 +158,11 @@ class TestResourceClasses:
         name: str,
         workers_per_job: int,
         fixed_parallel_jobs: int | None,
-        memory_gigabytes_per_job: float,
     ) -> None:
         """Verifies that every exported resource class declares its measured worker, concurrency, and memory budget."""
         assert resource_class.name == name
         assert resource_class.workers_per_job == workers_per_job
         assert resource_class.fixed_parallel_jobs == fixed_parallel_jobs
-        assert resource_class.memory_gigabytes_per_job == memory_gigabytes_per_job
 
     @pytest.mark.parametrize(
         ("job_name", "expected_class"),
@@ -188,14 +185,12 @@ class TestResourceClasses:
         """Verifies that the map leaves no single or multi-recording job name without a resource class."""
         assert set(RESOURCE_CLASS_BY_JOB_NAME) == set(SingleRecordingJobNames) | set(MultiRecordingJobNames)
 
-    def test_only_the_processing_class_bounds_its_concurrency_by_memory(self) -> None:
-        """Verifies that the processing class is the sole class declaring a per-job memory footprint."""
-        memory_bound = {
-            resource_class.name
+    def test_no_class_declares_a_memory_footprint(self) -> None:
+        """Verifies that memory bounds admission per job rather than concurrency per class."""
+        assert not any(
+            hasattr(resource_class, "memory_gigabytes_per_job")
             for resource_class in RESOURCE_CLASS_BY_JOB_NAME.values()
-            if resource_class.memory_gigabytes_per_job > 0
-        }
-        assert memory_bound == {"processing"}
+        )
 
 
 class TestFixedCapacityAllocation:
@@ -218,7 +213,6 @@ class TestFixedCapacityAllocation:
         allocation = resolve_class_allocation(
             resource_class=resource_class,
             budget=64,
-            available_memory=256.0,
             job_count=job_count,
             workers_per_job=None,
             max_parallel_jobs=None,
@@ -237,7 +231,6 @@ class TestFixedCapacityAllocation:
         allocation = resolve_class_allocation(
             resource_class=_BINARIZATION_RESOURCES,
             budget=64,
-            available_memory=64.0,
             job_count=8,
             workers_per_job=workers_per_job,
             max_parallel_jobs=max_parallel_jobs,
@@ -277,7 +270,6 @@ class TestDerivedCapacityAllocation:
         allocation = resolve_class_allocation(
             resource_class=_REGISTRATION_RESOURCES,
             budget=budget,
-            available_memory=64.0,
             job_count=job_count,
             workers_per_job=workers_per_job,
             max_parallel_jobs=max_parallel_jobs,
@@ -285,13 +277,11 @@ class TestDerivedCapacityAllocation:
 
         assert allocation == expected
 
-    @pytest.mark.parametrize("available_memory", [0.0, 0.5, 4096.0])
-    def test_class_without_a_memory_footprint_ignores_the_available_memory(self, available_memory: float) -> None:
-        """Verifies that a class declaring no per-job memory keeps its CPU-derived cap whatever memory is free."""
+    def test_discovery_class_derives_its_capacity_from_the_budget(self) -> None:
+        """Verifies that the discovery class splits the budget across its measured worker count."""
         allocation = resolve_class_allocation(
             resource_class=_DISCOVERY_RESOURCES,
             budget=DISCOVERY_WORKERS * 3,
-            available_memory=available_memory,
             job_count=8,
             workers_per_job=None,
             max_parallel_jobs=None,
@@ -304,7 +294,6 @@ class TestDerivedCapacityAllocation:
         allocation = resolve_class_allocation(
             resource_class=_EXTRACTION_RESOURCES,
             budget=EXTRACTION_WORKERS * 2,
-            available_memory=1024.0,
             job_count=6,
             workers_per_job=None,
             max_parallel_jobs=None,
@@ -313,65 +302,23 @@ class TestDerivedCapacityAllocation:
         assert allocation == (EXTRACTION_WORKERS, 2)
 
 
-class TestMemoryBoundAllocation:
-    """Tests the allocation of the processing class, whose concurrency additionally follows the available memory."""
-
-    @pytest.mark.parametrize(
-        ("budget", "available_memory", "job_count", "expected"),
-        [
-            (100, 100.0, 20, (PROCESSING_WORKERS, 6)),
-            (100, 5.0, 20, (PROCESSING_WORKERS, 1)),
-            (100, 0.0, 20, (PROCESSING_WORKERS, 1)),
-            (100, 4096.0, 20, (PROCESSING_WORKERS, 10)),
-            (100, 4096.0, 3, (PROCESSING_WORKERS, 3)),
-        ],
-    )
-    def test_capacity_takes_the_smallest_of_the_cpu_memory_and_job_bounds(
-        self, budget: int, available_memory: float, job_count: int, expected: tuple[int, int]
-    ) -> None:
-        """Verifies that the memory-bound class caps its concurrency at the tightest of its three bounds."""
-        allocation = resolve_class_allocation(
-            resource_class=_PROCESSING_RESOURCES,
-            budget=budget,
-            available_memory=available_memory,
-            job_count=job_count,
-            workers_per_job=None,
-            max_parallel_jobs=None,
-        )
-
-        assert allocation == expected
-
-    def test_explicit_concurrency_override_bypasses_the_memory_bound(self) -> None:
-        """Verifies that an explicit concurrency cap is honored even when the memory bound would be tighter."""
-        allocation = resolve_class_allocation(
-            resource_class=_PROCESSING_RESOURCES,
-            budget=100,
-            available_memory=1.0,
-            job_count=20,
-            workers_per_job=None,
-            max_parallel_jobs=8,
-        )
-
-        assert allocation == (PROCESSING_WORKERS, 8)
-
-
 @pytest.mark.xdist_group(name="allocation_system_probes")
-class TestResolveAvailableMemory:
-    """Tests the memory probe that sizes the memory-bound resource classes."""
+class TestResolveMemoryBudget:
+    """Tests the memory probe that bounds how much a session may commit to running jobs."""
 
-    @pytest.mark.parametrize("available_bytes", [0, 4096, 8 * _BYTES_PER_GIGABYTE, 1536 * _BYTES_PER_GIGABYTE])
-    def test_probe_converts_the_available_byte_counter_to_gigabytes(self, monkeypatch, available_bytes: int) -> None:
-        """Verifies that the probe divides the host's available-byte counter into a gigabyte figure."""
+    @pytest.mark.parametrize("available_bytes", [0, 4096, 8 * _BYTES_PER_MEGABYTE, 1536 * _BYTES_PER_MEGABYTE])
+    def test_probe_converts_the_available_byte_counter_to_megabytes(self, monkeypatch, available_bytes: int) -> None:
+        """Verifies that the probe reports the host counter on the scale the per-job estimates use."""
         monkeypatch.setattr(
             "cindra.orchestration.allocation.psutil.virtual_memory",
             lambda: _VirtualMemory(available=available_bytes),
         )
 
-        assert resolve_available_memory_gigabytes() == available_bytes / _BYTES_PER_GIGABYTE
+        assert resolve_memory_budget_mb() == int(available_bytes / _BYTES_PER_MEGABYTE)
 
     def test_host_probe_reports_a_non_negative_figure(self) -> None:
         """Verifies that the unpatched probe reports a usable memory figure on the test host."""
-        assert resolve_available_memory_gigabytes() >= 0
+        assert resolve_memory_budget_mb() >= 0
 
 
 class TestSummarizeClassAllocation:
