@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
+from ataraxis_data_structures import resolve_unique_roots, discover_marker_files
 
 from ..dataclasses import (
     IOData,
@@ -19,6 +20,9 @@ from ..dataclasses import (
     MultiRecordingRuntimeContext,
     SingleRecordingConfiguration,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 PARAMETERS_FILENAME: str = "cindra_parameters.json"
 """The name of the acquisition parameters JSON file expected in each recording's data directory."""
@@ -51,7 +55,7 @@ def find_data_directory(data_path: Path) -> Path:
         message = f"Unable to find data directory. The data_path is not a directory: {data_path}"
         console.error(message=message, error=ValueError)
 
-    parameter_files = list(data_path.rglob(PARAMETERS_FILENAME))
+    parameter_files = discover_marker_files(directory=data_path, marker_name=PARAMETERS_FILENAME)
 
     if not parameter_files:
         message = (
@@ -178,7 +182,7 @@ def resolve_single_recording_contexts(
             contexts.append(context)
             continue
 
-        ensure_directory_exists(path=plane_output_path)
+        ensure_directory_exists(path=plane_output_path, is_file=False)
 
         io_data = IOData(
             output_path=plane_output_path,
@@ -365,7 +369,7 @@ def resolve_multi_recording_contexts(
 
         runtime = MultiRecordingRuntimeData(output_path=output_path, io=io_data, combined_data=combined_data)
 
-        ensure_directory_exists(path=output_path)
+        ensure_directory_exists(path=output_path, is_file=False)
 
         contexts.append(MultiRecordingRuntimeContext(configuration=configuration, runtime=runtime))
 
@@ -413,6 +417,11 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
         which is shared). This allows users to organize recordings using any naming convention, as long as each path
         contains at least one unique component somewhere in its hierarchy.
 
+        The returned components become the tracker specifiers of the multi-recording extraction jobs, and a
+        specifier is hashed into its job identifier alongside the job name with a colon joining the two. A component
+        carrying a colon would therefore collide with a differently split pair, so it is rejected here rather than at
+        identifier generation, where the diagnostic no longer names the directory that produced it.
+
     Args:
         paths: A list or tuple of Path objects.
 
@@ -420,7 +429,8 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
         A tuple of unique components, one for each path, stored in the same order as the input paths.
 
     Raises:
-        RuntimeError: If one or more paths do not contain unique components.
+        RuntimeError: If one or more paths do not contain unique components, or if a resolved component contains a
+            colon.
     """
     paths_list = list(paths)
     unique_components: list[str] = []
@@ -444,6 +454,13 @@ def extract_unique_components(paths: list[Path] | tuple[Path, ...]) -> tuple[str
                     break
 
             if is_unique:
+                if ":" in component:
+                    message = (
+                        f"Unable to extract a unique component from the given path: {path}. The resolved component "
+                        f"'{component}' contains the ':' character, which the tracker reserves for joining a job "
+                        f"name to its specifier. Rename the directory to remove the character."
+                    )
+                    console.error(message=message, error=RuntimeError)
                 unique_components.append(component)
                 found_unique = True
                 break
@@ -461,8 +478,13 @@ def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path,
     Recording roots are the meaningful top-level directories that uniquely identify each recording session. A marker
     directory that is itself a pipeline output directory resolves to its parent, which is the path every downstream
     status, cleaning, and preparation tool expects. Any other marker directory, whose depth below the recording root
-    is user-defined, is truncated at the trailing components it shares with every other such directory, which strips
-    a common structural subdirectory without assuming any particular name.
+    is user-defined, is truncated at its deepest distinguishing component, which strips a common structural
+    subdirectory without assuming any particular name.
+
+    Notes:
+        The output-directory roots are reported ahead of the roots inferred from the remaining directories, so the
+        result follows those two groups rather than the order the paths arrived in. Each group is resolved by its own
+        rule, and every consumer sorts the result before displaying it.
 
     Args:
         paths: Directories containing discovered marker files (e.g., parents of ``cindra_parameters.json``
@@ -472,22 +494,29 @@ def resolve_recording_roots(paths: list[Path] | tuple[Path, ...]) -> tuple[Path,
     Returns:
         A deduplicated tuple of recording root paths, one per unique recording.
     """
-    path_list = list(paths)
-
     # The combination stage always writes combined_metadata.npz directly into <output_root>/cindra, so an output
     # marker's parent is the recording root by construction and needs no inference.
-    roots: list[Path | None] = [path.parent if path.name == OUTPUT_DIRECTORY_NAME else None for path in path_list]
+    roots: list[Path] = []
+    raw_paths: list[Path] = []
+    for path in paths:
+        if path.name == OUTPUT_DIRECTORY_NAME:
+            roots.append(path.parent)
+        else:
+            raw_paths.append(path)
 
     # Resolves the remaining directories against each other only, so an authoritative output root is never shortened
-    # by a component a raw-data sibling happens to share.
-    raw_indices = [index for index, root in enumerate(roots) if root is None]
-    raw_roots = _strip_shared_suffix(paths=[path_list[index] for index in raw_indices])
-    for index, raw_root in zip(raw_indices, raw_roots, strict=True):
-        roots[index] = raw_root
+    # by a component a raw-data sibling happens to share. A set in which some path shares every one of its components
+    # with its peers offers no ancestor to truncate at, so each of those paths stands as its own root.
+    distinct_raw_paths = list(dict.fromkeys(raw_paths))
+    if distinct_raw_paths:
+        try:
+            roots.extend(resolve_unique_roots(paths=distinct_raw_paths))
+        except ValueError:
+            roots.extend(distinct_raw_paths)
 
     unique_roots: list[Path] = []
     for root in roots:
-        if root is not None and root not in unique_roots:
+        if root not in unique_roots:
             unique_roots.append(root)
 
     return tuple(unique_roots)
@@ -625,7 +654,7 @@ def _find_cindra_directory(recording_directory: Path) -> Path:
         FileNotFoundError: If no combined_metadata.npz file is found under the recording directory.
         RuntimeError: If multiple combined_metadata.npz files are found under the recording directory.
     """
-    matches = list(recording_directory.rglob("combined_metadata.npz"))
+    matches = discover_marker_files(directory=recording_directory, marker_name="combined_metadata.npz")
 
     if not matches:
         message = (
@@ -669,33 +698,3 @@ def _compute_mroi_region_borders(data_path: Path) -> tuple[int, ...]:
     # another begins, which are all x-coordinates except the minimum (leftmost region).
     sorted_x = sorted(acquisition.roi_x_coordinates)
     return tuple(sorted_x[1:])
-
-
-def _strip_shared_suffix(paths: list[Path]) -> list[Path]:
-    """Truncates each path at the longest trailing component sequence shared by every input path.
-
-    Args:
-        paths: The directories to truncate.
-
-    Returns:
-        The truncated paths, stored in the same order as the input paths. Paths that share no trailing components
-        are returned unchanged.
-    """
-    unique_paths = list(dict.fromkeys(paths))
-
-    # A shared suffix is only meaningful when at least two distinct paths are compared.
-    if len(unique_paths) <= 1:
-        return list(paths)
-
-    reversed_parts = [list(path.parts)[::-1] for path in unique_paths]
-    shortest_length = min(len(parts) for parts in reversed_parts)
-
-    shared_count = 0
-    # Stops one component short of the shortest path, so every root retains at least one identifying component.
-    while shared_count < shortest_length - 1 and len({parts[shared_count] for parts in reversed_parts}) == 1:
-        shared_count += 1
-
-    if shared_count == 0:
-        return list(paths)
-
-    return [Path(*path.parts[: len(path.parts) - shared_count]) for path in paths]

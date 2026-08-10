@@ -9,13 +9,14 @@
 | `MultiRecordingRuntimeContext`    | `dataclasses/runtime_contexts.py`               | Multi-recording config + runtime data                   |
 | `SingleRecordingRuntimeData`      | `dataclasses/single_recording_data.py`          | IOData, RegistrationData, DetectionData, ExtractionData |
 | `MultiRecordingRuntimeData`       | `dataclasses/multi_recording_data.py`           | Multi-recording IO, registration, tracking, timing data |
-| `run_single_recording_pipeline`   | `pipelines/pipeline.py`                         | Execute single-recording four-phase workflow            |
-| `run_multi_recording_pipeline`    | `pipelines/pipeline.py`                         | Execute multi-recording two-phase workflow              |
+| `run_single_recording_pipeline`   | `orchestration/pipeline.py`                     | Execute single-recording four-phase workflow            |
+| `run_multi_recording_pipeline`    | `orchestration/pipeline.py`                     | Execute multi-recording two-phase workflow              |
+| `start_execution_session`         | `orchestration/execution.py`                    | Batch engine: admission, process-pool dispatch, budgets |
 | `register_recording_plane`        | `pipelines/single_recording.py`                 | Per-plane registration stage entry point (phase 2)      |
 | `register_plane`                  | `registration/register.py`                      | Per-plane motion correction (rigid + optional nonrigid) |
-| `resolve_stage_workers`           | `allocation/workers.py`                         | Measured per-stage worker defaults and worker resolver  |
-| `SINGLE_RECORDING_PHASES`         | `allocation/phases.py`                          | Phase model: job universe and prerequisite graph        |
-| `resolve_openmp_runtime`          | `allocation/openmp.py`                          | macOS OpenMP runtime discovery, linking, verification   |
+| `resolve_stage_workers`           | `orchestration/allocation.py`                   | Measured per-stage worker defaults and worker resolver  |
+| `SINGLE_RECORDING_PHASES`         | `orchestration/jobs.py`                         | Phase model: job universe and prerequisite graph        |
+| `resolve_openmp_runtime`          | `orchestration/openmp.py`                       | macOS OpenMP runtime discovery, linking, verification   |
 | `DiffeomorphicDemonsRegistration` | `registration/diffeomorphic.py`                 | Cross-day diffeomorphic alignment algorithm             |
 | `Deformation`                     | `registration/deformation.py`                   | Deformation field application and inversion             |
 | `detect_plane_rois`               | `detection/detect.py`                           | ROI detection via sparse detection with PCA denoising   |
@@ -88,13 +89,16 @@
 
 **Modifying pipeline orchestration:**
 
-1. Review `src/cindra/pipelines/pipeline.py` for job orchestration and ProcessingTracker integration
-2. Review `src/cindra/pipelines/single_recording.py` for the four-phase single-recording workflow
-3. Review `src/cindra/pipelines/multi_recording.py` for the two-phase multi-recording workflow
-4. Job universes and prerequisite edges derive from the phase model in `src/cindra/allocation/phases.py`
+1. Review `src/cindra/orchestration/pipeline.py` for per-job execution and ProcessingTracker integration
+2. Review `src/cindra/orchestration/execution.py` for the batch engine that admits and dispatches queued jobs
+3. Review `src/cindra/pipelines/single_recording.py` for the four-phase single-recording stage entry points
+4. Review `src/cindra/pipelines/multi_recording.py` for the two-phase multi-recording stage entry points
+5. Job universes and prerequisite edges derive from the phase model in `src/cindra/orchestration/jobs.py`
    (`SINGLE_RECORDING_PHASES`, `MULTI_RECORDING_PHASES`). Add, remove, or reorder a phase there rather than at each call
-   site, and both the pipelines and the MCP layer follow automatically
-5. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
+   site, and the pipelines, the execution engine, and the MCP layer follow automatically
+6. Maintain the job naming convention (`SingleRecordingJobNames`, `MultiRecordingJobNames`) for tracker consistency
+7. Keep the dependency chain one-way. `jobs.py` imports nothing from cindra, `allocation.py` imports `jobs`,
+   `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no orchestration module imports `interface`
 
 **Modifying registration:**
 
@@ -130,7 +134,8 @@
 
 1. Review the relevant tool module in `src/cindra/interface/` (acquisition, configuration, processing, or results)
 2. Tools register via `@mcp.tool()` decorator on the shared `mcp` instance from `mcp_instance.py`
-3. Batch processing tools use background manager threads with per-job worker threads
+3. Batch processing tools call into `cindra.orchestration`, whose manager thread dispatches each job into a
+   worker process pinned by `limit_worker_threads` and `initialize_worker_threads`
 4. Return JSON-serializable dictionaries. The shared `mcp` instance runs in JSON response mode
 
 **Adding or modifying CLI commands:**
@@ -148,7 +153,7 @@
   because the Numba macOS wheel ships no tbbpool extension, so the TBB layer is unavailable there whatever runtime is
   installed
 - The macOS OpenMP layer loads `libomp.dylib` from the dynamic loader's default search path, and
-  `cindra.allocation.openmp` owns the discovery and linking that put it there. `__init__.py` calls
+  `cindra.orchestration.openmp` owns the discovery and linking that put it there. `__init__.py` calls
   `warn_missing_openmp_runtime()` below the console initialization, so the warning reaches the terminal, while
   `cindra omp` reports the runtimes found on the host and `cindra omp --yes` links one. Numba raises its
   threading-layer error at the first parallelized call rather than at import, which is what the warning stands in for

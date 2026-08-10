@@ -1,19 +1,13 @@
-"""Provides the processing pipeline orchestration logic for single-recording and multi-recording workflows."""
+"""Provides the stage entry points that the single-recording and multi-recording pipelines dispatch."""
 
-from .pipeline import (
-    MULTI_RECORDING_TRACKER_NAME,
-    SINGLE_RECORDING_TRACKER_NAME,
-    execute_multi_recording_job,
-    execute_single_recording_job,
-    run_multi_recording_pipeline,
-    run_single_recording_pipeline,
-)
+from .multi_recording import discover_multi_recording_cells, extract_multi_recording_fluorescence
+from .single_recording import process_plane, binarize_recording, save_combined_data, register_recording_plane
 
 __all__ = [
-    "MULTI_RECORDING_TRACKER_NAME",
-    "SINGLE_RECORDING_TRACKER_NAME",
-    "execute_multi_recording_job",
-    "execute_single_recording_job",
-    "run_multi_recording_pipeline",
-    "run_single_recording_pipeline",
+    "binarize_recording",
+    "discover_multi_recording_cells",
+    "extract_multi_recording_fluorescence",
+    "process_plane",
+    "register_recording_plane",
+    "save_combined_data",
 ]

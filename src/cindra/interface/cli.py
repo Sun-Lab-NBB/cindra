@@ -7,10 +7,14 @@ import click
 from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console
 
-from ..pipelines import run_multi_recording_pipeline, run_single_recording_pipeline
 from .mcp_server import run_server
-from ..allocation import OpenMpStatus, resolve_openmp_runtime
 from ..dataclasses import PipelineType, MultiRecordingConfiguration, SingleRecordingConfiguration, detect_pipeline_type
+from ..orchestration import (
+    OpenMpStatus,
+    resolve_openmp_runtime,
+    run_multi_recording_pipeline,
+    run_single_recording_pipeline,
+)
 
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """The Click context settings that ensure displayed help messages are formatted according to the cindra standard."""

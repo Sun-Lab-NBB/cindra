@@ -18,27 +18,25 @@ config.THREADING_LAYER = "omp" if sys.platform == "darwin" else "tbb"
 
 from ataraxis_base_utilities import console  # noqa: E402
 
-from .pipelines import (  # noqa: E402
-    execute_multi_recording_job,
-    execute_single_recording_job,
-    run_multi_recording_pipeline,
-    run_single_recording_pipeline,
+from .io import TIFF_DECODE_CEILING  # noqa: E402
+from .dataclasses import (  # noqa: E402
+    MultiRecordingConfiguration,
+    SingleRecordingConfiguration,
 )
-from .allocation import (  # noqa: E402
+from .orchestration import (  # noqa: E402
     DISCOVERY_WORKERS,
     EXTRACTION_WORKERS,
     PROCESSING_WORKERS,
-    TIFF_DECODE_CEILING,
     BINARIZATION_WORKERS,
     REGISTRATION_WORKERS,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
     resolve_stage_workers,
+    execute_multi_recording_job,
     warn_missing_openmp_runtime,
-)
-from .dataclasses import (  # noqa: E402
-    MultiRecordingConfiguration,
-    SingleRecordingConfiguration,
+    execute_single_recording_job,
+    run_multi_recording_pipeline,
+    run_single_recording_pipeline,
 )
 
 # Ensures console output is enabled whenever the cindra library is imported. The 'Console' class is

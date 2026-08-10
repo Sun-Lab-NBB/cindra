@@ -15,6 +15,7 @@ from dataclasses import field, dataclass
 import yaml  # type: ignore[import-untyped]
 import numpy as np
 from natsort import natsorted
+from ataraxis_data_structures import discover_marker_files
 
 from .mcp_instance import mcp
 
@@ -1715,7 +1716,7 @@ def _find_cindra_root(recording_path: str) -> tuple[Path | None, str | None]:
         return cindra_path, None
 
     # Falls back to recursive search for configuration.yaml (handles non-standard nesting).
-    matches = list(recording.rglob("configuration.yaml"))
+    matches = discover_marker_files(directory=recording, marker_name="configuration.yaml")
     if matches:
         return matches[0].parent, None
 

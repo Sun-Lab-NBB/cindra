@@ -12,7 +12,6 @@ from ataraxis_base_utilities import LogLevel, console
 
 from .binary import BinaryFile, clear_registration_marker
 from .context import find_data_directory
-from ..allocation import TIFF_DECODE_CEILING
 from ..dataclasses import RuntimeContext, AcquisitionParameters  # noqa: TC001
 
 if TYPE_CHECKING:
@@ -22,6 +21,10 @@ if TYPE_CHECKING:
 
 TIFF_EXTENSIONS: tuple[str, ...] = ("tif", "tiff", "TIF", "TIFF")
 """The supported TIFF file extensions."""
+
+TIFF_DECODE_CEILING: int = 4
+"""The maximum number of TIFF decode threads, measured as the point where added decode threads stop shortening the
+conversion. The decode pool never exceeds this value regardless of how many cores the surrounding job holds."""
 
 _MULTIDIMENSIONAL_PROCESSING_THRESHOLD: int = 3
 """The minimum number of image dimensions considered 'multidimensional'."""

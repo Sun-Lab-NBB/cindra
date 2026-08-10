@@ -19,6 +19,7 @@ from dataclasses import (
 
 import yaml  # type: ignore[import-untyped]
 from natsort import natsorted
+from ataraxis_data_structures import discover_marker_roots
 
 from ..io import resolve_recording_roots
 from ..dataclasses import (
@@ -98,8 +99,9 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
     components a raw-data directory shares with its peers.
 
     Notes:
-        Directories the process cannot read are skipped silently by the underlying recursive search, so an unreadable
-        subtree lowers the candidate counts without surfacing a distinct diagnostic.
+        The marker search keeps only the entries that resolve to files, so a directory carrying a marker's name is not
+        reported as a recording. A subtree the process cannot read falls back to a tolerant scan that skips it, so an
+        unreadable subtree lowers the candidate counts without surfacing a distinct diagnostic.
 
     Args:
         root_directory: The absolute path to the root directory to search.
@@ -123,10 +125,11 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
             "error": f"Unable to discover recordings. The path is not a directory: {root_directory}",
         }
 
-    # Discovers single-recording candidates via cindra_parameters.json marker files.
-    single_marker_parents: list[Path] = [
-        marker_file.parent for marker_file in root_path.rglob("cindra_parameters.json")
-    ]
+    # Discovers single-recording candidates via cindra_parameters.json marker files. The marker-root discoverer keeps
+    # only the entries that resolve to files, so a directory carrying a marker's name is no longer mistaken for a
+    # recording. It refuses a subtree it cannot read, and this tool surveys a root the caller chose rather than a path
+    # the pipeline owns, so a denial falls back to the tolerant scan rather than reporting no candidate at all.
+    single_marker_parents = _discover_marker_parents(root_path=root_path, marker_name="cindra_parameters.json")
 
     single_recording_paths = (
         natsorted(str(root) for root in resolve_recording_roots(paths=single_marker_parents))
@@ -135,7 +138,7 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
     )
 
     # Discovers multi-recording candidates via combined_metadata.npz marker files.
-    multi_marker_parents: list[Path] = [marker_file.parent for marker_file in root_path.rglob("combined_metadata.npz")]
+    multi_marker_parents = _discover_marker_parents(root_path=root_path, marker_name="combined_metadata.npz")
 
     multi_recording_paths = (
         natsorted(str(root) for root in resolve_recording_roots(paths=multi_marker_parents))
@@ -397,6 +400,28 @@ def validate_config_file_tool(file_path: str) -> dict[str, str | bool | list[str
         result["non_default_parameters"] = non_defaults
 
     return result
+
+
+def _discover_marker_parents(root_path: Path, marker_name: str) -> list[Path]:
+    """Discovers the directories owning every marker file with the target name under the root directory.
+
+    Notes:
+        The ataraxis marker discoverer refuses a subtree it cannot read rather than narrowing its result to the
+        readable part, which is the right answer for a path the pipeline owns and the wrong one for a root the caller
+        chose. A denial therefore falls back to the tolerant recursive glob, so an unreadable sibling directory lowers
+        the candidate count instead of failing the whole discovery.
+
+    Args:
+        root_path: The root directory whose tree is searched.
+        marker_name: The exact filename every discovered marker carries.
+
+    Returns:
+        The parent directory of every discovered marker file.
+    """
+    try:
+        return discover_marker_roots(directory=root_path, marker_name=marker_name)
+    except OSError:
+        return [marker_file.parent for marker_file in root_path.rglob(marker_name)]
 
 
 def _convert_to_json_compatible(value: object) -> object:
