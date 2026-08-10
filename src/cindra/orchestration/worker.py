@@ -12,7 +12,14 @@ from typing import TYPE_CHECKING
 
 from ataraxis_base_utilities import console
 
-from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
+from ..io import (
+    RecordingPlanes,
+    DatasetRecordings,
+    resolve_recording_planes,
+    resolve_dataset_recordings,
+    resolve_multi_recording_contexts,
+    resolve_single_recording_contexts,
+)
 from .jobs import (
     MultiRecordingJobNames,
     SingleRecordingJobNames,
@@ -45,7 +52,6 @@ def execute_single_recording_job(
     job_id: str,
     tracker: ProcessingTracker,
     *,
-    persist_bootstrap: bool = False,
     workers: int | None = None,
 ) -> None:
     """Executes one single-recording job and records its state on a caller-provided tracker.
@@ -57,11 +63,9 @@ def execute_single_recording_job(
         granularity the caller controls. The job's start, completion, and failure are recorded onto the provided
         tracker under job_id.
 
-        The binarization, plane-registration, and plane-processing stages re-load the shared bootstrap with persistence
-        disabled, so it must already exist on disk. Enable persist_bootstrap for the first job dispatched against a
-        configuration, the binarization job, which runs single-threaded and writes the bootstrap for every plane. Leave
-        it disabled for the later per-plane jobs, which may run concurrently and read the bootstrap the binarization job
-        already wrote.
+        Every stage re-loads the shared bootstrap with persistence disabled, so prime_recording must have written it
+        before any job runs. Priming is a separate call rather than a flag on this one, because a job that wrote the
+        bootstrap while its peers ran would overwrite each peer plane's runtime data with its own stale snapshot.
 
         The worker count travels through this parameter, so a batch dispatcher can give every job a different
         allocation while every job shares one immutable configuration file.
@@ -74,8 +78,6 @@ def execute_single_recording_job(
         job_id: The unique hexadecimal identifier under which the job's state is recorded on the provided tracker. It
             must already be present in the tracker's aligned job set.
         tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
-        persist_bootstrap: Determines whether to write the shared single-recording bootstrap to disk before running the
-            job. Enable it only for the single-threaded binarization job that precedes plane processing.
         workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for
             the job's stage and -1 to request every available core. The combination job ignores this parameter.
 
@@ -86,12 +88,6 @@ def execute_single_recording_job(
             single-recording job.
     """
     configuration, _ = load_single_recording_configuration(configuration_path=configuration_path)
-
-    # The binarization, plane-registration, and plane-processing stages re-load the shared bootstrap with persistence
-    # disabled, so it must exist before they run. The single-threaded binarization job opts in to write it, and later
-    # jobs rely on it.
-    if persist_bootstrap:
-        resolve_single_recording_contexts(configuration=configuration, persist=True)
 
     dispatch_single_recording_job(
         configuration=configuration,
@@ -110,7 +106,6 @@ def execute_multi_recording_job(
     job_id: str,
     tracker: ProcessingTracker,
     *,
-    persist_bootstrap: bool = False,
     workers: int | None = None,
 ) -> None:
     """Executes one multi-recording job and records its state on a caller-provided tracker.
@@ -122,11 +117,9 @@ def execute_multi_recording_job(
         granularity the caller controls. The job's start, completion, and failure are recorded onto the provided
         tracker under job_id.
 
-        The discovery and extraction stages re-load the shared bootstrap with persistence disabled, so it must already
-        exist on disk. Enable persist_bootstrap for the first job dispatched against a configuration, the discovery
-        job, which runs single-threaded and writes the bootstrap for every recording. Leave it disabled for the later
-        per-recording extraction jobs, which may run concurrently and read the bootstrap the discovery job already
-        wrote.
+        Every stage re-loads the shared bootstrap with persistence disabled, so prime_dataset must have written it
+        before any job runs. Priming is a separate call rather than a flag on this one, because a job that wrote the
+        bootstrap while its peers ran would overwrite each peer recording's runtime data with its own stale snapshot.
 
     Args:
         configuration_path: The path to the multi-recording configuration YAML file.
@@ -136,8 +129,6 @@ def execute_multi_recording_job(
         job_id: The unique hexadecimal identifier under which the job's state is recorded on the provided tracker. It
             must already be present in the tracker's aligned job set.
         tracker: The caller-owned ProcessingTracker onto which this job's start, completion, or failure is recorded.
-        persist_bootstrap: Determines whether to write the shared multi-recording bootstrap to disk before running the
-            job. Enable it only for the single-threaded discovery job that precedes extraction.
         workers: The number of parallel workers to allocate to this job. Use None to accept the measured default for the
             job's stage and -1 to request every available core.
 
@@ -148,11 +139,6 @@ def execute_multi_recording_job(
             recognized multi-recording job.
     """
     configuration = load_multi_recording_configuration(configuration_path=configuration_path)
-
-    # The discovery and extraction stages re-load the shared bootstrap with persistence disabled, so it must exist
-    # before they run. The single-threaded discovery job opts in to write it, and later extraction jobs rely on it.
-    if persist_bootstrap:
-        resolve_multi_recording_contexts(configuration=configuration, persist=True)
 
     dispatch_multi_recording_job(
         configuration=configuration,
@@ -425,3 +411,57 @@ def dispatch_multi_recording_job(
                 f"recognized. Use one of the valid Job names: {list(MultiRecordingJobNames)}."
             )
             console.error(message=message, error=ValueError)
+
+
+def prime_recording(configuration_path: Path) -> RecordingPlanes:
+    """Writes the shared single-recording bootstrap and reports the planes the recording holds.
+
+    Notes:
+        Every per-job entry point re-loads this bootstrap with persistence disabled, so this call must precede the
+        first job dispatched against a configuration. Priming is single-threaded by contract, because it writes one
+        runtime data file per plane and a peer job writing them concurrently would overwrite each other's snapshot.
+
+        The returned inventory names the planes the recording holds, so a caller primes and enumerates its own jobs in
+        one step rather than resolving the plane count separately.
+
+    Args:
+        configuration_path: The path to the single-recording configuration file.
+
+    Returns:
+        The recording's plane inventory.
+
+    Raises:
+        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid
+            single-recording configuration.
+    """
+    configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
+    resolve_single_recording_contexts(configuration=configuration, persist=True)
+    return resolve_recording_planes(output_root=output_path, data_path=configuration.file_io.data_path)
+
+
+def prime_dataset(configuration_path: Path) -> DatasetRecordings:
+    """Writes the shared multi-recording bootstrap and reports the recordings the dataset spans.
+
+    Notes:
+        Every per-job entry point re-loads this bootstrap with persistence disabled, so this call must precede the
+        first job dispatched against a configuration. Priming is single-threaded by contract, for the same reason the
+        single-recording bootstrap is.
+
+    Args:
+        configuration_path: The path to the multi-recording configuration file.
+
+    Returns:
+        The dataset's recording inventory.
+
+    Raises:
+        FileNotFoundError: If the configuration file is missing, is not a .yaml file, or is not a valid
+            multi-recording configuration.
+    """
+    configuration = load_multi_recording_configuration(configuration_path=configuration_path)
+    contexts = resolve_multi_recording_contexts(configuration=configuration, persist=True)
+    return resolve_dataset_recordings(
+        recording_roots=[
+            context.runtime.output_path for context in contexts if context.runtime.output_path is not None
+        ],
+        dataset_name=configuration.recording_io.dataset_name,
+    )

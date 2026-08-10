@@ -19,7 +19,11 @@ from cindra.io import (
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import RuntimeContext, SingleRecordingConfiguration
 from cindra.orchestration import SingleRecordingJobNames
-from cindra.orchestration.worker import execute_single_recording_job, dispatch_single_recording_job
+from cindra.orchestration.worker import (
+    prime_recording,
+    execute_single_recording_job,
+    dispatch_single_recording_job,
+)
 from cindra.orchestration.pipeline import run_single_recording_pipeline
 from cindra.pipelines.single_recording import (
     process_plane,
@@ -679,13 +683,13 @@ class TestExecuteSingleRecordingJobInjection:
         process_id = ProcessingTracker.generate_job_id(job_name="recording_process", specifier="plane_0")
         combine_id = ProcessingTracker.generate_job_id(job_name="recording_combine", specifier="")
 
+        prime_recording(configuration_path=configuration_path)
         execute_single_recording_job(
             configuration_path=configuration_path,
             job_name=SingleRecordingJobNames.BINARIZE,
             specifier="",
             job_id=binarize_id,
             tracker=tracker,
-            persist_bootstrap=True,
         )
         execute_single_recording_job(
             configuration_path=configuration_path,
@@ -739,13 +743,13 @@ class TestExecuteSingleRecordingJobInjection:
         binarize_id = ProcessingTracker.generate_job_id(job_name="recording_binarize", specifier="")
         process_id = ProcessingTracker.generate_job_id(job_name="recording_process", specifier="plane_0")
 
+        prime_recording(configuration_path=configuration_path)
         execute_single_recording_job(
             configuration_path=configuration_path,
             job_name=SingleRecordingJobNames.BINARIZE,
             specifier="",
             job_id=binarize_id,
             tracker=tracker,
-            persist_bootstrap=True,
         )
 
         with pytest.raises(RuntimeError, match="must be registered before ROI detection"):

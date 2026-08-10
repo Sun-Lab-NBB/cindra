@@ -15,7 +15,11 @@ from ataraxis_data_structures import ProcessingStatus, ProcessingTracker
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
 from cindra.orchestration import MultiRecordingJobNames
-from cindra.orchestration.worker import execute_multi_recording_job, dispatch_multi_recording_job
+from cindra.orchestration.worker import (
+    prime_dataset,
+    execute_multi_recording_job,
+    dispatch_multi_recording_job,
+)
 from cindra.orchestration.pipeline import run_multi_recording_pipeline, run_single_recording_pipeline
 
 if TYPE_CHECKING:
@@ -281,13 +285,13 @@ class TestExecuteMultiRecordingJobInjection:
         first_id = ProcessingTracker.generate_job_id(job_name="multiday_extraction", specifier="rec1")
         second_id = ProcessingTracker.generate_job_id(job_name="multiday_extraction", specifier="rec2")
 
+        prime_dataset(configuration_path=configuration_path)
         execute_multi_recording_job(
             configuration_path=configuration_path,
             job_name=MultiRecordingJobNames.DISCOVER,
             specifier="",
             job_id=discovery_id,
             tracker=tracker,
-            persist_bootstrap=True,
         )
         execute_multi_recording_job(
             configuration_path=configuration_path,
