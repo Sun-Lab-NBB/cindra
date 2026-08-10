@@ -10,16 +10,18 @@ from ataraxis_data_structures import ProcessingTracker
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
 from .jobs import (
     PER_PLANE_JOB_NAMES,
-    PLANE_SPECIFIER_PREFIX,
-    MULTI_RECORDING_TRACKER_NAME,
-    SINGLE_RECORDING_TRACKER_NAME,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
-    resolve_plane_specifier,
     resolve_multi_recording_jobs,
     resolve_single_recording_jobs,
 )
 from .openmp import verify_openmp_runtime
+from ..layout import (
+    PLANE_SPECIFIER_PREFIX,
+    MULTI_RECORDING_TRACKER_FILENAME,
+    SINGLE_RECORDING_TRACKER_FILENAME,
+    resolve_plane_specifier,
+)
 from ..pipelines import (
     process_plane,
     binarize_recording,
@@ -105,7 +107,7 @@ def run_single_recording_pipeline(
 
     # Derives the tracker path from the configuration. The tracker lives under the cindra/ subdirectory, consistent
     # with where batch tools create it and where get_recording_status_tool looks for it.
-    tracker_path: Path = output_path / "cindra" / SINGLE_RECORDING_TRACKER_NAME
+    tracker_path: Path = output_path / "cindra" / SINGLE_RECORDING_TRACKER_FILENAME
 
     # The insertion order of this dictionary sequences the jobs a LOCAL-mode invocation runs, so the registration
     # entry must sit between the binarization and processing entries. Otherwise a run that requests no flags detects
@@ -344,7 +346,7 @@ def run_multi_recording_pipeline(
     # treats the universe as a configuration fingerprint, not an invocation fingerprint.
     universe: list[tuple[str, str]] = resolve_multi_recording_jobs(recording_ids=recording_ids)
 
-    tracker = ProcessingTracker(file_path=main_recording_path.joinpath(MULTI_RECORDING_TRACKER_NAME))
+    tracker = ProcessingTracker(file_path=main_recording_path.joinpath(MULTI_RECORDING_TRACKER_FILENAME))
 
     # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:

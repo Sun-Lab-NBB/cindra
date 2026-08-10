@@ -30,13 +30,16 @@ from ataraxis_data_structures import (
 )
 
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
+from ..layout import (
+    MULTI_RECORDING_TRACKER_FILENAME,
+    SINGLE_RECORDING_TRACKER_FILENAME,
+    resolve_plane_specifier,
+)
 from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
 from .mcp_instance import mcp
 from ..orchestration import (
     SINGLE_RECORDING_PHASES,
     RESOURCE_CLASS_BY_JOB_NAME,
-    MULTI_RECORDING_TRACKER_NAME,
-    SINGLE_RECORDING_TRACKER_NAME,
     PendingJob,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
@@ -44,7 +47,6 @@ from ..orchestration import (
     set_execution_state,
     resolve_session_load,
     resolve_pipeline_jobs,
-    resolve_plane_specifier,
     start_execution_session,
     cancel_execution_session,
     order_phases_by_execution,
@@ -94,7 +96,7 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
             "error": f"Unable to get recording status. Recording directory not found: {recording_path}.",
         }
 
-    single_tracker_path = recording / "cindra" / SINGLE_RECORDING_TRACKER_NAME
+    single_tracker_path = recording / "cindra" / SINGLE_RECORDING_TRACKER_FILENAME
     if single_tracker_path.exists():
         single_recording_status = _read_single_recording_tracker(
             tracker_path=single_tracker_path, recording_path=recording
@@ -109,10 +111,10 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
         # directory reports the datasets that are readable instead of failing the whole status query.
         try:
             tracker_files = discover_marker_files(
-                directory=multi_recording_base, marker_name=MULTI_RECORDING_TRACKER_NAME
+                directory=multi_recording_base, marker_name=MULTI_RECORDING_TRACKER_FILENAME
             )
         except OSError:
-            tracker_files = list(multi_recording_base.rglob(MULTI_RECORDING_TRACKER_NAME))
+            tracker_files = list(multi_recording_base.rglob(MULTI_RECORDING_TRACKER_FILENAME))
         if tracker_files:
             datasets: dict[str, object] = {}
             for tracker_file in natsorted(tracker_files):
@@ -178,14 +180,14 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
     # unreadable would be the wrong answer, so the denial is recorded and the tolerant scan supplies the rest.
     try:
         tracker_index = index_marker_files(
-            directory=root, marker_names=(SINGLE_RECORDING_TRACKER_NAME, MULTI_RECORDING_TRACKER_NAME)
+            directory=root, marker_names=(SINGLE_RECORDING_TRACKER_FILENAME, MULTI_RECORDING_TRACKER_FILENAME)
         )
-        single_tracker_paths: list[Path] = list(tracker_index[SINGLE_RECORDING_TRACKER_NAME])
-        multi_tracker_paths: list[Path] = list(tracker_index[MULTI_RECORDING_TRACKER_NAME])
+        single_tracker_paths: list[Path] = list(tracker_index[SINGLE_RECORDING_TRACKER_FILENAME])
+        multi_tracker_paths: list[Path] = list(tracker_index[MULTI_RECORDING_TRACKER_FILENAME])
     except OSError as error:
         permission_errors.append(f"Access denied during the processing tracker search: {error}")
-        single_tracker_paths = list(root.rglob(SINGLE_RECORDING_TRACKER_NAME))
-        multi_tracker_paths = list(root.rglob(MULTI_RECORDING_TRACKER_NAME))
+        single_tracker_paths = list(root.rglob(SINGLE_RECORDING_TRACKER_FILENAME))
+        multi_tracker_paths = list(root.rglob(MULTI_RECORDING_TRACKER_FILENAME))
 
     # Reads single-recording trackers. Derives recording_path from tracker location.
     single_recordings: list[dict[str, object]] = []
@@ -347,7 +349,7 @@ def prepare_single_recording_batch_tool(
     for data_path, output_path in zip(valid_paths, resolved_output_paths, strict=True):
         recording_key = str(data_path)
         cindra_root = output_path / "cindra"
-        tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_NAME
+        tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_FILENAME
 
         if tracker_path.exists():
             # Idempotent path: tracker already exists, returns current state without reinitializing.
@@ -631,7 +633,7 @@ def prepare_multi_recording_batch_tool(
             invalid_configurations.append(f"Unable to resolve output path for dataset '{dataset_key}'.")
             continue
 
-        tracker_path = main_recording_path / MULTI_RECORDING_TRACKER_NAME
+        tracker_path = main_recording_path / MULTI_RECORDING_TRACKER_FILENAME
         configuration_file_path = main_recording_path / "multi_recording_configuration.yaml"
 
         if tracker_path.exists():
