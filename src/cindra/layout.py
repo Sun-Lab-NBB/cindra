@@ -43,7 +43,8 @@ SINGLE_RECORDING_CONFIGURATION_FILENAME: str = "configuration.yaml"
 """The name of the single-recording configuration file, written into the recording's output directory."""
 
 MULTI_RECORDING_CONFIGURATION_FILENAME: str = "multi_recording_configuration.yaml"
-"""The name of the multi-recording configuration file, written into the tracked dataset's directory."""
+"""The name of the multi-recording configuration file, written into the dataset directory of the main recording,
+which is the first of the dataset's recordings after natural sorting."""
 
 ACQUISITION_PARAMETERS_FILENAME: str = "acquisition_parameters.yaml"
 """The name of the resolved acquisition parameters file, written into the recording's output directory."""
@@ -109,17 +110,21 @@ class RecordingArrays(StrEnum):
     NEUROPIL_FLUORESCENCE = "neuropil_fluorescence.npy"
     """The neuropil fluorescence trace surrounding every ROI."""
     SUBTRACTED_FLUORESCENCE = "subtracted_fluorescence.npy"
-    """The neuropil-subtracted fluorescence trace of every ROI."""
+    """The delta fluorescence of every ROI, after both the scaled neuropil trace and the estimated resting baseline
+    have been subtracted."""
     SPIKES = "spikes.npy"
     """The deconvolved spike trace of every ROI."""
     CELL_CLASSIFICATION = "cell_classification.npy"
-    """The probability that each ROI is a cell rather than an artifact."""
+    """The classification of every ROI, holding its thresholded is-cell label in the first column and the probability
+    that label was drawn from in the second."""
     CELL_COLOCALIZATION = "cell_colocalization.npy"
-    """The colocalization of every functional ROI with the structural channel."""
+    """The colocalization of every ROI with the recording's second channel, measured against the structural channel
+    when the second channel is structural and against the second functional channel's own ROIs otherwise."""
     ROI_MASKS = "roi_masks.npz"
     """The pixel masks and weights of every ROI."""
     ROI_STATISTICS = "roi_statistics.npz"
-    """The shape statistics of every ROI."""
+    """The per-ROI statistics, holding the shape descriptors alongside the soma, overlap, and neuropil masks and the
+    trace skewness the extraction stage records."""
     CORRECTED_STRUCTURAL_MEAN_IMAGE = "corrected_structural_mean_image.npy"
     """The structural channel mean image with the functional channel bleed-through removed."""
 
@@ -128,20 +133,28 @@ class DetectionImages(StrEnum):
     """Defines the names of the summary images the detection stage writes into its own subdirectory."""
 
     MEAN_IMAGE = "mean_image.npy"
-    """The mean of every registered frame."""
+    """The mean of the temporally binned movie, which excludes the frames registration marked bad."""
     ENHANCED_MEAN_IMAGE = "enhanced_mean_image.npy"
     """The mean image filtered at the detected ROI scale."""
     MAXIMUM_PROJECTION = "maximum_projection.npy"
-    """The maximum intensity of every pixel across the registered frames."""
+    """The maximum of every pixel across the temporally binned and high-pass filtered movie, zero outside the valid
+    registration crop."""
     CORRELATION_MAP = "correlation_map.npy"
-    """The local temporal correlation of every pixel with its neighbors."""
+    """The maximum activity of every pixel across the detection scale pyramid, zero outside the valid registration
+    crop."""
 
 
 class RegistrationArrays(StrEnum):
     """Defines the names of the arrays the registration stage writes into its own subdirectory."""
 
     BAD_FRAMES = "bad_frames.npy"
-    """The mask marking the frames excluded from registration."""
+    """The mask marking the frames excluded from the valid-region crop and from detection's temporal binning, which
+    registration computes from its own offsets after registering every frame.
+
+    Notes:
+        The same name identifies an optional input file placed in the raw imaging directory, where it instead holds the
+        indices of the frames to mark bad before the crop is computed.
+    """
     REFERENCE_IMAGE = "reference_image.npy"
     """The reference image every frame is registered against, whose presence marks a plane as registered."""
     RIGID_Y_OFFSETS = "rigid_y_offsets.npy"
@@ -258,8 +271,9 @@ def resolve_array_path(root_path: Path, array: PipelineArray, *, second_channel:
     """Resolves the path to one pipeline array under a recording, plane, or dataset directory.
 
     Args:
-        root_path: The directory the array was written into, which is a recording output directory for the combined
-            results, a plane directory for one plane's results, or a dataset directory for the tracked results.
+        root_path: The directory the array was written into. The result arrays are written into a recording output
+            directory, a plane directory, or a dataset directory, while the detection, registration, and
+            multi-recording arrays are written into their own subdirectory of one of those.
         array: The array to resolve the path of, named by any of the four pipeline array families.
         second_channel: Determines whether the second channel's copy of the array is resolved instead of the
             functional channel's copy.

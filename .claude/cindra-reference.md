@@ -106,8 +106,9 @@
 7. Keep the dependency chain one-way. `jobs.py` imports `cindra.layout` alone, `allocation.py`, `footprints.py`, and
    `discovery.py` import `jobs`, `worker.py` imports `jobs` and `allocation`, `pipeline.py` imports `worker`,
    `execution.py` imports `pipeline`, `jobs`, and `allocation`, and no orchestration module imports `interface`.
-   `openmp.py` stays off every path `execution.py` reaches, so a console message never precedes the stdio MCP
-   server's JSON-RPC stream
+   `openmp.py` carries no module-level side effect and its check runs only inside the two sequential entry points,
+   so importing the package writes nothing and a console message never precedes the stdio MCP server's JSON-RPC
+   stream
 
 **Modifying registration:**
 

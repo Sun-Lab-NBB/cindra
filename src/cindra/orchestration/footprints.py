@@ -1,11 +1,13 @@
 """Provides the per-stage memory models of the single and multi-recording pipeline jobs, which project each stage's
 peak anonymous working set from the shape of the data it processes.
 
-Every model here is read from the stage's own allocations rather than measured from the outside, so a change to what a
-kernel holds is a change to the model beside it. The estimates cover anonymous memory alone, which is the term that
-forces a host to swap and a scheduler to kill a job, so the reclaimable pages a memory-mapping stage leaves resident
-are excluded. Each estimate carries a flag stating whether it follows from the recording's own geometry, so a caller
-holding an unprocessed recording reads a floor to plan around rather than handling an exception.
+Most models here are read from the stage's own allocations, so a change to what a kernel holds is a change to the
+model beside it. Two terms are not: the cross-recording clustering allowance and the per-stage fallbacks are flat
+figures whose own documentation records what each is based on. The estimates cover anonymous memory alone, which is
+the term that forces a host to swap and a scheduler to kill a job, so the reclaimable pages a memory-mapping stage
+leaves resident are excluded. Each estimate carries a flag stating whether it follows from the recording's own
+geometry, so a caller holding an unprocessed recording reads a conservative allowance rather than handling an
+exception.
 """
 
 from __future__ import annotations
@@ -54,8 +56,13 @@ WORKER_MEMORY_MB: int = 384
 of this library. The term is charged once per job."""
 
 SPAWNED_CHILD_MEMORY_MB: int = 200
-"""The resident memory each child of a job's own worker pool occupies before it touches data. A worker is spawned
-rather than forked, so every child re-imports the module its target function lives in."""
+"""The resident memory each child of a job's own process pool occupies before it touches data.
+
+Notes:
+    Carried at the value the sibling ataraxis libraries use, so a scheduler composing a batch across them charges one
+    scale. No cindra stage opens a process pool of its own, so no estimate here applies the term. It is exported for a
+    scheduler that wraps a cindra job in a pool it owns.
+"""
 
 _BYTES_PER_MEGABYTE: int = 1024 * 1024
 """The divisor converting a byte count into megabytes."""
@@ -70,9 +77,10 @@ _BINARIZATION_BYTES_PER_PIXEL: int = 8
 """The memory the conversion stage holds per pixel of the batch it reads.
 
 Notes:
-    The stage decodes a batch, halves it, clips the halved copy, and casts the clipped copy to the internal width. A
-    unsigned 16-bit source therefore holds the decoded batch, the halved copy, the clipped copy, and the cast result
-    at once, each two bytes per pixel.
+    The stage decodes a batch, halves it, clips the halved copy, and casts the clipped copy to the internal width, so
+    four buffers are live at once. The figure is the unsigned 16-bit case, where each buffer is two bytes per pixel. A
+    32-bit source holds three four-byte buffers and one two-byte buffer instead, which is heavier, so the estimate
+    understates a recording acquired at that width.
 """
 
 _DETECTION_ARRAY_COPIES: int = 3
@@ -123,7 +131,8 @@ _COMBINATION_TRACE_KINDS: int = 4
 
 Notes:
     The per-plane sources are memory-mapped, so the anonymous peak is one concatenated copy of each kind rather than
-    the sources plus the result.
+    the sources plus the result. A recording whose second channel is also functional concatenates the same four kinds
+    again, so the estimate understates that case by half.
 """
 
 _EXTRACTION_TRACE_COPIES: int = 5
@@ -131,7 +140,9 @@ _EXTRACTION_TRACE_COPIES: int = 5
 
 Notes:
     The stage returns the raw, neuropil, subtracted, and spike traces together, so all four are live at once, and the
-    baseline filter that produces the subtracted trace holds a fifth array of the same size.
+    baseline filter that produces the subtracted trace holds a fifth array of the same size. A dataset whose second
+    channel is also functional keeps the first channel's four arrays live while it extracts the second, so the estimate
+    understates that case.
 """
 
 _EXTRACTION_BATCH_BYTES_PER_PIXEL: int = 6
@@ -184,11 +195,12 @@ Notes:
     understating is the asymmetric failure. A job admitted against a floor overcommits its host and is killed, while a
     job admitted against an allowance merely waits longer than it had to.
 
-    The registration, processing, combination, and discovery figures are the widest footprints those stages have been
-    observed to reach. The processing figure is the measured nine-plane peak of 10.5 gigabytes rounded up to cover the
-    taller planes of the same recording. The binarization and extraction figures are allowances rather than observed
-    peaks, since neither stage has been measured at its widest, and both sit above every projection their own models
-    produce for the recordings this corpus holds.
+    Only two figures rest on an observation. The processing figure is the measured nine-plane peak of 10.5 gigabytes
+    rounded up to cover the taller planes of the same recording, and the registration figure is the widest footprint
+    that stage has been observed to reach. The combination and discovery figures are flat allowances carried over from
+    the sollertia forgery scheduler, which declared them allowances rather than peaks, and the binarization and
+    extraction figures are allowances chosen to sit above every projection their own models produce for the recordings
+    this corpus holds. Measuring the four unmeasured stages at their widest is what would let them be narrowed.
 """
 
 
@@ -219,7 +231,7 @@ class RecordingGeometry:
     combined_frame_count: int = 0
     """The frames the combined view holds, trimmed to the shortest contributing plane."""
     region_count: int = 0
-    """The regions the pipeline detected across every plane, which is zero before extraction has run."""
+    """The regions the combined trace array holds, which is zero until the combination stage has written it."""
     resolved: bool = False
     """Determines whether the geometry follows from the recording's own data rather than from its absence."""
 
