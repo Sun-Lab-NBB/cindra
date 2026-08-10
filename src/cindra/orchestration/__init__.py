@@ -19,7 +19,12 @@ from .jobs import (
     resolve_single_recording_prerequisites,
 )
 from .openmp import OpenMpStatus, resolve_openmp_runtime
-from .worker import execute_multi_recording_job, execute_single_recording_job
+from .worker import (
+    prime_dataset,
+    prime_recording,
+    execute_multi_recording_job,
+    execute_single_recording_job,
+)
 from ..layout import (
     PLANE_SPECIFIER_PREFIX,
     MULTI_RECORDING_TRACKER_FILENAME,
@@ -103,6 +108,8 @@ __all__ = [
     "get_execution_state",
     "order_phases_by_execution",
     "parse_plane_specifier",
+    "prime_dataset",
+    "prime_recording",
     "resolve_downstream_phases",
     "resolve_multi_recording_job_universe",
     "resolve_multi_recording_jobs",
