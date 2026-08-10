@@ -105,22 +105,28 @@ Phase 3: PROCESS (phase name processing, per plane, 10 cores per job)
 ├── ROI detection, trace extraction, classification, spike deconvolution
 └── One job per plane, specifier plane_{plane_index}, requires that plane's registration job to succeed
 
-Phase 4: COMBINE (phase name combination, I/O bound, 1 core per job, up to 4 concurrent jobs)
+Phase 4: COMBINE (phase name combination, serial merge, 1 core per job)
 └── Merges all plane results into a unified combined_metadata.npz dataset
 ```
 
 Batch processing across multiple recordings:
 
 ```text
-BINARIZE: Up to 4 concurrent recordings, 3 cores each, fixed concurrency
-REGISTER: Concurrency bounded by the session CPU budget, 8 cores per plane job
-PROCESS:  Concurrency bounded by the CPU budget and available memory, 10 cores per plane job
-COMBINE:  Up to 4 concurrent recordings, 1 core each, fixed concurrency
+BINARIZE: Up to 4 concurrent recordings, 3 cores each, a hard ceiling spare capacity never lifts
+REGISTER: 12 cores per plane job, 4 jobs reserved, released when nothing else can use the capacity
+PROCESS:  10 cores per plane job, 5 jobs reserved, released when nothing else can use the capacity
+COMBINE:  1 core each, bounded by the session CPU budget alone
 ```
 
 Every job is admitted as soon as its own prerequisites succeed on its own tracker, so the whole dependency graph can be
 submitted in one call. One plane starts processing while its peers are still registering, and each recording advances
 independently.
+
+Dispatch runs in two passes. The first honors every reservation, so the conversion jobs at the root of the chain keep
+their share of the host while planes are still registering. The second releases the reservations over whatever capacity
+the first left unused, so a deep queue runs at its full width rather than idling the host. Memory bounds admission
+rather than concurrency: every job is sized from the recording it will process, and a job whose geometry cannot be read
+is charged the widest footprint its stage has been observed to reach.
 
 ---
 
