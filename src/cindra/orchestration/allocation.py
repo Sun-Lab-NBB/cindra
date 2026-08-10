@@ -60,11 +60,10 @@ _BINARIZATION_CONCURRENCY_LIMIT: int = 4
 """The binarization jobs that may run at once regardless of the cores the budget could still supply.
 
 Notes:
-    The stage decodes a compressed image set into a binary of comparable size, so its rate is the storage's rate
-    rather than the host's core count. Past a few jobs the readers compete for the same device and the array delivers
-    less in total than it does to fewer of them, so a wider batch finishes the same work more slowly while holding
-    cores other work could use. Spare cores never lift this ceiling, because a job held by it waits on something
-    spare cores do not supply.
+    The stage sits at the root of the single-recording chain, so each job that finishes releases that recording's
+    plane jobs. Four run at their full decode rate, which is what returns those plane jobs to the queue soonest,
+    while spreading the same capacity over more recordings would delay all of them equally. Spare cores never lift
+    this ceiling, because a job held by it waits on something spare cores do not supply.
 """
 
 _REGISTRATION_CONCURRENCY_RESERVATION: int = 4
