@@ -1,7 +1,5 @@
 """Contains tests for the per-stage worker defaults, the resource-class model, and the allocation resolvers."""
 
-from typing import TYPE_CHECKING
-
 import pytest
 from ataraxis_base_utilities import resolve_worker_count
 
@@ -27,7 +25,6 @@ from cindra.orchestration.allocation import (
     _PROCESSING_RESOURCES,
     _COMBINATION_RESOURCES,
     _BINARIZATION_RESOURCES,
-    _KIBIBYTES_PER_GIGABYTE,
     _REGISTRATION_RESOURCES,
     _MAXIMUM_PARALLEL_IO_JOBS,
     _PROCESSING_MEMORY_GIGABYTES_PER_JOB,
@@ -35,33 +32,14 @@ from cindra.orchestration.allocation import (
     resolve_class_allocation,
     summarize_class_allocation,
     resolve_available_memory_gigabytes,
-    _read_linux_available_memory_gigabytes,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
 
+class _VirtualMemory:
+    """Stands in for the psutil memory record, carrying only the available-byte counter the resolver reads."""
 
-def _write_memory_info(directory: Path, contents: str) -> Path:
-    """Writes a stand-in Linux memory counter file into the given directory and returns its path."""
-    memory_info_path = directory / "meminfo"
-    memory_info_path.write_text(contents)
-    return memory_info_path
-
-
-def _page_counters(available_pages: int, page_size: int):
-    """Builds a stand-in POSIX page counter reader that reports the given page count and page size."""
-
-    def _sysconf(name):
-        return {"SC_AVPHYS_PAGES": available_pages, "SC_PAGE_SIZE": page_size}[name]
-
-    return _sysconf
-
-
-def _unreachable_sysconf(name):
-    """Stands in for a POSIX page counter reader that the resolver must not consult."""
-    message = f"The POSIX page counters must not be read when the Linux counter reports '{name}'."
-    raise AssertionError(message)
+    def __init__(self, available: int) -> None:
+        self.available = available
 
 
 class TestStageDefaults:
@@ -252,7 +230,7 @@ class TestFixedCapacityAllocation:
         allocation = resolve_class_allocation(
             resource_class=_BINARIZATION_RESOURCES,
             budget=64,
-            available_memory=None,
+            available_memory=64.0,
             job_count=8,
             workers_per_job=workers_per_job,
             max_parallel_jobs=max_parallel_jobs,
@@ -300,10 +278,8 @@ class TestDerivedCapacityAllocation:
 
         assert allocation == expected
 
-    @pytest.mark.parametrize("available_memory", [None, 0.5, 4096.0])
-    def test_class_without_a_memory_footprint_ignores_the_available_memory(
-        self, available_memory: float | None
-    ) -> None:
+    @pytest.mark.parametrize("available_memory", [0.0, 0.5, 4096.0])
+    def test_class_without_a_memory_footprint_ignores_the_available_memory(self, available_memory: float) -> None:
         """Verifies that a class declaring no per-job memory keeps its CPU-derived cap whatever memory is free."""
         allocation = resolve_class_allocation(
             resource_class=_DISCOVERY_RESOURCES,
@@ -321,7 +297,7 @@ class TestDerivedCapacityAllocation:
         allocation = resolve_class_allocation(
             resource_class=_EXTRACTION_RESOURCES,
             budget=EXTRACTION_WORKERS * 2,
-            available_memory=None,
+            available_memory=1024.0,
             job_count=6,
             workers_per_job=None,
             max_parallel_jobs=None,
@@ -337,7 +313,6 @@ class TestMemoryBoundAllocation:
         ("budget", "available_memory", "job_count", "expected"),
         [
             (100, 100.0, 20, (PROCESSING_WORKERS, 6)),
-            (100, None, 20, (PROCESSING_WORKERS, 10)),
             (100, 5.0, 20, (PROCESSING_WORKERS, 1)),
             (100, 0.0, 20, (PROCESSING_WORKERS, 1)),
             (100, 4096.0, 20, (PROCESSING_WORKERS, 10)),
@@ -345,7 +320,7 @@ class TestMemoryBoundAllocation:
         ],
     )
     def test_capacity_takes_the_smallest_of_the_cpu_memory_and_job_bounds(
-        self, budget: int, available_memory: float | None, job_count: int, expected: tuple[int, int]
+        self, budget: int, available_memory: float, job_count: int, expected: tuple[int, int]
     ) -> None:
         """Verifies that the memory-bound class caps its concurrency at the tightest of its three bounds."""
         allocation = resolve_class_allocation(
@@ -374,90 +349,22 @@ class TestMemoryBoundAllocation:
 
 
 @pytest.mark.xdist_group(name="allocation_system_probes")
-class TestLinuxMemoryCounter:
-    """Tests the reader that converts the Linux MemAvailable counter into a gigabyte figure."""
-
-    def test_missing_counter_file_reports_no_value(self, monkeypatch, tmp_path) -> None:
-        """Verifies that a host without the Linux memory counter file reports no value."""
-        monkeypatch.setattr("cindra.orchestration.allocation._MEMORY_INFO_PATH", tmp_path / "absent_meminfo")
-
-        assert _read_linux_available_memory_gigabytes() is None
-
-    def test_well_formed_counter_converts_kibibytes_to_gigabytes(self, monkeypatch, tmp_path) -> None:
-        """Verifies that the reader skips the preceding counters and converts the MemAvailable value to gigabytes."""
-        contents = "MemTotal:       33554432 kB\nMemFree:         2097152 kB\nMemAvailable:    8388608 kB\n"
-        monkeypatch.setattr("cindra.orchestration.allocation._MEMORY_INFO_PATH", _write_memory_info(tmp_path, contents))
-
-        assert _read_linux_available_memory_gigabytes() == 8388608 / _KIBIBYTES_PER_GIGABYTE
-
-    @pytest.mark.parametrize(
-        "contents",
-        [
-            "MemAvailable: 8388608\n",
-            "MemAvailable:\n",
-            "MemAvailable: eight kB\n",
-            "MemAvailable: 8388608.0 kB\n",
-            "MemAvailable: 0 kB\n",
-            "MemAvailable: -4096 kB\n",
-            "MemTotal: 33554432 kB\nMemFree: 2097152 kB\n",
-            "",
-        ],
-    )
-    def test_unusable_counter_reports_no_value(self, monkeypatch, tmp_path, contents: str) -> None:
-        """Verifies that a short, non-integer, non-positive, or absent counter line reports no value."""
-        monkeypatch.setattr("cindra.orchestration.allocation._MEMORY_INFO_PATH", _write_memory_info(tmp_path, contents))
-
-        assert _read_linux_available_memory_gigabytes() is None
-
-
-@pytest.mark.xdist_group(name="allocation_system_probes")
 class TestResolveAvailableMemory:
     """Tests the memory probe that sizes the memory-bound resource classes."""
 
-    def test_linux_counter_takes_precedence_over_the_page_counters(self, monkeypatch, tmp_path) -> None:
-        """Verifies that a host exposing the Linux counter reports its value without reading the page counters."""
-        contents = "MemAvailable: 8388608 kB\n"
-        monkeypatch.setattr("cindra.orchestration.allocation._MEMORY_INFO_PATH", _write_memory_info(tmp_path, contents))
-        monkeypatch.setattr("os.sysconf", _unreachable_sysconf, raising=False)
-
-        assert resolve_available_memory_gigabytes() == 8388608 / _KIBIBYTES_PER_GIGABYTE
-
-    def test_page_counters_provide_the_fallback(self, monkeypatch, tmp_path) -> None:
-        """Verifies that a host without the Linux counter falls back to the POSIX page counters."""
-        monkeypatch.setattr("cindra.orchestration.allocation._MEMORY_INFO_PATH", tmp_path / "absent_meminfo")
-        monkeypatch.setattr("os.sysconf", _page_counters(available_pages=1024 * 1024, page_size=4096), raising=False)
-
-        assert resolve_available_memory_gigabytes() == (1024 * 1024 * 4096) / _BYTES_PER_GIGABYTE
-
-    @pytest.mark.parametrize("error", [AttributeError, OSError, ValueError])
-    def test_unavailable_page_counters_report_no_value(self, monkeypatch, tmp_path, error: type[Exception]) -> None:
-        """Verifies that a platform whose page counters cannot be read reports no value."""
-
-        def _raise(name):
-            raise error(name)
-
-        monkeypatch.setattr("cindra.orchestration.allocation._MEMORY_INFO_PATH", tmp_path / "absent_meminfo")
-        monkeypatch.setattr("os.sysconf", _raise, raising=False)
-
-        assert resolve_available_memory_gigabytes() is None
-
-    @pytest.mark.parametrize(("available_pages", "page_size"), [(0, 4096), (-1, 4096), (1024, 0), (1024, -1), (0, 0)])
-    def test_non_positive_page_counters_report_no_value(
-        self, monkeypatch, tmp_path, available_pages: int, page_size: int
-    ) -> None:
-        """Verifies that a page count or page size of zero or less reports no value rather than a zero budget."""
-        monkeypatch.setattr("cindra.orchestration.allocation._MEMORY_INFO_PATH", tmp_path / "absent_meminfo")
+    @pytest.mark.parametrize("available_bytes", [0, 4096, 8 * _BYTES_PER_GIGABYTE, 1536 * _BYTES_PER_GIGABYTE])
+    def test_probe_converts_the_available_byte_counter_to_gigabytes(self, monkeypatch, available_bytes: int) -> None:
+        """Verifies that the probe divides the host's available-byte counter into a gigabyte figure."""
         monkeypatch.setattr(
-            "os.sysconf", _page_counters(available_pages=available_pages, page_size=page_size), raising=False
+            "cindra.orchestration.allocation.psutil.virtual_memory",
+            lambda: _VirtualMemory(available=available_bytes),
         )
 
-        assert resolve_available_memory_gigabytes() is None
+        assert resolve_available_memory_gigabytes() == available_bytes / _BYTES_PER_GIGABYTE
 
-    def test_host_probe_reports_a_positive_figure_or_no_value(self) -> None:
-        """Verifies that the unpatched probe reports either a usable memory figure or no value on the test host."""
-        available_memory = resolve_available_memory_gigabytes()
-
-        assert available_memory is None or available_memory > 0
+    def test_host_probe_reports_a_non_negative_figure(self) -> None:
+        """Verifies that the unpatched probe reports a usable memory figure on the test host."""
+        assert resolve_available_memory_gigabytes() >= 0
 
 
 class TestSummarizeClassAllocation:

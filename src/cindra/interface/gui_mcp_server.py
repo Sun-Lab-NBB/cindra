@@ -14,12 +14,12 @@ from pathlib import Path
 import subprocess
 from dataclasses import dataclass
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from ..gui import read_viewer_state, cleanup_state_file, generate_state_path
 
-gui_mcp = FastMCP(name="cindra-gui-mcp", json_response=True)
-"""The GUI MCP server instance initialized with JSON response mode for structured output."""
+gui_mcp: MCPServer = MCPServer(name="cindra-gui-mcp")
+"""The GUI MCP server instance that exposes the viewer lifecycle tools to AI agents."""
 
 
 @dataclass(slots=True)
@@ -50,6 +50,12 @@ def run_gui_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdi
     Args:
         transport: The transport type to use ('stdio', 'sse', or 'streamable-http').
     """
+    if transport == "streamable-http":
+        # Frames each response as a single JSON body instead of an event stream. Only the streamable-http transport
+        # accepts this flag, so it stays out of the call below.
+        gui_mcp.run(transport=transport, json_response=True)
+        return
+
     gui_mcp.run(transport=transport)
 
 
