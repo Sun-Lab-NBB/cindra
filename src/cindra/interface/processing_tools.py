@@ -1741,6 +1741,12 @@ def execute_full_pipeline_tool(
                             job_id=binarize["job_id"],
                             single_recording=True,
                             resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.BINARIZE],
+                            memory_megabytes=_estimate_pending_job_memory(
+                                configuration_path=job_configuration_path,
+                                job_name=str(binarize["name"]),
+                                specifier=str(binarize["specifier"]),
+                                single=True,
+                            ),
                         )
                     )
 
@@ -1751,6 +1757,12 @@ def execute_full_pipeline_tool(
                         job_id=register["job_id"],
                         single_recording=True,
                         resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.REGISTER],
+                        memory_megabytes=_estimate_pending_job_memory(
+                            configuration_path=job_configuration_path,
+                            job_name=str(register["name"]),
+                            specifier=str(register["specifier"]),
+                            single=True,
+                        ),
                     )
                     for register in manifest_dict.get("register_jobs", [])
                     if register.get("status") != "succeeded"
@@ -1763,6 +1775,12 @@ def execute_full_pipeline_tool(
                         job_id=process["job_id"],
                         single_recording=True,
                         resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.PROCESS],
+                        memory_megabytes=_estimate_pending_job_memory(
+                            configuration_path=job_configuration_path,
+                            job_name=str(process["name"]),
+                            specifier=str(process["specifier"]),
+                            single=True,
+                        ),
                     )
                     for process in manifest_dict.get("process_jobs", [])
                     if process.get("status") != "succeeded"
@@ -1777,6 +1795,12 @@ def execute_full_pipeline_tool(
                             job_id=combine["job_id"],
                             single_recording=True,
                             resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.COMBINE],
+                            memory_megabytes=_estimate_pending_job_memory(
+                                configuration_path=job_configuration_path,
+                                job_name=str(combine["name"]),
+                                specifier=str(combine["specifier"]),
+                                single=True,
+                            ),
                         )
                     )
 
@@ -1809,6 +1833,12 @@ def execute_full_pipeline_tool(
                             job_id=discover["job_id"],
                             single_recording=False,
                             resource_class=RESOURCE_CLASS_BY_JOB_NAME[MultiRecordingJobNames.DISCOVER],
+                            memory_megabytes=_estimate_pending_job_memory(
+                                configuration_path=job_configuration_path,
+                                job_name=str(discover["name"]),
+                                specifier=str(discover["specifier"]),
+                                single=False,
+                            ),
                         )
                     )
 
@@ -1819,6 +1849,12 @@ def execute_full_pipeline_tool(
                         job_id=extract["job_id"],
                         single_recording=False,
                         resource_class=RESOURCE_CLASS_BY_JOB_NAME[MultiRecordingJobNames.EXTRACT],
+                        memory_megabytes=_estimate_pending_job_memory(
+                            configuration_path=job_configuration_path,
+                            job_name=str(extract["name"]),
+                            specifier=str(extract["specifier"]),
+                            single=False,
+                        ),
                     )
                     for extract in manifest_dict.get("extract_jobs", [])
                     if extract.get("status") != "succeeded"
