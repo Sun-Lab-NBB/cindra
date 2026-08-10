@@ -148,7 +148,7 @@ class Main:
 
     Notes:
         For runtime behavior settings shared with the multi-recording pipeline (progress bars), see RuntimeSettings.
-        Worker counts are explicit API parameters resolved through ``cindra.allocation``.
+        Worker counts are explicit API parameters resolved through ``cindra.orchestration``.
     """
 
     two_channels: bool = False
@@ -527,7 +527,7 @@ class SingleRecordingConfiguration(YamlConfig):
         Args:
             file_path: The path to the .yaml file in which to save the configuration data.
         """
-        ensure_directory_exists(path=file_path)
+        ensure_directory_exists(path=file_path, is_file=True)
         self.to_yaml(file_path=file_path)
 
     @classmethod

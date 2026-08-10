@@ -555,7 +555,7 @@ from the trim target.
 
 `combined_metadata.npz` also doubles as the marker that downstream consumers, including the multi-recording pipeline,
 check to decide whether the single-recording pipeline completed. It is therefore written after every array it describes
-and moved into place from a temporary `combined_metadata.tmp.npz` staging name, so an interrupted run never leaves a
+and published through an atomic write that renames it into place, so an interrupted run never leaves a
 marker describing a payload that is not on disk.
 
 Reads:
@@ -774,7 +774,7 @@ parameter gives the phase its measured default (`BINARIZATION_WORKERS`, `REGISTR
 `DISCOVERY_WORKERS`, `EXTRACTION_WORKERS`, all exported from `cindra`), and passing `-1` requests every available core.
 
 External schedulers that need to enumerate a recording's jobs and their dependencies without driving the pipeline
-themselves can read the phase model exported from `cindra.allocation`. `SINGLE_RECORDING_PHASES` and
+themselves can read the phase model exported from `cindra.orchestration`. `SINGLE_RECORDING_PHASES` and
 `MULTI_RECORDING_PHASES` describe the ordered phases, `resolve_single_recording_jobs()` and
 `resolve_multi_recording_jobs()` expand them into a job universe of `(job_name, specifier)` pairs, and
 `resolve_single_recording_prerequisites()` and `resolve_multi_recording_prerequisites()` return the jobs each job

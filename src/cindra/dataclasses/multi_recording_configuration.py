@@ -192,7 +192,7 @@ class MultiRecordingConfiguration(YamlConfig):
         Args:
             file_path: The path to the .yaml file in which to save the configuration data.
         """
-        ensure_directory_exists(path=file_path)
+        ensure_directory_exists(path=file_path, is_file=True)
         self.to_yaml(file_path=file_path)
 
     @classmethod

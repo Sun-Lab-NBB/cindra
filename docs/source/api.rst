@@ -9,10 +9,10 @@ Data Structures
    :undoc-members:
    :show-inheritance:
 
-Allocation
-==========
+Orchestration
+=============
 
-.. automodule:: cindra.allocation
+.. automodule:: cindra.orchestration
    :members:
    :undoc-members:
    :show-inheritance:

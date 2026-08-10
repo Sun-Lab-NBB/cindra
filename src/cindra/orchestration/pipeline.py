@@ -8,33 +8,30 @@ from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import ProcessingTracker
 
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
-from ..allocation import (
-    SINGLE_RECORDING_PHASES,
+from .jobs import (
+    PER_PLANE_JOB_NAMES,
+    PLANE_SPECIFIER_PREFIX,
+    MULTI_RECORDING_TRACKER_NAME,
+    SINGLE_RECORDING_TRACKER_NAME,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
-    resolve_stage_workers,
     resolve_plane_specifier,
     resolve_multi_recording_jobs,
     resolve_single_recording_jobs,
 )
+from ..pipelines import (
+    process_plane,
+    binarize_recording,
+    save_combined_data,
+    register_recording_plane,
+    discover_multi_recording_cells,
+    extract_multi_recording_fluorescence,
+)
+from .allocation import resolve_stage_workers
 from ..dataclasses import RuntimeContext, MultiRecordingConfiguration, SingleRecordingConfiguration
-from .multi_recording import discover_multi_recording_cells, extract_multi_recording_fluorescence
-from .single_recording import process_plane, binarize_recording, save_combined_data, register_recording_plane
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-SINGLE_RECORDING_TRACKER_NAME: str = "single_recording_tracker.yaml"
-"""The tracker file name for the single-recording processing pipeline."""
-
-MULTI_RECORDING_TRACKER_NAME: str = "multi_recording_tracker.yaml"
-"""The tracker file name for the multi-recording processing pipeline."""
-
-_PER_PLANE_JOB_NAMES: frozenset[str] = frozenset(
-    str(phase.job_name) for phase in SINGLE_RECORDING_PHASES if phase.per_specifier
-)
-"""The single-recording job names that expand into one job per imaging plane, each carrying a 'plane_{index}'
-specifier. Derived from the exported phase model, so that adding a per-plane phase updates it automatically."""
 
 
 def run_single_recording_pipeline(
@@ -79,7 +76,8 @@ def run_single_recording_pipeline(
 
     Raises:
         FileNotFoundError: If the single-recording configuration data cannot be loaded from the specified file.
-        ValueError: If the recording's data validation fails or the specified job_id does not match any available jobs.
+        ValueError: If the recording's data validation fails, the specified job_id does not match any available job,
+            or target_plane names a plane the recording does not hold.
     """
     configuration, output_path = _load_single_recording_configuration(configuration_path=configuration_path)
 
@@ -129,24 +127,12 @@ def run_single_recording_pipeline(
 
     # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
-        # REMOTE mode: Validates the requested job_id against the pipeline's universe, aligns the tracker with
-        # every valid job so that ``start_job`` finds the requested ID, and executes the matching job.
-        id_to_job: dict[str, tuple[str, str]] = {
-            ProcessingTracker.generate_job_id(job_name=name, specifier=specifier): (name, specifier)
-            for name, specifier in universe
-        }
-
-        if job_id not in id_to_job:
-            message = (
-                f"Unable to execute the requested job with ID '{job_id}'. The input identifier does not match "
-                f"any jobs available for the current pipeline configuration. Valid job IDs: "
-                f"{sorted(id_to_job.keys())}."
-            )
-            console.error(message=message, error=ValueError)
+        # REMOTE mode: Resolves the requested job_id against the pipeline's universe, aligns the tracker with every
+        # valid job so that the tracker holds the requested ID, and executes the matching job.
+        resolved_name, resolved_specifier = tracker.resolve_job(job_id=job_id, universe=universe)
 
         tracker.align_jobs(jobs=universe, universe=universe)
 
-        resolved_name, resolved_specifier = id_to_job[job_id]
         _execute_single_recording_job(
             configuration=configuration,
             job_name=SingleRecordingJobNames(resolved_name),
@@ -159,9 +145,21 @@ def run_single_recording_pipeline(
         # LOCAL mode: Builds all requested jobs upfront using the pre-resolved plane count, aligns the tracker
         # with the requested subset, then runs them sequentially. This mirrors the approach used by
         # run_multi_recording_pipeline.
+
+        # Rejects a plane the recording does not hold before the tracker is aligned. Without this guard the
+        # out-of-range job pair reaches align_jobs, which rejects it against the universe with a message naming job
+        # identifiers rather than the plane index the caller actually asked for.
+        if target_plane != -1 and target_plane not in range(plane_count):
+            message = (
+                f"Unable to run the single-recording cindra processing pipeline. The requested 'target_plane' must be "
+                f"an index of one of the {plane_count} plane(s) the recording holds, or -1 to process every plane, "
+                f"but encountered {target_plane}."
+            )
+            console.error(message=message, error=ValueError)
+
         jobs: list[tuple[str, str]] = []
         for base_job_name in jobs_to_run:
-            if base_job_name in _PER_PLANE_JOB_NAMES:
+            if base_job_name in PER_PLANE_JOB_NAMES:
                 if target_plane == -1:
                     jobs.extend(
                         (base_job_name, resolve_plane_specifier(plane_index=plane_index))
@@ -287,8 +285,8 @@ def run_multi_recording_pipeline(
     Raises:
         FileNotFoundError: If the multi-recording configuration data cannot be loaded from the specified file, or if a
             recording directory holds no combined_metadata.npz file.
-        RuntimeError: If a recording directory holds multiple combined_metadata.npz files, or if the recording paths do
-            not contain unique identifying components.
+        RuntimeError: If a recording directory holds multiple combined_metadata.npz files, if the recording paths do
+            not contain unique identifying components, or if a resolved identifying component contains a colon.
         ValueError: If recording validation fails, recording_directories is empty, target_recording does not name a
             resolved recording, or the specified job_id does not match any available jobs.
     """
@@ -341,24 +339,12 @@ def run_multi_recording_pipeline(
 
     # Determines the execution mode and resolves job IDs accordingly.
     if job_id is not None:
-        # REMOTE mode: Validates the requested job_id against the pipeline's universe, aligns the tracker with
-        # every valid job so that ``start_job`` finds the requested ID, and executes the matching job.
-        id_to_job: dict[str, tuple[str, str]] = {
-            ProcessingTracker.generate_job_id(job_name=name, specifier=specifier): (name, specifier)
-            for name, specifier in universe
-        }
-
-        if job_id not in id_to_job:
-            message = (
-                f"Unable to execute the requested job with ID '{job_id}'. The input identifier does not match "
-                f"any jobs available for the current pipeline configuration. Valid job IDs: "
-                f"{sorted(id_to_job.keys())}."
-            )
-            console.error(message=message, error=ValueError)
+        # REMOTE mode: Resolves the requested job_id against the pipeline's universe, aligns the tracker with every
+        # valid job so that the tracker holds the requested ID, and executes the matching job.
+        resolved_name, resolved_specifier = tracker.resolve_job(job_id=job_id, universe=universe)
 
         tracker.align_jobs(jobs=universe, universe=universe)
 
-        resolved_name, resolved_specifier = id_to_job[job_id]
         _execute_multi_recording_job(
             configuration=configuration,
             job_name=MultiRecordingJobNames(resolved_name),
@@ -370,6 +356,18 @@ def run_multi_recording_pipeline(
     else:
         # LOCAL mode: Builds all requested jobs, aligns the tracker with the requested subset, then runs
         # them sequentially. For EXTRACT jobs, expands to recording-specific jobs if target_recording is None.
+
+        # Rejects a recording the dataset does not span before the tracker is aligned. The context resolver applies
+        # the same check, but only once the extraction job reaches it, which is after align_jobs would have rejected
+        # the unknown job pair with a message naming job identifiers rather than the requested recording.
+        if target_recording is not None and target_recording not in recording_ids:
+            message = (
+                f"Unable to run the multi-recording cindra processing pipeline. The requested 'target_recording' must "
+                f"name one of the recordings the dataset spans, but encountered '{target_recording}'. Resolved "
+                f"recording identifiers: {recording_ids}."
+            )
+            console.error(message=message, error=ValueError)
+
         jobs: list[tuple[str, str]] = []
         for base_job_name in jobs_to_run:
             if base_job_name == MultiRecordingJobNames.EXTRACT:
@@ -607,12 +605,13 @@ def _execute_single_recording_job(
         ValueError: If the job_name is not recognized or the requested worker count is invalid.
     """
     console.echo(message=f"Running '{job_name}' job (specifier='{specifier}') with ID {job_id}...")
-    tracker.start_job(job_id=job_id)
 
-    try:
-        # Every worker-consuming stage resolves its budget inside the tracked block, so an invalid request is recorded
-        # as a job failure instead of escaping as an untracked error. The resolution happens per branch rather than
-        # ahead of the chain, so that an unrecognized job name reaches the job-name guard below.
+    # The tracker's run_job() context owns the job's state transitions: it marks the job as running, completes it when
+    # the block returns, and records the exception's message as the failure reason before re-raising when the block
+    # raises. Every worker-consuming stage resolves its budget inside the block, so an invalid request is recorded as
+    # a job failure instead of escaping as an untracked error. The resolution happens per branch rather than ahead of
+    # the chain, so that an unrecognized job name reaches the job-name guard below.
+    with tracker.run_job(job_id=job_id):
         if job_name == SingleRecordingJobNames.BINARIZE:
             binarize_recording(
                 configuration=configuration,
@@ -622,14 +621,14 @@ def _execute_single_recording_job(
         elif job_name == SingleRecordingJobNames.REGISTER:
             register_recording_plane(
                 configuration=configuration,
-                plane_index=int(specifier.removeprefix("plane_")),
+                plane_index=int(specifier.removeprefix(PLANE_SPECIFIER_PREFIX)),
                 workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
             )
 
         elif job_name == SingleRecordingJobNames.PROCESS:
             process_plane(
                 configuration=configuration,
-                plane_index=int(specifier.removeprefix("plane_")),
+                plane_index=int(specifier.removeprefix(PLANE_SPECIFIER_PREFIX)),
                 workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
             )
 
@@ -665,12 +664,6 @@ def _execute_single_recording_job(
             )
             console.error(message=message, error=ValueError)
 
-        tracker.complete_job(job_id=job_id)
-
-    except Exception as error:
-        tracker.fail_job(job_id=job_id, error_message=str(error))
-        raise
-
 
 def _execute_multi_recording_job(
     configuration: MultiRecordingConfiguration,
@@ -697,12 +690,12 @@ def _execute_multi_recording_job(
         ValueError: If the job_name is not recognized or the requested worker count is invalid.
     """
     console.echo(message=f"Running '{job_name}' job (specifier='{specifier}') with ID {job_id}...")
-    tracker.start_job(job_id=job_id)
 
-    try:
-        # Resolves each stage's worker budget inside its own dispatch branch, matching the single-recording executor.
-        # An unrecognized job name therefore reports the job-name error below rather than a worker-resolution error,
-        # and an invalid worker request is still recorded as a job failure instead of escaping untracked.
+    # The tracker's run_job() context owns the job's state transitions, matching the single-recording executor. Each
+    # stage resolves its worker budget inside its own dispatch branch, so an unrecognized job name reports the
+    # job-name error below rather than a worker-resolution error, and an invalid worker request is still recorded as a
+    # job failure instead of escaping untracked.
+    with tracker.run_job(job_id=job_id):
         if job_name == MultiRecordingJobNames.DISCOVER:
             discover_multi_recording_cells(
                 configuration=configuration,
@@ -722,9 +715,3 @@ def _execute_multi_recording_job(
                 f"recognized. Use one of the valid Job names: {list(MultiRecordingJobNames)}."
             )
             console.error(message=message, error=ValueError)
-
-        tracker.complete_job(job_id=job_id)
-
-    except Exception as error:
-        tracker.fail_job(job_id=job_id, error_message=str(error))
-        raise

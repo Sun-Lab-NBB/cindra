@@ -9,6 +9,7 @@ from dataclasses import field, dataclass
 import numpy as np
 from natsort import natsorted
 from ataraxis_base_utilities import LogLevel, console
+from ataraxis_data_structures import discover_marker_files
 
 from ..io import BinaryFile, BinaryFileCombined
 from ..dataclasses import CombinedData, RuntimeContext, MultiRecordingRuntimeContext
@@ -1156,7 +1157,7 @@ class ViewerData:
         Returns:
             A tuple of natsorted unique dataset names.
         """
-        matches = list(root_path.rglob("multi_recording_runtime_data.yaml"))
+        matches = discover_marker_files(directory=root_path, marker_name="multi_recording_runtime_data.yaml")
         if not matches:
             return ()
 
@@ -1170,7 +1171,7 @@ class ViewerData:
             search_root: The root path to search for multi_recording_runtime_data.yaml files.
         """
         # Finds the target dataset directory by matching multi_recording_runtime_data.yaml parent names.
-        matches = list(search_root.rglob("multi_recording_runtime_data.yaml"))
+        matches = discover_marker_files(directory=search_root, marker_name="multi_recording_runtime_data.yaml")
         target_dir: Path | None = None
         for match in matches:
             if match.parent.name == dataset_name:

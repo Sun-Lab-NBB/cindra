@@ -11,7 +11,7 @@ from dataclasses import field, dataclass
 import numpy as np
 from numpy.typing import NDArray  # noqa: TC002 - needed at runtime for dacite deserialization
 from ataraxis_base_utilities import console, ensure_directory_exists
-from ataraxis_data_structures import YamlConfig
+from ataraxis_data_structures import YamlConfig, atomic_write
 
 from .version import VERSION, PYTHON_VERSION
 
@@ -279,7 +279,7 @@ class RegistrationData:
             output_path: The directory in which to create the ``registration_data/`` subdirectory.
         """
         registration_directory = output_path / "registration_data"
-        ensure_directory_exists(registration_directory)
+        ensure_directory_exists(path=registration_directory, is_file=False)
 
         if self.bad_frames is not None and not is_memory_mapped(self.bad_frames):
             np.save(registration_directory / "bad_frames.npy", arr=self.bad_frames)
@@ -483,7 +483,7 @@ class DetectionData:
             output_path: The directory in which to create the ``detection_data/`` subdirectory.
         """
         detection_directory = output_path / "detection_data"
-        ensure_directory_exists(detection_directory)
+        ensure_directory_exists(path=detection_directory, is_file=False)
 
         # Channel 1 arrays.
         if self.mean_image is not None and not is_memory_mapped(self.mean_image):
@@ -1434,7 +1434,7 @@ class SingleRecordingRuntimeData(YamlConfig):
         Args:
             output_path: The directory in which to save the runtime_data.yaml file and .npy files.
         """
-        ensure_directory_exists(output_path)
+        ensure_directory_exists(path=output_path, is_file=False)
         self.output_path = output_path
 
         self.registration.save_arrays(output_path)
@@ -1552,13 +1552,13 @@ class CombinedData:
         Notes:
             The combined_metadata.npz file doubles as the marker consumers check to decide whether the
             single-recording pipeline completed. It is therefore written after the arrays it describes, and it is
-            moved into place from a temporary name so that it appears atomically. An interrupted run never leaves a
+            published through the atomic writer so that it appears in one step. An interrupted run never leaves a
             marker that describes a payload which is not on disk.
 
         Args:
             root_path: The root cindra output directory containing configuration.yaml.
         """
-        ensure_directory_exists(root_path)
+        ensure_directory_exists(path=root_path, is_file=False)
 
         # Saves metadata using appropriate unsigned types for counts and dimensions. Binary paths are stored as
         # strings relative to root_path to allow relocating processed data without breaking path references.
@@ -1599,12 +1599,11 @@ class CombinedData:
         self.detection.save_arrays(root_path)
         self.extraction.save_arrays(root_path)
 
-        # Stages the marker under a temporary name and moves it into place. Writing it directly would truncate the
-        # destination first, so an interrupted write would also destroy an already complete marker from an earlier run.
-        # The staged name ends with the .npz suffix, because np.savez appends that suffix to any path that lacks it.
-        staged_metadata_path = root_path / "combined_metadata.tmp.npz"
-        np.savez(staged_metadata_path, allow_pickle=False, **save_dictionary)
-        staged_metadata_path.replace(root_path / "combined_metadata.npz")
+        # Publishes the marker through the atomic writer, which writes a temporary file in the destination's own
+        # directory, flushes it to disk, and renames it over the destination. Writing the destination directly would
+        # truncate it first, so an interrupted write would also destroy an already complete marker from an earlier run.
+        with atomic_write(file_path=root_path / "combined_metadata.npz", binary=True) as metadata_file:
+            np.savez(metadata_file, allow_pickle=False, **save_dictionary)
 
     @classmethod
     def load(cls, root_path: Path) -> CombinedData:
