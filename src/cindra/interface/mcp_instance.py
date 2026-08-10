@@ -7,7 +7,7 @@ module level to trigger that registration before starting the server.
 
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
-mcp = FastMCP(name="cindra-mcp", json_response=True)
-"""The MCP server instance initialized with JSON response mode for structured output."""
+mcp: MCPServer = MCPServer(name="cindra-mcp")
+"""The MCP server instance that exposes the data-processing tools to AI agents."""

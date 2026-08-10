@@ -73,17 +73,15 @@
 | `pyside6`                  | Qt6 GUI framework for interactive viewers                     |
 | `pyqtgraph`                | High-performance plotting for GUI image display               |
 | `click`                    | CLI framework for command-line interfaces                     |
-| `mcp`                      | FastMCP server for agentic AI tool integration                |
-| `httpx`                    | HTTP client used by the MCP transport layer                   |
+| `mcp`                      | MCPServer host for agentic AI tool integration                |
+| `psutil`                   | Available host memory reads that size the processing class    |
 | `ataraxis-time`            | PrecisionTimer for pipeline step timing                       |
 | `ataraxis-base-utilities`  | Console for unified message handling and error reporting      |
 | `ataraxis-data-structures` | YamlConfig, ProcessingTracker, and data logging utilities     |
 | `threadpoolctl`            | BLAS thread confinement around scikit-learn and LAPACK fits   |
 | `pyyaml`                   | YAML serialization for configuration and tracker files        |
-| `filelock`                 | Cross-process file locking for ProcessingTracker state        |
-| `importlib_metadata`       | Runtime version introspection for the cindra package          |
 | `tbb4py`                   | Intel TBB threading layer for Numba parallelization (non-Mac) |
-| `intel-cmplr-lib-rt`       | Intel compiler runtime paired with `tbb4py` (non-Mac)         |
+| `intel-cmplr-lib-rt`       | SVML runtime held for Numba's vectorization path (non-Mac)    |
 
 ### Workflow guidance
 
@@ -136,7 +134,8 @@
 2. Tools register via `@mcp.tool()` decorator on the shared `mcp` instance from `mcp_instance.py`
 3. Batch processing tools call into `cindra.orchestration`, whose manager thread dispatches each job into a
    worker process pinned by `limit_worker_threads` and `initialize_worker_threads`
-4. Return JSON-serializable dictionaries. The shared `mcp` instance runs in JSON response mode
+4. Return JSON-serializable dictionaries. `run_server` and `run_gui_server` enable JSON responses only when they
+   start the streamable-http transport
 
 **Adding or modifying CLI commands:**
 
@@ -153,12 +152,15 @@
   because the Numba macOS wheel ships no tbbpool extension, so the TBB layer is unavailable there whatever runtime is
   installed
 - The macOS OpenMP layer loads `libomp.dylib` from the dynamic loader's default search path, and
-  `cindra.orchestration.openmp` owns the discovery and linking that put it there. `__init__.py` calls
-  `warn_missing_openmp_runtime()` below the console initialization, so the warning reaches the terminal, while
-  `cindra omp` reports the runtimes found on the host and `cindra omp --yes` links one. Numba raises its
-  threading-layer error at the first parallelized call rather than at import, which is what the warning stands in for
-- The `# type: ignore[import-untyped]` comments on the scikit-learn, threadpoolctl, PyQtGraph, and yaml imports are
-  expected (Numba is excluded via the `pyproject.toml` mypy override, and tifffile imports carry no such comment)
+  `cindra.orchestration.openmp` owns the discovery and linking that put it there. Both pipeline entry points call
+  `verify_openmp_runtime()` before they dispatch a stage, so a macOS host carrying no loadable runtime aborts having
+  done no work, while `cindra omp` reports the runtimes found on the host and `cindra omp --yes` links one. Numba
+  raises its threading-layer error at the first parallelized call rather than at import, which is what the check
+  replaces. Keep the check off the import path, because a message written there reaches the stdio MCP server's
+  JSON-RPC stream before any CLI code can silence the console
+- The `# type: ignore[import-untyped]` comments on the scikit-learn, threadpoolctl, and PyQtGraph imports are
+  expected (Numba is excluded via the `pyproject.toml` mypy override, and the tifffile and yaml imports carry no such
+  comment, because both ship types)
 - The `# pragma: no cover` annotations on `@njit` function bodies are intentional
 - Registration rewrites the plane binary in place and guards the rewrite with a `<binary>.registering` marker
   (`create_registration_marker`, `clear_registration_marker`, `resolve_registration_marker_path`, exported from

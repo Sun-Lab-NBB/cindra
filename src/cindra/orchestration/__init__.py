@@ -21,7 +21,7 @@ from .jobs import (
     resolve_multi_recording_prerequisites,
     resolve_single_recording_prerequisites,
 )
-from .openmp import OpenMpStatus, resolve_openmp_runtime, warn_missing_openmp_runtime
+from .openmp import OpenMpStatus, resolve_openmp_runtime
 from .pipeline import (
     execute_multi_recording_job,
     execute_single_recording_job,
@@ -89,5 +89,4 @@ __all__ = [
     "set_execution_state",
     "start_execution_session",
     "validate_job_prerequisites",
-    "warn_missing_openmp_runtime",
 ]

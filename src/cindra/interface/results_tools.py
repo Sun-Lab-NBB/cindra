@@ -12,7 +12,7 @@ from pathlib import Path
 import contextlib
 from dataclasses import field, dataclass
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 import numpy as np
 from natsort import natsorted
 from ataraxis_data_structures import discover_marker_files

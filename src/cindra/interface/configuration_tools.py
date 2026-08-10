@@ -17,7 +17,7 @@ from dataclasses import (
     is_dataclass,
 )
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from natsort import natsorted
 from ataraxis_data_structures import discover_marker_roots
 
