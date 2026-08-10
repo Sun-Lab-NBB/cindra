@@ -29,7 +29,7 @@ from ataraxis_data_structures import (
     discover_marker_files,
 )
 
-from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
+from ..io import resolve_multi_recording_contexts
 from ..layout import (
     OUTPUT_DIRECTORY_NAME,
     PLANE_SPECIFIER_PREFIX,
@@ -61,6 +61,7 @@ from ..orchestration import (
     PendingJob,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
+    prime_recording,
     get_execution_state,
     set_execution_state,
     resolve_session_load,
@@ -79,6 +80,44 @@ if TYPE_CHECKING:
 
 _MINIMUM_RECORDING_COUNT: int = 2
 """The minimum number of recordings required for multi-recording processing."""
+
+
+def _resolve_job_identifiers(tracker: ProcessingTracker, jobs: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    """Initializes a tracker's jobs and keys every returned identifier by the job it belongs to.
+
+    Notes:
+        The tracker returns its identifiers in the order the job list carries them. Keying them by name and specifier
+        keeps a manifest entry bound to its own job, so inserting or reordering a pipeline phase cannot shift an
+        identifier onto a different job.
+
+    Args:
+        tracker: The tracker to initialize the jobs on.
+        jobs: The job universe, as job name and specifier pairs.
+
+    Returns:
+        The identifier of every job, keyed by its name and specifier.
+    """
+    job_ids = tracker.initialize_jobs(jobs=jobs)
+    return dict(zip(jobs, job_ids, strict=True))
+
+
+def _manifest_entry(identifiers: dict[tuple[str, str], str], job_name: str, specifier: str) -> dict[str, object]:
+    """Builds the manifest entry describing one scheduled job.
+
+    Args:
+        identifiers: The identifier of every job, keyed by its name and specifier.
+        job_name: The name of the job the entry describes.
+        specifier: The specifier of the job the entry describes.
+
+    Returns:
+        The manifest entry holding the job's identifier, name, specifier, and scheduled status.
+    """
+    return {
+        "job_id": identifiers[str(job_name), specifier],
+        "name": str(job_name),
+        "specifier": specifier,
+        "status": "scheduled",
+    }
 
 
 @mcp.tool()
@@ -462,57 +501,46 @@ def prepare_single_recording_batch_tool(
             cindra_root.mkdir(parents=True, exist_ok=True)
             recording_configuration_path = cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME
 
-            # Resolves plane count from configuration to build the complete job list.
-            contexts = resolve_single_recording_contexts(configuration=recording_configuration)
-            plane_count = len(contexts)
-
             # Saves the per-recording configuration. The execute tool passes the resolved worker allocation to each
             # job as a dispatch argument, so this one file serves every job dispatched against it.
             recording_configuration.save(file_path=recording_configuration_path)
+
+            # Writes the shared bootstrap every later job reads and reports the planes the recording holds.
+            plane_count = prime_recording(configuration_path=recording_configuration_path).plane_count
 
             # Builds the recording's job universe from the exported phase model, which orders the phases and expands
             # the per-plane ones.
             jobs: list[tuple[str, str]] = resolve_single_recording_jobs(plane_count=plane_count)
 
             tracker = ProcessingTracker(file_path=tracker_path)
-            job_ids = tracker.initialize_jobs(jobs=jobs)
+            identifiers = _resolve_job_identifiers(tracker=tracker, jobs=jobs)
             total_jobs += len(jobs)
 
-            # Builds manifest entries from the freshly initialized tracker. The returned identifiers follow the job
-            # list order, so the register block starts at index 1 and the process block starts after it.
-            binarize_entry = {
-                "job_id": job_ids[0],
-                "name": SingleRecordingJobNames.BINARIZE.value,
-                "specifier": "",
-                "status": "scheduled",
-            }
+            binarize_entry = _manifest_entry(
+                identifiers=identifiers, job_name=SingleRecordingJobNames.BINARIZE, specifier=""
+            )
 
             register_entries = [
-                {
-                    "job_id": job_ids[1 + plane_index],
-                    "name": SingleRecordingJobNames.REGISTER.value,
-                    "specifier": resolve_plane_specifier(plane_index=plane_index),
-                    "status": "scheduled",
-                }
+                _manifest_entry(
+                    identifiers=identifiers,
+                    job_name=SingleRecordingJobNames.REGISTER,
+                    specifier=resolve_plane_specifier(plane_index=plane_index),
+                )
                 for plane_index in range(plane_count)
             ]
 
             process_entries = [
-                {
-                    "job_id": job_ids[1 + plane_count + plane_index],
-                    "name": SingleRecordingJobNames.PROCESS.value,
-                    "specifier": resolve_plane_specifier(plane_index=plane_index),
-                    "status": "scheduled",
-                }
+                _manifest_entry(
+                    identifiers=identifiers,
+                    job_name=SingleRecordingJobNames.PROCESS,
+                    specifier=resolve_plane_specifier(plane_index=plane_index),
+                )
                 for plane_index in range(plane_count)
             ]
 
-            combine_entry = {
-                "job_id": job_ids[-1],
-                "name": SingleRecordingJobNames.COMBINE.value,
-                "specifier": "",
-                "status": "scheduled",
-            }
+            combine_entry = _manifest_entry(
+                identifiers=identifiers, job_name=SingleRecordingJobNames.COMBINE, specifier=""
+            )
 
             recordings_manifest[recording_key] = {
                 "configuration_path": str(recording_configuration_path),
@@ -702,24 +730,18 @@ def prepare_multi_recording_batch_tool(
             jobs: list[tuple[str, str]] = resolve_multi_recording_jobs(recording_ids=recording_ids)
 
             tracker = ProcessingTracker(file_path=tracker_path)
-            job_ids = tracker.initialize_jobs(jobs=jobs)
+            identifiers = _resolve_job_identifiers(tracker=tracker, jobs=jobs)
             total_jobs += len(jobs)
 
-            discover_entry = {
-                "job_id": job_ids[0],
-                "name": MultiRecordingJobNames.DISCOVER.value,
-                "specifier": "",
-                "status": "scheduled",
-            }
+            discover_entry = _manifest_entry(
+                identifiers=identifiers, job_name=MultiRecordingJobNames.DISCOVER, specifier=""
+            )
 
             extract_entries = [
-                {
-                    "job_id": job_ids[1 + index],
-                    "name": MultiRecordingJobNames.EXTRACT.value,
-                    "specifier": recording_ids[index],
-                    "status": "scheduled",
-                }
-                for index in range(len(recording_ids))
+                _manifest_entry(
+                    identifiers=identifiers, job_name=MultiRecordingJobNames.EXTRACT, specifier=recording_id
+                )
+                for recording_id in recording_ids
             ]
 
             datasets_manifest[dataset_key] = {
