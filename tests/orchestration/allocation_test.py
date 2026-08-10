@@ -26,7 +26,9 @@ from cindra.orchestration.allocation import (
     _COMBINATION_RESOURCES,
     _BINARIZATION_RESOURCES,
     _REGISTRATION_RESOURCES,
-    _MAXIMUM_PARALLEL_IO_JOBS,
+    _BINARIZATION_CONCURRENCY_LIMIT,
+    _PROCESSING_CONCURRENCY_RESERVATION,
+    _REGISTRATION_CONCURRENCY_RESERVATION,
     resolve_core_budget,
     resolve_class_allocation,
     resolve_memory_budget_mb,
@@ -142,14 +144,20 @@ class TestResourceClasses:
     """Tests the resource classes that size a batch of jobs and the job name map that selects them."""
 
     @pytest.mark.parametrize(
-        ("resource_class", "name", "workers_per_job", "fixed_parallel_jobs"),
+        ("resource_class", "name", "workers_per_job", "concurrency_limit", "concurrency_reservation"),
         [
-            (_BINARIZATION_RESOURCES, "binarization", BINARIZATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS),
-            (_REGISTRATION_RESOURCES, "registration", REGISTRATION_WORKERS, None),
-            (_PROCESSING_RESOURCES, "processing", PROCESSING_WORKERS, None),
-            (_COMBINATION_RESOURCES, "combination", COMBINATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS),
-            (_DISCOVERY_RESOURCES, "discovery", DISCOVERY_WORKERS, None),
-            (_EXTRACTION_RESOURCES, "extraction", EXTRACTION_WORKERS, None),
+            (_BINARIZATION_RESOURCES, "binarization", BINARIZATION_WORKERS, _BINARIZATION_CONCURRENCY_LIMIT, None),
+            (
+                _REGISTRATION_RESOURCES,
+                "registration",
+                REGISTRATION_WORKERS,
+                None,
+                _REGISTRATION_CONCURRENCY_RESERVATION,
+            ),
+            (_PROCESSING_RESOURCES, "processing", PROCESSING_WORKERS, None, _PROCESSING_CONCURRENCY_RESERVATION),
+            (_COMBINATION_RESOURCES, "combination", COMBINATION_WORKERS, None, None),
+            (_DISCOVERY_RESOURCES, "discovery", DISCOVERY_WORKERS, None, None),
+            (_EXTRACTION_RESOURCES, "extraction", EXTRACTION_WORKERS, None, None),
         ],
     )
     def test_class_fields_carry_the_measured_stage_budget(
@@ -157,12 +165,34 @@ class TestResourceClasses:
         resource_class: ResourceClass,
         name: str,
         workers_per_job: int,
-        fixed_parallel_jobs: int | None,
+        concurrency_limit: int | None,
+        concurrency_reservation: int | None,
     ) -> None:
-        """Verifies that every exported resource class declares its measured worker, concurrency, and memory budget."""
+        """Verifies that every resource class declares its measured worker count, its ceiling, and its reservation."""
         assert resource_class.name == name
         assert resource_class.workers_per_job == workers_per_job
-        assert resource_class.fixed_parallel_jobs == fixed_parallel_jobs
+        assert resource_class.concurrency_limit == concurrency_limit
+        assert resource_class.concurrency_reservation == concurrency_reservation
+
+    def test_only_the_conversion_stage_carries_a_hard_ceiling(self) -> None:
+        """Verifies that the disk-bound conversion stage is the only class spare capacity cannot widen."""
+        limited = {
+            resource_class.name
+            for resource_class in RESOURCE_CLASS_BY_JOB_NAME.values()
+            if resource_class.concurrency_limit is not None
+        }
+
+        assert limited == {"binarization"}
+
+    def test_only_the_compute_stages_carry_a_reservation(self) -> None:
+        """Verifies that the two stages competing for the scarcest cores are the ones holding capacity back."""
+        reserved = {
+            resource_class.name
+            for resource_class in RESOURCE_CLASS_BY_JOB_NAME.values()
+            if resource_class.concurrency_reservation is not None
+        }
+
+        assert reserved == {"registration", "processing"}
 
     @pytest.mark.parametrize(
         ("job_name", "expected_class"),
@@ -199,11 +229,10 @@ class TestFixedCapacityAllocation:
     @pytest.mark.parametrize(
         ("resource_class", "job_count", "expected"),
         [
-            (_BINARIZATION_RESOURCES, 10, (BINARIZATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS)),
+            (_BINARIZATION_RESOURCES, 10, (BINARIZATION_WORKERS, _BINARIZATION_CONCURRENCY_LIMIT)),
             (_BINARIZATION_RESOURCES, 2, (BINARIZATION_WORKERS, 2)),
             (_BINARIZATION_RESOURCES, 0, (BINARIZATION_WORKERS, 1)),
-            (_COMBINATION_RESOURCES, 7, (COMBINATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS)),
-            (_COMBINATION_RESOURCES, 1, (COMBINATION_WORKERS, 1)),
+            (_BINARIZATION_RESOURCES, 3, (BINARIZATION_WORKERS, 3)),
         ],
     )
     def test_fixed_cap_class_bounds_its_concurrency_by_the_job_count(
@@ -236,7 +265,7 @@ class TestFixedCapacityAllocation:
             max_parallel_jobs=max_parallel_jobs,
         )
 
-        assert allocation == (BINARIZATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS)
+        assert allocation == (BINARIZATION_WORKERS, _BINARIZATION_CONCURRENCY_LIMIT)
 
 
 class TestDerivedCapacityAllocation:

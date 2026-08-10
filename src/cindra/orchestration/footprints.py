@@ -169,6 +169,29 @@ Notes:
 """
 
 
+_STAGE_FALLBACK_MEGABYTES: dict[str, int] = {
+    SingleRecordingJobNames.BINARIZE: 4096,
+    SingleRecordingJobNames.REGISTER: 14848,
+    SingleRecordingJobNames.PROCESS: 15360,
+    SingleRecordingJobNames.COMBINE: 8192,
+    MultiRecordingJobNames.DISCOVER: 16384,
+    MultiRecordingJobNames.EXTRACT: 8192,
+}
+"""The memory each stage is charged when its own geometry cannot be read.
+
+Notes:
+    An estimate that cannot be derived falls back to a conservative allowance rather than to a floor, because
+    understating is the asymmetric failure. A job admitted against a floor overcommits its host and is killed, while a
+    job admitted against an allowance merely waits longer than it had to.
+
+    The registration, processing, combination, and discovery figures are the widest footprints those stages have been
+    observed to reach. The processing figure is the measured nine-plane peak of 10.5 gigabytes rounded up to cover the
+    taller planes of the same recording. The binarization and extraction figures are allowances rather than observed
+    peaks, since neither stage has been measured at its widest, and both sit above every projection their own models
+    produce for the recordings this corpus holds.
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class PlaneGeometry:
     """Describes the shape of one virtual imaging plane as its binarized output reports it."""
@@ -262,7 +285,7 @@ def estimate_single_recording_job_memory_mb(
     """
     geometry = resolve_recording_geometry(output_root=output_root, data_path=data_path)
     if not geometry.resolved:
-        return _apply_tolerance(memory_mb=WORKER_MEMORY_MB), False
+        return _resolve_stage_fallback(job_name=job_name), False
 
     if job_name == SingleRecordingJobNames.BINARIZE:
         return _apply_tolerance(
@@ -273,7 +296,7 @@ def estimate_single_recording_job_memory_mb(
         return _apply_tolerance(memory_mb=_estimate_combination_mb(geometry=geometry)), True
 
     if not geometry.planes:
-        return _apply_tolerance(memory_mb=WORKER_MEMORY_MB), False
+        return _resolve_stage_fallback(job_name=job_name), False
 
     estimator = _estimate_registration_mb if job_name == SingleRecordingJobNames.REGISTER else _estimate_processing_mb
     estimates = [estimator(plane=plane, configuration=configuration) for plane in geometry.planes]
@@ -309,7 +332,7 @@ def estimate_multi_recording_job_memory_mb(
     geometries = [resolve_recording_geometry(output_root=root) for root in recording_roots]
     resolved = [geometry for geometry in geometries if geometry.combined_pixels > 0]
     if not resolved:
-        return _apply_tolerance(memory_mb=WORKER_MEMORY_MB + _TRACKING_CLUSTERING_MEMORY_MB), False
+        return _resolve_stage_fallback(job_name=job_name), False
 
     if job_name == MultiRecordingJobNames.DISCOVER:
         return _apply_tolerance(memory_mb=_estimate_discovery_mb(geometries=resolved)), True
@@ -658,3 +681,15 @@ def _apply_tolerance(memory_mb: int) -> int:
     """
     reportable = int(memory_mb * MEMORY_ESTIMATE_TOLERANCE) + 1
     return math.ceil(reportable / _MEGABYTES_PER_GIGABYTE) * _MEGABYTES_PER_GIGABYTE
+
+
+def _resolve_stage_fallback(job_name: str) -> int:
+    """Resolves the conservative allowance one stage is charged when its own geometry cannot be read.
+
+    Args:
+        job_name: The name of the pipeline stage the job runs.
+
+    Returns:
+        The reportable allowance in megabytes.
+    """
+    return _apply_tolerance(memory_mb=WORKER_MEMORY_MB + _STAGE_FALLBACK_MEGABYTES[str(job_name)])

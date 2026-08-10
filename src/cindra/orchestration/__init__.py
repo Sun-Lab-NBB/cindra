@@ -24,6 +24,8 @@ from .worker import (
     prime_recording,
     execute_multi_recording_job,
     execute_single_recording_job,
+    load_multi_recording_configuration,
+    load_single_recording_configuration,
 )
 from ..layout import (
     PLANE_SPECIFIER_PREFIX,
@@ -106,6 +108,8 @@ __all__ = [
     "execute_multi_recording_job",
     "execute_single_recording_job",
     "get_execution_state",
+    "load_multi_recording_configuration",
+    "load_single_recording_configuration",
     "order_phases_by_execution",
     "parse_plane_specifier",
     "prime_dataset",

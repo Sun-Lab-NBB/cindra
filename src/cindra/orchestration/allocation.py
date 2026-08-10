@@ -56,8 +56,32 @@ ALL_CORES_REQUEST: int = -1
 _RESERVED_CORES: int = 2
 """The number of CPU cores held back for host-system operations when a core budget auto-resolves."""
 
-_MAXIMUM_PARALLEL_IO_JOBS: int = 4
-"""The maximum number of concurrent I/O-bound jobs (the binarization and combination resource classes)."""
+_BINARIZATION_CONCURRENCY_LIMIT: int = 4
+"""The binarization jobs that may run at once regardless of the cores the budget could still supply.
+
+Notes:
+    The stage decodes a compressed image set into a binary of comparable size, so its rate is the storage's rate
+    rather than the host's core count. Past a few jobs the readers compete for the same device and the array delivers
+    less in total than it does to fewer of them, so a wider batch finishes the same work more slowly while holding
+    cores other work could use. Spare cores never lift this ceiling, because a job held by it waits on something
+    spare cores do not supply.
+"""
+
+_REGISTRATION_CONCURRENCY_RESERVATION: int = 4
+"""The registration jobs that run at once while other work can still use the capacity the stage gives up.
+
+Notes:
+    Registration gates the processing job that waits on it, so holding a share back keeps the stages that wait on no
+    other job running while a recording's planes are still being registered.
+"""
+
+_PROCESSING_CONCURRENCY_RESERVATION: int = 5
+"""The processing jobs that run at once while other work can still use the capacity the stage gives up.
+
+Notes:
+    Processing cores are the batch's scarcest resource once the single-recording chain opens, so holding a share back
+    keeps the conversion jobs at the root of that chain running rather than starving behind a full budget.
+"""
 
 _BYTES_PER_MEGABYTE: int = 1024**2
 """The number of bytes in one megabyte, used to convert the host memory counter into a memory budget."""
@@ -87,16 +111,30 @@ class ResourceClass:
     workers_per_job: int
     """The number of CPU cores each job of this class holds, taken from the measured stage defaults, except for the
     combination class, whose single core is defined by COMBINATION_WORKERS."""
-    fixed_parallel_jobs: int | None
-    """The machine-independent concurrency cap of this class, or None when the cap is derived from the CPU budget and,
-    for memory-bound classes, from the available system memory. A per-class cap bounds one class in isolation, so the
-    dispatcher additionally holds the sum of the cores committed by every class inside the session CPU budget."""
+    concurrency_limit: int | None
+    """The jobs of this class that may run at once regardless of the capacity the budgets could still supply, or None
+    when the class is bounded by the budgets alone.
+
+    Notes:
+        This is a hard ceiling. It exists for a class whose own throughput stops climbing before its cores run out, so
+        spare capacity never lifts it.
+    """
+    concurrency_reservation: int | None
+    """The jobs of this class that run at once while other work can still use the capacity the class gives up, or None
+    when the class competes at its full derived width.
+
+    Notes:
+        This is a soft counterpart to the ceiling. It exists to leave room for other jobs rather than because the
+        class stops gaining from concurrency, so the dispatcher releases it over whatever capacity remains once every
+        other runnable job has been offered that room.
+    """
 
 
 _BINARIZATION_RESOURCES: ResourceClass = ResourceClass(
     name="binarization",
     workers_per_job=BINARIZATION_WORKERS,
-    fixed_parallel_jobs=_MAXIMUM_PARALLEL_IO_JOBS,
+    concurrency_limit=_BINARIZATION_CONCURRENCY_LIMIT,
+    concurrency_reservation=None,
 )
 """The resource class of the binarization jobs. The allocated cores become the TIFF image decode threads, and the
 stage streams frames to disk instead of holding them, so the concurrency cap is the fixed I/O limit."""
@@ -104,7 +142,8 @@ stage streams frames to disk instead of holding them, so the concurrency cap is 
 _REGISTRATION_RESOURCES: ResourceClass = ResourceClass(
     name="registration",
     workers_per_job=REGISTRATION_WORKERS,
-    fixed_parallel_jobs=None,
+    concurrency_limit=None,
+    concurrency_reservation=_REGISTRATION_CONCURRENCY_RESERVATION,
 )
 """The resource class of the plane-registration jobs. Registration reads the plane binary through a memory map, so its
 resident growth is evictable page cache and its concurrency is bounded by the shared CPU budget alone."""
@@ -112,7 +151,8 @@ resident growth is evictable page cache and its concurrency is bounded by the sh
 _PROCESSING_RESOURCES: ResourceClass = ResourceClass(
     name="processing",
     workers_per_job=PROCESSING_WORKERS,
-    fixed_parallel_jobs=None,
+    concurrency_limit=None,
+    concurrency_reservation=_PROCESSING_CONCURRENCY_RESERVATION,
 )
 """The resource class of the plane-processing jobs. Detection materializes the binned movie in anonymous memory, so
 this class bounds its concurrency by both the shared CPU budget and the available system memory."""
@@ -120,7 +160,8 @@ this class bounds its concurrency by both the shared CPU budget and the availabl
 _COMBINATION_RESOURCES: ResourceClass = ResourceClass(
     name="combination",
     workers_per_job=COMBINATION_WORKERS,
-    fixed_parallel_jobs=_MAXIMUM_PARALLEL_IO_JOBS,
+    concurrency_limit=None,
+    concurrency_reservation=None,
 )
 """The resource class of the combination jobs. Combination merges per-plane result files with serial input and output,
 so each job holds one core and the concurrency cap is the fixed I/O limit."""
@@ -128,7 +169,8 @@ so each job holds one core and the concurrency cap is the fixed I/O limit."""
 _DISCOVERY_RESOURCES: ResourceClass = ResourceClass(
     name="discovery",
     workers_per_job=DISCOVERY_WORKERS,
-    fixed_parallel_jobs=None,
+    concurrency_limit=None,
+    concurrency_reservation=None,
 )
 """The resource class of the multi-recording discovery jobs. Discovery registers every recording of one animal against
 the others, so each job holds the stage's saturating allocation and its concurrency is bounded by the shared CPU budget
@@ -137,7 +179,8 @@ alone."""
 _EXTRACTION_RESOURCES: ResourceClass = ResourceClass(
     name="extraction",
     workers_per_job=EXTRACTION_WORKERS,
-    fixed_parallel_jobs=None,
+    concurrency_limit=None,
+    concurrency_reservation=None,
 )
 """The resource class of the multi-recording extraction jobs. Extraction reads each frame batch serially before the
 kernel consumes it, so the stage plateaus at its measured worker count and the remaining budget is better spent on
@@ -227,10 +270,10 @@ def resolve_class_allocation(
     """Resolves the per-job worker count and the concurrency cap of one resource class.
 
     Notes:
-        A class with a fixed concurrency cap describes I/O-bound work whose throughput does not follow the core count,
-        so it keeps its measured allocation and ignores both overrides. Every other class takes its measured worker
-        count, bounds its concurrency by the CPU budget, and bounds it further by the available system memory when the
-        class declares a per-job memory footprint.
+        A class carrying a hard concurrency ceiling describes work whose throughput stops climbing before its cores
+        run out, so it keeps its measured allocation and ignores both overrides. Every other class takes its measured
+        worker count and bounds its concurrency by the CPU budget. Memory bounds admission rather than concurrency,
+        because the memory one job holds follows the recording it processes rather than the class it belongs to.
 
         Every cap resolved here bounds one class in isolation, because a class cannot know which other classes will be
         dispatching alongside it. The dispatcher therefore holds the sum of the cores committed by every class inside
@@ -247,9 +290,8 @@ def resolve_class_allocation(
     Returns:
         A (workers_per_job, max_parallel_jobs) tuple for this resource class.
     """
-    if resource_class.fixed_parallel_jobs is not None:
-        workers = resource_class.workers_per_job
-        return workers, min(resource_class.fixed_parallel_jobs, max(1, job_count))
+    if resource_class.concurrency_limit is not None:
+        return resource_class.workers_per_job, min(resource_class.concurrency_limit, max(1, job_count))
 
     if workers_per_job is None:
         workers = resource_class.workers_per_job

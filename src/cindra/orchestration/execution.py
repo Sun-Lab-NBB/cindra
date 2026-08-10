@@ -143,6 +143,9 @@ class JobExecutionState:
     """The resolved maximum number of concurrent jobs for each resource class name."""
     class_workers: dict[str, int] = field(default_factory=dict)
     """The resolved number of CPU cores allocated to each job of each resource class name."""
+    class_reservations: dict[str, int] = field(default_factory=dict)
+    """The jobs of each resource class that run before the dispatcher releases that class's reservation, keyed by
+    class name. A class absent from this map competes at its full derived width in both passes."""
     cpu_budget: int = 1
     """The total number of CPU cores this session may commit across every resource class at once."""
     memory_budget_mb: int = 0
@@ -272,6 +275,11 @@ def start_execution_session(
         active_futures={class_name: {} for class_name in classes_by_name},
         class_capacities=class_capacities,
         class_workers=class_workers,
+        class_reservations={
+            class_name: resource_class.concurrency_reservation
+            for class_name, resource_class in classes_by_name.items()
+            if resource_class.concurrency_reservation is not None
+        },
         cpu_budget=budget,
         memory_budget_mb=memory_budget,
         lock=Lock(),
@@ -289,7 +297,9 @@ def start_execution_session(
         "cpu_budget": budget,
         "memory_budget_mb": memory_budget,
         "resource_classes": summarize_class_allocation(
-            class_workers=class_workers, class_capacities=class_capacities, class_job_counts=class_job_counts
+            class_workers=class_workers,
+            class_capacities=class_capacities,
+            class_job_counts=class_job_counts,
         ),
     }
 
@@ -486,9 +496,15 @@ def _dispatch_admitted_jobs(state: JobExecutionState, pool: Executor) -> bool:
     """Submits admitted jobs to the worker pool up to each resource class cap and the session CPU budget.
 
     Notes:
-        A per-class concurrency cap bounds one class in isolation, and every class dispatches during the same cycle, so
-        the caps alone would let the classes oversubscribe the machine between them. This function therefore also holds
-        the sum of the cores committed by every running job inside the session CPU budget.
+        Dispatch runs in two passes. The first offers every class the capacity its reservation leaves free, so a class
+        holding a reservation cannot take the room the stages that wait on no other job need. The second releases
+        every reservation over whatever capacity remains, so a reserved class runs at its full derived width rather
+        than idling a host whose other queues have drained. Holding a wide compute stage to a reservation while cores
+        sit unused and its own queue is deep would waste the very capacity the reservation protects.
+
+        A per-class cap bounds one class in isolation, and every class dispatches during the same cycle, so the caps
+        alone would let the classes oversubscribe the machine between them. Both passes therefore hold the sum of the
+        cores and the memory committed by every running job inside the session budgets.
 
         A session whose classes all hold nothing dispatches one job regardless of the budget, so a job whose worker
         count exceeds the whole budget still runs instead of stalling the session forever.
@@ -509,9 +525,36 @@ def _dispatch_admitted_jobs(state: JobExecutionState, pool: Executor) -> bool:
     """
     dispatched = False
 
+    # The first pass honors every reservation, and the second releases them over the capacity the first left unused.
+    for release_reservations in (False, True):
+        dispatched |= _dispatch_pass(state=state, pool=pool, release_reservations=release_reservations)
+
+    return dispatched
+
+
+def _dispatch_pass(state: JobExecutionState, pool: Executor, *, release_reservations: bool) -> bool:
+    """Submits admitted jobs during one pass of the dispatcher.
+
+    Args:
+        state: The current job execution state, accessed under its lock.
+        pool: The worker pool the session dispatches its jobs into.
+        release_reservations: Determines whether a class holding a reservation dispatches at its full derived width
+            rather than at the width its reservation leaves free.
+
+    Returns:
+        True if at least one job was submitted during this pass, False otherwise.
+
+    Raises:
+        BrokenProcessPool: If a worker process died outside its job's control, leaving the pool unable to accept work.
+    """
+    dispatched = False
+
     for class_name, pending_queue in state.pending_queues.items():
         active_futures = state.active_futures[class_name]
         capacity = state.class_capacities[class_name]
+        reservation = state.class_reservations.get(class_name)
+        if not release_reservations and reservation is not None:
+            capacity = min(capacity, reservation)
         workers = state.class_workers[class_name]
         while len(active_futures) < capacity and pending_queue:
             committed = _committed_cores(state=state)

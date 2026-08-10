@@ -29,6 +29,7 @@ from cindra.orchestration.footprints import (
     _apply_tolerance,
     _estimate_discovery_mb,
     _estimate_processing_mb,
+    _resolve_stage_fallback,
     _estimate_registration_mb,
     resolve_recording_geometry,
     _resolve_binned_frame_count,
@@ -177,8 +178,8 @@ class TestDiscoveryModel:
 class TestSingleRecordingEstimates:
     """Tests the single-recording entry point."""
 
-    def test_absent_recording_reports_the_worker_floor(self, tmp_path: Path) -> None:
-        """Verifies that a recording carrying no output reports the baseline and clears the modeled flag."""
+    def test_absent_recording_reports_the_conservative_stage_allowance(self, tmp_path: Path) -> None:
+        """Verifies that a recording carrying no output is charged its stage's allowance, not a floor."""
         memory_mb, modeled = estimate_single_recording_job_memory_mb(
             job_name=SingleRecordingJobNames.PROCESS,
             specifier="plane_0",
@@ -187,7 +188,8 @@ class TestSingleRecordingEstimates:
         )
 
         assert modeled is False
-        assert memory_mb == _apply_tolerance(memory_mb=WORKER_MEMORY_MB)
+        assert memory_mb == _resolve_stage_fallback(job_name=SingleRecordingJobNames.PROCESS)
+        assert memory_mb > _apply_tolerance(memory_mb=WORKER_MEMORY_MB)
 
     @pytest.mark.parametrize(
         "job_name",
@@ -351,8 +353,8 @@ class TestRecordingGeometry:
 class TestGeometryEdges:
     """Tests the geometry paths a partially written recording exercises."""
 
-    def test_recording_without_planes_reports_the_floor_for_a_per_plane_job(self, tmp_path: Path) -> None:
-        """Verifies that a recording carrying combined output but no plane runtime reports the worker floor."""
+    def test_recording_without_planes_reports_the_conservative_stage_allowance(self, tmp_path: Path) -> None:
+        """Verifies that a recording carrying no plane runtime is charged its stage's allowance."""
         _write_combined(output_root=tmp_path)
 
         memory_mb, modeled = estimate_single_recording_job_memory_mb(
@@ -363,7 +365,7 @@ class TestGeometryEdges:
         )
 
         assert modeled is False
-        assert memory_mb == _apply_tolerance(memory_mb=WORKER_MEMORY_MB)
+        assert memory_mb == _resolve_stage_fallback(job_name=SingleRecordingJobNames.REGISTER)
 
     def test_unreadable_plane_runtime_is_skipped(self, tmp_path: Path) -> None:
         """Verifies that a plane whose runtime data cannot be read is left out of the geometry."""

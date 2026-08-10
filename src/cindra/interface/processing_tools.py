@@ -73,6 +73,10 @@ from ..orchestration import (
     validate_job_prerequisites,
     resolve_multi_recording_jobs,
     resolve_single_recording_jobs,
+    load_multi_recording_configuration,
+    load_single_recording_configuration,
+    estimate_multi_recording_job_memory_mb,
+    estimate_single_recording_job_memory_mb,
 )
 
 if TYPE_CHECKING:
@@ -118,6 +122,44 @@ def _manifest_entry(identifiers: dict[tuple[str, str], str], job_name: str, spec
         "specifier": specifier,
         "status": "scheduled",
     }
+
+
+def _estimate_pending_job_memory(configuration_path: Path, job_name: str, specifier: str, *, single: bool) -> int:
+    """Estimates the memory one queued job holds, from the recording or dataset it will process.
+
+    Notes:
+        A job whose inputs cannot be read yet reports zero, which leaves it admitted on the core budget alone rather
+        than blocking the session behind a figure the estimator could not derive.
+
+    Args:
+        configuration_path: The path to the job's pipeline configuration file.
+        job_name: The name of the pipeline stage the job runs.
+        specifier: The job's tracker specifier.
+        single: Determines whether the job belongs to the single-recording or the multi-recording pipeline.
+
+    Returns:
+        The memory the job holds in megabytes, or zero when its inputs could not be read.
+    """
+    if single:
+        configuration, output_path = load_single_recording_configuration(configuration_path=configuration_path)
+        memory_mb, _ = estimate_single_recording_job_memory_mb(
+            job_name=SingleRecordingJobNames(job_name),
+            specifier=specifier,
+            output_root=output_path,
+            configuration=configuration,
+            data_path=configuration.file_io.data_path,
+        )
+        return memory_mb
+
+    dataset_configuration = load_multi_recording_configuration(configuration_path=configuration_path)
+    memory_mb, _ = estimate_multi_recording_job_memory_mb(
+        job_name=MultiRecordingJobNames(job_name),
+        specifier=specifier,
+        recording_roots=dataset_configuration.recording_io.recording_directories,
+        dataset_name=dataset_configuration.recording_io.dataset_name,
+        configuration=dataset_configuration,
+    )
+    return memory_mb
 
 
 @mcp.tool()
@@ -1229,13 +1271,20 @@ def execute_processing_jobs_tool(
             invalid_jobs.append({"job_id": job_id, "reason": f"Unrecognized pipeline phase: {job_info.job_name}"})
             continue
 
+        single_recording = pipeline_type == "single-recording"
         candidate_jobs.append(
             PendingJob(
                 configuration_path=configuration_file,
                 tracker_path=tracker_file,
                 job_id=job_id,
-                single_recording=pipeline_type == "single-recording",
+                single_recording=single_recording,
                 resource_class=resource_class,
+                memory_megabytes=_estimate_pending_job_memory(
+                    configuration_path=configuration_file,
+                    job_name=job_info.job_name,
+                    specifier=job_info.specifier,
+                    single=single_recording,
+                ),
             )
         )
         submitted_by_tracker.setdefault(str(tracker_file), set()).add(job_id)
