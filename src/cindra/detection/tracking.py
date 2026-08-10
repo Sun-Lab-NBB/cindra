@@ -10,6 +10,7 @@ from scipy.cluster import hierarchy
 from scipy.spatial.distance import pdist, squareform
 from ataraxis_base_utilities import LogLevel, console
 
+from ..layout import TRACKING_TEMPLATE_MASKS_FILENAME
 from ..dataclasses import ROIMask
 from .roi_statistics import estimate_diameter_from_rois
 
@@ -52,7 +53,11 @@ def track_rois_across_recordings(contexts: list[MultiRecordingRuntimeContext]) -
     # run, making re-tracking both unnecessary and incorrect (the cluster_id filter would find no unclustered ROIs).
     first_output = contexts[0].runtime.output_path
     repeat_registration = contexts[0].configuration.diffeomorphic_registration.repeat_registration
-    if not repeat_registration and first_output is not None and (first_output / "tracking_template_masks.npz").exists():
+    if (
+        not repeat_registration
+        and first_output is not None
+        and (first_output / TRACKING_TEMPLATE_MASKS_FILENAME).exists()
+    ):
         console.echo(
             message="Multi-recording tracking: skipped. Template masks already exist and re-registration is disabled.",
             level=LogLevel.INFO,

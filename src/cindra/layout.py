@@ -123,6 +123,67 @@ class RecordingArrays(StrEnum):
     """The pixel masks and weights of every ROI."""
     ROI_STATISTICS = "roi_statistics.npz"
     """The shape statistics of every ROI."""
+    CORRECTED_STRUCTURAL_MEAN_IMAGE = "corrected_structural_mean_image.npy"
+    """The structural channel mean image with the functional channel bleed-through removed."""
+
+
+class DetectionImages(StrEnum):
+    """Defines the names of the summary images the detection stage writes into its own subdirectory."""
+
+    MEAN_IMAGE = "mean_image.npy"
+    """The mean of every registered frame."""
+    ENHANCED_MEAN_IMAGE = "enhanced_mean_image.npy"
+    """The mean image filtered at the detected ROI scale."""
+    MAXIMUM_PROJECTION = "maximum_projection.npy"
+    """The maximum intensity of every pixel across the registered frames."""
+    CORRELATION_MAP = "correlation_map.npy"
+    """The local temporal correlation of every pixel with its neighbors."""
+
+
+class RegistrationArrays(StrEnum):
+    """Defines the names of the arrays the registration stage writes into its own subdirectory."""
+
+    BAD_FRAMES = "bad_frames.npy"
+    """The mask marking the frames excluded from registration."""
+    REFERENCE_IMAGE = "reference_image.npy"
+    """The reference image every frame is registered against, whose presence marks a plane as registered."""
+    RIGID_Y_OFFSETS = "rigid_y_offsets.npy"
+    """The vertical rigid shift applied to every frame."""
+    RIGID_X_OFFSETS = "rigid_x_offsets.npy"
+    """The horizontal rigid shift applied to every frame."""
+    RIGID_CORRELATIONS = "rigid_correlations.npy"
+    """The phase correlation peak of every frame's rigid alignment."""
+    NONRIGID_Y_OFFSETS = "nonrigid_y_offsets.npy"
+    """The vertical shift applied to every block of every frame."""
+    NONRIGID_X_OFFSETS = "nonrigid_x_offsets.npy"
+    """The horizontal shift applied to every block of every frame."""
+    NONRIGID_CORRELATIONS = "nonrigid_correlations.npy"
+    """The phase correlation peak of every block's nonrigid alignment."""
+    PRINCIPAL_COMPONENT_EXTREME_IMAGES = "principal_component_extreme_images.npy"
+    """The low and high projection images of every retained principal component."""
+    PRINCIPAL_COMPONENT_PROJECTIONS = "principal_component_projections.npy"
+    """The projection of every sampled frame onto every retained principal component."""
+    PRINCIPAL_COMPONENT_SHIFT_METRICS = "principal_component_shift_metrics.npy"
+    """The residual shift measured between each principal component's extreme images."""
+
+
+class MultiRecordingArrays(StrEnum):
+    """Defines the names of the arrays the multi-recording registration stage writes into its own subdirectory."""
+
+    DEFORM_FIELD_Y = "deform_field_y.npy"
+    """The vertical deformation carrying this recording into the shared visual space."""
+    DEFORM_FIELD_X = "deform_field_x.npy"
+    """The horizontal deformation carrying this recording into the shared visual space."""
+    TRANSFORMED_MEAN_IMAGE = "transformed_mean_image.npy"
+    """The recording's mean image deformed into the shared visual space."""
+    TRANSFORMED_ENHANCED_MEAN_IMAGE = "transformed_enhanced_mean_image.npy"
+    """The recording's enhanced mean image deformed into the shared visual space."""
+    TRANSFORMED_MAXIMUM_PROJECTION = "transformed_maximum_projection.npy"
+    """The recording's maximum projection deformed into the shared visual space."""
+
+
+type PipelineArray = RecordingArrays | DetectionImages | RegistrationArrays | MultiRecordingArrays
+"""Any array name the pipelines write, which the array path resolver accepts from any of the four families."""
 
 
 def resolve_output_path(output_root: Path) -> Path:
@@ -167,23 +228,49 @@ def resolve_dataset_path(output_root: Path, dataset_name: str) -> Path:
     return resolve_output_path(output_root=output_root).joinpath(MULTI_RECORDING_DIRECTORY_NAME, dataset_name.lower())
 
 
-def resolve_array_path(root_path: Path, array: RecordingArrays, *, second_channel: bool = False) -> Path:
-    """Resolves the path to one result array under a recording, plane, or dataset directory.
+def resolve_channel_2_name(name: str) -> str:
+    """Resolves the name of the second channel's copy of a result file.
+
+    Args:
+        name: The name of the functional channel's copy of the file.
+
+    Returns:
+        The name of the second channel's copy, carrying the channel suffix before the extension.
+    """
+    stem, _, extension = name.rpartition(".")
+    return f"{stem}{CHANNEL_2_ARRAY_SUFFIX}.{extension}"
+
+
+def resolve_array_name(array: PipelineArray, *, second_channel: bool = False) -> str:
+    """Resolves the filename one pipeline array is written under.
+
+    Args:
+        array: The array to resolve the filename of, named by any of the four pipeline array families.
+        second_channel: Determines whether the second channel's copy of the array is named instead of the functional
+            channel's copy.
+
+    Returns:
+        The filename the array is written under.
+    """
+    if not second_channel:
+        return array.value
+    return resolve_channel_2_name(name=array.value)
+
+
+def resolve_array_path(root_path: Path, array: PipelineArray, *, second_channel: bool = False) -> Path:
+    """Resolves the path to one pipeline array under a recording, plane, or dataset directory.
 
     Args:
         root_path: The directory the array was written into, which is a recording output directory for the combined
             results, a plane directory for one plane's results, or a dataset directory for the tracked results.
-        array: The result array to resolve the path of.
+        array: The array to resolve the path of, named by any of the four pipeline array families.
         second_channel: Determines whether the second channel's copy of the array is resolved instead of the
             functional channel's copy.
 
     Returns:
         The path to the requested result array.
     """
-    if not second_channel:
-        return root_path.joinpath(array.value)
-    stem, _, extension = array.value.rpartition(".")
-    return root_path.joinpath(f"{stem}{CHANNEL_2_ARRAY_SUFFIX}.{extension}")
+    return root_path.joinpath(resolve_array_name(array=array, second_channel=second_channel))
 
 
 def resolve_registration_marker_name(binary_name: str) -> str:

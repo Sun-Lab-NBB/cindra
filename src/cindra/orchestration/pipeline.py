@@ -17,6 +17,7 @@ from .jobs import (
 )
 from .openmp import verify_openmp_runtime
 from ..layout import (
+    OUTPUT_DIRECTORY_NAME,
     PLANE_SPECIFIER_PREFIX,
     MULTI_RECORDING_TRACKER_FILENAME,
     SINGLE_RECORDING_TRACKER_FILENAME,
@@ -107,7 +108,7 @@ def run_single_recording_pipeline(
 
     # Derives the tracker path from the configuration. The tracker lives under the cindra/ subdirectory, consistent
     # with where batch tools create it and where get_recording_status_tool looks for it.
-    tracker_path: Path = output_path / "cindra" / SINGLE_RECORDING_TRACKER_FILENAME
+    tracker_path: Path = output_path / OUTPUT_DIRECTORY_NAME / SINGLE_RECORDING_TRACKER_FILENAME
 
     # The insertion order of this dictionary sequences the jobs a LOCAL-mode invocation runs, so the registration
     # entry must sit between the binarization and processing entries. Otherwise a run that requests no flags detects
@@ -656,7 +657,7 @@ def _execute_single_recording_job(
             # loaded automatically due to their memory footprint, so they must be loaded explicitly before
             # combining. Detection arrays provide background images. Extraction arrays provide ROI statistics
             # and fluorescence traces.
-            root_path = configuration.file_io.output_path / "cindra"
+            root_path = configuration.file_io.output_path / OUTPUT_DIRECTORY_NAME
             contexts = RuntimeContext.load(root_path=root_path, plane_index=-1)
             if not isinstance(contexts, list):  # pragma: no cover - load with plane_index=-1 always returns a list
                 contexts = [contexts]
