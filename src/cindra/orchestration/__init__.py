@@ -19,6 +19,7 @@ from .jobs import (
     resolve_single_recording_prerequisites,
 )
 from .openmp import OpenMpStatus, resolve_openmp_runtime
+from .worker import execute_multi_recording_job, execute_single_recording_job
 from ..layout import (
     PLANE_SPECIFIER_PREFIX,
     MULTI_RECORDING_TRACKER_FILENAME,
@@ -26,12 +27,7 @@ from ..layout import (
     parse_plane_specifier,
     resolve_plane_specifier,
 )
-from .pipeline import (
-    execute_multi_recording_job,
-    execute_single_recording_job,
-    run_multi_recording_pipeline,
-    run_single_recording_pipeline,
-)
+from .pipeline import run_multi_recording_pipeline, run_single_recording_pipeline
 from .discovery import (
     MultiRecordingJobs,
     SingleRecordingJobs,

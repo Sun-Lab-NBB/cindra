@@ -19,11 +19,8 @@ from cindra.io import (
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import RuntimeContext, SingleRecordingConfiguration
 from cindra.orchestration import SingleRecordingJobNames
-from cindra.orchestration.pipeline import (
-    execute_single_recording_job,
-    _execute_single_recording_job,
-    run_single_recording_pipeline,
-)
+from cindra.orchestration.worker import execute_single_recording_job, dispatch_single_recording_job
+from cindra.orchestration.pipeline import run_single_recording_pipeline
 from cindra.pipelines.single_recording import (
     process_plane,
     binarize_recording,
@@ -597,7 +594,7 @@ class TestAlignJobs:
 
 
 class TestExecuteSingleRecordingJob:
-    """Tests _execute_single_recording_job."""
+    """Tests dispatch_single_recording_job."""
 
     def test_unknown_job_fails_and_reraises(self, tmp_path: Path) -> None:
         """Verifies that an unrecognized job name marks the job failed and re-raises the ValueError."""
@@ -607,7 +604,7 @@ class TestExecuteSingleRecordingJob:
         configuration = _make_configuration(data_directory=None, output_directory=tmp_path / "output")
 
         with pytest.raises(ValueError, match="not recognized"):
-            _execute_single_recording_job(
+            dispatch_single_recording_job(
                 configuration=configuration,
                 job_name="unrecognized_job",  # type: ignore[arg-type]
                 specifier="",
@@ -626,7 +623,7 @@ class TestExecuteSingleRecordingJob:
         configuration = _make_configuration(data_directory=None, output_directory=None)
 
         with pytest.raises(ValueError, match="output_path must be configured"):
-            _execute_single_recording_job(
+            dispatch_single_recording_job(
                 configuration=configuration,
                 job_name=SingleRecordingJobNames.COMBINE,
                 specifier="",
@@ -645,7 +642,7 @@ class TestExecuteSingleRecordingJob:
         configuration = _make_configuration(data_directory=None, output_directory=tmp_path / "output")
 
         with pytest.raises(ValueError, match="but encountered 0"):
-            _execute_single_recording_job(
+            dispatch_single_recording_job(
                 configuration=configuration,
                 job_name=SingleRecordingJobNames.REGISTER,
                 specifier="plane_0",
