@@ -32,6 +32,12 @@ from .pipeline import (
     run_multi_recording_pipeline,
     run_single_recording_pipeline,
 )
+from .discovery import (
+    MultiRecordingJobs,
+    SingleRecordingJobs,
+    resolve_multi_recording_job_universe,
+    resolve_single_recording_job_universe,
+)
 from .execution import (
     PendingJob,
     JobExecutionState,
@@ -81,6 +87,7 @@ __all__ = [
     "WORKER_MEMORY_MB",
     "JobExecutionState",
     "MultiRecordingJobNames",
+    "MultiRecordingJobs",
     "OpenMpStatus",
     "PendingJob",
     "PipelinePhase",
@@ -89,6 +96,7 @@ __all__ = [
     "RecordingGeometry",
     "ResourceClass",
     "SingleRecordingJobNames",
+    "SingleRecordingJobs",
     "cancel_execution_session",
     "estimate_multi_recording_job_memory_mb",
     "estimate_single_recording_job_memory_mb",
@@ -98,6 +106,7 @@ __all__ = [
     "order_phases_by_execution",
     "parse_plane_specifier",
     "resolve_downstream_phases",
+    "resolve_multi_recording_job_universe",
     "resolve_multi_recording_jobs",
     "resolve_multi_recording_prerequisites",
     "resolve_openmp_runtime",
@@ -105,6 +114,7 @@ __all__ = [
     "resolve_plane_specifier",
     "resolve_recording_geometry",
     "resolve_session_load",
+    "resolve_single_recording_job_universe",
     "resolve_single_recording_jobs",
     "resolve_single_recording_prerequisites",
     "resolve_stage_workers",
