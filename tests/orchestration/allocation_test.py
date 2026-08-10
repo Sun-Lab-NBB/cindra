@@ -18,8 +18,8 @@ from cindra.orchestration import (
 )
 from cindra.orchestration.allocation import (
     _RESERVED_CORES,
+    COMBINATION_WORKERS,
     _BYTES_PER_GIGABYTE,
-    _COMBINATION_WORKERS,
     _DISCOVERY_RESOURCES,
     _EXTRACTION_RESOURCES,
     _PROCESSING_RESOURCES,
@@ -141,7 +141,7 @@ class TestResourceClasses:
             (_BINARIZATION_RESOURCES, "binarization", BINARIZATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS, 0.0),
             (_REGISTRATION_RESOURCES, "registration", REGISTRATION_WORKERS, None, 0.0),
             (_PROCESSING_RESOURCES, "processing", PROCESSING_WORKERS, None, _PROCESSING_MEMORY_GIGABYTES_PER_JOB),
-            (_COMBINATION_RESOURCES, "combination", _COMBINATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS, 0.0),
+            (_COMBINATION_RESOURCES, "combination", COMBINATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS, 0.0),
             (_DISCOVERY_RESOURCES, "discovery", DISCOVERY_WORKERS, None, 0.0),
             (_EXTRACTION_RESOURCES, "extraction", EXTRACTION_WORKERS, None, 0.0),
         ],
@@ -200,8 +200,8 @@ class TestFixedCapacityAllocation:
             (_BINARIZATION_RESOURCES, 10, (BINARIZATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS)),
             (_BINARIZATION_RESOURCES, 2, (BINARIZATION_WORKERS, 2)),
             (_BINARIZATION_RESOURCES, 0, (BINARIZATION_WORKERS, 1)),
-            (_COMBINATION_RESOURCES, 7, (_COMBINATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS)),
-            (_COMBINATION_RESOURCES, 1, (_COMBINATION_WORKERS, 1)),
+            (_COMBINATION_RESOURCES, 7, (COMBINATION_WORKERS, _MAXIMUM_PARALLEL_IO_JOBS)),
+            (_COMBINATION_RESOURCES, 1, (COMBINATION_WORKERS, 1)),
         ],
     )
     def test_fixed_cap_class_bounds_its_concurrency_by_the_job_count(

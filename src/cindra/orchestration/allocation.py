@@ -46,7 +46,7 @@ EXTRACTION_WORKERS: int = 16
 stage stops shortening. Every frame batch the extraction kernel consumes is read serially before the kernel runs, so
 the stage plateaus below the width it is given and further cores are spent waiting on batch reads."""
 
-_COMBINATION_WORKERS: int = 1
+COMBINATION_WORKERS: int = 1
 """The number of CPU cores one combination job holds. The combination stage merges the per-plane result files with
 serial input and output and takes no worker argument, so each of its jobs occupies exactly one core."""
 
@@ -88,7 +88,7 @@ class ResourceClass:
     """The name of the resource class, used as the key of the per-class queues and of the reported allocation."""
     workers_per_job: int
     """The number of CPU cores each job of this class holds, taken from the measured stage defaults, except for the
-    combination class, whose single core is defined by _COMBINATION_WORKERS."""
+    combination class, whose single core is defined by COMBINATION_WORKERS."""
     fixed_parallel_jobs: int | None
     """The machine-independent concurrency cap of this class, or None when the cap is derived from the CPU budget and,
     for memory-bound classes, from the available system memory. A per-class cap bounds one class in isolation, so the
@@ -127,7 +127,7 @@ this class bounds its concurrency by both the shared CPU budget and the availabl
 
 _COMBINATION_RESOURCES: ResourceClass = ResourceClass(
     name="combination",
-    workers_per_job=_COMBINATION_WORKERS,
+    workers_per_job=COMBINATION_WORKERS,
     fixed_parallel_jobs=_MAXIMUM_PARALLEL_IO_JOBS,
     memory_gigabytes_per_job=0.0,
 )
