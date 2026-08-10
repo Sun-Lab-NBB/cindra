@@ -91,7 +91,7 @@ def resolve_recording_planes(output_root: Path, data_path: Path | None = None) -
     Returns:
         The recording's plane inventory.
     """
-    acquisition = _read_acquisition_parameters(output_root=output_root, data_path=data_path)
+    acquisition = resolve_acquisition_parameters(output_root=output_root, data_path=data_path)
     if acquisition is None:
         return RecordingPlanes(output_root=output_root, plane_count=0)
 
@@ -198,8 +198,8 @@ def is_dataset_discovered(output_root: Path, dataset_name: str) -> bool:
     return (dataset_path / TRACKING_TEMPLATE_MASKS_FILENAME).exists()
 
 
-def _read_acquisition_parameters(output_root: Path, data_path: Path | None) -> AcquisitionParameters | None:
-    """Reads a recording's acquisition parameters from its output directory or its raw imaging directory.
+def resolve_acquisition_parameters(output_root: Path, data_path: Path | None) -> AcquisitionParameters | None:
+    """Resolves a recording's acquisition parameters from its output directory or its raw imaging directory.
 
     Args:
         output_root: The output root the recording was configured with.
