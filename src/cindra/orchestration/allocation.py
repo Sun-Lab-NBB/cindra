@@ -9,11 +9,10 @@ plan a batch mixing several stages against one host.
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
-from pathlib import Path
 from dataclasses import dataclass
 
+import psutil
 from ataraxis_base_utilities import console, resolve_worker_count
 
 from .jobs import MultiRecordingJobNames, SingleRecordingJobNames
@@ -68,21 +67,7 @@ memory its jobs actually demand. Each job runs in its own worker process, so a h
 memory ends that job rather than the process every other job shares."""
 
 _BYTES_PER_GIGABYTE: int = 1024**3
-"""The number of bytes in one gigabyte, used to convert the operating system's page counts into a memory budget."""
-
-_KIBIBYTES_PER_GIGABYTE: int = 1024**2
-"""The number of kibibytes in one gigabyte, used to convert the Linux memory counters into a memory budget."""
-
-_MEMORY_INFO_PATH: Path = Path("/proc/meminfo")
-"""The path to the Linux memory counter file that reports how much memory new allocations can claim."""
-
-_AVAILABLE_MEMORY_FIELDS: int = 3
-"""The number of whitespace-separated fields a well-formed Linux memory counter line carries, which are the counter
-name, the value, and the unit."""
-
-_AVAILABLE_MEMORY_KEY: str = "MemAvailable:"
-"""The Linux memory counter that estimates how much memory new allocations can claim without swapping, counting the
-reclaimable page cache that registration leaves behind when it memory-maps a plane binary."""
+"""The number of bytes in one gigabyte, used to convert the host memory counter into a memory budget."""
 
 _STAGE_WORKER_DEFAULTS: dict[SingleRecordingJobNames | MultiRecordingJobNames, int] = {
     SingleRecordingJobNames.BINARIZE: BINARIZATION_WORKERS,
@@ -247,7 +232,7 @@ def resolve_class_allocation(
     resource_class: ResourceClass,
     *,
     budget: int,
-    available_memory: float | None,
+    available_memory: float,
     job_count: int,
     workers_per_job: int | None,
     max_parallel_jobs: int | None,
@@ -267,7 +252,7 @@ def resolve_class_allocation(
     Args:
         resource_class: The resource class to resolve the allocation for.
         budget: The number of CPU cores available to the session after reserving system cores.
-        available_memory: The available system memory in gigabytes, or None when the platform does not report it.
+        available_memory: The available system memory in gigabytes.
         job_count: The number of jobs of this class in the session, which caps the useful concurrency.
         workers_per_job: The requested CPU cores per job, -1 to request every available core, or None to accept
             the class default.
@@ -295,44 +280,27 @@ def resolve_class_allocation(
         return workers, max_parallel_jobs
 
     capacity = max(1, budget // workers)
-    if resource_class.memory_gigabytes_per_job > 0 and available_memory is not None:
+    if resource_class.memory_gigabytes_per_job > 0:
         capacity = min(capacity, max(1, int(available_memory // resource_class.memory_gigabytes_per_job)))
 
     return workers, min(capacity, max(1, job_count))
 
 
-def resolve_available_memory_gigabytes() -> float | None:
+def resolve_available_memory_gigabytes() -> float:
     """Resolves the amount of system memory that new allocations can claim, in gigabytes.
 
     Notes:
-        On Linux the value comes from the MemAvailable counter, which counts the reclaimable page cache. The POSIX
-        SC_AVPHYS_PAGES counter is not used there because it reports MemFree instead, which collapses once registration
-        fills the page cache with the plane binaries it memory-maps. That would throttle the memory-bound classes to a
-        near-serial concurrency on a machine that is not actually short of memory.
+        The counter discounts the reclaimable page cache, which matters because registration fills that cache with the
+        plane binaries it memory-maps. A counter reporting free memory alone would collapse behind that cache and
+        throttle the memory-bound classes to a near-serial concurrency on a host that is not actually short of memory.
 
-        Hosts without the Linux counter, such as macOS, fall back to the POSIX page counters. Platforms without either
-        report no value, and the memory-bound resource classes then bound their concurrency by the CPU budget alone.
-
-        The value is sampled once, when the execution session starts. MemAvailable already discounts the page cache
-        that the session itself will fill, so the sample stays representative for the lifetime of the session.
+        The value is sampled once, when the execution session starts. It already discounts the page cache that the
+        session itself will fill, so the sample stays representative for the lifetime of the session.
 
     Returns:
-        The available system memory in gigabytes, or None when the platform does not report it.
+        The available system memory in gigabytes.
     """
-    linux_available = _read_linux_available_memory_gigabytes()
-    if linux_available is not None:
-        return linux_available
-
-    try:
-        available_pages = os.sysconf("SC_AVPHYS_PAGES")
-        page_size = os.sysconf("SC_PAGE_SIZE")
-    except AttributeError, OSError, ValueError:
-        return None
-
-    if available_pages <= 0 or page_size <= 0:
-        return None
-
-    return (available_pages * page_size) / _BYTES_PER_GIGABYTE
+    return float(psutil.virtual_memory().available) / _BYTES_PER_GIGABYTE
 
 
 def summarize_class_allocation(
@@ -356,32 +324,3 @@ def summarize_class_allocation(
         }
         for class_name in class_job_counts
     }
-
-
-def _read_linux_available_memory_gigabytes() -> float | None:
-    """Reads the Linux MemAvailable counter and converts it to gigabytes.
-
-    Returns:
-        The memory that new allocations can claim, in gigabytes, or None when the host does not expose the counter or
-        the counter cannot be parsed.
-    """
-    try:
-        memory_info = _MEMORY_INFO_PATH.read_text()
-    except OSError:
-        return None
-
-    for line in memory_info.splitlines():
-        if not line.startswith(_AVAILABLE_MEMORY_KEY):
-            continue
-        fields = line.split()
-        if len(fields) < _AVAILABLE_MEMORY_FIELDS:
-            return None
-        try:
-            available_kibibytes = int(fields[1])
-        except ValueError:
-            return None
-        if available_kibibytes <= 0:
-            return None
-        return available_kibibytes / _KIBIBYTES_PER_GIGABYTE
-
-    return None

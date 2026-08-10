@@ -11,11 +11,11 @@ from cindra.orchestration import (
     OpenMpStatus,
     openmp as openmp_module,
     resolve_openmp_runtime,
-    warn_missing_openmp_runtime,
 )
 from cindra.orchestration.openmp import (
     OpenMpSummary,
     _link_openmp_runtime,
+    verify_openmp_runtime,
     _discover_openmp_runtime,
     _openmp_runtime_loadable,
     _resolve_candidate_paths,
@@ -244,35 +244,24 @@ class TestRuntimeResolution:
         assert summary.link_path == tmp_path / "libomp.dylib"
 
 
-class TestMissingRuntimeWarning:
-    """Tests the import-time report that names the remedy for a missing OpenMP runtime."""
+class TestMissingRuntimeVerification:
+    """Tests the pre-dispatch check that aborts a run whose OpenMP runtime cannot be loaded."""
 
-    @staticmethod
-    def _record_messages(monkeypatch) -> list[str]:
-        """Redirects console output into a list and returns it."""
-        messages: list[str] = []
-        monkeypatch.setattr(openmp_module.console, "echo", lambda message, level: messages.append(message))
-        return messages
-
-    def test_warning_stays_silent_on_platforms_needing_no_runtime(self, monkeypatch):
-        """Verifies that a platform resolving its threading layer without a runtime reports nothing."""
-        messages = self._record_messages(monkeypatch)
+    def test_check_passes_on_platforms_needing_no_runtime(self, monkeypatch):
+        """Verifies that a platform resolving its threading layer without a runtime is admitted."""
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "linux")
-        warn_missing_openmp_runtime()
-        assert not messages
+        verify_openmp_runtime()
 
-    def test_warning_stays_silent_when_the_runtime_loads(self, monkeypatch):
-        """Verifies that a macOS host whose runtime loads reports nothing."""
-        messages = self._record_messages(monkeypatch)
+    def test_check_passes_when_the_runtime_loads(self, monkeypatch):
+        """Verifies that a macOS host whose runtime loads is admitted."""
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "darwin")
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: True)
-        warn_missing_openmp_runtime()
-        assert not messages
+        verify_openmp_runtime()
 
-    def test_warning_names_the_remedy_when_the_runtime_is_missing(self, monkeypatch):
-        """Verifies that a macOS host carrying no loadable runtime is told which command resolves it."""
-        messages = self._record_messages(monkeypatch)
+    def test_check_aborts_and_names_the_remedy_when_the_runtime_is_missing(self, monkeypatch):
+        """Verifies that a macOS host carrying no loadable runtime aborts and is told which command resolves it."""
         monkeypatch.setattr("cindra.orchestration.openmp.sys.platform", "darwin")
         monkeypatch.setattr("cindra.orchestration.openmp._openmp_runtime_loadable", lambda: False)
-        warn_missing_openmp_runtime()
-        assert "cindra omp" in messages[0]
+
+        with pytest.raises(RuntimeError, match="cindra omp"):
+            verify_openmp_runtime()

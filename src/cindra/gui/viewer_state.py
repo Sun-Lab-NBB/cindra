@@ -8,13 +8,10 @@ from pathlib import Path
 import tempfile
 
 from PySide6 import QtCore
-from filelock import FileLock
+from ataraxis_data_structures import atomic_write
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-_LOCK_TIMEOUT: float = 10.0
-"""The maximum number of seconds to wait when acquiring the state file lock."""
 
 _POLL_INTERVAL_MILLISECONDS: int = 250
 """The polling interval in milliseconds for the StateWriter to check for state changes."""
@@ -33,23 +30,21 @@ def generate_state_path(viewer_id: str) -> str:
 
 
 def write_viewer_state(state_path: Path, state: dict[str, Any]) -> None:
-    """Writes viewer state to a JSON file with cross-platform file locking.
+    """Writes viewer state to a JSON file that the MCP server reads concurrently.
 
-    Acquires an exclusive lock before writing to prevent the MCP server from reading a partially written file.
+    The state reaches its path through a rename, so the MCP server observes either the previous snapshot or the
+    complete new one.
 
     Args:
         state_path: The path to the state file.
         state: The state dictionary to serialize.
     """
-    lock = FileLock(state_path.with_name(state_path.name + ".lock"))
-    with lock.acquire(timeout=_LOCK_TIMEOUT):
-        state_path.write_text(json.dumps(state))
+    with atomic_write(file_path=state_path) as state_file:
+        json.dump(state, state_file)
 
 
 def read_viewer_state(state_path: Path) -> dict[str, Any]:
-    """Reads viewer state from a JSON file with cross-platform file locking.
-
-    Acquires a lock before reading to prevent reading a partially written file.
+    """Reads viewer state from a JSON file.
 
     Args:
         state_path: The path to the state file.
@@ -57,27 +52,26 @@ def read_viewer_state(state_path: Path) -> dict[str, Any]:
     Returns:
         The deserialized state dictionary.
     """
-    lock = FileLock(state_path.with_name(state_path.name + ".lock"))
-    with lock.acquire(timeout=_LOCK_TIMEOUT):
-        return json.loads(state_path.read_text())
+    return json.loads(state_path.read_text(encoding="utf-8"))
 
 
 def cleanup_state_file(state_path: Path) -> None:
-    """Removes the state file and its associated lock file.
+    """Removes the state file and any temporary file a killed writer left beside it.
 
     Args:
         state_path: The path to the state file to clean up.
     """
-    for path in (state_path, state_path.with_name(state_path.name + ".lock")):
-        path.unlink(missing_ok=True)
+    state_path.unlink(missing_ok=True)
+    for temporary_path in state_path.parent.glob(f".{state_path.name}.*.tmp"):
+        temporary_path.unlink(missing_ok=True)
 
 
 class StateWriter(QtCore.QObject):
     """Polls a viewer's state callback and writes to disk when changes are detected.
 
     Uses a QTimer to periodically call the ``get_state`` callback. Writes to the state file only when the returned
-    dictionary differs from the last written state, minimizing disk I/O during idle periods. All writes use
-    ``filelock.FileLock`` to coordinate with the MCP server process.
+    dictionary differs from the last written state, minimizing disk I/O during idle periods. Each write publishes
+    through a rename, so the MCP server process never reads a half-written snapshot.
 
     Args:
         state_path: The path to the state file.

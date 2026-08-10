@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import sys
 from typing import TYPE_CHECKING
-
-from importlib_metadata import metadata as _metadata
+from importlib.metadata import metadata as _metadata
 
 if TYPE_CHECKING:
-    from importlib_metadata import PackageMetadata
+    from importlib.metadata import PackageMetadata
 
 _package_metadata: PackageMetadata | None = _metadata("cindra")
 

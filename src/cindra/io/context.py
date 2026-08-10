@@ -86,12 +86,13 @@ def resolve_single_recording_contexts(
         runtime data file are saved to disk at the end of resolution, ensuring they reflect the current settings. This
         is the correct mode for single-threaded bootstrap (e.g., the prepare_single_recording_batch_tool invocation).
 
-        With ``persist=False``, no files are written. This mode is required for worker-thread entry (REMOTE mode),
-        because the MCP executor dispatches multiple worker threads in the same process. If each worker bootstraps
-        the shared configuration and every plane's runtime_data.yaml on entry, concurrent ``open(file, "w")`` calls
-        on the same paths race at the byte level and produce corrupted YAML. Workers must therefore only *load* the
-        bootstrap written by the earlier prepare step. When ``persist=False``, any missing runtime_data.yaml is
-        treated as a hard error because it indicates prepare_single_recording_batch_tool was not run first.
+        With ``persist=False``, no files are written. This mode is required for worker entry (REMOTE mode), because
+        this resolver builds a context for every plane rather than for the one plane the worker was dispatched to
+        process. A persisting worker would therefore write each peer plane's runtime_data.yaml from its own
+        snapshot, overwriting whatever a peer had already recorded there with content that is whole and parsable
+        but stale. Workers must therefore only *load* the bootstrap written by the earlier prepare step. When
+        ``persist=False``, any missing runtime_data.yaml is treated as a hard error because it indicates
+        prepare_single_recording_batch_tool was not run first.
 
         When loading previously processed data (e.g., data moved to a different machine), acquisition parameters are
         loaded from the saved output directory if available, allowing the pipeline to work without raw TIFF data.
@@ -265,13 +266,14 @@ def resolve_multi_recording_contexts(
         file are saved to disk at the end of resolution, ensuring they reflect the current settings. This is the
         correct mode for single-threaded bootstrap (e.g., the prepare_multi_recording_batch_tool invocation).
 
-        With ``persist=False``, no files are written. This mode is required for worker-thread entry (REMOTE mode),
-        because the MCP executor dispatches multiple worker threads in the same process. If each worker bootstraps
-        the shared configuration and every recording's multi_recording_runtime_data.yaml on entry, concurrent
-        ``open(file, "w")`` calls on the same paths race at the byte level and produce corrupted YAML that
-        subsequent workers fail to parse. Workers must therefore only *load* the bootstrap written by the earlier
-        prepare step. When ``persist=False``, any missing multi_recording_runtime_data.yaml is treated as a hard
-        error because it indicates prepare_multi_recording_batch_tool was not run first.
+        With ``persist=False``, no files are written. This mode is required for worker entry (REMOTE mode), because
+        this resolver builds a context for every recording rather than for the one recording the worker was
+        dispatched to process. A persisting worker would therefore write each peer recording's
+        multi_recording_runtime_data.yaml from its own snapshot, overwriting whatever a peer had already recorded
+        there with content that is whole and parsable but stale. Workers must therefore only *load* the bootstrap
+        written by the earlier prepare step. When ``persist=False``, any missing
+        multi_recording_runtime_data.yaml is treated as a hard error because it indicates
+        prepare_multi_recording_batch_tool was not run first.
 
         ROI selection is performed as a separate step using select_recording_rois(), not during context resolution.
 
@@ -386,8 +388,8 @@ def resolve_multi_recording_contexts(
             context.save_runtime()
     else:
         # Worker entry (REMOTE mode): bootstrap must already exist on disk from a prior prepare step. Treats missing
-        # multi_recording_runtime_data.yaml as a hard error rather than silently persisting concurrently alongside
-        # peer workers, which would race on the same files and corrupt them.
+        # multi_recording_runtime_data.yaml as a hard error rather than silently persisting alongside peer workers,
+        # which would overwrite each peer's file with this worker's own stale snapshot of it.
         for context in contexts:
             runtime_output_path = context.runtime.output_path
             # output_path is always populated during per-recording construction above, so the guard is defensive only.

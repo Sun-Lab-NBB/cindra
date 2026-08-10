@@ -59,32 +59,36 @@ dependencies = [
 
     # Image I/O
     "tifffile>=2026,<2027",
-    "imagecodecs>=2026,<2027",
+    # Supplies the codecs tifffile loads at runtime to decode compressed TIFF data, which no cindra module imports.
+    # The floor matches the one tifffile itself declares for its 'codecs' extra.
+    "imagecodecs>=2026.5.10,<2027",
 
     # Visualization
     "matplotlib>=3,<4",
 
     # GUI
     "pyside6>=6,<7",
-    "pyqtgraph>=0,<1",
+    "pyqtgraph>=0.14,<1",  # 0.14 is the release whose bundled colormaps and PySide6 binding the viewers are built on
 
     # CLI and MCP Server
     "click>=8,<9",
-    "mcp>=1,<2",
-    "httpx>=0.28,<1",
+    "mcp>=2,<3",
+
+    # Host Resource Introspection
+    "psutil>=7,<8",
 
     # Ataraxis
     "ataraxis-time>=7,<8",
     "ataraxis-base-utilities>=7,<8",
-    "ataraxis-data-structures>=7.1,<8",  # 7.1 first exports the file writers and the worker-pinning assets
+    "ataraxis-data-structures>=7.1,<8",  # 7.1 first exports 'atomic_write' and 'index_marker_files'
 
     # Runtime Utilities
     "pyyaml>=6,<7",
-    "filelock>=3,<4",
-    "importlib_metadata>=9,<10",
 
     # Platform-Specific Acceleration
     "tbb4py>=2023,<2024; sys_platform != 'darwin'",
+    # Supplies the SVML runtime Numba's vectorization path loads. The path stays inert while llvmlite reports no SVML
+    # support, and the pin is held so that a Numba release restoring it needs no packaging change here.
     "intel-cmplr-lib-rt>=2026,<2027; sys_platform != 'darwin'",
 ]
 
@@ -111,6 +115,8 @@ dev = [
 
     # Types
     "scipy-stubs>=1,<2",
+    "types-psutil>=7,<8",
+    "types-pyyaml>=6,<7",
 ]
 
 # Specifies files that should not be included in the source-code distribution.

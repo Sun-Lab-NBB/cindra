@@ -9,6 +9,7 @@ from typing import Literal
 from pathlib import Path
 
 import click
+from ataraxis_base_utilities import console
 
 from .cli import CONTEXT_SETTINGS
 from ..gui import run_roi_viewer, run_tracking_viewer, run_registration_viewer
@@ -115,4 +116,10 @@ def gui_tracking(recording_path: Path, dataset: str | None, state_file: Path | N
 )
 def gui_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
     """Starts the GUI MCP server for agentic viewer lifecycle management and display state queries."""
+    # The stdio transport carries the JSON-RPC message stream over stdout, which is also where the console writes
+    # every message up to the WARNING level. Silencing the console keeps library output out of that stream, as a
+    # single logged line renders the message it interleaves with unparsable for the connected client.
+    if transport == "stdio":
+        console.disable()
+
     run_gui_server(transport=transport)

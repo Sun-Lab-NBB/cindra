@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from natsort import natsorted
 from ataraxis_time import (
     TimeUnits,
