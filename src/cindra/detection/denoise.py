@@ -12,7 +12,6 @@ from sklearn.decomposition import PCA  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console
 
 from .utils import compute_spatial_taper_mask, compute_registration_blocks
-from ..allocation import ALL_CORES_REQUEST
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -38,16 +37,16 @@ def pca_denoise(
         frames: The input movie array with shape (num_frames, height, width). Modified in-place.
         block_size: The spatial dimensions (height, width) of each processing block.
         component_fraction: The fraction of PCA components to retain, relative to the smaller block dimension.
-        parallel_workers: The number of parallel threads for PCA fitting. Use -1 to request every available core, or
-            a positive count to use exactly that many threads. Defaults to 1 (sequential).
+        parallel_workers: The number of parallel threads for PCA fitting. Must be a positive integer, which the
+            caller resolves before invoking this function. Defaults to 1 (sequential).
 
     Raises:
-        ValueError: If parallel_workers is zero or is a negative value other than -1.
+        ValueError: If parallel_workers is not a positive integer.
     """
-    if parallel_workers <= 0 and parallel_workers != ALL_CORES_REQUEST:
+    if parallel_workers <= 0:
         message = (
-            f"Unable to apply PCA denoising. The requested parallel worker count must be a positive integer, or -1 "
-            f"to request every available core, but encountered {parallel_workers}."
+            f"Unable to apply PCA denoising. The requested parallel worker count must be a positive integer, but "
+            f"encountered {parallel_workers}."
         )
         console.error(message=message, error=ValueError)
 
@@ -67,10 +66,6 @@ def pca_denoise(
     normalization = np.zeros((height, width), dtype=np.float32)
     reconstruction = np.zeros_like(frames)
 
-    # Resolves the effective worker count. The all-cores request maps to None, which ThreadPoolExecutor interprets as
-    # its own default width.
-    effective_workers: int | None = None if parallel_workers == ALL_CORES_REQUEST else parallel_workers
-
     # Extracts and centers each block for PCA.
     block_slices: list[tuple[slice, slice]] = []
     centered_blocks: list[NDArray[np.float32]] = []
@@ -87,12 +82,12 @@ def pca_denoise(
     # Limits each block fit to a single BLAS thread. The worker budget is already spent on the block pool below, so
     # leaving the BLAS thread count unconstrained would multiply the two and oversubscribe the host.
     with threadpool_limits(limits=1):
-        if effective_workers is not None and effective_workers <= 1:
+        if parallel_workers == 1:
             reconstructed_blocks = [
                 _fit_and_reconstruct_block(block=block, num_components=num_components) for block in centered_blocks
             ]
         else:
-            with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
                 futures = [
                     executor.submit(_fit_and_reconstruct_block, block=block, num_components=num_components)
                     for block in centered_blocks

@@ -9,259 +9,56 @@ unified execution model that admits every job as soon as that job's own prerequi
 
 from __future__ import annotations
 
-import os
-from enum import StrEnum
-import shutil
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
-from threading import Lock, Thread
-from dataclasses import field, dataclass
 
 import yaml  # type: ignore[import-untyped]
 from natsort import natsorted
 from ataraxis_time import (
     TimeUnits,
-    PrecisionTimer,
-    TimerPrecisions,
     TimestampFormats,
     TimestampPrecisions,
     convert_time,
     get_timestamp,
 )
-from ataraxis_base_utilities import resolve_worker_count
-from ataraxis_data_structures import JobState, ProcessingStatus, ProcessingTracker
+from ataraxis_data_structures import (
+    ProcessingStatus,
+    ProcessingTracker,
+    delete_directory,
+    index_marker_files,
+    discover_marker_files,
+)
 
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
-from ..pipelines import (
+from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
+from .mcp_instance import mcp
+from ..orchestration import (
+    SINGLE_RECORDING_PHASES,
+    RESOURCE_CLASS_BY_JOB_NAME,
     MULTI_RECORDING_TRACKER_NAME,
     SINGLE_RECORDING_TRACKER_NAME,
-    run_multi_recording_pipeline,
-    run_single_recording_pipeline,
-)
-from ..allocation import (
-    ALL_CORES_REQUEST,
-    DISCOVERY_WORKERS,
-    EXTRACTION_WORKERS,
-    PROCESSING_WORKERS,
-    BINARIZATION_WORKERS,
-    REGISTRATION_WORKERS,
-    MULTI_RECORDING_PHASES,
-    SINGLE_RECORDING_PHASES,
-    PrerequisiteScope,
+    PendingJob,
     MultiRecordingJobNames,
     SingleRecordingJobNames,
+    get_execution_state,
+    set_execution_state,
+    resolve_session_load,
     resolve_pipeline_jobs,
+    resolve_plane_specifier,
+    start_execution_session,
+    cancel_execution_session,
+    order_phases_by_execution,
     resolve_downstream_phases,
+    validate_job_prerequisites,
     resolve_multi_recording_jobs,
     resolve_single_recording_jobs,
 )
-from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-from .mcp_instance import mcp
-
-_RESERVED_CORES: int = 2
-"""The number of CPU cores reserved for system operations."""
-
-_MAXIMUM_PARALLEL_IO_JOBS: int = 4
-"""The maximum number of concurrent I/O-bound jobs (the binarization and combination resource classes)."""
+    from ataraxis_data_structures import JobState
 
 _MINIMUM_RECORDING_COUNT: int = 2
 """The minimum number of recordings required for multi-recording processing."""
-
-_COMBINATION_WORKERS: int = 1
-"""The number of CPU cores one combination job holds. The combination stage merges the per-plane result files with
-serial input and output and takes no worker argument, so each of its jobs occupies exactly one core."""
-
-
-_PROCESSING_MEMORY_GIGABYTES_PER_JOB: float = 15.0
-"""The peak resident memory, in gigabytes, that one processing job holds. Measured on a real nine-plane run where
-detection peaked at 10.5 gigabytes on the smallest (512-line) plane, rounded up to 15 to cover the taller planes of the
-same recording. The processing resource class bounds its concurrency by this figure because the job workers are threads
-inside the MCP server process, so one out-of-memory kill terminates the whole server rather than a single job."""
-
-_BYTES_PER_GIGABYTE: int = 1024**3
-"""The number of bytes in one gigabyte, used to convert the operating system's page counts into a memory budget."""
-
-_KIBIBYTES_PER_GIGABYTE: int = 1024**2
-"""The number of kibibytes in one gigabyte, used to convert the Linux memory counters into a memory budget."""
-
-_MEMORY_INFO_PATH: Path = Path("/proc/meminfo")
-"""The path to the Linux memory counter file that reports how much memory new allocations can claim."""
-
-_AVAILABLE_MEMORY_FIELDS: int = 3
-"""The number of whitespace-separated fields a well-formed Linux memory counter line carries, which are the counter
-name, the value, and the unit."""
-
-_AVAILABLE_MEMORY_KEY: str = "MemAvailable:"
-"""The Linux memory counter that estimates how much memory new allocations can claim without swapping, counting the
-reclaimable page cache that registration leaves behind when it memory-maps a plane binary."""
-
-_PREREQUISITE_FAILURE_MESSAGE: str = "Unable to execute job. A preceding pipeline phase failed."
-"""The tracker error message recorded for a job whose prerequisite job failed."""
-
-_UNREACHABLE_PREREQUISITE_MESSAGE: str = (
-    "Unable to execute job. Its prerequisite jobs never succeeded and no queued job can still satisfy them."
-)
-"""The tracker error message recorded for a job that the execution session can no longer admit."""
-
-
-class _AdmissionDecisions(StrEnum):
-    """Defines the outcomes of evaluating one queued job's prerequisites against its own tracker."""
-
-    ADMIT = "admit"
-    """Every prerequisite job succeeded, so the job moves into its resource class queue."""
-    WAIT = "wait"
-    """At least one prerequisite job has not finished, so the job stays in the admission pool."""
-    ABORT = "abort"
-    """At least one prerequisite job failed or is absent from the tracker, so the job can never run."""
-
-
-@dataclass(frozen=True, slots=True)
-class _ResourceClass:
-    """Describes the CPU and memory budget that one class of pipeline jobs holds for its entire duration."""
-
-    name: str
-    """The name of the resource class, used as the key of the per-class queues and of the reported allocation."""
-    workers_per_job: int
-    """The number of CPU cores each job of this class holds, taken from the measured stage defaults in
-    cindra.allocation, except for the combination class, whose single core is defined by _COMBINATION_WORKERS."""
-    fixed_parallel_jobs: int | None
-    """The machine-independent concurrency cap of this class, or None when the cap is derived from the CPU budget and,
-    for memory-bound classes, from the available system memory. A per-class cap bounds one class in isolation, so the
-    dispatcher additionally holds the sum of the cores committed by every class inside the session CPU budget."""
-    memory_gigabytes_per_job: float
-    """The peak resident memory one job of this class holds, or 0.0 when the class does not bound its concurrency by
-    memory."""
-
-
-_BINARIZATION_RESOURCES: _ResourceClass = _ResourceClass(
-    name="binarization",
-    workers_per_job=BINARIZATION_WORKERS,
-    fixed_parallel_jobs=_MAXIMUM_PARALLEL_IO_JOBS,
-    memory_gigabytes_per_job=0.0,
-)
-"""The resource class of the binarization jobs. The allocated cores become the TIFF image decode threads, and the
-stage streams frames to disk instead of holding them, so the concurrency cap is the fixed I/O limit."""
-
-_REGISTRATION_RESOURCES: _ResourceClass = _ResourceClass(
-    name="registration",
-    workers_per_job=REGISTRATION_WORKERS,
-    fixed_parallel_jobs=None,
-    memory_gigabytes_per_job=0.0,
-)
-"""The resource class of the plane-registration jobs. Registration reads the plane binary through a memory map, so its
-resident growth is evictable page cache and its concurrency is bounded by the shared CPU budget alone."""
-
-_PROCESSING_RESOURCES: _ResourceClass = _ResourceClass(
-    name="processing",
-    workers_per_job=PROCESSING_WORKERS,
-    fixed_parallel_jobs=None,
-    memory_gigabytes_per_job=_PROCESSING_MEMORY_GIGABYTES_PER_JOB,
-)
-"""The resource class of the plane-processing jobs. Detection materializes the binned movie in anonymous memory, so
-this class bounds its concurrency by both the shared CPU budget and the available system memory."""
-
-_COMBINATION_RESOURCES: _ResourceClass = _ResourceClass(
-    name="combination",
-    workers_per_job=_COMBINATION_WORKERS,
-    fixed_parallel_jobs=_MAXIMUM_PARALLEL_IO_JOBS,
-    memory_gigabytes_per_job=0.0,
-)
-"""The resource class of the combination jobs. Combination merges per-plane result files with serial input and output,
-so each job holds one core and the concurrency cap is the fixed I/O limit."""
-
-_DISCOVERY_RESOURCES: _ResourceClass = _ResourceClass(
-    name="discovery",
-    workers_per_job=DISCOVERY_WORKERS,
-    fixed_parallel_jobs=None,
-    memory_gigabytes_per_job=0.0,
-)
-"""The resource class of the multi-recording discovery jobs. Discovery registers every recording of one animal against
-the others, so each job holds the stage's saturating allocation and its concurrency is bounded by the shared CPU budget
-alone."""
-
-_EXTRACTION_RESOURCES: _ResourceClass = _ResourceClass(
-    name="extraction",
-    workers_per_job=EXTRACTION_WORKERS,
-    fixed_parallel_jobs=None,
-    memory_gigabytes_per_job=0.0,
-)
-"""The resource class of the multi-recording extraction jobs. Extraction reads each frame batch serially before the
-kernel consumes it, so the stage plateaus at its measured worker count and the remaining budget is better spent on
-running more recordings concurrently."""
-
-_RESOURCE_CLASS_BY_JOB_NAME: dict[str, _ResourceClass] = {
-    SingleRecordingJobNames.BINARIZE: _BINARIZATION_RESOURCES,
-    SingleRecordingJobNames.REGISTER: _REGISTRATION_RESOURCES,
-    SingleRecordingJobNames.PROCESS: _PROCESSING_RESOURCES,
-    SingleRecordingJobNames.COMBINE: _COMBINATION_RESOURCES,
-    MultiRecordingJobNames.DISCOVER: _DISCOVERY_RESOURCES,
-    MultiRecordingJobNames.EXTRACT: _EXTRACTION_RESOURCES,
-}
-"""Maps every pipeline job name to the resource class that governs its worker count and its concurrency cap."""
-
-
-@dataclass(slots=True)
-class _PendingJob:
-    """Describes a single job queued for execution."""
-
-    configuration_path: Path
-    """The path to the pipeline configuration file for this job."""
-    tracker_path: Path
-    """The path to the ProcessingTracker file that tracks this job."""
-    job_id: str
-    """The unique hexadecimal identifier for this job in the tracker."""
-    single_recording: bool
-    """Determines whether this job belongs to a single-recording or multi-recording pipeline."""
-    resource_class: _ResourceClass
-    """The resource class that governs this job's worker count and the concurrency of its queue."""
-    resolved_workers: int | None = None
-    """The number of parallel workers to allocate to this job, assigned at dispatch time. A value of None makes the
-    pipeline fall back to the measured default for the job's stage."""
-
-    @property
-    def dispatch_key(self) -> tuple[str, str]:
-        """Returns the composite key that uniquely identifies this job across the entire batch, combining the tracker
-        path with the job ID.
-        """
-        return str(self.tracker_path), self.job_id
-
-
-@dataclass(slots=True)
-class _JobExecutionState:
-    """Tracks the runtime state for generic job execution across both pipeline types.
-
-    Notes:
-        Every submitted job first enters the admission pool. The execution manager admits a job into its resource
-        class queue as soon as that job's own prerequisites have succeeded on its own tracker, so each recording
-        advances independently. Each resource class then dispatches from its own queue under its own concurrency cap
-        and under the session-wide CPU budget shared by every class.
-    """
-
-    all_jobs: dict[tuple[str, str], _PendingJob] = field(default_factory=dict)
-    """All submitted jobs keyed by (tracker_path, job_id) dispatch key, used for status reporting."""
-    admission_pool: list[_PendingJob] = field(default_factory=list)
-    """Jobs awaiting prerequisite satisfaction, scanned by the manager on every polling cycle."""
-    pending_queues: dict[str, list[_PendingJob]] = field(default_factory=dict)
-    """Admitted jobs awaiting dispatch, keyed by resource class name."""
-    active_threads: dict[str, dict[tuple[str, str], Thread]] = field(default_factory=dict)
-    """Currently running dispatch key to Thread mappings, keyed by resource class name."""
-    class_capacities: dict[str, int] = field(default_factory=dict)
-    """The resolved maximum number of concurrent jobs for each resource class name."""
-    class_workers: dict[str, int] = field(default_factory=dict)
-    """The resolved number of CPU cores allocated to each job of each resource class name."""
-    cpu_budget: int = 1
-    """The total number of CPU cores this session may commit across every resource class at once."""
-    lock: Lock = field(default_factory=Lock)
-    """Thread synchronization lock for execution state access."""
-    manager_thread: Thread | None = None
-    """Background execution manager thread reference."""
-
-
-_job_execution_state: _JobExecutionState | None = None
-"""The module-level execution state for active processing jobs."""
 
 
 @mcp.tool()
@@ -308,7 +105,14 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
     multi_recording_status: dict[str, object]
     multi_recording_base = recording / "cindra" / "multi_recording"
     if multi_recording_base.exists():
-        tracker_files = list(multi_recording_base.rglob(MULTI_RECORDING_TRACKER_NAME))
+        # Falls back to the tolerant scan when a subdirectory denies the strict one, so a single unreadable dataset
+        # directory reports the datasets that are readable instead of failing the whole status query.
+        try:
+            tracker_files = discover_marker_files(
+                directory=multi_recording_base, marker_name=MULTI_RECORDING_TRACKER_NAME
+            )
+        except OSError:
+            tracker_files = list(multi_recording_base.rglob(MULTI_RECORDING_TRACKER_NAME))
         if tracker_files:
             datasets: dict[str, object] = {}
             for tracker_file in natsorted(tracker_files):
@@ -367,17 +171,21 @@ def get_batch_status_overview_tool(root_directory: str) -> dict[str, object]:
 
     permission_errors: list[str] = []
 
-    single_tracker_paths: list[Path] = []
+    # Indexes both tracker names in a single traversal of the tree, which halves the walk a two-name search would
+    # otherwise cost over a whole data root. The indexer refuses to narrow its result to the readable subset, so a
+    # single unreadable directory anywhere under the root fails the whole scan. This tool surveys a root the caller
+    # chose rather than a path the pipeline owns, and reporting no recording at all because one sibling directory is
+    # unreadable would be the wrong answer, so the denial is recorded and the tolerant scan supplies the rest.
     try:
-        single_tracker_paths.extend(root.rglob(SINGLE_RECORDING_TRACKER_NAME))
-    except PermissionError as error:
-        permission_errors.append(f"Access denied during single-recording search: {error}")
-
-    multi_tracker_paths: list[Path] = []
-    try:
-        multi_tracker_paths.extend(root.rglob(MULTI_RECORDING_TRACKER_NAME))
-    except PermissionError as error:
-        permission_errors.append(f"Access denied during multi-recording search: {error}")
+        tracker_index = index_marker_files(
+            directory=root, marker_names=(SINGLE_RECORDING_TRACKER_NAME, MULTI_RECORDING_TRACKER_NAME)
+        )
+        single_tracker_paths: list[Path] = list(tracker_index[SINGLE_RECORDING_TRACKER_NAME])
+        multi_tracker_paths: list[Path] = list(tracker_index[MULTI_RECORDING_TRACKER_NAME])
+    except OSError as error:
+        permission_errors.append(f"Access denied during the processing tracker search: {error}")
+        single_tracker_paths = list(root.rglob(SINGLE_RECORDING_TRACKER_NAME))
+        multi_tracker_paths = list(root.rglob(MULTI_RECORDING_TRACKER_NAME))
 
     # Reads single-recording trackers. Derives recording_path from tracker location.
     single_recordings: list[dict[str, object]] = []
@@ -663,7 +471,7 @@ def prepare_single_recording_batch_tool(
                 {
                     "job_id": job_ids[1 + plane_index],
                     "name": SingleRecordingJobNames.REGISTER.value,
-                    "specifier": f"plane_{plane_index}",
+                    "specifier": resolve_plane_specifier(plane_index=plane_index),
                     "status": "scheduled",
                 }
                 for plane_index in range(plane_count)
@@ -673,7 +481,7 @@ def prepare_single_recording_batch_tool(
                 {
                     "job_id": job_ids[1 + plane_count + plane_index],
                     "name": SingleRecordingJobNames.PROCESS.value,
-                    "specifier": f"plane_{plane_index}",
+                    "specifier": resolve_plane_specifier(plane_index=plane_index),
                     "status": "scheduled",
                 }
                 for plane_index in range(plane_count)
@@ -980,7 +788,7 @@ def reset_processing_phases_tool(
     # all phases that depend on its output, so they must be reset too.
     requested_phases = list(phases)
     single_recording = pipeline_type == "single-recording"
-    phases = _order_phases_by_execution(
+    phases = order_phases_by_execution(
         resolve_downstream_phases(phase_names=phases, single_recording=single_recording),
         single_recording=single_recording,
     )
@@ -1098,7 +906,7 @@ def clean_processing_output_tool(
     # Expands the requested phases to include all downstream dependents.
     requested_phases = list(phases)
     single_recording = pipeline_type == "single-recording"
-    effective_phases = _order_phases_by_execution(
+    effective_phases = order_phases_by_execution(
         resolve_downstream_phases(phase_names=phases, single_recording=single_recording),
         single_recording=single_recording,
     )
@@ -1332,7 +1140,7 @@ def execute_processing_jobs_tool(
 
     # Validates each job entry and resolves the resource class that governs its allocation.
     required_keys = {"configuration_path", "tracker_path", "job_id", "pipeline_type"}
-    candidate_jobs: list[_PendingJob] = []
+    candidate_jobs: list[PendingJob] = []
     submitted_by_tracker: dict[str, set[str]] = {}
     invalid_jobs: list[dict[str, str]] = []
 
@@ -1367,13 +1175,13 @@ def execute_processing_jobs_tool(
             invalid_jobs.append({"job_id": job_id, "reason": f"Job ID not found in tracker: {tracker_file}"})
             continue
 
-        resource_class = _RESOURCE_CLASS_BY_JOB_NAME.get(job_info.job_name)
+        resource_class = RESOURCE_CLASS_BY_JOB_NAME.get(job_info.job_name)
         if resource_class is None:
             invalid_jobs.append({"job_id": job_id, "reason": f"Unrecognized pipeline phase: {job_info.job_name}"})
             continue
 
         candidate_jobs.append(
-            _PendingJob(
+            PendingJob(
                 configuration_path=configuration_file,
                 tracker_path=tracker_file,
                 job_id=job_id,
@@ -1385,10 +1193,10 @@ def execute_processing_jobs_tool(
 
     # Validates prerequisites once the full submission is known, so a job whose prerequisite is submitted alongside it
     # is accepted and admitted later, when that prerequisite actually succeeds.
-    all_jobs_map: dict[tuple[str, str], _PendingJob] = {}
+    all_jobs_map: dict[tuple[str, str], PendingJob] = {}
     for candidate_job in candidate_jobs:
-        prerequisite_error = _validate_job_prerequisites(
-            tracker=ProcessingTracker(file_path=candidate_job.tracker_path),
+        prerequisite_error = validate_job_prerequisites(
+            registry=ProcessingTracker(file_path=candidate_job.tracker_path).snapshot(),
             job_id=candidate_job.job_id,
             single_recording=candidate_job.single_recording,
             submitted_job_ids=frozenset(submitted_by_tracker[str(candidate_job.tracker_path)]),
@@ -1405,7 +1213,7 @@ def execute_processing_jobs_tool(
             "invalid_jobs": invalid_jobs,
         }
 
-    return _start_execution_session(
+    return _start_session(
         all_jobs=all_jobs_map,
         workers_per_job=workers_per_job,
         max_parallel_jobs=max_parallel_jobs,
@@ -1432,7 +1240,10 @@ def get_processing_jobs_status_tool() -> dict[str, object]:
         'note'. Final per-job outcomes must then be re-read via get_recording_status_tool,
         get_batch_status_overview_tool, or verify_*_output_tool.
     """
-    if _job_execution_state is None:
+    # Binds the session to a local name, because the execution manager clears the module-level reference the moment
+    # the session drains and this tool must keep reporting on the session it started with.
+    state = get_execution_state()
+    if state is None:
         return {
             "success": True,
             "active": False,
@@ -1444,10 +1255,6 @@ def get_processing_jobs_status_tool() -> dict[str, object]:
             ),
         }
 
-    # Binds the session to a local name, because the execution manager clears the module-level reference the moment
-    # the session drains and this tool must keep reporting on the session it started with.
-    state = _job_execution_state
-
     with state.lock:
         awaiting_prerequisites = len(state.admission_pool)
         class_status: dict[str, object] = {
@@ -1455,7 +1262,7 @@ def get_processing_jobs_status_tool() -> dict[str, object]:
                 "workers_per_job": state.class_workers.get(class_name, 0),
                 "max_parallel_jobs": state.class_capacities.get(class_name, 0),
                 "pending": len(state.pending_queues.get(class_name, [])),
-                "active": list(state.active_threads.get(class_name, {}).keys()),
+                "active": list(state.active_futures.get(class_name, {}).keys()),
             }
             for class_name in state.class_capacities
         }
@@ -1519,7 +1326,10 @@ def get_active_execution_timing_tool() -> dict[str, object]:
         'jobs', and a 'session' summary with total_elapsed_seconds, completed_count, failed_count, running_count, and
         pending_count, plus throughput_jobs_per_hour when applicable.
     """
-    if _job_execution_state is None:
+    # Binds the session to a local name, because the execution manager clears the module-level reference the moment
+    # the session drains and this tool must keep reporting on the session it started with.
+    state = get_execution_state()
+    if state is None:
         return {
             "success": True,
             "active": False,
@@ -1532,10 +1342,6 @@ def get_active_execution_timing_tool() -> dict[str, object]:
                 "pending_count": 0,
             },
         }
-
-    # Binds the session to a local name, because the execution manager clears the module-level reference the moment
-    # the session drains and this tool must keep reporting on the session it started with.
-    state = _job_execution_state
 
     current_microseconds = int(
         get_timestamp(output_format=TimestampFormats.INTEGER, precision=TimestampPrecisions.MICROSECOND)
@@ -1664,9 +1470,10 @@ def cancel_processing_jobs_tool() -> dict[str, object]:
         active and that final per-job outcomes can be read via get_recording_status_tool or
         get_batch_status_overview_tool.
     """
-    global _job_execution_state
-
-    if _job_execution_state is None:
+    # Binds the session to a local name, because the execution manager can clear the module-level reference while this
+    # tool reads the final tracker state.
+    state = get_execution_state()
+    if state is None:
         return {
             "success": True,
             "canceled": False,
@@ -1677,41 +1484,26 @@ def cancel_processing_jobs_tool() -> dict[str, object]:
             ),
         }
 
-    # Binds the session to a local name, because the execution manager can clear the module-level reference while this
-    # tool reads the final tracker state.
-    state = _job_execution_state
+    _canceled_count, active_count = cancel_execution_session()
 
-    with state.lock:
-        active_count = sum(len(threads) for threads in state.active_threads.values())
+    total_succeeded = 0
+    total_failed = 0
+    seen_trackers: set[Path] = set()
+    for pending_job in state.all_jobs.values():
+        if pending_job.tracker_path in seen_trackers:
+            continue
+        seen_trackers.add(pending_job.tracker_path)
+        counts = ProcessingTracker(file_path=pending_job.tracker_path).summarize()["summary"]
+        total_succeeded += counts["succeeded"]
+        total_failed += counts["failed"]
 
-        # Clears the admission pool and every class queue to prevent new jobs from starting.
-        state.admission_pool.clear()
-        for pending_queue in state.pending_queues.values():
-            pending_queue.clear()
+    final_state = {
+        "succeeded_jobs": total_succeeded,
+        "failed_jobs": total_failed,
+        "active_jobs_at_cancel": active_count,
+    }
 
-        total_succeeded = 0
-        total_failed = 0
-        seen_trackers: set[Path] = set()
-        for pending_job in state.all_jobs.values():
-            if pending_job.tracker_path in seen_trackers:
-                continue
-            seen_trackers.add(pending_job.tracker_path)
-            tracker = ProcessingTracker(file_path=pending_job.tracker_path)
-            summary = tracker.get_summary()
-            for status, count in summary.items():
-                if status == ProcessingStatus.SUCCEEDED:
-                    total_succeeded += count
-                elif status == ProcessingStatus.FAILED:
-                    total_failed += count
-
-        final_state = {
-            "succeeded_jobs": total_succeeded,
-            "failed_jobs": total_failed,
-            "active_jobs_at_cancel": active_count,
-        }
-
-    # Resets execution state after releasing lock.
-    _job_execution_state = None
+    set_execution_state(state=None)
 
     return {
         "success": True,
@@ -1824,13 +1616,13 @@ def execute_full_pipeline_tool(
 
     # Parses the manifest into phase groups. The groups order the admission pool and shape the response summary, while
     # the actual execution order follows each job's own prerequisites.
-    phase_groups: list[tuple[str, list[_PendingJob]]] = []
+    phase_groups: list[tuple[str, list[PendingJob]]] = []
 
     if pipeline_type == "single-recording":
-        binarize_phase_jobs: list[_PendingJob] = []
-        register_phase_jobs: list[_PendingJob] = []
-        process_phase_jobs: list[_PendingJob] = []
-        combine_phase_jobs: list[_PendingJob] = []
+        binarize_phase_jobs: list[PendingJob] = []
+        register_phase_jobs: list[PendingJob] = []
+        process_phase_jobs: list[PendingJob] = []
+        combine_phase_jobs: list[PendingJob] = []
 
         raw_recordings = manifest.get("recordings", {})
         if isinstance(raw_recordings, dict):
@@ -1842,34 +1634,34 @@ def execute_full_pipeline_tool(
                 binarize = manifest_dict.get("binarize_job", {})
                 if binarize and binarize.get("status") != "succeeded":
                     binarize_phase_jobs.append(
-                        _PendingJob(
+                        PendingJob(
                             configuration_path=job_configuration_path,
                             tracker_path=tracker_path,
                             job_id=binarize["job_id"],
                             single_recording=True,
-                            resource_class=_BINARIZATION_RESOURCES,
+                            resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.BINARIZE],
                         )
                     )
 
                 register_phase_jobs.extend(
-                    _PendingJob(
+                    PendingJob(
                         configuration_path=job_configuration_path,
                         tracker_path=tracker_path,
                         job_id=register["job_id"],
                         single_recording=True,
-                        resource_class=_REGISTRATION_RESOURCES,
+                        resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.REGISTER],
                     )
                     for register in manifest_dict.get("register_jobs", [])
                     if register.get("status") != "succeeded"
                 )
 
                 process_phase_jobs.extend(
-                    _PendingJob(
+                    PendingJob(
                         configuration_path=job_configuration_path,
                         tracker_path=tracker_path,
                         job_id=process["job_id"],
                         single_recording=True,
-                        resource_class=_PROCESSING_RESOURCES,
+                        resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.PROCESS],
                     )
                     for process in manifest_dict.get("process_jobs", [])
                     if process.get("status") != "succeeded"
@@ -1878,12 +1670,12 @@ def execute_full_pipeline_tool(
                 combine = manifest_dict.get("combine_job", {})
                 if combine and combine.get("status") != "succeeded":
                     combine_phase_jobs.append(
-                        _PendingJob(
+                        PendingJob(
                             configuration_path=job_configuration_path,
                             tracker_path=tracker_path,
                             job_id=combine["job_id"],
                             single_recording=True,
-                            resource_class=_COMBINATION_RESOURCES,
+                            resource_class=RESOURCE_CLASS_BY_JOB_NAME[SingleRecordingJobNames.COMBINE],
                         )
                     )
 
@@ -1897,8 +1689,8 @@ def execute_full_pipeline_tool(
             phase_groups.append((SingleRecordingJobNames.COMBINE.value, combine_phase_jobs))
 
     else:
-        discover_phase_jobs: list[_PendingJob] = []
-        extract_phase_jobs: list[_PendingJob] = []
+        discover_phase_jobs: list[PendingJob] = []
+        extract_phase_jobs: list[PendingJob] = []
 
         raw_datasets = manifest.get("datasets", {})
         if isinstance(raw_datasets, dict):
@@ -1910,22 +1702,22 @@ def execute_full_pipeline_tool(
                 discover = manifest_dict.get("discover_job", {})
                 if discover and discover.get("status") != "succeeded":
                     discover_phase_jobs.append(
-                        _PendingJob(
+                        PendingJob(
                             configuration_path=job_configuration_path,
                             tracker_path=tracker_path,
                             job_id=discover["job_id"],
                             single_recording=False,
-                            resource_class=_DISCOVERY_RESOURCES,
+                            resource_class=RESOURCE_CLASS_BY_JOB_NAME[MultiRecordingJobNames.DISCOVER],
                         )
                     )
 
                 extract_phase_jobs.extend(
-                    _PendingJob(
+                    PendingJob(
                         configuration_path=job_configuration_path,
                         tracker_path=tracker_path,
                         job_id=extract["job_id"],
                         single_recording=False,
-                        resource_class=_EXTRACTION_RESOURCES,
+                        resource_class=RESOURCE_CLASS_BY_JOB_NAME[MultiRecordingJobNames.EXTRACT],
                     )
                     for extract in manifest_dict.get("extract_jobs", [])
                     if extract.get("status") != "succeeded"
@@ -1952,7 +1744,7 @@ def execute_full_pipeline_tool(
 
     # Collects all jobs across all phases for the execution state, preserving the phase order so that the admission
     # scan always considers upstream jobs before the jobs that depend on them.
-    all_jobs_map: dict[tuple[str, str], _PendingJob] = {}
+    all_jobs_map: dict[tuple[str, str], PendingJob] = {}
     for _phase_name, phase_jobs in phase_groups:
         for job in phase_jobs:
             all_jobs_map[job.dispatch_key] = job
@@ -1977,7 +1769,7 @@ def execute_full_pipeline_tool(
     if "invalid_configurations" in manifest:
         extra_fields["invalid_configurations"] = manifest["invalid_configurations"]
 
-    return _start_execution_session(
+    return _start_session(
         all_jobs=all_jobs_map,
         workers_per_job=workers_per_job,
         max_parallel_jobs=max_parallel_jobs,
@@ -1994,48 +1786,25 @@ def _check_active_session(action: str) -> dict[str, object] | None:
     Returns:
         None when no session is active, or an error result dictionary describing the running session.
     """
-    # Binds the session to a local name, because the execution manager can clear the module-level reference between
-    # the emptiness check and the lock acquisition.
-    state = _job_execution_state
-    if state is None:
+    pending_count, active_count = resolve_session_load()
+    if not pending_count and not active_count:
         return None
 
-    with state.lock:
-        pending_count = len(state.admission_pool) + sum(len(queue) for queue in state.pending_queues.values())
-        active_count = sum(len(threads) for threads in state.active_threads.values())
-        if not pending_count and not active_count:
-            return None
-
-        return {
-            "success": False,
-            "error": f"Unable to {action}. An execution session is already active.",
-            "pending_count": pending_count,
-            "active_count": active_count,
-        }
+    return {
+        "success": False,
+        "error": f"Unable to {action}. An execution session is already active.",
+        "pending_count": pending_count,
+        "active_count": active_count,
+    }
 
 
-def _start_execution_session(
-    all_jobs: dict[tuple[str, str], _PendingJob],
+def _start_session(
+    all_jobs: dict[tuple[str, str], PendingJob],
     workers_per_job: int | None,
     max_parallel_jobs: int | None,
     extra_result_fields: dict[str, object],
 ) -> dict[str, object]:
-    """Resolves per-class resource allocation, stamps it onto the queued jobs, and starts the execution manager.
-
-    Centralizes the execution setup logic shared by ``execute_processing_jobs_tool`` and
-    ``execute_full_pipeline_tool``. The caller is responsible for validating jobs and checking for active sessions
-    before calling this function.
-
-    Notes:
-        Every job enters the admission pool, and the manager decides admission from the tracked prerequisites.
-
-        The resolved allocation is stamped onto each job and travels to the pipeline as a dispatch argument, so one
-        configuration file serves every job dispatched concurrently against it.
-
-        Each class resolves its own concurrency cap, and the session CPU budget is recorded alongside those caps
-        because every class dispatches during the same cycle. The dispatcher holds the sum of the cores committed by
-        the running jobs of every class inside that budget, so the per-class caps cannot oversubscribe the machine
-        between them.
+    """Starts a batch execution session and shapes its allocation report into an MCP tool response.
 
     Args:
         all_jobs: All submitted jobs keyed by dispatch key, in the order the manager should consider them.
@@ -2047,613 +1816,31 @@ def _start_execution_session(
 
     Returns:
         A result dictionary containing 'success', 'started', the session 'cpu_budget', per-class resource allocation
-        details, and any extra fields.
+        details, and any extra fields. A rejected override yields success:False and an 'error' instead.
     """
-    global _job_execution_state
-
-    # Rejects a non-positive override rather than letting it fall through as a negative core count. None is the only
-    # way to ask for a default, so a caller passing 0 or a negative value has confused the two.
-    for override_name, override_value in (
-        ("workers_per_job", workers_per_job),
-        ("max_parallel_jobs", max_parallel_jobs),
-    ):
-        if override_value is not None and override_value <= 0 and override_value != ALL_CORES_REQUEST:
-            return {
-                "success": False,
-                "started": False,
-                "error": (
-                    f"Unable to start the execution session. The '{override_name}' override must be a positive "
-                    f"integer, -1 to request every available core, or None to accept the measured default, but "
-                    f"encountered {override_value}."
-                ),
-            }
-
-    budget = resolve_worker_count(requested_workers=-1, reserved_cores=_RESERVED_CORES)
-    available_memory = _resolve_available_memory_gigabytes()
-
-    # Counts the jobs of every resource class present in this session, which bounds each class capacity.
-    class_job_counts: dict[str, int] = {}
-    classes_by_name: dict[str, _ResourceClass] = {}
-    for pending_job in all_jobs.values():
-        class_name = pending_job.resource_class.name
-        classes_by_name[class_name] = pending_job.resource_class
-        class_job_counts[class_name] = class_job_counts.get(class_name, 0) + 1
-
-    # Resolves the allocation of every class and stamps the worker count onto its jobs.
-    class_workers: dict[str, int] = {}
-    class_capacities: dict[str, int] = {}
-    for class_name, resource_class in classes_by_name.items():
-        workers, capacity = _resolve_class_allocation(
-            resource_class=resource_class,
-            budget=budget,
-            available_memory=available_memory,
-            job_count=class_job_counts[class_name],
-            workers_per_job=workers_per_job,
-            max_parallel_jobs=max_parallel_jobs,
+    try:
+        session = start_execution_session(
+            all_jobs=all_jobs, workers_per_job=workers_per_job, max_parallel_jobs=max_parallel_jobs
         )
-        class_workers[class_name] = workers
-        class_capacities[class_name] = capacity
+    except ValueError as error:
+        return {"success": False, "started": False, "error": str(error)}
 
-    for pending_job in all_jobs.values():
-        pending_job.resolved_workers = class_workers[pending_job.resource_class.name]
-
-    execution_state = _JobExecutionState(
-        all_jobs=all_jobs,
-        admission_pool=list(all_jobs.values()),
-        pending_queues={class_name: [] for class_name in classes_by_name},
-        active_threads={class_name: {} for class_name in classes_by_name},
-        class_capacities=class_capacities,
-        class_workers=class_workers,
-        cpu_budget=budget,
-        lock=Lock(),
-    )
-
-    # Assigns the global state before starting the manager thread to prevent a race condition where the manager
-    # reads _job_execution_state as None and exits immediately.
-    _job_execution_state = execution_state
-    manager = Thread(target=_job_execution_manager, daemon=True)
-    manager.start()
-    execution_state.manager_thread = manager
-
-    result: dict[str, object] = {
-        "success": True,
-        "started": True,
-        "total_jobs": len(all_jobs),
-        "cpu_budget": budget,
-        "resource_classes": {
-            class_name: {
-                "workers_per_job": class_workers[class_name],
-                "max_parallel_jobs": class_capacities[class_name],
-                "job_count": class_job_counts[class_name],
-            }
-            for class_name in classes_by_name
-        },
-    }
+    result: dict[str, object] = {"success": True, "started": True, **session}
     result.update(extra_result_fields)
-
     return result
 
 
-def _order_phases_by_execution(phase_names: Iterable[str], *, single_recording: bool) -> list[str]:
-    """Orders phase job names by the order the pipeline executes them.
-
-    Notes:
-        Callers report the resulting list to the user, who reads a phase list as a sequence. Alphabetical order would
-        render the single-recording chain as binarization, combination, processing, registration, which inverts the
-        two middle phases relative to the order they run in.
+def _group_jobs_by_name(registry: dict[str, JobState], job_name: str) -> dict[str, JobState]:
+    """Selects the jobs of one pipeline phase from a tracker registry snapshot.
 
     Args:
-        phase_names: The phase job names to order.
-        single_recording: Determines whether to apply the single-recording or the multi-recording phase chain.
+        registry: The point-in-time job registry read from the tracker.
+        job_name: The name of the phase whose jobs are selected.
 
     Returns:
-        The phase job names in pipeline execution order. Names outside the phase model are appended alphabetically.
+        The state of every job carrying the requested phase name, keyed by that job's identifier.
     """
-    phases = SINGLE_RECORDING_PHASES if single_recording else MULTI_RECORDING_PHASES
-    execution_order = {str(phase.job_name): index for index, phase in enumerate(phases)}
-    known = [name for name in phase_names if name in execution_order]
-    unknown = [name for name in phase_names if name not in execution_order]
-    return sorted(known, key=lambda name: execution_order[name]) + sorted(unknown)
-
-
-def _resolve_class_allocation(
-    resource_class: _ResourceClass,
-    *,
-    budget: int,
-    available_memory: float | None,
-    job_count: int,
-    workers_per_job: int | None,
-    max_parallel_jobs: int | None,
-) -> tuple[int, int]:
-    """Resolves the per-job worker count and the concurrency cap of one resource class.
-
-    Notes:
-        A class with a fixed concurrency cap describes I/O-bound work whose throughput does not follow the core count,
-        so it keeps its measured allocation and ignores both overrides. Every other class takes its measured worker
-        count, bounds its concurrency by the CPU budget, and bounds it further by the available system memory when the
-        class declares a per-job memory footprint.
-
-        Every cap resolved here bounds one class in isolation, because a class cannot know which other classes will be
-        dispatching alongside it. The dispatcher therefore holds the sum of the cores committed by every class inside
-        the same CPU budget at run time.
-
-    Args:
-        resource_class: The resource class to resolve the allocation for.
-        budget: The number of CPU cores available to the session after reserving system cores.
-        available_memory: The available system memory in gigabytes, or None when the platform does not report it.
-        job_count: The number of jobs of this class in the session, which caps the useful concurrency.
-        workers_per_job: The requested CPU cores per job, -1 to request every available core, or None to accept
-            the class default.
-        max_parallel_jobs: The requested concurrency cap, -1 to lift the cap, or None to accept the derived cap.
-
-    Returns:
-        A (workers_per_job, max_parallel_jobs) tuple for this resource class.
-    """
-    if resource_class.fixed_parallel_jobs is not None:
-        workers = resource_class.workers_per_job
-        return workers, min(resource_class.fixed_parallel_jobs, max(1, job_count))
-
-    if workers_per_job is None:
-        workers = resource_class.workers_per_job
-    elif workers_per_job == ALL_CORES_REQUEST:
-        workers = budget
-    else:
-        workers = workers_per_job
-
-    # An all-cores concurrency request lifts the derived cap, leaving the job count as the only bound.
-    if max_parallel_jobs == ALL_CORES_REQUEST:
-        return workers, max(1, job_count)
-
-    if max_parallel_jobs is not None:
-        return workers, max_parallel_jobs
-
-    capacity = max(1, budget // workers)
-    if resource_class.memory_gigabytes_per_job > 0 and available_memory is not None:
-        capacity = min(capacity, max(1, int(available_memory // resource_class.memory_gigabytes_per_job)))
-
-    return workers, min(capacity, max(1, job_count))
-
-
-def _resolve_available_memory_gigabytes() -> float | None:
-    """Resolves the amount of system memory that new allocations can claim, in gigabytes.
-
-    Notes:
-        On Linux the value comes from the MemAvailable counter, which counts the reclaimable page cache. The POSIX
-        SC_AVPHYS_PAGES counter is not used there because it reports MemFree instead, which collapses once registration
-        fills the page cache with the plane binaries it memory-maps. That would throttle the memory-bound classes to a
-        near-serial concurrency on a machine that is not actually short of memory.
-
-        Hosts without the Linux counter, such as macOS, fall back to the POSIX page counters. Platforms without either
-        report no value, and the memory-bound resource classes then bound their concurrency by the CPU budget alone.
-
-        The value is sampled once, when the execution session starts. MemAvailable already discounts the page cache
-        that the session itself will fill, so the sample stays representative for the lifetime of the session.
-
-    Returns:
-        The available system memory in gigabytes, or None when the platform does not report it.
-    """
-    linux_available = _read_linux_available_memory_gigabytes()
-    if linux_available is not None:
-        return linux_available
-
-    try:
-        available_pages = os.sysconf("SC_AVPHYS_PAGES")
-        page_size = os.sysconf("SC_PAGE_SIZE")
-    except AttributeError, OSError, ValueError:
-        return None
-
-    if available_pages <= 0 or page_size <= 0:
-        return None
-
-    return (available_pages * page_size) / _BYTES_PER_GIGABYTE
-
-
-def _read_linux_available_memory_gigabytes() -> float | None:
-    """Reads the Linux MemAvailable counter and converts it to gigabytes.
-
-    Returns:
-        The memory that new allocations can claim, in gigabytes, or None when the host does not expose the counter or
-        the counter cannot be parsed.
-    """
-    try:
-        memory_info = _MEMORY_INFO_PATH.read_text()
-    except OSError:
-        return None
-
-    for line in memory_info.splitlines():
-        if not line.startswith(_AVAILABLE_MEMORY_KEY):
-            continue
-        fields = line.split()
-        if len(fields) < _AVAILABLE_MEMORY_FIELDS:
-            return None
-        try:
-            available_kibibytes = int(fields[1])
-        except ValueError:
-            return None
-        if available_kibibytes <= 0:
-            return None
-        return available_kibibytes / _KIBIBYTES_PER_GIGABYTE
-
-    return None
-
-
-def _resolve_prerequisite_job_ids(
-    registry: dict[str, JobState], job_id: str, *, single_recording: bool
-) -> tuple[list[str], str | None]:
-    """Resolves the tracker job IDs that must succeed before the target job can run.
-
-    Notes:
-        The single-recording chain runs binarization to registration to processing to combination and the
-        multi-recording chain runs discovery to extraction. Each job depends on its immediate predecessor only, because
-        a succeeded predecessor already implies the phases above it. Registration and processing pair up per plane, so
-        a processing job depends only on the registration job carrying the same specifier.
-
-        A prerequisite phase that the tracker does not contain is reported as an error rather than treated as
-        satisfied, which prevents an incompletely initialized tracker from admitting a job whose input never exists.
-
-    Args:
-        registry: The point-in-time job registry of the tracker that owns the target job.
-        job_id: The unique hexadecimal identifier of the job to resolve the prerequisites for.
-        single_recording: Determines whether to apply single-recording or multi-recording prerequisite rules.
-
-    Returns:
-        A tuple of the prerequisite job IDs and an error message. The message is None unless the target job itself is
-        not registered in the tracker or its prerequisite phase is absent from the tracker.
-    """
-    job_state = registry.get(job_id)
-    if job_state is None:
-        message = (
-            f"Unable to resolve the prerequisites for job {job_id}. The job is not registered in the tracker that "
-            f"was provided for it."
-        )
-        return [], message
-
-    # Reads the dependency from the exported phase model, so the rule the interface layer enforces and the rule the
-    # phase model publishes to external schedulers cannot drift apart.
-    phases = SINGLE_RECORDING_PHASES if single_recording else MULTI_RECORDING_PHASES
-    phase = {str(entry.job_name): entry for entry in phases}.get(job_state.job_name)
-    if phase is None or phase.prerequisite is None:
-        return [], None
-
-    specifier = job_state.specifier if phase.prerequisite_scope == PrerequisiteScope.MATCHING_SPECIFIER else None
-    return _collect_phase_job_ids(
-        registry=registry,
-        job_name=phase.prerequisite,
-        specifier=specifier,
-        dependent_job_id=job_id,
-    )
-
-
-def _collect_phase_job_ids(
-    registry: dict[str, JobState], job_name: str, specifier: str | None, dependent_job_id: str
-) -> tuple[list[str], str | None]:
-    """Collects the tracker job IDs belonging to a prerequisite phase and reports an absent phase.
-
-    Args:
-        registry: The point-in-time job registry of the tracker that owns the dependent job.
-        job_name: The name of the prerequisite phase to collect the jobs of.
-        specifier: The specifier the prerequisite job must carry, or None to collect every job of the phase.
-        dependent_job_id: The identifier of the job that depends on this phase, used in the error message.
-
-    Returns:
-        A tuple of the matching job IDs and an error message, where the message is None unless the phase has no
-        matching jobs.
-    """
-    matches = [
-        candidate_id
-        for candidate_id, state in registry.items()
-        if state.job_name == job_name and (specifier is None or state.specifier == specifier)
-    ]
-
-    if not matches:
-        scope = "" if specifier is None else f" with specifier '{specifier}'"
-        message = (
-            f"Unable to execute job {dependent_job_id}. Its prerequisite '{job_name}' phase{scope} is not registered "
-            f"in the tracker, so the prerequisite can never be satisfied. Re-run the prepare tool for this recording "
-            f"or dataset to register the missing phase."
-        )
-        return [], message
-
-    return matches, None
-
-
-def _validate_job_prerequisites(
-    tracker: ProcessingTracker, job_id: str, *, single_recording: bool, submitted_job_ids: frozenset[str]
-) -> str | None:
-    """Validates that a job's prerequisites either already succeeded or arrive with the same submission.
-
-    The tracker is the authoritative source for phase completion. Files on disk may be corrupt or incomplete even if
-    they exist, and the tracker only marks SUCCEEDED when processing is confirmed complete. A prerequisite that is
-    submitted alongside the dependent job passes validation because the execution manager admits the dependent job only
-    after that prerequisite actually succeeds.
-
-    Args:
-        tracker: The ProcessingTracker instance for the job's recording or dataset.
-        job_id: The unique hexadecimal job identifier to validate.
-        single_recording: Determines whether to apply single-recording or multi-recording prerequisite rules.
-        submitted_job_ids: The identifiers of every job submitted against this tracker in the same call.
-
-    Returns:
-        None if all prerequisites are satisfied or pending in this submission, or an error message string describing
-        the unmet prerequisite.
-    """
-    registry = tracker.snapshot()
-    prerequisite_ids, missing_message = _resolve_prerequisite_job_ids(
-        registry=registry, job_id=job_id, single_recording=single_recording
-    )
-    if missing_message is not None:
-        return missing_message
-
-    for prerequisite_id in prerequisite_ids:
-        prerequisite_state = registry[prerequisite_id]
-        if prerequisite_state.status == ProcessingStatus.SUCCEEDED or prerequisite_id in submitted_job_ids:
-            continue
-        return (
-            f"Unable to execute job {job_id}. Its prerequisite '{prerequisite_state.job_name}' job "
-            f"{prerequisite_id} has not succeeded and is not part of this submission."
-        )
-
-    return None
-
-
-def _pipeline_worker(
-    configuration_path: Path,
-    job_id: str,
-    tracker_path: Path,
-    *,
-    single_recording: bool = True,
-    workers: int | None = None,
-) -> None:
-    """Executes a single pipeline job identified by its job ID.
-
-    Calls the appropriate pipeline function in REMOTE mode, passing the job_id so the pipeline reads the job definition
-    from the ProcessingTracker and updates tracker state on completion or failure. After the pipeline returns or raises,
-    verifies that the tracker reached a terminal state and marks the job as failed if the pipeline terminated without
-    updating the tracker.
-
-    Notes:
-        A remote invocation runs exactly one job, so the allocation the execution manager resolved for that job's
-        resource class is given to every stage parameter of the pipeline. Only the parameter of the executed stage is
-        read, and a combination job reads none of them because that stage takes no worker allocation.
-
-    Args:
-        configuration_path: The path to the recording or dataset configuration file.
-        job_id: The unique hexadecimal job identifier registered in the ProcessingTracker.
-        tracker_path: The path to the ProcessingTracker file for this job.
-        single_recording: Determines whether to call the single-recording or multi-recording pipeline.
-        workers: The number of parallel workers to allocate to this job. A value of None makes the pipeline apply the
-            measured default for the job's stage.
-    """
-    try:
-        if single_recording:
-            run_single_recording_pipeline(
-                configuration_path=configuration_path,
-                job_id=job_id,
-                binarization_workers=workers,
-                registration_workers=workers,
-                processing_workers=workers,
-            )
-        else:
-            run_multi_recording_pipeline(
-                configuration_path=configuration_path,
-                job_id=job_id,
-                discovery_workers=workers,
-                extraction_workers=workers,
-            )
-    except Exception:  # noqa: S110 - Pipeline may have persisted failure via tracker.fail_job() before re-raising.
-        pass
-    finally:
-        tracker = ProcessingTracker(file_path=tracker_path)
-        if tracker.get_job_status(job_id=job_id) not in (ProcessingStatus.SUCCEEDED, ProcessingStatus.FAILED):
-            tracker.fail_job(
-                job_id=job_id,
-                error_message="Unable to complete job. Worker terminated without reaching a terminal state.",
-            )
-
-
-def _job_execution_manager() -> None:
-    """Admits jobs whose prerequisites succeeded and dispatches them under their resource class concurrency caps.
-
-    Runs as a daemon thread, polling at 1-second intervals.
-
-    Notes:
-        Every polling cycle reaps finished worker threads, scans the admission pool against a fresh snapshot of each
-        tracker, and then dispatches from every resource class queue up to that class's cap. A job is admitted the
-        moment its own prerequisites succeed on its own tracker, so each job follows the progress of its own recording.
-
-        A job whose prerequisite failed is marked FAILED on the cycle that observes the failure, and a session that can
-        make no further progress fails everything it still holds. Both outcomes clear the session state, so the manager
-        always terminates.
-    """
-    global _job_execution_state
-
-    timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
-
-    while True:
-        state = _job_execution_state
-        if state is None:
-            return
-
-        with state.lock:
-            _reap_completed_threads(state=state)
-            admitted = _admit_ready_jobs(state=state)
-            dispatched = _dispatch_admitted_jobs(state=state)
-
-            queued = any(pending_queue for pending_queue in state.pending_queues.values())
-            active = any(threads for threads in state.active_threads.values())
-
-            if not state.admission_pool and not queued and not active:
-                _job_execution_state = None
-                return
-
-            # Nothing is running, nothing is queued, and this cycle changed nothing, so the jobs still held in the
-            # admission pool depend on work that this session cannot perform.
-            if not queued and not active and not admitted and not dispatched:
-                _fail_pending_jobs(jobs=state.admission_pool, message=_UNREACHABLE_PREREQUISITE_MESSAGE)
-                state.admission_pool.clear()
-                _job_execution_state = None
-                return
-
-        timer.delay(delay=1000, allow_sleep=True)
-
-
-def _reap_completed_threads(state: _JobExecutionState) -> None:
-    """Removes the finished worker threads from every resource class, freeing that class's concurrency.
-
-    Args:
-        state: The current job execution state, accessed under its lock.
-    """
-    for active_threads in state.active_threads.values():
-        completed_keys = [key for key, thread in active_threads.items() if not thread.is_alive()]
-        for key in completed_keys:
-            active_threads.pop(key, None)
-
-
-def _admit_ready_jobs(state: _JobExecutionState) -> bool:
-    """Moves every admission-pool job whose prerequisites succeeded into its resource class queue.
-
-    Notes:
-        Each tracker is snapshotted once per scan and the snapshot is reused for every job that tracker owns, which
-        keeps a large batch to one tracker read per recording per polling cycle. Jobs whose prerequisites failed or are
-        absent from the tracker are marked FAILED here, so they leave the pool on the cycle that detects the failure.
-        Each of them records the reason resolved for it, so a missing prerequisite phase is distinguishable from a
-        failed one.
-
-    Args:
-        state: The current job execution state, accessed under its lock.
-
-    Returns:
-        True if at least one job left the admission pool during this scan, False otherwise.
-    """
-    if not state.admission_pool:
-        return False
-
-    registries: dict[Path, dict[str, JobState]] = {}
-    remaining: list[_PendingJob] = []
-    aborted: list[tuple[_PendingJob, str]] = []
-    admitted = False
-
-    for pending_job in state.admission_pool:
-        registry = registries.get(pending_job.tracker_path)
-        if registry is None:
-            registry = ProcessingTracker(file_path=pending_job.tracker_path).snapshot()
-            registries[pending_job.tracker_path] = registry
-
-        decision, abort_message = _resolve_job_admission(registry=registry, pending_job=pending_job)
-        if decision == _AdmissionDecisions.ADMIT:
-            state.pending_queues[pending_job.resource_class.name].append(pending_job)
-            admitted = True
-        elif decision == _AdmissionDecisions.ABORT:
-            aborted.append((pending_job, abort_message))
-        else:
-            remaining.append(pending_job)
-
-    state.admission_pool = remaining
-
-    # Records the reason resolved for each aborted job, because a job blocked by a missing prerequisite phase needs a
-    # different remedy from one blocked by a failed phase.
-    for aborted_job, aborted_message in aborted:
-        _fail_pending_jobs(jobs=[aborted_job], message=aborted_message)
-
-    return admitted or bool(aborted)
-
-
-def _resolve_job_admission(registry: dict[str, JobState], pending_job: _PendingJob) -> tuple[_AdmissionDecisions, str]:
-    """Decides whether one queued job may start, must keep waiting, or can never run.
-
-    Args:
-        registry: The point-in-time job registry of the tracker that owns the job.
-        pending_job: The queued job to evaluate.
-
-    Returns:
-        A tuple of the admission decision for the job and the reason to record when that decision is ABORT. The reason
-        is an empty string for every other decision.
-    """
-    prerequisite_ids, missing_message = _resolve_prerequisite_job_ids(
-        registry=registry, job_id=pending_job.job_id, single_recording=pending_job.single_recording
-    )
-    if missing_message is not None:
-        return _AdmissionDecisions.ABORT, missing_message
-
-    statuses = [registry[prerequisite_id].status for prerequisite_id in prerequisite_ids]
-    if any(status == ProcessingStatus.FAILED for status in statuses):
-        return _AdmissionDecisions.ABORT, _PREREQUISITE_FAILURE_MESSAGE
-    if all(status == ProcessingStatus.SUCCEEDED for status in statuses):
-        return _AdmissionDecisions.ADMIT, ""
-
-    return _AdmissionDecisions.WAIT, ""
-
-
-def _committed_cores(state: _JobExecutionState) -> int:
-    """Sums the CPU cores that the currently running jobs of every resource class hold.
-
-    Args:
-        state: The current job execution state, accessed under its lock.
-
-    Returns:
-        The number of cores the session has committed to running jobs.
-    """
-    return sum(len(threads) * state.class_workers[class_name] for class_name, threads in state.active_threads.items())
-
-
-def _dispatch_admitted_jobs(state: _JobExecutionState) -> bool:
-    """Starts worker threads for admitted jobs up to each resource class concurrency cap and the session CPU budget.
-
-    Notes:
-        A per-class concurrency cap bounds one class in isolation, and every class dispatches during the same cycle, so
-        the caps alone would let the classes oversubscribe the machine between them. This function therefore also holds
-        the sum of the cores committed by every running job inside the session CPU budget.
-
-        A session whose classes all hold nothing dispatches one job regardless of the budget, so a job whose worker
-        count exceeds the whole budget still runs instead of stalling the session forever.
-
-    Args:
-        state: The current job execution state, accessed under its lock.
-
-    Returns:
-        True if at least one worker thread started during this cycle, False otherwise.
-    """
-    dispatched = False
-
-    for class_name, pending_queue in state.pending_queues.items():
-        active_threads = state.active_threads[class_name]
-        capacity = state.class_capacities[class_name]
-        workers = state.class_workers[class_name]
-        while len(active_threads) < capacity and pending_queue:
-            committed = _committed_cores(state=state)
-            if committed > 0 and committed + workers > state.cpu_budget:
-                break
-
-            pending_job = pending_queue.pop(0)
-            thread = Thread(
-                target=_pipeline_worker,
-                kwargs={
-                    "configuration_path": pending_job.configuration_path,
-                    "job_id": pending_job.job_id,
-                    "tracker_path": pending_job.tracker_path,
-                    "single_recording": pending_job.single_recording,
-                    "workers": pending_job.resolved_workers,
-                },
-                daemon=True,
-            )
-            thread.start()
-            active_threads[pending_job.dispatch_key] = thread
-            dispatched = True
-
-    return dispatched
-
-
-def _fail_pending_jobs(jobs: list[_PendingJob], message: str) -> None:
-    """Marks every provided job as failed with the given reason recorded on its tracker.
-
-    Args:
-        jobs: The jobs that can no longer run.
-        message: The error message to record for each job.
-    """
-    for job in jobs:
-        tracker = ProcessingTracker(file_path=job.tracker_path)
-        tracker.start_job(job_id=job.job_id)
-        tracker.fail_job(job_id=job.job_id, error_message=message)
+    return {job_id: job_state for job_id, job_state in registry.items() if job_state.job_name == job_name}
 
 
 def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> dict[str, object]:
@@ -2667,60 +1854,65 @@ def _read_single_recording_tracker(tracker_path: Path, recording_path: Path) -> 
         A dictionary containing a success flag, the recording path, tracker path, per-phase job status, summary
         counts, and an overall synthesized status string.
     """
-    tracker = ProcessingTracker(file_path=tracker_path)
-    summary = tracker.get_summary()
-    registry = tracker.snapshot()
+    # Reads the whole registry once and derives every phase grouping, the counts, and the overall status from that one
+    # snapshot. Asking the tracker for each phase separately costs one lock acquisition and one YAML parse per
+    # question, which the batch overview then pays once per discovered tracker across a whole data root.
+    registry = ProcessingTracker(file_path=tracker_path).snapshot()
 
-    binarize_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.BINARIZE)
-    register_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.REGISTER)
-    process_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.PROCESS)
-    combine_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.COMBINE)
+    binarize_jobs = _group_jobs_by_name(registry=registry, job_name=SingleRecordingJobNames.BINARIZE)
+    register_jobs = _group_jobs_by_name(registry=registry, job_name=SingleRecordingJobNames.REGISTER)
+    process_jobs = _group_jobs_by_name(registry=registry, job_name=SingleRecordingJobNames.PROCESS)
+    combine_jobs = _group_jobs_by_name(registry=registry, job_name=SingleRecordingJobNames.COMBINE)
 
     binarize_status: dict[str, object] = {}
-    for job_id in binarize_jobs:
-        job_info = registry[job_id]
-        binarize_status["status"] = job_info.status.name.lower()
-        if job_info.error_message:
-            binarize_status["error"] = job_info.error_message
+    for job_state in binarize_jobs.values():
+        binarize_status["status"] = job_state.status.name.lower()
+        if job_state.error_message:
+            binarize_status["error"] = job_state.error_message
 
     register_status: dict[str, object] = {
-        specifier: registry[job_id].status.name.lower() for job_id, (_, specifier) in register_jobs.items()
+        job_state.specifier: job_state.status.name.lower() for job_state in register_jobs.values()
     }
 
     process_status: dict[str, object] = {
-        specifier: registry[job_id].status.name.lower() for job_id, (_, specifier) in process_jobs.items()
+        job_state.specifier: job_state.status.name.lower() for job_state in process_jobs.values()
     }
 
     combine_status: dict[str, object] = {}
-    for job_id in combine_jobs:
-        job_info = registry[job_id]
-        combine_status["status"] = job_info.status.name.lower()
-        if job_info.error_message:
-            combine_status["error"] = job_info.error_message
+    for job_state in combine_jobs.values():
+        combine_status["status"] = job_state.status.name.lower()
+        if job_state.error_message:
+            combine_status["error"] = job_state.error_message
 
     # Synthesizes overall status from tracker state, reporting the furthest phase the recording has reached.
-    if tracker.complete:
+    statuses = [job_state.status for job_state in registry.values()]
+    if statuses and all(status == ProcessingStatus.SUCCEEDED for status in statuses):
         overall_status = "completed"
-    elif tracker.encountered_error:
+    elif any(status == ProcessingStatus.FAILED for status in statuses):
         overall_status = "failed"
-    elif combine_jobs and any(registry[job_id].status == ProcessingStatus.RUNNING for job_id in combine_jobs):
+    elif combine_jobs and any(job_state.status == ProcessingStatus.RUNNING for job_state in combine_jobs.values()):
         overall_status = "combining"
     elif process_jobs and any(
-        registry[job_id].status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED) for job_id in process_jobs
+        job_state.status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
+        for job_state in process_jobs.values()
     ):
         overall_status = "processing"
     elif register_jobs and any(
-        registry[job_id].status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED) for job_id in register_jobs
+        job_state.status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
+        for job_state in register_jobs.values()
     ):
         overall_status = "registering"
     elif binarize_jobs and any(
-        registry[job_id].status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED) for job_id in binarize_jobs
+        job_state.status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
+        for job_state in binarize_jobs.values()
     ):
         overall_status = "binarizing"
     else:
         overall_status = "scheduled"
 
-    summary_counts: dict[str, int] = {status.name.lower(): count for status, count in summary.items()}
+    summary_counts: dict[str, int] = {
+        status.name.lower(): sum(1 for job_status in statuses if job_status == status) for status in ProcessingStatus
+    }
 
     return {
         "success": True,
@@ -2747,41 +1939,43 @@ def _read_multi_recording_tracker(tracker_path: Path) -> dict[str, object]:
         A dictionary containing the tracker path, per-phase job status, summary counts, and an overall synthesized
         status string.
     """
-    tracker = ProcessingTracker(file_path=tracker_path)
-    summary = tracker.get_summary()
-    registry = tracker.snapshot()
+    registry = ProcessingTracker(file_path=tracker_path).snapshot()
 
-    discover_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.DISCOVER)
-    extract_jobs = tracker.find_jobs(job_name=MultiRecordingJobNames.EXTRACT)
+    discover_jobs = _group_jobs_by_name(registry=registry, job_name=MultiRecordingJobNames.DISCOVER)
+    extract_jobs = _group_jobs_by_name(registry=registry, job_name=MultiRecordingJobNames.EXTRACT)
 
     discover_status: dict[str, object] = {}
-    for job_id in discover_jobs:
-        job_info = registry[job_id]
-        discover_status["status"] = job_info.status.name.lower()
-        if job_info.error_message:
-            discover_status["error"] = job_info.error_message
+    for job_state in discover_jobs.values():
+        discover_status["status"] = job_state.status.name.lower()
+        if job_state.error_message:
+            discover_status["error"] = job_state.error_message
 
     extract_status: dict[str, object] = {
-        specifier: registry[job_id].status.name.lower() for job_id, (_, specifier) in extract_jobs.items()
+        job_state.specifier: job_state.status.name.lower() for job_state in extract_jobs.values()
     }
 
     # Synthesizes overall status from tracker state.
-    if tracker.complete:
+    statuses = [job_state.status for job_state in registry.values()]
+    if statuses and all(status == ProcessingStatus.SUCCEEDED for status in statuses):
         overall_status = "completed"
-    elif tracker.encountered_error:
+    elif any(status == ProcessingStatus.FAILED for status in statuses):
         overall_status = "failed"
     elif extract_jobs and any(
-        registry[job_id].status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED) for job_id in extract_jobs
+        job_state.status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
+        for job_state in extract_jobs.values()
     ):
         overall_status = "extracting"
     elif discover_jobs and any(
-        registry[job_id].status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED) for job_id in discover_jobs
+        job_state.status in (ProcessingStatus.RUNNING, ProcessingStatus.SUCCEEDED)
+        for job_state in discover_jobs.values()
     ):
         overall_status = "discovering"
     else:
         overall_status = "scheduled"
 
-    summary_counts: dict[str, int] = {status.name.lower(): count for status, count in summary.items()}
+    summary_counts: dict[str, int] = {
+        status.name.lower(): sum(1 for job_status in statuses if job_status == status) for status in ProcessingStatus
+    }
 
     return {
         "tracker_path": str(tracker_path),
@@ -2814,6 +2008,12 @@ def _delete_file(path: Path, deleted: list[str], errors: list[str]) -> None:
 def _delete_directory(path: Path, deleted: list[str], errors: list[str]) -> None:
     """Recursively deletes a directory and records the result.
 
+    Notes:
+        The ataraxis directory remover unlinks the files of each directory in parallel and retries every emptied
+        directory whose removal the host refuses, which suits a tree of memory-mapped arrays another process may still
+        hold open. It reports a directory it could not remove through a warning and returns rather than raising, so
+        the path is re-examined afterwards to decide between the deleted and the failed list.
+
     Args:
         path: The filesystem path to the directory to delete.
         deleted: The list to append the deleted directory path to on success.
@@ -2822,10 +2022,16 @@ def _delete_directory(path: Path, deleted: list[str], errors: list[str]) -> None
     if not path.exists():
         return
     try:
-        shutil.rmtree(path)
-        deleted.append(str(path))
+        delete_directory(directory_path=path)
     except Exception as error:
         errors.append(f"Unable to delete directory {path}: {error}")
+        return
+
+    if path.exists():
+        errors.append(f"Unable to delete directory {path}: the directory could not be removed after every attempt.")
+        return
+
+    deleted.append(str(path))
 
 
 def _load_runtime_yaml(path: Path) -> dict[str, Any] | None:

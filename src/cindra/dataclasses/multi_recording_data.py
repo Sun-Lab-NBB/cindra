@@ -147,7 +147,7 @@ class MultiRecordingRegistrationData:
             output_path: The directory in which to create the ``registration_arrays/`` subdirectory.
         """
         registration_directory = output_path / "registration_arrays"
-        ensure_directory_exists(path=registration_directory)
+        ensure_directory_exists(path=registration_directory, is_file=False)
 
         if self.deform_field_y is not None and not is_memory_mapped(self.deform_field_y):
             np.save(file=registration_directory / "deform_field_y.npy", arr=self.deform_field_y)
@@ -513,7 +513,7 @@ class MultiRecordingRuntimeData(YamlConfig):
         Args:
             output_path: The directory in which to save the multi_recording_runtime_data.yaml file and array files.
         """
-        ensure_directory_exists(path=output_path)
+        ensure_directory_exists(path=output_path, is_file=False)
         self.output_path = output_path
 
         self.registration.save_arrays(output_path=output_path)

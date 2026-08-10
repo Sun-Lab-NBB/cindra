@@ -96,12 +96,12 @@ class TestPcaDenoise:
         """Verifies that parallel execution produces finite results."""
         generator = np.random.default_rng(seed=42)
         frames = generator.standard_normal((20, 32, 32)).astype(np.float32)
-        pca_denoise(frames=frames, block_size=(32, 32), component_fraction=0.5, parallel_workers=-1)
+        pca_denoise(frames=frames, block_size=(32, 32), component_fraction=0.5, parallel_workers=4)
         assert np.isfinite(frames).all()
 
-    @pytest.mark.parametrize("parallel_workers", [0, -2, -100])
+    @pytest.mark.parametrize("parallel_workers", [0, -1, -2, -100])
     def test_invalid_worker_count_is_rejected(self, parallel_workers: int) -> None:
-        """Verifies that zero and every negative count other than the all-cores request raise an error."""
+        """Verifies that every non-positive worker count raises an error."""
         frames = np.ones((20, 32, 32), dtype=np.float32)
         with pytest.raises(ValueError, match=r"must be a positive\s+integer"):
             pca_denoise(frames=frames, block_size=(32, 32), component_fraction=0.5, parallel_workers=parallel_workers)

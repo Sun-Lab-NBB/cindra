@@ -16,10 +16,10 @@ from cindra.io import (
     resolve_registration_marker_path,
     resolve_single_recording_contexts,
 )
-from cindra.allocation import SingleRecordingJobNames
 from cindra.io.context import PARAMETERS_FILENAME
 from cindra.dataclasses import RuntimeContext, SingleRecordingConfiguration
-from cindra.pipelines.pipeline import (
+from cindra.orchestration import SingleRecordingJobNames
+from cindra.orchestration.pipeline import (
     execute_single_recording_job,
     _execute_single_recording_job,
     run_single_recording_pipeline,
@@ -205,6 +205,17 @@ class TestRunSingleRecordingPipeline:
         combined = output_directory / "cindra" / "combined_metadata.npz"
         assert combined.exists()
 
+    def test_out_of_range_target_plane_raises(self, tmp_path: Path) -> None:
+        """Verifies that a target plane the recording does not hold raises a ValueError before the tracker is built."""
+        configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path)
+
+        # The synthetic recording holds a single plane, so index 1 falls outside the resolved plane range.
+        with pytest.raises(ValueError, match="The requested 'target_plane' must be"):
+            run_single_recording_pipeline(configuration_path=configuration_path, register=True, target_plane=1)
+
+        # The guard fires before align_jobs, so the pipeline leaves no tracker file behind.
+        assert not (output_directory / "cindra" / "single_recording_tracker.yaml").exists()
+
     def test_remote_mode_executes_individual_jobs(self, tmp_path: Path) -> None:
         """Verifies that remote mode executes each of the four phase jobs addressed by its own job ID."""
         configuration_path, output_directory = _prepare_pipeline_inputs(tmp_path)
@@ -243,7 +254,7 @@ class TestRunSingleRecordingPipeline:
         # Bootstraps the runtime data so that the remote resolution reaches the job identifier validation.
         run_single_recording_pipeline(configuration_path=configuration_path, binarize=True)
 
-        with pytest.raises(ValueError, match="does not match"):
+        with pytest.raises(ValueError, match="must name a job the pipeline could produce"):
             run_single_recording_pipeline(configuration_path=configuration_path, job_id="deadbeefdeadbeef")
 
     def test_missing_configuration_file_raises(self, tmp_path: Path) -> None:
