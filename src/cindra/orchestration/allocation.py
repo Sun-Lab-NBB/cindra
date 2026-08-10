@@ -73,11 +73,16 @@ _STAGE_WORKER_DEFAULTS: dict[SingleRecordingJobNames | MultiRecordingJobNames, i
     SingleRecordingJobNames.BINARIZE: BINARIZATION_WORKERS,
     SingleRecordingJobNames.REGISTER: REGISTRATION_WORKERS,
     SingleRecordingJobNames.PROCESS: PROCESSING_WORKERS,
+    SingleRecordingJobNames.COMBINE: COMBINATION_WORKERS,
     MultiRecordingJobNames.DISCOVER: DISCOVERY_WORKERS,
     MultiRecordingJobNames.EXTRACT: EXTRACTION_WORKERS,
 }
-"""Maps every single and multi-recording pipeline stage that consumes a worker allocation to its measured default
-worker count."""
+"""Maps every single and multi-recording pipeline stage to its measured default worker count.
+
+Notes:
+    The combination stage carries the single core its serial merge occupies rather than being absent, so a caller
+    resolving an allocation never has to special-case one of the six stages.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,9 +182,8 @@ def resolve_stage_workers(
         worker resolver holds back for system use. A positive requested count is honored exactly. A requested count of
         zero, or any negative count other than -1, is rejected.
 
-        The single-recording binarization, registration, and processing stages resolve through this function, as do the
-        multi-recording discovery and extraction stages. Passing the single-recording combination stage's job name
-        raises an error, because that stage takes no worker allocation.
+        Every pipeline stage resolves through this function. The combination stage takes no worker argument of its
+        own, so its default is the single core its serial merge occupies.
 
     Args:
         job_name: The single or multi-recording pipeline stage to allocate workers for.
@@ -190,14 +194,14 @@ def resolve_stage_workers(
         The number of workers to allocate to the stage, always at least 1.
 
     Raises:
-        ValueError: If job_name does not name a stage that consumes a worker allocation, or if requested_workers is
-            zero or is a negative value other than -1.
+        ValueError: If job_name does not name a pipeline stage, or if requested_workers is zero or is a negative value
+            other than -1.
     """
     default_workers: int | None = _STAGE_WORKER_DEFAULTS.get(job_name)
     if default_workers is None:
         message = (
             f"Unable to resolve the worker count for the '{job_name}' processing stage. The input job name does not "
-            f"name a pipeline stage that consumes a worker allocation. Use one of the valid stage names: "
+            f"name a pipeline stage. Use one of the valid stage names: "
             f"{[stage.value for stage in _STAGE_WORKER_DEFAULTS]}."
         )
         console.error(message=message, error=ValueError)

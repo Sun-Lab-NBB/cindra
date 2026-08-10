@@ -97,18 +97,25 @@ class TestExplicitRequests:
             assert resolve_stage_workers(job_name=job_name, requested_workers=ALL_CORES_REQUEST) == expected
 
 
+class TestCombinationStage:
+    """Tests the allocation of the stage whose merge is serial."""
+
+    def test_combination_stage_resolves_to_its_single_core(self) -> None:
+        """Verifies that the combination stage resolves rather than forcing the caller to special-case it."""
+        assert resolve_stage_workers(job_name=SingleRecordingJobNames.COMBINE) == COMBINATION_WORKERS
+
+    def test_combination_stage_honors_an_explicit_count(self) -> None:
+        """Verifies that the combination stage follows the shared sentinel contract like every other stage."""
+        assert resolve_stage_workers(job_name=SingleRecordingJobNames.COMBINE, requested_workers=4) == 4
+
+
 class TestRejectedRequests:
     """Tests the requests the resolver rejects."""
 
-    def test_combination_stage_is_rejected(self) -> None:
-        """Verifies that the combination stage, which takes no allocation, raises rather than returning a count."""
+    def test_unknown_stage_is_rejected(self) -> None:
+        """Verifies that a name that is not a pipeline stage raises rather than returning a count."""
         with pytest.raises(ValueError, match=r"does not name a\s+pipeline\s+stage"):
-            resolve_stage_workers(job_name=SingleRecordingJobNames.COMBINE)
-
-    def test_combination_stage_is_rejected_before_the_requested_count_is_read(self) -> None:
-        """Verifies that the stage check precedes the requested-count check, so a valid count cannot mask it."""
-        with pytest.raises(ValueError, match=r"does not name a\s+pipeline\s+stage"):
-            resolve_stage_workers(job_name=SingleRecordingJobNames.COMBINE, requested_workers=8)
+            resolve_stage_workers(job_name="recording_denoise")  # type: ignore[arg-type]
 
     @pytest.mark.parametrize("requested_workers", [0, -2, -3, -100])
     def test_invalid_worker_count_is_rejected(self, requested_workers: int) -> None:

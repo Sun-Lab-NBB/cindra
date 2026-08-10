@@ -24,10 +24,7 @@ from .jobs import (
     MultiRecordingJobNames,
     SingleRecordingJobNames,
 )
-from ..layout import (
-    OUTPUT_DIRECTORY_NAME,
-    PLANE_SPECIFIER_PREFIX,
-)
+from ..layout import OUTPUT_DIRECTORY_NAME, parse_plane_specifier
 from ..pipelines import (
     process_plane,
     binarize_recording,
@@ -317,14 +314,14 @@ def dispatch_single_recording_job(
         elif job_name == SingleRecordingJobNames.REGISTER:
             register_recording_plane(
                 configuration=configuration,
-                plane_index=int(specifier.removeprefix(PLANE_SPECIFIER_PREFIX)),
+                plane_index=_resolve_job_plane_index(job_name=job_name, specifier=specifier),
                 workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
             )
 
         elif job_name == SingleRecordingJobNames.PROCESS:
             process_plane(
                 configuration=configuration,
-                plane_index=int(specifier.removeprefix(PLANE_SPECIFIER_PREFIX)),
+                plane_index=_resolve_job_plane_index(job_name=job_name, specifier=specifier),
                 workers=resolve_stage_workers(job_name=job_name, requested_workers=workers),
             )
 
@@ -465,3 +462,26 @@ def prime_dataset(configuration_path: Path) -> DatasetRecordings:
         ],
         dataset_name=configuration.recording_io.dataset_name,
     )
+
+
+def _resolve_job_plane_index(job_name: str, specifier: str) -> int:
+    """Reads the imaging plane a per-plane job's specifier names.
+
+    Args:
+        job_name: The name of the job whose specifier is read, used in the error message.
+        specifier: The job's tracker specifier.
+
+    Returns:
+        The index of the imaging plane the job processes.
+
+    Raises:
+        ValueError: If the specifier does not name an imaging plane.
+    """
+    plane_index = parse_plane_specifier(specifier=specifier)
+    if plane_index is None:
+        message = (
+            f"Unable to execute the '{job_name}' job. A per-plane job's specifier must name an imaging plane, but "
+            f"encountered '{specifier}'."
+        )
+        console.error(message=message, error=ValueError)
+    return plane_index
