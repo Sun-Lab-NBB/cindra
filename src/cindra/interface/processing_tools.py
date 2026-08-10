@@ -31,8 +31,24 @@ from ataraxis_data_structures import (
 
 from ..io import resolve_multi_recording_contexts, resolve_single_recording_contexts
 from ..layout import (
+    OUTPUT_DIRECTORY_NAME,
+    DEFORMED_MASKS_FILENAME,
+    CHANNEL_1_BINARY_FILENAME,
+    CHANNEL_2_BINARY_FILENAME,
+    COMBINED_METADATA_FILENAME,
+    DETECTION_DATA_DIRECTORY_NAME,
+    MULTI_RECORDING_DIRECTORY_NAME,
     MULTI_RECORDING_TRACKER_FILENAME,
+    REGISTRATION_DATA_DIRECTORY_NAME,
+    TRACKING_TEMPLATE_MASKS_FILENAME,
     SINGLE_RECORDING_TRACKER_FILENAME,
+    MULTI_RECORDING_ARRAYS_DIRECTORY_NAME,
+    MULTI_RECORDING_RUNTIME_DATA_FILENAME,
+    MULTI_RECORDING_CONFIGURATION_FILENAME,
+    SINGLE_RECORDING_CONFIGURATION_FILENAME,
+    DetectionImages,
+    RecordingArrays,
+    resolve_array_name,
     resolve_plane_specifier,
 )
 from ..dataclasses import MultiRecordingConfiguration, SingleRecordingConfiguration
@@ -96,7 +112,7 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
             "error": f"Unable to get recording status. Recording directory not found: {recording_path}.",
         }
 
-    single_tracker_path = recording / "cindra" / SINGLE_RECORDING_TRACKER_FILENAME
+    single_tracker_path = recording / OUTPUT_DIRECTORY_NAME / SINGLE_RECORDING_TRACKER_FILENAME
     if single_tracker_path.exists():
         single_recording_status = _read_single_recording_tracker(
             tracker_path=single_tracker_path, recording_path=recording
@@ -105,7 +121,7 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
         single_recording_status = {"status": "not_started"}
 
     multi_recording_status: dict[str, object]
-    multi_recording_base = recording / "cindra" / "multi_recording"
+    multi_recording_base = recording / OUTPUT_DIRECTORY_NAME / MULTI_RECORDING_DIRECTORY_NAME
     if multi_recording_base.exists():
         # Falls back to the tolerant scan when a subdirectory denies the strict one, so a single unreadable dataset
         # directory reports the datasets that are readable instead of failing the whole status query.
@@ -130,7 +146,7 @@ def get_recording_status_tool(recording_path: str) -> dict[str, object]:
         "success": True,
         "recording_path": str(recording),
         "single_recording": single_recording_status,
-        "multi_recording": multi_recording_status,
+        MULTI_RECORDING_DIRECTORY_NAME: multi_recording_status,
     }
 
 
@@ -348,14 +364,14 @@ def prepare_single_recording_batch_tool(
 
     for data_path, output_path in zip(valid_paths, resolved_output_paths, strict=True):
         recording_key = str(data_path)
-        cindra_root = output_path / "cindra"
+        cindra_root = output_path / OUTPUT_DIRECTORY_NAME
         tracker_path = cindra_root / SINGLE_RECORDING_TRACKER_FILENAME
 
         if tracker_path.exists():
             # Idempotent path: tracker already exists, returns current state without reinitializing.
             tracker = ProcessingTracker(file_path=tracker_path)
             registry = tracker.snapshot()
-            configuration_file_path = cindra_root / "configuration.yaml"
+            configuration_file_path = cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME
 
             binarize_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.BINARIZE)
             register_jobs = tracker.find_jobs(job_name=SingleRecordingJobNames.REGISTER)
@@ -442,7 +458,7 @@ def prepare_single_recording_batch_tool(
             recording_configuration.runtime.display_progress_bars = False
 
             cindra_root.mkdir(parents=True, exist_ok=True)
-            recording_configuration_path = cindra_root / "configuration.yaml"
+            recording_configuration_path = cindra_root / SINGLE_RECORDING_CONFIGURATION_FILENAME
 
             # Resolves plane count from configuration to build the complete job list.
             contexts = resolve_single_recording_contexts(configuration=recording_configuration)
@@ -634,7 +650,7 @@ def prepare_multi_recording_batch_tool(
             continue
 
         tracker_path = main_recording_path / MULTI_RECORDING_TRACKER_FILENAME
-        configuration_file_path = main_recording_path / "multi_recording_configuration.yaml"
+        configuration_file_path = main_recording_path / MULTI_RECORDING_CONFIGURATION_FILENAME
 
         if tracker_path.exists():
             # Idempotent path: tracker already exists, returns current state without reinitializing.
@@ -918,7 +934,7 @@ def clean_processing_output_tool(
     errors: list[str] = []
 
     if pipeline_type == "single-recording":
-        cindra_root = recording / "cindra"
+        cindra_root = recording / OUTPUT_DIRECTORY_NAME
         if not cindra_root.exists():
             return {
                 "success": False,
@@ -932,72 +948,77 @@ def clean_processing_output_tool(
             entry for entry in cindra_root.iterdir() if entry.is_dir() and entry.name.startswith("plane_")
         )
         for plane_directory in plane_directories:
-            plane_detection_directory = plane_directory / "detection_data"
+            plane_detection_directory = plane_directory / DETECTION_DATA_DIRECTORY_NAME
 
             if SingleRecordingJobNames.BINARIZE in effective_set:
-                for name in ("channel_1_data.bin", "channel_2_data.bin"):
+                for name in (CHANNEL_1_BINARY_FILENAME, CHANNEL_2_BINARY_FILENAME):
                     _delete_file(path=plane_directory / name, deleted=deleted_files, errors=errors)
                 # The mean images are created by binarization and later rewritten by both registration and processing,
                 # so binarization, the phase that creates them, owns their removal. Deleting them under a downstream
                 # phase would discard the output of the phases between it and binarization.
-                for name in ("mean_image.npy", "mean_image_channel_2.npy"):
+                for name in (
+                    DetectionImages.MEAN_IMAGE,
+                    resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True),
+                ):
                     _delete_file(path=plane_detection_directory / name, deleted=deleted_files, errors=errors)
 
             if SingleRecordingJobNames.REGISTER in effective_set:
                 # The registration directory holds bad_frames.npy, which detection reads, so it is removed only when
                 # the registration phase itself is cleaned.
-                _delete_directory(path=plane_directory / "registration_data", deleted=deleted_dirs, errors=errors)
+                _delete_directory(
+                    path=plane_directory / REGISTRATION_DATA_DIRECTORY_NAME, deleted=deleted_dirs, errors=errors
+                )
 
             if SingleRecordingJobNames.PROCESS in effective_set:
                 for name in (
-                    "enhanced_mean_image.npy",
-                    "maximum_projection.npy",
-                    "correlation_map.npy",
-                    "enhanced_mean_image_channel_2.npy",
-                    "maximum_projection_channel_2.npy",
-                    "correlation_map_channel_2.npy",
+                    DetectionImages.ENHANCED_MEAN_IMAGE,
+                    DetectionImages.MAXIMUM_PROJECTION,
+                    DetectionImages.CORRELATION_MAP,
+                    resolve_array_name(array=DetectionImages.ENHANCED_MEAN_IMAGE, second_channel=True),
+                    resolve_array_name(array=DetectionImages.MAXIMUM_PROJECTION, second_channel=True),
+                    resolve_array_name(array=DetectionImages.CORRELATION_MAP, second_channel=True),
                 ):
                     _delete_file(path=plane_detection_directory / name, deleted=deleted_files, errors=errors)
                 for name in (
-                    "roi_masks.npz",
-                    "roi_masks_channel_2.npz",
-                    "roi_statistics.npz",
-                    "roi_statistics_channel_2.npz",
-                    "cell_fluorescence.npy",
-                    "neuropil_fluorescence.npy",
-                    "subtracted_fluorescence.npy",
-                    "spikes.npy",
-                    "cell_classification.npy",
-                    "cell_fluorescence_channel_2.npy",
-                    "neuropil_fluorescence_channel_2.npy",
-                    "subtracted_fluorescence_channel_2.npy",
-                    "spikes_channel_2.npy",
-                    "cell_classification_channel_2.npy",
-                    "cell_colocalization.npy",
-                    "corrected_structural_mean_image.npy",
+                    RecordingArrays.ROI_MASKS,
+                    resolve_array_name(array=RecordingArrays.ROI_MASKS, second_channel=True),
+                    RecordingArrays.ROI_STATISTICS,
+                    resolve_array_name(array=RecordingArrays.ROI_STATISTICS, second_channel=True),
+                    RecordingArrays.CELL_FLUORESCENCE,
+                    RecordingArrays.NEUROPIL_FLUORESCENCE,
+                    RecordingArrays.SUBTRACTED_FLUORESCENCE,
+                    RecordingArrays.SPIKES,
+                    RecordingArrays.CELL_CLASSIFICATION,
+                    resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True),
+                    RecordingArrays.CELL_COLOCALIZATION,
+                    RecordingArrays.CORRECTED_STRUCTURAL_MEAN_IMAGE,
                 ):
                     _delete_file(path=plane_directory / name, deleted=deleted_files, errors=errors)
 
         if SingleRecordingJobNames.COMBINE in effective_set:
-            _delete_directory(path=cindra_root / "detection_data", deleted=deleted_dirs, errors=errors)
+            _delete_directory(path=cindra_root / DETECTION_DATA_DIRECTORY_NAME, deleted=deleted_dirs, errors=errors)
             for name in (
-                "combined_metadata.npz",
-                "roi_masks.npz",
-                "roi_masks_channel_2.npz",
-                "roi_statistics.npz",
-                "roi_statistics_channel_2.npz",
-                "cell_fluorescence.npy",
-                "neuropil_fluorescence.npy",
-                "subtracted_fluorescence.npy",
-                "spikes.npy",
-                "cell_classification.npy",
-                "cell_fluorescence_channel_2.npy",
-                "neuropil_fluorescence_channel_2.npy",
-                "subtracted_fluorescence_channel_2.npy",
-                "spikes_channel_2.npy",
-                "cell_classification_channel_2.npy",
-                "cell_colocalization.npy",
-                "corrected_structural_mean_image.npy",
+                COMBINED_METADATA_FILENAME,
+                RecordingArrays.ROI_MASKS,
+                resolve_array_name(array=RecordingArrays.ROI_MASKS, second_channel=True),
+                RecordingArrays.ROI_STATISTICS,
+                resolve_array_name(array=RecordingArrays.ROI_STATISTICS, second_channel=True),
+                RecordingArrays.CELL_FLUORESCENCE,
+                RecordingArrays.NEUROPIL_FLUORESCENCE,
+                RecordingArrays.SUBTRACTED_FLUORESCENCE,
+                RecordingArrays.SPIKES,
+                RecordingArrays.CELL_CLASSIFICATION,
+                resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
+                resolve_array_name(array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True),
+                resolve_array_name(array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True),
+                resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True),
+                resolve_array_name(array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True),
+                RecordingArrays.CELL_COLOCALIZATION,
+                RecordingArrays.CORRECTED_STRUCTURAL_MEAN_IMAGE,
             ):
                 _delete_file(path=cindra_root / name, deleted=deleted_files, errors=errors)
 
@@ -1009,8 +1030,8 @@ def clean_processing_output_tool(
                 "error": "Unable to clean processing output. The 'dataset' parameter is required for multi-recording.",
             }
 
-        cindra_root = recording / "cindra"
-        dataset_path = cindra_root / "multi_recording" / dataset
+        cindra_root = recording / OUTPUT_DIRECTORY_NAME
+        dataset_path = cindra_root / MULTI_RECORDING_DIRECTORY_NAME / dataset
         if not dataset_path.exists():
             return {
                 "success": False,
@@ -1018,7 +1039,7 @@ def clean_processing_output_tool(
             }
 
         # Loads runtime data to discover all recording output paths.
-        runtime = _load_runtime_yaml(path=dataset_path / "multi_recording_runtime_data.yaml")
+        runtime = _load_runtime_yaml(path=dataset_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         if runtime is None:
             return {
                 "success": False,
@@ -1034,33 +1055,35 @@ def clean_processing_output_tool(
                 continue
 
             if MultiRecordingJobNames.DISCOVER in effective_set:
-                _delete_directory(path=output_path / "registration_arrays", deleted=deleted_dirs, errors=errors)
+                _delete_directory(
+                    path=output_path / MULTI_RECORDING_ARRAYS_DIRECTORY_NAME, deleted=deleted_dirs, errors=errors
+                )
                 for name in (
-                    "registration_deformed_masks.npz",
+                    DEFORMED_MASKS_FILENAME,
                     "registration_deformed_masks_channel_2.npz",
-                    "tracking_template_masks.npz",
+                    TRACKING_TEMPLATE_MASKS_FILENAME,
                     "tracking_template_masks_channel_2.npz",
                     # Backward-projected per-recording mask and statistics files are produced by the final
                     # discovery step (project_templates_to_recordings), not by extraction, and deleting them under
                     # EXTRACT strands the pipeline because extraction consumes them as inputs.
-                    "roi_masks.npz",
-                    "roi_masks_channel_2.npz",
-                    "roi_statistics.npz",
-                    "roi_statistics_channel_2.npz",
+                    RecordingArrays.ROI_MASKS,
+                    resolve_array_name(array=RecordingArrays.ROI_MASKS, second_channel=True),
+                    RecordingArrays.ROI_STATISTICS,
+                    resolve_array_name(array=RecordingArrays.ROI_STATISTICS, second_channel=True),
                 ):
                     _delete_file(path=output_path / name, deleted=deleted_files, errors=errors)
 
             if MultiRecordingJobNames.EXTRACT in effective_set:
                 for name in (
-                    "cell_fluorescence.npy",
-                    "neuropil_fluorescence.npy",
-                    "subtracted_fluorescence.npy",
-                    "spikes.npy",
-                    "cell_fluorescence_channel_2.npy",
-                    "neuropil_fluorescence_channel_2.npy",
-                    "subtracted_fluorescence_channel_2.npy",
-                    "spikes_channel_2.npy",
-                    "cell_colocalization.npy",
+                    RecordingArrays.CELL_FLUORESCENCE,
+                    RecordingArrays.NEUROPIL_FLUORESCENCE,
+                    RecordingArrays.SUBTRACTED_FLUORESCENCE,
+                    RecordingArrays.SPIKES,
+                    resolve_array_name(array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True),
+                    resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True),
+                    RecordingArrays.CELL_COLOCALIZATION,
                 ):
                     _delete_file(path=output_path / name, deleted=deleted_files, errors=errors)
 

@@ -22,6 +22,9 @@ from natsort import natsorted
 from ataraxis_data_structures import discover_marker_roots
 
 from ..io import resolve_recording_roots
+from ..layout import (
+    COMBINED_METADATA_FILENAME,
+)
 from ..dataclasses import (
     BaselineMethod,
     ReferenceImageType,
@@ -138,7 +141,7 @@ def discover_recordings_tool(root_directory: str) -> dict[str, object]:
     )
 
     # Discovers multi-recording candidates via combined_metadata.npz marker files.
-    multi_marker_parents = _discover_marker_parents(root_path=root_path, marker_name="combined_metadata.npz")
+    multi_marker_parents = _discover_marker_parents(root_path=root_path, marker_name=COMBINED_METADATA_FILENAME)
 
     multi_recording_paths = (
         natsorted(str(root) for root in resolve_recording_roots(paths=multi_marker_parents))
