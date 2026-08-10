@@ -12,6 +12,7 @@ from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import discover_marker_files
 
 from ..io import BinaryFile, BinaryFileCombined
+from ..layout import MULTI_RECORDING_RUNTIME_DATA_FILENAME
 from ..dataclasses import CombinedData, RuntimeContext, MultiRecordingRuntimeContext
 
 if TYPE_CHECKING:
@@ -1157,7 +1158,7 @@ class ViewerData:
         Returns:
             A tuple of natsorted unique dataset names.
         """
-        matches = discover_marker_files(directory=root_path, marker_name="multi_recording_runtime_data.yaml")
+        matches = discover_marker_files(directory=root_path, marker_name=MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         if not matches:
             return ()
 
@@ -1171,7 +1172,7 @@ class ViewerData:
             search_root: The root path to search for multi_recording_runtime_data.yaml files.
         """
         # Finds the target dataset directory by matching multi_recording_runtime_data.yaml parent names.
-        matches = discover_marker_files(directory=search_root, marker_name="multi_recording_runtime_data.yaml")
+        matches = discover_marker_files(directory=search_root, marker_name=MULTI_RECORDING_RUNTIME_DATA_FILENAME)
         target_dir: Path | None = None
         for match in matches:
             if match.parent.name == dataset_name:

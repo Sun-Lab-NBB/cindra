@@ -16,6 +16,7 @@ from ..layout import (
     COMBINED_METADATA_FILENAME,
     MULTI_RECORDING_DIRECTORY_NAME,
     ACQUISITION_PARAMETERS_FILENAME,
+    MULTI_RECORDING_RUNTIME_DATA_FILENAME,
     SINGLE_RECORDING_RUNTIME_DATA_FILENAME,
     resolve_plane_specifier,
 )
@@ -349,7 +350,7 @@ def resolve_multi_recording_contexts(
         # Loads single-recording combined data (scalars only). Arrays are loaded on demand by each pipeline function.
         combined_data = CombinedData.load(root_path=data_path)
 
-        runtime_path = output_path / "multi_recording_runtime_data.yaml"
+        runtime_path = output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME
         if runtime_path.exists():
             # Loads existing runtime data (scalars only). Arrays are loaded on demand by each pipeline function.
             runtime = MultiRecordingRuntimeData.load(output_path=output_path)
@@ -402,7 +403,7 @@ def resolve_multi_recording_contexts(
             # output_path is always populated during per-recording construction above, so the guard is defensive only.
             if runtime_output_path is None:  # pragma: no cover
                 continue
-            runtime_yaml = runtime_output_path / "multi_recording_runtime_data.yaml"
+            runtime_yaml = runtime_output_path / MULTI_RECORDING_RUNTIME_DATA_FILENAME
             if not runtime_yaml.exists():
                 message = (
                     f"Unable to resolve multi-recording contexts without bootstrap persistence. The runtime data "
