@@ -28,6 +28,7 @@ from .inventory import (
     is_recording_processed,
     resolve_recording_planes,
     resolve_dataset_recordings,
+    resolve_acquisition_parameters,
 )
 
 __all__ = [
@@ -50,6 +51,7 @@ __all__ = [
     "is_plane_registered",
     "is_recording_processed",
     "load_acquisition_parameters",
+    "resolve_acquisition_parameters",
     "resolve_dataset_recordings",
     "resolve_multi_recording_contexts",
     "resolve_recording_planes",
