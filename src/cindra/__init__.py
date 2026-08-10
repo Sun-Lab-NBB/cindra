@@ -33,7 +33,6 @@ from .orchestration import (  # noqa: E402
     SingleRecordingJobNames,
     resolve_stage_workers,
     execute_multi_recording_job,
-    warn_missing_openmp_runtime,
     execute_single_recording_job,
     run_multi_recording_pipeline,
     run_single_recording_pipeline,
@@ -44,10 +43,6 @@ from .orchestration import (  # noqa: E402
 # outputs instead of or in addition to sending them to the terminal.
 if not console.enabled:  # pragma: no branch - the console-enabled state is only reachable as False on first import.
     console.enable()
-
-# Reports a macOS host that carries no loadable OpenMP runtime for the threading layer configured above. The check
-# runs below the console initialization, because the warning reaches the terminal only once the console is enabled.
-warn_missing_openmp_runtime()
 
 __all__ = [
     "BINARIZATION_WORKERS",

@@ -19,6 +19,7 @@ from .jobs import (
     resolve_multi_recording_jobs,
     resolve_single_recording_jobs,
 )
+from .openmp import verify_openmp_runtime
 from ..pipelines import (
     process_plane,
     binarize_recording,
@@ -79,6 +80,10 @@ def run_single_recording_pipeline(
         ValueError: If the recording's data validation fails, the specified job_id does not match any available job,
             or target_plane names a plane the recording does not hold.
     """
+    # Every stage below reaches a parallelized kernel, so a host whose threading layer has no runtime to load fails
+    # here rather than partway through a recording.
+    verify_openmp_runtime()
+
     configuration, output_path = _load_single_recording_configuration(configuration_path=configuration_path)
 
     # Maps each worker-consuming stage to its requested allocation so that every job reads the count intended for its
@@ -93,8 +98,8 @@ def run_single_recording_pipeline(
     # binarization to run first, mirroring how run_multi_recording_pipeline resolves contexts before building jobs.
     # In REMOTE mode (job_id provided, i.e., when dispatched by the MCP job executor), disables bootstrap persistence
     # because the prepare tool already wrote the shared configuration and per-plane runtime_data.yaml files
-    # single-threaded. Skipping the per-worker re-save prevents concurrent worker threads from racing on the same
-    # YAML files and producing corrupted output.
+    # single-threaded. Skipping the per-worker re-save keeps a worker from overwriting every peer plane's file with
+    # its own stale snapshot, since this resolver builds a context per plane rather than per dispatched job.
     contexts = resolve_single_recording_contexts(configuration=configuration, persist=job_id is None)
     plane_count = len(contexts)
 
@@ -290,6 +295,10 @@ def run_multi_recording_pipeline(
         ValueError: If recording validation fails, recording_directories is empty, target_recording does not name a
             resolved recording, or the specified job_id does not match any available jobs.
     """
+    # Every stage below reaches a parallelized kernel, so a host whose threading layer has no runtime to load fails
+    # here rather than partway through a dataset.
+    verify_openmp_runtime()
+
     configuration = _load_multi_recording_configuration(configuration_path=configuration_path)
 
     # Maps each stage to its requested allocation so that every job reads the count intended for its own stage.
@@ -307,8 +316,8 @@ def run_multi_recording_pipeline(
     # path. This also validates that all recording directories contain valid single-recording outputs and
     # handles relocated data. In REMOTE mode (job_id provided, i.e., when dispatched by the MCP job executor),
     # disables bootstrap persistence because the prepare tool already wrote the shared configuration and every
-    # recording's multi_recording_runtime_data.yaml single-threaded. Skipping the per-worker re-save prevents
-    # concurrent worker threads from racing on the same YAML files and producing corrupted output.
+    # recording's multi_recording_runtime_data.yaml single-threaded. Skipping the per-worker re-save keeps a worker
+    # from overwriting every peer recording's file with its own stale snapshot.
     contexts = resolve_multi_recording_contexts(configuration=configuration, persist=job_id is None)
     recording_ids: list[str] = [context.runtime.io.recording_id for context in contexts]
     main_recording_path = contexts[0].runtime.output_path

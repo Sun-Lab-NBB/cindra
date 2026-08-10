@@ -9,7 +9,7 @@ import sysconfig
 import subprocess
 from dataclasses import dataclass
 
-from ataraxis_base_utilities import LogLevel, console
+from ataraxis_base_utilities import console
 
 _OPENMP_LIBRARY_NAME: str = "libomp.dylib"
 """The file name of the OpenMP runtime that Numba's omppool extension loads on macOS."""
@@ -101,11 +101,17 @@ class OpenMpSummary:
         )
 
 
-def warn_missing_openmp_runtime() -> None:
-    """Reports that Numba's OpenMP threading layer has no runtime to load on this macOS host.
+def verify_openmp_runtime() -> None:
+    """Aborts the runtime when Numba's OpenMP threading layer has no runtime to load on this macOS host.
 
-    The warning stands in for the threading-layer error Numba raises at the first parallelized call, which names no
-    remedy. The platforms whose threading layer needs no separately installed runtime report nothing.
+    Notes:
+        The pipeline entry points call this before they dispatch any stage, so a host that cannot run a parallelized
+        kernel fails while it has done no work rather than partway through a recording. The error replaces the
+        threading-layer error Numba raises at the first parallelized call, which names no remedy. The platforms whose
+        threading layer needs no separately installed runtime return without checking anything.
+
+    Raises:
+        RuntimeError: If the host is macOS and no OpenMP runtime is loadable.
     """
     if sys.platform != "darwin":
         return
@@ -118,7 +124,7 @@ def warn_missing_openmp_runtime() -> None:
         f"report the runtimes found on this host, and 'cindra omp --yes' to link one into {_LINK_DIRECTORY}. Install "
         f"one with 'brew install libomp' when the report finds none."
     )
-    console.echo(message=message, level=LogLevel.WARNING)
+    console.error(message=message, error=RuntimeError)
 
 
 def resolve_openmp_runtime(

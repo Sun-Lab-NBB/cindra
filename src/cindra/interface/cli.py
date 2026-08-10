@@ -40,6 +40,12 @@ def cindra_mcp(transport: Literal["stdio", "sse", "streamable-http"]) -> None:
     The MCP server exposes tools that enable AI agents to discover recording data, execute pipelines,
     monitor processing status, and manage batch operations for both single-recording and multi-recording workflows.
     """
+    # The stdio transport carries the JSON-RPC message stream over stdout, which is also where the console writes
+    # every message up to the WARNING level. Silencing the console keeps library output out of that stream, as a
+    # single logged line renders the message it interleaves with unparsable for the connected client.
+    if transport == "stdio":
+        console.disable()
+
     run_server(transport=transport)
 
 

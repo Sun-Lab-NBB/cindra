@@ -18,4 +18,10 @@ def run_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") 
     Args:
         transport: The transport type to use ('stdio', 'sse', or 'streamable-http').
     """
+    if transport == "streamable-http":
+        # Frames each response as a single JSON body instead of an event stream. Only the streamable-http transport
+        # accepts this flag, so it stays out of the call below.
+        mcp.run(transport=transport, json_response=True)
+        return
+
     mcp.run(transport=transport)
