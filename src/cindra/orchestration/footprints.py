@@ -131,8 +131,8 @@ _COMBINATION_TRACE_KINDS: int = 4
 
 Notes:
     The per-plane sources are memory-mapped, so the anonymous peak is one concatenated copy of each kind rather than
-    the sources plus the result. A recording whose second channel is also functional concatenates the same four kinds
-    again, so the estimate understates that case by half.
+    the sources plus the result. One combination job merges both channels, so a recording carrying a second channel
+    concatenates the same four kinds again and the estimate doubles.
 """
 
 _EXTRACTION_TRACE_COPIES: int = 5
@@ -140,9 +140,9 @@ _EXTRACTION_TRACE_COPIES: int = 5
 
 Notes:
     The stage returns the raw, neuropil, subtracted, and spike traces together, so all four are live at once, and the
-    baseline filter that produces the subtracted trace holds a fifth array of the same size. A dataset whose second
-    channel is also functional keeps the first channel's four arrays live while it extracts the second, so the estimate
-    understates that case.
+    baseline filter that produces the subtracted trace holds a fifth array of the same size. One extraction job
+    extracts both channels and assigns each onto the same record without releasing the first, so a recording carrying
+    a second channel doubles the estimate.
 """
 
 _EXTRACTION_BATCH_BYTES_PER_PIXEL: int = 6
@@ -195,12 +195,10 @@ Notes:
     understating is the asymmetric failure. A job admitted against a floor overcommits its host and is killed, while a
     job admitted against an allowance merely waits longer than it had to.
 
-    Only two figures rest on an observation. The processing figure is the measured nine-plane peak of 10.5 gigabytes
-    rounded up to cover the taller planes of the same recording, and the registration figure is the widest footprint
-    that stage has been observed to reach. The combination and discovery figures are flat allowances carried over from
-    the sollertia forgery scheduler, which declared them allowances rather than peaks, and the binarization and
-    extraction figures are allowances chosen to sit above every projection their own models produce for the recordings
-    this corpus holds. Measuring the four unmeasured stages at their widest is what would let them be narrowed.
+    Every figure is a conservative allowance that sits above the projections its own model produces for the recordings
+    this corpus holds. The processing figure additionally covers a measured nine-plane peak of 10.5 gigabytes. The set
+    is confirmed against measured peaks before a release, so a figure that proves loose is narrowed there rather than
+    guessed at here.
 """
 
 
@@ -230,6 +228,9 @@ class RecordingGeometry:
     """The pixels one combined multi-plane frame holds, which every multi-recording stage works at."""
     combined_frame_count: int = 0
     """The frames the combined view holds, trimmed to the shortest contributing plane."""
+    two_channels: bool = False
+    """Determines whether the recording carries a second channel, which both the combination and the tracked
+    extraction stages process alongside the first inside one job."""
     region_count: int = 0
     """The regions the combined trace array holds, which is zero until the combination stage has written it."""
     resolved: bool = False
@@ -254,7 +255,7 @@ def resolve_recording_geometry(output_root: Path, data_path: Path | None = None)
     inventory = resolve_recording_planes(output_root=output_root, data_path=data_path)
     acquisition = resolve_acquisition_parameters(output_root=output_root, data_path=data_path)
     planes = _read_plane_geometries(inventory=inventory)
-    combined_pixels, combined_frame_count = _read_combined_geometry(output_root=output_root)
+    combined_pixels, combined_frame_count, combined_two_channels = _read_combined_geometry(output_root=output_root)
     region_count = _read_region_count(
         array_path=resolve_array_path(
             root_path=resolve_output_path(output_root=output_root), array=RecordingArrays.CELL_FLUORESCENCE
@@ -266,6 +267,7 @@ def resolve_recording_geometry(output_root: Path, data_path: Path | None = None)
         raw_frame_pixels=_resolve_raw_frame_pixels(planes=planes, acquisition=acquisition),
         combined_pixels=combined_pixels,
         combined_frame_count=combined_frame_count,
+        two_channels=combined_two_channels or (acquisition is not None and acquisition.channel_number > 1),
         region_count=region_count,
         resolved=bool(planes) or combined_pixels > 0,
     )
@@ -471,8 +473,13 @@ def _estimate_combination_mb(geometry: RecordingGeometry) -> int:
     Returns:
         The memory the stage holds in megabytes, before the shared tolerance.
     """
+    channels = 2 if geometry.two_channels else 1
     trace_bytes = (
-        _COMBINATION_TRACE_KINDS * geometry.region_count * geometry.combined_frame_count * _SINGLE_PRECISION_BYTES
+        _COMBINATION_TRACE_KINDS
+        * channels
+        * geometry.region_count
+        * geometry.combined_frame_count
+        * _SINGLE_PRECISION_BYTES
     )
     return WORKER_MEMORY_MB + _bytes_to_megabytes(byte_count=trace_bytes)
 
@@ -511,7 +518,10 @@ def _estimate_extraction_mb(
     Returns:
         The memory the job holds in megabytes, before the shared tolerance.
     """
-    trace_bytes = _EXTRACTION_TRACE_COPIES * tracked_regions * geometry.combined_frame_count * _SINGLE_PRECISION_BYTES
+    channels = 2 if geometry.two_channels else 1
+    trace_bytes = (
+        _EXTRACTION_TRACE_COPIES * channels * tracked_regions * geometry.combined_frame_count * _SINGLE_PRECISION_BYTES
+    )
     batch_size = configuration.signal_extraction.batch_size
     workspace_bytes = _OASIS_WORKSPACE_BYTES * min(batch_size, max(1, tracked_regions)) * geometry.combined_frame_count
     batch_bytes = _EXTRACTION_BATCH_BYTES_PER_PIXEL * batch_size * geometry.combined_pixels
@@ -627,23 +637,24 @@ def _read_plane_geometries(inventory: RecordingPlanes) -> tuple[PlaneGeometry, .
     return tuple(geometries)
 
 
-def _read_combined_geometry(output_root: Path) -> tuple[int, int]:
+def _read_combined_geometry(output_root: Path) -> tuple[int, int, bool]:
     """Reads the combined field extent and frame count from the metadata archive the combination stage wrote.
 
     Args:
         output_root: The output root the recording was configured with.
 
     Returns:
-        The pixels one combined frame holds and the frames the combined view holds, both zero when the archive is
-        absent.
+        The pixels one combined frame holds, the frames the combined view holds, and whether the recording carries a
+        second channel. The first two are zero and the last False when the archive is absent.
     """
     metadata_path = resolve_output_path(output_root=output_root) / COMBINED_METADATA_FILENAME
     if not metadata_path.is_file():
-        return 0, 0
+        return 0, 0, False
     with np.load(file=metadata_path) as metadata:
         pixels = int(metadata["combined_height"][0]) * int(metadata["combined_width"][0])
         frame_count = int(metadata["frame_count"][0]) if "frame_count" in metadata else 0
-    return pixels, frame_count
+        two_channels = "registered_binary_paths_channel_2" in metadata
+    return pixels, frame_count, two_channels
 
 
 def _read_region_count(array_path: Path) -> int:

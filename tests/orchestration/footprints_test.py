@@ -28,8 +28,10 @@ from cindra.orchestration.footprints import (
     RecordingGeometry,
     _apply_tolerance,
     _estimate_discovery_mb,
+    _estimate_extraction_mb,
     _estimate_processing_mb,
     _resolve_stage_fallback,
+    _estimate_combination_mb,
     _estimate_registration_mb,
     resolve_recording_geometry,
     _resolve_binned_frame_count,
@@ -461,3 +463,42 @@ class TestGeometryEdges:
         with_metrics = _estimate_registration_mb(plane=plane, configuration=SingleRecordingConfiguration())
 
         assert _estimate_registration_mb(plane=plane, configuration=configuration) < with_metrics
+
+
+class TestDualChannelRecordings:
+    """Tests the stages that process both channels inside one job."""
+
+    def test_second_channel_doubles_the_combination_estimate(self) -> None:
+        """Verifies that a recording carrying a second channel doubles the traces combination concatenates."""
+        single = RecordingGeometry(region_count=500, combined_frame_count=6000, resolved=True)
+        dual = RecordingGeometry(region_count=500, combined_frame_count=6000, two_channels=True, resolved=True)
+
+        trace_bytes = _estimate_combination_mb(geometry=dual) - WORKER_MEMORY_MB
+        assert trace_bytes == pytest.approx(
+            2 * (_estimate_combination_mb(geometry=single) - WORKER_MEMORY_MB), rel=0.01
+        )
+
+    def test_second_channel_raises_the_extraction_estimate(self) -> None:
+        """Verifies that a recording carrying a second channel raises the traces extraction holds at once."""
+        configuration = MultiRecordingConfiguration()
+        single = RecordingGeometry(combined_pixels=512 * 512, combined_frame_count=6000, resolved=True)
+        dual = RecordingGeometry(combined_pixels=512 * 512, combined_frame_count=6000, two_channels=True, resolved=True)
+
+        dual_mb = _estimate_extraction_mb(geometry=dual, tracked_regions=500, configuration=configuration)
+        single_mb = _estimate_extraction_mb(geometry=single, tracked_regions=500, configuration=configuration)
+
+        assert dual_mb > single_mb
+
+    def test_second_channel_is_read_from_the_combined_metadata(self, tmp_path: Path) -> None:
+        """Verifies that the geometry reports a second channel when the metadata archive records its binaries."""
+        output_path = resolve_output_path(output_root=tmp_path)
+        output_path.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            output_path / COMBINED_METADATA_FILENAME,
+            combined_height=np.array([256], dtype=np.uint16),
+            combined_width=np.array([256], dtype=np.uint16),
+            frame_count=np.array([100], dtype=np.uint32),
+            registered_binary_paths_channel_2=np.array(["a.bin"]),
+        )
+
+        assert resolve_recording_geometry(output_root=tmp_path).two_channels is True
