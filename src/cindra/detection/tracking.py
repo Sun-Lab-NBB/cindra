@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from numba import njit
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from scipy.cluster import hierarchy
@@ -15,6 +16,8 @@ from ..dataclasses import ROIMask
 from .roi_statistics import estimate_diameter_from_rois
 
 if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
     from ..dataclasses import MultiRecordingRuntimeContext
 
 _DEFAULT_JACCARD_DISTANCE: float = 10000.0
@@ -134,6 +137,39 @@ def _compute_overlap(rois: list[ROIMask]) -> None:
         roi.overlap_mask = flat_overlap[mask_offsets[roi_index] : mask_offsets[roi_index + 1]]
 
 
+@njit(cache=True)
+def _count_shared_pixels(  # pragma: no cover
+    first_pixels: NDArray[np.int32],
+    second_pixels: NDArray[np.int32],
+) -> int:
+    """Counts the pixel indices two ascending, duplicate-free index arrays share.
+
+    Notes:
+        The two arrays are walked with one cursor each, so the count costs one pass over their combined length and
+        allocates nothing. Both inputs must be sorted ascending, which the caller establishes once per ROI.
+
+    Args:
+        first_pixels: The ascending raveled pixel indices of the first ROI.
+        second_pixels: The ascending raveled pixel indices of the second ROI.
+
+    Returns:
+        The number of pixel indices present in both arrays.
+    """
+    first_cursor = 0
+    second_cursor = 0
+    shared = 0
+    while first_cursor < first_pixels.size and second_cursor < second_pixels.size:
+        if first_pixels[first_cursor] == second_pixels[second_cursor]:
+            shared += 1
+            first_cursor += 1
+            second_cursor += 1
+        elif first_pixels[first_cursor] < second_pixels[second_cursor]:
+            first_cursor += 1
+        else:
+            second_cursor += 1
+    return shared
+
+
 def _compute_condensed_index(row_index: int, column_index: int, matrix_size: int) -> int:
     """Converts square form matrix indices to condensed form indices.
 
@@ -206,12 +242,16 @@ def _cluster_rois_in_bin(
     condensed_size = int(((roi_count * roi_count) / 2) - (roi_count / 2))
     jaccard_matrix = np.full(shape=condensed_size, fill_value=_DEFAULT_JACCARD_DISTANCE, dtype=np.float32)
 
+    # Sorts each ROI's pixel list once, rather than once per pair the ROI participates in. The intersection below
+    # walks two ascending lists in one pass, which needs the ordering but not a fresh sort per pair.
+    sorted_pixels = [np.sort(roi.raveled_pixels) for roi in rois]
+
     # Computes Jaccard distance for each valid pair based on pixel overlap.
     for roi_1_index, roi_2_index in valid_pairs:
-        roi_1_pixels = rois[roi_1_index].raveled_pixels
-        roi_2_pixels = rois[roi_2_index].raveled_pixels
+        roi_1_pixels = sorted_pixels[roi_1_index]
+        roi_2_pixels = sorted_pixels[roi_2_index]
 
-        intersection_size = np.intersect1d(roi_1_pixels, roi_2_pixels, assume_unique=True).shape[0]
+        intersection_size = _count_shared_pixels(first_pixels=roi_1_pixels, second_pixels=roi_2_pixels)
         union_size = roi_1_pixels.shape[0] + roi_2_pixels.shape[0] - intersection_size
         jaccard_distance = 0.0 if union_size == 0 else 1 - intersection_size / union_size
 

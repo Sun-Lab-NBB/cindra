@@ -165,3 +165,34 @@ class TestReadTiff:
         assert result.dtype == np.int16
         # 60000 // 2 = 30000, which fits in int16.
         assert result[0, 0, 0] == 30000
+
+    @pytest.mark.parametrize(
+        ("dtype", "boundary_values"),
+        [
+            (np.uint16, (0, 1, 2, 3, 65534, 65535)),
+            (np.int32, (np.iinfo(np.int32).min, -65537, -3, -1, 0, 1, 65535, 65536, np.iinfo(np.int32).max)),
+        ],
+    )
+    def test_source_dtype_is_halved_and_saturated(
+        self, tmp_path: Path, dtype: type[np.generic], boundary_values: tuple[int, ...]
+    ) -> None:
+        """Verifies that uint16 and int32 pages are halved and saturated into the int16 range."""
+        generator = np.random.default_rng(seed=42)
+        pages = [np.full((4, 5), fill_value=value, dtype=dtype) for value in boundary_values]
+        pages.append(
+            generator.integers(np.iinfo(dtype).min, np.iinfo(dtype).max, size=(4, 5), endpoint=True).astype(dtype)
+        )
+        source = np.stack(pages)
+
+        tiff_path = tmp_path / "source.tif"
+        with TiffWriter(tiff_path) as writer:
+            for page in pages:
+                writer.write(page)
+
+        with TiffFile(tiff_path) as tiff:
+            result = _read_tiff(tiff=tiff, start_index=0, batch_size=len(pages), decode_workers=1)
+
+        expected = np.clip(source // 2, np.iinfo(np.int16).min, np.iinfo(np.int16).max).astype(np.int16)
+        assert result is not None
+        assert result.dtype == np.int16
+        np.testing.assert_array_equal(result, expected)

@@ -220,14 +220,15 @@ def _create_neuropil_masks(
             )
 
         # Creates the final neuropil mask for this ROI by excluding all inner border pixels and including all non-cell
-        # pixels in the expanded neuropil region.
+        # pixels in the expanded neuropil region. The two pixel sets are resolved as flat indices over the expanded
+        # region alone, which keeps the working set proportional to that region rather than to the whole frame.
         is_non_roi = roi_pixels[current_y_pixels, current_x_pixels] == 0
-        neuropil_mask = np.zeros((height, width), dtype=np.bool_)
-        neuropil_mask[current_y_pixels[is_non_roi], current_x_pixels[is_non_roi]] = True
-        neuropil_mask[inner_y_pixels, inner_x_pixels] = False
+        included = (current_y_pixels[is_non_roi].astype(np.int64) * width + current_x_pixels[is_non_roi]).ravel()
+        excluded = (inner_y_pixels.astype(np.int64) * width + inner_x_pixels).ravel()
 
-        # Converts the dense boolean mask to flat indices and caches on the ROI.
-        flat_indices = np.flatnonzero(a=neuropil_mask).astype(np.int32)
+        # setdiff1d returns ascending unique values, matching the order and the deduplication a dense frame-sized
+        # mask followed by flatnonzero produces.
+        flat_indices = np.setdiff1d(included, excluded).astype(np.int32)
         roi.neuropil_mask = flat_indices
         neuropil_masks.append(flat_indices)
 

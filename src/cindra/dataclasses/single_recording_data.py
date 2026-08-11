@@ -341,37 +341,62 @@ class RegistrationData:
 
         path = registration_directory / RegistrationArrays.BAD_FRAMES
         if path.exists():
-            self.bad_frames = np.load(path, allow_pickle=False).astype(np.bool_)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.bad_frames = loaded_array if loaded_array.dtype == np.bool_ else loaded_array.astype(np.bool_)
         path = registration_directory / RegistrationArrays.REFERENCE_IMAGE
         if path.exists():
-            self.reference_image = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.reference_image = loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
         path = registration_directory / RegistrationArrays.RIGID_Y_OFFSETS
         if path.exists():
-            self.rigid_y_offsets = np.load(path, allow_pickle=False).astype(np.int32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.rigid_y_offsets = loaded_array if loaded_array.dtype == np.int32 else loaded_array.astype(np.int32)
         path = registration_directory / RegistrationArrays.RIGID_X_OFFSETS
         if path.exists():
-            self.rigid_x_offsets = np.load(path, allow_pickle=False).astype(np.int32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.rigid_x_offsets = loaded_array if loaded_array.dtype == np.int32 else loaded_array.astype(np.int32)
         path = registration_directory / RegistrationArrays.RIGID_CORRELATIONS
         if path.exists():
-            self.rigid_correlations = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.rigid_correlations = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
         path = registration_directory / RegistrationArrays.NONRIGID_Y_OFFSETS
         if path.exists():
-            self.nonrigid_y_offsets = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.nonrigid_y_offsets = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
         path = registration_directory / RegistrationArrays.NONRIGID_X_OFFSETS
         if path.exists():
-            self.nonrigid_x_offsets = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.nonrigid_x_offsets = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
         path = registration_directory / RegistrationArrays.NONRIGID_CORRELATIONS
         if path.exists():
-            self.nonrigid_correlations = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.nonrigid_correlations = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
         path = registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_EXTREME_IMAGES
         if path.exists():
-            self.principal_component_extreme_images = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.principal_component_extreme_images = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
         path = registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_PROJECTIONS
         if path.exists():
-            self.principal_component_projections = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.principal_component_projections = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
         path = registration_directory / RegistrationArrays.PRINCIPAL_COMPONENT_SHIFT_METRICS
         if path.exists():
-            self.principal_component_shift_metrics = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.principal_component_shift_metrics = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
     def memory_map_arrays(self, output_path: Path) -> None:
         """Memory-maps registration arrays from individual .npy files in the ``registration_data/`` subdirectory.
@@ -541,30 +566,50 @@ class DetectionData:
         # Channel 1 arrays.
         path = detection_directory / DetectionImages.MEAN_IMAGE
         if path.exists():
-            self.mean_image = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.mean_image = loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
         path = detection_directory / DetectionImages.ENHANCED_MEAN_IMAGE
         if path.exists():
-            self.enhanced_mean_image = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.enhanced_mean_image = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
         path = detection_directory / DetectionImages.MAXIMUM_PROJECTION
         if path.exists():
-            self.maximum_projection = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.maximum_projection = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
         path = detection_directory / DetectionImages.CORRELATION_MAP
         if path.exists():
-            self.correlation_map = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.correlation_map = loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
 
         # Channel 2 arrays.
         path = detection_directory / resolve_array_name(array=DetectionImages.MEAN_IMAGE, second_channel=True)
         if path.exists():
-            self.mean_image_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.mean_image_channel_2 = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
         path = detection_directory / resolve_array_name(array=DetectionImages.ENHANCED_MEAN_IMAGE, second_channel=True)
         if path.exists():
-            self.enhanced_mean_image_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.enhanced_mean_image_channel_2 = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
         path = detection_directory / resolve_array_name(array=DetectionImages.MAXIMUM_PROJECTION, second_channel=True)
         if path.exists():
-            self.maximum_projection_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.maximum_projection_channel_2 = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
         path = detection_directory / resolve_array_name(array=DetectionImages.CORRELATION_MAP, second_channel=True)
         if path.exists():
-            self.correlation_map_channel_2 = np.load(path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(path, allow_pickle=False)
+            self.correlation_map_channel_2 = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
     def memory_map_arrays(self, output_path: Path) -> None:
         """Memory-maps detection arrays from individual .npy files in the ``detection_data/`` subdirectory.
@@ -650,7 +695,8 @@ class ROIMask:
     @cached_property
     def raveled_pixels(self) -> NDArray[np.int32]:
         """Computes raveled pixel indices (y * frame_width + x) on first access."""
-        return (self.y_pixels * self.frame_width + self.x_pixels).astype(np.int32)
+        raveled_indices = self.y_pixels * self.frame_width + self.x_pixels
+        return raveled_indices if raveled_indices.dtype == np.int32 else raveled_indices.astype(np.int32)
 
     @cached_property
     def circle_pixels(self) -> tuple[NDArray[np.int32], NDArray[np.int32]]:
@@ -1148,15 +1194,19 @@ class ExtractionData:
         # Channel 1 classification.
         cell_classification_path = output_path / RecordingArrays.CELL_CLASSIFICATION
         if self.cell_classification is None and cell_classification_path.exists():
-            self.cell_classification = np.load(cell_classification_path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(cell_classification_path, allow_pickle=False)
+            self.cell_classification = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
         # Channel 2 classification.
         cell_classification_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True
         )
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
-            self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, allow_pickle=False).astype(
-                np.float32
+            loaded_array = np.load(cell_classification_channel_2_path, allow_pickle=False)
+            self.cell_classification_channel_2 = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
             )
 
     def load_results(self, output_path: Path) -> None:
@@ -1174,73 +1224,97 @@ class ExtractionData:
         # Channel 1 traces.
         cell_fluorescence_path = output_path / RecordingArrays.CELL_FLUORESCENCE
         if self.cell_fluorescence is None and cell_fluorescence_path.exists():
-            self.cell_fluorescence = np.load(cell_fluorescence_path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(cell_fluorescence_path, allow_pickle=False)
+            self.cell_fluorescence = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
         neuropil_fluorescence_path = output_path / RecordingArrays.NEUROPIL_FLUORESCENCE
         if self.neuropil_fluorescence is None and neuropil_fluorescence_path.exists():
-            self.neuropil_fluorescence = np.load(neuropil_fluorescence_path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(neuropil_fluorescence_path, allow_pickle=False)
+            self.neuropil_fluorescence = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
         subtracted_fluorescence_path = output_path / RecordingArrays.SUBTRACTED_FLUORESCENCE
         if self.subtracted_fluorescence is None and subtracted_fluorescence_path.exists():
-            self.subtracted_fluorescence = np.load(subtracted_fluorescence_path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(subtracted_fluorescence_path, allow_pickle=False)
+            self.subtracted_fluorescence = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
         spikes_path = output_path / RecordingArrays.SPIKES
         if self.spikes is None and spikes_path.exists():
-            self.spikes = np.load(spikes_path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(spikes_path, allow_pickle=False)
+            self.spikes = loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
 
         # Channel 1 classification.
         cell_classification_path = output_path / RecordingArrays.CELL_CLASSIFICATION
         if self.cell_classification is None and cell_classification_path.exists():
-            self.cell_classification = np.load(cell_classification_path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(cell_classification_path, allow_pickle=False)
+            self.cell_classification = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
         # Channel 2 traces.
         cell_fluorescence_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.CELL_FLUORESCENCE, second_channel=True
         )
         if self.cell_fluorescence_channel_2 is None and cell_fluorescence_channel_2_path.exists():
-            self.cell_fluorescence_channel_2 = np.load(cell_fluorescence_channel_2_path, allow_pickle=False).astype(
-                np.float32
+            loaded_array = np.load(cell_fluorescence_channel_2_path, allow_pickle=False)
+            self.cell_fluorescence_channel_2 = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
             )
 
         neuropil_fluorescence_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.NEUROPIL_FLUORESCENCE, second_channel=True
         )
         if self.neuropil_fluorescence_channel_2 is None and neuropil_fluorescence_channel_2_path.exists():
-            self.neuropil_fluorescence_channel_2 = np.load(
-                neuropil_fluorescence_channel_2_path, allow_pickle=False
-            ).astype(np.float32)
+            loaded_array = np.load(neuropil_fluorescence_channel_2_path, allow_pickle=False)
+            self.neuropil_fluorescence_channel_2 = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
         subtracted_fluorescence_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.SUBTRACTED_FLUORESCENCE, second_channel=True
         )
         if self.subtracted_fluorescence_channel_2 is None and subtracted_fluorescence_channel_2_path.exists():
-            self.subtracted_fluorescence_channel_2 = np.load(
-                subtracted_fluorescence_channel_2_path, allow_pickle=False
-            ).astype(np.float32)
+            loaded_array = np.load(subtracted_fluorescence_channel_2_path, allow_pickle=False)
+            self.subtracted_fluorescence_channel_2 = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
         spikes_channel_2_path = output_path / resolve_array_name(array=RecordingArrays.SPIKES, second_channel=True)
         if self.spikes_channel_2 is None and spikes_channel_2_path.exists():
-            self.spikes_channel_2 = np.load(spikes_channel_2_path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(spikes_channel_2_path, allow_pickle=False)
+            self.spikes_channel_2 = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
         # Channel 2 classification.
         cell_classification_channel_2_path = output_path / resolve_array_name(
             array=RecordingArrays.CELL_CLASSIFICATION, second_channel=True
         )
         if self.cell_classification_channel_2 is None and cell_classification_channel_2_path.exists():
-            self.cell_classification_channel_2 = np.load(cell_classification_channel_2_path, allow_pickle=False).astype(
-                np.float32
+            loaded_array = np.load(cell_classification_channel_2_path, allow_pickle=False)
+            self.cell_classification_channel_2 = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
             )
 
         # Colocalization arrays.
         cell_colocalization_path = output_path / RecordingArrays.CELL_COLOCALIZATION
         if self.cell_colocalization is None and cell_colocalization_path.exists():
-            self.cell_colocalization = np.load(cell_colocalization_path, allow_pickle=False).astype(np.float32)
+            loaded_array = np.load(cell_colocalization_path, allow_pickle=False)
+            self.cell_colocalization = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
         corrected_structural_mean_image_path = output_path / RecordingArrays.CORRECTED_STRUCTURAL_MEAN_IMAGE
         if self.corrected_structural_mean_image is None and corrected_structural_mean_image_path.exists():
-            self.corrected_structural_mean_image = np.load(
-                corrected_structural_mean_image_path, allow_pickle=False
-            ).astype(np.float32)
+            loaded_array = np.load(corrected_structural_mean_image_path, allow_pickle=False)
+            self.corrected_structural_mean_image = (
+                loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+            )
 
     def memory_map_arrays(self, output_path: Path) -> None:
         """Memory-maps ROI statistics and classification results from disk.

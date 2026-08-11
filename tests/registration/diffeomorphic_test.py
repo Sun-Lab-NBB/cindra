@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from cindra.registration.deformation import Deformation
-from cindra.registration.diffeomorphic import DiffeomorphicDemonsRegistration
+from cindra.registration.diffeomorphic import DiffeomorphicDemonsRegistration, _compute_demons_force
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -49,6 +49,64 @@ observed error stays at or below 0.35 pixels across the tested translation magni
 _ACCURACY_MINIMUM_CORRELATION: float = 0.95
 """The minimum accepted correlation between warped images after registration. The observed correlation reaches 0.974
 or above for every tested configuration."""
+
+
+class TestComputeDemonsForce:
+    """Tests the fused Demons force kernel."""
+
+    @pytest.mark.parametrize(("height", "width"), [(97, 131), (64, 64)])
+    @pytest.mark.parametrize(("noise_factor", "speed_factor"), [(1.0, 3.0), (0.5, 1.25), (2.0, 5.0)])
+    def test_matches_the_operator_chain(
+        self, height: int, width: int, noise_factor: float, speed_factor: float
+    ) -> None:
+        """Verifies the kernel reproduces the equivalent chain of NumPy operators bit for bit."""
+        generator = np.random.default_rng(seed=77)
+        fields = [generator.standard_normal((height, width)).astype(np.float32) for _ in range(6)]
+
+        # Flattens one corner of both gradients so the zero-denominator branch is exercised.
+        for index in (1, 2, 4, 5):
+            fields[index][:5, :5] = 0.0
+
+        source_image, source_gradient_y, source_gradient_x = fields[0], fields[1], fields[2]
+        target_image, target_gradient_y, target_gradient_x = fields[3], fields[4], fields[5]
+
+        source_magnitude = source_gradient_y**2 + source_gradient_x**2
+        target_magnitude = target_gradient_y**2 + target_gradient_x**2
+        intensity_difference = source_image - target_image
+        intensity_difference_squared = intensity_difference**2
+        source_denominator = source_magnitude + noise_factor**2 * intensity_difference_squared
+        target_denominator = target_magnitude + noise_factor**2 * intensity_difference_squared
+        source_denominator[source_denominator == 0] = np.inf
+        target_denominator[target_denominator == 0] = np.inf
+        speed = -speed_factor
+        expected_y = (
+            intensity_difference
+            * (source_gradient_y / source_denominator + target_gradient_y / target_denominator)
+            * speed
+        )
+        expected_x = (
+            intensity_difference
+            * (source_gradient_x / source_denominator + target_gradient_x / target_denominator)
+            * speed
+        )
+
+        field_y = np.empty((height, width), dtype=np.float32)
+        field_x = np.empty((height, width), dtype=np.float32)
+        _compute_demons_force(
+            source_image=source_image,
+            source_gradient_y=source_gradient_y,
+            source_gradient_x=source_gradient_x,
+            target_image=target_image,
+            target_gradient_y=target_gradient_y,
+            target_gradient_x=target_gradient_x,
+            noise_squared=np.float32(noise_factor**2),
+            speed=np.float32(speed),
+            field_y=field_y,
+            field_x=field_x,
+        )
+
+        np.testing.assert_array_equal(field_y, expected_y.astype(np.float32))
+        np.testing.assert_array_equal(field_x, expected_x.astype(np.float32))
 
 
 class TestDiffeomorphicDemonsRegistration:
@@ -118,6 +176,20 @@ class TestDiffeomorphicDemonsRegistration:
             # Deformations should be near-zero for identical images.
             assert np.max(np.abs(deformation[0])) < 2.0
             assert np.max(np.abs(deformation[1])) < 2.0
+
+    def test_single_image_group_accumulates_an_identity_deformation(self) -> None:
+        """Verifies that an image pairing with nothing accumulates no contribution and resolves to an identity."""
+        image = np.random.default_rng(seed=7).standard_normal((32, 32)).astype(np.float32)
+        registration = DiffeomorphicDemonsRegistration(
+            images=[image], scale_sampling=2, final_scale=1.0, final_grid_sampling=8.0
+        )
+
+        deformations = registration._compute_groupwise_deformations(iteration_key=(0, 1, 1.0))
+
+        assert len(deformations) == 1
+        assert deformations[0] is not None
+        assert deformations[0].is_identity
+        assert deformations[0].field_shape == (32, 32)
 
     def test_register_produces_deformations(self) -> None:
         """Verifies that registration produces finite, full-resolution, non-trivial deformations for distinct images."""

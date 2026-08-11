@@ -106,11 +106,22 @@ class TestPcaDenoise:
         with pytest.raises(ValueError, match=r"must be a positive\s+integer"):
             pca_denoise(frames=frames, block_size=(32, 32), component_fraction=0.5, parallel_workers=parallel_workers)
 
-    def test_sequential_and_parallel_consistent(self) -> None:
-        """Verifies that sequential and parallel execution produce identical results."""
+    @pytest.mark.parametrize("parallel_workers", [2, 4, 8])
+    def test_sequential_and_parallel_consistent(self, parallel_workers: int) -> None:
+        """Verifies that sequential and parallel execution produce bit-identical results.
+
+        Blocks overlap, so most pixels accumulate a float32 sum over several of them and float addition is not
+        associative. Consuming the block futures in completion order rather than submission order therefore
+        perturbs the low bits of the denoised movie, which this assertion catches.
+        """
         generator = np.random.default_rng(seed=42)
         frames_sequential = generator.standard_normal((20, 32, 32)).astype(np.float32)
         frames_parallel = frames_sequential.copy()
-        pca_denoise(frames=frames_sequential, block_size=(32, 32), component_fraction=0.5, parallel_workers=1)
-        pca_denoise(frames=frames_parallel, block_size=(32, 32), component_fraction=0.5, parallel_workers=2)
-        np.testing.assert_allclose(frames_sequential, frames_parallel, atol=1e-4)
+        pca_denoise(frames=frames_sequential, block_size=(16, 16), component_fraction=0.5, parallel_workers=1)
+        pca_denoise(
+            frames=frames_parallel,
+            block_size=(16, 16),
+            component_fraction=0.5,
+            parallel_workers=parallel_workers,
+        )
+        np.testing.assert_array_equal(frames_sequential, frames_parallel)

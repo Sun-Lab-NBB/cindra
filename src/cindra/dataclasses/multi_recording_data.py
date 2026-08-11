@@ -228,43 +228,67 @@ class MultiRecordingRegistrationData:
         if self.deform_field_y is None:
             path = registration_directory / MultiRecordingArrays.DEFORM_FIELD_Y
             if path.exists():
-                self.deform_field_y = np.load(path).astype(np.float32)
+                loaded_array = np.load(path)
+                self.deform_field_y = (
+                    loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+                )
         if self.deform_field_x is None:
             path = registration_directory / MultiRecordingArrays.DEFORM_FIELD_X
             if path.exists():
-                self.deform_field_x = np.load(path).astype(np.float32)
+                loaded_array = np.load(path)
+                self.deform_field_x = (
+                    loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+                )
 
         if self.transformed_mean_image is None:
             path = registration_directory / MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE
             if path.exists():
-                self.transformed_mean_image = np.load(path).astype(np.float32)
+                loaded_array = np.load(path)
+                self.transformed_mean_image = (
+                    loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+                )
         if self.transformed_enhanced_mean_image is None:
             path = registration_directory / MultiRecordingArrays.TRANSFORMED_ENHANCED_MEAN_IMAGE
             if path.exists():
-                self.transformed_enhanced_mean_image = np.load(path).astype(np.float32)
+                loaded_array = np.load(path)
+                self.transformed_enhanced_mean_image = (
+                    loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+                )
         if self.transformed_maximum_projection is None:
             path = registration_directory / MultiRecordingArrays.TRANSFORMED_MAXIMUM_PROJECTION
             if path.exists():
-                self.transformed_maximum_projection = np.load(path).astype(np.float32)
+                loaded_array = np.load(path)
+                self.transformed_maximum_projection = (
+                    loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+                )
 
         if self.transformed_mean_image_channel_2 is None:
             path = registration_directory / resolve_array_name(
                 array=MultiRecordingArrays.TRANSFORMED_MEAN_IMAGE, second_channel=True
             )
             if path.exists():
-                self.transformed_mean_image_channel_2 = np.load(path).astype(np.float32)
+                loaded_array = np.load(path)
+                self.transformed_mean_image_channel_2 = (
+                    loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+                )
         if self.transformed_enhanced_mean_image_channel_2 is None:
             path = registration_directory / resolve_array_name(
                 array=MultiRecordingArrays.TRANSFORMED_ENHANCED_MEAN_IMAGE, second_channel=True
             )
             if path.exists():
-                self.transformed_enhanced_mean_image_channel_2 = np.load(path).astype(np.float32)
+                loaded_array = np.load(path)
+                self.transformed_enhanced_mean_image_channel_2 = (
+                    loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+                )
         if self.transformed_maximum_projection_channel_2 is None:
             path = registration_directory / resolve_array_name(
                 array=MultiRecordingArrays.TRANSFORMED_MAXIMUM_PROJECTION, second_channel=True
             )
             if path.exists():
-                self.transformed_maximum_projection_channel_2 = np.load(path).astype(np.float32)
+                loaded_array = np.load(path)
+                self.transformed_maximum_projection_channel_2 = (
+                    loaded_array if loaded_array.dtype == np.float32 else loaded_array.astype(np.float32)
+                )
 
         masks_path = output_path / DEFORMED_MASKS_FILENAME
         if self.deformed_roi_masks is None and masks_path.exists():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numba
 import numpy as np
 import scipy.ndimage
 from ataraxis_base_utilities import console
@@ -247,9 +248,12 @@ class DiffeomorphicDemonsRegistration:
             if all(dimension < _MINIMUM_GRID_DIMENSION for dimension in grid_shape):  # pragma: no cover
                 return [None] * image_count
 
-        total_deformations: list[Deformation] = [
-            Deformation.identity(height=image_height, width=image_width) for _ in range(image_count)
-        ]
+        # Accumulates into raw field arrays rather than into Deformation instances, so each contribution after the
+        # first writes through an existing buffer instead of allocating a fresh pair of fields. An image holds None
+        # until its first contribution arrives, which reproduces the copy the identity branch of Deformation.add
+        # performs and keeps the sign of a zero-valued field element intact.
+        accumulated_y: list[NDArray[np.float32] | None] = [None] * image_count
+        accumulated_x: list[NDArray[np.float32] | None] = [None] * image_count
 
         # Adds each pair's deformation to the first image's total and its negation to the second image's total. Pairs
         # are visited in ascending order, so every image accumulates its contributions in ascending partner order.
@@ -258,15 +262,41 @@ class DiffeomorphicDemonsRegistration:
                 pairwise_deformation = self._compute_pairwise_deformation(
                     source_index=first_index, target_index=second_index, iteration_key=iteration_key
                 )
-                total_deformations[first_index] += pairwise_deformation
-                total_deformations[second_index] += pairwise_deformation.scale(factor=-1.0)
+                pair_y = pairwise_deformation.get_field(dimension=0)
+                pair_x = pairwise_deformation.get_field(dimension=1)
+
+                first_y, first_x = accumulated_y[first_index], accumulated_x[first_index]
+                if first_y is None or first_x is None:
+                    accumulated_y[first_index], accumulated_x[first_index] = pair_y.copy(), pair_x.copy()
+                else:
+                    np.add(first_y, pair_y, out=first_y)
+                    np.add(first_x, pair_x, out=first_x)
+
+                second_y, second_x = accumulated_y[second_index], accumulated_x[second_index]
+                if second_y is None or second_x is None:
+                    accumulated_y[second_index], accumulated_x[second_index] = (
+                        np.negative(pair_y),
+                        np.negative(pair_x),
+                    )
+                else:
+                    np.subtract(second_y, pair_y, out=second_y)
+                    np.subtract(second_x, pair_x, out=second_x)
 
         # Averages the accumulated deformations. Every image pairs with each of the others exactly once.
         pair_count = image_count - 1
-        if pair_count > 1:  # pragma: no cover, only reached with more than two images in groupwise registration
-            total_deformations = [total.scale(factor=1.0 / pair_count) for total in total_deformations]
+        average_factor = np.float32(1.0 / pair_count) if pair_count > 1 else None
 
-        return list(total_deformations)
+        deformations: list[Deformation | None] = []
+        for field_y, field_x in zip(accumulated_y, accumulated_x, strict=True):
+            if field_y is None or field_x is None:
+                deformations.append(Deformation.identity(height=image_height, width=image_width))
+                continue
+            if average_factor is not None:  # pragma: no cover, only reached with more than two images
+                np.multiply(field_y, average_factor, out=field_y)
+                np.multiply(field_x, average_factor, out=field_x)
+            deformations.append(Deformation(field_y=field_y, field_x=field_x))
+
+        return deformations
 
     def _compute_pairwise_deformation(
         self, source_index: int, target_index: int, iteration_key: tuple[int, int, float]
@@ -293,37 +323,26 @@ class DiffeomorphicDemonsRegistration:
             image_index=target_index, iteration_key=iteration_key
         )
 
-        # Computes gradient magnitude squared for both images.
-        source_gradient_magnitude_squared = source_gradient[0] ** 2 + source_gradient[1] ** 2
-        target_gradient_magnitude_squared = target_gradient[0] ** 2 + target_gradient[1] ** 2
-
-        # Computes intensity difference and its square.
-        intensity_difference = source_image - target_image
-        intensity_difference_squared = intensity_difference**2
-
-        # Computes Demons denominators with noise regularization.
-        source_denominator = source_gradient_magnitude_squared + self._noise_factor**2 * intensity_difference_squared
-        target_denominator = target_gradient_magnitude_squared + self._noise_factor**2 * intensity_difference_squared
-
-        # Prevents division by zero.
-        source_denominator[source_denominator == 0] = np.inf
-        target_denominator[target_denominator == 0] = np.inf
-
-        # Computes symmetric Demons force field (negative for backward mapping).
-        speed = -self._speed_factor
-        field_y = (
-            intensity_difference
-            * (source_gradient[0] / source_denominator + target_gradient[0] / target_denominator)
-            * speed
-        )
-        field_x = (
-            intensity_difference
-            * (source_gradient[1] / source_denominator + target_gradient[1] / target_denominator)
-            * speed
+        # Computes the symmetric Demons force field in one fused pass over the two images and their gradients. The
+        # kernel writes directly into the two output fields, where the equivalent chain of NumPy operators allocates a
+        # full-field temporary per operator and traverses the field once per operator.
+        field_y = np.empty(source_image.shape, dtype=np.float32)
+        field_x = np.empty(source_image.shape, dtype=np.float32)
+        _compute_demons_force(
+            source_image=source_image,
+            source_gradient_y=source_gradient[0],
+            source_gradient_x=source_gradient[1],
+            target_image=target_image,
+            target_gradient_y=target_gradient[0],
+            target_gradient_x=target_gradient[1],
+            noise_squared=np.float32(self._noise_factor**2),
+            speed=np.float32(-self._speed_factor),
+            field_y=field_y,
+            field_x=field_x,
         )
 
         # Regularizes using B-spline grid to ensure diffeomorphism.
-        force_deformation = Deformation(field_y=field_y.astype(np.float32), field_x=field_x.astype(np.float32))
+        force_deformation = Deformation(field_y=field_y, field_x=field_x)
         return self._regularize_deformation(scale=scale, deformation=force_deformation, image_shape=source_image.shape)
 
     def _get_image_and_gradient(
@@ -500,3 +519,70 @@ class DiffeomorphicDemonsRegistration:
             data: The data to cache.
         """
         self._cache[key] = (iteration_key, data)
+
+
+@numba.njit(parallel=True, cache=True)
+def _compute_demons_force(  # pragma: no cover
+    source_image: NDArray[np.float32],
+    source_gradient_y: NDArray[np.float32],
+    source_gradient_x: NDArray[np.float32],
+    target_image: NDArray[np.float32],
+    target_gradient_y: NDArray[np.float32],
+    target_gradient_x: NDArray[np.float32],
+    noise_squared: np.float32,
+    speed: np.float32,
+    field_y: NDArray[np.float32],
+    field_x: NDArray[np.float32],
+) -> None:
+    """Computes the symmetric Demons force field between one image pair.
+
+    Notes:
+        The arithmetic is ordered to match the equivalent chain of NumPy operators term for term, which keeps the
+        result bit-identical to it. Reassociating any term, such as folding the noise factor into the squared
+        intensity difference as a single product, changes the low bits of every force value.
+
+        A denominator of zero is replaced by infinity, so the pixel contributes nothing to the force rather than
+        producing a non-finite value.
+
+    Args:
+        source_image: The source image resampled to the current scale.
+        source_gradient_y: The vertical central-difference gradient of the source image.
+        source_gradient_x: The horizontal central-difference gradient of the source image.
+        target_image: The target image resampled to the current scale.
+        target_gradient_y: The vertical central-difference gradient of the target image.
+        target_gradient_x: The horizontal central-difference gradient of the target image.
+        noise_squared: The square of the intensity-noise regularization factor.
+        speed: The negated deformation speed factor, which carries the sign for backward mapping.
+        field_y: The pre-allocated output array receiving the vertical force component.
+        field_x: The pre-allocated output array receiving the horizontal force component.
+    """
+    height, width = source_image.shape
+    for y in numba.prange(height):
+        for x in range(width):
+            source_gradient_magnitude_squared = (
+                source_gradient_y[y, x] * source_gradient_y[y, x] + source_gradient_x[y, x] * source_gradient_x[y, x]
+            )
+            target_gradient_magnitude_squared = (
+                target_gradient_y[y, x] * target_gradient_y[y, x] + target_gradient_x[y, x] * target_gradient_x[y, x]
+            )
+
+            intensity_difference = source_image[y, x] - target_image[y, x]
+            regularization = noise_squared * (intensity_difference * intensity_difference)
+
+            source_denominator = source_gradient_magnitude_squared + regularization
+            target_denominator = target_gradient_magnitude_squared + regularization
+            if source_denominator == np.float32(0.0):
+                source_denominator = np.float32(np.inf)
+            if target_denominator == np.float32(0.0):
+                target_denominator = np.float32(np.inf)
+
+            field_y[y, x] = (
+                intensity_difference
+                * (source_gradient_y[y, x] / source_denominator + target_gradient_y[y, x] / target_denominator)
+                * speed
+            )
+            field_x[y, x] = (
+                intensity_difference
+                * (source_gradient_x[y, x] / source_denominator + target_gradient_x[y, x] / target_denominator)
+                * speed
+            )

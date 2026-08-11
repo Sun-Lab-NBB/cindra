@@ -601,9 +601,10 @@ def _register_frames_batch(
     if bidirectional_phase_offset != 0:
         apply_bidirectional_phase_correction(frames=frames, bidirectional_phase_offset=bidirectional_phase_offset)
 
-    # Creates a working copy for correlation computation. The original frames are shifted separately. Temporal
-    # smoothing is only applied to the correlation maps inside compute_rigid_offsets, not to the raw frames here.
-    frames_smooth = frames.copy()
+    # Holds a working copy for correlation computation only when one-photon preprocessing replaces its contents. On
+    # the two-photon path the smoothed frames stay equal to the registered frames through every step below, so the
+    # two names share one buffer and the rigid shift is applied to it once.
+    frames_smooth = frames.copy() if one_photon_enabled else frames
 
     # Applies one-photon preprocessing: spatial smoothing followed by high-pass filtering.
     if one_photon_enabled:
@@ -660,12 +661,13 @@ def _register_frames_batch(
             else np.empty((0, 0, 0), dtype=np.complex64)
         )
 
-        # Applies rigid offsets to the smoothed working copy so nonrigid phase correlation operates on pre-aligned data.
-        # Without this, the per-block offsets would capture both global translation and local deformation,
-        # double-counting
-        # the rigid component that was already corrected on the original frames.
-        for frame_smooth, y_offset, x_offset in zip(frames_smooth, y_offsets, x_offsets, strict=False):
-            frame_smooth[:] = translate_frame(frame=frame_smooth, y_offset=y_offset, x_offset=x_offset)
+        # Applies rigid offsets to the smoothed working copy so nonrigid phase correlation operates on pre-aligned
+        # data. Without this, the per-block offsets would capture both global translation and local deformation,
+        # double-counting the rigid component that was already corrected on the original frames. The two-photon path
+        # shares one buffer between the two names, where the shift above already covers it.
+        if one_photon_enabled:
+            for frame_smooth, y_offset, x_offset in zip(frames_smooth, y_offsets, x_offsets, strict=False):
+                frame_smooth[:] = translate_frame(frame=frame_smooth, y_offset=y_offset, x_offset=x_offset)
 
         # Re-clips intensity range after rigid offset for nonrigid correlation.
         frames_for_correlation = (
@@ -1029,11 +1031,16 @@ def _register_alignment_channel(context: RuntimeContext, *, workers: int) -> Non
 
             mean_image += batch_result.frames.sum(axis=0)
 
-            # Converts back to int16 for BinaryFile storage and writes in-place.
-            frames_int16 = np.clip(
-                batch_result.frames, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max
-            ).astype(dtype=np.int16)
-            frames_file[batch_start:batch_end] = frames_int16
+            # Converts back to int16 for BinaryFile storage and writes in-place. The clip writes through the batch
+            # buffer, which the loop discards on the next iteration, so the narrowing needs one destination rather
+            # than a clipped copy followed by a converted copy.
+            np.clip(
+                batch_result.frames,
+                a_min=np.iinfo(np.int16).min,
+                a_max=np.iinfo(np.int16).max,
+                out=batch_result.frames,
+            )
+            frames_file[batch_start:batch_end] = batch_result.frames.astype(dtype=np.int16)
 
         # Flushes the rewritten frames and clears the marker. Every frame now carries the same correction, so the
         # binary is internally consistent again even though the registration outputs are not yet saved.
@@ -1211,11 +1218,11 @@ def _register_secondary_channel(context: RuntimeContext) -> None:
             # Accumulates frame sum for mean image computation.
             mean_image += frames.sum(axis=0)
 
-            # Converts back to int16 for BinaryFile storage and writes in-place.
-            frames_int16 = np.clip(frames, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max).astype(
-                dtype=np.int16
-            )
-            frames_file[batch_start:batch_end] = frames_int16
+            # Converts back to int16 for BinaryFile storage and writes in-place. The clip writes through the batch
+            # buffer, which the loop discards on the next iteration, so the narrowing needs one destination rather
+            # than a clipped copy followed by a converted copy.
+            np.clip(frames, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max, out=frames)
+            frames_file[batch_start:batch_end] = frames.astype(dtype=np.int16)
 
         # Flushes the rewritten frames and clears the marker, which declares the binary internally consistent again.
         frames_file.file.flush()
