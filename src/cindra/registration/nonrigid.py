@@ -234,9 +234,14 @@ def compute_nonrigid_offsets(
     # Applies batch matrix multiply for upsampling all regions at once.
     upsampled_flat = upsampling_regions.reshape(num_blocks * num_frames, -1) @ upsampling_kernel
 
-    # Finds subpixel peak locations and correlation maxima.
-    correlation_maxima = np.amax(upsampled_flat, axis=1).reshape(num_blocks, num_frames).T.astype(np.float32)
+    # Finds subpixel peak locations and correlation maxima. Gathering the maxima from the peak indices lets a single
+    # scan of the upsampled matrix serve both outputs.
     subpixel_indices = np.argmax(upsampled_flat, axis=1)
+    correlation_maxima = (
+        upsampled_flat[np.arange(upsampled_flat.shape[0]), subpixel_indices]
+        .reshape(num_blocks, num_frames)
+        .T.astype(np.float32)
+    )
     y_subpixel, x_subpixel = np.unravel_index(subpixel_indices, (upsampled_size, upsampled_size))
     y_subpixel = y_subpixel.reshape(num_blocks, num_frames)
     x_subpixel = x_subpixel.reshape(num_blocks, num_frames)

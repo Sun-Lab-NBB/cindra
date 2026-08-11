@@ -123,8 +123,9 @@ class SplineGrid:
     @property
     def deformation_fields(self) -> tuple[NDArray[np.float32], NDArray[np.float32]]:
         """Returns two arrays (Y, X), representing the deformation fields for each dimension of the underlying image."""
-        field_y: NDArray[np.float32] = np.zeros(self.field_shape, dtype=np.float32)
-        field_x: NDArray[np.float32] = np.zeros(self.field_shape, dtype=np.float32)
+        # _sample_grid writes every element of both fields, so the allocation needs no zero fill.
+        field_y: NDArray[np.float32] = np.empty(self.field_shape, dtype=np.float32)
+        field_x: NDArray[np.float32] = np.empty(self.field_shape, dtype=np.float32)
         _sample_grid(result=field_y, grid_sampling=self._grid_sampling, knots=self._get_knots(dimension=0))
         _sample_grid(result=field_x, grid_sampling=self._grid_sampling, knots=self._get_knots(dimension=1))
         return field_y, field_x
@@ -319,25 +320,32 @@ def _sample_grid(  # pragma: no cover
         grid_sampling: The spacing between B-spline control points (knots) in pixels.
         knots: The 2D array of B-spline knot values.
     """
+    # Tabulates the column basis coefficients and knot indices once. They depend on the x coordinate alone, so
+    # recomputing them inside the row loop repeats the same four-term polynomial for every row of the field.
+    width = result.shape[1]
+    column_coefficients = np.empty((width, 4), dtype=np.float32)
+    column_knot_indices = np.empty(width, dtype=np.int32)
+    for x in range(width):
+        # The +1 corrects for boundary padding in the knot grid.
+        grid_position_x = x / grid_sampling + 1
+        knot_index_x = int(grid_position_x)
+        column_knot_indices[x] = knot_index_x
+        _compute_basis_coefficients(
+            interpolation_factor=grid_position_x - knot_index_x, coefficients=column_coefficients[x]
+        )
+
     # Parallelizes the computation over rows to improve performance.
     for y in prange(result.shape[0]):
-        # Each thread gets its own coefficient arrays.
+        # Each thread gets its own coefficient array.
         coefficients_y = np.empty((4,), dtype=np.float32)
-        coefficients_x = np.empty((4,), dtype=np.float32)
 
-        for x in range(result.shape[1]):
-            # Computes the reference knot index and interpolation factor for each axis.
-            # The +1 corrects for boundary padding in the knot grid.
-            grid_position_y = y / grid_sampling + 1
-            knot_index_y = int(grid_position_y)
-            interpolation_factor_y = grid_position_y - knot_index_y
-            grid_position_x = x / grid_sampling + 1
-            knot_index_x = int(grid_position_x)
-            interpolation_factor_x = grid_position_x - knot_index_x
+        # The row basis coefficients depend on the y coordinate alone, so they are computed once per row.
+        grid_position_y = y / grid_sampling + 1
+        knot_index_y = int(grid_position_y)
+        _compute_basis_coefficients(interpolation_factor=grid_position_y - knot_index_y, coefficients=coefficients_y)
 
-            # Computes B-spline basis coefficients at this pixel position.
-            _compute_basis_coefficients(interpolation_factor=interpolation_factor_y, coefficients=coefficients_y)
-            _compute_basis_coefficients(interpolation_factor=interpolation_factor_x, coefficients=coefficients_x)
+        for x in range(width):
+            knot_index_x = column_knot_indices[x]
 
             # Accumulates weighted contributions from the 4x4 knot neighborhood.
             sampled_value = 0.0
@@ -345,7 +353,7 @@ def _sample_grid(  # pragma: no cover
             for offset_y in range(4):
                 knot_x = knot_index_x - 1
                 for offset_x in range(4):
-                    sampled_value += coefficients_y[offset_y] * coefficients_x[offset_x] * knots[knot_y, knot_x]
+                    sampled_value += coefficients_y[offset_y] * column_coefficients[x, offset_x] * knots[knot_y, knot_x]
                     knot_x += 1
                 knot_y += 1
 

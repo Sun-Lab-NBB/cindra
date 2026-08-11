@@ -55,6 +55,9 @@ _MAX_STATS_ROIS: int = 500
 _CELL_LABEL_THRESHOLD: float = 0.5
 """The threshold above which a classification label value is considered a cell."""
 
+_ARRAY_SUMMARY_CHUNK_ELEMENTS: int = 1 << 20
+"""The number of elements ``_array_summary`` reduces per accumulation step."""
+
 
 @dataclass(slots=True)
 class _VerificationState:
@@ -1851,13 +1854,40 @@ def _array_summary(array: NDArray[np.float32]) -> dict[str, object]:
         array: The data whose distribution is summarized. NaN entries are ignored.
 
     Returns:
-        A dictionary containing the min, max, mean, and standard deviation of the array.
+        A dictionary containing the min, max, mean, and standard deviation of the array. The mean and the standard
+        deviation are NaN when every entry is NaN.
     """
+    # Chunking the accumulation bounds the resident footprint, because most callers pass a memory-mapped array whose
+    # pages a whole-array NaN-aware reduction faults in and copies in full.
+    values = np.asarray(array).reshape(-1)
+    valid_count = 0
+    value_sum = 0.0
+    for chunk_start in range(0, values.size, _ARRAY_SUMMARY_CHUNK_ELEMENTS):
+        chunk = values[chunk_start : chunk_start + _ARRAY_SUMMARY_CHUNK_ELEMENTS]
+        valid_mask = ~np.isnan(chunk)
+        valid_count += int(np.count_nonzero(valid_mask))
+        value_sum += float(np.sum(chunk, where=valid_mask, dtype=np.float64))
+
+    mean = float("nan")
+    standard_deviation = float("nan")
+    if valid_count > 0:
+        mean = value_sum / valid_count
+        deviation_sum = 0.0
+        # The second pass centers each chunk on the mean before squaring, because a single-pass sum of squares cancels
+        # the entire spread of a distribution whose offset is large relative to its width.
+        for chunk_start in range(0, values.size, _ARRAY_SUMMARY_CHUNK_ELEMENTS):
+            chunk = values[chunk_start : chunk_start + _ARRAY_SUMMARY_CHUNK_ELEMENTS]
+            valid_mask = ~np.isnan(chunk)
+            deviations = np.subtract(chunk, mean, dtype=np.float64)
+            np.square(deviations, out=deviations)
+            deviation_sum += float(np.sum(deviations, where=valid_mask, dtype=np.float64))
+        standard_deviation = float(np.sqrt(deviation_sum / valid_count))
+
     return {
         "min": round(float(np.nanmin(array)), ndigits=4),
         "max": round(float(np.nanmax(array)), ndigits=4),
-        "mean": round(float(np.nanmean(array)), ndigits=4),
-        "std": round(float(np.nanstd(array)), ndigits=4),
+        "mean": round(mean, ndigits=4),
+        "std": round(standard_deviation, ndigits=4),
     }
 
 

@@ -369,6 +369,67 @@ class TestConvertTiffsToBinary:
         assert np.array_equal(binary_0, _constant_stack(frame_values=[0, 2], height=_FRAME_HEIGHT, width=_FRAME_WIDTH))
         assert np.array_equal(binary_1, _constant_stack(frame_values=[1, 3], height=_FRAME_HEIGHT, width=_FRAME_WIDTH))
 
+    def test_interleave_selection_survives_split_batches(
+        self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
+    ) -> None:
+        """Verifies that the interleave selection is exact when both the files and the batches split mid-cycle."""
+        data_path = tmp_path / "data"
+        output_path = tmp_path / "output"
+        _write_parameters_json(directory=data_path, plane_number=2, channel_number=2)
+        # Six pages followed by five pages carries the interleave offset across the file boundary, and the four-frame
+        # batch the two planes and two channels impose splits both files mid-cycle.
+        _write_constant_tiff(
+            file_path=data_path / "recording_0.tif",
+            frame_values=[0, 1, 2, 3, 4, 5],
+            height=_FRAME_HEIGHT,
+            width=_FRAME_WIDTH,
+        )
+        _write_constant_tiff(
+            file_path=data_path / "recording_1.tif",
+            frame_values=[6, 7, 8, 9, 10],
+            height=_FRAME_HEIGHT,
+            width=_FRAME_WIDTH,
+        )
+
+        configuration = _build_configuration(data_path=data_path, output_path=output_path)
+        configuration.main.two_channels = True
+        configuration.registration.batch_size = 2
+        acquisition = AcquisitionParameters(frame_rate=30.0, plane_number=2, channel_number=2)
+        contexts = [
+            _build_context(
+                output_path=output_path,
+                configuration=configuration,
+                acquisition=acquisition,
+                plane_index=plane_index,
+                two_channels=True,
+            )
+            for plane_index in range(2)
+        ]
+
+        convert_tiffs_to_binary(contexts=contexts, workers=1)
+
+        expected_selections = [([0, 4, 8], [1, 5, 9]), ([2, 6, 10], [3, 7])]
+        for context, (channel_1_values, channel_2_values) in zip(contexts, expected_selections, strict=True):
+            io_data = context.runtime.io
+            binary_1 = read_binary_movie(
+                file_path=io_data.registered_binary_path, frame_height=_FRAME_HEIGHT, frame_width=_FRAME_WIDTH
+            )
+            binary_2 = read_binary_movie(
+                file_path=io_data.registered_binary_path_channel_2,
+                frame_height=_FRAME_HEIGHT,
+                frame_width=_FRAME_WIDTH,
+            )
+            assert np.array_equal(
+                binary_1, _constant_stack(frame_values=channel_1_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+            )
+            assert np.array_equal(
+                binary_2, _constant_stack(frame_values=channel_2_values, height=_FRAME_HEIGHT, width=_FRAME_WIDTH)
+            )
+            expected_mean = np.full(
+                (_FRAME_HEIGHT, _FRAME_WIDTH), fill_value=np.mean(channel_1_values), dtype=np.float32
+            )
+            np.testing.assert_array_equal(context.runtime.detection.mean_image, expected_mean)
+
     def test_single_frame_tiff(
         self, tmp_path: Path, read_binary_movie: Callable[[Path, int, int], NDArray[np.int16]]
     ) -> None:

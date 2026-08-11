@@ -313,6 +313,79 @@ class TestMultiRecordingEstimates:
         assert modeled is True
         assert memory_mb > 0
 
+    def test_extraction_reads_the_tracked_regions_of_the_recording_it_names(self, tmp_path: Path) -> None:
+        """Verifies that recordings of identical geometry are charged their own tracked region counts."""
+        configuration = MultiRecordingConfiguration()
+        roots = [tmp_path / "day1", tmp_path / "day2"]
+        for root in roots:
+            _write_combined(output_root=root, height=64, width=64, frame_count=60000)
+        _write_traces(root_path=resolve_dataset_path(output_root=roots[0], dataset_name="set"), regions=40, samples=8)
+        _write_traces(
+            root_path=resolve_dataset_path(output_root=roots[1], dataset_name="set"), regions=40000, samples=8
+        )
+
+        memory_mb, modeled = estimate_multi_recording_job_memory_mb(
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="day2",
+            recording_roots=roots,
+            dataset_name="set",
+            configuration=configuration,
+        )
+
+        geometry = RecordingGeometry(combined_pixels=64 * 64, combined_frame_count=60000, resolved=True)
+        assert modeled is True
+        assert memory_mb == _apply_tolerance(
+            memory_mb=_estimate_extraction_mb(geometry=geometry, tracked_regions=40000, configuration=configuration)
+        )
+
+
+class TestUnmodeledFallbacks:
+    """Tests the stage-allowance fallbacks the estimators take when a recording resolves no geometry."""
+
+    @pytest.mark.parametrize(
+        "job_name",
+        [SingleRecordingJobNames.BINARIZE, SingleRecordingJobNames.COMBINE],
+    )
+    def test_whole_recording_stage_without_geometry_reports_the_stage_allowance(
+        self, tmp_path: Path, job_name: str
+    ) -> None:
+        """Verifies that the stages reading the whole recording fall back when the recording resolves no geometry."""
+        memory_mb, modeled = estimate_single_recording_job_memory_mb(
+            job_name=job_name,
+            specifier="",
+            output_root=tmp_path,
+            configuration=SingleRecordingConfiguration(),
+        )
+
+        assert modeled is False
+        assert memory_mb == _resolve_stage_fallback(job_name=job_name)
+
+    def test_extraction_without_a_resolvable_recording_reports_the_stage_allowance(self, tmp_path: Path) -> None:
+        """Verifies that extraction falls back when no recording root carries the geometry its specifier needs."""
+        memory_mb, modeled = estimate_multi_recording_job_memory_mb(
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="day1",
+            recording_roots=[tmp_path / "day1", tmp_path / "day2"],
+            dataset_name="set",
+            configuration=MultiRecordingConfiguration(),
+        )
+
+        assert modeled is False
+        assert memory_mb == _resolve_stage_fallback(job_name=MultiRecordingJobNames.EXTRACT)
+
+    def test_extraction_without_any_recording_root_reports_the_stage_allowance(self) -> None:
+        """Verifies that extraction falls back when the dataset spans no recording roots at all."""
+        memory_mb, modeled = estimate_multi_recording_job_memory_mb(
+            job_name=MultiRecordingJobNames.EXTRACT,
+            specifier="",
+            recording_roots=[],
+            dataset_name="set",
+            configuration=MultiRecordingConfiguration(),
+        )
+
+        assert modeled is False
+        assert memory_mb == _resolve_stage_fallback(job_name=MultiRecordingJobNames.EXTRACT)
+
 
 class TestRecordingGeometry:
     """Tests the geometry resolver the estimators read."""
@@ -377,6 +450,21 @@ class TestGeometryEdges:
         geometry = resolve_recording_geometry(output_root=tmp_path)
 
         assert len(geometry.planes) == 1
+
+    def test_specifier_naming_an_unreadable_plane_reports_the_stage_allowance(self, tmp_path: Path) -> None:
+        """Verifies that a per-plane job naming a plane without runtime data is charged its stage's allowance."""
+        _write_recording(output_root=tmp_path, plane_count=2)
+        (resolve_plane_path(output_root=tmp_path, plane_index=1) / "runtime_data.yaml").unlink()
+
+        memory_mb, modeled = estimate_single_recording_job_memory_mb(
+            job_name=SingleRecordingJobNames.PROCESS,
+            specifier="plane_1",
+            output_root=tmp_path,
+            configuration=SingleRecordingConfiguration(),
+        )
+
+        assert modeled is False
+        assert memory_mb == _resolve_stage_fallback(job_name=SingleRecordingJobNames.PROCESS)
 
     def test_plane_without_frames_is_skipped(self, tmp_path: Path) -> None:
         """Verifies that a plane whose runtime data records no frames is left out of the geometry."""

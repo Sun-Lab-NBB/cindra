@@ -73,8 +73,8 @@ def extend_roi(
         # Encodes each (y, x) pair as a unique flat index and deduplicates using 1D unique, which is significantly
         # faster than 2D axis-based unique.
         flat_indices = np.unique(expanded_y * width + expanded_x)
-        y_pixels = (flat_indices // width).astype(np.int32)
-        x_pixels = (flat_indices % width).astype(np.int32)
+        y_pixels = flat_indices // width
+        x_pixels = flat_indices % width
 
     return y_pixels, x_pixels
 
@@ -314,7 +314,7 @@ def detect_rois_in_frames(
             residual_activity[residual_activity <= peak_threshold] = 0
             variance_maps[scale_index][multiscale_y[scale_index], multiscale_x[scale_index]] = norm(
                 residual_activity, axis=0
-            ).astype(np.float32)
+            )
 
         # Rescales the pixel weights back to the original intensity scale before storing, since the detection operated
         # on temporally-standardized frames.
@@ -429,7 +429,7 @@ def _create_initial_square(
     x_coordinates = x_coordinates[valid_mask]
     y_coordinates = y_coordinates[valid_mask]
     weights = weights[valid_mask]
-    weights = (weights / norm(weights)).astype(np.float32)
+    weights = weights / norm(weights)
     return y_coordinates.flatten(), x_coordinates.flatten(), weights.flatten()
 
 
@@ -504,7 +504,9 @@ def _check_split_components(
             temporal_projection = pixel_frames @ component_masks[component_index]
             component_frames[component_index] = temporal_projection > intensity_threshold
             component_variances[component_index] = np.dot(temporal_projection, temporal_projection)
-            active_count = np.sum(component_frames[component_index])
+            # Takes the count as a Python int, which stays weak under NEP 50 so the division below keeps its
+            # float32 operand width instead of promoting to float64 and being narrowed straight back.
+            active_count = int(np.count_nonzero(component_frames[component_index]))
             if active_count == 0:
                 converged[component_index] = True
                 component_variances[component_index] = -1
@@ -514,7 +516,7 @@ def _check_split_components(
             projections[component_index] = temporal_projection[component_frames[component_index]]
             component_masks[component_index] = (
                 projections[component_index] @ pixel_frames[component_frames[component_index], :] / active_count
-            ).astype(np.float32)
+            )
             component_masks[component_index][component_masks[component_index] < 0] = 0
             component_masks[component_index] /= _NORMALIZATION_EPSILON + norm(component_masks[component_index])
             pixel_frames[component_frames[component_index], :] -= np.outer(
@@ -570,7 +572,7 @@ def _extend_mask(
     # apart from offsets clipped at the frame border. Uses a copy to avoid mutating the caller's array.
     local_y = y_pixels - min_y
     local_x = x_pixels - min_x
-    weights = (weights / 3).astype(np.float32)
+    weights = weights / np.float32(3.0)
 
     # Accumulates weights from each of the 9 directional offsets into the dense local grid. Boundary checks per
     # offset are cheaper than a single check on the full 9x-expanded array.
@@ -665,8 +667,8 @@ def _compute_multiscale_masks(
         accumulated_weights = np.zeros(len(flat_indices), dtype=np.float32)
         np.add.at(accumulated_weights, inverse_mapping, scale_weights[scale_index - 1] / 2)
         scale_weights.append(accumulated_weights)
-        y_coordinates.append((flat_indices // scale_widths[scale_index]).astype(np.int32))
-        x_coordinates.append((flat_indices % scale_widths[scale_index]).astype(np.int32))
+        y_coordinates.append(flat_indices // scale_widths[scale_index])
+        x_coordinates.append(flat_indices % scale_widths[scale_index])
 
     # Extends each scale's mask into neighboring pixels to ensure spatial coverage at all resolution levels.
     for scale_index in range(len(scale_heights)):
@@ -744,7 +746,7 @@ def _extend_iteratively(
             break
         previous_count = y_pixels.size
 
-    weights = (weights / norm(weights)).astype(np.float32)
+    weights = weights / norm(weights)
     return y_pixels, x_pixels, weights
 
 

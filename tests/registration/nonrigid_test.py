@@ -117,6 +117,49 @@ class TestComputeNonrigidOffsets:
         assert np.max(np.abs(y_offsets)) < 1.0
         assert np.max(np.abs(x_offsets)) < 1.0
 
+    def test_correlation_maxima_match_the_upsampled_peak(self) -> None:
+        """Verifies the correlation maxima are gathered from the peak indices the offsets are derived from."""
+        generator = np.random.default_rng(seed=42)
+        reference = generator.standard_normal((64, 64)).astype(np.float32)
+        y_blocks, x_blocks, _block_counts, _, smoothing_kernel = compute_registration_blocks(
+            height=64, width=64, block_size=(32, 32)
+        )
+
+        taper, offset, kernel = compute_nonrigid_reference_data(
+            reference_image=reference,
+            taper_slope=5.0,
+            smoothing_sigma=1.15,
+            y_blocks=y_blocks,
+            x_blocks=x_blocks,
+        )
+
+        # Shifting the second frame by a known amount moves every block's peak off center.
+        shifted = np.roll(reference, shift=(2, -3), axis=(0, 1))
+        frames = np.stack([reference, shifted]).astype(np.float32)
+        y_offsets, x_offsets, correlation = compute_nonrigid_offsets(
+            frames=frames,
+            taper_mask=taper,
+            mean_offset=offset,
+            reference_kernel=kernel,
+            snr_threshold=1.2,
+            smoothing_kernel=smoothing_kernel,
+            x_blocks=x_blocks,
+            y_blocks=y_blocks,
+            maximum_offset=5.0,
+            workers=1,
+        )
+
+        assert correlation.dtype == np.float32
+        assert correlation.shape == (2, len(y_blocks))
+        assert np.all(correlation > 0)
+        np.testing.assert_allclose(y_offsets[1] - y_offsets[0], 2.0, atol=0.3)
+        np.testing.assert_allclose(x_offsets[1] - x_offsets[0], -3.0, atol=0.3)
+
+        # Pins the identity the gather rests on, which is that argmax reports an index attaining the maximum.
+        matrix = generator.standard_normal((512, 61 * 61)).astype(np.float32)
+        peak_indices = np.argmax(matrix, axis=1)
+        np.testing.assert_array_equal(np.amax(matrix, axis=1), matrix[np.arange(matrix.shape[0]), peak_indices])
+
     def test_output_dtypes(self) -> None:
         """Verifies the output dtypes are correct."""
         generator = np.random.default_rng(seed=42)
