@@ -251,6 +251,9 @@ class _ROI:
         _diameter: The ROI diameter used for distance normalization.
         _crop: Determines whether to crop to soma region when computing statistics.
         _cached_soma_mask: Cached soma mask array, computed on first access.
+        _cached_soma_pixel_count: Cached number of soma pixels, computed on first access.
+        _cached_soma_y_pixels: Cached soma-masked y-coordinates, computed on first access.
+        _cached_soma_x_pixels: Cached soma-masked x-coordinates, computed on first access.
     """
 
     _baseline_cache: ClassVar[dict[int, NDArray[np.float32]]] = {}
@@ -281,6 +284,9 @@ class _ROI:
         self._diameter: int = diameter
         self._crop: bool = crop
         self._cached_soma_mask: NDArray[np.bool_] | None = None
+        self._cached_soma_pixel_count: int | None = None
+        self._cached_soma_y_pixels: NDArray[np.int32] | None = None
+        self._cached_soma_x_pixels: NDArray[np.int32] | None = None
 
     @property
     def data(self) -> ROIStatistics:
@@ -319,10 +325,24 @@ class _ROI:
         return self._cached_soma_mask
 
     @property
+    def soma_y_pixels(self) -> NDArray[np.int32]:
+        """Returns the y-coordinates of the pixels inside the soma region, computed and cached on first access."""
+        if self._cached_soma_y_pixels is None:
+            self._cached_soma_y_pixels = self.y_pixels[self.soma_mask]
+        return self._cached_soma_y_pixels
+
+    @property
+    def soma_x_pixels(self) -> NDArray[np.int32]:
+        """Returns the x-coordinates of the pixels inside the soma region, computed and cached on first access."""
+        if self._cached_soma_x_pixels is None:
+            self._cached_soma_x_pixels = self.x_pixels[self.soma_mask]
+        return self._cached_soma_x_pixels
+
+    @property
     def mean_radius(self) -> float:
         """Returns the mean diameter-normalized distance from ROI pixels to their median center."""
-        y_pixels = self.y_pixels[self.soma_mask]
-        x_pixels = self.x_pixels[self.soma_mask]
+        y_pixels = self.soma_y_pixels
+        x_pixels = self.soma_x_pixels
         # Normalizes distances by ROI diameter for scale-invariance, matching the original suite2p approach.
         distances = np.hypot(
             (y_pixels - np.median(y_pixels)) / self._diameter,
@@ -359,7 +379,7 @@ class _ROI:
             return pixel_count / default_area
 
         # ConvexHull requires (N, 2) array of points.
-        points = np.column_stack((self.y_pixels[self.soma_mask], self.x_pixels[self.soma_mask]))
+        points = np.column_stack((self.soma_y_pixels, self.soma_x_pixels))
         try:
             area = ConvexHull(points).volume
         except ValueError, QhullError:  # pragma: no cover, degenerate geometry fallback
@@ -369,8 +389,10 @@ class _ROI:
 
     @property
     def soma_pixel_count(self) -> int:
-        """Returns the number of pixels in the soma region."""
-        return int(self.soma_mask.sum())
+        """Returns the number of pixels in the soma region, computed and cached on first access."""
+        if self._cached_soma_pixel_count is None:
+            self._cached_soma_pixel_count = int(self.soma_mask.sum())
+        return self._cached_soma_pixel_count
 
     @property
     def pixel_count(self) -> int:
@@ -390,8 +412,8 @@ class _ROI:
             The fitted ellipse parameters including center, covariance, radii, and boundary points, packaged into an
             _EllipseData instance.
         """
-        y_pixels = self.y_pixels[self.soma_mask]
-        x_pixels = self.x_pixels[self.soma_mask]
+        y_pixels = self.soma_y_pixels
+        x_pixels = self.soma_x_pixels
         pixel_weights = self.pixel_weights[self.soma_mask]
 
         # Filters zero-weight pixels and normalizes weights to form a probability distribution for weighted statistics.

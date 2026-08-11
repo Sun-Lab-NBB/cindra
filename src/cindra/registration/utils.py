@@ -49,8 +49,11 @@ def apply_phase_correlation(
     frames_fft = scipy_rfft2(x=frames, axes=(-2, -1), workers=workers)
 
     # Normalizes by magnitude to extract phase-only information. This makes the correlation robust to
-    # intensity variations between frames. Epsilon prevents division by zero at DC component.
-    frames_fft /= NORMALIZATION_EPSILON + np.abs(frames_fft)
+    # intensity variations between frames. Epsilon prevents division by zero at DC component. Folding the epsilon
+    # into the magnitude buffer keeps the normalization down to a single full spectra temporary.
+    magnitude = np.abs(frames_fft)
+    magnitude += NORMALIZATION_EPSILON
+    frames_fft /= magnitude
 
     # Multiplies by conjugate of reference spectrum. In frequency domain, this computes cross-correlation.
     frames_fft *= kernel

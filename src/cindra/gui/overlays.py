@@ -78,7 +78,7 @@ def build_views(
     Returns:
         Array of shape (6, frame_height, frame_width, 3) containing RGB background views.
     """
-    views = np.zeros((len(BackgroundView), frame_height, frame_width, 3), dtype=np.float32)
+    views = np.zeros((len(BackgroundView), frame_height, frame_width, 3), dtype=np.uint8)
 
     for view_index in range(len(BackgroundView)):
         image = _build_single_view(
@@ -101,7 +101,7 @@ def build_views(
         image_uint8 = (image * 255).astype(np.uint8)
         views[view_index] = np.tile(image_uint8[:, :, np.newaxis], reps=(1, 1, 3))
 
-    return views.astype(np.uint8)
+    return views
 
 
 def display_views(

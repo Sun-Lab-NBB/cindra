@@ -197,16 +197,15 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> 
                             physical_plane_index = context_index % plane_number
                             roi_lines = ()
 
-                        # Generates frame indices for this plane's functional channel, accounting for the interleave
-                        # offset from previous files.
+                        # Selects this plane's functional channel frames, accounting for the interleave offset from
+                        # previous files. Striding the batch by the interleave period yields a view, so the selection
+                        # costs no copy of the decoded frames.
                         target_position = physical_plane_index * channel_number + functional_channel_index
                         first_frame_index = (target_position - interleave_offset) % interleave_stride
-                        frame_indices = list(range(first_frame_index, frame_count, interleave_stride))
+                        plane_frames = frames[first_frame_index::interleave_stride]
 
-                        if not frame_indices:
+                        if plane_frames.shape[0] == 0:
                             continue
-
-                        plane_frames = frames[frame_indices]
 
                         # For MROI data, slices frames to extract only the ROI lines.
                         if is_mroi and roi_lines:
@@ -236,15 +235,11 @@ def convert_tiffs_to_binary(contexts: list[RuntimeContext], *, workers: int) -> 
                             first_frame_index_channel_2 = (
                                 target_position_channel_2 - interleave_offset
                             ) % interleave_stride
-                            channel_2_frame_indices = list(
-                                range(first_frame_index_channel_2, frame_count, interleave_stride)
-                            )
+                            channel_2_frames = frames[first_frame_index_channel_2::interleave_stride]
 
-                            # For balanced two-channel data, the channel 2 indices mirror the already non-empty
-                            # channel 1 indices, so the empty case cannot be reached here.
-                            if channel_2_frame_indices:  # pragma: no branch
-                                channel_2_frames = frames[channel_2_frame_indices]
-
+                            # For balanced two-channel data, the channel 2 selection mirrors the already non-empty
+                            # channel 1 selection, so the empty case cannot be reached here.
+                            if channel_2_frames.shape[0] > 0:  # pragma: no branch
                                 if is_mroi and roi_lines:
                                     line_start = roi_lines[0]
                                     line_end = roi_lines[-1] + 1
@@ -407,9 +402,12 @@ def _read_tiff(tiff: TiffFile, start_index: int, batch_size: int, decode_workers
 
     # Converts to int16, rescaling where possible. Halves uint16 (0 to 65535) and int32 values, then clips to the
     # int16 range (-32768 to 32767) so out-of-range int32 magnitudes saturate instead of wrapping during the cast.
+    # A halved uint16 spans 0 to 32767, which already lies inside the int16 range, so only int32 needs the clip.
     if frames.dtype.type in {np.uint16, np.int32}:
         halved = frames // 2
-        frames = np.clip(halved, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max).astype(dtype=np.int16)
+        if frames.dtype.type == np.int32:
+            np.clip(halved, a_min=np.iinfo(np.int16).min, a_max=np.iinfo(np.int16).max, out=halved)
+        frames = halved.astype(dtype=np.int16)
     elif frames.dtype.type != np.int16:  # pragma: no cover, rare non-standard TIFF dtype such as float
         frames = frames.astype(dtype=np.int16)
 

@@ -285,14 +285,20 @@ def _extract_fluorescence_traces(
     # so zeroing is unnecessary. Re-allocated only for the last batch if it is smaller than the standard batch size.
     output_prototype = np.empty((roi_count, batch_size), dtype=np.float32)
 
+    # Pre-allocates the float32 destination the binary source is converted into. The binary stores int16, so the
+    # conversion is required, while a fresh destination per batch is not. A leading-axis slice of this buffer stays
+    # C-contiguous, which is the layout both kernels read.
+    batch_buffer = np.empty((min(batch_size, frame_count), pixel_count), dtype=np.float32)
+
     # Extracts the cell fluorescence from all frames of the processed cell activity movie.
     for batch_start in range(0, frame_count, batch_size):
         batch_end = min(batch_start + batch_size, frame_count)
 
         # Reshapes each batch from [frames, height, width] to [frames, pixels].
-        batch_data = frames[batch_start:batch_end].astype(np.float32)
-        batch_frames = batch_data.shape[0]
-        batch_pixels = batch_data.reshape(batch_frames, pixel_count)
+        batch_source = frames[batch_start:batch_end]
+        batch_frames = batch_source.shape[0]
+        batch_pixels = batch_buffer[:batch_frames]
+        np.copyto(batch_pixels, batch_source.reshape(batch_frames, pixel_count))
         batch_slice = slice(batch_start, batch_start + batch_frames)
 
         # Re-allocates the buffer for the last batch if it is smaller than the standard batch size.
@@ -343,7 +349,10 @@ def _update_roi_extraction_statistics(
         neuropil_fluorescence: The extracted neuropil fluorescence traces with shape (roi_count, frame_count).
         neuropil_coefficient: The scaling factor applied to neuropil fluorescence before subtraction.
     """
-    corrected = cell_fluorescence - np.float32(neuropil_coefficient) * neuropil_fluorescence
+    # Scaling by the negated coefficient and accumulating in place holds one full-size buffer instead of two. IEEE 754
+    # defines the difference to equal the sum with the negated operand, so the values are unchanged.
+    corrected = neuropil_fluorescence * np.float32(-neuropil_coefficient)
+    corrected += cell_fluorescence
     skew_values = np.asarray(stats.skew(a=corrected, axis=1))
 
     for roi, skewness_value in zip(roi_statistics, skew_values, strict=True):

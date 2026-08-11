@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from scipy.fft import rfft2
+from scipy.fft import rfft2, irfft2
 
 from cindra.registration.utils import (
     NORMALIZATION_EPSILON,
@@ -54,6 +54,26 @@ class TestApplyPhaseCorrelation:
         frames = reference[np.newaxis, :, :]
         result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
         assert result[0, 0, 0] == result[0].max()
+
+    @pytest.mark.parametrize("zero_frame", [False, True])
+    def test_normalization_split_is_bit_identical(self, *, zero_frame: bool) -> None:
+        """Verifies the magnitude normalization matches the fused reference expression bit-for-bit."""
+        generator = np.random.default_rng(seed=42)
+        frames = generator.standard_normal((5, 32, 32)).astype(np.float32)
+        if zero_frame:
+            frames[2] = 0.0
+        reference = generator.standard_normal((32, 32)).astype(np.float32)
+        kernel = compute_reference_fft(reference_image=reference)
+
+        expected_fft = rfft2(frames, axes=(-2, -1))
+        expected_fft /= NORMALIZATION_EPSILON + np.abs(expected_fft)
+        expected_fft *= kernel
+        expected = irfft2(expected_fft, s=(32, 32), axes=(-2, -1)).astype(np.float32, copy=False)
+
+        result = apply_phase_correlation(frames=frames, kernel=kernel, workers=1)
+
+        assert result.dtype == np.float32
+        np.testing.assert_array_equal(result, expected)
 
 
 class TestApplyMask:

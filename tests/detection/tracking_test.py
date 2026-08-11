@@ -13,6 +13,7 @@ from cindra.detection.tracking import (
     _compute_overlap,
     _filter_templates,
     _cluster_rois_in_bin,
+    _count_shared_pixels,
     _create_template_roi,
     _compute_condensed_index,
 )
@@ -169,6 +170,31 @@ class TestCreateTemplateRoi:
         )
         assert template is not None
         np.testing.assert_allclose(template.radius, 5.0, atol=1e-5)
+
+
+class TestCountSharedPixels:
+    """Tests _count_shared_pixels."""
+
+    def test_matches_the_set_intersection_over_unique_inputs(self) -> None:
+        """Verifies the merge count equals the set intersection size for ascending, duplicate-free inputs."""
+        generator = np.random.default_rng(seed=7)
+        for size in (0, 1, 5, 50, 400):
+            first = np.unique(generator.integers(0, 4000, size=size)).astype(np.int32)
+            second = np.unique(generator.integers(0, 4000, size=size)).astype(np.int32)
+            expected = np.intersect1d(first, second, assume_unique=True).shape[0]
+            assert _count_shared_pixels(first_pixels=first, second_pixels=second) == expected
+
+    def test_empty_input_shares_nothing(self) -> None:
+        """Verifies that an empty pixel list yields a zero count rather than raising."""
+        populated = np.arange(10, dtype=np.int32)
+        empty = np.array([], dtype=np.int32)
+        assert _count_shared_pixels(first_pixels=populated, second_pixels=empty) == 0
+        assert _count_shared_pixels(first_pixels=empty, second_pixels=populated) == 0
+
+    def test_identical_lists_share_every_pixel(self) -> None:
+        """Verifies that two identical pixel lists report the full count."""
+        pixels = np.arange(0, 200, 3, dtype=np.int32)
+        assert _count_shared_pixels(first_pixels=pixels, second_pixels=pixels) == pixels.size
 
 
 class TestClusterRoisInBin:
